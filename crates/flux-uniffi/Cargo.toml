@@ -1,0 +1,12 @@
+[package]
+name = "flux-uniffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+flux-core = { path = "../flux-core" }
+uniffi.workspace = true
