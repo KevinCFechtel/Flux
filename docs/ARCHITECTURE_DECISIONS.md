@@ -19,6 +19,8 @@ requested for historical investigation.
 UniFFI is the selected binding technology for Swift and Kotlin/native
 clients.
 
+The shared Rust implementation is organized as a workspace under `core/`, with platform-native clients alongside it (`macos/`, and later `ios/` and `android/`). The workspace manifest and lockfile belong to that shared-core workspace rather than the repository root.
+
 ## 2. Responsibility boundary
 
 ### Rust core
