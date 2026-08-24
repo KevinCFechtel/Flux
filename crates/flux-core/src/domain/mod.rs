@@ -103,6 +103,62 @@ pub enum SyncReason {
     Widget,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeliveryMode {
+    Live,
+    Deferred,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeHealth {
+    Healthy,
+    ConnectivityDegraded,
+    ServerDegraded,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MutationField {
+    Read,
+    Starred,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeliveryDisposition {
+    Queued,
+    Delivered,
+    DeferredByBackoff,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MutationResult {
+    pub disposition: DeliveryDisposition,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CoreEvent {
+    ArticleReadStateChanged {
+        article_id: i64,
+        read: bool,
+    },
+    ArticleStarredStateChanged {
+        article_id: i64,
+        starred: bool,
+    },
+    MutationQueued {
+        article_id: i64,
+        field: MutationField,
+    },
+    MutationDeliverySucceeded {
+        article_id: i64,
+        field: MutationField,
+    },
+    MutationDeliveryFailed {
+        article_id: i64,
+        field: MutationField,
+        error_kind: CoreErrorKind,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CoreErrorKind {
     Connectivity,

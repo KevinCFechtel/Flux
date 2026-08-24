@@ -72,6 +72,64 @@ pub enum SyncReason {
     Background,
     Widget,
 }
+#[derive(uniffi::Enum)]
+pub enum DeliveryMode {
+    Live,
+    Deferred,
+}
+#[derive(uniffi::Enum)]
+pub enum DeliveryDisposition {
+    Queued,
+    Delivered,
+    DeferredByBackoff,
+}
+#[derive(uniffi::Record)]
+pub struct MutationResult {
+    pub disposition: DeliveryDisposition,
+}
+#[derive(uniffi::Enum)]
+pub enum MutationField {
+    Read,
+    Starred,
+}
+#[derive(uniffi::Enum)]
+pub enum CoreEvent {
+    ArticleReadStateChanged {
+        article_id: i64,
+        read: bool,
+    },
+    ArticleStarredStateChanged {
+        article_id: i64,
+        starred: bool,
+    },
+    MutationQueued {
+        article_id: i64,
+        field: MutationField,
+    },
+    MutationDeliverySucceeded {
+        article_id: i64,
+        field: MutationField,
+    },
+    MutationDeliveryFailed {
+        article_id: i64,
+        field: MutationField,
+        error_kind: ErrorKind,
+    },
+}
+#[derive(uniffi::Enum)]
+pub enum ErrorKind {
+    Connectivity,
+    Authentication,
+    InvalidConfiguration,
+    ServerTransient,
+    Persistence,
+    Data,
+    Internal,
+}
+#[uniffi::export(with_foreign)]
+pub trait EventListener: Send + Sync {
+    fn on_event(&self, event: CoreEvent);
+}
 
 #[derive(Debug, uniffi::Error)]
 pub enum FluxError {
@@ -92,7 +150,12 @@ impl std::fmt::Display for FluxError {
 
 #[derive(uniffi::Object)]
 pub struct Flux {
-    core: FluxCore,
+    core: Arc<FluxCore>,
+}
+#[derive(uniffi::Object)]
+pub struct EventSubscription {
+    core: Arc<FluxCore>,
+    id: u64,
 }
 
 #[uniffi::export]
@@ -107,7 +170,9 @@ impl Flux {
             api_key: config.api_key,
         })
         .map_err(map_error)?;
-        Ok(Arc::new(Self { core }))
+        Ok(Arc::new(Self {
+            core: Arc::new(core),
+        }))
     }
     pub fn sync(&self, reason: SyncReason) -> Result<(), FluxError> {
         self.core.sync(reason.into()).map_err(map_error)
@@ -117,6 +182,72 @@ impl Flux {
             .query_articles(query.into())
             .map(|rows| rows.into_iter().map(Into::into).collect())
             .map_err(map_error)
+    }
+    pub fn set_delivery_mode(&self, mode: DeliveryMode) -> Result<(), FluxError> {
+        self.core.set_delivery_mode(mode.into()).map_err(map_error)
+    }
+    pub fn set_read_state(&self, article_id: i64, read: bool) -> Result<MutationResult, FluxError> {
+        self.core
+            .set_read_state(article_id, read)
+            .map(Into::into)
+            .map_err(map_error)
+    }
+    pub fn set_read_state_bulk(
+        &self,
+        article_ids: Vec<i64>,
+        read: bool,
+    ) -> Result<MutationResult, FluxError> {
+        self.core
+            .set_read_state_bulk(&article_ids, read)
+            .map(Into::into)
+            .map_err(map_error)
+    }
+    pub fn set_starred_state(
+        &self,
+        article_id: i64,
+        starred: bool,
+    ) -> Result<MutationResult, FluxError> {
+        self.core
+            .set_starred_state(article_id, starred)
+            .map(Into::into)
+            .map_err(map_error)
+    }
+    pub fn set_starred_state_bulk(
+        &self,
+        article_ids: Vec<i64>,
+        starred: bool,
+    ) -> Result<MutationResult, FluxError> {
+        self.core
+            .set_starred_state_bulk(&article_ids, starred)
+            .map(Into::into)
+            .map_err(map_error)
+    }
+    pub fn subscribe_events(
+        &self,
+        listener: Arc<dyn EventListener>,
+    ) -> Result<Arc<EventSubscription>, FluxError> {
+        let id = self
+            .core
+            .subscribe_events(Arc::new(ListenerBridge { listener }))
+            .map_err(map_error)?;
+        Ok(Arc::new(EventSubscription {
+            core: self.core.clone(),
+            id,
+        }))
+    }
+}
+#[uniffi::export]
+impl EventSubscription {
+    pub fn unsubscribe(&self) -> Result<(), FluxError> {
+        self.core.unsubscribe_events(self.id).map_err(map_error)
+    }
+}
+struct ListenerBridge {
+    listener: Arc<dyn EventListener>,
+}
+impl flux_core::CoreEventListener for ListenerBridge {
+    fn on_event(&self, event: domain::CoreEvent) {
+        self.listener.on_event(event.into())
     }
 }
 
@@ -163,6 +294,83 @@ impl From<SyncReason> for domain::SyncReason {
             SyncReason::Resume => Self::Resume,
             SyncReason::Background => Self::Background,
             SyncReason::Widget => Self::Widget,
+        }
+    }
+}
+impl From<DeliveryMode> for domain::DeliveryMode {
+    fn from(value: DeliveryMode) -> Self {
+        match value {
+            DeliveryMode::Live => Self::Live,
+            DeliveryMode::Deferred => Self::Deferred,
+        }
+    }
+}
+impl From<domain::MutationResult> for MutationResult {
+    fn from(value: domain::MutationResult) -> Self {
+        Self {
+            disposition: match value.disposition {
+                domain::DeliveryDisposition::Queued => DeliveryDisposition::Queued,
+                domain::DeliveryDisposition::Delivered => DeliveryDisposition::Delivered,
+                domain::DeliveryDisposition::DeferredByBackoff => {
+                    DeliveryDisposition::DeferredByBackoff
+                }
+            },
+        }
+    }
+}
+impl From<domain::MutationField> for MutationField {
+    fn from(value: domain::MutationField) -> Self {
+        match value {
+            domain::MutationField::Read => Self::Read,
+            domain::MutationField::Starred => Self::Starred,
+        }
+    }
+}
+impl From<domain::CoreErrorKind> for ErrorKind {
+    fn from(value: domain::CoreErrorKind) -> Self {
+        match value {
+            domain::CoreErrorKind::Connectivity => Self::Connectivity,
+            domain::CoreErrorKind::Authentication => Self::Authentication,
+            domain::CoreErrorKind::InvalidConfiguration => Self::InvalidConfiguration,
+            domain::CoreErrorKind::ServerTransient => Self::ServerTransient,
+            domain::CoreErrorKind::Persistence => Self::Persistence,
+            domain::CoreErrorKind::Data => Self::Data,
+            domain::CoreErrorKind::Internal => Self::Internal,
+        }
+    }
+}
+impl From<domain::CoreEvent> for CoreEvent {
+    fn from(value: domain::CoreEvent) -> Self {
+        match value {
+            domain::CoreEvent::ArticleReadStateChanged { article_id, read } => {
+                Self::ArticleReadStateChanged { article_id, read }
+            }
+            domain::CoreEvent::ArticleStarredStateChanged {
+                article_id,
+                starred,
+            } => Self::ArticleStarredStateChanged {
+                article_id,
+                starred,
+            },
+            domain::CoreEvent::MutationQueued { article_id, field } => Self::MutationQueued {
+                article_id,
+                field: field.into(),
+            },
+            domain::CoreEvent::MutationDeliverySucceeded { article_id, field } => {
+                Self::MutationDeliverySucceeded {
+                    article_id,
+                    field: field.into(),
+                }
+            }
+            domain::CoreEvent::MutationDeliveryFailed {
+                article_id,
+                field,
+                error_kind,
+            } => Self::MutationDeliveryFailed {
+                article_id,
+                field: field.into(),
+                error_kind: error_kind.into(),
+            },
         }
     }
 }

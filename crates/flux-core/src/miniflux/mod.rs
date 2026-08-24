@@ -18,6 +18,8 @@ pub struct RemoteSnapshot {
 
 pub trait RemoteSource: Send + Sync {
     fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError>;
+    fn set_read_state(&self, article_ids: &[i64], read: bool) -> Result<(), CoreError>;
+    fn set_starred_state(&self, article_id: i64, starred: bool) -> Result<(), CoreError>;
 }
 
 pub struct MinifluxClient {
@@ -78,6 +80,19 @@ impl MinifluxClient {
             .map_err(map_http_error)?;
         serde_json::from_reader(response.into_reader())
             .map_err(|e| CoreError::data(format!("invalid Miniflux response: {e}")))
+    }
+    fn put(&self, path: &str, body: String) -> Result<(), CoreError> {
+        let _request = self
+            .request_lock
+            .lock()
+            .map_err(|_| CoreError::internal("HTTP client lock poisoned"))?;
+        self.agent
+            .put(&format!("{}{path}", self.base_url))
+            .set("Content-Type", "application/json")
+            .set("X-Auth-Token", &self.api_key)
+            .send_string(&body)
+            .map_err(map_http_error)?;
+        Ok(())
     }
     fn entries(&self, status: Option<&str>, starred: bool) -> Result<Vec<EntryDto>, CoreError> {
         let mut all = Vec::new();
@@ -180,6 +195,26 @@ impl RemoteSource for MinifluxClient {
             feeds,
             articles,
         })
+    }
+    fn set_read_state(&self, article_ids: &[i64], read: bool) -> Result<(), CoreError> {
+        let ids = article_ids
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let status = if read { "read" } else { "unread" };
+        self.put(
+            "/v1/entries",
+            format!(r#"{{"entry_ids":[{ids}],"status":"{status}"}}"#),
+        )
+    }
+    fn set_starred_state(&self, article_id: i64, starred: bool) -> Result<(), CoreError> {
+        let entry: EntryDto = self.get(&format!("/v1/entries/{article_id}"), &[])?;
+        if entry.starred != starred {
+            self.put(&format!("/v1/entries/{article_id}/star"), String::new())
+        } else {
+            Ok(())
+        }
     }
 }
 

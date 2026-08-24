@@ -1,13 +1,24 @@
+//! SQLite persistence. Pending rows coalesce by article/field; acknowledgement
+//! deletes only the exact sent revision so later local intent always survives.
+
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::domain::{
     Article, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary, Category, CoreError, Feed,
-    ReadFilter, StarredFilter,
+    MutationField, ReadFilter, StarredFilter,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
+
+#[derive(Clone, Debug)]
+pub struct PendingMutation {
+    pub article_id: i64,
+    pub field: MutationField,
+    pub desired: bool,
+    pub revision: i64,
+}
 
 pub struct Store {
     connection: Mutex<Connection>,
@@ -74,9 +85,106 @@ impl Store {
             tx.execute("INSERT INTO feeds (id,category_id,title) VALUES (?1,?2,?3) ON CONFLICT(id) DO UPDATE SET category_id=excluded.category_id,title=excluded.title", params![f.id,f.category_id,f.title]).map_err(sql_error)?;
         }
         for a in articles {
-            tx.execute("INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,raw_html_content) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9) ON CONFLICT(id) DO UPDATE SET feed_id=excluded.feed_id,title=excluded.title,url=excluded.url,comments_url=excluded.comments_url,published_at=excluded.published_at,is_read=excluded.is_read,is_starred=excluded.is_starred,raw_html_content=excluded.raw_html_content", params![a.id,a.feed_id,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.raw_html_content]).map_err(sql_error)?;
+            tx.execute("INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9) ON CONFLICT(id) DO UPDATE SET feed_id=excluded.feed_id,title=excluded.title,url=excluded.url,comments_url=excluded.comments_url,published_at=excluded.published_at,remote_is_read=excluded.remote_is_read,remote_is_starred=excluded.remote_is_starred,is_read=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='read') THEN articles.is_read ELSE excluded.is_read END,is_starred=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='starred') THEN articles.is_starred ELSE excluded.is_starred END,raw_html_content=excluded.raw_html_content", params![a.id,a.feed_id,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.raw_html_content]).map_err(sql_error)?;
         }
         tx.commit().map_err(sql_error)
+    }
+
+    pub fn set_state_bulk(
+        &self,
+        article_ids: &[i64],
+        field: MutationField,
+        desired: bool,
+    ) -> Result<Vec<PendingMutation>, CoreError> {
+        let mut ids = article_ids.to_vec();
+        ids.sort_unstable();
+        ids.dedup();
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        let field_name = field_name(field);
+        let mut pending = Vec::with_capacity(ids.len());
+        for id in ids {
+            let column = match field {
+                MutationField::Read => "is_read",
+                MutationField::Starred => "is_starred",
+            };
+            if tx
+                .execute(
+                    &format!("UPDATE articles SET {column}=?1 WHERE id=?2"),
+                    params![desired, id],
+                )
+                .map_err(sql_error)?
+                == 0
+            {
+                return Err(CoreError::data(format!("article {id} does not exist")));
+            }
+            tx.execute("INSERT INTO pending_mutations(article_id,field,desired,revision) VALUES(?1,?2,?3,1) ON CONFLICT(article_id,field) DO UPDATE SET desired=excluded.desired,revision=pending_mutations.revision+1",params![id,field_name,desired]).map_err(sql_error)?;
+            let revision = tx
+                .query_row(
+                    "SELECT revision FROM pending_mutations WHERE article_id=?1 AND field=?2",
+                    params![id, field_name],
+                    |r| r.get(0),
+                )
+                .map_err(sql_error)?;
+            pending.push(PendingMutation {
+                article_id: id,
+                field,
+                desired,
+                revision,
+            });
+        }
+        tx.commit().map_err(sql_error)?;
+        Ok(pending)
+    }
+    pub fn pending_mutations(&self) -> Result<Vec<PendingMutation>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut statement=connection.prepare("SELECT article_id,field,desired,revision FROM pending_mutations ORDER BY article_id,field").map_err(sql_error)?;
+        statement
+            .query_map([], |r| {
+                Ok(PendingMutation {
+                    article_id: r.get(0)?,
+                    field: parse_field(r.get::<_, String>(1)?.as_str())?,
+                    desired: r.get(2)?,
+                    revision: r.get(3)?,
+                })
+            })
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)
+    }
+    pub fn acknowledge(&self, pending: &PendingMutation) -> Result<bool, CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        let remote_column = match pending.field {
+            MutationField::Read => "remote_is_read",
+            MutationField::Starred => "remote_is_starred",
+        };
+        tx.execute(
+            &format!("UPDATE articles SET {remote_column}=?1 WHERE id=?2"),
+            params![pending.desired, pending.article_id],
+        )
+        .map_err(sql_error)?;
+        let deleted = tx
+            .execute(
+                "DELETE FROM pending_mutations WHERE article_id=?1 AND field=?2 AND revision=?3",
+                params![
+                    pending.article_id,
+                    field_name(pending.field),
+                    pending.revision
+                ],
+            )
+            .map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+        Ok(deleted == 1)
     }
 
     pub fn mark_sync_success(&self) -> Result<(), CoreError> {
@@ -172,7 +280,25 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
         tx.execute_batch("CREATE TABLE core_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE categories (id INTEGER PRIMARY KEY, title TEXT NOT NULL); CREATE TABLE feeds (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL REFERENCES categories(id), title TEXT NOT NULL); CREATE TABLE articles (id INTEGER PRIMARY KEY, feed_id INTEGER NOT NULL REFERENCES feeds(id), title TEXT NOT NULL, url TEXT NOT NULL, comments_url TEXT NOT NULL DEFAULT '', published_at TEXT NOT NULL, is_read INTEGER NOT NULL CHECK(is_read IN(0,1)), is_starred INTEGER NOT NULL CHECK(is_starred IN(0,1)), raw_html_content TEXT NOT NULL); CREATE INDEX articles_published ON articles(published_at,id); CREATE INDEX articles_feed_published ON articles(feed_id,published_at,id); CREATE INDEX feeds_category ON feeds(category_id); PRAGMA user_version=1;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
+    if current < 2 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute_batch("ALTER TABLE articles ADD COLUMN remote_is_read INTEGER; ALTER TABLE articles ADD COLUMN remote_is_starred INTEGER; UPDATE articles SET remote_is_read=is_read, remote_is_starred=is_starred WHERE remote_is_read IS NULL; CREATE TABLE pending_mutations (article_id INTEGER NOT NULL REFERENCES articles(id), field TEXT NOT NULL CHECK(field IN ('read','starred')), desired INTEGER NOT NULL CHECK(desired IN(0,1)), revision INTEGER NOT NULL, PRIMARY KEY(article_id,field)); PRAGMA user_version=2;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
     Ok(())
+}
+fn field_name(field: MutationField) -> &'static str {
+    match field {
+        MutationField::Read => "read",
+        MutationField::Starred => "starred",
+    }
+}
+fn parse_field(field: &str) -> Result<MutationField, rusqlite::Error> {
+    match field {
+        "read" => Ok(MutationField::Read),
+        "starred" => Ok(MutationField::Starred),
+        _ => Err(rusqlite::Error::InvalidQuery),
+    }
 }
 fn sql_error(error: rusqlite::Error) -> CoreError {
     CoreError::persistence(error.to_string())
