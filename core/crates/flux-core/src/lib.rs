@@ -12,9 +12,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use chrono::{DateTime, Utc};
+
 use domain::{
     ArticleQuery, ArticleSummary, CoreError, CoreErrorKind, CoreEvent, DeliveryDisposition,
-    DeliveryMode, MutationField, MutationResult, RuntimeHealth, SyncReason,
+    DeliveryMode, MutationField, MutationResult, NavigationCatalog, RuntimeHealth,
+    RuntimeHealthStatus, SyncCompleted, SyncFailure, SyncReason,
 };
 use miniflux::{MinifluxClient, RemoteSource};
 use storage::Store;
@@ -44,6 +47,7 @@ pub struct FluxCore {
 struct DeliveryRuntime {
     health: RuntimeHealth,
     next_retry_at: Option<Instant>,
+    next_retry_at_utc: Option<DateTime<Utc>>,
 }
 pub trait CoreEventListener: Send + Sync {
     fn on_event(&self, event: CoreEvent);
@@ -67,6 +71,7 @@ impl FluxCore {
             runtime: Mutex::new(DeliveryRuntime {
                 health: RuntimeHealth::Healthy,
                 next_retry_at: None,
+                next_retry_at_utc: None,
             }),
             listeners: Mutex::new(HashMap::new()),
             next_listener_id: std::sync::atomic::AtomicU64::new(1),
@@ -93,6 +98,7 @@ impl FluxCore {
             runtime: Mutex::new(DeliveryRuntime {
                 health: RuntimeHealth::Healthy,
                 next_retry_at: None,
+                next_retry_at_utc: None,
             }),
             listeners: Mutex::new(HashMap::new()),
             next_listener_id: std::sync::atomic::AtomicU64::new(1),
@@ -104,12 +110,57 @@ impl FluxCore {
             .sync_gate
             .lock()
             .map_err(|_| CoreError::internal("sync gate poisoned"))?;
-        self.deliver_for_sync(reason)?;
-        sync::run(self.remote.as_ref(), self.store.as_ref(), reason)
+        let mutations_delivered = match self.deliver_for_sync(reason) {
+            Ok(count) => count,
+            Err(error) => {
+                self.emit(CoreEvent::SyncFailed(SyncFailure {
+                    reason,
+                    error_kind: error.kind.clone(),
+                    mutation_delivery_completed: false,
+                    remote_fetch_started: false,
+                    remote_fetch_completed: false,
+                    mutations_delivered: 0,
+                }));
+                return Err(error);
+            }
+        };
+        match sync::run(self.remote.as_ref(), self.store.as_ref(), reason) {
+            Ok(data) => {
+                self.emit(CoreEvent::SyncCompleted(SyncCompleted {
+                    reason,
+                    new_articles: data.new_articles,
+                    updated_articles: data.updated_articles,
+                    mutations_delivered,
+                    data_changed: data.data_changed,
+                    navigation_changed: data.navigation_changed,
+                }));
+                Ok(())
+            }
+            Err(error) => {
+                self.emit(CoreEvent::SyncFailed(SyncFailure {
+                    reason,
+                    error_kind: error.kind.clone(),
+                    mutation_delivery_completed: true,
+                    remote_fetch_started: true,
+                    remote_fetch_completed: false,
+                    mutations_delivered,
+                }));
+                Err(error)
+            }
+        }
     }
 
     pub fn query_articles(&self, query: ArticleQuery) -> Result<Vec<ArticleSummary>, CoreError> {
         self.store.query_articles(&query)
+    }
+    pub fn count_articles(&self, query: ArticleQuery) -> Result<u64, CoreError> {
+        self.store.count_articles(&query)
+    }
+    pub fn navigation_catalog(&self) -> Result<NavigationCatalog, CoreError> {
+        self.store.navigation_catalog()
+    }
+    pub fn last_successful_sync_at(&self) -> Result<Option<String>, CoreError> {
+        self.store.last_successful_sync_at()
     }
 
     pub fn database_path(&self) -> PathBuf {
@@ -122,12 +173,18 @@ impl FluxCore {
             .map_err(|_| CoreError::internal("delivery mode lock poisoned"))? = mode;
         Ok(())
     }
-    pub fn delivery_health(&self) -> Result<RuntimeHealth, CoreError> {
-        Ok(self
+    pub fn runtime_health(&self) -> Result<RuntimeHealthStatus, CoreError> {
+        let state = self
             .runtime
             .lock()
-            .map_err(|_| CoreError::internal("delivery runtime lock poisoned"))?
-            .health)
+            .map_err(|_| CoreError::internal("delivery runtime lock poisoned"))?;
+        Ok(RuntimeHealthStatus {
+            health: state.health,
+            next_retry_at: state.next_retry_at_utc.map(|time| time.to_rfc3339()),
+        })
+    }
+    pub fn delivery_health(&self) -> Result<RuntimeHealth, CoreError> {
+        Ok(self.runtime_health()?.health)
     }
     pub fn set_read_state(&self, article_id: i64, read: bool) -> Result<MutationResult, CoreError> {
         self.set_state_bulk(&[article_id], MutationField::Read, read)
@@ -213,7 +270,7 @@ impl FluxCore {
             });
         }
         match self.deliver_pending() {
-            Ok(()) => Ok(MutationResult {
+            Ok(_) => Ok(MutationResult {
                 disposition: DeliveryDisposition::Delivered,
             }),
             Err(error) if retryable(&error) => {
@@ -227,12 +284,12 @@ impl FluxCore {
             }),
         }
     }
-    fn deliver_for_sync(&self, reason: SyncReason) -> Result<(), CoreError> {
+    fn deliver_for_sync(&self, reason: SyncReason) -> Result<u32, CoreError> {
         if reason != SyncReason::Manual && self.in_backoff()? {
-            return Ok(());
+            return Ok(0);
         }
         match self.deliver_pending() {
-            Ok(()) => Ok(()),
+            Ok(count) => Ok(count),
             Err(error) if retryable(&error) => {
                 self.record_failure(&error)?;
                 Err(error)
@@ -240,12 +297,13 @@ impl FluxCore {
             Err(error) => Err(error),
         }
     }
-    fn deliver_pending(&self) -> Result<(), CoreError> {
+    fn deliver_pending(&self) -> Result<u32, CoreError> {
         mutations::deliver_pending(self.remote.as_ref(), self.store.as_ref(), &|event| {
             self.emit(event)
         })
-        .map(|_| {
+        .map(|count| {
             self.clear_backoff().ok();
+            count
         })
     }
     fn in_backoff(&self) -> Result<bool, CoreError> {
@@ -267,6 +325,7 @@ impl FluxCore {
             RuntimeHealth::ConnectivityDegraded
         };
         state.next_retry_at = Some(Instant::now() + Duration::from_secs(5));
+        state.next_retry_at_utc = Some(Utc::now() + chrono::Duration::seconds(5));
         Ok(())
     }
     fn clear_backoff(&self) -> Result<(), CoreError> {
@@ -276,6 +335,7 @@ impl FluxCore {
             .map_err(|_| CoreError::internal("delivery runtime lock poisoned"))?;
         state.health = RuntimeHealth::Healthy;
         state.next_retry_at = None;
+        state.next_retry_at_utc = None;
         Ok(())
     }
     fn emit(&self, event: CoreEvent) {
@@ -854,5 +914,126 @@ mod tests {
                 .unwrap()
                 .is_read
         );
+    }
+    #[test]
+    fn navigation_catalog_is_complete_and_counts_use_effective_state() {
+        let temp = TempDir::new().unwrap();
+        let (core, _) = mutation_core(&temp);
+        let catalog = core.navigation_catalog().unwrap();
+        assert_eq!(catalog.categories.len(), 2);
+        assert_eq!(
+            catalog.feeds.iter().map(|feed| feed.id).collect::<Vec<_>>(),
+            vec![10, 20]
+        );
+        assert_eq!(
+            core.count_articles(ArticleQuery {
+                limit: 1,
+                ..Default::default()
+            })
+            .unwrap(),
+            3
+        );
+        assert_eq!(
+            core.count_articles(ArticleQuery {
+                scope: ArticleScope::Category(1),
+                read_filter: ReadFilter::Unread,
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            core.count_articles(ArticleQuery {
+                scope: ArticleScope::Feed(10),
+                starred_filter: StarredFilter::Starred,
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap(),
+            1
+        );
+        core.set_read_state_bulk(&[1, 1], true).unwrap();
+        assert_eq!(
+            core.count_articles(ArticleQuery {
+                read_filter: ReadFilter::Unread,
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap(),
+            0
+        );
+        core.set_read_state_bulk(&[1], false).unwrap();
+        assert_eq!(
+            core.count_articles(ArticleQuery {
+                read_filter: ReadFilter::Unread,
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap(),
+            1
+        );
+    }
+    #[test]
+    fn comments_sync_metadata_and_runtime_health_are_public_state() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = mutation_core(&temp);
+        assert_eq!(
+            core.runtime_health().unwrap().health,
+            RuntimeHealth::Healthy
+        );
+        assert!(core.runtime_health().unwrap().next_retry_at.is_none());
+        let article = core
+            .query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        assert!(article.comments_url.is_empty());
+        assert!(core.last_successful_sync_at().unwrap().is_some());
+        let listener = Arc::new(ReentrantListener {
+            core: Mutex::new(Some(core.clone())),
+            events: Mutex::new(vec![]),
+        });
+        let id = core.subscribe_events(listener.clone()).unwrap();
+        core.sync(SyncReason::Periodic).unwrap();
+        core.unsubscribe_events(id).unwrap();
+        assert!(listener.events.lock().unwrap().iter().any(|event| matches!(
+            event,
+            CoreEvent::SyncCompleted(SyncCompleted {
+                reason: SyncReason::Periodic,
+                new_articles: 0,
+                updated_articles: 0,
+                data_changed: false,
+                navigation_changed: false,
+                ..
+            })
+        )));
+        source.snapshot.lock().unwrap().articles[0].title = "updated remotely".into();
+        let listener = Arc::new(ReentrantListener {
+            core: Mutex::new(Some(core.clone())),
+            events: Mutex::new(vec![]),
+        });
+        let id = core.subscribe_events(listener.clone()).unwrap();
+        core.sync(SyncReason::Manual).unwrap();
+        core.unsubscribe_events(id).unwrap();
+        assert!(listener.events.lock().unwrap().iter().any(|event| matches!(
+            event,
+            CoreEvent::SyncCompleted(SyncCompleted {
+                reason: SyncReason::Manual,
+                new_articles: 0,
+                updated_articles: 1,
+                data_changed: true,
+                navigation_changed: false,
+                ..
+            })
+        )));
+        *source.failure.lock().unwrap() = Some(CoreError::connectivity("offline"));
+        core.set_delivery_mode(DeliveryMode::Live).unwrap();
+        core.set_read_state(1, true).unwrap();
+        assert!(core.runtime_health().unwrap().next_retry_at.is_some());
     }
 }

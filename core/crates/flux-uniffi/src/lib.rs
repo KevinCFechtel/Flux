@@ -36,6 +36,7 @@ pub struct ArticleSummary {
     pub feed_title: String,
     pub title: String,
     pub url: String,
+    pub comments_url: String,
     pub published_at: String,
     pub is_read: bool,
     pub is_starred: bool,
@@ -70,7 +71,53 @@ pub enum SyncReason {
     AppStart,
     Resume,
     Background,
+    Periodic,
     Widget,
+}
+#[derive(uniffi::Record)]
+pub struct Category {
+    pub id: i64,
+    pub title: String,
+}
+#[derive(uniffi::Record)]
+pub struct Feed {
+    pub id: i64,
+    pub category_id: i64,
+    pub title: String,
+}
+#[derive(uniffi::Record)]
+pub struct NavigationCatalog {
+    pub categories: Vec<Category>,
+    pub feeds: Vec<Feed>,
+}
+#[derive(uniffi::Enum)]
+pub enum RuntimeHealth {
+    Healthy,
+    ConnectivityDegraded,
+    ServerDegraded,
+}
+#[derive(uniffi::Record)]
+pub struct RuntimeHealthStatus {
+    pub health: RuntimeHealth,
+    pub next_retry_at: Option<String>,
+}
+#[derive(uniffi::Record)]
+pub struct SyncCompleted {
+    pub reason: SyncReason,
+    pub new_articles: u32,
+    pub updated_articles: u32,
+    pub mutations_delivered: u32,
+    pub data_changed: bool,
+    pub navigation_changed: bool,
+}
+#[derive(uniffi::Record)]
+pub struct SyncFailed {
+    pub reason: SyncReason,
+    pub error_kind: ErrorKind,
+    pub mutation_delivery_completed: bool,
+    pub remote_fetch_started: bool,
+    pub remote_fetch_completed: bool,
+    pub mutations_delivered: u32,
 }
 #[derive(uniffi::Enum)]
 pub enum DeliveryMode {
@@ -114,6 +161,12 @@ pub enum CoreEvent {
         article_id: i64,
         field: MutationField,
         error_kind: ErrorKind,
+    },
+    SyncCompleted {
+        metadata: SyncCompleted,
+    },
+    SyncFailed {
+        metadata: SyncFailed,
     },
 }
 #[derive(uniffi::Enum)]
@@ -181,6 +234,24 @@ impl Flux {
         self.core
             .query_articles(query.into())
             .map(|rows| rows.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn count_articles(&self, query: ArticleQuery) -> Result<u64, FluxError> {
+        self.core.count_articles(query.into()).map_err(map_error)
+    }
+    pub fn navigation_catalog(&self) -> Result<NavigationCatalog, FluxError> {
+        self.core
+            .navigation_catalog()
+            .map(Into::into)
+            .map_err(map_error)
+    }
+    pub fn last_successful_sync_at(&self) -> Result<Option<String>, FluxError> {
+        self.core.last_successful_sync_at().map_err(map_error)
+    }
+    pub fn runtime_health(&self) -> Result<RuntimeHealthStatus, FluxError> {
+        self.core
+            .runtime_health()
+            .map(Into::into)
             .map_err(map_error)
     }
     pub fn set_delivery_mode(&self, mode: DeliveryMode) -> Result<(), FluxError> {
@@ -293,6 +364,7 @@ impl From<SyncReason> for domain::SyncReason {
             SyncReason::AppStart => Self::AppStart,
             SyncReason::Resume => Self::Resume,
             SyncReason::Background => Self::Background,
+            SyncReason::Periodic => Self::Periodic,
             SyncReason::Widget => Self::Widget,
         }
     }
@@ -371,6 +443,12 @@ impl From<domain::CoreEvent> for CoreEvent {
                 field: field.into(),
                 error_kind: error_kind.into(),
             },
+            domain::CoreEvent::SyncCompleted(metadata) => Self::SyncCompleted {
+                metadata: metadata.into(),
+            },
+            domain::CoreEvent::SyncFailed(metadata) => Self::SyncFailed {
+                metadata: metadata.into(),
+            },
         }
     }
 }
@@ -398,9 +476,90 @@ impl From<domain::ArticleSummary> for ArticleSummary {
             feed_title: value.feed_title,
             title: value.title,
             url: value.url,
+            comments_url: value.comments_url,
             published_at: value.published_at,
             is_read: value.is_read,
             is_starred: value.is_starred,
+        }
+    }
+}
+impl From<domain::Category> for Category {
+    fn from(value: domain::Category) -> Self {
+        Self {
+            id: value.id,
+            title: value.title,
+        }
+    }
+}
+impl From<domain::Feed> for Feed {
+    fn from(value: domain::Feed) -> Self {
+        Self {
+            id: value.id,
+            category_id: value.category_id,
+            title: value.title,
+        }
+    }
+}
+impl From<domain::NavigationCatalog> for NavigationCatalog {
+    fn from(value: domain::NavigationCatalog) -> Self {
+        Self {
+            categories: value.categories.into_iter().map(Into::into).collect(),
+            feeds: value.feeds.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+impl From<domain::RuntimeHealth> for RuntimeHealth {
+    fn from(value: domain::RuntimeHealth) -> Self {
+        match value {
+            domain::RuntimeHealth::Healthy => Self::Healthy,
+            domain::RuntimeHealth::ConnectivityDegraded => Self::ConnectivityDegraded,
+            domain::RuntimeHealth::ServerDegraded => Self::ServerDegraded,
+        }
+    }
+}
+impl From<domain::RuntimeHealthStatus> for RuntimeHealthStatus {
+    fn from(value: domain::RuntimeHealthStatus) -> Self {
+        Self {
+            health: value.health.into(),
+            next_retry_at: value.next_retry_at,
+        }
+    }
+}
+impl From<domain::SyncCompleted> for SyncCompleted {
+    fn from(value: domain::SyncCompleted) -> Self {
+        Self {
+            reason: match value.reason {
+                domain::SyncReason::Manual => SyncReason::Manual,
+                domain::SyncReason::AppStart => SyncReason::AppStart,
+                domain::SyncReason::Resume => SyncReason::Resume,
+                domain::SyncReason::Background => SyncReason::Background,
+                domain::SyncReason::Periodic => SyncReason::Periodic,
+                domain::SyncReason::Widget => SyncReason::Widget,
+            },
+            new_articles: value.new_articles,
+            updated_articles: value.updated_articles,
+            mutations_delivered: value.mutations_delivered,
+            data_changed: value.data_changed,
+            navigation_changed: value.navigation_changed,
+        }
+    }
+}
+impl From<domain::SyncFailure> for SyncFailed {
+    fn from(value: domain::SyncFailure) -> Self {
+        Self {
+            reason: match value.reason {
+                domain::SyncReason::Manual => SyncReason::Manual,
+                domain::SyncReason::AppStart => SyncReason::AppStart,
+                domain::SyncReason::Resume => SyncReason::Resume,
+                domain::SyncReason::Background => SyncReason::Background,
+                domain::SyncReason::Periodic => SyncReason::Periodic,
+                domain::SyncReason::Widget => SyncReason::Widget,
+            },
+            error_kind: value.error_kind.into(),
+            mutation_delivery_completed: value.mutation_delivery_completed,
+            remote_fetch_started: value.remote_fetch_started,
+            remote_fetch_completed: value.remote_fetch_completed,
+            mutations_delivered: value.mutations_delivered,
         }
     }
 }

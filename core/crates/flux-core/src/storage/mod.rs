@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 use crate::domain::{
     Article, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary, Category, CoreError, Feed,
-    MutationField, ReadFilter, StarredFilter,
+    MutationField, NavigationCatalog, ReadFilter, StarredFilter,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -18,6 +18,13 @@ pub struct PendingMutation {
     pub field: MutationField,
     pub desired: bool,
     pub revision: i64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReconciliationStats {
+    pub new_articles: u32,
+    pub updated_articles: u32,
+    pub navigation_changed: bool,
 }
 
 pub struct Store {
@@ -72,22 +79,64 @@ impl Store {
         categories: &[Category],
         feeds: &[Feed],
         articles: &[Article],
-    ) -> Result<(), CoreError> {
+    ) -> Result<ReconciliationStats, CoreError> {
         let mut connection = self
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let tx = connection.transaction().map_err(sql_error)?;
+        let mut stats = ReconciliationStats::default();
         for c in categories {
+            let existing = tx
+                .query_row("SELECT title FROM categories WHERE id=?1", [c.id], |row| {
+                    row.get::<_, String>(0)
+                })
+                .optional()
+                .map_err(sql_error)?;
+            stats.navigation_changed |= existing.as_deref() != Some(c.title.as_str());
             tx.execute("INSERT INTO categories (id,title) VALUES (?1,?2) ON CONFLICT(id) DO UPDATE SET title=excluded.title", params![c.id,c.title]).map_err(sql_error)?;
         }
         for f in feeds {
+            let existing = tx
+                .query_row(
+                    "SELECT category_id,title FROM feeds WHERE id=?1",
+                    [f.id],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                )
+                .optional()
+                .map_err(sql_error)?;
+            stats.navigation_changed |=
+                existing.as_ref() != Some(&(f.category_id, f.title.clone()));
             tx.execute("INSERT INTO feeds (id,category_id,title) VALUES (?1,?2,?3) ON CONFLICT(id) DO UPDATE SET category_id=excluded.category_id,title=excluded.title", params![f.id,f.category_id,f.title]).map_err(sql_error)?;
         }
         for a in articles {
+            let existing = tx
+                .query_row("SELECT feed_id,title,url,comments_url,published_at,remote_is_read,remote_is_starred,raw_html_content FROM articles WHERE id=?1", [a.id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, bool>(5)?, row.get::<_, bool>(6)?, row.get::<_, String>(7)?)))
+                .optional()
+                .map_err(sql_error)?;
+            match existing {
+                None => stats.new_articles += 1,
+                Some(existing)
+                    if existing
+                        != (
+                            a.feed_id,
+                            a.title.clone(),
+                            a.url.clone(),
+                            a.comments_url.clone(),
+                            a.published_at.clone(),
+                            a.is_read,
+                            a.is_starred,
+                            a.raw_html_content.clone(),
+                        ) =>
+                {
+                    stats.updated_articles += 1
+                }
+                Some(_) => {}
+            }
             tx.execute("INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9) ON CONFLICT(id) DO UPDATE SET feed_id=excluded.feed_id,title=excluded.title,url=excluded.url,comments_url=excluded.comments_url,published_at=excluded.published_at,remote_is_read=excluded.remote_is_read,remote_is_starred=excluded.remote_is_starred,is_read=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='read') THEN articles.is_read ELSE excluded.is_read END,is_starred=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='starred') THEN articles.is_starred ELSE excluded.is_starred END,raw_html_content=excluded.raw_html_content", params![a.id,a.feed_id,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.raw_html_content]).map_err(sql_error)?;
         }
-        tx.commit().map_err(sql_error)
+        tx.commit().map_err(sql_error)?;
+        Ok(stats)
     }
 
     pub fn set_state_bulk(
@@ -198,36 +247,71 @@ impl Store {
             .map_err(sql_error)?;
         Ok(())
     }
+    pub fn last_successful_sync_at(&self) -> Result<Option<String>, CoreError> {
+        self.connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .query_row(
+                "SELECT value FROM core_settings WHERE key='last_successful_sync_at'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(sql_error)
+    }
+    pub fn navigation_catalog(&self) -> Result<NavigationCatalog, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut categories = connection
+            .prepare("SELECT id,title FROM categories ORDER BY title COLLATE NOCASE,id")
+            .map_err(sql_error)?;
+        let categories = categories
+            .query_map([], |row| {
+                Ok(Category {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                })
+            })
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)?;
+        let mut feeds=connection.prepare("SELECT id,category_id,title FROM feeds ORDER BY category_id,title COLLATE NOCASE,id").map_err(sql_error)?;
+        let feeds = feeds
+            .query_map([], |row| {
+                Ok(Feed {
+                    id: row.get(0)?,
+                    category_id: row.get(1)?,
+                    title: row.get(2)?,
+                })
+            })
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)?;
+        Ok(NavigationCatalog { categories, feeds })
+    }
+    pub fn count_articles(&self, query: &ArticleQuery) -> Result<u64, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let (sql, values) = article_filter_sql(
+            "SELECT COUNT(*) FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE 1=1".into(),
+            query,
+        );
+        connection
+            .query_row(&sql, rusqlite::params_from_iter(values), |row| {
+                row.get::<_, u64>(0)
+            })
+            .map_err(sql_error)
+    }
     pub fn query_articles(&self, query: &ArticleQuery) -> Result<Vec<ArticleSummary>, CoreError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
-        let mut sql = String::from(
-            "SELECT a.id,a.feed_id,f.category_id,f.title,a.title,a.url,a.published_at,a.is_read,a.is_starred FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE 1=1",
-        );
-        let mut values: Vec<rusqlite::types::Value> = Vec::new();
-        match query.scope {
-            ArticleScope::All => {}
-            ArticleScope::Category(id) => {
-                sql.push_str(" AND f.category_id=?");
-                values.push(id.into());
-            }
-            ArticleScope::Feed(id) => {
-                sql.push_str(" AND a.feed_id=?");
-                values.push(id.into());
-            }
-        }
-        match query.read_filter {
-            ReadFilter::All => {}
-            ReadFilter::Read => sql.push_str(" AND a.is_read=1"),
-            ReadFilter::Unread => sql.push_str(" AND a.is_read=0"),
-        }
-        match query.starred_filter {
-            StarredFilter::All => {}
-            StarredFilter::Starred => sql.push_str(" AND a.is_starred=1"),
-            StarredFilter::Unstarred => sql.push_str(" AND a.is_starred=0"),
-        }
+        let (mut sql,mut values)=article_filter_sql("SELECT a.id,a.feed_id,f.category_id,f.title,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE 1=1".into(),query);
         let descending = query.sort == ArticleSort::NewestFirst;
         if let Some(cursor) = &query.cursor {
             let op = if descending { "<" } else { ">" };
@@ -256,15 +340,44 @@ impl Store {
                     feed_title: r.get(3)?,
                     title: r.get(4)?,
                     url: r.get(5)?,
-                    published_at: r.get(6)?,
-                    is_read: r.get(7)?,
-                    is_starred: r.get(8)?,
+                    comments_url: r.get(6)?,
+                    published_at: r.get(7)?,
+                    is_read: r.get(8)?,
+                    is_starred: r.get(9)?,
                 })
             })
             .map_err(sql_error)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(sql_error)
     }
+}
+fn article_filter_sql(
+    mut sql: String,
+    query: &ArticleQuery,
+) -> (String, Vec<rusqlite::types::Value>) {
+    let mut values = Vec::new();
+    match query.scope {
+        ArticleScope::All => {}
+        ArticleScope::Category(id) => {
+            sql.push_str(" AND f.category_id=?");
+            values.push(id.into())
+        }
+        ArticleScope::Feed(id) => {
+            sql.push_str(" AND a.feed_id=?");
+            values.push(id.into())
+        }
+    }
+    match query.read_filter {
+        ReadFilter::All => {}
+        ReadFilter::Read => sql.push_str(" AND a.is_read=1"),
+        ReadFilter::Unread => sql.push_str(" AND a.is_read=0"),
+    }
+    match query.starred_filter {
+        StarredFilter::All => {}
+        StarredFilter::Starred => sql.push_str(" AND a.is_starred=1"),
+        StarredFilter::Unstarred => sql.push_str(" AND a.is_starred=0"),
+    }
+    (sql, values)
 }
 fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
     let current: i64 = connection

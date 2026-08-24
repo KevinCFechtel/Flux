@@ -7,7 +7,8 @@ pub(crate) fn deliver_pending(
     remote: &dyn RemoteSource,
     store: &Store,
     emit: &dyn Fn(CoreEvent),
-) -> Result<(), CoreError> {
+) -> Result<u32, CoreError> {
+    let mut delivered = 0;
     for pending in store.pending_mutations()? {
         let result = match pending.field {
             MutationField::Read => remote.set_read_state(&[pending.article_id], pending.desired),
@@ -16,6 +17,7 @@ pub(crate) fn deliver_pending(
         match result {
             Ok(()) => {
                 store.acknowledge(&pending)?;
+                delivered += 1;
                 emit(CoreEvent::MutationDeliverySucceeded {
                     article_id: pending.article_id,
                     field: pending.field,
@@ -31,5 +33,5 @@ pub(crate) fn deliver_pending(
             }
         }
     }
-    Ok(())
+    Ok(delivered)
 }

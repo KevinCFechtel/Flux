@@ -35,6 +35,7 @@ pub struct ArticleSummary {
     pub feed_title: String,
     pub title: String,
     pub url: String,
+    pub comments_url: String,
     pub published_at: String,
     pub is_read: bool,
     pub is_starred: bool,
@@ -100,6 +101,7 @@ pub enum SyncReason {
     AppStart,
     Resume,
     Background,
+    Periodic,
     Widget,
 }
 
@@ -114,6 +116,39 @@ pub enum RuntimeHealth {
     Healthy,
     ConnectivityDegraded,
     ServerDegraded,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeHealthStatus {
+    pub health: RuntimeHealth,
+    /// RFC 3339 timestamp. Absent while healthy.
+    pub next_retry_at: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NavigationCatalog {
+    pub categories: Vec<Category>,
+    pub feeds: Vec<Feed>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SyncCompleted {
+    pub reason: SyncReason,
+    pub new_articles: u32,
+    pub updated_articles: u32,
+    pub mutations_delivered: u32,
+    pub data_changed: bool,
+    pub navigation_changed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SyncFailure {
+    pub reason: SyncReason,
+    pub error_kind: CoreErrorKind,
+    pub mutation_delivery_completed: bool,
+    pub remote_fetch_started: bool,
+    pub remote_fetch_completed: bool,
+    pub mutations_delivered: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,6 +192,8 @@ pub enum CoreEvent {
         field: MutationField,
         error_kind: CoreErrorKind,
     },
+    SyncCompleted(SyncCompleted),
+    SyncFailed(SyncFailure),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
