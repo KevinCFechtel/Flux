@@ -27,6 +27,7 @@ final class BrowserStore: ObservableObject {
     @Published var newestFirst = false
     @Published var popoverVisible = false
     @Published var settingsVisible = false
+    @Published var addFeedVisible = false
     @Published var newDataAvailable = false
     @Published var lastScrolloverBatch: [Int64] = []
     @Published var scrolloverUndoVisible = false
@@ -277,6 +278,26 @@ final class BrowserStore: ObservableObject {
             }
         }
     }
+    func discoverSubscriptions(_ request: DiscoverSubscriptionsRequest, completion: @escaping (Result<[DiscoveredSubscription], Error>) -> Void) {
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            return
+        }
+        Task.detached {
+            let result = Result { try core.discoverSubscriptions(request: request) }
+            await MainActor.run { completion(result) }
+        }
+    }
+    func createFeed(_ request: CreateFeedRequest, completion: @escaping (Result<CreateFeedResult, Error>) -> Void) {
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            return
+        }
+        Task.detached {
+            let result = Result { try core.createFeed(request: request) }
+            await MainActor.run { completion(result) }
+        }
+    }
     func beginScrolloverUndoBatch() { scrolloverUndoBatch.beginScroll() }
     func finishScrolloverUndoBatch() {
         guard scrolloverCountsPending else { return }
@@ -307,7 +328,7 @@ final class BrowserStore: ObservableObject {
     func openComments(_ article: ArticleSummary) { if let url = URL(string: article.commentsUrl), !article.commentsUrl.isEmpty { NSWorkspace.shared.open(url) } }
     func copyLink(_ article: ArticleSummary) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(article.url, forType: .string) }
     func share(_ article: ArticleSummary) { guard let url = URL(string: article.url) else { return }; DispatchQueue.main.async { [weak self] in guard let self, let view = NSApplication.shared.keyWindow?.contentView else { return }; let picker = NSSharingServicePicker(items: [article.title, url]); self.sharingPicker = picker; let point = view.convert(view.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil); picker.show(relativeTo: NSRect(origin: point, size: NSSize(width: 1, height: 1)), of: view, preferredEdge: .minY) } }
-    private func showActionConfirmation(_ message: String) {
+    func showActionConfirmation(_ message: String) {
         actionConfirmation = message
         actionConfirmationExpiry?.cancel()
         actionConfirmationExpiry = Task { [weak self] in
@@ -367,6 +388,87 @@ final class BrowserStore: ObservableObject {
         scrolloverUndoVisible = true
         undoExpiry?.cancel()
         undoExpiry = Task { [weak self] in try? await Task.sleep(for: .seconds(8)); guard !Task.isCancelled else { return }; self?.scrolloverUndoVisible = false }
+    }
+}
+
+enum AddFeedOptionalBoolean: String, CaseIterable, Identifiable {
+    case serverDefault, enabled, disabled
+
+    var id: Self { self }
+    var value: Bool? {
+        switch self {
+        case .serverDefault: nil
+        case .enabled: true
+        case .disabled: false
+        }
+    }
+    var title: String {
+        switch self {
+        case .serverDefault: "Use Miniflux default"
+        case .enabled: "Enabled"
+        case .disabled: "Disabled"
+        }
+    }
+}
+
+struct AddFeedForm {
+    var url = ""
+    var categoryID: Int64?
+    var username = ""
+    var password = ""
+    var userAgent = ""
+    var scraperRules = ""
+    var rewriteRules = ""
+    var blocklistRules = ""
+    var keeplistRules = ""
+    var crawler: AddFeedOptionalBoolean = .serverDefault
+    var disabled: AddFeedOptionalBoolean = .serverDefault
+    var ignoreHttpCache: AddFeedOptionalBoolean = .serverDefault
+    var fetchViaProxy: AddFeedOptionalBoolean = .serverDefault
+
+    func discoveryRequest() -> DiscoverSubscriptionsRequest {
+        DiscoverSubscriptionsRequest(
+            url: url.trimmingCharacters(in: .whitespacesAndNewlines),
+            username: optional(username),
+            password: optional(password),
+            userAgent: optional(userAgent),
+            fetchViaProxy: fetchViaProxy.value
+        )
+    }
+    func createRequest(feedURL: String) -> CreateFeedRequest {
+        CreateFeedRequest(
+            feedUrl: feedURL,
+            categoryId: categoryID,
+            username: optional(username),
+            password: optional(password),
+            crawler: crawler.value,
+            userAgent: optional(userAgent),
+            scraperRules: optional(scraperRules),
+            rewriteRules: optional(rewriteRules),
+            blocklistRules: optional(blocklistRules),
+            keeplistRules: optional(keeplistRules),
+            disabled: disabled.value,
+            ignoreHttpCache: ignoreHttpCache.value,
+            fetchViaProxy: fetchViaProxy.value
+        )
+    }
+    private func optional(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+enum AddFeedDiscoveryOutcome: Equatable {
+    case none
+    case automatic(DiscoveredSubscription)
+    case choose
+
+    static func from(_ candidates: [DiscoveredSubscription]) -> Self {
+        switch candidates.count {
+        case 0: .none
+        case 1: .automatic(candidates[0])
+        default: .choose
+        }
     }
 }
 
