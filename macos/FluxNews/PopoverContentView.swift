@@ -53,6 +53,7 @@ struct PopoverContentView: View {
         .frame(maxHeight: .infinity)
         .sheet(isPresented: $store.settingsVisible) { SettingsView(store: store) }
         .sheet(isPresented: $store.addFeedVisible) { AddFeedView(store: store) }
+        .sheet(isPresented: $store.addCategoryVisible) { AddCategoryView(store: store) }
     }
 }
 
@@ -132,10 +133,6 @@ private struct ArticlePane: View {
             Text(title).font(.headline).lineLimit(1)
             Text("\(store.selectionTotal)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             Spacer()
-            Button { store.addFeedVisible = true } label: { Image(systemName: "plus") }
-                .buttonStyle(.borderless)
-                .help("Add Feed")
-                .accessibilityLabel("Add Feed")
             Button { store.sync() } label: {
                 if store.isLoading { ProgressView().controlSize(.small).frame(width: 16, height: 16) }
                 else { Image(systemName: "arrow.clockwise") }
@@ -301,17 +298,27 @@ private struct NavigationSidebar: View {
     @ObservedObject var store: BrowserStore
 
     var body: some View {
-        List(selection: selectedScope) {
-            Section {
-                sidebarRow(SidebarItem(id: "all", scope: .all, title: "All News", count: store.unreadTotal, systemImage: "tray.full", feedID: nil, children: nil))
-                sidebarRow(SidebarItem(id: "starred", scope: .starred, title: "Starred", count: store.starredTotal, systemImage: "star.fill", feedID: nil, children: nil))
+        VStack(spacing: 0) {
+            List(selection: selectedScope) {
+                Section {
+                    sidebarRow(SidebarItem(id: "all", scope: .all, title: "All News", count: store.unreadTotal, systemImage: "tray.full", feedID: nil, children: nil))
+                    sidebarRow(SidebarItem(id: "starred", scope: .starred, title: "Starred", count: store.starredTotal, systemImage: "star.fill", feedID: nil, children: nil))
+                }
+                Section("Feeds") {
+                    OutlineGroup(categoryItems, children: \.children) { item in sidebarRow(item) }
+                }
             }
-            Section("Feeds") {
-                OutlineGroup(categoryItems, children: \.children) { item in sidebarRow(item) }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            Divider()
+            VStack(alignment: .leading, spacing: 4) {
+                Button { store.addFeedVisible = true } label: { Label("Add Feed...", systemImage: "plus") }
+                Button { store.addCategoryVisible = true } label: { Label("Add Category...", systemImage: "folder.badge.plus") }
             }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
         }
-        .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
         .background(.regularMaterial)
     }
 
@@ -690,5 +697,53 @@ private struct AddFeedView: View {
     private func showError(_ message: String) {
         self.message = message
         store.errorMessage = message
+    }
+}
+
+private struct AddCategoryView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: BrowserStore
+    @State private var title = ""
+    @State private var isCreating = false
+    @State private var message: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Add Category").font(.title2.bold())
+            LabeledContent("Name") { TextField("Category name", text: $title) }
+            if let message {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button(isCreating ? "Adding..." : "Add") { create() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(isCreating || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 360)
+    }
+
+    private func create() {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        message = nil
+        isCreating = true
+        store.createCategory(title) { result in
+            isCreating = false
+            switch result {
+            case .success:
+                store.showActionConfirmation("Category added. It will appear after the next refresh.")
+                dismiss()
+            case let .failure(error):
+                let message = "Could not add category: \(error.localizedDescription)"
+                self.message = message
+                store.errorMessage = message
+            }
+        }
     }
 }

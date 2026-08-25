@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use crate::domain::{
-    Article, Category, CoreError, CreateFeedRequest, CreateFeedResult,
+    Article, Category, CoreError, CreateCategoryResult, CreateFeedRequest, CreateFeedResult,
     DiscoverSubscriptionsRequest, DiscoveredSubscription, Feed, SaveToServiceResult,
 };
 use chrono::{DateTime, SecondsFormat};
@@ -41,6 +41,9 @@ pub trait RemoteSource: Send + Sync {
     }
     fn create_feed(&self, _request: CreateFeedRequest) -> Result<CreateFeedResult, CoreError> {
         Err(CoreError::data("feed creation is unavailable"))
+    }
+    fn create_category(&self, _title: String) -> Result<CreateCategoryResult, CoreError> {
+        Err(CoreError::data("category creation is unavailable"))
     }
     fn fetch_feed_icon(&self, _feed_id: i64) -> Result<Option<String>, CoreError> {
         Err(CoreError::data("feed icon acquisition is unavailable"))
@@ -272,6 +275,13 @@ impl MinifluxClient {
             feed_id: response.feed_id,
         })
     }
+    fn create_category(&self, title: String) -> Result<CreateCategoryResult, CoreError> {
+        let response: CreateCategoryDto =
+            self.post_json("/v1/categories", serde_json::json!({ "title": title }), 201)?;
+        Ok(CreateCategoryResult {
+            category_id: response.id,
+        })
+    }
     fn entries(&self, status: Option<&str>, starred: bool) -> Result<Vec<EntryDto>, CoreError> {
         let set = if starred {
             "starred"
@@ -451,6 +461,9 @@ impl RemoteSource for MinifluxClient {
     fn create_feed(&self, request: CreateFeedRequest) -> Result<CreateFeedResult, CoreError> {
         MinifluxClient::create_feed(self, request)
     }
+    fn create_category(&self, title: String) -> Result<CreateCategoryResult, CoreError> {
+        MinifluxClient::create_category(self, title)
+    }
     fn fetch_feed_icon(&self, feed_id: i64) -> Result<Option<String>, CoreError> {
         let icon: IconDto = match self.get(&format!("/v1/feeds/{feed_id}/icon"), &[]) {
             Ok(icon) => icon,
@@ -556,6 +569,10 @@ struct ErrorDto {
 #[derive(Deserialize)]
 struct CreateFeedDto {
     feed_id: i64,
+}
+#[derive(Deserialize)]
+struct CreateCategoryDto {
+    id: i64,
 }
 #[derive(Deserialize)]
 struct DiscoveredSubscriptionDto {
@@ -969,6 +986,39 @@ mod tests {
 
         assert_eq!(error.kind, crate::domain::CoreErrorKind::ServerTransient);
         assert_eq!(worker.join().unwrap()[0].1, "/v1/feeds");
+    }
+
+    #[test]
+    fn create_category_sends_title_and_maps_created_identity() {
+        let (address, worker) = json_server(vec![(
+            201,
+            r#"{"id":44,"title":"Engineering","user_id":1}"#.into(),
+        )]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        assert_eq!(
+            client.create_category("Engineering".into()).unwrap(),
+            CreateCategoryResult { category_id: 44 }
+        );
+        assert_eq!(
+            worker.join().unwrap(),
+            vec![(
+                "POST".into(),
+                "/v1/categories".into(),
+                serde_json::json!({"title": "Engineering"}),
+            )]
+        );
+    }
+
+    #[test]
+    fn create_category_reports_server_failures() {
+        let (address, worker) = json_server(vec![(500, String::new())]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        let error = client.create_category("Engineering".into()).unwrap_err();
+
+        assert_eq!(error.kind, crate::domain::CoreErrorKind::ServerTransient);
+        assert_eq!(worker.join().unwrap()[0].1, "/v1/categories");
     }
 
     #[test]

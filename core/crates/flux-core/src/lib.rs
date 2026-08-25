@@ -21,7 +21,7 @@ use chrono::{DateTime, Utc};
 use diagnostics::{CoreDiagnosticListener, Diagnostics};
 use domain::{
     ArticleQuery, ArticleSummary, ArticleThumbnailResult, CoreError, CoreErrorKind, CoreEvent,
-    CreateFeedRequest, CreateFeedResult, DeliveryDisposition, DeliveryMode,
+    CreateCategoryResult, CreateFeedRequest, CreateFeedResult, DeliveryDisposition, DeliveryMode,
     DiscoverSubscriptionsRequest, DiscoveredSubscription, FeedIcon, FeedIconVariant, MutationField,
     MutationResult, NavigationCatalog, RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult,
     SyncCompleted, SyncFailure, SyncReason,
@@ -350,6 +350,16 @@ impl FluxCore {
         }
         let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
             self.remote.create_feed(request)
+        });
+        self.diagnostics.flush();
+        result
+    }
+    pub fn create_category(&self, title: String) -> Result<CreateCategoryResult, CoreError> {
+        if title.trim().is_empty() {
+            return Err(CoreError::data("category title must not be empty"));
+        }
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            self.remote.create_category(title)
         });
         self.diagnostics.flush();
         result

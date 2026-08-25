@@ -186,6 +186,10 @@ pub struct CreateFeedRequest {
 pub struct CreateFeedResult {
     pub feed_id: i64,
 }
+#[derive(uniffi::Record)]
+pub struct CreateCategoryResult {
+    pub category_id: i64,
+}
 #[derive(uniffi::Enum)]
 pub enum SaveToServiceResult {
     Saved,
@@ -434,6 +438,12 @@ impl Flux {
             .map(Into::into)
             .map_err(map_error)
     }
+    pub fn create_category(&self, title: String) -> Result<CreateCategoryResult, FluxError> {
+        self.core
+            .create_category(title)
+            .map(Into::into)
+            .map_err(map_error)
+    }
     pub fn subscribe_events(
         &self,
         listener: Arc<dyn EventListener>,
@@ -608,6 +618,13 @@ impl From<domain::CreateFeedResult> for CreateFeedResult {
     fn from(value: domain::CreateFeedResult) -> Self {
         Self {
             feed_id: value.feed_id,
+        }
+    }
+}
+impl From<domain::CreateCategoryResult> for CreateCategoryResult {
+    fn from(value: domain::CreateCategoryResult) -> Self {
+        Self {
+            category_id: value.category_id,
         }
     }
 }

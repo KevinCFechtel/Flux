@@ -239,6 +239,11 @@ pub struct CreateFeedResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreateCategoryResult {
+    pub category_id: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CoreEvent {
     ArticleReadStateChanged {
         article_id: i64,

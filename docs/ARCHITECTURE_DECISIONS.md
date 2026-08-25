@@ -238,9 +238,24 @@ Feed preferences have global defaults plus per-feed overrides. Current intended 
 
 Feed/category core preferences are device-local and are not automatically synchronized across devices. Device backup and explicit config export/import are separate mechanisms.
 
-Flux may add user-defined feeds. The native UI gathers URL/category/options; the core performs Miniflux communication. Feed discovery is delegated entirely to Miniflux. General feed/category edit/delete remains in the Miniflux web UI for now.
+Flux may add user-defined feeds and categories.
 
-Curated feeds remain a static repository-maintained list and may be extended through repository change requests/PRs.
+For feed creation, the native UI gathers URL/category/options; the core performs
+Miniflux communication. Feed discovery is delegated entirely to Miniflux.
+
+Category creation is also a direct core-wrapped Miniflux operation initiated by
+the native UI.
+
+Feed and category creation are immediate remote operations. Newly created
+entities enter Flux local state through the normal synchronization/reconciliation
+path; creation does not introduce a separate local persistence or hidden sync
+mechanism.
+
+General feed/category edit/delete remains in the Miniflux web UI for now.
+
+Curated feed onboarding is intentionally not part of Flux. Maintaining a
+repository-owned feed catalog adds ongoing maintenance cost while providing
+little value for the intended Miniflux user base.
 
 Miniflux Save/third-party integration is a core-wrapped Miniflux API operation, not a duplicated service implementation.
 

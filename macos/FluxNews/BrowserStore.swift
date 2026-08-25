@@ -28,6 +28,7 @@ final class BrowserStore: ObservableObject {
     @Published var popoverVisible = false
     @Published var settingsVisible = false
     @Published var addFeedVisible = false
+    @Published var addCategoryVisible = false
     @Published var newDataAvailable = false
     @Published var lastScrolloverBatch: [Int64] = []
     @Published var scrolloverUndoVisible = false
@@ -295,6 +296,16 @@ final class BrowserStore: ObservableObject {
         }
         Task.detached {
             let result = Result { try core.createFeed(request: request) }
+            await MainActor.run { completion(result) }
+        }
+    }
+    func createCategory(_ title: String, completion: @escaping (Result<CreateCategoryResult, Error>) -> Void) {
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            return
+        }
+        Task.detached {
+            let result = Result { try core.createCategory(title: title) }
             await MainActor.run { completion(result) }
         }
     }
