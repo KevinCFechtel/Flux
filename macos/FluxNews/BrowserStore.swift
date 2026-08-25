@@ -7,12 +7,6 @@ import Security
 enum BrowserScope: Hashable { case all, starred, category(Int64), feed(Int64) }
 enum ArticleListStyle: String { case row, card }
 
-enum BrowserSyncRefreshPolicy {
-    static func reloadVisibleArticles(reason: SyncReason, dataChanged: Bool, popoverVisible: Bool, hasMeaningfullyInteracted: Bool) -> Bool {
-        reason == .manual || (dataChanged && (!popoverVisible || !hasMeaningfullyInteracted))
-    }
-}
-
 @MainActor
 final class BrowserStore: ObservableObject {
     @Published var articles: [ArticleSummary] = []
@@ -40,6 +34,7 @@ final class BrowserStore: ObservableObject {
     @Published var globalShortcut: GlobalShortcutChoice
     @Published var globalShortcutRegistrationError: String?
     @Published private(set) var listPresentationRevision: UInt64 = 0
+    @Published private(set) var snapshotResetRevision: UInt64 = 0
 
     private var core: Flux?
     private var eventSubscription: EventSubscription?
@@ -100,7 +95,18 @@ final class BrowserStore: ObservableObject {
         let coreScope: ArticleScope = switch scope { case .all, .starred: .all; case let .category(id): .category(id: id); case let .feed(id): .feed(id: id) }
         return ArticleQuery(scope: coreScope, readFilter: scope == .starred ? .all : (unreadOnly ? .unread : .all), starredFilter: scope == .starred ? .starred : .all, sort: newestFirst ? .newestFirst : .oldestFirst, limit: 0, cursor: nil)
     }
-    func reloadVisibleArticles() { guard let core else { return }; do { articles = try core.queryArticles(query: query()); selectionTotal = try core.countArticles(query: query()); errorMessage = nil } catch { errorMessage = String(describing: error) } }
+    func reloadVisibleArticles(resetPosition: Bool = false) {
+        guard let core else { return }
+        do {
+            articles = try core.queryArticles(query: query())
+            selectionTotal = try core.countArticles(query: query())
+            errorMessage = nil
+            if resetPosition {
+                resetPresentation()
+                snapshotResetRevision &+= 1
+            }
+        } catch { errorMessage = String(describing: error) }
+    }
     func reloadSelectionTotal() { guard let core else { return }; do { selectionTotal = try core.countArticles(query: query()); errorMessage = nil } catch { errorMessage = String(describing: error) } }
     func reloadNavigation() {
         guard let core else { return }
@@ -197,7 +203,7 @@ final class BrowserStore: ObservableObject {
     func noteMeaningfulInteraction() { hasMeaningfullyInteracted = true }
     func resetPresentation() { hasMeaningfullyInteracted = false; newDataAvailable = false; listPresentationRevision &+= 1 }
     func setArticleListStyle(_ style: ArticleListStyle) { guard style != articleListStyle else { return }; articleListStyle = style; UserDefaults.standard.set(style.rawValue, forKey: "FluxNews.articleListStyle"); resetPresentation() }
-    func applyNewData() { resetPresentation(); reloadVisibleArticles() }
+    func applyNewData() { reloadVisibleArticles(resetPosition: true) }
     func sync(reason: SyncReason = .manual) {
         guard let core else { return }
         guard !isLoading else {
@@ -239,8 +245,14 @@ final class BrowserStore: ObservableObject {
         else if metadata.reason == .manual { reloadCounts() }
         else if metadata.dataChanged { reloadCounts() }
         if metadata.reason == .periodic { NativeLog.sync.notice("periodic sync completed") }
-        if BrowserSyncRefreshPolicy.reloadVisibleArticles(reason: metadata.reason, dataChanged: metadata.dataChanged, popoverVisible: popoverVisible, hasMeaningfullyInteracted: hasMeaningfullyInteracted) { reloadVisibleArticles(); newDataAvailable = false }
-        else if metadata.dataChanged { newDataAvailable = true }
+        switch SnapshotRefreshPolicy.action(manual: metadata.reason == .manual, dataChanged: metadata.dataChanged, popoverVisible: popoverVisible, hasMeaningfullyInteracted: hasMeaningfullyInteracted) {
+        case .replace:
+            reloadVisibleArticles(resetPosition: true)
+        case .signalNewData:
+            newDataAvailable = true
+        case .preserve:
+            break
+        }
     }
     func setRead(_ article: ArticleSummary, _ read: Bool) { guard let core else { return }; do { _ = try core.setReadState(articleId: article.id, read: read); updateVisible([article.id]) { $0.isRead = read }; reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
     func setStarred(_ article: ArticleSummary, _ starred: Bool) { guard let core else { return }; do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }

@@ -99,4 +99,23 @@ final class ScrolloverExposureTrackerTests: XCTestCase {
         requests.complete("1-image")
         XCTAssertFalse(requests.begin("1-image", cached: true))
     }
+
+    func testManualSyncAlwaysReplacesAndResetsSnapshot() {
+        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: true, dataChanged: false, popoverVisible: true, hasMeaningfullyInteracted: true), .replace)
+        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: true, dataChanged: true, popoverVisible: true, hasMeaningfullyInteracted: true), .replace)
+    }
+
+    func testAutomaticUntouchedSnapshotReplacesWhenDataChanges() {
+        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: false, dataChanged: true, popoverVisible: true, hasMeaningfullyInteracted: false), .replace)
+        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: false, dataChanged: true, popoverVisible: false, hasMeaningfullyInteracted: true), .replace)
+    }
+
+    func testAutomaticInteractedSnapshotSignalsNewDataWithoutReplacement() {
+        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: false, dataChanged: true, popoverVisible: true, hasMeaningfullyInteracted: true), .signalNewData)
+    }
+
+    func testUnchangedAutomaticSyncAndLocalMutationDoNotReplaceSnapshot() {
+        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: false, dataChanged: false, popoverVisible: true, hasMeaningfullyInteracted: false), .preserve)
+        XCTAssertNotEqual(SnapshotRefreshPolicy.Action.preserve, .replace)
+    }
 }

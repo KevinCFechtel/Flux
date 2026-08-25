@@ -198,6 +198,12 @@ private struct ArticlePane: View {
                         scrollPhase = phase
                         if !userScrolling { tracker.rebase(frames: frames, unread: unreadIDs) }
                     }
+                    .onChange(of: store.snapshotResetRevision) { _, _ in
+                        guard let firstID = store.articles.first?.id else { return }
+                        tracker.reset()
+                        suppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
+                        proxy.scrollTo(firstID, anchor: .top)
+                    }
                     .background { KeyboardCommandObserver { command in handle(command, proxy: proxy) } }
                     .onAppear { viewport = CGRect(origin: .zero, size: geometry.size); observe() }
                     .onChange(of: geometry.size) { _, size in viewport = CGRect(origin: .zero, size: size); tracker.reset() }

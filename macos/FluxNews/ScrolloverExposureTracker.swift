@@ -11,6 +11,19 @@ struct ScrolloverExposureTracker {
     mutating func process(frames: [Int64: CGRect], viewport: CGRect, unread: Set<Int64>, now: TimeInterval, offsetDelta: CGFloat, userInitiated: Bool) -> [Int64] { guard userInitiated, offsetDelta > 0, offsetDelta <= viewport.height * 0.85 else { reset(); observe(frames: frames, viewport: viewport, unread: unread, now: now); return [] }; let ids = exposures.compactMap { id, exposure -> Int64? in let crossed = frames[id].map { exposure.processedFrame.maxY > viewport.minY && $0.maxY <= viewport.minY } ?? (exposure.currentFrame.midY < viewport.midY); return exposure.qualified && unread.contains(id) && crossed ? id : nil }.sorted(); for id in ids { exposures.removeValue(forKey: id) }; observe(frames: frames, viewport: viewport, unread: unread, now: now); for id in Array(exposures.keys) { if var exposure = exposures[id] { exposure.processedFrame = exposure.currentFrame; exposures[id] = exposure } }; return ids }
 }
 
+enum SnapshotRefreshPolicy {
+    enum Action: Equatable {
+        case replace
+        case preserve
+        case signalNewData
+    }
+
+    static func action(manual: Bool, dataChanged: Bool, popoverVisible: Bool, hasMeaningfullyInteracted: Bool) -> Action {
+        if manual || (dataChanged && (!popoverVisible || !hasMeaningfullyInteracted)) { return .replace }
+        return dataChanged ? .signalNewData : .preserve
+    }
+}
+
 /// Presentation-only policy for grouping tracker flushes from one scroll interaction.
 struct ScrolloverUndoBatch {
     private var session = 0

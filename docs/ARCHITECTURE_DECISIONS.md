@@ -19,8 +19,6 @@ requested for historical investigation.
 UniFFI is the selected binding technology for Swift and Kotlin/native
 clients.
 
-The shared Rust implementation is organized as a workspace under `core/`, with platform-native clients alongside it (`macos/`, and later `ios/` and `android/`). The workspace manifest and lockfile belong to that shared-core workspace rather than the repository root.
-
 ## 2. Responsibility boundary
 
 ### Rust core
@@ -60,12 +58,8 @@ Article queries support at least:
 
 Sorting uses publication time only.
 
-Counts are separate point-in-time core queries and respect the same
-scope/read/starred filter semantics as article queries, but do not
-require sorting or pagination. They can be refreshed independently from
-visible article snapshots, for example after Read-on-Scrollover, without
-re-querying the visible list. Background changes do not silently replace
-visible counts.
+Counts are point-in-time core queries and respect the selected
+view/filter. Background changes do not silently replace visible counts.
 
 List queries should return compact article summaries; full content is
 requested separately for article detail.
@@ -74,11 +68,6 @@ requested separately for article detail.
 
 A background core change must not unexpectedly rebuild a list the user
 is currently using.
-
-Synchronization is independent of native presentation visibility.
-Periodic/background sync may run while a UI surface is visible; native
-refresh policy, rather than suppressed synchronization, protects stable
-visible snapshots.
 
 With Sync-on-Start enabled:
 
@@ -110,6 +99,18 @@ On foreground → background, flush transient UI work that must become
 durable, currently including pending scrollover batches and playback
 checkpoints. This transition does not itself force a sync.
 
+When a native client intentionally replaces the currently presented
+article snapshot with a newly queried snapshot, presentation starts at
+the beginning of that snapshot. This applies to Manual sync refresh,
+automatic snapshot replacement permitted by the native presentation
+policy, and explicit adoption of a signalled new-data snapshot.
+
+An interacted visible snapshot that is preserved across
+automatic/background synchronization retains its scroll position. Local
+mutations, count-only refreshes, and other presentation-state updates do
+not reset scroll position unless they intentionally replace the visible
+article snapshot.
+
 ## 5. Mutations and bulk semantics
 
 A mutation is successful for normal offline-first use once it is safely
@@ -119,15 +120,8 @@ Bulk UI actions pass the exact article IDs the user acted on. The core
 does not expand a UI-selected set based on newer database contents. The
 core deduplicates bulk IDs before processing.
 
-Opening an article always marks it read. Opening an article's comments
-URL does **not** mark the article read. Read/unread and starred are
+Opening an article always marks it read. Read/unread and starred are
 explicit reversible domain states.
-
-Scrollover Undo is native presentation state, not a dedicated core
-operation. The native client retains only the most recently flushed
-Scrollover batch and may undo it by issuing the normal exact-ID bulk
-unread mutation for that batch. There is no multi-batch Undo history in
-the core.
 
 ### Delivery policy
 
@@ -145,10 +139,8 @@ All ordinary triggers use one operation:
 
 `sync(reason)`
 
-Reasons identify the trigger, e.g. Manual, AppStart, Resume, Background,
-Periodic, Widget. They must not become hidden behavior switches. Native
-platforms decide when timer/stale refreshes occur; these use `Periodic`
-rather than overloading `Background`.
+Reasons identify the trigger, e.g. Manual, AppStart, Resume, Background,
+Widget. They must not become hidden behavior switches.
 
 The normal sync order is:
 
@@ -168,21 +160,7 @@ Background sync is independently configurable from Live/Deferred
 mutation delivery and can be disabled completely. When enabled it is a
 full normal sync, including pending mutations.
 
-`last_successful_sync_at` is one global persisted/queryable timestamp
-for the last fully successful sync, independent of `SyncReason`. The
-reason belongs in events/logs rather than separate persisted success
-timestamps.
-
-Sync completion events contain coarse domain metadata rather than
-snapshots or counts. They may include the reason, numbers of new/updated
-articles and delivered mutations, `data_changed`, and
-`navigation_changed`. Native clients decide which
-article/navigation/count queries to refresh.
-
-Sync failure events include compact phase-oriented partial-progress
-metadata where useful (for example mutation delivery completed, remote
-fetch started/completed, and small processed-item counts). They do not
-contain partial snapshots or a complex progress state.
+`last_successful_sync_at` is persisted and queryable.
 
 ### Rebuild
 
@@ -213,10 +191,8 @@ semantics.
 Data-processing failures should be isolated where possible; one bad
 image or metadata record should not unnecessarily fail an entire sync.
 
-Runtime health distinguishes at least Healthy, ConnectivityDegraded, and
-ServerDegraded and is publicly queryable through the core/UniFFI
-boundary, including `next_retry_at` where relevant. It is observable
-state, not a UI-controlled retry mechanism.
+Runtime health may distinguish at least Healthy, ConnectivityDegraded,
+and ServerDegraded.
 
 Backoff is runtime-only and may use failure count plus `next_retry_at`;
 it need not survive process restart. Manual sync overrides backoff and
@@ -232,18 +208,6 @@ persisted in the core database, and never logged.
 
 Non-sensitive connection configuration such as the Miniflux base URL may
 be persisted by the core.
-
-Changing the Miniflux base URL creates a new server context.
-Server-bound synchronized data and feed/category preferences are not
-carried into that new context. Changing only the API key while keeping
-the same base URL retains the existing local server context and
-feed/category preferences; the long-lived core is recreated with the new
-runtime credential.
-
-Feed/category preferences are not deleted immediately when their
-referenced entity disappears from sync results. Orphaned preferences are
-retained for 90 days and may then be removed by a separate cleanup if
-the entity has not reappeared.
 
 ## 9. Article data and content processing
 
@@ -287,11 +251,12 @@ Retention cleanup runs only during a normal sync. A very old unread
 article may therefore remain locally until a later sync after it is
 marked read.
 
-Remote synchronization and local retention are separate concerns. Retention is a local cleanup policy, not a remote fetch policy. A normal sync, including the initial sync on a fresh installation, does not fetch read history merely to populate the retention window. Remote synchronization fetches at least all unread articles and all starred articles, plus explicitly required special sets such as articles needed for active/existing downloads.
+Initial/rebuilt local state includes at least:
 
-Articles already received locally remain in the local data set when they later become read. After reconciliation, retention cleanup may remove locally persisted read articles that are older than the configured retention period and have no independent protection. A fresh installation therefore does not backfill read articles solely because they fall within the configured retention period.
-
-Rebuild follows the same separation of concerns: it restores the required remote article sets rather than treating retention as a request to backfill read history. Any additional rebuild-only recovery requirements must be explicit, such as restoring article records required for preserved downloads.
+-   all unread articles;
+-   read articles inside retention;
+-   all starred articles;
+-   articles required by active/existing downloads.
 
 ## 11. Search
 
@@ -304,103 +269,17 @@ starts a download.
 
 ## 12. Feeds, categories, navigation, and feed preferences
 
-Navigation is category → feed. The core maintains/query-exposes the
-complete category/feed catalog independently of whether entries
-currently have matching articles. Categories need ID/name/count. Feeds
-need ID/category/name/icon/count for normal navigation; URL/error state
-need not be part of that navigation DTO.
-
-FluxNews supports a presentation option for showing empty
-feeds/categories. It defaults to enabled. When disabled, "empty" is
-relative to the currently active article filters: a feed/category whose
-relevant filtered count is `0` is hidden even if it would contain
-articles under another filter. The underlying catalog entry and
-preferences remain intact.
+Navigation is category → feed. Categories need ID/name/count. Feeds need
+ID/category/name/icon/count for normal navigation; URL/error state need
+not be part of that navigation DTO.
 
 The core owns feed-icon acquisition, cache/processing, and suitable
 light/dark variants for transparent low-contrast icons. Native UI
 requests and renders the appropriate variant.
 
-### Article images
-
-Article-image discovery, acquisition, processing, and regenerable disk
-caching belong to the core. Native clients trigger lazy loading and own
-image decoding/rendering for presentation. They may additionally keep a
-small platform-native memory cache.
-
-Background sync does not preload article images. Discovering an
-`image_url` during article-content processing records only the source
-metadata. Network acquisition begins only when a native client requests
-the image resource.
-
-Article images are optional enrichment. The absence or failure of an
-article image must degrade silently to the normal text-only article
-presentation and must not make article queries, synchronization, or the
-article itself fail.
-
-If an article has no discovered `image_url`, the native client does not
-request an image resource and immediately renders the text-only layout.
-No loading indicator or image placeholder is required for this state.
-
-If an `image_url` exists and no cached thumbnail is available, the native
-client may reserve the normal thumbnail area and present a subtle loading
-or skeleton state while requesting the resource from the core. If the
-core determines that no usable image is available, the native client
-removes that loading state and collapses to the normal text-only layout
-rather than presenting a broken-image error.
-
-The core stores only a normalized thumbnail, not the downloaded original
-article image. The original source is temporary processing input and is
-discarded after successful thumbnail generation.
-
-Normalized article thumbnails preserve aspect ratio and have a maximum
-longest edge of 640 pixels. The core must not stretch source images to a
-fixed aspect ratio. Native presentation remains responsible for clipping
-or cropping the normalized thumbnail into its UI-specific layout.
-
-The article-thumbnail disk cache is regenerable Core cache data and has a
-default maximum size of 1 GiB. Cache eviction is size-driven and
-approximately least-recently-used. Successful cached thumbnails have no
-fixed time-to-live merely because of age.
-
-Article-thumbnail cache lifetime is independent of article retention.
-Removing an article from durable article storage does not require an
-immediate corresponding thumbnail deletion. The bounded cache manages
-its own lifecycle and eventually evicts unused resources.
-
-Concurrent requests for the same article-image resource are deduplicated
-by the core so multiple native rows or clients do not cause duplicate
-network acquisition or processing.
-
-A cached thumbnail should be returned immediately when available. A
-known-unavailable resource should likewise be reported quickly so the
-native client can stop displaying its loading state.
-
-Permanent or resource-specific failures may be negatively cached for
-approximately 24 hours. This includes cases such as:
-
--   HTTP 404 / resource not found;
--   a successful response that is not an image;
--   an image payload that cannot be decoded or normalized;
--   an otherwise permanently invalid image resource.
-
-Transient transport/server failures must not receive the 24-hour
-negative-cache treatment. This includes at least:
-
--   no network connectivity;
--   DNS/connection failures;
--   timeouts;
--   transient 5xx responses;
--   other failures classified by the core as automatically retryable.
-
-A transient failure may cause the current native presentation attempt to
-fall back to the text-only article layout, but a later request must remain
-eligible to retry.
-
-The core image-resource contract must distinguish a usable cached/fetched
-thumbnail from a known-unavailable resource and from structured transient
-or other operational errors. The architecture defines these semantics but
-does not require a particular UniFFI enum/record shape.
+Article image discovery/download/disk cache belongs to the core; native
+UI triggers lazy loading, decodes/renders images, and may maintain a
+memory cache. Background sync does not preload article images.
 
 Feed preferences have global defaults plus per-feed overrides. Current
 intended preferences include independent preview/full-text limits,
@@ -516,16 +395,6 @@ platform, a native user preference chooses in-app browser or
 external/default browser.
 
 Widgets follow the same opening policy.
-
-App Intents, Spotlight, and equivalent OS integrations are native
-responsibilities. The core exposes stable feed/category IDs, titles, and
-relationships through the navigation catalog; native clients project
-those domain records into platform-specific entities/indexes.
-
-An optional `comments_url` is part of the public article data contract.
-Native clients offer an Open Comments action only when it is present and
-perform the actual browser/deep-link opening. Opening comments does not
-mark the article read.
 
 Sharing is entirely native; the core supplies article data such as
 title/URL.
