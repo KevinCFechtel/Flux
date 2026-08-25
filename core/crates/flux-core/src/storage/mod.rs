@@ -187,6 +187,20 @@ impl Store {
         Ok(deleted as u32)
     }
 
+    pub fn article_exists(&self, article_id: i64) -> Result<bool, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM articles WHERE id=?1)",
+                [article_id],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)
+    }
+
     pub fn set_state_bulk(
         &self,
         article_ids: &[i64],
