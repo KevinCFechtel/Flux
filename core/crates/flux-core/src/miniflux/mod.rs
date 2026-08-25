@@ -349,8 +349,8 @@ mod tests {
         let responses = vec![
             r#"[{"id":1,"title":"Category"}]"#,
             r#"[{"id":9,"title":"Feed","category":{"id":1}}]"#,
-            r#"{"total":1,"entries":[{"id":4,"feed_id":9,"title":"Unread and starred","url":"https://entry","status":"unread","starred":true,"published_at":"2026-01-02T03:04:05Z","content":"<p>source</p>"}]}"#,
-            r#"{"total":1,"entries":[{"id":4,"feed_id":9,"title":"Unread and starred","url":"https://entry","status":"unread","starred":true,"published_at":"2026-01-02T03:04:05Z","content":"<p>source</p>"}]}"#,
+            r#"{"total":1,"entries":[{"id":4,"feed_id":9,"title":"Unread and starred","url":"https://entry/post","status":"unread","starred":true,"published_at":"2026-01-02T03:04:05Z","content":"<p>source &amp; preview</p>","enclosures":[{"url":"audio.mp3","mime_type":"audio/mpeg"},{"url":"/cover.jpg","mime_type":"image/jpeg"}]}]}"#,
+            r#"{"total":1,"entries":[{"id":4,"feed_id":9,"title":"Unread and starred","url":"https://entry/post","status":"unread","starred":true,"published_at":"2026-01-02T03:04:05Z","content":"<p>source &amp; preview</p>","enclosures":[{"url":"audio.mp3","mime_type":"audio/mpeg"},{"url":"/cover.jpg","mime_type":"image/jpeg"}]}]}"#,
         ];
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -400,7 +400,15 @@ mod tests {
             }]
         );
         assert_eq!(snapshot.articles.len(), 1);
-        assert_eq!(snapshot.articles[0].raw_html_content, "<p>source</p>");
+        assert_eq!(
+            snapshot.articles[0].raw_html_content,
+            "<p>source &amp; preview</p>"
+        );
+        assert_eq!(snapshot.articles[0].preview, "source & preview");
+        assert_eq!(
+            snapshot.articles[0].image_url.as_deref(),
+            Some("https://entry/cover.jpg")
+        );
         assert!(!snapshot.articles[0].is_read);
         assert!(snapshot.articles[0].is_starred);
         assert!(

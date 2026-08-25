@@ -469,3 +469,100 @@ fn parse_field(field: &str) -> Result<MutationField, rusqlite::Error> {
 fn sql_error(error: rusqlite::Error) -> CoreError {
     CoreError::persistence(error.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn roots(temp: &TempDir) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+        let data = temp.path().join("data");
+        let cache = temp.path().join("cache");
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&data).unwrap();
+        (data, cache, media)
+    }
+
+    #[test]
+    fn v3_migration_reprocesses_and_preserves_article_state() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let path = data.join("flux.sqlite3");
+        let connection = Connection::open(&path).unwrap();
+        connection.execute_batch("CREATE TABLE categories (id INTEGER PRIMARY KEY, title TEXT NOT NULL); CREATE TABLE feeds (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL, title TEXT NOT NULL); CREATE TABLE articles (id INTEGER PRIMARY KEY, feed_id INTEGER NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL, comments_url TEXT NOT NULL DEFAULT '', published_at TEXT NOT NULL, is_read INTEGER NOT NULL, is_starred INTEGER NOT NULL, raw_html_content TEXT NOT NULL, remote_is_read INTEGER, remote_is_starred INTEGER, preview TEXT NOT NULL DEFAULT '', image_url TEXT); CREATE TABLE pending_mutations (article_id INTEGER NOT NULL, field TEXT NOT NULL, desired INTEGER NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(article_id,field)); INSERT INTO categories VALUES (1,'Category'); INSERT INTO feeds VALUES (2,1,'Feed'); INSERT INTO articles VALUES (3,2,'Title','https://example.test/post','', '2024-01-01T00:00:00Z',1,1,'<p>Hello <b>world</b></p><img src=\"/cover.jpg\">',1,1,'',''); INSERT INTO pending_mutations VALUES (3,'read',0,7); PRAGMA user_version=3;").unwrap();
+        drop(connection);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let connection = store.connection.lock().unwrap();
+        let row: (i64, String, Option<String>, String, bool, bool, i64, i64) = connection.query_row("SELECT content_processing_version,preview,image_url,raw_html_content,is_read,is_starred,feed_id,(SELECT COUNT(*) FROM pending_mutations) FROM articles WHERE id=3", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).unwrap();
+        drop(connection);
+        assert_eq!(store.schema_version().unwrap(), 4);
+        assert_eq!(row.0, crate::article::PROCESSING_VERSION);
+        assert_eq!(row.1, "Hello world");
+        assert_eq!(row.2.as_deref(), Some("https://example.test/cover.jpg"));
+        assert!(row.3.contains("<b>world</b>"));
+        assert!(row.4 && row.5);
+        assert_eq!((row.6, row.7), (2, 1));
+    }
+
+    #[test]
+    fn reconcile_round_trip_returns_processed_summary_and_version() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let processed = crate::article::process(
+            "<p>Hello &amp; goodbye</p><img data-original=\"/image.jpg\">",
+            "https://example.test/post",
+            &[],
+        );
+        store
+            .reconcile(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 2,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                &[Article {
+                    id: 3,
+                    feed_id: 2,
+                    title: "Title".into(),
+                    url: "https://example.test/post".into(),
+                    comments_url: String::new(),
+                    published_at: "2024-01-01T00:00:00Z".into(),
+                    is_read: false,
+                    is_starred: false,
+                    raw_html_content:
+                        "<p>Hello &amp; goodbye</p><img data-original=\"/image.jpg\">".into(),
+                    preview: processed.preview.clone(),
+                    image_url: processed.image_url.clone(),
+                }],
+            )
+            .unwrap();
+        let article = store
+            .query_articles(&ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(article.preview, processed.preview);
+        assert_eq!(article.image_url, processed.image_url);
+        assert_eq!(
+            store
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT content_processing_version FROM articles WHERE id=3",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            crate::article::PROCESSING_VERSION
+        );
+    }
+}
