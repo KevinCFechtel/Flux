@@ -64,11 +64,19 @@ private struct ArticlePane: View {
     @State private var tracker = ScrolloverExposureTracker()
     @State private var frames: [Int64: CGRect] = [:]
     @State private var viewport = CGRect.zero
-    @State private var trackerRevision: UInt64 = 0
+    @State private var trackerRevision: UInt64
     @State private var selectedID: Int64?
     @State private var scrollPhase = ScrollPhase.idle
     @State private var suppressUntil: TimeInterval = 0
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
+
+    init(store: BrowserStore, sidebarVisible: Binding<Bool>, layoutChanged: @escaping (Bool) -> Void, dismiss: @escaping () -> Void) {
+        self.store = store
+        _sidebarVisible = sidebarVisible
+        self.layoutChanged = layoutChanged
+        self.dismiss = dismiss
+        _trackerRevision = State(initialValue: store.listPresentationRevision)
+    }
 
     var body: some View {
         VStack(spacing: 0) {

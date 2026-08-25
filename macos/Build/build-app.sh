@@ -24,6 +24,8 @@ FLUX_UNIFFI_PREPARED=1 xcodebuild \
   -configuration "${CONFIGURATION}" \
   -destination "platform=macOS" \
   -derivedDataPath "${DERIVED_DATA}" \
+  ARCHS="arm64 x86_64" \
+  ONLY_ACTIVE_ARCH=NO \
   CODE_SIGNING_ALLOWED=NO \
   build
 

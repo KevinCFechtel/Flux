@@ -129,10 +129,20 @@ final class BrowserStore: ObservableObject {
                 let variant: FeedIconVariant = darkAppearance ? .dark : .normal
                 let icon = try core.feedIcon(feedId: feedID, variant: variant)
                 await MainActor.run {
-                    if let icon { store.value?.feedIcons[key] = Data(icon.pngData) }
+                    guard let store = store.value else { return }
+                    if let icon {
+                        store.feedIcons[key] = Data(icon.pngData)
+                        NativeLog.feedIcon.debug("feed icon available feed_id=\(feedID, privacy: .public) variant=\(darkAppearance ? "dark" : "normal", privacy: .public)")
+                    } else {
+                        store.requestedFeedIcons.remove(key)
+                        NativeLog.feedIcon.debug("feed icon unavailable feed_id=\(feedID, privacy: .public) variant=\(darkAppearance ? "dark" : "normal", privacy: .public)")
+                    }
                 }
             } catch {
-                // Feed icon acquisition is advisory; retain the native fallback.
+                await MainActor.run {
+                    store.value?.requestedFeedIcons.remove(key)
+                    NativeLog.feedIcon.debug("feed icon request failed feed_id=\(feedID, privacy: .public) variant=\(darkAppearance ? "dark" : "normal", privacy: .public)")
+                }
             }
         }
     }
@@ -255,4 +265,5 @@ enum NativeLog {
     static let keychain = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "keychain")
     static let launchAtLogin = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "launch_at_login")
     static let shortcut = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "shortcut")
+    static let feedIcon = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "feed_icon")
 }
