@@ -34,7 +34,8 @@ final class BrowserStore: ObservableObject {
 
     private var core: Flux?
     private var eventSubscription: EventSubscription?
-    private var lastSync: Date?
+    private var lastAutomaticSyncAttempt: Date?
+    private var periodicSyncTimer: Timer?
     private var hasMeaningfullyInteracted = false
     private var sharingPicker: NSSharingServicePicker?
     private var undoExpiry: Task<Void, Never>?
@@ -72,6 +73,7 @@ final class BrowserStore: ObservableObject {
             resetPresentation()
             reloadNavigationAndCounts(); reloadVisibleArticles()
             sync(reason: .appStart)
+            if NSApp.isActive { activatePeriodicSyncScheduling() }
             return true
         } catch {
             NativeLog.app.error("core configuration failed: \(error.localizedDescription, privacy: .public)")
@@ -86,10 +88,15 @@ final class BrowserStore: ObservableObject {
         return ArticleQuery(scope: coreScope, readFilter: scope == .starred ? .all : (unreadOnly ? .unread : .all), starredFilter: scope == .starred ? .starred : .all, sort: newestFirst ? .newestFirst : .oldestFirst, limit: 0, cursor: nil)
     }
     func reloadVisibleArticles() { guard let core else { return }; do { articles = try core.queryArticles(query: query()); selectionTotal = try core.countArticles(query: query()); errorMessage = nil } catch { errorMessage = String(describing: error) } }
-    func reloadNavigationAndCounts() {
+    func reloadNavigation() {
         guard let core else { return }
         do {
             catalog = try core.navigationCatalog()
+        } catch { errorMessage = String(describing: error) }
+    }
+    func reloadCounts() {
+        guard let core else { return }
+        do {
             unreadTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil))
             starredTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .all, starredFilter: .starred, sort: .newestFirst, limit: 0, cursor: nil))
             var categoryCounts: [Int64: UInt64] = [:]
@@ -100,6 +107,7 @@ final class BrowserStore: ObservableObject {
             feedSidebarCounts = feedCounts
         } catch { errorMessage = String(describing: error) }
     }
+    func reloadNavigationAndCounts() { reloadNavigation(); reloadCounts() }
     func select(_ scope: BrowserScope) { self.scope = scope; resetPresentation(); reloadVisibleArticles() }
     func route(to route: NavigationRoute) {
         switch route {
@@ -109,33 +117,66 @@ final class BrowserStore: ObservableObject {
         case .feed(let id): select(.feed(id))
         }
     }
-    func setUnreadOnly(_ enabled: Bool) { unreadOnly = enabled; resetPresentation(); reloadNavigationAndCounts(); reloadVisibleArticles() }
-    func setNewestFirst(_ enabled: Bool) { newestFirst = enabled; resetPresentation(); reloadNavigationAndCounts(); reloadVisibleArticles() }
+    func setUnreadOnly(_ enabled: Bool) { unreadOnly = enabled; resetPresentation(); reloadCounts(); reloadVisibleArticles() }
+    func setNewestFirst(_ enabled: Bool) { newestFirst = enabled; resetPresentation(); reloadVisibleArticles() }
     func noteMeaningfulInteraction() { hasMeaningfullyInteracted = true }
     func resetPresentation() { hasMeaningfullyInteracted = false; newDataAvailable = false; listPresentationRevision &+= 1 }
     func setArticleListStyle(_ style: ArticleListStyle) { guard style != articleListStyle else { return }; articleListStyle = style; UserDefaults.standard.set(style.rawValue, forKey: "FluxNews.articleListStyle"); resetPresentation() }
     func applyNewData() { resetPresentation(); reloadVisibleArticles() }
     func sync(reason: SyncReason = .manual) {
-        guard let core, !isLoading else { return }
+        guard let core else { return }
+        guard !isLoading else {
+            if reason == .periodic { NativeLog.sync.debug("periodic sync skipped because sync is already in flight") }
+            return
+        }
         isLoading = true
+        if reason != .manual { lastAutomaticSyncAttempt = .now }
+        if reason == .periodic { NativeLog.sync.notice("periodic sync triggered") }
         let store = WeakBrowserStore(self)
         Task.detached { [core, store] in
             do { try core.sync(reason: reason) }
             catch { await MainActor.run { store.value?.isLoading = false; store.value?.errorMessage = String(describing: error) } }
         }
     }
-    func syncIfStale() { if lastSync.map({ Date.now.timeIntervalSince($0) > 60 }) ?? true { sync(reason: .periodic) } }
+    func syncIfStale(reason: SyncReason = .periodic) {
+        if lastAutomaticSyncAttempt.map({ Date.now.timeIntervalSince($0) > 60 }) ?? true { sync(reason: reason) }
+    }
+    func activatePeriodicSyncScheduling() {
+        guard core != nil, periodicSyncTimer == nil else { return }
+        periodicSyncTimer = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.runPeriodicSync() }
+        }
+        NativeLog.sync.notice("periodic sync scheduled cadence_seconds=900")
+    }
+    func deactivatePeriodicSyncScheduling() {
+        periodicSyncTimer?.invalidate()
+        periodicSyncTimer = nil
+    }
+    func resume() {
+        activatePeriodicSyncScheduling()
+        syncIfStale(reason: .resume)
+    }
+    private func runPeriodicSync() {
+        guard !popoverVisible else {
+            NativeLog.sync.debug("periodic sync skipped while popover is visible")
+            return
+        }
+        sync(reason: .periodic)
+    }
     func handle(event: CoreEvent) {
         guard case let .syncCompleted(metadata) = event else { return }
-        lastSync = .now; isLoading = false; reloadNavigationAndCounts()
+        isLoading = false
+        if metadata.navigationChanged { reloadNavigationAndCounts() }
+        else if metadata.dataChanged { reloadCounts() }
+        if metadata.reason == .periodic { NativeLog.sync.notice("periodic sync completed") }
         guard metadata.dataChanged else { return }
         if metadata.reason == .manual || !popoverVisible || !hasMeaningfullyInteracted { reloadVisibleArticles(); newDataAvailable = false }
         else { newDataAvailable = true }
     }
-    func setRead(_ article: ArticleSummary, _ read: Bool) { guard let core else { return }; do { _ = try core.setReadState(articleId: article.id, read: read); updateVisible([article.id]) { $0.isRead = read }; reloadNavigationAndCounts() } catch { errorMessage = String(describing: error) } }
-    func setStarred(_ article: ArticleSummary, _ starred: Bool) { guard let core else { return }; do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadNavigationAndCounts() } catch { errorMessage = String(describing: error) } }
-    func flushScrollover(_ ids: [Int64]) { guard let core, !ids.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: ids, read: true); lastScrolloverBatch = ids; updateVisible(ids) { $0.isRead = true }; reloadNavigationAndCounts(); showScrolloverUndo() } catch { errorMessage = String(describing: error) } }
-    func undoScrollover() { guard let core, !lastScrolloverBatch.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: lastScrolloverBatch, read: false); updateVisible(lastScrolloverBatch) { $0.isRead = false }; lastScrolloverBatch = []; scrolloverUndoVisible = false; undoExpiry?.cancel(); reloadNavigationAndCounts() } catch { errorMessage = String(describing: error) } }
+    func setRead(_ article: ArticleSummary, _ read: Bool) { guard let core else { return }; do { _ = try core.setReadState(articleId: article.id, read: read); updateVisible([article.id]) { $0.isRead = read }; reloadCounts() } catch { errorMessage = String(describing: error) } }
+    func setStarred(_ article: ArticleSummary, _ starred: Bool) { guard let core else { return }; do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadCounts() } catch { errorMessage = String(describing: error) } }
+    func flushScrollover(_ ids: [Int64]) { guard let core, !ids.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: ids, read: true); lastScrolloverBatch = ids; updateVisible(ids) { $0.isRead = true }; reloadCounts(); showScrolloverUndo() } catch { errorMessage = String(describing: error) } }
+    func undoScrollover() { guard let core, !lastScrolloverBatch.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: lastScrolloverBatch, read: false); updateVisible(lastScrolloverBatch) { $0.isRead = false }; lastScrolloverBatch = []; scrolloverUndoVisible = false; undoExpiry?.cancel(); reloadCounts() } catch { errorMessage = String(describing: error) } }
     func setScrolloverEnabled(_ enabled: Bool) { markReadOnScrolloverEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.markReadOnScrollover") }
     func setGlobalShortcut(_ shortcut: GlobalShortcutChoice) { guard shortcut != globalShortcut else { return }; globalShortcut = shortcut; shortcut.store() }
     func open(_ article: ArticleSummary) { setRead(article, true); if let url = URL(string: article.url) { NSWorkspace.shared.open(url) } }
@@ -167,6 +208,7 @@ private final class CoreDiagnosticLogger: DiagnosticListener, @unchecked Sendabl
 
 enum NativeLog {
     static let app = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "app")
+    static let sync = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "sync")
     static let keychain = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "keychain")
     static let launchAtLogin = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "launch_at_login")
     static let shortcut = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "shortcut")

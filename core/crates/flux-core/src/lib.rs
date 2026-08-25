@@ -170,6 +170,18 @@ impl FluxCore {
             .sync_gate
             .lock()
             .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        if reason != SyncReason::Manual && self.in_backoff()? {
+            tracing::info!(target: "sync", "sync skipped reason={reason:?} because runtime backoff is active");
+            self.emit(CoreEvent::SyncCompleted(SyncCompleted {
+                reason,
+                new_articles: 0,
+                updated_articles: 0,
+                mutations_delivered: 0,
+                data_changed: false,
+                navigation_changed: false,
+            }));
+            return Ok(());
+        }
         let mutations_delivered = match self.deliver_for_sync(reason) {
             Ok(count) => {
                 tracing::info!(target: "mutation", "pending mutation delivery completed delivered={count}");
@@ -993,6 +1005,27 @@ mod tests {
         core.set_read_state(1, true).unwrap();
         assert_eq!(source.read_calls.load(Ordering::SeqCst), 2);
         *source.failure.lock().unwrap() = None;
+        core.sync(SyncReason::Manual).unwrap();
+        assert_eq!(source.read_calls.load(Ordering::SeqCst), 3);
+    }
+    #[test]
+    fn periodic_sync_delivers_deferred_mutations_and_respects_backoff() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = mutation_core(&temp);
+        core.set_read_state(1, true).unwrap();
+        core.sync(SyncReason::Periodic).unwrap();
+        assert_eq!(*source.log.lock().unwrap(), vec!["read", "fetch"]);
+
+        source.log.lock().unwrap().clear();
+        *source.failure.lock().unwrap() = Some(CoreError::connectivity("offline"));
+        core.set_delivery_mode(DeliveryMode::Live).unwrap();
+        core.set_read_state(1, false).unwrap();
+        assert_eq!(source.read_calls.load(Ordering::SeqCst), 2);
+
+        *source.failure.lock().unwrap() = None;
+        core.sync(SyncReason::Periodic).unwrap();
+        assert_eq!(source.read_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(*source.log.lock().unwrap(), vec!["read"]);
         core.sync(SyncReason::Manual).unwrap();
         assert_eq!(source.read_calls.load(Ordering::SeqCst), 3);
     }

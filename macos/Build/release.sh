@@ -44,7 +44,18 @@ echo "1/8 Building the Release app with the Rust/UniFFI core"
 CONFIGURATION=Release "${SCRIPT_DIR}/build-app.sh"
 
 timestamp_args=(--timestamp)
-if [[ -n "${SIGNING_TIMESTAMP_URL}" ]]; then
+if [[ -z "${SIGNING_TIMESTAMP_URL}" ]]; then
+  timestamp_ipv4="$({
+      dscacheutil -q host -a name timestamp.apple.com || true
+    } | awk '/ip_address:/ && $2 ~ /^[0-9.]+$/ {print $2; exit}')"
+
+    if [[ -z "${timestamp_ipv4}" ]]; then
+      echo "Keine IPv4-Adresse für timestamp.apple.com gefunden." >&2
+      echo "Alternativ SIGNING_TIMESTAMP_URL explizit setzen." >&2
+      exit 1
+    fi
+
+    SIGNING_TIMESTAMP_URL="http://${timestamp_ipv4}/ts01"
   timestamp_args=("--timestamp=${SIGNING_TIMESTAMP_URL}")
 fi
 
