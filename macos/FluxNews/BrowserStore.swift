@@ -21,6 +21,7 @@ final class BrowserStore: ObservableObject {
     @Published private(set) var unavailableArticleThumbnails = Set<String>()
     @Published var isLoading = false
     @Published var errorMessage: String?
+    @Published var actionConfirmation: String?
     @Published var scope: BrowserScope = .all
     @Published var unreadOnly = true
     @Published var newestFirst = false
@@ -43,6 +44,7 @@ final class BrowserStore: ObservableObject {
     private var hasMeaningfullyInteracted = false
     private var sharingPicker: NSSharingServicePicker?
     private var undoExpiry: Task<Void, Never>?
+    private var actionConfirmationExpiry: Task<Void, Never>?
     private var feedIconRequests = FeedIconRequestState()
     private var scrolloverUndoBatch = ScrolloverUndoBatch()
     private var articleThumbnailRequests = ArticleThumbnailRequestState()
@@ -256,6 +258,25 @@ final class BrowserStore: ObservableObject {
     }
     func setRead(_ article: ArticleSummary, _ read: Bool) { guard let core else { return }; do { _ = try core.setReadState(articleId: article.id, read: read); updateVisible([article.id]) { $0.isRead = read }; reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
     func setStarred(_ article: ArticleSummary, _ starred: Bool) { guard let core else { return }; do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
+    func saveToService(_ article: ArticleSummary) {
+        guard let core else { return }
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            do {
+                let result = try core.saveToService(articleId: article.id)
+                await MainActor.run {
+                    switch result {
+                    case .saved:
+                        store.value?.showActionConfirmation("Saved to third-party service")
+                    case .noIntegrationConfigured:
+                        store.value?.showActionConfirmation("No third-party integration is configured in Miniflux")
+                    }
+                }
+            } catch {
+                await MainActor.run { store.value?.errorMessage = String(describing: error) }
+            }
+        }
+    }
     func beginScrolloverUndoBatch() { scrolloverUndoBatch.beginScroll() }
     func finishScrolloverUndoBatch() {
         guard scrolloverCountsPending else { return }
@@ -286,6 +307,15 @@ final class BrowserStore: ObservableObject {
     func openComments(_ article: ArticleSummary) { if let url = URL(string: article.commentsUrl), !article.commentsUrl.isEmpty { NSWorkspace.shared.open(url) } }
     func copyLink(_ article: ArticleSummary) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(article.url, forType: .string) }
     func share(_ article: ArticleSummary) { guard let url = URL(string: article.url) else { return }; DispatchQueue.main.async { [weak self] in guard let self, let view = NSApplication.shared.keyWindow?.contentView else { return }; let picker = NSSharingServicePicker(items: [article.title, url]); self.sharingPicker = picker; let point = view.convert(view.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil); picker.show(relativeTo: NSRect(origin: point, size: NSSize(width: 1, height: 1)), of: view, preferredEdge: .minY) } }
+    private func showActionConfirmation(_ message: String) {
+        actionConfirmation = message
+        actionConfirmationExpiry?.cancel()
+        actionConfirmationExpiry = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, self?.actionConfirmation == message else { return }
+            self?.actionConfirmation = nil
+        }
+    }
     private func updateVisible(_ ids: [Int64], _ change: (inout ArticleSummary) -> Void) { let ids = Set(ids); for index in articles.indices where ids.contains(articles[index].id) { change(&articles[index]) } }
     private func reloadScrolloverCounts() {
         guard let core else { return }

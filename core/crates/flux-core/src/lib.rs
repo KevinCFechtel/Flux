@@ -22,7 +22,8 @@ use diagnostics::{CoreDiagnosticListener, Diagnostics};
 use domain::{
     ArticleQuery, ArticleSummary, ArticleThumbnailResult, CoreError, CoreErrorKind, CoreEvent,
     DeliveryDisposition, DeliveryMode, FeedIcon, FeedIconVariant, MutationField, MutationResult,
-    NavigationCatalog, RuntimeHealth, RuntimeHealthStatus, SyncCompleted, SyncFailure, SyncReason,
+    NavigationCatalog, RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult, SyncCompleted,
+    SyncFailure, SyncReason,
 };
 use miniflux::{MinifluxClient, RemoteSource};
 use storage::Store;
@@ -318,6 +319,16 @@ impl FluxCore {
         starred: bool,
     ) -> Result<MutationResult, CoreError> {
         self.set_state_bulk(article_ids, MutationField::Starred, starred)
+    }
+    pub fn save_to_service(&self, article_id: i64) -> Result<SaveToServiceResult, CoreError> {
+        if article_id <= 0 {
+            return Err(CoreError::data("article ID must be positive"));
+        }
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            self.remote.save_to_service(article_id)
+        });
+        self.diagnostics.flush();
+        result
     }
     pub fn subscribe_events(&self, listener: Arc<dyn CoreEventListener>) -> Result<u64, CoreError> {
         let id = self

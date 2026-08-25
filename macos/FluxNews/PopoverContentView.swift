@@ -95,7 +95,15 @@ private struct ArticlePane: View {
         }
         .background(.regularMaterial)
         .overlay(alignment: .bottom) {
-            if store.newDataAvailable {
+            if let confirmation = store.actionConfirmation {
+                Text(confirmation)
+                    .font(.subheadline)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.regularMaterial, in: Capsule())
+                    .shadow(radius: 3)
+                    .padding(.bottom, 12)
+            } else if store.newDataAvailable {
                 updateBanner.padding(.bottom, 12)
             } else if store.scrolloverUndoVisible {
                 undoBanner.padding(.bottom, 12)
@@ -435,6 +443,7 @@ private struct ArticleItem: View {
         Button { store.open(article) } label: { Label("Open in Browser", systemImage: "safari") }
         Button { store.setRead(article, !article.isRead) } label: { Label(article.isRead ? "Mark as Unread" : "Mark as Read", systemImage: article.isRead ? "circle.fill" : "checkmark.circle") }
         Button { store.setStarred(article, !article.isStarred) } label: { Label(article.isStarred ? "Unstar" : "Star", systemImage: article.isStarred ? "star.slash" : "star") }
+        Button { store.saveToService(article) } label: { Label("Save to Third-Party Service", systemImage: "tray.and.arrow.down") }
         Divider()
         Button { store.copyLink(article) } label: { Label("Copy Link", systemImage: "doc.on.doc") }
         Button { store.share(article) } label: { Label("Share...", systemImage: "square.and.arrow.up") }

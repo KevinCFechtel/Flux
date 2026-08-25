@@ -195,6 +195,12 @@ pub struct MutationResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SaveToServiceResult {
+    Saved,
+    NoIntegrationConfigured,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CoreEvent {
     ArticleReadStateChanged {
         article_id: i64,

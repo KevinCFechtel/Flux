@@ -5,7 +5,7 @@ use std::io::Read;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use crate::domain::{Article, Category, CoreError, Feed};
+use crate::domain::{Article, Category, CoreError, Feed, SaveToServiceResult};
 use chrono::{DateTime, SecondsFormat};
 use serde::Deserialize;
 
@@ -27,6 +27,9 @@ pub trait RemoteSource: Send + Sync {
     fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError>;
     fn set_read_state(&self, article_ids: &[i64], read: bool) -> Result<(), CoreError>;
     fn set_starred_state(&self, article_id: i64, starred: bool) -> Result<(), CoreError>;
+    fn save_to_service(&self, _article_id: i64) -> Result<SaveToServiceResult, CoreError> {
+        Err(CoreError::data("save-to-service is unavailable"))
+    }
     fn fetch_feed_icon(&self, _feed_id: i64) -> Result<Option<String>, CoreError> {
         Err(CoreError::data("feed icon acquisition is unavailable"))
     }
@@ -135,6 +138,52 @@ impl MinifluxClient {
                 Ok(())
             }
             Err(error) => {
+                tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
+                Err(error)
+            }
+        }
+    }
+    fn save_to_service(&self, article_id: i64) -> Result<SaveToServiceResult, CoreError> {
+        let path = format!("/v1/entries/{article_id}/save");
+        let _request = self
+            .request_lock
+            .lock()
+            .map_err(|_| CoreError::internal("HTTP client lock poisoned"))?;
+        let started = Instant::now();
+        tracing::debug!(target: "miniflux", "request started endpoint={path}");
+        match self
+            .agent
+            .post(&format!("{}{path}", self.base_url))
+            .set("X-Auth-Token", &self.api_key)
+            .call()
+        {
+            Ok(response) if response.status() == 202 => {
+                tracing::debug!(target: "miniflux", "request completed endpoint={} elapsed_ms={}", path, started.elapsed().as_millis());
+                Ok(SaveToServiceResult::Saved)
+            }
+            Ok(response) => {
+                let error = CoreError::data(format!(
+                    "Miniflux returned unexpected HTTP {}",
+                    response.status()
+                ));
+                tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
+                Err(error)
+            }
+            Err(ureq::Error::Status(400, response)) => {
+                let configured = serde_json::from_reader::<_, ErrorDto>(response.into_reader())
+                    .map(|body| body.error_message != "no third-party integration enabled")
+                    .unwrap_or(true);
+                if configured {
+                    let error = CoreError::invalid_configuration("Miniflux returned HTTP 400");
+                    tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
+                    Err(error)
+                } else {
+                    tracing::debug!(target: "miniflux", "request completed without configured integration endpoint={} elapsed_ms={}", path, started.elapsed().as_millis());
+                    Ok(SaveToServiceResult::NoIntegrationConfigured)
+                }
+            }
+            Err(error) => {
+                let error = map_http_error(error);
                 tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
                 Err(error)
             }
@@ -307,6 +356,9 @@ impl RemoteSource for MinifluxClient {
             Ok(())
         }
     }
+    fn save_to_service(&self, article_id: i64) -> Result<SaveToServiceResult, CoreError> {
+        MinifluxClient::save_to_service(self, article_id)
+    }
     fn fetch_feed_icon(&self, feed_id: i64) -> Result<Option<String>, CoreError> {
         let icon: IconDto = match self.get(&format!("/v1/feeds/{feed_id}/icon"), &[]) {
             Ok(icon) => icon,
@@ -403,6 +455,11 @@ struct IconDto {
     data: Option<String>,
     #[serde(default)]
     mime_type: Option<String>,
+}
+#[derive(Deserialize)]
+struct ErrorDto {
+    #[serde(default)]
+    error_message: String,
 }
 impl IconDto {
     fn data_url(self) -> Option<String> {
@@ -572,6 +629,45 @@ mod tests {
         assert_eq!(error.kind, crate::domain::CoreErrorKind::ServerTransient);
         assert_eq!(error.message, "Miniflux server returned HTTP 500");
         assert_eq!(worker.join().unwrap(), unread_entry_targets(&[100]));
+    }
+
+    #[test]
+    fn save_to_service_accepts_202() {
+        let (address, worker) = entry_server(vec![(202, String::new())]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        assert_eq!(
+            client.save_to_service(42).unwrap(),
+            SaveToServiceResult::Saved
+        );
+        assert_eq!(worker.join().unwrap(), vec!["/v1/entries/42/save"]);
+    }
+
+    #[test]
+    fn save_to_service_reports_missing_integration() {
+        let (address, worker) = entry_server(vec![(
+            400,
+            r#"{"error_message":"no third-party integration enabled"}"#.into(),
+        )]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        assert_eq!(
+            client.save_to_service(42).unwrap(),
+            SaveToServiceResult::NoIntegrationConfigured
+        );
+        assert_eq!(worker.join().unwrap(), vec!["/v1/entries/42/save"]);
+    }
+
+    #[test]
+    fn save_to_service_reports_unexpected_server_failure() {
+        let (address, worker) = entry_server(vec![(500, String::new())]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        let error = client.save_to_service(42).unwrap_err();
+
+        assert_eq!(error.kind, crate::domain::CoreErrorKind::ServerTransient);
+        assert_eq!(error.message, "Miniflux server returned HTTP 500");
+        assert_eq!(worker.join().unwrap(), vec!["/v1/entries/42/save"]);
     }
 
     #[test]

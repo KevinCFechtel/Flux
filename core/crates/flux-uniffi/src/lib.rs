@@ -153,6 +153,11 @@ pub struct MutationResult {
     pub disposition: DeliveryDisposition,
 }
 #[derive(uniffi::Enum)]
+pub enum SaveToServiceResult {
+    Saved,
+    NoIntegrationConfigured,
+}
+#[derive(uniffi::Enum)]
 pub enum MutationField {
     Read,
     Starred,
@@ -374,6 +379,12 @@ impl Flux {
             .map(Into::into)
             .map_err(map_error)
     }
+    pub fn save_to_service(&self, article_id: i64) -> Result<SaveToServiceResult, FluxError> {
+        self.core
+            .save_to_service(article_id)
+            .map(Into::into)
+            .map_err(map_error)
+    }
     pub fn subscribe_events(
         &self,
         listener: Arc<dyn EventListener>,
@@ -494,6 +505,14 @@ impl From<domain::MutationResult> for MutationResult {
                     DeliveryDisposition::DeferredByBackoff
                 }
             },
+        }
+    }
+}
+impl From<domain::SaveToServiceResult> for SaveToServiceResult {
+    fn from(value: domain::SaveToServiceResult) -> Self {
+        match value {
+            domain::SaveToServiceResult::Saved => Self::Saved,
+            domain::SaveToServiceResult::NoIntegrationConfigured => Self::NoIntegrationConfigured,
         }
     }
 }
