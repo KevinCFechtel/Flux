@@ -222,9 +222,35 @@ Initial/rebuilt local state includes at least:
 
 ## 11. Search
 
-Search initially remains Miniflux online full-text search without additional Flux filtering or local FTS.
+Search initially remains Miniflux online full-text search without additional
+Flux filtering or local FTS.
 
-Remote search results may be displayed without automatic persistence. A remote result becomes durable local data when the user stars it or starts a download.
+Search results are temporary remote data and may refer to articles that are not
+part of the local Flux database or retention window. Displaying a search result
+does not automatically persist it.
+
+Actions on a remote-only search result do not use the normal Local-First
+mutation path when that path requires an already persisted article. Instead,
+the core performs the corresponding operation directly against Miniflux and
+updates the temporary search presentation state only after remote success.
+
+In particular, Star/Unstar on a remote-only search result is an immediate
+Miniflux operation. Starring does not introduce a special search-result
+materialization path or hidden sync. The next normal sync retrieves the article
+through the regular Starred set, persists it through normal reconciliation, and
+the usual starred retention protection then applies.
+
+Likewise, marking or opening a remote-only search result as read does not by
+itself require local persistence. The remote read state may be changed directly
+through Miniflux.
+
+Articles that already belong to the normal persisted Flux data set continue to
+use the regular Local-First mutation semantics. Search-specific behavior must
+not weaken or replace those guarantees.
+
+A remote search result may also become durable local data through other normal
+retention-protected workflows, such as starting a download, once those features
+are implemented.
 
 ## 12. Feeds, categories, navigation, and feed preferences
 

@@ -24,7 +24,7 @@ use domain::{
     CreateCategoryResult, CreateFeedRequest, CreateFeedResult, DeliveryDisposition, DeliveryMode,
     DiscoverSubscriptionsRequest, DiscoveredSubscription, FeedIcon, FeedIconVariant, MutationField,
     MutationResult, NavigationCatalog, RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult,
-    SyncCompleted, SyncFailure, SyncReason,
+    SearchArticlesRequest, SearchArticlesResult, SyncCompleted, SyncFailure, SyncReason,
 };
 use miniflux::{MinifluxClient, RemoteSource};
 use storage::Store;
@@ -252,6 +252,39 @@ impl FluxCore {
     pub fn count_articles(&self, query: ArticleQuery) -> Result<u64, CoreError> {
         self.store.count_articles(&query)
     }
+    pub fn search_articles(
+        &self,
+        request: SearchArticlesRequest,
+    ) -> Result<SearchArticlesResult, CoreError> {
+        if request.query.trim().is_empty() {
+            return Err(CoreError::data("search query must not be empty"));
+        }
+        if request.offset < 0 {
+            return Err(CoreError::data("search offset must not be negative"));
+        }
+        if request.limit == 0 {
+            return Err(CoreError::data("search limit must be positive"));
+        }
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            self.remote.search_articles(request)
+        });
+        self.diagnostics.flush();
+        result
+    }
+    pub fn search_set_starred_state(
+        &self,
+        article_id: i64,
+        starred: bool,
+    ) -> Result<(), CoreError> {
+        self.search_set_state(article_id, |remote| {
+            remote.set_starred_state(article_id, starred)
+        })
+    }
+    pub fn search_set_read_state(&self, article_id: i64, read: bool) -> Result<(), CoreError> {
+        self.search_set_state(article_id, |remote| {
+            remote.set_read_state(&[article_id], read)
+        })
+    }
     pub fn navigation_catalog(&self) -> Result<NavigationCatalog, CoreError> {
         self.store.navigation_catalog()
     }
@@ -397,6 +430,20 @@ impl FluxCore {
     ) -> Result<MutationResult, CoreError> {
         let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
             self.set_state_bulk_inner(ids, field, desired)
+        });
+        self.diagnostics.flush();
+        result
+    }
+    fn search_set_state(
+        &self,
+        article_id: i64,
+        operation: impl FnOnce(&dyn RemoteSource) -> Result<(), CoreError>,
+    ) -> Result<(), CoreError> {
+        if article_id <= 0 {
+            return Err(CoreError::data("article ID must be positive"));
+        }
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            operation(self.remote.as_ref())
         });
         self.diagnostics.flush();
         result
@@ -581,6 +628,11 @@ mod tests {
         log: Mutex<Vec<&'static str>>,
         delay: Mutex<Duration>,
     }
+    struct SearchSource {
+        search_calls: AtomicUsize,
+        read_calls: AtomicUsize,
+        star_calls: AtomicUsize,
+    }
     struct ReentrantListener {
         core: Mutex<Option<Arc<FluxCore>>>,
         events: Mutex<Vec<CoreEvent>>,
@@ -646,6 +698,47 @@ mod tests {
         }
         fn set_starred_state(&self, _article_id: i64, _starred: bool) -> Result<(), CoreError> {
             Ok(())
+        }
+    }
+    impl RemoteSource for SearchSource {
+        fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError> {
+            Ok(RemoteSnapshot {
+                categories: vec![],
+                feeds: vec![],
+                articles: vec![],
+            })
+        }
+        fn set_read_state(&self, _: &[i64], _: bool) -> Result<(), CoreError> {
+            self.read_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+        fn set_starred_state(&self, _: i64, _: bool) -> Result<(), CoreError> {
+            self.star_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+        fn search_articles(
+            &self,
+            request: SearchArticlesRequest,
+        ) -> Result<SearchArticlesResult, CoreError> {
+            self.search_calls.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(request.query, "rust");
+            Ok(SearchArticlesResult {
+                total: 1,
+                articles: vec![ArticleSummary {
+                    id: 99,
+                    feed_id: 10,
+                    category_id: 1,
+                    feed_title: "Feed A".into(),
+                    title: "Remote result".into(),
+                    url: "https://example.test/99".into(),
+                    comments_url: String::new(),
+                    published_at: "2026-01-02T03:04:05Z".into(),
+                    is_read: false,
+                    is_starred: false,
+                    preview: "Remote preview".into(),
+                    image_url: None,
+                }],
+            })
         }
     }
     fn article(id: i64, feed_id: i64, published_at: String, read: bool, starred: bool) -> Article {
@@ -1343,5 +1436,62 @@ mod tests {
         core.set_delivery_mode(DeliveryMode::Live).unwrap();
         core.set_read_state(1, true).unwrap();
         assert!(core.runtime_health().unwrap().next_retry_at.is_some());
+    }
+    #[test]
+    fn search_is_remote_only_and_validates_its_request() {
+        let temp = TempDir::new().unwrap();
+        let source = Arc::new(SearchSource {
+            search_calls: AtomicUsize::new(0),
+            read_calls: AtomicUsize::new(0),
+            star_calls: AtomicUsize::new(0),
+        });
+        let core = FluxCore::with_remote(config(&temp), source.clone()).unwrap();
+
+        let result = core
+            .search_articles(SearchArticlesRequest {
+                query: "rust".into(),
+                offset: 0,
+                limit: 20,
+            })
+            .unwrap();
+        assert_eq!(result.total, 1);
+        assert_eq!(result.articles[0].id, 99);
+        core.search_set_starred_state(99, true).unwrap();
+        core.search_set_read_state(99, true).unwrap();
+        assert_eq!(source.search_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(source.star_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(source.read_calls.load(Ordering::SeqCst), 1);
+        assert!(core.store.pending_mutations().unwrap().is_empty());
+        assert!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty()
+        );
+
+        for request in [
+            SearchArticlesRequest {
+                query: " ".into(),
+                offset: 0,
+                limit: 1,
+            },
+            SearchArticlesRequest {
+                query: "rust".into(),
+                offset: -1,
+                limit: 1,
+            },
+            SearchArticlesRequest {
+                query: "rust".into(),
+                offset: 0,
+                limit: 0,
+            },
+        ] {
+            assert_eq!(
+                core.search_articles(request).unwrap_err().kind,
+                CoreErrorKind::Data
+            );
+        }
     }
 }

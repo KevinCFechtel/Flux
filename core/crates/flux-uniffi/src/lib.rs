@@ -43,6 +43,17 @@ pub struct ArticleSummary {
     pub preview: String,
     pub image_url: Option<String>,
 }
+#[derive(uniffi::Record)]
+pub struct SearchArticlesRequest {
+    pub query: String,
+    pub offset: i64,
+    pub limit: u32,
+}
+#[derive(uniffi::Record)]
+pub struct SearchArticlesResult {
+    pub total: i64,
+    pub articles: Vec<ArticleSummary>,
+}
 
 #[derive(uniffi::Enum)]
 pub enum ArticleScope {
@@ -342,6 +353,29 @@ impl Flux {
     }
     pub fn count_articles(&self, query: ArticleQuery) -> Result<u64, FluxError> {
         self.core.count_articles(query.into()).map_err(map_error)
+    }
+    pub fn search_articles(
+        &self,
+        request: SearchArticlesRequest,
+    ) -> Result<SearchArticlesResult, FluxError> {
+        self.core
+            .search_articles(request.into())
+            .map(Into::into)
+            .map_err(map_error)
+    }
+    pub fn search_set_starred_state(
+        &self,
+        article_id: i64,
+        starred: bool,
+    ) -> Result<(), FluxError> {
+        self.core
+            .search_set_starred_state(article_id, starred)
+            .map_err(map_error)
+    }
+    pub fn search_set_read_state(&self, article_id: i64, read: bool) -> Result<(), FluxError> {
+        self.core
+            .search_set_read_state(article_id, read)
+            .map_err(map_error)
     }
     pub fn navigation_catalog(&self) -> Result<NavigationCatalog, FluxError> {
         self.core
@@ -722,6 +756,23 @@ impl From<ArticleQuery> for domain::ArticleQuery {
                 published_at: c.published_at,
                 article_id: c.article_id,
             }),
+        }
+    }
+}
+impl From<SearchArticlesRequest> for domain::SearchArticlesRequest {
+    fn from(value: SearchArticlesRequest) -> Self {
+        Self {
+            query: value.query,
+            offset: value.offset,
+            limit: value.limit,
+        }
+    }
+}
+impl From<domain::SearchArticlesResult> for SearchArticlesResult {
+    fn from(value: domain::SearchArticlesResult) -> Self {
+        Self {
+            total: value.total,
+            articles: value.articles.into_iter().map(Into::into).collect(),
         }
     }
 }

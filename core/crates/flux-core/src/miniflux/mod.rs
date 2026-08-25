@@ -6,8 +6,9 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use crate::domain::{
-    Article, Category, CoreError, CreateCategoryResult, CreateFeedRequest, CreateFeedResult,
-    DiscoverSubscriptionsRequest, DiscoveredSubscription, Feed, SaveToServiceResult,
+    Article, ArticleSummary, Category, CoreError, CreateCategoryResult, CreateFeedRequest,
+    CreateFeedResult, DiscoverSubscriptionsRequest, DiscoveredSubscription, Feed,
+    SaveToServiceResult, SearchArticlesRequest, SearchArticlesResult,
 };
 use chrono::{DateTime, SecondsFormat};
 use serde::Deserialize;
@@ -30,6 +31,12 @@ pub trait RemoteSource: Send + Sync {
     fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError>;
     fn set_read_state(&self, article_ids: &[i64], read: bool) -> Result<(), CoreError>;
     fn set_starred_state(&self, article_id: i64, starred: bool) -> Result<(), CoreError>;
+    fn search_articles(
+        &self,
+        _request: SearchArticlesRequest,
+    ) -> Result<SearchArticlesResult, CoreError> {
+        Err(CoreError::data("article search is unavailable"))
+    }
     fn save_to_service(&self, _article_id: i64) -> Result<SaveToServiceResult, CoreError> {
         Err(CoreError::data("save-to-service is unavailable"))
     }
@@ -327,6 +334,30 @@ impl MinifluxClient {
         tracing::info!(target: "miniflux", "entry fetch completed set={} entries={} elapsed_ms={}", set, all.len(), started.elapsed().as_millis());
         Ok(all)
     }
+    fn search_articles(
+        &self,
+        request: SearchArticlesRequest,
+    ) -> Result<SearchArticlesResult, CoreError> {
+        let page: EntriesDto = self.get(
+            "/v1/entries",
+            &[
+                ("search", request.query),
+                ("order", "published_at".into()),
+                ("direction", "desc".into()),
+                ("offset", request.offset.to_string()),
+                ("limit", request.limit.to_string()),
+            ],
+        )?;
+        let articles = page
+            .entries
+            .into_iter()
+            .map(search_article_summary)
+            .collect::<Result<_, _>>()?;
+        Ok(SearchArticlesResult {
+            total: page.total,
+            articles,
+        })
+    }
     fn download_image(&self, url: &str, max_bytes: usize) -> Result<RemoteImage, CoreError> {
         let response = self
             .agent
@@ -449,6 +480,12 @@ impl RemoteSource for MinifluxClient {
             Ok(())
         }
     }
+    fn search_articles(
+        &self,
+        request: SearchArticlesRequest,
+    ) -> Result<SearchArticlesResult, CoreError> {
+        MinifluxClient::search_articles(self, request)
+    }
     fn save_to_service(&self, article_id: i64) -> Result<SaveToServiceResult, CoreError> {
         MinifluxClient::save_to_service(self, article_id)
     }
@@ -529,6 +566,7 @@ struct EntryDto {
     content: String,
     #[serde(default)]
     enclosures: Vec<EnclosureDto>,
+    feed: Option<FeedDto>,
 }
 #[derive(Deserialize)]
 struct EnclosureDto {
@@ -549,6 +587,47 @@ struct FeedDto {
     #[serde(default)]
     title: String,
     category: Option<CategoryRefDto>,
+}
+
+fn search_article_summary(entry: EntryDto) -> Result<ArticleSummary, CoreError> {
+    let feed = entry.feed.ok_or_else(|| {
+        CoreError::data(format!(
+            "search article {} is missing feed metadata",
+            entry.id
+        ))
+    })?;
+    let category_id = feed
+        .category
+        .map(|category| category.id)
+        .unwrap_or_default();
+    let published = DateTime::parse_from_rfc3339(&entry.published_at).map_err(|_| {
+        CoreError::data(format!("article {} has invalid publication time", entry.id))
+    })?;
+    let enclosures = entry
+        .enclosures
+        .iter()
+        .map(|item| crate::article::EnclosureInput {
+            url: item.url.clone(),
+            mime_type: item.mime_type.clone(),
+        })
+        .collect::<Vec<_>>();
+    let processed = crate::article::process(&entry.content, &entry.url, &enclosures);
+    Ok(ArticleSummary {
+        id: entry.id,
+        feed_id: entry.feed_id,
+        category_id,
+        feed_title: feed.title,
+        title: entry.title,
+        url: entry.url,
+        comments_url: entry.comments_url,
+        published_at: published
+            .to_utc()
+            .to_rfc3339_opts(SecondsFormat::Secs, true),
+        is_read: entry.status == "read",
+        is_starred: entry.starred,
+        preview: processed.preview,
+        image_url: processed.image_url,
+    })
 }
 #[derive(Deserialize)]
 struct CategoryRefDto {
@@ -842,6 +921,120 @@ mod tests {
         assert_eq!(error.kind, crate::domain::CoreErrorKind::ServerTransient);
         assert_eq!(error.message, "Miniflux server returned HTTP 500");
         assert_eq!(worker.join().unwrap(), unread_entry_targets(&[100]));
+    }
+
+    #[test]
+    fn search_encodes_parameters_and_processes_temporary_results() {
+        let response = r#"{"total":7,"entries":[{"id":42,"feed_id":9,"feed":{"id":9,"title":"Engineering","category":{"id":3}},"title":"Rust & Systems","url":"https://example.test/posts/42","comments_url":"https://example.test/comments/42","status":"read","starred":true,"published_at":"2026-01-02T03:04:05+02:00","content":"<p>source &amp; preview</p><img src=\"/cover.jpg\">"}]}"#;
+        let (address, worker) = entry_server(vec![(200, response.into())]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        let result = client
+            .search_articles(SearchArticlesRequest {
+                query: "rust & systems".into(),
+                offset: 20,
+                limit: 10,
+            })
+            .unwrap();
+
+        assert_eq!(result.total, 7);
+        assert_eq!(result.articles.len(), 1);
+        let article = &result.articles[0];
+        assert_eq!(article.feed_title, "Engineering");
+        assert_eq!(article.category_id, 3);
+        assert_eq!(article.preview, "source & preview");
+        assert_eq!(
+            article.image_url.as_deref(),
+            Some("https://example.test/cover.jpg")
+        );
+        assert_eq!(article.published_at, "2026-01-02T01:04:05Z");
+        assert!(article.is_read);
+        assert!(article.is_starred);
+        assert_eq!(
+            worker.join().unwrap(),
+            vec![
+                "/v1/entries?search=rust+%26+systems&order=published_at&direction=desc&offset=20&limit=10"
+            ]
+        );
+    }
+
+    #[test]
+    fn search_accepts_empty_results_and_propagates_failure() {
+        let (address, worker) = entry_server(vec![(200, r#"{"total":0,"entries":[]}"#.into())]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+        let result = client
+            .search_articles(SearchArticlesRequest {
+                query: "none".into(),
+                offset: 0,
+                limit: 50,
+            })
+            .unwrap();
+        assert_eq!(result.total, 0);
+        assert!(result.articles.is_empty());
+        worker.join().unwrap();
+
+        let (address, worker) = entry_server(vec![(500, String::new())]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+        let error = client
+            .search_articles(SearchArticlesRequest {
+                query: "failure".into(),
+                offset: 0,
+                limit: 1,
+            })
+            .unwrap_err();
+        assert_eq!(error.kind, crate::domain::CoreErrorKind::ServerTransient);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn set_starred_state_changes_only_when_needed_and_propagates_errors() {
+        let (address, worker) = entry_server(vec![
+            (
+                200,
+                r#"{"id":42,"feed_id":9,"starred":false,"published_at":"2026-01-02T03:04:05Z"}"#
+                    .into(),
+            ),
+            (204, String::new()),
+            (
+                200,
+                r#"{"id":42,"feed_id":9,"starred":true,"published_at":"2026-01-02T03:04:05Z"}"#
+                    .into(),
+            ),
+            (204, String::new()),
+        ]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+        client.set_starred_state(42, true).unwrap();
+        client.set_starred_state(42, false).unwrap();
+        assert_eq!(
+            worker.join().unwrap(),
+            vec![
+                "/v1/entries/42",
+                "/v1/entries/42/star",
+                "/v1/entries/42",
+                "/v1/entries/42/star",
+            ]
+        );
+
+        let (address, worker) = entry_server(vec![(500, String::new())]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+        let error = client.set_starred_state(42, true).unwrap_err();
+        assert_eq!(error.kind, crate::domain::CoreErrorKind::ServerTransient);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn set_read_state_sends_direct_remote_update() {
+        let (address, worker) = json_server(vec![(204, String::new())]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+        client.set_read_state(&[42], true).unwrap();
+        assert_eq!(
+            worker.join().unwrap(),
+            vec![(
+                "PUT".into(),
+                "/v1/entries".into(),
+                serde_json::json!({"entry_ids": [42], "status": "read"}),
+            )]
+        );
     }
 
     #[test]
