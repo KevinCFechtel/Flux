@@ -3,9 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
-APP_DIR="${REPOSITORY_DIR}/dist/FluxBar.app"
+APP_DIR="${REPOSITORY_DIR}/dist/FluxNews.app"
 RELEASE_DIR="${REPOSITORY_DIR}/dist/release"
-INFO_PLIST="${REPOSITORY_DIR}/macos/FluxBar/Info.plist"
+INFO_PLIST="${REPOSITORY_DIR}/macos/FluxNews/Info.plist"
 RELEASE_ENV_FILE="${FLUX_RELEASE_ENV_FILE:-${SCRIPT_DIR}/.env}"
 
 if [[ -f "${RELEASE_ENV_FILE}" ]]; then
@@ -35,8 +35,8 @@ security find-identity -v -p codesigning | grep -F -- "${SIGNING_IDENTITY}" >/de
   exit 1
 }
 
-SUBMISSION_ARCHIVE="${RELEASE_DIR}/FluxBar-${RELEASE_VERSION}-macos-${RELEASE_ARCH}-notarization.zip"
-FINAL_ARCHIVE="${RELEASE_DIR}/FluxBar-${RELEASE_VERSION}-macos-${RELEASE_ARCH}.zip"
+SUBMISSION_ARCHIVE="${RELEASE_DIR}/FluxNews-${RELEASE_VERSION}-macos-${RELEASE_ARCH}-notarization.zip"
+FINAL_ARCHIVE="${RELEASE_DIR}/FluxNews-${RELEASE_VERSION}-macos-${RELEASE_ARCH}.zip"
 CHECK_DIR="$(mktemp -d /tmp/flux-release-check.XXXXXX)"
 trap 'rm -rf -- "${CHECK_DIR}"' EXIT
 
@@ -77,8 +77,8 @@ COPYFILE_DISABLE=1 ditto -c -k --keepParent --norsrc --noextattr "${APP_DIR}" "$
 
 echo "8/8 Extracting and validating the final artifact"
 ditto -x -k "${FINAL_ARCHIVE}" "${CHECK_DIR}"
-xcrun stapler validate "${CHECK_DIR}/FluxBar.app"
-codesign --verify --deep --strict --verbose=4 "${CHECK_DIR}/FluxBar.app"
-spctl --assess --type execute --verbose=4 "${CHECK_DIR}/FluxBar.app"
+xcrun stapler validate "${CHECK_DIR}/FluxNews.app"
+codesign --verify --deep --strict --verbose=4 "${CHECK_DIR}/FluxNews.app"
+spctl --assess --type execute --verbose=4 "${CHECK_DIR}/FluxNews.app"
 
 echo "Release artifact: ${FINAL_ARCHIVE}"

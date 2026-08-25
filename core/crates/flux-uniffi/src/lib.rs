@@ -183,6 +183,24 @@ pub enum ErrorKind {
 pub trait EventListener: Send + Sync {
     fn on_event(&self, event: CoreEvent);
 }
+#[derive(uniffi::Enum)]
+pub enum DiagnosticLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+#[derive(uniffi::Record)]
+pub struct DiagnosticRecord {
+    pub level: DiagnosticLevel,
+    pub target: String,
+    pub message: String,
+}
+#[uniffi::export(with_foreign)]
+pub trait DiagnosticListener: Send + Sync {
+    fn on_diagnostic(&self, record: DiagnosticRecord);
+}
 
 #[derive(Debug, uniffi::Error)]
 pub enum FluxError {
@@ -210,6 +228,11 @@ pub struct EventSubscription {
     core: Arc<FluxCore>,
     id: u64,
 }
+#[derive(uniffi::Object)]
+pub struct DiagnosticSubscription {
+    core: Arc<FluxCore>,
+    id: u64,
+}
 
 #[uniffi::export]
 impl Flux {
@@ -222,6 +245,26 @@ impl Flux {
             base_url: config.base_url,
             api_key: config.api_key,
         })
+        .map_err(map_error)?;
+        Ok(Arc::new(Self {
+            core: Arc::new(core),
+        }))
+    }
+    #[uniffi::constructor]
+    pub fn initialize_with_diagnostics(
+        config: InitializationConfig,
+        listener: Arc<dyn DiagnosticListener>,
+    ) -> Result<Arc<Self>, FluxError> {
+        let core = FluxCore::initialize_with_diagnostics(
+            CoreConfig {
+                persistent_data: config.persistent_data.into(),
+                cache: config.cache.into(),
+                media: config.media.into(),
+                base_url: config.base_url,
+                api_key: config.api_key,
+            },
+            Some(Arc::new(DiagnosticListenerBridge { listener })),
+        )
         .map_err(map_error)?;
         Ok(Arc::new(Self {
             core: Arc::new(core),
@@ -306,11 +349,29 @@ impl Flux {
             id,
         }))
     }
+    pub fn subscribe_diagnostics(
+        &self,
+        listener: Arc<dyn DiagnosticListener>,
+    ) -> Arc<DiagnosticSubscription> {
+        let id = self
+            .core
+            .subscribe_diagnostics(Arc::new(DiagnosticListenerBridge { listener }));
+        Arc::new(DiagnosticSubscription {
+            core: self.core.clone(),
+            id,
+        })
+    }
 }
 #[uniffi::export]
 impl EventSubscription {
     pub fn unsubscribe(&self) -> Result<(), FluxError> {
         self.core.unsubscribe_events(self.id).map_err(map_error)
+    }
+}
+#[uniffi::export]
+impl DiagnosticSubscription {
+    pub fn unsubscribe(&self) {
+        self.core.unsubscribe_diagnostics(self.id);
     }
 }
 struct ListenerBridge {
@@ -319,6 +380,14 @@ struct ListenerBridge {
 impl flux_core::CoreEventListener for ListenerBridge {
     fn on_event(&self, event: domain::CoreEvent) {
         self.listener.on_event(event.into())
+    }
+}
+struct DiagnosticListenerBridge {
+    listener: Arc<dyn DiagnosticListener>,
+}
+impl flux_core::diagnostics::CoreDiagnosticListener for DiagnosticListenerBridge {
+    fn on_diagnostic(&self, record: flux_core::diagnostics::DiagnosticRecord) {
+        self.listener.on_diagnostic(record.into())
     }
 }
 
@@ -395,6 +464,26 @@ impl From<domain::MutationField> for MutationField {
         match value {
             domain::MutationField::Read => Self::Read,
             domain::MutationField::Starred => Self::Starred,
+        }
+    }
+}
+impl From<flux_core::diagnostics::DiagnosticLevel> for DiagnosticLevel {
+    fn from(value: flux_core::diagnostics::DiagnosticLevel) -> Self {
+        match value {
+            flux_core::diagnostics::DiagnosticLevel::Trace => Self::Trace,
+            flux_core::diagnostics::DiagnosticLevel::Debug => Self::Debug,
+            flux_core::diagnostics::DiagnosticLevel::Info => Self::Info,
+            flux_core::diagnostics::DiagnosticLevel::Warn => Self::Warn,
+            flux_core::diagnostics::DiagnosticLevel::Error => Self::Error,
+        }
+    }
+}
+impl From<flux_core::diagnostics::DiagnosticRecord> for DiagnosticRecord {
+    fn from(value: flux_core::diagnostics::DiagnosticRecord) -> Self {
+        Self {
+            level: value.level.into(),
+            target: value.target,
+            message: value.message,
         }
     }
 }

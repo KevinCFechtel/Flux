@@ -43,6 +43,10 @@ impl Store {
             .pragma_update(None, "foreign_keys", "ON")
             .map_err(sql_error)?;
         migrate(&mut connection)?;
+        let schema_version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .map_err(sql_error)?;
+        tracing::info!(target: "storage", "storage initialized schema_version={schema_version}");
         Ok(Self {
             connection: Mutex::new(connection),
             database_path,
@@ -137,6 +141,19 @@ impl Store {
         }
         tx.commit().map_err(sql_error)?;
         Ok(stats)
+    }
+
+    pub fn cleanup_expired_read_articles(&self, cutoff: &str) -> Result<u32, CoreError> {
+        let deleted = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .execute(
+                "DELETE FROM articles WHERE is_read=1 AND is_starred=0 AND published_at < ?1",
+                [cutoff],
+            )
+            .map_err(sql_error)?;
+        Ok(deleted as u32)
     }
 
     pub fn set_state_bulk(

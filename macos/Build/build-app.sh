@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-Debug}"
 DERIVED_DATA="${DERIVED_DATA:-${REPOSITORY_DIR}/.build/DerivedData}"
-APP_DIR="${APP_DIR:-${REPOSITORY_DIR}/dist/FluxBar.app}"
-BUILT_APP="${DERIVED_DATA}/Build/Products/${CONFIGURATION}/FluxBar.app"
+APP_DIR="${APP_DIR:-${REPOSITORY_DIR}/dist/FluxNews.app}"
+BUILT_APP="${DERIVED_DATA}/Build/Products/${CONFIGURATION}/FluxNews.app"
 
 case "${CONFIGURATION}" in
   Debug|Release) ;;
@@ -19,8 +19,8 @@ esac
 "${SCRIPT_DIR}/build-uniffi.sh"
 
 FLUX_UNIFFI_PREPARED=1 xcodebuild \
-  -project "${REPOSITORY_DIR}/macos/FluxBar.xcodeproj" \
-  -scheme FluxBar \
+  -project "${REPOSITORY_DIR}/macos/FluxNews.xcodeproj" \
+  -scheme FluxNews \
   -configuration "${CONFIGURATION}" \
   -destination "platform=macOS" \
   -derivedDataPath "${DERIVED_DATA}" \
@@ -32,4 +32,4 @@ mkdir -p "$(dirname -- "${APP_DIR}")"
 ditto "${BUILT_APP}" "${APP_DIR}"
 codesign --force --deep --sign - "${APP_DIR}"
 
-echo "FluxBar ${CONFIGURATION} app: ${APP_DIR}"
+echo "FluxNews ${CONFIGURATION} app: ${APP_DIR}"

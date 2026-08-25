@@ -1,9 +1,11 @@
 import AppKit
 import Combine
 import Foundation
+import OSLog
 import Security
 
 enum BrowserScope: Hashable { case all, starred, category(Int64), feed(Int64) }
+enum ArticleListStyle: String { case row, card }
 
 @MainActor
 final class BrowserStore: ObservableObject {
@@ -12,7 +14,8 @@ final class BrowserStore: ObservableObject {
     @Published var unreadTotal: UInt64 = 0
     @Published var starredTotal: UInt64 = 0
     @Published var selectionTotal: UInt64 = 0
-    @Published var sidebarCounts: [Int64: UInt64] = [:]
+    @Published var categorySidebarCounts: [Int64: UInt64] = [:]
+    @Published var feedSidebarCounts: [Int64: UInt64] = [:]
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var scope: BrowserScope = .all
@@ -24,6 +27,10 @@ final class BrowserStore: ObservableObject {
     @Published var lastScrolloverBatch: [Int64] = []
     @Published var scrolloverUndoVisible = false
     @Published var markReadOnScrolloverEnabled = true
+    @Published var articleListStyle: ArticleListStyle
+    @Published var globalShortcut: GlobalShortcutChoice
+    @Published var globalShortcutRegistrationError: String?
+    @Published private(set) var listPresentationRevision: UInt64 = 0
 
     private var core: Flux?
     private var eventSubscription: EventSubscription?
@@ -32,27 +39,45 @@ final class BrowserStore: ObservableObject {
     private var sharingPicker: NSSharingServicePicker?
     private var undoExpiry: Task<Void, Never>?
 
-    init() { markReadOnScrolloverEnabled = UserDefaults.standard.object(forKey: "FluxBar.markReadOnScrollover") as? Bool ?? true }
-
-    func start() {
-        if let server = UserDefaults.standard.string(forKey: "Flux.server"), let key = KeychainCredentials.load(), !server.isEmpty { configure(server: server, apiKey: key) }
-        else { settingsVisible = true }
+    init() {
+        markReadOnScrolloverEnabled = UserDefaults.standard.object(forKey: "FluxNews.markReadOnScrollover") as? Bool ?? true
+        articleListStyle = UserDefaults.standard.string(forKey: "FluxNews.articleListStyle").flatMap(ArticleListStyle.init(rawValue:)) ?? .row
+        globalShortcut = GlobalShortcutChoice.stored()
     }
 
-    func configure(server: String, apiKey: String) {
+    func start() {
+        do {
+            guard let credentials = try CredentialStore.load() else { settingsVisible = true; return }
+            NativeLog.keychain.notice("stored Miniflux credentials loaded")
+            configure(server: credentials.server, apiKey: credentials.apiKey)
+        } catch {
+            NativeLog.keychain.error("credential lookup failed: \(error.localizedDescription, privacy: .public)")
+            errorMessage = error.localizedDescription
+            settingsVisible = true
+        }
+    }
+
+    @discardableResult
+    func configure(server: String, apiKey: String, launchAtLogin: Bool? = nil) -> Bool {
         let fm = FileManager.default
         let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Flux", isDirectory: true)
         let cache = fm.urls(for: .cachesDirectory, in: .userDomainMask).first!.appendingPathComponent("Flux", isDirectory: true)
         let media = fm.urls(for: .moviesDirectory, in: .userDomainMask).first!.appendingPathComponent("Flux", isDirectory: true)
         do {
-            core = try Flux.initialize(config: InitializationConfig(persistentData: support.path, cache: cache.path, media: media.path, baseUrl: server, apiKey: apiKey))
+            core = try Flux.initializeWithDiagnostics(config: InitializationConfig(persistentData: support.path, cache: cache.path, media: media.path, baseUrl: server, apiKey: apiKey), listener: CoreDiagnosticLogger())
             eventSubscription = try core?.subscribeEvents(listener: BrowserEventListener(store: self))
-            UserDefaults.standard.set(server, forKey: "Flux.server")
-            try KeychainCredentials.save(apiKey)
+            if let launchAtLogin { try CredentialStore.setLaunchAtLogin(launchAtLogin) }
+            try CredentialStore.save(MinifluxCredentials(server: server, apiKey: apiKey))
+            NativeLog.app.notice("core configured")
             resetPresentation()
             reloadNavigationAndCounts(); reloadVisibleArticles()
             sync(reason: .appStart)
-        } catch { errorMessage = String(describing: error) }
+            return true
+        } catch {
+            NativeLog.app.error("core configuration failed: \(error.localizedDescription, privacy: .public)")
+            errorMessage = error.localizedDescription
+            return false
+        }
     }
 
     func query(scope: BrowserScope? = nil) -> ArticleQuery {
@@ -67,17 +92,28 @@ final class BrowserStore: ObservableObject {
             catalog = try core.navigationCatalog()
             unreadTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil))
             starredTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .all, starredFilter: .starred, sort: .newestFirst, limit: 0, cursor: nil))
-            var counts: [Int64: UInt64] = [:]
-            for category in catalog.categories { counts[category.id] = try core.countArticles(query: query(scope: .category(category.id))) }
-            for feed in catalog.feeds { counts[feed.id] = try core.countArticles(query: query(scope: .feed(feed.id))) }
-            sidebarCounts = counts
+            var categoryCounts: [Int64: UInt64] = [:]
+            var feedCounts: [Int64: UInt64] = [:]
+            for category in catalog.categories { categoryCounts[category.id] = try core.countArticles(query: query(scope: .category(category.id))) }
+            for feed in catalog.feeds { feedCounts[feed.id] = try core.countArticles(query: query(scope: .feed(feed.id))) }
+            categorySidebarCounts = categoryCounts
+            feedSidebarCounts = feedCounts
         } catch { errorMessage = String(describing: error) }
     }
     func select(_ scope: BrowserScope) { self.scope = scope; resetPresentation(); reloadVisibleArticles() }
+    func route(to route: NavigationRoute) {
+        switch route {
+        case .all: select(.all)
+        case .starred: select(.starred)
+        case .category(let id): select(.category(id))
+        case .feed(let id): select(.feed(id))
+        }
+    }
     func setUnreadOnly(_ enabled: Bool) { unreadOnly = enabled; resetPresentation(); reloadNavigationAndCounts(); reloadVisibleArticles() }
     func setNewestFirst(_ enabled: Bool) { newestFirst = enabled; resetPresentation(); reloadNavigationAndCounts(); reloadVisibleArticles() }
     func noteMeaningfulInteraction() { hasMeaningfullyInteracted = true }
-    func resetPresentation() { hasMeaningfullyInteracted = false; newDataAvailable = false }
+    func resetPresentation() { hasMeaningfullyInteracted = false; newDataAvailable = false; listPresentationRevision &+= 1 }
+    func setArticleListStyle(_ style: ArticleListStyle) { guard style != articleListStyle else { return }; articleListStyle = style; UserDefaults.standard.set(style.rawValue, forKey: "FluxNews.articleListStyle"); resetPresentation() }
     func applyNewData() { resetPresentation(); reloadVisibleArticles() }
     func sync(reason: SyncReason = .manual) {
         guard let core, !isLoading else { return }
@@ -100,7 +136,8 @@ final class BrowserStore: ObservableObject {
     func setStarred(_ article: ArticleSummary, _ starred: Bool) { guard let core else { return }; do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadNavigationAndCounts() } catch { errorMessage = String(describing: error) } }
     func flushScrollover(_ ids: [Int64]) { guard let core, !ids.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: ids, read: true); lastScrolloverBatch = ids; updateVisible(ids) { $0.isRead = true }; reloadNavigationAndCounts(); showScrolloverUndo() } catch { errorMessage = String(describing: error) } }
     func undoScrollover() { guard let core, !lastScrolloverBatch.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: lastScrolloverBatch, read: false); updateVisible(lastScrolloverBatch) { $0.isRead = false }; lastScrolloverBatch = []; scrolloverUndoVisible = false; undoExpiry?.cancel(); reloadNavigationAndCounts() } catch { errorMessage = String(describing: error) } }
-    func setScrolloverEnabled(_ enabled: Bool) { markReadOnScrolloverEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxBar.markReadOnScrollover") }
+    func setScrolloverEnabled(_ enabled: Bool) { markReadOnScrolloverEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.markReadOnScrollover") }
+    func setGlobalShortcut(_ shortcut: GlobalShortcutChoice) { guard shortcut != globalShortcut else { return }; globalShortcut = shortcut; shortcut.store() }
     func open(_ article: ArticleSummary) { setRead(article, true); if let url = URL(string: article.url) { NSWorkspace.shared.open(url) } }
     func openComments(_ article: ArticleSummary) { if let url = URL(string: article.commentsUrl), !article.commentsUrl.isEmpty { NSWorkspace.shared.open(url) } }
     func copyLink(_ article: ArticleSummary) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(article.url, forType: .string) }
@@ -112,8 +149,25 @@ final class BrowserStore: ObservableObject {
 private final class WeakBrowserStore: @unchecked Sendable { weak var value: BrowserStore?; init(_ value: BrowserStore) { self.value = value } }
 private final class BrowserEventListener: EventListener, @unchecked Sendable { weak var store: BrowserStore?; init(store: BrowserStore) { self.store = store }; func onEvent(event: CoreEvent) { Task { @MainActor [weak store] in store?.handle(event: event) } } }
 
-enum KeychainCredentials {
-    static let service = "dev.kevincfechtel.Flux.api-key"
-    static func load() -> String? { let query:[String:Any] = [kSecClass as String:kSecClassGenericPassword,kSecAttrService as String:service,kSecReturnData as String:true]; var result:CFTypeRef?; guard SecItemCopyMatching(query as CFDictionary,&result) == errSecSuccess, let data=result as? Data else{return nil}; return String(data:data,encoding:.utf8) }
-    static func save(_ key:String) throws { let data=Data(key.utf8); let query:[String:Any] = [kSecClass as String:kSecClassGenericPassword,kSecAttrService as String:service]; if SecItemUpdate(query as CFDictionary,[kSecValueData as String:data] as CFDictionary) == errSecItemNotFound { guard SecItemAdd((query.merging([kSecValueData as String:data]){$1}) as CFDictionary,nil) == errSecSuccess else { throw NSError(domain:"Flux",code:1) } } }
+private final class CoreDiagnosticLogger: DiagnosticListener, @unchecked Sendable {
+    func onDiagnostic(record: DiagnosticRecord) {
+        let logger = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "core.\(record.target)")
+        switch record.level {
+        case .trace, .debug:
+            logger.debug("\(record.message, privacy: .public)")
+        case .info:
+            logger.notice("\(record.message, privacy: .public)")
+        case .warn:
+            logger.warning("\(record.message, privacy: .public)")
+        case .error:
+            logger.error("\(record.message, privacy: .public)")
+        }
+    }
+}
+
+enum NativeLog {
+    static let app = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "app")
+    static let keychain = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "keychain")
+    static let launchAtLogin = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "launch_at_login")
+    static let shortcut = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "shortcut")
 }

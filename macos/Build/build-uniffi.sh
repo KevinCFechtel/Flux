@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
-generated="$root/macos/FluxBar/Generated"
+generated="$root/macos/FluxNews/Generated"
 workspace="$root/core/Cargo.toml"
 library="$root/core/target/release/libflux_uniffi.dylib"
 mkdir -p "$generated"

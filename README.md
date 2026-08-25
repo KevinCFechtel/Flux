@@ -1,6 +1,6 @@
 # Flux
 
-Flux is a native-client RSS reader for [Miniflux](https://miniflux.app/) built around one shared Rust core. FluxBar is the current macOS client.
+Flux is a native-client RSS reader for [Miniflux](https://miniflux.app/) built around one shared Rust core. FluxNews is the current macOS client.
 
 ## Requirements
 
@@ -25,10 +25,24 @@ Generate the Swift bindings and release dylib required by Xcode:
 zsh macos/Build/build-uniffi.sh
 ```
 
-Build the macOS app for normal development. The resulting ad-hoc-signed app is at `dist/FluxBar.app`:
+Build the macOS app for normal development. The resulting ad-hoc-signed app is at `dist/FluxNews.app`:
 
 ```bash
 bash macos/Build/build-app.sh
+```
+
+## Diagnostics
+
+FluxNews forwards structured Rust Core diagnostics to macOS Unified Logging. Stream all application activity with:
+
+```bash
+log stream --style compact --predicate 'process == "FluxNews"'
+```
+
+Limit output to Core diagnostics with:
+
+```bash
+log stream --style compact --predicate 'process == "FluxNews" AND subsystem == "dev.kevincfechtel.fluxNews"'
 ```
 
 Use the same production configuration without signing or notarization to prepare a release build:
@@ -42,15 +56,15 @@ CONFIGURATION=Release bash macos/Build/build-app.sh
 A release uses a Developer ID signing identity and a `notarytool` Keychain profile. Keep those local or supply them through the environment:
 
 ```bash
-xcrun notarytool store-credentials FluxBar-notary
+xcrun notarytool store-credentials FluxNews-notary
 cp macos/Build/.env.example macos/Build/.env
 bash macos/Build/release.sh
 ```
 
-`macos/Build/.env` is ignored by Git. `release.sh` builds the Rust/UniFFI-backed app, signs it with hardened runtime, notarizes and staples it, then creates and validates `dist/release/FluxBar-<version>-macos-<architecture>.zip`.
+`macos/Build/.env` is ignored by Git. `release.sh` builds the Rust/UniFFI-backed app, signs it with hardened runtime, notarizes and staples it, then creates and validates `dist/release/FluxNews-<version>-macos-<architecture>.zip`.
 
 Changes should be covered by appropriate tests. Pull requests should focus on a clearly described problem or feature.
 
 ## License
 
-FluxBar is released under the [BSD 3-Clause License](LICENSE).
+FluxNews is released under the [BSD 3-Clause License](LICENSE).

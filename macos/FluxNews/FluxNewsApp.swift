@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct FluxBarApp: App {
+struct FluxNewsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {

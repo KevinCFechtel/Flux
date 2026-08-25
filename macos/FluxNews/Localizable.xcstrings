@@ -1,0 +1,20 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "entity.category.type" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Kategorie" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Category" } } } },
+    "entity.feed.type" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Feed" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Feed" } } } },
+    "intent.category.description" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Eine bestimmte Kategorie in FluxNews öffnen." } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Open a specific category in FluxNews." } } } },
+    "intent.category.parameter" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Kategorie" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Category" } } } },
+    "intent.category.title" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Kategorie öffnen" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Category" } } } },
+    "intent.feed.description" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Einen bestimmten Feed in FluxNews öffnen." } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Open a specific feed in FluxNews." } } } },
+    "intent.feed.parameter" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Feed" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Feed" } } } },
+    "intent.feed.title" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Feed öffnen" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Feed" } } } },
+    "intent.open.description" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Den FluxNews-Posteingang öffnen." } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Open the FluxNews inbox." } } } },
+    "intent.open.title" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "FluxNews öffnen" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Open FluxNews" } } } },
+    "intent.refresh.description" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "FluxNews mit Miniflux aktualisieren." } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh FluxNews from Miniflux." } } } },
+    "intent.refresh.title" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "FluxNews aktualisieren" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh FluxNews" } } } },
+    "intent.starred.description" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Markierte Artikel in FluxNews öffnen." } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Open starred articles in FluxNews." } } } },
+    "intent.starred.title" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Markierte anzeigen" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Show Starred" } } } }
+  },
+  "version" : "1.0"
+}

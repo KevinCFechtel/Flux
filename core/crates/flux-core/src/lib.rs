@@ -1,5 +1,6 @@
 //! Shared durable Flux domain core. Platform clients provide paths and secrets.
 
+pub mod diagnostics;
 pub mod domain;
 pub mod miniflux;
 pub mod mutations;
@@ -14,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 
+use diagnostics::{CoreDiagnosticListener, Diagnostics};
 use domain::{
     ArticleQuery, ArticleSummary, CoreError, CoreErrorKind, CoreEvent, DeliveryDisposition,
     DeliveryMode, MutationField, MutationResult, NavigationCatalog, RuntimeHealth,
@@ -41,6 +43,8 @@ pub struct FluxCore {
     runtime: Mutex<DeliveryRuntime>,
     listeners: Mutex<HashMap<u64, Arc<dyn CoreEventListener>>>,
     next_listener_id: std::sync::atomic::AtomicU64,
+    diagnostics: Arc<Diagnostics>,
+    diagnostic_dispatcher: tracing::Dispatch,
 }
 
 #[derive(Clone, Copy)]
@@ -55,14 +59,46 @@ pub trait CoreEventListener: Send + Sync {
 
 impl FluxCore {
     pub fn initialize(config: CoreConfig) -> Result<Self, CoreError> {
-        validate_config(&config)?;
-        let store = Arc::new(Store::open(
-            &config.persistent_data,
-            &config.cache,
-            &config.media,
-        )?);
-        store.set_base_url(&config.base_url)?;
-        let remote = Arc::new(MinifluxClient::new(&config.base_url, &config.api_key)?);
+        Self::initialize_with_diagnostics(config, None)
+    }
+
+    pub fn initialize_with_diagnostics(
+        config: CoreConfig,
+        listener: Option<Arc<dyn CoreDiagnosticListener>>,
+    ) -> Result<Self, CoreError> {
+        let diagnostics = Diagnostics::new();
+        if let Some(listener) = listener {
+            diagnostics.subscribe(listener);
+        }
+        let diagnostic_dispatcher = diagnostics.dispatcher();
+        let result = tracing::dispatcher::with_default(&diagnostic_dispatcher, || {
+            tracing::info!(target: "core", "core initialization started");
+            validate_config(&config)?;
+            let store = Arc::new(Store::open(
+                &config.persistent_data,
+                &config.cache,
+                &config.media,
+            )?);
+            store.set_base_url(&config.base_url)?;
+            let remote = Arc::new(MinifluxClient::new(&config.base_url, &config.api_key)?);
+            Ok::<_, CoreError>((store, remote))
+        });
+        let (store, remote) = match result {
+            Ok(result) => result,
+            Err(error) => {
+                tracing::dispatcher::with_default(
+                    &diagnostic_dispatcher,
+                    || tracing::error!(target: "core", "core initialization failed kind={:?}", error.kind),
+                );
+                diagnostics.flush();
+                return Err(error);
+            }
+        };
+        tracing::dispatcher::with_default(
+            &diagnostic_dispatcher,
+            || tracing::info!(target: "core", "core initialization completed"),
+        );
+        diagnostics.flush();
         Ok(Self {
             store,
             remote,
@@ -75,6 +111,8 @@ impl FluxCore {
             }),
             listeners: Mutex::new(HashMap::new()),
             next_listener_id: std::sync::atomic::AtomicU64::new(1),
+            diagnostics,
+            diagnostic_dispatcher,
         })
     }
 
@@ -83,13 +121,23 @@ impl FluxCore {
         config: CoreConfig,
         remote: Arc<dyn RemoteSource>,
     ) -> Result<Self, CoreError> {
-        validate_config(&config)?;
-        let store = Arc::new(Store::open(
-            &config.persistent_data,
-            &config.cache,
-            &config.media,
-        )?);
-        store.set_base_url(&config.base_url)?;
+        let diagnostics = Diagnostics::new();
+        let diagnostic_dispatcher = diagnostics.dispatcher();
+        let store = tracing::dispatcher::with_default(&diagnostic_dispatcher, || {
+            tracing::info!(target: "core", "core initialization started");
+            validate_config(&config)?;
+            let store = Arc::new(Store::open(
+                &config.persistent_data,
+                &config.cache,
+                &config.media,
+            )?);
+            store.set_base_url(&config.base_url)?;
+            Ok::<_, CoreError>(store)
+        })?;
+        tracing::dispatcher::with_default(
+            &diagnostic_dispatcher,
+            || tracing::info!(target: "core", "core initialization completed"),
+        );
         Ok(Self {
             store,
             remote,
@@ -102,17 +150,33 @@ impl FluxCore {
             }),
             listeners: Mutex::new(HashMap::new()),
             next_listener_id: std::sync::atomic::AtomicU64::new(1),
+            diagnostics,
+            diagnostic_dispatcher,
         })
     }
 
     pub fn sync(&self, reason: SyncReason) -> Result<(), CoreError> {
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            self.sync_inner(reason)
+        });
+        self.diagnostics.flush();
+        result
+    }
+
+    fn sync_inner(&self, reason: SyncReason) -> Result<(), CoreError> {
+        let started = Instant::now();
+        tracing::info!(target: "sync", "sync started reason={reason:?}");
         let _sync = self
             .sync_gate
             .lock()
             .map_err(|_| CoreError::internal("sync gate poisoned"))?;
         let mutations_delivered = match self.deliver_for_sync(reason) {
-            Ok(count) => count,
+            Ok(count) => {
+                tracing::info!(target: "mutation", "pending mutation delivery completed delivered={count}");
+                count
+            }
             Err(error) => {
+                tracing::warn!(target: "sync", "sync stopped during pending delivery kind={:?}", error.kind);
                 self.emit(CoreEvent::SyncFailed(SyncFailure {
                     reason,
                     error_kind: error.kind.clone(),
@@ -126,6 +190,7 @@ impl FluxCore {
         };
         match sync::run(self.remote.as_ref(), self.store.as_ref(), reason) {
             Ok(data) => {
+                tracing::info!(target: "sync", "sync completed new={} updated={} delivered={} elapsed_ms={}", data.new_articles, data.updated_articles, mutations_delivered, started.elapsed().as_millis());
                 self.emit(CoreEvent::SyncCompleted(SyncCompleted {
                     reason,
                     new_articles: data.new_articles,
@@ -137,6 +202,7 @@ impl FluxCore {
                 Ok(())
             }
             Err(error) => {
+                tracing::warn!(target: "sync", "sync failed kind={:?} elapsed_ms={}", error.kind, started.elapsed().as_millis());
                 self.emit(CoreEvent::SyncFailed(SyncFailure {
                     reason,
                     error_kind: error.kind.clone(),
@@ -227,13 +293,34 @@ impl FluxCore {
             .remove(&id);
         Ok(())
     }
+    pub fn subscribe_diagnostics(&self, listener: Arc<dyn CoreDiagnosticListener>) -> u64 {
+        let id = self.diagnostics.subscribe(listener);
+        self.diagnostics.flush();
+        id
+    }
+    pub fn unsubscribe_diagnostics(&self, id: u64) {
+        self.diagnostics.unsubscribe(id);
+    }
     fn set_state_bulk(
         &self,
         ids: &[i64],
         field: MutationField,
         desired: bool,
     ) -> Result<MutationResult, CoreError> {
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            self.set_state_bulk_inner(ids, field, desired)
+        });
+        self.diagnostics.flush();
+        result
+    }
+    fn set_state_bulk_inner(
+        &self,
+        ids: &[i64],
+        field: MutationField,
+        desired: bool,
+    ) -> Result<MutationResult, CoreError> {
         let pending = self.store.set_state_bulk(ids, field, desired)?;
+        tracing::debug!(target: "mutation", "mutation persisted field={field:?} desired={desired} count={}", pending.len());
         for item in &pending {
             self.emit(match field {
                 MutationField::Read => CoreEvent::ArticleReadStateChanged {
@@ -410,12 +497,20 @@ mod tests {
         core: Mutex<Option<Arc<FluxCore>>>,
         events: Mutex<Vec<CoreEvent>>,
     }
+    struct DiagnosticCollector {
+        records: Mutex<Vec<diagnostics::DiagnosticRecord>>,
+    }
     impl CoreEventListener for ReentrantListener {
         fn on_event(&self, event: CoreEvent) {
             if let Some(core) = self.core.lock().unwrap().as_ref() {
                 core.query_articles(ArticleQuery::default()).unwrap();
             }
             self.events.lock().unwrap().push(event);
+        }
+    }
+    impl CoreDiagnosticListener for DiagnosticCollector {
+        fn on_diagnostic(&self, record: diagnostics::DiagnosticRecord) {
+            self.records.lock().unwrap().push(record);
         }
     }
     impl RemoteSource for MutationSource {
@@ -598,6 +693,41 @@ mod tests {
         assert_eq!(rows[0].category_id, 1);
     }
     #[test]
+    fn diagnostics_are_structured_safe_and_advisory() {
+        let temp = TempDir::new().unwrap();
+        let (core, _) = core(&temp, snapshot());
+        let collector = Arc::new(DiagnosticCollector {
+            records: Mutex::new(vec![]),
+        });
+        let subscription = core.subscribe_diagnostics(collector.clone());
+        let initialization_records = std::mem::take(&mut *collector.records.lock().unwrap());
+        assert!(
+            initialization_records
+                .iter()
+                .any(|record| record.target == "core" && record.message.contains("initialization"))
+        );
+
+        core.sync(SyncReason::Manual).unwrap();
+        let records = std::mem::take(&mut *collector.records.lock().unwrap());
+        assert!(
+            records
+                .iter()
+                .any(|record| record.target == "sync" && record.message.contains("sync started"))
+        );
+        assert!(records.iter().any(|record| {
+            record.target == "retention" && record.message.contains("cleanup completed")
+        }));
+        assert!(
+            records
+                .iter()
+                .all(|record| !record.message.contains("test-secret"))
+        );
+
+        core.unsubscribe_diagnostics(subscription);
+        core.sync(SyncReason::Manual).unwrap();
+        assert!(collector.records.lock().unwrap().is_empty());
+    }
+    #[test]
     fn query_applies_scope_independent_state_filters_and_sorting() {
         let temp = TempDir::new().unwrap();
         let (core, _) = core(&temp, snapshot());
@@ -690,7 +820,7 @@ mod tests {
         );
     }
     #[test]
-    fn initial_sync_retains_unread_recent_read_and_all_starred() {
+    fn sync_retention_removes_only_expired_unstarred_read_articles() {
         let temp = TempDir::new().unwrap();
         let old = (Utc::now() - ChronoDuration::days(91)).to_rfc3339();
         let mut data = snapshot();
@@ -711,6 +841,70 @@ mod tests {
             .map(|a| a.id)
             .collect::<Vec<_>>(),
             vec![2, 1]
+        );
+    }
+    #[test]
+    fn sync_keeps_existing_recent_read_articles_absent_from_remote_sets() {
+        let temp = TempDir::new().unwrap();
+        let mut remote = snapshot();
+        remote.articles.clear();
+        let (core, _) = core(&temp, remote.clone());
+        let recent_read = article(
+            4,
+            10,
+            (Utc::now() - ChronoDuration::days(89)).to_rfc3339(),
+            true,
+            false,
+        );
+        core.store
+            .reconcile(&remote.categories, &remote.feeds, &[recent_read])
+            .unwrap();
+
+        core.sync(SyncReason::Manual).unwrap();
+
+        assert_eq!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .iter()
+            .map(|article| article.id)
+            .collect::<Vec<_>>(),
+            vec![4]
+        );
+    }
+    #[test]
+    fn sync_retention_preserves_old_unread_and_starred_local_articles() {
+        let temp = TempDir::new().unwrap();
+        let mut remote = snapshot();
+        remote.articles.clear();
+        let (core, _) = core(&temp, remote.clone());
+        let old = (Utc::now() - ChronoDuration::days(91)).to_rfc3339();
+        core.store
+            .reconcile(
+                &remote.categories,
+                &remote.feeds,
+                &[
+                    article(4, 10, old.clone(), true, false),
+                    article(5, 10, old.clone(), false, false),
+                    article(6, 10, old, true, true),
+                ],
+            )
+            .unwrap();
+
+        core.sync(SyncReason::Manual).unwrap();
+
+        assert_eq!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .iter()
+            .map(|article| article.id)
+            .collect::<Vec<_>>(),
+            vec![6, 5]
         );
     }
     #[test]

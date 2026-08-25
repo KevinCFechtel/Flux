@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Instant;
 
 use crate::domain::{Article, Category, CoreError, Feed};
 use chrono::{DateTime, SecondsFormat};
@@ -71,30 +72,68 @@ impl MinifluxClient {
         } else {
             format!("{}{path}?{suffix}", self.base_url)
         };
-        let response = self
+        let started = Instant::now();
+        tracing::debug!(target: "miniflux", "request started endpoint={path}");
+        let response = match self
             .agent
             .get(&url)
             .set("Accept", "application/json")
             .set("X-Auth-Token", &self.api_key)
             .call()
-            .map_err(map_http_error)?;
-        serde_json::from_reader(response.into_reader())
-            .map_err(|e| CoreError::data(format!("invalid Miniflux response: {e}")))
+            .map_err(map_http_error)
+        {
+            Ok(response) => response,
+            Err(error) => {
+                tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
+                return Err(error);
+            }
+        };
+        let decoded = serde_json::from_reader(response.into_reader())
+            .map_err(|e| CoreError::data(format!("invalid Miniflux response: {e}")));
+        match decoded {
+            Ok(value) => {
+                tracing::debug!(target: "miniflux", "request completed endpoint={} elapsed_ms={}", path, started.elapsed().as_millis());
+                Ok(value)
+            }
+            Err(error) => {
+                tracing::warn!(target: "miniflux", "response decoding failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
+                Err(error)
+            }
+        }
     }
     fn put(&self, path: &str, body: String) -> Result<(), CoreError> {
         let _request = self
             .request_lock
             .lock()
             .map_err(|_| CoreError::internal("HTTP client lock poisoned"))?;
-        self.agent
+        let started = Instant::now();
+        tracing::debug!(target: "miniflux", "request started endpoint={path}");
+        match self
+            .agent
             .put(&format!("{}{path}", self.base_url))
             .set("Content-Type", "application/json")
             .set("X-Auth-Token", &self.api_key)
             .send_string(&body)
-            .map_err(map_http_error)?;
-        Ok(())
+            .map_err(map_http_error)
+        {
+            Ok(_) => {
+                tracing::debug!(target: "miniflux", "request completed endpoint={} elapsed_ms={}", path, started.elapsed().as_millis());
+                Ok(())
+            }
+            Err(error) => {
+                tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
+                Err(error)
+            }
+        }
     }
     fn entries(&self, status: Option<&str>, starred: bool) -> Result<Vec<EntryDto>, CoreError> {
+        let set = if starred {
+            "starred"
+        } else {
+            status.unwrap_or("all")
+        };
+        let started = Instant::now();
+        tracing::info!(target: "miniflux", "entry fetch started set={set}");
         let mut all = Vec::new();
         let mut after_id = 0;
         loop {
@@ -113,6 +152,7 @@ impl MinifluxClient {
                 query.push(("after_entry_id", after_id.to_string()));
             }
             let page: EntriesDto = self.get("/v1/entries", &query)?;
+            tracing::debug!(target: "miniflux", "entry page completed set={} entries={} total={}", set, page.entries.len(), page.total);
             if page.entries.is_empty() {
                 break;
             }
@@ -131,6 +171,7 @@ impl MinifluxClient {
                 break;
             }
         }
+        tracing::info!(target: "miniflux", "entry fetch completed set={} entries={} elapsed_ms={}", set, all.len(), started.elapsed().as_millis());
         Ok(all)
     }
 }
@@ -156,11 +197,11 @@ impl RemoteSource for MinifluxClient {
             .collect();
         let feed_ids: HashMap<i64, _> = feeds.iter().map(|f| (f.id, ())).collect();
         let mut entries = HashMap::new();
-        // The union exactly represents unread, starred, and read candidates; read retention is local.
+        // Normal sync retains the account-wide unread and starred remote sets. Retention only
+        // cleans up articles that were already persisted locally.
         for entry in self
             .entries(Some("unread"), false)?
             .into_iter()
-            .chain(self.entries(Some("read"), false)?)
             .chain(self.entries(None, true)?)
         {
             entries.insert(entry.id, entry);
@@ -284,22 +325,23 @@ mod tests {
     use std::thread;
 
     #[test]
-    fn maps_controlled_miniflux_responses_without_persistence() {
+    fn fetches_only_unread_and_starred_entries_without_read_history() {
         let responses = vec![
             r#"[{"id":1,"title":"Category"}]"#,
             r#"[{"id":9,"title":"Feed","category":{"id":1}}]"#,
-            r#"{"total":1,"entries":[{"id":4,"feed_id":9,"title":"Unread","url":"https://entry","status":"unread","starred":false,"published_at":"2026-01-02T03:04:05Z","content":"<p>source</p>"}]}"#,
-            r#"{"total":0,"entries":[]}"#,
-            r#"{"total":0,"entries":[]}"#,
+            r#"{"total":1,"entries":[{"id":4,"feed_id":9,"title":"Unread and starred","url":"https://entry","status":"unread","starred":true,"published_at":"2026-01-02T03:04:05Z","content":"<p>source</p>"}]}"#,
+            r#"{"total":1,"entries":[{"id":4,"feed_id":9,"title":"Unread and starred","url":"https://entry","status":"unread","starred":true,"published_at":"2026-01-02T03:04:05Z","content":"<p>source</p>"}]}"#,
         ];
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let worker = thread::spawn(move || {
+            let mut targets = Vec::new();
             for body in responses {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
                 let mut line = String::new();
                 reader.read_line(&mut line).unwrap();
+                targets.push(line.split_whitespace().nth(1).unwrap().to_string());
                 let mut authenticated = false;
                 loop {
                     line.clear();
@@ -317,10 +359,11 @@ mod tests {
                 assert!(authenticated);
                 write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
             }
+            targets
         });
         let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
         let snapshot = client.fetch_initial_articles().unwrap();
-        worker.join().unwrap();
+        let targets = worker.join().unwrap();
         assert_eq!(
             snapshot.categories,
             vec![Category {
@@ -336,7 +379,16 @@ mod tests {
                 title: "Feed".into()
             }]
         );
+        assert_eq!(snapshot.articles.len(), 1);
         assert_eq!(snapshot.articles[0].raw_html_content, "<p>source</p>");
         assert!(!snapshot.articles[0].is_read);
+        assert!(snapshot.articles[0].is_starred);
+        assert!(
+            targets
+                .iter()
+                .any(|target| target.contains("status=unread"))
+        );
+        assert!(targets.iter().any(|target| target.contains("starred=1")));
+        assert!(!targets.iter().any(|target| target.contains("status=read")));
     }
 }

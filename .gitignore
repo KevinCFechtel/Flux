@@ -34,4 +34,4 @@ rustc-ice-*.txt
 *.key
 dist/
 .build/
-macos/FluxBar/Generated/
+macos/FluxNews/Generated/
