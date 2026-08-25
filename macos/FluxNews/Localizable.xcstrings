@@ -1,20 +1,274 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "entity.category.type" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Kategorie" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Category" } } } },
-    "entity.feed.type" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Feed" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Feed" } } } },
-    "intent.category.description" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Eine bestimmte Kategorie in FluxNews öffnen." } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Open a specific category in FluxNews." } } } },
-    "intent.category.parameter" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Kategorie" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Category" } } } },
-    "intent.category.title" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Kategorie öffnen" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Category" } } } },
-    "intent.feed.description" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Einen bestimmten Feed in FluxNews öffnen." } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Open a specific feed in FluxNews." } } } },
-    "intent.feed.parameter" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Feed" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Feed" } } } },
-    "intent.feed.title" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Feed öffnen" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Feed" } } } },
-    "intent.open.description" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Den FluxNews-Posteingang öffnen." } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Open the FluxNews inbox." } } } },
-    "intent.open.title" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "FluxNews öffnen" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Open FluxNews" } } } },
-    "intent.refresh.description" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "FluxNews mit Miniflux aktualisieren." } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh FluxNews from Miniflux." } } } },
-    "intent.refresh.title" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "FluxNews aktualisieren" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh FluxNews" } } } },
-    "intent.starred.description" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Markierte Artikel in FluxNews öffnen." } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Open starred articles in FluxNews." } } } },
-    "intent.starred.title" : { "localizations" : { "de" : { "stringUnit" : { "state" : "translated", "value" : "Markierte anzeigen" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "Show Starred" } } } }
+    "·" : {
+
+    },
+    "%@" : {
+
+    },
+    "%@ articles marked as read" : {
+
+    },
+    "Category in FluxNews" : {
+      "comment" : "Spotlight category description"
+    },
+    "Credentials are stored securely in the macOS Keychain." : {
+
+    },
+    "entity.category.type" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kategorie"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Category"
+          }
+        }
+      }
+    },
+    "entity.feed.type" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Feed"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Feed"
+          }
+        }
+      }
+    },
+    "Feed in FluxNews" : {
+      "comment" : "Spotlight feed description"
+    },
+    "FluxNews Settings" : {
+
+    },
+    "intent.category.description" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine bestimmte Kategorie in FluxNews öffnen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open a specific category in FluxNews."
+          }
+        }
+      }
+    },
+    "intent.category.parameter" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kategorie"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Category"
+          }
+        }
+      }
+    },
+    "intent.category.title" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kategorie öffnen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Category"
+          }
+        }
+      }
+    },
+    "intent.feed.description" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einen bestimmten Feed in FluxNews öffnen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open a specific feed in FluxNews."
+          }
+        }
+      }
+    },
+    "intent.feed.parameter" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Feed"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Feed"
+          }
+        }
+      }
+    },
+    "intent.feed.title" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Feed öffnen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Feed"
+          }
+        }
+      }
+    },
+    "intent.open.description" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den FluxNews-Posteingang öffnen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open the FluxNews inbox."
+          }
+        }
+      }
+    },
+    "intent.open.title" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "FluxNews öffnen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open FluxNews"
+          }
+        }
+      }
+    },
+    "intent.refresh.description" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "FluxNews mit Miniflux aktualisieren."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh FluxNews from Miniflux."
+          }
+        }
+      }
+    },
+    "intent.refresh.title" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "FluxNews aktualisieren"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh FluxNews"
+          }
+        }
+      }
+    },
+    "intent.starred.description" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markierte Artikel in FluxNews öffnen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open starred articles in FluxNews."
+          }
+        }
+      }
+    },
+    "intent.starred.title" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markierte anzeigen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Starred"
+          }
+        }
+      }
+    },
+    "Loading Miniflux..." : {
+
+    },
+    "New articles available" : {
+
+    },
+    "There are no articles in this selection." : {
+
+    }
   },
   "version" : "1.0"
 }
