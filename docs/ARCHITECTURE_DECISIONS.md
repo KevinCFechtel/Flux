@@ -145,7 +145,7 @@ All ordinary triggers use one operation:
 
 `sync(reason)`
 
-Reasons identify the trigger, e.g. Manual, AppStart, Resume, Background,
+Reasons identify the trigger, e.g. Manual, AppStart, Resume, Background,
 Periodic, Widget. They must not become hidden behavior switches. Native
 platforms decide when timer/stale refreshes occur; these use `Periodic`
 rather than overloading `Background`.
@@ -321,9 +321,86 @@ The core owns feed-icon acquisition, cache/processing, and suitable
 light/dark variants for transparent low-contrast icons. Native UI
 requests and renders the appropriate variant.
 
-Article image discovery/download/disk cache belongs to the core; native
-UI triggers lazy loading, decodes/renders images, and may maintain a
-memory cache. Background sync does not preload article images.
+### Article images
+
+Article-image discovery, acquisition, processing, and regenerable disk
+caching belong to the core. Native clients trigger lazy loading and own
+image decoding/rendering for presentation. They may additionally keep a
+small platform-native memory cache.
+
+Background sync does not preload article images. Discovering an
+`image_url` during article-content processing records only the source
+metadata. Network acquisition begins only when a native client requests
+the image resource.
+
+Article images are optional enrichment. The absence or failure of an
+article image must degrade silently to the normal text-only article
+presentation and must not make article queries, synchronization, or the
+article itself fail.
+
+If an article has no discovered `image_url`, the native client does not
+request an image resource and immediately renders the text-only layout.
+No loading indicator or image placeholder is required for this state.
+
+If an `image_url` exists and no cached thumbnail is available, the native
+client may reserve the normal thumbnail area and present a subtle loading
+or skeleton state while requesting the resource from the core. If the
+core determines that no usable image is available, the native client
+removes that loading state and collapses to the normal text-only layout
+rather than presenting a broken-image error.
+
+The core stores only a normalized thumbnail, not the downloaded original
+article image. The original source is temporary processing input and is
+discarded after successful thumbnail generation.
+
+Normalized article thumbnails preserve aspect ratio and have a maximum
+longest edge of 640 pixels. The core must not stretch source images to a
+fixed aspect ratio. Native presentation remains responsible for clipping
+or cropping the normalized thumbnail into its UI-specific layout.
+
+The article-thumbnail disk cache is regenerable Core cache data and has a
+default maximum size of 1 GiB. Cache eviction is size-driven and
+approximately least-recently-used. Successful cached thumbnails have no
+fixed time-to-live merely because of age.
+
+Article-thumbnail cache lifetime is independent of article retention.
+Removing an article from durable article storage does not require an
+immediate corresponding thumbnail deletion. The bounded cache manages
+its own lifecycle and eventually evicts unused resources.
+
+Concurrent requests for the same article-image resource are deduplicated
+by the core so multiple native rows or clients do not cause duplicate
+network acquisition or processing.
+
+A cached thumbnail should be returned immediately when available. A
+known-unavailable resource should likewise be reported quickly so the
+native client can stop displaying its loading state.
+
+Permanent or resource-specific failures may be negatively cached for
+approximately 24 hours. This includes cases such as:
+
+-   HTTP 404 / resource not found;
+-   a successful response that is not an image;
+-   an image payload that cannot be decoded or normalized;
+-   an otherwise permanently invalid image resource.
+
+Transient transport/server failures must not receive the 24-hour
+negative-cache treatment. This includes at least:
+
+-   no network connectivity;
+-   DNS/connection failures;
+-   timeouts;
+-   transient 5xx responses;
+-   other failures classified by the core as automatically retryable.
+
+A transient failure may cause the current native presentation attempt to
+fall back to the text-only article layout, but a later request must remain
+eligible to retry.
+
+The core image-resource contract must distinguish a usable cached/fetched
+thumbnail from a known-unavailable resource and from structured transient
+or other operational errors. The architecture defines these semantics but
+does not require a particular UniFFI enum/record shape.
 
 Feed preferences have global defaults plus per-feed overrides. Current
 intended preferences include independent preview/full-text limits,
