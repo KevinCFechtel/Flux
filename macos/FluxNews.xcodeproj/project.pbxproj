@@ -1,11 +1,398 @@
 // !$*UTF8*$!
-{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
- A1 = {isa = PBXBuildFile; fileRef = B1; }; A2 = {isa = PBXBuildFile; fileRef = B2; }; A3 = {isa = PBXBuildFile; fileRef = B3; }; A4 = {isa = PBXBuildFile; fileRef = B4; }; A5 = {isa = PBXBuildFile; fileRef = B5; }; A6 = {isa = PBXBuildFile; fileRef = B6; }; A7 = {isa = PBXBuildFile; fileRef = B7; }; A8 = {isa = PBXBuildFile; fileRef = B8; }; A9 = {isa = PBXBuildFile; fileRef = B9; }; A10 = {isa = PBXBuildFile; fileRef = B10; }; A11 = {isa = PBXBuildFile; fileRef = B11; }; A12 = {isa = PBXBuildFile; fileRef = B12; }; A13 = {isa = PBXBuildFile; fileRef = B13; }; A14 = {isa = PBXBuildFile; fileRef = B14; }; A15 = {isa = PBXBuildFile; fileRef = B15; }; A16 = {isa = PBXBuildFile; fileRef = B16; }; A17 = {isa = PBXBuildFile; fileRef = B17; }; A18 = {isa = PBXBuildFile; fileRef = B5; }; A19 = {isa = PBXBuildFile; fileRef = F1; };
- B1 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsApp.swift; sourceTree = "<group>"; }; B2 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; }; B3 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserStore.swift; sourceTree = "<group>"; }; B4 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverContentView.swift; sourceTree = "<group>"; }; B5 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrolloverExposureTracker.swift; sourceTree = "<group>"; }; B6 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Generated/flux_uniffi.swift; sourceTree = "<group>"; }; B7 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardCommandObserver.swift; sourceTree = "<group>"; }; B8 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; }; B9 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcut.swift; sourceTree = "<group>"; }; B10 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouting.swift; sourceTree = "<group>"; }; B11 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntents.swift; sourceTree = "<group>"; }; B12 = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Build/AppIcon.icns; sourceTree = "<group>"; }; B13 = {isa = PBXFileReference; lastKnownFileType = image.svg; path = FluxNewsTemplate.svg; sourceTree = "<group>"; }; B14 = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; }; B15 = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; path = en.lproj/AppShortcuts.strings; sourceTree = "<group>"; }; B16 = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; path = de.lproj/AppShortcuts.strings; sourceTree = "<group>"; }; B17 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrolloverExposureTrackerTests.swift; sourceTree = "<group>"; }; BP = {isa = PBXFileReference; explicitFileType = wrapper.application; path = FluxNews.app; sourceTree = BUILT_PRODUCTS_DIR; }; BT = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = FluxNewsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; }; F1 = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
- G0 = {isa = PBXGroup; children = (G1,GT,G2,B12,F1); sourceTree = "<group>"; }; G1 = {isa = PBXGroup; children = (B1,B2,B3,B4,B5,B6,B7,B8,B9,B10,B11,B13,B14,B15,B16); path = FluxNews; sourceTree = "<group>"; }; GT = {isa = PBXGroup; children = (B17); path = FluxNewsTests; sourceTree = "<group>"; }; G2 = {isa = PBXGroup; children = (BP,BT); name = Products; sourceTree = "<group>"; };
- T0 = {isa = PBXNativeTarget; buildConfigurationList = C1; buildPhases = (P0,P1,P2,P3); name = FluxNews; productName = FluxNews; productReference = BP; productType = "com.apple.product-type.application"; }; T1 = {isa = PBXNativeTarget; buildConfigurationList = C2; buildPhases = (P4,P5); buildRules = (); dependencies = (TD0); name = FluxNewsTests; productName = FluxNewsTests; productReference = BT; productType = "com.apple.product-type.bundle.unit-test"; };
- R0 = {isa = PBXProject; buildConfigurationList = C0; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; mainGroup = G0; productRefGroup = G2; targets = (T0,T1); };
- P0 = {isa = PBXShellScriptBuildPhase; buildActionMask = 2147483647; files = (); name = "Generate UniFFI bindings"; outputPaths = ("$(SRCROOT)/FluxNews/Generated/flux_uniffi.swift"); shellPath = /bin/zsh; shellScript = "set -euo pipefail\nzsh \"${SRCROOT}/Build/build-uniffi.sh\"\n"; };
- P1 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A1,A2,A3,A4,A5,A6,A7,A8,A9,A10,A11); }; P2 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); }; P3 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A12,A13,A14,A15,A16); }; P4 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A17,A18); }; P5 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A19); };
- D0 = {isa = XCBuildConfiguration; buildSettings = {MACOSX_DEPLOYMENT_TARGET = 15.0; SDKROOT = macosx; SWIFT_VERSION = 5.0;}; name = Debug;}; R1 = {isa = XCBuildConfiguration; buildSettings = {MACOSX_DEPLOYMENT_TARGET = 15.0; SDKROOT = macosx; SWIFT_VERSION = 5.0;}; name = Release;}; D1 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; CURRENT_PROJECT_VERSION = 2; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = FluxNews/Info.plist; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 2.0.0; PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews; PRODUCT_NAME = FluxNews; SWIFT_OBJC_BRIDGING_HEADER = "FluxNews/FluxNews-Bridging-Header.h"; SWIFT_VERSION = 5.0; SWIFT_INCLUDE_PATHS = "$(SRCROOT)/FluxNews/Generated"; OTHER_LDFLAGS = ("$(SRCROOT)/../core/target/release/libflux_uniffi.dylib", "-rpath", "@executable_path/../Frameworks");}; name = Debug;}; R2 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; CURRENT_PROJECT_VERSION = 2; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = FluxNews/Info.plist; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 2.0.0; PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews; PRODUCT_NAME = FluxNews; SWIFT_OBJC_BRIDGING_HEADER = "FluxNews/FluxNews-Bridging-Header.h"; SWIFT_VERSION = 5.0; SWIFT_INCLUDE_PATHS = "$(SRCROOT)/FluxNews/Generated"; OTHER_LDFLAGS = ("$(SRCROOT)/../core/target/release/libflux_uniffi.dylib", "-rpath", "@executable_path/../Frameworks");}; name = Release;}; TD1 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNewsTests; PRODUCT_NAME = FluxNewsTests; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FluxNews.app/Contents/MacOS/FluxNews";}; name = Debug;}; TD2 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNewsTests; PRODUCT_NAME = FluxNewsTests; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FluxNews.app/Contents/MacOS/FluxNews";}; name = Release;}; C0 = {isa = XCConfigurationList; buildConfigurations = (D0,R1); defaultConfigurationName = Release;}; C1 = {isa = XCConfigurationList; buildConfigurations = (D1,R2); defaultConfigurationName = Debug;}; C2 = {isa = XCConfigurationList; buildConfigurations = (TD1,TD2); defaultConfigurationName = Debug;}; TD0 = {isa = PBXTargetDependency; target = T0; };
-}; rootObject = R0; }
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A1 /* FluxNewsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1 /* FluxNewsApp.swift */; };
+		A10 /* AppRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10 /* AppRouting.swift */; };
+		A11 /* AppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11 /* AppIntents.swift */; };
+		A12 /* Build/AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = B12 /* Build/AppIcon.icns */; };
+		A13 /* FluxNewsTemplate.svg in Resources */ = {isa = PBXBuildFile; fileRef = B13 /* FluxNewsTemplate.svg */; };
+		A14 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = B14 /* Localizable.xcstrings */; };
+		A15 /* en.lproj/AppShortcuts.strings in Resources */ = {isa = PBXBuildFile; fileRef = B15 /* en.lproj/AppShortcuts.strings */; };
+		A16 /* de.lproj/AppShortcuts.strings in Resources */ = {isa = PBXBuildFile; fileRef = B16 /* de.lproj/AppShortcuts.strings */; };
+		A17 /* ScrolloverExposureTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B17 /* ScrolloverExposureTrackerTests.swift */; };
+		A18 /* ScrolloverExposureTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5 /* ScrolloverExposureTracker.swift */; };
+		A19 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F1 /* XCTest.framework */; };
+		A2 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2 /* AppDelegate.swift */; };
+		A3 /* BrowserStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3 /* BrowserStore.swift */; };
+		A4 /* PopoverContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4 /* PopoverContentView.swift */; };
+		A5 /* ScrolloverExposureTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5 /* ScrolloverExposureTracker.swift */; };
+		A6 /* Generated/flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6 /* Generated/flux_uniffi.swift */; };
+		A7 /* KeyboardCommandObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7 /* KeyboardCommandObserver.swift */; };
+		A8 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8 /* CredentialStore.swift */; };
+		A9 /* GlobalShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9 /* GlobalShortcut.swift */; };
+		E184D499303DEC29009B16A3 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = E184D498303DEC29009B16A3 /* AppIcon.icon */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		E184D497303DEBC2009B16A3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = R0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = T0;
+			remoteInfo = FluxNews;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		B1 /* FluxNewsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsApp.swift; sourceTree = "<group>"; };
+		B10 /* AppRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouting.swift; sourceTree = "<group>"; };
+		B11 /* AppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntents.swift; sourceTree = "<group>"; };
+		B12 /* Build/AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Build/AppIcon.icns; sourceTree = "<group>"; };
+		B13 /* FluxNewsTemplate.svg */ = {isa = PBXFileReference; lastKnownFileType = image.svg; path = FluxNewsTemplate.svg; sourceTree = "<group>"; };
+		B14 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		B15 /* en.lproj/AppShortcuts.strings */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; path = en.lproj/AppShortcuts.strings; sourceTree = "<group>"; };
+		B16 /* de.lproj/AppShortcuts.strings */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; path = de.lproj/AppShortcuts.strings; sourceTree = "<group>"; };
+		B17 /* ScrolloverExposureTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrolloverExposureTrackerTests.swift; sourceTree = "<group>"; };
+		B2 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		B3 /* BrowserStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserStore.swift; sourceTree = "<group>"; };
+		B4 /* PopoverContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverContentView.swift; sourceTree = "<group>"; };
+		B5 /* ScrolloverExposureTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrolloverExposureTracker.swift; sourceTree = "<group>"; };
+		B6 /* Generated/flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Generated/flux_uniffi.swift; sourceTree = "<group>"; };
+		B7 /* KeyboardCommandObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardCommandObserver.swift; sourceTree = "<group>"; };
+		B8 /* CredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; };
+		B9 /* GlobalShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcut.swift; sourceTree = "<group>"; };
+		BP /* FluxNews.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = FluxNews.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		BT /* FluxNewsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = FluxNewsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E184D498303DEC29009B16A3 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
+		F1 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		P2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		P5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A19 /* XCTest.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		G0 = {
+			isa = PBXGroup;
+			children = (
+				G1 /* FluxNews */,
+				GT /* FluxNewsTests */,
+				G2 /* Products */,
+				B12 /* Build/AppIcon.icns */,
+				F1 /* XCTest.framework */,
+				E184D498303DEC29009B16A3 /* AppIcon.icon */,
+			);
+			sourceTree = "<group>";
+		};
+		G1 /* FluxNews */ = {
+			isa = PBXGroup;
+			children = (
+				B1 /* FluxNewsApp.swift */,
+				B2 /* AppDelegate.swift */,
+				B3 /* BrowserStore.swift */,
+				B4 /* PopoverContentView.swift */,
+				B5 /* ScrolloverExposureTracker.swift */,
+				B6 /* Generated/flux_uniffi.swift */,
+				B7 /* KeyboardCommandObserver.swift */,
+				B8 /* CredentialStore.swift */,
+				B9 /* GlobalShortcut.swift */,
+				B10 /* AppRouting.swift */,
+				B11 /* AppIntents.swift */,
+				B13 /* FluxNewsTemplate.svg */,
+				B14 /* Localizable.xcstrings */,
+				B15 /* en.lproj/AppShortcuts.strings */,
+				B16 /* de.lproj/AppShortcuts.strings */,
+			);
+			path = FluxNews;
+			sourceTree = "<group>";
+		};
+		G2 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				BP /* FluxNews.app */,
+				BT /* FluxNewsTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		GT /* FluxNewsTests */ = {
+			isa = PBXGroup;
+			children = (
+				B17 /* ScrolloverExposureTrackerTests.swift */,
+			);
+			path = FluxNewsTests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		T0 /* FluxNews */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C1 /* Build configuration list for PBXNativeTarget "FluxNews" */;
+			buildPhases = (
+				P0 /* Generate UniFFI bindings */,
+				P1 /* Sources */,
+				P2 /* Frameworks */,
+				P3 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = FluxNews;
+			productName = FluxNews;
+			productReference = BP /* FluxNews.app */;
+			productType = "com.apple.product-type.application";
+		};
+		T1 /* FluxNewsTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C2 /* Build configuration list for PBXNativeTarget "FluxNewsTests" */;
+			buildPhases = (
+				P4 /* Sources */,
+				P5 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				TD0 /* PBXTargetDependency */,
+			);
+			name = FluxNewsTests;
+			productName = FluxNewsTests;
+			productReference = BT /* FluxNewsTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		R0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+			};
+			buildConfigurationList = C0 /* Build configuration list for PBXProject "FluxNews" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = G0;
+			productRefGroup = G2 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				T0 /* FluxNews */,
+				T1 /* FluxNewsTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		P3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A12 /* Build/AppIcon.icns in Resources */,
+				A13 /* FluxNewsTemplate.svg in Resources */,
+				A14 /* Localizable.xcstrings in Resources */,
+				A15 /* en.lproj/AppShortcuts.strings in Resources */,
+				A16 /* de.lproj/AppShortcuts.strings in Resources */,
+				E184D499303DEC29009B16A3 /* AppIcon.icon in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		P0 /* Generate UniFFI bindings */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Generate UniFFI bindings";
+			outputPaths = (
+				"$(SRCROOT)/FluxNews/Generated/flux_uniffi.swift",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/zsh;
+			shellScript = "set -euo pipefail\nzsh \"${SRCROOT}/Build/build-uniffi.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		P1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1 /* FluxNewsApp.swift in Sources */,
+				A2 /* AppDelegate.swift in Sources */,
+				A3 /* BrowserStore.swift in Sources */,
+				A4 /* PopoverContentView.swift in Sources */,
+				A5 /* ScrolloverExposureTracker.swift in Sources */,
+				A6 /* Generated/flux_uniffi.swift in Sources */,
+				A7 /* KeyboardCommandObserver.swift in Sources */,
+				A8 /* CredentialStore.swift in Sources */,
+				A9 /* GlobalShortcut.swift in Sources */,
+				A10 /* AppRouting.swift in Sources */,
+				A11 /* AppIntents.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		P4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A17 /* ScrolloverExposureTrackerTests.swift in Sources */,
+				A18 /* ScrolloverExposureTracker.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		TD0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = T0 /* FluxNews */;
+			targetProxy = E184D497303DEBC2009B16A3 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		D0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		D1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				CODE_SIGNING_ALLOWED = NO;
+				CURRENT_PROJECT_VERSION = 2;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = FluxNews/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 2.0.0;
+				OTHER_LDFLAGS = (
+					"$(SRCROOT)/../core/target/release/libflux_uniffi.dylib",
+					"-rpath",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews;
+				PRODUCT_NAME = FluxNews;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/FluxNews/Generated";
+				SWIFT_OBJC_BRIDGING_HEADER = "FluxNews/FluxNews-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		R1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		R2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				CODE_SIGNING_ALLOWED = NO;
+				CURRENT_PROJECT_VERSION = 2;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = FluxNews/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 2.0.0;
+				OTHER_LDFLAGS = (
+					"$(SRCROOT)/../core/target/release/libflux_uniffi.dylib",
+					"-rpath",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews;
+				PRODUCT_NAME = FluxNews;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/FluxNews/Generated";
+				SWIFT_OBJC_BRIDGING_HEADER = "FluxNews/FluxNews-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		TD1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNewsTests;
+				PRODUCT_NAME = FluxNewsTests;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FluxNews.app/Contents/MacOS/FluxNews";
+			};
+			name = Debug;
+		};
+		TD2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNewsTests;
+				PRODUCT_NAME = FluxNewsTests;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FluxNews.app/Contents/MacOS/FluxNews";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		C0 /* Build configuration list for PBXProject "FluxNews" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D0 /* Debug */,
+				R1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C1 /* Build configuration list for PBXNativeTarget "FluxNews" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D1 /* Debug */,
+				R2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C2 /* Build configuration list for PBXNativeTarget "FluxNewsTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				TD1 /* Debug */,
+				TD2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = R0 /* Project object */;
+}
