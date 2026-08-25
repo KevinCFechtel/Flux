@@ -201,6 +201,44 @@ pub enum SaveToServiceResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiscoverSubscriptionsRequest {
+    pub url: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub user_agent: Option<String>,
+    pub fetch_via_proxy: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiscoveredSubscription {
+    pub url: String,
+    pub title: String,
+    pub feed_type: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreateFeedRequest {
+    pub feed_url: String,
+    pub category_id: Option<i64>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub crawler: Option<bool>,
+    pub user_agent: Option<String>,
+    pub scraper_rules: Option<String>,
+    pub rewrite_rules: Option<String>,
+    pub blocklist_rules: Option<String>,
+    pub keeplist_rules: Option<String>,
+    pub disabled: Option<bool>,
+    pub ignore_http_cache: Option<bool>,
+    pub fetch_via_proxy: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreateFeedResult {
+    pub feed_id: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CoreEvent {
     ArticleReadStateChanged {
         article_id: i64,

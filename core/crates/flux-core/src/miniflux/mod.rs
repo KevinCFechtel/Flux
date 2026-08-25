@@ -5,7 +5,10 @@ use std::io::Read;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use crate::domain::{Article, Category, CoreError, Feed, SaveToServiceResult};
+use crate::domain::{
+    Article, Category, CoreError, CreateFeedRequest, CreateFeedResult,
+    DiscoverSubscriptionsRequest, DiscoveredSubscription, Feed, SaveToServiceResult,
+};
 use chrono::{DateTime, SecondsFormat};
 use serde::Deserialize;
 
@@ -29,6 +32,15 @@ pub trait RemoteSource: Send + Sync {
     fn set_starred_state(&self, article_id: i64, starred: bool) -> Result<(), CoreError>;
     fn save_to_service(&self, _article_id: i64) -> Result<SaveToServiceResult, CoreError> {
         Err(CoreError::data("save-to-service is unavailable"))
+    }
+    fn discover_subscriptions(
+        &self,
+        _request: DiscoverSubscriptionsRequest,
+    ) -> Result<Vec<DiscoveredSubscription>, CoreError> {
+        Err(CoreError::data("feed discovery is unavailable"))
+    }
+    fn create_feed(&self, _request: CreateFeedRequest) -> Result<CreateFeedResult, CoreError> {
+        Err(CoreError::data("feed creation is unavailable"))
     }
     fn fetch_feed_icon(&self, _feed_id: i64) -> Result<Option<String>, CoreError> {
         Err(CoreError::data("feed icon acquisition is unavailable"))
@@ -188,6 +200,77 @@ impl MinifluxClient {
                 Err(error)
             }
         }
+    }
+    fn post_json<T: for<'a> Deserialize<'a>>(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+        expected_status: u16,
+    ) -> Result<T, CoreError> {
+        let _request = self
+            .request_lock
+            .lock()
+            .map_err(|_| CoreError::internal("HTTP client lock poisoned"))?;
+        let body = serde_json::to_string(&body)
+            .map_err(|error| CoreError::internal(format!("encode Miniflux request: {error}")))?;
+        let started = Instant::now();
+        tracing::debug!(target: "miniflux", "request started endpoint={path}");
+        let response = match self
+            .agent
+            .post(&format!("{}{path}", self.base_url))
+            .set("Content-Type", "application/json")
+            .set("X-Auth-Token", &self.api_key)
+            .send_string(&body)
+            .map_err(map_http_error)
+        {
+            Ok(response) => response,
+            Err(error) => {
+                tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
+                return Err(error);
+            }
+        };
+        if response.status() != expected_status {
+            let error = CoreError::data(format!(
+                "Miniflux returned unexpected HTTP {}",
+                response.status()
+            ));
+            tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
+            return Err(error);
+        }
+        let decoded = serde_json::from_reader(response.into_reader())
+            .map_err(|error| CoreError::data(format!("invalid Miniflux response: {error}")));
+        match decoded {
+            Ok(value) => {
+                tracing::debug!(target: "miniflux", "request completed endpoint={} elapsed_ms={}", path, started.elapsed().as_millis());
+                Ok(value)
+            }
+            Err(error) => {
+                tracing::warn!(target: "miniflux", "response decoding failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
+                Err(error)
+            }
+        }
+    }
+    fn discover_subscriptions(
+        &self,
+        request: DiscoverSubscriptionsRequest,
+    ) -> Result<Vec<DiscoveredSubscription>, CoreError> {
+        let response: Vec<DiscoveredSubscriptionDto> =
+            self.post_json("/v1/discover", discovery_request_json(request), 200)?;
+        Ok(response
+            .into_iter()
+            .map(|subscription| DiscoveredSubscription {
+                url: subscription.url,
+                title: subscription.title,
+                feed_type: subscription.feed_type,
+            })
+            .collect())
+    }
+    fn create_feed(&self, request: CreateFeedRequest) -> Result<CreateFeedResult, CoreError> {
+        let response: CreateFeedDto =
+            self.post_json("/v1/feeds", create_feed_request_json(request), 201)?;
+        Ok(CreateFeedResult {
+            feed_id: response.feed_id,
+        })
     }
     fn entries(&self, status: Option<&str>, starred: bool) -> Result<Vec<EntryDto>, CoreError> {
         let set = if starred {
@@ -359,6 +442,15 @@ impl RemoteSource for MinifluxClient {
     fn save_to_service(&self, article_id: i64) -> Result<SaveToServiceResult, CoreError> {
         MinifluxClient::save_to_service(self, article_id)
     }
+    fn discover_subscriptions(
+        &self,
+        request: DiscoverSubscriptionsRequest,
+    ) -> Result<Vec<DiscoveredSubscription>, CoreError> {
+        MinifluxClient::discover_subscriptions(self, request)
+    }
+    fn create_feed(&self, request: CreateFeedRequest) -> Result<CreateFeedResult, CoreError> {
+        MinifluxClient::create_feed(self, request)
+    }
     fn fetch_feed_icon(&self, feed_id: i64) -> Result<Option<String>, CoreError> {
         let icon: IconDto = match self.get(&format!("/v1/feeds/{feed_id}/icon"), &[]) {
             Ok(icon) => icon,
@@ -461,6 +553,69 @@ struct ErrorDto {
     #[serde(default)]
     error_message: String,
 }
+#[derive(Deserialize)]
+struct CreateFeedDto {
+    feed_id: i64,
+}
+#[derive(Deserialize)]
+struct DiscoveredSubscriptionDto {
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    title: String,
+    #[serde(rename = "type", default)]
+    feed_type: String,
+}
+
+fn discovery_request_json(request: DiscoverSubscriptionsRequest) -> serde_json::Value {
+    let mut body = serde_json::Map::new();
+    body.insert("url".into(), request.url.into());
+    insert_optional_string(&mut body, "username", request.username);
+    insert_optional_string(&mut body, "password", request.password);
+    insert_optional_string(&mut body, "user_agent", request.user_agent);
+    insert_optional_bool(&mut body, "fetch_via_proxy", request.fetch_via_proxy);
+    body.into()
+}
+
+fn create_feed_request_json(request: CreateFeedRequest) -> serde_json::Value {
+    let mut body = serde_json::Map::new();
+    body.insert("feed_url".into(), request.feed_url.into());
+    if let Some(category_id) = request.category_id {
+        body.insert("category_id".into(), category_id.into());
+    }
+    insert_optional_string(&mut body, "username", request.username);
+    insert_optional_string(&mut body, "password", request.password);
+    insert_optional_bool(&mut body, "crawler", request.crawler);
+    insert_optional_string(&mut body, "user_agent", request.user_agent);
+    insert_optional_string(&mut body, "scraper_rules", request.scraper_rules);
+    insert_optional_string(&mut body, "rewrite_rules", request.rewrite_rules);
+    insert_optional_string(&mut body, "blocklist_rules", request.blocklist_rules);
+    insert_optional_string(&mut body, "keeplist_rules", request.keeplist_rules);
+    insert_optional_bool(&mut body, "disabled", request.disabled);
+    insert_optional_bool(&mut body, "ignore_http_cache", request.ignore_http_cache);
+    insert_optional_bool(&mut body, "fetch_via_proxy", request.fetch_via_proxy);
+    body.into()
+}
+
+fn insert_optional_string(
+    body: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<String>,
+) {
+    if let Some(value) = value {
+        body.insert(key.into(), value.into());
+    }
+}
+
+fn insert_optional_bool(
+    body: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<bool>,
+) {
+    if let Some(value) = value {
+        body.insert(key.into(), value.into());
+    }
+}
 impl IconDto {
     fn data_url(self) -> Option<String> {
         let data = self.data?.trim().to_string();
@@ -534,6 +689,47 @@ mod tests {
                 write!(stream, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
             }
             targets
+        });
+        (address, worker)
+    }
+
+    fn json_server(
+        responses: Vec<(u16, String)>,
+    ) -> (
+        SocketAddr,
+        thread::JoinHandle<Vec<(String, String, serde_json::Value)>>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let worker = thread::spawn(move || {
+            let mut requests = Vec::new();
+            for (status, body) in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut request_line = String::new();
+                reader.read_line(&mut request_line).unwrap();
+                let mut content_length = 0;
+                loop {
+                    let mut header = String::new();
+                    reader.read_line(&mut header).unwrap();
+                    if header == "\r\n" {
+                        break;
+                    }
+                    if let Some(value) = header.strip_prefix("Content-Length: ") {
+                        content_length = value.trim().parse().unwrap();
+                    }
+                }
+                let mut request_body = vec![0; content_length];
+                std::io::Read::read_exact(&mut reader, &mut request_body).unwrap();
+                let mut parts = request_line.split_whitespace();
+                requests.push((
+                    parts.next().unwrap().into(),
+                    parts.next().unwrap().into(),
+                    serde_json::from_slice(&request_body).unwrap(),
+                ));
+                write!(stream, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+            }
+            requests
         });
         (address, worker)
     }
@@ -668,6 +864,195 @@ mod tests {
         assert_eq!(error.kind, crate::domain::CoreErrorKind::ServerTransient);
         assert_eq!(error.message, "Miniflux server returned HTTP 500");
         assert_eq!(worker.join().unwrap(), vec!["/v1/entries/42/save"]);
+    }
+
+    #[test]
+    fn create_feed_sends_only_the_required_field_when_options_are_omitted() {
+        let (address, worker) = json_server(vec![(201, r#"{"feed_id":42}"#.into())]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        assert_eq!(
+            client
+                .create_feed(CreateFeedRequest {
+                    feed_url: "https://example.test/feed.xml".into(),
+                    category_id: None,
+                    username: None,
+                    password: None,
+                    crawler: None,
+                    user_agent: None,
+                    scraper_rules: None,
+                    rewrite_rules: None,
+                    blocklist_rules: None,
+                    keeplist_rules: None,
+                    disabled: None,
+                    ignore_http_cache: None,
+                    fetch_via_proxy: None,
+                })
+                .unwrap(),
+            CreateFeedResult { feed_id: 42 }
+        );
+        assert_eq!(
+            worker.join().unwrap(),
+            vec![(
+                "POST".into(),
+                "/v1/feeds".into(),
+                serde_json::json!({"feed_url": "https://example.test/feed.xml"}),
+            )]
+        );
+    }
+
+    #[test]
+    fn create_feed_preserves_all_supplied_optional_fields() {
+        let (address, worker) = json_server(vec![(201, r#"{"feed_id":43}"#.into())]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        client
+            .create_feed(CreateFeedRequest {
+                feed_url: "https://example.test/feed.xml".into(),
+                category_id: Some(7),
+                username: Some("feed-user".into()),
+                password: Some("feed-password".into()),
+                crawler: Some(false),
+                user_agent: Some("Flux Test".into()),
+                scraper_rules: Some("article".into()),
+                rewrite_rules: Some("replace".into()),
+                blocklist_rules: Some("ads".into()),
+                keeplist_rules: Some("main".into()),
+                disabled: Some(false),
+                ignore_http_cache: Some(true),
+                fetch_via_proxy: Some(false),
+            })
+            .unwrap();
+
+        assert_eq!(
+            worker.join().unwrap()[0].2,
+            serde_json::json!({
+                "feed_url": "https://example.test/feed.xml",
+                "category_id": 7,
+                "username": "feed-user",
+                "password": "feed-password",
+                "crawler": false,
+                "user_agent": "Flux Test",
+                "scraper_rules": "article",
+                "rewrite_rules": "replace",
+                "blocklist_rules": "ads",
+                "keeplist_rules": "main",
+                "disabled": false,
+                "ignore_http_cache": true,
+                "fetch_via_proxy": false,
+            })
+        );
+    }
+
+    #[test]
+    fn create_feed_reports_server_failures() {
+        let (address, worker) = json_server(vec![(500, String::new())]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        let error = client
+            .create_feed(CreateFeedRequest {
+                feed_url: "https://example.test/feed.xml".into(),
+                category_id: None,
+                username: None,
+                password: None,
+                crawler: None,
+                user_agent: None,
+                scraper_rules: None,
+                rewrite_rules: None,
+                blocklist_rules: None,
+                keeplist_rules: None,
+                disabled: None,
+                ignore_http_cache: None,
+                fetch_via_proxy: None,
+            })
+            .unwrap_err();
+
+        assert_eq!(error.kind, crate::domain::CoreErrorKind::ServerTransient);
+        assert_eq!(worker.join().unwrap()[0].1, "/v1/feeds");
+    }
+
+    #[test]
+    fn discovery_returns_multiple_candidates() {
+        let response = r#"[{"url":"https://example.test/atom","title":"Atom","type":"atom"},{"url":"https://example.test/rss","title":"RSS","type":"rss"}]"#;
+        let (address, worker) = json_server(vec![(200, response.into())]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        assert_eq!(
+            client
+                .discover_subscriptions(DiscoverSubscriptionsRequest {
+                    url: "https://example.test".into(),
+                    username: Some("feed-user".into()),
+                    password: Some("feed-password".into()),
+                    user_agent: Some("Flux Test".into()),
+                    fetch_via_proxy: Some(false),
+                })
+                .unwrap(),
+            vec![
+                DiscoveredSubscription {
+                    url: "https://example.test/atom".into(),
+                    title: "Atom".into(),
+                    feed_type: "atom".into()
+                },
+                DiscoveredSubscription {
+                    url: "https://example.test/rss".into(),
+                    title: "RSS".into(),
+                    feed_type: "rss".into()
+                },
+            ]
+        );
+        assert_eq!(
+            worker.join().unwrap()[0],
+            (
+                "POST".into(),
+                "/v1/discover".into(),
+                serde_json::json!({
+                    "url": "https://example.test",
+                    "username": "feed-user",
+                    "password": "feed-password",
+                    "user_agent": "Flux Test",
+                    "fetch_via_proxy": false,
+                }),
+            )
+        );
+    }
+
+    #[test]
+    fn discovery_accepts_no_candidates() {
+        let (address, worker) = json_server(vec![(200, "[]".into())]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        assert!(
+            client
+                .discover_subscriptions(DiscoverSubscriptionsRequest {
+                    url: "https://example.test".into(),
+                    username: None,
+                    password: None,
+                    user_agent: None,
+                    fetch_via_proxy: None,
+                })
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(worker.join().unwrap()[0].1, "/v1/discover");
+    }
+
+    #[test]
+    fn discovery_reports_server_failures() {
+        let (address, worker) = json_server(vec![(500, String::new())]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        let error = client
+            .discover_subscriptions(DiscoverSubscriptionsRequest {
+                url: "https://example.test".into(),
+                username: None,
+                password: None,
+                user_agent: None,
+                fetch_via_proxy: None,
+            })
+            .unwrap_err();
+
+        assert_eq!(error.kind, crate::domain::CoreErrorKind::ServerTransient);
+        assert_eq!(worker.join().unwrap()[0].1, "/v1/discover");
     }
 
     #[test]

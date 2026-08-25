@@ -152,6 +152,40 @@ pub enum DeliveryDisposition {
 pub struct MutationResult {
     pub disposition: DeliveryDisposition,
 }
+#[derive(uniffi::Record)]
+pub struct DiscoverSubscriptionsRequest {
+    pub url: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub user_agent: Option<String>,
+    pub fetch_via_proxy: Option<bool>,
+}
+#[derive(uniffi::Record)]
+pub struct DiscoveredSubscription {
+    pub url: String,
+    pub title: String,
+    pub feed_type: String,
+}
+#[derive(uniffi::Record)]
+pub struct CreateFeedRequest {
+    pub feed_url: String,
+    pub category_id: Option<i64>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub crawler: Option<bool>,
+    pub user_agent: Option<String>,
+    pub scraper_rules: Option<String>,
+    pub rewrite_rules: Option<String>,
+    pub blocklist_rules: Option<String>,
+    pub keeplist_rules: Option<String>,
+    pub disabled: Option<bool>,
+    pub ignore_http_cache: Option<bool>,
+    pub fetch_via_proxy: Option<bool>,
+}
+#[derive(uniffi::Record)]
+pub struct CreateFeedResult {
+    pub feed_id: i64,
+}
 #[derive(uniffi::Enum)]
 pub enum SaveToServiceResult {
     Saved,
@@ -385,6 +419,21 @@ impl Flux {
             .map(Into::into)
             .map_err(map_error)
     }
+    pub fn discover_subscriptions(
+        &self,
+        request: DiscoverSubscriptionsRequest,
+    ) -> Result<Vec<DiscoveredSubscription>, FluxError> {
+        self.core
+            .discover_subscriptions(request.into())
+            .map(|subscriptions| subscriptions.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn create_feed(&self, request: CreateFeedRequest) -> Result<CreateFeedResult, FluxError> {
+        self.core
+            .create_feed(request.into())
+            .map(Into::into)
+            .map_err(map_error)
+    }
     pub fn subscribe_events(
         &self,
         listener: Arc<dyn EventListener>,
@@ -513,6 +562,52 @@ impl From<domain::SaveToServiceResult> for SaveToServiceResult {
         match value {
             domain::SaveToServiceResult::Saved => Self::Saved,
             domain::SaveToServiceResult::NoIntegrationConfigured => Self::NoIntegrationConfigured,
+        }
+    }
+}
+impl From<DiscoverSubscriptionsRequest> for domain::DiscoverSubscriptionsRequest {
+    fn from(value: DiscoverSubscriptionsRequest) -> Self {
+        Self {
+            url: value.url,
+            username: value.username,
+            password: value.password,
+            user_agent: value.user_agent,
+            fetch_via_proxy: value.fetch_via_proxy,
+        }
+    }
+}
+impl From<domain::DiscoveredSubscription> for DiscoveredSubscription {
+    fn from(value: domain::DiscoveredSubscription) -> Self {
+        Self {
+            url: value.url,
+            title: value.title,
+            feed_type: value.feed_type,
+        }
+    }
+}
+impl From<CreateFeedRequest> for domain::CreateFeedRequest {
+    fn from(value: CreateFeedRequest) -> Self {
+        Self {
+            feed_url: value.feed_url,
+            category_id: value.category_id,
+            username: value.username,
+            password: value.password,
+            crawler: value.crawler,
+            user_agent: value.user_agent,
+            scraper_rules: value.scraper_rules,
+            rewrite_rules: value.rewrite_rules,
+            blocklist_rules: value.blocklist_rules,
+            keeplist_rules: value.keeplist_rules,
+            disabled: value.disabled,
+            ignore_http_cache: value.ignore_http_cache,
+            fetch_via_proxy: value.fetch_via_proxy,
+        }
+    }
+}
+impl From<domain::CreateFeedResult> for CreateFeedResult {
+    fn from(value: domain::CreateFeedResult) -> Self {
+        Self {
+            feed_id: value.feed_id,
         }
     }
 }

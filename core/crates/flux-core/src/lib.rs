@@ -21,9 +21,10 @@ use chrono::{DateTime, Utc};
 use diagnostics::{CoreDiagnosticListener, Diagnostics};
 use domain::{
     ArticleQuery, ArticleSummary, ArticleThumbnailResult, CoreError, CoreErrorKind, CoreEvent,
-    DeliveryDisposition, DeliveryMode, FeedIcon, FeedIconVariant, MutationField, MutationResult,
-    NavigationCatalog, RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult, SyncCompleted,
-    SyncFailure, SyncReason,
+    CreateFeedRequest, CreateFeedResult, DeliveryDisposition, DeliveryMode,
+    DiscoverSubscriptionsRequest, DiscoveredSubscription, FeedIcon, FeedIconVariant, MutationField,
+    MutationResult, NavigationCatalog, RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult,
+    SyncCompleted, SyncFailure, SyncReason,
 };
 use miniflux::{MinifluxClient, RemoteSource};
 use storage::Store;
@@ -326,6 +327,29 @@ impl FluxCore {
         }
         let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
             self.remote.save_to_service(article_id)
+        });
+        self.diagnostics.flush();
+        result
+    }
+    pub fn discover_subscriptions(
+        &self,
+        request: DiscoverSubscriptionsRequest,
+    ) -> Result<Vec<DiscoveredSubscription>, CoreError> {
+        if request.url.trim().is_empty() {
+            return Err(CoreError::data("discovery URL must not be empty"));
+        }
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            self.remote.discover_subscriptions(request)
+        });
+        self.diagnostics.flush();
+        result
+    }
+    pub fn create_feed(&self, request: CreateFeedRequest) -> Result<CreateFeedResult, CoreError> {
+        if request.feed_url.trim().is_empty() {
+            return Err(CoreError::data("feed URL must not be empty"));
+        }
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            self.remote.create_feed(request)
         });
         self.diagnostics.flush();
         result
