@@ -16,6 +16,7 @@ final class BrowserStore: ObservableObject {
     @Published var selectionTotal: UInt64 = 0
     @Published var categorySidebarCounts: [Int64: UInt64] = [:]
     @Published var feedSidebarCounts: [Int64: UInt64] = [:]
+    @Published private(set) var feedIcons: [String: Data] = [:]
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var scope: BrowserScope = .all
@@ -39,6 +40,7 @@ final class BrowserStore: ObservableObject {
     private var hasMeaningfullyInteracted = false
     private var sharingPicker: NSSharingServicePicker?
     private var undoExpiry: Task<Void, Never>?
+    private var requestedFeedIcons = Set<String>()
 
     init() {
         markReadOnScrolloverEnabled = UserDefaults.standard.object(forKey: "FluxNews.markReadOnScrollover") as? Bool ?? true
@@ -108,6 +110,22 @@ final class BrowserStore: ObservableObject {
         } catch { errorMessage = String(describing: error) }
     }
     func reloadNavigationAndCounts() { reloadNavigation(); reloadCounts() }
+    func requestFeedIcon(_ feedID: Int64, darkAppearance: Bool) {
+        let key = "\(feedID)-\(darkAppearance ? "dark" : "normal")"
+        guard feedIcons[key] == nil, requestedFeedIcons.insert(key).inserted, let core else { return }
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            do {
+                let variant: FeedIconVariant = darkAppearance ? .dark : .normal
+                let icon = try core.feedIcon(feedId: feedID, variant: variant)
+                await MainActor.run {
+                    if let icon { store.value?.feedIcons[key] = Data(icon.pngData) }
+                }
+            } catch {
+                // Feed icon acquisition is advisory; retain the native fallback.
+            }
+        }
+    }
     func select(_ scope: BrowserScope) { self.scope = scope; resetPresentation(); reloadVisibleArticles() }
     func route(to route: NavigationRoute) {
         switch route {

@@ -296,7 +296,7 @@ private struct NavigationSidebar: View {
         Button { store.select(item.scope) } label: {
             HStack(spacing: 8) {
                 if let image = item.systemImage { Image(systemName: image).frame(width: 16) }
-                else if item.feedID != nil { FeedIconSlot() }
+                else if let feedID = item.feedID { FeedIconSlot(feedID: feedID, store: store) }
                 Text(item.title).lineLimit(1)
                 Spacer(minLength: 0)
             }
@@ -381,7 +381,7 @@ private struct ArticleItem: View {
     }
     private var metadata: some View {
         HStack(spacing: 5) {
-            FeedIconSlot()
+            FeedIconSlot(feedID: article.feedId, store: store)
             Text(article.feedTitle).lineLimit(1)
             Text("·")
             Text(relativeDate)
@@ -432,8 +432,25 @@ private struct ThumbnailSlot: View {
 }
 
 private struct FeedIconSlot: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let feedID: Int64
+    @ObservedObject var store: BrowserStore
     var body: some View {
-        Image(systemName: "dot.radiowaves.left.and.right").foregroundStyle(.secondary).frame(width: 16, height: 16).accessibilityLabel("Feed icon")
+        let dark = colorScheme == .dark
+        let key = "\(feedID)-\(dark ? "dark" : "normal")"
+        Group {
+            if let data = store.feedIcons[key], let image = NSImage(data: data) {
+                Image(nsImage: image).resizable().interpolation(.high).scaledToFit()
+            } else {
+                Image(systemName: "dot.radiowaves.left.and.right").foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 16, height: 16)
+        .accessibilityLabel("Feed icon")
+        .onAppear { store.requestFeedIcon(feedID, darkAppearance: dark) }
+        .onChange(of: colorScheme) { _, appearance in
+            store.requestFeedIcon(feedID, darkAppearance: appearance == .dark)
+        }
     }
 }
 

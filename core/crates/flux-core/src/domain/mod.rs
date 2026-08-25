@@ -13,6 +13,20 @@ pub struct Feed {
     pub title: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FeedIconVariant {
+    Normal,
+    Dark,
+}
+
+/// A normalized 32x32 PNG owned by the core cache.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FeedIcon {
+    pub feed_id: i64,
+    pub variant: FeedIconVariant,
+    pub png_data: Vec<u8>,
+}
+
 /// Flexible local representation aligned with Miniflux's source article data.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Article {

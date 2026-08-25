@@ -21,6 +21,9 @@ pub trait RemoteSource: Send + Sync {
     fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError>;
     fn set_read_state(&self, article_ids: &[i64], read: bool) -> Result<(), CoreError>;
     fn set_starred_state(&self, article_id: i64, starred: bool) -> Result<(), CoreError>;
+    fn fetch_feed_icon(&self, _feed_id: i64) -> Result<Option<String>, CoreError> {
+        Err(CoreError::data("feed icon acquisition is unavailable"))
+    }
 }
 
 pub struct MinifluxClient {
@@ -268,6 +271,10 @@ impl RemoteSource for MinifluxClient {
             Ok(())
         }
     }
+    fn fetch_feed_icon(&self, feed_id: i64) -> Result<Option<String>, CoreError> {
+        let icon: IconDto = self.get(&format!("/v1/feeds/{feed_id}/icon"), &[])?;
+        Ok((!icon.data.trim().is_empty()).then_some(icon.data))
+    }
 }
 
 fn map_http_error(error: ureq::Error) -> CoreError {
@@ -335,6 +342,11 @@ struct FeedDto {
 #[derive(Deserialize)]
 struct CategoryRefDto {
     id: i64,
+}
+#[derive(Deserialize)]
+struct IconDto {
+    #[serde(default)]
+    data: String,
 }
 
 #[cfg(test)]
@@ -418,5 +430,33 @@ mod tests {
         );
         assert!(targets.iter().any(|target| target.contains("starred=1")));
         assert!(!targets.iter().any(|target| target.contains("status=read")));
+    }
+    #[test]
+    fn fetches_feed_icon_data_url() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut request = String::new();
+            reader.read_line(&mut request).unwrap();
+            while !request.ends_with("\r\n\r\n") {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                request.push_str(&line);
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            assert!(request.starts_with("GET /v1/feeds/9/icon HTTP/1.1"));
+            let body = r#"{"id":9,"data":"data:image/png;base64,AA=="}"#;
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+        });
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+        assert_eq!(
+            client.fetch_feed_icon(9).unwrap().as_deref(),
+            Some("data:image/png;base64,AA==")
+        );
+        worker.join().unwrap();
     }
 }

@@ -87,6 +87,17 @@ pub struct Feed {
     pub category_id: i64,
     pub title: String,
 }
+#[derive(uniffi::Enum)]
+pub enum FeedIconVariant {
+    Normal,
+    Dark,
+}
+#[derive(uniffi::Record)]
+pub struct FeedIcon {
+    pub feed_id: i64,
+    pub variant: FeedIconVariant,
+    pub png_data: Vec<u8>,
+}
 #[derive(uniffi::Record)]
 pub struct NavigationCatalog {
     pub categories: Vec<Category>,
@@ -288,6 +299,16 @@ impl Flux {
         self.core
             .navigation_catalog()
             .map(Into::into)
+            .map_err(map_error)
+    }
+    pub fn feed_icon(
+        &self,
+        feed_id: i64,
+        variant: FeedIconVariant,
+    ) -> Result<Option<FeedIcon>, FluxError> {
+        self.core
+            .feed_icon(feed_id, variant.into())
+            .map(|icon| icon.map(Into::into))
             .map_err(map_error)
     }
     pub fn last_successful_sync_at(&self) -> Result<Option<String>, FluxError> {
@@ -590,6 +611,31 @@ impl From<domain::Feed> for Feed {
             id: value.id,
             category_id: value.category_id,
             title: value.title,
+        }
+    }
+}
+impl From<FeedIconVariant> for domain::FeedIconVariant {
+    fn from(value: FeedIconVariant) -> Self {
+        match value {
+            FeedIconVariant::Normal => Self::Normal,
+            FeedIconVariant::Dark => Self::Dark,
+        }
+    }
+}
+impl From<domain::FeedIconVariant> for FeedIconVariant {
+    fn from(value: domain::FeedIconVariant) -> Self {
+        match value {
+            domain::FeedIconVariant::Normal => Self::Normal,
+            domain::FeedIconVariant::Dark => Self::Dark,
+        }
+    }
+}
+impl From<domain::FeedIcon> for FeedIcon {
+    fn from(value: domain::FeedIcon) -> Self {
+        Self {
+            feed_id: value.feed_id,
+            variant: value.variant.into(),
+            png_data: value.png_data,
         }
     }
 }

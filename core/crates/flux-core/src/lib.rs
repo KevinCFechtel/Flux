@@ -3,6 +3,7 @@
 pub mod article;
 pub mod diagnostics;
 pub mod domain;
+mod feed_icon;
 pub mod miniflux;
 pub mod mutations;
 pub mod queries;
@@ -19,8 +20,8 @@ use chrono::{DateTime, Utc};
 use diagnostics::{CoreDiagnosticListener, Diagnostics};
 use domain::{
     ArticleQuery, ArticleSummary, CoreError, CoreErrorKind, CoreEvent, DeliveryDisposition,
-    DeliveryMode, MutationField, MutationResult, NavigationCatalog, RuntimeHealth,
-    RuntimeHealthStatus, SyncCompleted, SyncFailure, SyncReason,
+    DeliveryMode, FeedIcon, FeedIconVariant, MutationField, MutationResult, NavigationCatalog,
+    RuntimeHealth, RuntimeHealthStatus, SyncCompleted, SyncFailure, SyncReason,
 };
 use miniflux::{MinifluxClient, RemoteSource};
 use storage::Store;
@@ -39,6 +40,7 @@ pub struct CoreConfig {
 pub struct FluxCore {
     store: Arc<Store>,
     remote: Arc<dyn RemoteSource>,
+    feed_icons: feed_icon::FeedIconService,
     sync_gate: Mutex<()>,
     delivery_mode: Mutex<DeliveryMode>,
     runtime: Mutex<DeliveryRuntime>,
@@ -82,9 +84,10 @@ impl FluxCore {
             )?);
             store.set_base_url(&config.base_url)?;
             let remote = Arc::new(MinifluxClient::new(&config.base_url, &config.api_key)?);
-            Ok::<_, CoreError>((store, remote))
+            let feed_icons = feed_icon::FeedIconService::new(config.cache.clone())?;
+            Ok::<_, CoreError>((store, remote, feed_icons))
         });
-        let (store, remote) = match result {
+        let (store, remote, feed_icons) = match result {
             Ok(result) => result,
             Err(error) => {
                 tracing::dispatcher::with_default(
@@ -103,6 +106,7 @@ impl FluxCore {
         Ok(Self {
             store,
             remote,
+            feed_icons,
             sync_gate: Mutex::new(()),
             delivery_mode: Mutex::new(DeliveryMode::Deferred),
             runtime: Mutex::new(DeliveryRuntime {
@@ -133,8 +137,10 @@ impl FluxCore {
                 &config.media,
             )?);
             store.set_base_url(&config.base_url)?;
-            Ok::<_, CoreError>(store)
+            let feed_icons = feed_icon::FeedIconService::new(config.cache.clone())?;
+            Ok::<_, CoreError>((store, feed_icons))
         })?;
+        let (store, feed_icons) = store;
         tracing::dispatcher::with_default(
             &diagnostic_dispatcher,
             || tracing::info!(target: "core", "core initialization completed"),
@@ -142,6 +148,7 @@ impl FluxCore {
         Ok(Self {
             store,
             remote,
+            feed_icons,
             sync_gate: Mutex::new(()),
             delivery_mode: Mutex::new(DeliveryMode::Deferred),
             runtime: Mutex::new(DeliveryRuntime {
@@ -237,6 +244,13 @@ impl FluxCore {
     }
     pub fn navigation_catalog(&self) -> Result<NavigationCatalog, CoreError> {
         self.store.navigation_catalog()
+    }
+    pub fn feed_icon(
+        &self,
+        feed_id: i64,
+        variant: FeedIconVariant,
+    ) -> Result<Option<FeedIcon>, CoreError> {
+        self.feed_icons.get(self.remote.as_ref(), feed_id, variant)
     }
     pub fn last_successful_sync_at(&self) -> Result<Option<String>, CoreError> {
         self.store.last_successful_sync_at()
