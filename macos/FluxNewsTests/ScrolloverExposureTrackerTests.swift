@@ -118,4 +118,27 @@ final class ScrolloverExposureTrackerTests: XCTestCase {
         XCTAssertEqual(SnapshotRefreshPolicy.action(manual: false, dataChanged: false, popoverVisible: true, hasMeaningfullyInteracted: false), .preserve)
         XCTAssertNotEqual(SnapshotRefreshPolicy.Action.preserve, .replace)
     }
+
+    func testSnapshotResetWaitsForCurrentFirstArticleAndConsumesOnce() {
+        var reset = SnapshotResetState()
+        reset.request(1)
+        XCTAssertNil(reset.consume(firstArticleID: 2, presentedArticleIDs: [1]))
+        XCTAssertEqual(reset.pendingRevision, 1)
+        XCTAssertEqual(reset.consume(firstArticleID: 2, presentedArticleIDs: [1, 2]), SnapshotResetRequest(revision: 1, firstArticleID: 2))
+        XCTAssertNil(reset.consume(firstArticleID: 2, presentedArticleIDs: [1, 2]))
+    }
+
+    func testNewerSnapshotResetSupersedesPendingReset() {
+        var reset = SnapshotResetState()
+        reset.request(1)
+        reset.request(2)
+        XCTAssertEqual(reset.consume(firstArticleID: 4, presentedArticleIDs: [4]), SnapshotResetRequest(revision: 2, firstArticleID: 4))
+    }
+
+    func testSnapshotResetWithEmptySnapshotIsSafe() {
+        var reset = SnapshotResetState()
+        reset.request(1)
+        XCTAssertNil(reset.consume(firstArticleID: nil, presentedArticleIDs: []))
+        XCTAssertNil(reset.pendingRevision)
+    }
 }

@@ -367,4 +367,5 @@ enum NativeLog {
     static let shortcut = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "shortcut")
     static let feedIcon = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "feed_icon")
     static let scrollover = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "scrollover")
+    static let snapshot = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "snapshot")
 }

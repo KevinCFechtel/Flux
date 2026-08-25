@@ -24,6 +24,30 @@ enum SnapshotRefreshPolicy {
     }
 }
 
+struct SnapshotResetRequest: Equatable {
+    let revision: UInt64
+    let firstArticleID: Int64
+}
+
+struct SnapshotResetState {
+    private(set) var pendingRevision: UInt64?
+
+    mutating func request(_ revision: UInt64) {
+        pendingRevision = revision
+    }
+
+    mutating func consume(firstArticleID: Int64?, presentedArticleIDs: Set<Int64>) -> SnapshotResetRequest? {
+        guard let revision = pendingRevision else { return nil }
+        guard let firstArticleID else {
+            pendingRevision = nil
+            return nil
+        }
+        guard presentedArticleIDs.contains(firstArticleID) else { return nil }
+        pendingRevision = nil
+        return SnapshotResetRequest(revision: revision, firstArticleID: firstArticleID)
+    }
+}
+
 /// Presentation-only policy for grouping tracker flushes from one scroll interaction.
 struct ScrolloverUndoBatch {
     private var session = 0
