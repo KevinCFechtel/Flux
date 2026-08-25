@@ -4,7 +4,7 @@ import Foundation
 import OSLog
 import Security
 
-enum BrowserScope: Hashable { case all, starred, category(Int64), feed(Int64) }
+enum BrowserScope: Hashable { case all, starred, search, category(Int64), feed(Int64) }
 enum ArticleListStyle: String { case row, card }
 
 @MainActor
@@ -23,6 +23,10 @@ final class BrowserStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var actionConfirmation: String?
     @Published var scope: BrowserScope = .all
+    @Published var searchQuery = ""
+    @Published private(set) var searchTotal: Int64 = 0
+    @Published private(set) var hasSearched = false
+    @Published private(set) var isSearching = false
     @Published var unreadOnly = true
     @Published var newestFirst = false
     @Published var popoverVisible = false
@@ -51,6 +55,8 @@ final class BrowserStore: ObservableObject {
     private var scrolloverUndoBatch = ScrolloverUndoBatch()
     private var articleThumbnailRequests = ArticleThumbnailRequestState()
     private var scrolloverCountsPending = false
+    private var searchGeneration: UInt64 = 0
+    private let searchPageSize: UInt32 = 50
 
     init() {
         markReadOnScrolloverEnabled = UserDefaults.standard.object(forKey: "FluxNews.markReadOnScrollover") as? Bool ?? true
@@ -96,10 +102,11 @@ final class BrowserStore: ObservableObject {
 
     func query(scope: BrowserScope? = nil) -> ArticleQuery {
         let scope = scope ?? self.scope
-        let coreScope: ArticleScope = switch scope { case .all, .starred: .all; case let .category(id): .category(id: id); case let .feed(id): .feed(id: id) }
+        let coreScope: ArticleScope = switch scope { case .all, .starred: .all; case .search: fatalError("Search has no local article query"); case let .category(id): .category(id: id); case let .feed(id): .feed(id: id) }
         return ArticleQuery(scope: coreScope, readFilter: scope == .starred ? .all : (unreadOnly ? .unread : .all), starredFilter: scope == .starred ? .starred : .all, sort: newestFirst ? .newestFirst : .oldestFirst, limit: 0, cursor: nil)
     }
     func reloadVisibleArticles(resetPosition: Bool = false) {
+        guard scope != .search else { return }
         guard let core else { return }
         do {
             articles = try core.queryArticles(query: query())
@@ -193,7 +200,86 @@ final class BrowserStore: ObservableObject {
         guard unavailableArticleThumbnails.contains(key) else { return }
         unavailableArticleThumbnails.remove(key)
     }
-    func select(_ scope: BrowserScope) { self.scope = scope; resetPresentation(); reloadVisibleArticles() }
+    var isSearchActive: Bool { scope == .search }
+    var canLoadMoreSearchResults: Bool { Int64(articles.count) < searchTotal }
+    func select(_ scope: BrowserScope) {
+        if scope == .search { selectSearch(); return }
+        self.scope = scope
+        resetPresentation()
+        reloadVisibleArticles()
+    }
+    func selectSearch() {
+        guard scope != .search else { return }
+        scope = .search
+        articles = []
+        selectionTotal = 0
+        searchQuery = ""
+        searchTotal = 0
+        hasSearched = false
+        isSearching = false
+        errorMessage = nil
+        searchGeneration &+= 1
+        resetPresentation()
+    }
+    func submitSearch() {
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        searchGeneration &+= 1
+        let generation = searchGeneration
+        guard !query.isEmpty else { clearSearch(); return }
+        guard let core else { return }
+        articles = []
+        selectionTotal = 0
+        searchTotal = 0
+        hasSearched = true
+        isSearching = true
+        errorMessage = nil
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result { try core.searchArticles(request: SearchArticlesRequest(query: query, offset: 0, limit: store.value?.searchPageSize ?? 50)) }
+            await MainActor.run {
+                guard let store = store.value, store.scope == .search, store.searchGeneration == generation else { return }
+                store.isSearching = false
+                switch result {
+                case let .success(page):
+                    store.articles = page.articles
+                    store.searchTotal = page.total
+                case let .failure(error): store.errorMessage = String(describing: error)
+                }
+            }
+        }
+    }
+    func clearSearch() {
+        searchGeneration &+= 1
+        searchQuery = ""
+        articles = []
+        selectionTotal = 0
+        searchTotal = 0
+        hasSearched = false
+        isSearching = false
+        errorMessage = nil
+    }
+    func loadMoreSearchResults() {
+        guard scope == .search, hasSearched, !isSearching, canLoadMoreSearchResults, let core else { return }
+        let generation = searchGeneration
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let offset = Int64(articles.count)
+        isSearching = true
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result { try core.searchArticles(request: SearchArticlesRequest(query: query, offset: offset, limit: store.value?.searchPageSize ?? 50)) }
+            await MainActor.run {
+                guard let store = store.value, store.scope == .search, store.searchGeneration == generation else { return }
+                store.isSearching = false
+                switch result {
+                case let .success(page):
+                    let existing = Set(store.articles.map(\.id))
+                    store.articles.append(contentsOf: page.articles.filter { !existing.contains($0.id) })
+                    store.searchTotal = page.total
+                case let .failure(error): store.errorMessage = String(describing: error)
+                }
+            }
+        }
+    }
     func route(to route: NavigationRoute) {
         switch route {
         case .all: select(.all)
@@ -258,8 +344,44 @@ final class BrowserStore: ObservableObject {
             break
         }
     }
-    func setRead(_ article: ArticleSummary, _ read: Bool) { guard let core else { return }; do { _ = try core.setReadState(articleId: article.id, read: read); updateVisible([article.id]) { $0.isRead = read }; reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
-    func setStarred(_ article: ArticleSummary, _ starred: Bool) { guard let core else { return }; do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
+    func setRead(_ article: ArticleSummary, _ read: Bool) {
+        guard let core else { return }
+        if scope == .search {
+            let store = WeakBrowserStore(self)
+            Task.detached {
+                let result = Result { try core.searchSetReadState(articleId: article.id, read: read) }
+                await MainActor.run {
+                    switch result {
+                    case let .success(disposition):
+                        store.value?.updateVisible([article.id]) { $0.isRead = read }
+                        if case .localFirst = disposition { store.value?.reloadCounts() }
+                    case let .failure(error): store.value?.errorMessage = String(describing: error)
+                    }
+                }
+            }
+            return
+        }
+        do { _ = try core.setReadState(articleId: article.id, read: read); updateVisible([article.id]) { $0.isRead = read }; reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) }
+    }
+    func setStarred(_ article: ArticleSummary, _ starred: Bool) {
+        guard let core else { return }
+        if scope == .search {
+            let store = WeakBrowserStore(self)
+            Task.detached {
+                let result = Result { try core.searchSetStarredState(articleId: article.id, starred: starred) }
+                await MainActor.run {
+                    switch result {
+                    case let .success(disposition):
+                        store.value?.updateVisible([article.id]) { $0.isStarred = starred }
+                        if case .localFirst = disposition { store.value?.reloadCounts() }
+                    case let .failure(error): store.value?.errorMessage = String(describing: error)
+                    }
+                }
+            }
+            return
+        }
+        do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) }
+    }
     func saveToService(_ article: ArticleSummary) {
         guard let core else { return }
         let store = WeakBrowserStore(self)

@@ -24,7 +24,8 @@ use domain::{
     CreateCategoryResult, CreateFeedRequest, CreateFeedResult, DeliveryDisposition, DeliveryMode,
     DiscoverSubscriptionsRequest, DiscoveredSubscription, FeedIcon, FeedIconVariant, MutationField,
     MutationResult, NavigationCatalog, RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult,
-    SyncCompleted, SyncFailure, SyncReason,
+    SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition, SyncCompleted,
+    SyncFailure, SyncReason,
 };
 use miniflux::{MinifluxClient, RemoteSource};
 use storage::Store;
@@ -252,6 +253,52 @@ impl FluxCore {
     pub fn count_articles(&self, query: ArticleQuery) -> Result<u64, CoreError> {
         self.store.count_articles(&query)
     }
+    pub fn search_articles(
+        &self,
+        request: SearchArticlesRequest,
+    ) -> Result<SearchArticlesResult, CoreError> {
+        if request.query.trim().is_empty() {
+            return Err(CoreError::data("search query must not be empty"));
+        }
+        if request.offset < 0 {
+            return Err(CoreError::data("search offset must not be negative"));
+        }
+        if request.limit == 0 {
+            return Err(CoreError::data("search limit must be positive"));
+        }
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            self.remote.search_articles(request)
+        })
+        .and_then(|mut result| {
+            for article in &mut result.articles {
+                if let Some(state) = self.store.local_article_state(article.id)? {
+                    article.is_read = state.is_read;
+                    article.is_starred = state.is_starred;
+                }
+            }
+            Ok(result)
+        });
+        self.diagnostics.flush();
+        result
+    }
+    pub fn search_set_starred_state(
+        &self,
+        article_id: i64,
+        starred: bool,
+    ) -> Result<SearchMutationDisposition, CoreError> {
+        self.search_set_state(article_id, MutationField::Starred, starred, |remote| {
+            remote.set_starred_state(article_id, starred)
+        })
+    }
+    pub fn search_set_read_state(
+        &self,
+        article_id: i64,
+        read: bool,
+    ) -> Result<SearchMutationDisposition, CoreError> {
+        self.search_set_state(article_id, MutationField::Read, read, |remote| {
+            remote.set_read_state(&[article_id], read)
+        })
+    }
     pub fn navigation_catalog(&self) -> Result<NavigationCatalog, CoreError> {
         self.store.navigation_catalog()
     }
@@ -397,6 +444,27 @@ impl FluxCore {
     ) -> Result<MutationResult, CoreError> {
         let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
             self.set_state_bulk_inner(ids, field, desired)
+        });
+        self.diagnostics.flush();
+        result
+    }
+    fn search_set_state(
+        &self,
+        article_id: i64,
+        field: MutationField,
+        desired: bool,
+        operation: impl FnOnce(&dyn RemoteSource) -> Result<(), CoreError>,
+    ) -> Result<SearchMutationDisposition, CoreError> {
+        if article_id <= 0 {
+            return Err(CoreError::data("article ID must be positive"));
+        }
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            if self.store.local_article_state(article_id)?.is_some() {
+                self.set_state_bulk_inner(&[article_id], field, desired)
+                    .map(|_| SearchMutationDisposition::LocalFirst)
+            } else {
+                operation(self.remote.as_ref()).map(|_| SearchMutationDisposition::RemoteOnly)
+            }
         });
         self.diagnostics.flush();
         result
@@ -581,6 +649,13 @@ mod tests {
         log: Mutex<Vec<&'static str>>,
         delay: Mutex<Duration>,
     }
+    struct SearchSource {
+        search_calls: AtomicUsize,
+        read_calls: AtomicUsize,
+        star_calls: AtomicUsize,
+        failure: Mutex<Option<CoreError>>,
+        search_result: Mutex<SearchArticlesResult>,
+    }
     struct ReentrantListener {
         core: Mutex<Option<Arc<FluxCore>>>,
         events: Mutex<Vec<CoreEvent>>,
@@ -646,6 +721,56 @@ mod tests {
         }
         fn set_starred_state(&self, _article_id: i64, _starred: bool) -> Result<(), CoreError> {
             Ok(())
+        }
+    }
+    impl RemoteSource for SearchSource {
+        fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError> {
+            Ok(RemoteSnapshot {
+                categories: vec![],
+                feeds: vec![],
+                articles: vec![],
+            })
+        }
+        fn set_read_state(&self, _: &[i64], _: bool) -> Result<(), CoreError> {
+            self.read_calls.fetch_add(1, Ordering::SeqCst);
+            if let Some(error) = self.failure.lock().unwrap().clone() {
+                return Err(error);
+            }
+            Ok(())
+        }
+        fn set_starred_state(&self, _: i64, _: bool) -> Result<(), CoreError> {
+            self.star_calls.fetch_add(1, Ordering::SeqCst);
+            if let Some(error) = self.failure.lock().unwrap().clone() {
+                return Err(error);
+            }
+            Ok(())
+        }
+        fn search_articles(
+            &self,
+            request: SearchArticlesRequest,
+        ) -> Result<SearchArticlesResult, CoreError> {
+            self.search_calls.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(request.query, "rust");
+            Ok(self.search_result.lock().unwrap().clone())
+        }
+    }
+    fn search_result() -> SearchArticlesResult {
+        SearchArticlesResult {
+            total: 1,
+            articles: vec![ArticleSummary {
+                id: 99,
+                feed_id: 10,
+                category_id: 1,
+                feed_title: "Feed A".into(),
+                title: "Remote result".into(),
+                url: "https://example.test/99".into(),
+                comments_url: String::new(),
+                published_at: "2026-01-02T03:04:05Z".into(),
+                is_read: false,
+                is_starred: false,
+                preview: "Remote preview".into(),
+                image_url: None,
+            }],
         }
     }
     fn article(id: i64, feed_id: i64, published_at: String, read: bool, starred: bool) -> Article {
@@ -744,6 +869,17 @@ mod tests {
         let core = Arc::new(FluxCore::with_remote(config(temp), source.clone()).unwrap());
         core.sync(SyncReason::Manual).unwrap();
         source.log.lock().unwrap().clear();
+        (core, source)
+    }
+    fn search_core(temp: &TempDir) -> (Arc<FluxCore>, Arc<SearchSource>) {
+        let source = Arc::new(SearchSource {
+            search_calls: AtomicUsize::new(0),
+            read_calls: AtomicUsize::new(0),
+            star_calls: AtomicUsize::new(0),
+            failure: Mutex::new(None),
+            search_result: Mutex::new(search_result()),
+        });
+        let core = Arc::new(FluxCore::with_remote(config(temp), source.clone()).unwrap());
         (core, source)
     }
 
@@ -1343,5 +1479,259 @@ mod tests {
         core.set_delivery_mode(DeliveryMode::Live).unwrap();
         core.set_read_state(1, true).unwrap();
         assert!(core.runtime_health().unwrap().next_retry_at.is_some());
+    }
+    #[test]
+    fn search_is_remote_only_and_validates_its_request() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = search_core(&temp);
+
+        let result = core
+            .search_articles(SearchArticlesRequest {
+                query: "rust".into(),
+                offset: 0,
+                limit: 20,
+            })
+            .unwrap();
+        assert_eq!(result.total, 1);
+        assert_eq!(result.articles[0].id, 99);
+        assert_eq!(source.search_calls.load(Ordering::SeqCst), 1);
+
+        for request in [
+            SearchArticlesRequest {
+                query: " ".into(),
+                offset: 0,
+                limit: 1,
+            },
+            SearchArticlesRequest {
+                query: "rust".into(),
+                offset: -1,
+                limit: 1,
+            },
+            SearchArticlesRequest {
+                query: "rust".into(),
+                offset: 0,
+                limit: 0,
+            },
+        ] {
+            assert_eq!(
+                core.search_articles(request).unwrap_err().kind,
+                CoreErrorKind::Data
+            );
+        }
+    }
+    #[test]
+    fn search_overlays_all_local_read_and_starred_state_combinations() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = search_core(&temp);
+        let mut data = snapshot();
+        data.articles
+            .push(article(4, 20, Utc::now().to_rfc3339(), false, true));
+        core.store
+            .reconcile(&data.categories, &data.feeds, &data.articles)
+            .unwrap();
+        source.search_result.lock().unwrap().articles = (1..=4)
+            .map(|id| ArticleSummary {
+                id,
+                feed_id: 10,
+                category_id: 1,
+                feed_title: "Remote".into(),
+                title: format!("Remote {id}"),
+                url: format!("https://example.test/{id}"),
+                comments_url: String::new(),
+                published_at: "2026-01-02T03:04:05Z".into(),
+                is_read: false,
+                is_starred: false,
+                preview: String::new(),
+                image_url: None,
+            })
+            .collect();
+
+        let result = core
+            .search_articles(SearchArticlesRequest {
+                query: "rust".into(),
+                offset: 0,
+                limit: 20,
+            })
+            .unwrap();
+
+        assert_eq!(
+            result
+                .articles
+                .iter()
+                .map(|article| (article.is_read, article.is_starred))
+                .collect::<Vec<_>>(),
+            vec![(false, false), (true, true), (true, false), (false, true)]
+        );
+    }
+    #[test]
+    fn search_overlays_pending_star_and_unstar_state() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = search_core(&temp);
+        let data = snapshot();
+        core.store
+            .reconcile(&data.categories, &data.feeds, &data.articles)
+            .unwrap();
+        source.search_result.lock().unwrap().articles[0].id = 1;
+
+        assert_eq!(
+            core.search_set_starred_state(1, true).unwrap(),
+            SearchMutationDisposition::LocalFirst
+        );
+        assert!(
+            core.search_articles(SearchArticlesRequest {
+                query: "rust".into(),
+                offset: 0,
+                limit: 20,
+            })
+            .unwrap()
+            .articles[0]
+                .is_starred
+        );
+        assert_eq!(
+            core.search_set_starred_state(1, false).unwrap(),
+            SearchMutationDisposition::LocalFirst
+        );
+        let pending = core.store.pending_mutations().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].field, MutationField::Starred);
+        assert!(!pending[0].desired);
+        assert!(
+            !core
+                .search_articles(SearchArticlesRequest {
+                    query: "rust".into(),
+                    offset: 0,
+                    limit: 20,
+                })
+                .unwrap()
+                .articles[0]
+                .is_starred
+        );
+    }
+    #[test]
+    fn search_star_for_local_article_uses_local_first_mutation() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = search_core(&temp);
+        let data = snapshot();
+        core.store
+            .reconcile(&data.categories, &data.feeds, &data.articles)
+            .unwrap();
+
+        assert_eq!(
+            core.search_set_starred_state(1, true).unwrap(),
+            SearchMutationDisposition::LocalFirst
+        );
+
+        assert!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .iter()
+            .find(|article| article.id == 1)
+            .unwrap()
+            .is_starred
+        );
+        let pending = core.store.pending_mutations().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].article_id, 1);
+        assert_eq!(pending[0].field, MutationField::Starred);
+        assert!(pending[0].desired);
+        assert_eq!(pending[0].revision, 1);
+        assert_eq!(source.star_calls.load(Ordering::SeqCst), 0);
+    }
+    #[test]
+    fn search_star_for_remote_only_article_is_direct_and_does_not_persist() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = search_core(&temp);
+
+        assert_eq!(
+            core.search_set_starred_state(99, true).unwrap(),
+            SearchMutationDisposition::RemoteOnly
+        );
+
+        assert_eq!(source.star_calls.load(Ordering::SeqCst), 1);
+        assert!(core.store.pending_mutations().unwrap().is_empty());
+        assert!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty()
+        );
+    }
+    #[test]
+    fn failed_remote_only_search_star_does_not_persist_state() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = search_core(&temp);
+        *source.failure.lock().unwrap() = Some(CoreError::connectivity("offline"));
+
+        assert!(core.search_set_starred_state(99, true).is_err());
+
+        assert_eq!(source.star_calls.load(Ordering::SeqCst), 1);
+        assert!(core.store.pending_mutations().unwrap().is_empty());
+        assert!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty()
+        );
+    }
+    #[test]
+    fn search_read_for_local_article_uses_local_first_mutation() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = search_core(&temp);
+        let data = snapshot();
+        core.store
+            .reconcile(&data.categories, &data.feeds, &data.articles)
+            .unwrap();
+
+        assert_eq!(
+            core.search_set_read_state(1, true).unwrap(),
+            SearchMutationDisposition::LocalFirst
+        );
+
+        assert!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .iter()
+            .find(|article| article.id == 1)
+            .unwrap()
+            .is_read
+        );
+        let pending = core.store.pending_mutations().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].article_id, 1);
+        assert_eq!(pending[0].field, MutationField::Read);
+        assert!(pending[0].desired);
+        assert_eq!(pending[0].revision, 1);
+        assert_eq!(source.read_calls.load(Ordering::SeqCst), 0);
+    }
+    #[test]
+    fn search_read_for_remote_only_article_is_direct_and_does_not_persist() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = search_core(&temp);
+
+        assert_eq!(
+            core.search_set_read_state(99, true).unwrap(),
+            SearchMutationDisposition::RemoteOnly
+        );
+
+        assert_eq!(source.read_calls.load(Ordering::SeqCst), 1);
+        assert!(core.store.pending_mutations().unwrap().is_empty());
+        assert!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty()
+        );
     }
 }

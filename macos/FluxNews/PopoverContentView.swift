@@ -168,7 +168,9 @@ private struct ArticlePane: View {
     }
 
     @ViewBuilder private var content: some View {
-        if let error = store.errorMessage, store.articles.isEmpty {
+        if store.isSearchActive {
+            SearchResultsView(store: store)
+        } else if let error = store.errorMessage, store.articles.isEmpty {
             ContentUnavailableView("Refresh failed", systemImage: "exclamationmark.triangle", description: Text(error))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if store.isLoading && store.articles.isEmpty {
@@ -246,6 +248,7 @@ private struct ArticlePane: View {
         switch store.scope {
         case .all: "All News"
         case .starred: "Starred"
+        case .search: "Search"
         case let .category(id): store.catalog.categories.first(where: { $0.id == id })?.title ?? "Category"
         case let .feed(id): store.catalog.feeds.first(where: { $0.id == id })?.title ?? "Feed"
         }
@@ -261,13 +264,13 @@ private struct ArticlePane: View {
         layoutChanged(sidebarVisible)
     }
     private func observe() {
-        guard store.popoverVisible, store.markReadOnScrolloverEnabled, ProcessInfo.processInfo.systemUptime >= suppressUntil, !viewport.isEmpty else { return }
+        guard !store.isSearchActive, store.popoverVisible, store.markReadOnScrolloverEnabled, ProcessInfo.processInfo.systemUptime >= suppressUntil, !viewport.isEmpty else { return }
         tracker.observe(frames: frames, viewport: viewport, unread: unreadIDs, now: Date.timeIntervalSinceReferenceDate)
     }
     private func scrollChanged(_ delta: CGFloat) {
         guard userScrolling else { tracker.rebase(frames: frames, unread: unreadIDs); observe(); return }
         store.noteMeaningfulInteraction()
-        guard store.markReadOnScrolloverEnabled, ProcessInfo.processInfo.systemUptime >= suppressUntil, trackerRevision == store.listPresentationRevision else { return }
+        guard !store.isSearchActive, store.markReadOnScrolloverEnabled, ProcessInfo.processInfo.systemUptime >= suppressUntil, trackerRevision == store.listPresentationRevision else { return }
         let ids = tracker.process(frames: frames, viewport: viewport, unread: unreadIDs, now: Date.timeIntervalSinceReferenceDate, offsetDelta: delta, userInitiated: true)
         if !ids.isEmpty { store.flushScrollover(ids) }
     }
@@ -276,7 +279,7 @@ private struct ArticlePane: View {
         case .moveUp: move(-1, proxy)
         case .moveDown: move(1, proxy)
         case .open: if let article = selected { store.open(article) }
-        case .toggleRead: if let article = selected { store.setRead(article, !article.isRead) }
+        case .toggleRead: if !store.isSearchActive, let article = selected { store.setRead(article, !article.isRead) }
         case .toggleStarred: if let article = selected { store.setStarred(article, !article.isStarred) }
         case .refresh: store.sync()
         case .dismiss: dismiss()
@@ -294,6 +297,55 @@ private struct ArticlePane: View {
     }
 }
 
+private struct SearchResultsView: View {
+    @ObservedObject var store: BrowserStore
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                TextField("Search Miniflux", text: $store.searchQuery)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { store.submitSearch() }
+                if !store.searchQuery.isEmpty {
+                    Button { store.clearSearch() } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(12)
+
+            if let error = store.errorMessage {
+                ContentUnavailableView("Search failed", systemImage: "exclamationmark.triangle", description: Text(error))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if store.isSearching && store.articles.isEmpty {
+                ProgressView("Searching Miniflux...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if !store.hasSearched {
+                ContentUnavailableView("Search Miniflux", systemImage: "magnifyingglass", description: Text("Enter a query and press Return."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if store.articles.isEmpty {
+                ContentUnavailableView("No results", systemImage: "magnifyingglass", description: Text("No Miniflux entries matched your search."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                VStack(spacing: 0) {
+                    Text("\(store.searchTotal) results").font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.bottom, 6)
+                    ScrollView {
+                        LazyVStack(spacing: store.articleListStyle == .row ? 0 : 4) {
+                            ForEach(store.articles, id: \.id) { article in
+                                ArticleItem(article: article, style: store.articleListStyle, selected: false, store: store, onSelect: {})
+                                    .onAppear { if article.id == store.articles.last?.id { store.loadMoreSearchResults() } }
+                                if store.articleListStyle == .row { Divider().padding(.leading, 264) }
+                            }
+                            if store.isSearching { ProgressView().padding() }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 private struct NavigationSidebar: View {
     @ObservedObject var store: BrowserStore
 
@@ -303,6 +355,7 @@ private struct NavigationSidebar: View {
                 Section {
                     sidebarRow(SidebarItem(id: "all", scope: .all, title: "All News", count: store.unreadTotal, systemImage: "tray.full", feedID: nil, children: nil))
                     sidebarRow(SidebarItem(id: "starred", scope: .starred, title: "Starred", count: store.starredTotal, systemImage: "star.fill", feedID: nil, children: nil))
+                    sidebarRow(SidebarItem(id: "search", scope: .search, title: "Search", count: 0, systemImage: "magnifyingglass", feedID: nil, children: nil))
                 }
                 Section("Feeds") {
                     OutlineGroup(categoryItems, children: \.children) { item in sidebarRow(item) }
@@ -455,7 +508,9 @@ private struct ArticleItem: View {
     }
     private var quickActions: some View {
         VStack(spacing: 8) {
-            iconButton(article.isRead ? "circle.fill" : "checkmark.circle", label: article.isRead ? "Mark as Unread" : "Mark as Read") { store.setRead(article, !article.isRead) }
+            if !store.isSearchActive {
+                iconButton(article.isRead ? "circle.fill" : "checkmark.circle", label: article.isRead ? "Mark as Unread" : "Mark as Read") { store.setRead(article, !article.isRead) }
+            }
             iconButton(article.isStarred ? "star.fill" : "star", label: article.isStarred ? "Unstar" : "Star") { store.setStarred(article, !article.isStarred) }
             Menu { actionMenu } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 22).help("More").accessibilityLabel("More")
         }
@@ -463,14 +518,16 @@ private struct ArticleItem: View {
     private var interactionBackground: Color { selected ? Color.accentColor.opacity(0.16) : hovered ? Color.primary.opacity(0.055) : .clear }
     @ViewBuilder private var actionMenu: some View {
         Button { store.open(article) } label: { Label("Open in Browser", systemImage: "safari") }
-        Button { store.setRead(article, !article.isRead) } label: { Label(article.isRead ? "Mark as Unread" : "Mark as Read", systemImage: article.isRead ? "circle.fill" : "checkmark.circle") }
         Button { store.setStarred(article, !article.isStarred) } label: { Label(article.isStarred ? "Unstar" : "Star", systemImage: article.isStarred ? "star.slash" : "star") }
-        Button { store.saveToService(article) } label: { Label("Save to Third-Party Service", systemImage: "tray.and.arrow.down") }
-        Divider()
-        Button { store.copyLink(article) } label: { Label("Copy Link", systemImage: "doc.on.doc") }
-        Button { store.share(article) } label: { Label("Share...", systemImage: "square.and.arrow.up") }
-        Button { store.select(.feed(article.feedId)) } label: { Label("Show Feed", systemImage: "line.3.horizontal.decrease.circle") }
-        if !article.commentsUrl.isEmpty { Button { store.openComments(article) } label: { Label("Open Comments", systemImage: "bubble.left") } }
+        if !store.isSearchActive {
+            Button { store.setRead(article, !article.isRead) } label: { Label(article.isRead ? "Mark as Unread" : "Mark as Read", systemImage: article.isRead ? "circle.fill" : "checkmark.circle") }
+            Button { store.saveToService(article) } label: { Label("Save to Third-Party Service", systemImage: "tray.and.arrow.down") }
+            Divider()
+            Button { store.copyLink(article) } label: { Label("Copy Link", systemImage: "doc.on.doc") }
+            Button { store.share(article) } label: { Label("Share...", systemImage: "square.and.arrow.up") }
+            Button { store.select(.feed(article.feedId)) } label: { Label("Show Feed", systemImage: "line.3.horizontal.decrease.circle") }
+            if !article.commentsUrl.isEmpty { Button { store.openComments(article) } label: { Label("Open Comments", systemImage: "bubble.left") } }
+        }
     }
     private func iconButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: icon) }.buttonStyle(.borderless).help(label).accessibilityLabel(label)

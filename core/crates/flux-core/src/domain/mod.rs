@@ -66,6 +66,26 @@ pub struct ArticleSummary {
     pub image_url: Option<String>,
 }
 
+/// A page of temporary, remote Miniflux search results.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchArticlesRequest {
+    pub query: String,
+    pub offset: i64,
+    pub limit: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchArticlesResult {
+    pub total: i64,
+    pub articles: Vec<ArticleSummary>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchMutationDisposition {
+    LocalFirst,
+    RemoteOnly,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ArticleScope {
     All,

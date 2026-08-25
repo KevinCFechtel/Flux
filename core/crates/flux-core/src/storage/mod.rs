@@ -21,6 +21,12 @@ pub struct PendingMutation {
     pub revision: i64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LocalArticleState {
+    pub is_read: bool,
+    pub is_starred: bool,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ReconciliationStats {
     pub new_articles: u32,
@@ -185,6 +191,29 @@ impl Store {
             )
             .map_err(sql_error)?;
         Ok(deleted as u32)
+    }
+
+    pub fn local_article_state(
+        &self,
+        article_id: i64,
+    ) -> Result<Option<LocalArticleState>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        connection
+            .query_row(
+                "SELECT is_read,is_starred FROM articles WHERE id=?1",
+                [article_id],
+                |row| {
+                    Ok(LocalArticleState {
+                        is_read: row.get(0)?,
+                        is_starred: row.get(1)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(sql_error)
     }
 
     pub fn set_state_bulk(
