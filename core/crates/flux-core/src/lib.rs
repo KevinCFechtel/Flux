@@ -923,9 +923,12 @@ mod tests {
     fn sync_retention_preserves_old_unread_and_starred_local_articles() {
         let temp = TempDir::new().unwrap();
         let mut remote = snapshot();
-        remote.articles.clear();
-        let (core, _) = core(&temp, remote.clone());
         let old = (Utc::now() - ChronoDuration::days(91)).to_rfc3339();
+        remote.articles = vec![
+            article(5, 10, old.clone(), false, false),
+            article(6, 10, old.clone(), true, true),
+        ];
+        let (core, _) = core(&temp, remote.clone());
         core.store
             .reconcile(
                 &remote.categories,

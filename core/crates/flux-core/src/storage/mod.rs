@@ -1,6 +1,7 @@
 //! SQLite persistence. Pending rows coalesce by article/field; acknowledgement
 //! deletes only the exact sent revision so later local intent always survives.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -112,6 +113,34 @@ impl Store {
             stats.navigation_changed |=
                 existing.as_ref() != Some(&(f.category_id, f.title.clone()));
             tx.execute("INSERT INTO feeds (id,category_id,title) VALUES (?1,?2,?3) ON CONFLICT(id) DO UPDATE SET category_id=excluded.category_id,title=excluded.title", params![f.id,f.category_id,f.title]).map_err(sql_error)?;
+        }
+        let remote_article_ids: HashSet<i64> = articles.iter().map(|article| article.id).collect();
+        let absent_articles = {
+            let mut statement = tx
+                .prepare("SELECT id,remote_is_read,remote_is_starred FROM articles")
+                .map_err(sql_error)?;
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, bool>(1)?,
+                        row.get::<_, bool>(2)?,
+                    ))
+                })
+                .map_err(sql_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(sql_error)?
+        };
+        // The remote snapshot is the union of unread and starred articles. An absent local
+        // article is therefore remotely read and unstarred, unless local intent is pending.
+        for (id, remote_is_read, remote_is_starred) in absent_articles {
+            if remote_article_ids.contains(&id) {
+                continue;
+            }
+            if !remote_is_read || remote_is_starred {
+                stats.updated_articles += 1;
+            }
+            tx.execute("UPDATE articles SET remote_is_read=1,remote_is_starred=0,is_read=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=articles.id AND p.field='read') THEN is_read ELSE 1 END,is_starred=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=articles.id AND p.field='starred') THEN is_starred ELSE 0 END WHERE id=?1", [id]).map_err(sql_error)?;
         }
         for a in articles {
             let existing = tx
@@ -563,6 +592,69 @@ mod tests {
                 )
                 .unwrap(),
             crate::article::PROCESSING_VERSION
+        );
+    }
+
+    #[test]
+    fn reconcile_absent_unread_starred_articles_as_remote_read_unstarred_without_overwriting_pending_intent()
+     {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 2,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        let articles = [1, 2].map(|id| Article {
+            id,
+            feed_id: 2,
+            title: format!("Title {id}"),
+            url: format!("https://example.test/{id}"),
+            comments_url: String::new(),
+            published_at: "2024-01-01T00:00:00Z".into(),
+            is_read: false,
+            is_starred: true,
+            raw_html_content: String::new(),
+            preview: String::new(),
+            image_url: None,
+        });
+        store.reconcile(&categories, &feeds, &articles).unwrap();
+
+        store
+            .set_state_bulk(&[2], MutationField::Read, false)
+            .unwrap();
+        store
+            .set_state_bulk(&[2], MutationField::Starred, true)
+            .unwrap();
+        let stats = store.reconcile(&categories, &feeds, &[]).unwrap();
+
+        let rows = store
+            .connection
+            .lock()
+            .unwrap()
+            .prepare("SELECT id,is_read,is_starred,remote_is_read,remote_is_starred FROM articles ORDER BY id")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, bool>(1)?,
+                    row.get::<_, bool>(2)?,
+                    row.get::<_, bool>(3)?,
+                    row.get::<_, bool>(4)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(stats.updated_articles, 2);
+        assert_eq!(
+            rows,
+            vec![(1, true, false, true, false), (2, false, true, true, false)]
         );
     }
 }

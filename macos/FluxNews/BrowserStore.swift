@@ -7,6 +7,12 @@ import Security
 enum BrowserScope: Hashable { case all, starred, category(Int64), feed(Int64) }
 enum ArticleListStyle: String { case row, card }
 
+enum BrowserSyncRefreshPolicy {
+    static func reloadVisibleArticles(reason: SyncReason, dataChanged: Bool, popoverVisible: Bool, hasMeaningfullyInteracted: Bool) -> Bool {
+        reason == .manual || (dataChanged && (!popoverVisible || !hasMeaningfullyInteracted))
+    }
+}
+
 @MainActor
 final class BrowserStore: ObservableObject {
     @Published var articles: [ArticleSummary] = []
@@ -93,6 +99,7 @@ final class BrowserStore: ObservableObject {
         return ArticleQuery(scope: coreScope, readFilter: scope == .starred ? .all : (unreadOnly ? .unread : .all), starredFilter: scope == .starred ? .starred : .all, sort: newestFirst ? .newestFirst : .oldestFirst, limit: 0, cursor: nil)
     }
     func reloadVisibleArticles() { guard let core else { return }; do { articles = try core.queryArticles(query: query()); selectionTotal = try core.countArticles(query: query()); errorMessage = nil } catch { errorMessage = String(describing: error) } }
+    func reloadSelectionTotal() { guard let core else { return }; do { selectionTotal = try core.countArticles(query: query()); errorMessage = nil } catch { errorMessage = String(describing: error) } }
     func reloadNavigation() {
         guard let core else { return }
         do {
@@ -203,16 +210,16 @@ final class BrowserStore: ObservableObject {
         guard case let .syncCompleted(metadata) = event else { return }
         isLoading = false
         if metadata.navigationChanged { reloadNavigationAndCounts() }
+        else if metadata.reason == .manual { reloadCounts() }
         else if metadata.dataChanged { reloadCounts() }
         if metadata.reason == .periodic { NativeLog.sync.notice("periodic sync completed") }
-        guard metadata.dataChanged else { return }
-        if metadata.reason == .manual || !popoverVisible || !hasMeaningfullyInteracted { reloadVisibleArticles(); newDataAvailable = false }
-        else { newDataAvailable = true }
+        if BrowserSyncRefreshPolicy.reloadVisibleArticles(reason: metadata.reason, dataChanged: metadata.dataChanged, popoverVisible: popoverVisible, hasMeaningfullyInteracted: hasMeaningfullyInteracted) { reloadVisibleArticles(); newDataAvailable = false }
+        else if metadata.dataChanged { newDataAvailable = true }
     }
-    func setRead(_ article: ArticleSummary, _ read: Bool) { guard let core else { return }; do { _ = try core.setReadState(articleId: article.id, read: read); updateVisible([article.id]) { $0.isRead = read }; reloadCounts() } catch { errorMessage = String(describing: error) } }
-    func setStarred(_ article: ArticleSummary, _ starred: Bool) { guard let core else { return }; do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadCounts() } catch { errorMessage = String(describing: error) } }
-    func flushScrollover(_ ids: [Int64]) { guard let core, !ids.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: ids, read: true); lastScrolloverBatch = ids; updateVisible(ids) { $0.isRead = true }; reloadCounts(); showScrolloverUndo() } catch { errorMessage = String(describing: error) } }
-    func undoScrollover() { guard let core, !lastScrolloverBatch.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: lastScrolloverBatch, read: false); updateVisible(lastScrolloverBatch) { $0.isRead = false }; lastScrolloverBatch = []; scrolloverUndoVisible = false; undoExpiry?.cancel(); reloadCounts() } catch { errorMessage = String(describing: error) } }
+    func setRead(_ article: ArticleSummary, _ read: Bool) { guard let core else { return }; do { _ = try core.setReadState(articleId: article.id, read: read); updateVisible([article.id]) { $0.isRead = read }; reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
+    func setStarred(_ article: ArticleSummary, _ starred: Bool) { guard let core else { return }; do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
+    func flushScrollover(_ ids: [Int64]) { guard let core, !ids.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: ids, read: true); lastScrolloverBatch = ids; updateVisible(ids) { $0.isRead = true }; reloadSelectionTotal(); reloadCounts(); showScrolloverUndo() } catch { errorMessage = String(describing: error) } }
+    func undoScrollover() { guard let core, !lastScrolloverBatch.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: lastScrolloverBatch, read: false); updateVisible(lastScrolloverBatch) { $0.isRead = false }; lastScrolloverBatch = []; scrolloverUndoVisible = false; undoExpiry?.cancel(); reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
     func setScrolloverEnabled(_ enabled: Bool) { markReadOnScrolloverEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.markReadOnScrollover") }
     func setGlobalShortcut(_ shortcut: GlobalShortcutChoice) { guard shortcut != globalShortcut else { return }; globalShortcut = shortcut; shortcut.store() }
     func open(_ article: ArticleSummary) { setRead(article, true); if let url = URL(string: article.url) { NSWorkspace.shared.open(url) } }
