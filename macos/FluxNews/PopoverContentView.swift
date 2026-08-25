@@ -68,7 +68,7 @@ private struct ArticlePane: View {
     @State private var selectedID: Int64?
     @State private var scrollPhase = ScrollPhase.idle
     @State private var suppressUntil: TimeInterval = 0
-    @State private var snapshotReset = SnapshotResetState()
+    @State private var scrollPosition = ScrollPosition()
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
     init(store: BrowserStore, sidebarVisible: Binding<Bool>, layoutChanged: @escaping (Bool) -> Void, dismiss: @escaping () -> Void) {
@@ -187,6 +187,7 @@ private struct ArticlePane: View {
                             }
                         }
                     }
+                    .scrollPosition($scrollPosition)
                     .coordinateSpace(name: ArticleScrollSpace.name)
                     .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in scrollChanged(new - old) }
                     .onScrollPhaseChange { previous, phase in
@@ -200,9 +201,11 @@ private struct ArticlePane: View {
                         if !userScrolling { tracker.rebase(frames: frames, unread: unreadIDs) }
                     }
                     .onChange(of: store.snapshotResetRevision) { _, revision in
-                        snapshotReset.request(revision)
                         NativeLog.snapshot.debug("snapshot reset requested revision=\(revision, privacy: .public)")
-                        executePendingSnapshotReset(proxy, presentedArticleIDs: Set(frames.keys))
+                        tracker.reset()
+                        suppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
+                        scrollPosition.scrollTo(edge: .top)
+                        NativeLog.snapshot.debug("snapshot reset completed revision=\(revision, privacy: .public)")
                     }
                     .background { KeyboardCommandObserver { command in handle(command, proxy: proxy) } }
                     .onAppear { viewport = CGRect(origin: .zero, size: geometry.size); observe() }
@@ -210,7 +213,6 @@ private struct ArticlePane: View {
                     .onPreferenceChange(ArticleFrameKey.self) { newFrames in
                         frames = newFrames
                         if !userScrolling { tracker.rebase(frames: newFrames, unread: unreadIDs) }
-                        executePendingSnapshotReset(proxy, presentedArticleIDs: Set(newFrames.keys))
                         observe()
                     }
                 }
@@ -258,14 +260,6 @@ private struct ArticlePane: View {
         guard store.markReadOnScrolloverEnabled, ProcessInfo.processInfo.systemUptime >= suppressUntil, trackerRevision == store.listPresentationRevision else { return }
         let ids = tracker.process(frames: frames, viewport: viewport, unread: unreadIDs, now: Date.timeIntervalSinceReferenceDate, offsetDelta: delta, userInitiated: true)
         if !ids.isEmpty { store.flushScrollover(ids) }
-    }
-    private func executePendingSnapshotReset(_ proxy: ScrollViewProxy, presentedArticleIDs: Set<Int64>) {
-        guard let request = snapshotReset.consume(firstArticleID: store.articles.first?.id, presentedArticleIDs: presentedArticleIDs) else { return }
-        tracker.reset()
-        suppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
-        NativeLog.snapshot.debug("snapshot reset executing revision=\(request.revision, privacy: .public) first_id=\(request.firstArticleID, privacy: .public)")
-        proxy.scrollTo(request.firstArticleID, anchor: .top)
-        NativeLog.snapshot.debug("snapshot reset completed revision=\(request.revision, privacy: .public)")
     }
     private func handle(_ command: ArticleKeyboardCommand, proxy: ScrollViewProxy) {
         switch command {
