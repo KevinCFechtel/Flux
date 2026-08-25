@@ -9,6 +9,7 @@ mkdir -p "$generated"
 
 if [[ "${FLUX_UNIFFI_PREPARED:-0}" != "1" ]]; then
   cargo build --manifest-path "$workspace" --package flux-uniffi --release
+  install_name_tool -id "@rpath/libflux_uniffi.dylib" "$library"
   (
     cd "$root/core"
     cargo run --manifest-path "$workspace" --package flux-uniffi --bin uniffi-bindgen -- generate "$library" --library --crate flux_uniffi --language swift --out-dir "$generated"

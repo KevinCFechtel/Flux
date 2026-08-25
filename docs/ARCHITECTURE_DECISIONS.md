@@ -282,12 +282,11 @@ Retention cleanup runs only during a normal sync. A very old unread
 article may therefore remain locally until a later sync after it is
 marked read.
 
-Initial/rebuilt local state includes at least:
+Remote synchronization and local retention are separate concerns. Retention is a local cleanup policy, not a remote fetch policy. A normal sync, including the initial sync on a fresh installation, does not fetch read history merely to populate the retention window. Remote synchronization fetches at least all unread articles and all starred articles, plus explicitly required special sets such as articles needed for active/existing downloads.
 
--   all unread articles;
--   read articles inside retention;
--   all starred articles;
--   articles required by active/existing downloads.
+Articles already received locally remain in the local data set when they later become read. After reconciliation, retention cleanup may remove locally persisted read articles that are older than the configured retention period and have no independent protection. A fresh installation therefore does not backfill read articles solely because they fall within the configured retention period.
+
+Rebuild follows the same separation of concerns: it restores the required remote article sets rather than treating retention as a request to backfill read history. Any additional rebuild-only recovery requirements must be explicit, such as restoring article records required for preserved downloads.
 
 ## 11. Search
 

@@ -49,7 +49,10 @@ if [[ -n "${SIGNING_TIMESTAMP_URL}" ]]; then
 fi
 
 echo "2/8 Signing with Developer ID and hardened runtime"
-codesign --force --deep --options runtime "${timestamp_args[@]}" --sign "${SIGNING_IDENTITY}" "${APP_DIR}"
+UNIFFI_LIBRARY="${APP_DIR}/Contents/Frameworks/libflux_uniffi.dylib"
+[[ -f "${UNIFFI_LIBRARY}" ]] || { echo "Embedded UniFFI library is missing: ${UNIFFI_LIBRARY}" >&2; exit 1; }
+codesign --force --options runtime "${timestamp_args[@]}" --sign "${SIGNING_IDENTITY}" "${UNIFFI_LIBRARY}"
+codesign --force --options runtime "${timestamp_args[@]}" --sign "${SIGNING_IDENTITY}" "${APP_DIR}"
 codesign --verify --deep --strict --verbose=4 "${APP_DIR}"
 
 mkdir -p "${RELEASE_DIR}"
