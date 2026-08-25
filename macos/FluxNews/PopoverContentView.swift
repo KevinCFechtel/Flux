@@ -316,6 +316,7 @@ private struct NavigationSidebar: View {
                 Button { store.addCategoryVisible = true } label: { Label("Add Category...", systemImage: "folder.badge.plus") }
             }
             .buttonStyle(.plain)
+            .labelStyle(SidebarManagementLabelStyle())
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
         }
@@ -350,6 +351,15 @@ private struct NavigationSidebar: View {
         .contentShape(Rectangle())
         .tag(item.scope)
         .badge(Int(item.count))
+    }
+}
+
+private struct SidebarManagementLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) {
+            configuration.icon.frame(width: 25)
+            configuration.title
+        }
     }
 }
 
