@@ -166,7 +166,7 @@ impl MinifluxClient {
                 query.push(("after_entry_id", after_id.to_string()));
             }
             let page: EntriesDto = self.get("/v1/entries", &query)?;
-            tracing::debug!(target: "miniflux", "entry page completed set={} entries={} total={}", set, page.entries.len(), page.total);
+            tracing::debug!(target: "miniflux", "entry page completed set={} entries={} total={} accumulated={} after_entry_id={}", set, page.entries.len(), page.total, all.len(), after_id);
             if page.entries.is_empty() {
                 break;
             }
@@ -181,9 +181,6 @@ impl MinifluxClient {
             }
             after_id = previous;
             all.extend(page.entries);
-            if all.len() as i64 >= page.total {
-                break;
-            }
         }
         tracing::info!(target: "miniflux", "entry fetch completed set={} entries={} elapsed_ms={}", set, all.len(), started.elapsed().as_millis());
         Ok(all)
@@ -406,8 +403,150 @@ struct IconDto {
 mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Write};
-    use std::net::TcpListener;
+    use std::net::{SocketAddr, TcpListener};
     use std::thread;
+
+    fn entry_page(total: i64, ids: impl IntoIterator<Item = i64>) -> String {
+        let entries = ids
+            .into_iter()
+            .map(|id| {
+                serde_json::json!({
+                    "id": id,
+                    "feed_id": 1,
+                    "published_at": "2026-01-02T03:04:05Z",
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::json!({ "total": total, "entries": entries }).to_string()
+    }
+
+    fn entry_server(
+        responses: Vec<(u16, String)>,
+    ) -> (SocketAddr, thread::JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let worker = thread::spawn(move || {
+            let mut targets = Vec::new();
+            for (status, body) in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                targets.push(line.split_whitespace().nth(1).unwrap().to_string());
+                let mut authenticated = false;
+                loop {
+                    line.clear();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if line
+                        .to_ascii_lowercase()
+                        .starts_with("x-auth-token: test-key")
+                    {
+                        authenticated = true;
+                    }
+                }
+                assert!(authenticated);
+                write!(stream, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+            }
+            targets
+        });
+        (address, worker)
+    }
+
+    fn unread_entry_targets(after_ids: &[i64]) -> Vec<String> {
+        let mut targets =
+            vec!["/v1/entries?limit=100&order=id&direction=asc&status=unread".to_string()];
+        targets.extend(after_ids.iter().map(|id| {
+            format!(
+                "/v1/entries?limit=100&order=id&direction=asc&status=unread&after_entry_id={id}"
+            )
+        }));
+        targets
+    }
+
+    #[test]
+    fn entries_continue_after_decreasing_totals_until_empty_page() {
+        let (address, worker) = entry_server(vec![
+            (200, entry_page(230, 1..=100)),
+            (200, entry_page(130, 101..=200)),
+            (200, entry_page(30, 201..=230)),
+            (200, entry_page(0, [])),
+        ]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        let entries = client.entries(Some("unread"), false).unwrap();
+
+        assert_eq!(
+            entries
+                .into_iter()
+                .map(|entry| entry.id)
+                .collect::<Vec<_>>(),
+            (1..=230).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            worker.join().unwrap(),
+            unread_entry_targets(&[100, 200, 230])
+        );
+    }
+
+    #[test]
+    fn entries_fetch_empty_page_after_exactly_full_page() {
+        let (address, worker) = entry_server(vec![
+            (200, entry_page(100, 1..=100)),
+            (200, entry_page(0, [])),
+        ]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        let entries = client.entries(Some("unread"), false).unwrap();
+
+        assert_eq!(entries.len(), 100);
+        assert_eq!(worker.join().unwrap(), unread_entry_targets(&[100]));
+    }
+
+    #[test]
+    fn entries_accept_empty_first_page() {
+        let (address, worker) = entry_server(vec![(200, entry_page(0, []))]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        assert!(client.entries(Some("unread"), false).unwrap().is_empty());
+        assert_eq!(worker.join().unwrap(), unread_entry_targets(&[]));
+    }
+
+    #[test]
+    fn entries_reject_unstable_later_page() {
+        let (address, worker) = entry_server(vec![
+            (200, entry_page(100, 1..=100)),
+            (200, entry_page(1, [100])),
+        ]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        let error = match client.entries(Some("unread"), false) {
+            Err(error) => error,
+            Ok(_) => panic!("unstable entry pagination should fail"),
+        };
+
+        assert_eq!(error.kind, crate::domain::CoreErrorKind::Data);
+        assert_eq!(error.message, "Miniflux returned unstable entry pagination");
+        assert_eq!(worker.join().unwrap(), unread_entry_targets(&[100]));
+    }
+
+    #[test]
+    fn entries_return_error_when_second_page_fails() {
+        let (address, worker) =
+            entry_server(vec![(200, entry_page(100, 1..=100)), (500, String::new())]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        let error = match client.entries(Some("unread"), false) {
+            Err(error) => error,
+            Ok(_) => panic!("second-page server failure should fail entry fetch"),
+        };
+
+        assert_eq!(error.kind, crate::domain::CoreErrorKind::ServerTransient);
+        assert_eq!(error.message, "Miniflux server returned HTTP 500");
+        assert_eq!(worker.join().unwrap(), unread_entry_targets(&[100]));
+    }
 
     #[test]
     fn fetches_only_unread_and_starred_entries_without_read_history() {
@@ -415,7 +554,9 @@ mod tests {
             r#"[{"id":1,"title":"Category"}]"#,
             r#"[{"id":9,"title":"Feed","category":{"id":1}}]"#,
             r#"{"total":1,"entries":[{"id":4,"feed_id":9,"title":"Unread and starred","url":"https://entry/post","status":"unread","starred":true,"published_at":"2026-01-02T03:04:05Z","content":"<p>source &amp; preview</p>","enclosures":[{"url":"audio.mp3","mime_type":"audio/mpeg"},{"url":"/cover.jpg","mime_type":"image/jpeg"}]}]}"#,
+            r#"{"total":0,"entries":[]}"#,
             r#"{"total":1,"entries":[{"id":4,"feed_id":9,"title":"Unread and starred","url":"https://entry/post","status":"unread","starred":true,"published_at":"2026-01-02T03:04:05Z","content":"<p>source &amp; preview</p>","enclosures":[{"url":"audio.mp3","mime_type":"audio/mpeg"},{"url":"/cover.jpg","mime_type":"image/jpeg"}]}]}"#,
+            r#"{"total":0,"entries":[]}"#,
         ];
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
