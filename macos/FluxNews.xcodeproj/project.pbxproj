@@ -10,7 +10,6 @@
 		A1 /* FluxNewsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1 /* FluxNewsApp.swift */; };
 		A10 /* AppRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10 /* AppRouting.swift */; };
 		A11 /* AppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11 /* AppIntents.swift */; };
-		A12 /* Build/AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = B12 /* Build/AppIcon.icns */; };
 		A13 /* FluxNewsTemplate.svg in Resources */ = {isa = PBXBuildFile; fileRef = B13 /* FluxNewsTemplate.svg */; };
 		A14 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = B14 /* Localizable.xcstrings */; };
 		A15 /* en.lproj/AppShortcuts.strings in Resources */ = {isa = PBXBuildFile; fileRef = B15 /* en.lproj/AppShortcuts.strings */; };
@@ -43,7 +42,6 @@
 		B1 /* FluxNewsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsApp.swift; sourceTree = "<group>"; };
 		B10 /* AppRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouting.swift; sourceTree = "<group>"; };
 		B11 /* AppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntents.swift; sourceTree = "<group>"; };
-		B12 /* Build/AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Build/AppIcon.icns; sourceTree = "<group>"; };
 		B13 /* FluxNewsTemplate.svg */ = {isa = PBXFileReference; lastKnownFileType = image.svg; path = FluxNewsTemplate.svg; sourceTree = "<group>"; };
 		B14 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		B15 /* en.lproj/AppShortcuts.strings */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; path = en.lproj/AppShortcuts.strings; sourceTree = "<group>"; };
@@ -88,7 +86,6 @@
 				G1 /* FluxNews */,
 				GT /* FluxNewsTests */,
 				G2 /* Products */,
-				B12 /* Build/AppIcon.icns */,
 				F1 /* XCTest.framework */,
 				E184D498303DEC29009B16A3 /* AppIcon.icon */,
 			);
@@ -202,7 +199,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A12 /* Build/AppIcon.icns in Resources */,
 				A13 /* FluxNewsTemplate.svg in Resources */,
 				A14 /* Localizable.xcstrings in Resources */,
 				A15 /* en.lproj/AppShortcuts.strings in Resources */,
