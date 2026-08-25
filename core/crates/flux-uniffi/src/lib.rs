@@ -56,6 +56,12 @@ pub struct SearchArticlesResult {
 }
 
 #[derive(uniffi::Enum)]
+pub enum SearchMutationDisposition {
+    LocalFirst,
+    RemoteOnly,
+}
+
+#[derive(uniffi::Enum)]
 pub enum ArticleScope {
     All,
     Category { id: i64 },
@@ -367,14 +373,20 @@ impl Flux {
         &self,
         article_id: i64,
         starred: bool,
-    ) -> Result<(), FluxError> {
+    ) -> Result<SearchMutationDisposition, FluxError> {
         self.core
             .search_set_starred_state(article_id, starred)
+            .map(Into::into)
             .map_err(map_error)
     }
-    pub fn search_set_read_state(&self, article_id: i64, read: bool) -> Result<(), FluxError> {
+    pub fn search_set_read_state(
+        &self,
+        article_id: i64,
+        read: bool,
+    ) -> Result<SearchMutationDisposition, FluxError> {
         self.core
             .search_set_read_state(article_id, read)
+            .map(Into::into)
             .map_err(map_error)
     }
     pub fn navigation_catalog(&self) -> Result<NavigationCatalog, FluxError> {
@@ -773,6 +785,14 @@ impl From<domain::SearchArticlesResult> for SearchArticlesResult {
         Self {
             total: value.total,
             articles: value.articles.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+impl From<domain::SearchMutationDisposition> for SearchMutationDisposition {
+    fn from(value: domain::SearchMutationDisposition) -> Self {
+        match value {
+            domain::SearchMutationDisposition::LocalFirst => Self::LocalFirst,
+            domain::SearchMutationDisposition::RemoteOnly => Self::RemoteOnly,
         }
     }
 }

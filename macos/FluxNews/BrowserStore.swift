@@ -250,6 +250,7 @@ final class BrowserStore: ObservableObject {
     }
     func clearSearch() {
         searchGeneration &+= 1
+        searchQuery = ""
         articles = []
         selectionTotal = 0
         searchTotal = 0
@@ -349,7 +350,14 @@ final class BrowserStore: ObservableObject {
             let store = WeakBrowserStore(self)
             Task.detached {
                 let result = Result { try core.searchSetReadState(articleId: article.id, read: read) }
-                await MainActor.run { switch result { case .success: store.value?.updateVisible([article.id]) { $0.isRead = read }; case let .failure(error): store.value?.errorMessage = String(describing: error) } }
+                await MainActor.run {
+                    switch result {
+                    case let .success(disposition):
+                        store.value?.updateVisible([article.id]) { $0.isRead = read }
+                        if case .localFirst = disposition { store.value?.reloadCounts() }
+                    case let .failure(error): store.value?.errorMessage = String(describing: error)
+                    }
+                }
             }
             return
         }
@@ -361,7 +369,14 @@ final class BrowserStore: ObservableObject {
             let store = WeakBrowserStore(self)
             Task.detached {
                 let result = Result { try core.searchSetStarredState(articleId: article.id, starred: starred) }
-                await MainActor.run { switch result { case .success: store.value?.updateVisible([article.id]) { $0.isStarred = starred }; case let .failure(error): store.value?.errorMessage = String(describing: error) } }
+                await MainActor.run {
+                    switch result {
+                    case let .success(disposition):
+                        store.value?.updateVisible([article.id]) { $0.isStarred = starred }
+                        if case .localFirst = disposition { store.value?.reloadCounts() }
+                    case let .failure(error): store.value?.errorMessage = String(describing: error)
+                    }
+                }
             }
             return
         }

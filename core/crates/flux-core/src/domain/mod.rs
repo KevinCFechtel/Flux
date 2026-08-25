@@ -80,6 +80,12 @@ pub struct SearchArticlesResult {
     pub articles: Vec<ArticleSummary>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchMutationDisposition {
+    LocalFirst,
+    RemoteOnly,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ArticleScope {
     All,

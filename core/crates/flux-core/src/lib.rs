@@ -24,7 +24,8 @@ use domain::{
     CreateCategoryResult, CreateFeedRequest, CreateFeedResult, DeliveryDisposition, DeliveryMode,
     DiscoverSubscriptionsRequest, DiscoveredSubscription, FeedIcon, FeedIconVariant, MutationField,
     MutationResult, NavigationCatalog, RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult,
-    SearchArticlesRequest, SearchArticlesResult, SyncCompleted, SyncFailure, SyncReason,
+    SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition, SyncCompleted,
+    SyncFailure, SyncReason,
 };
 use miniflux::{MinifluxClient, RemoteSource};
 use storage::Store;
@@ -267,6 +268,15 @@ impl FluxCore {
         }
         let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
             self.remote.search_articles(request)
+        })
+        .and_then(|mut result| {
+            for article in &mut result.articles {
+                if let Some(state) = self.store.local_article_state(article.id)? {
+                    article.is_read = state.is_read;
+                    article.is_starred = state.is_starred;
+                }
+            }
+            Ok(result)
         });
         self.diagnostics.flush();
         result
@@ -275,12 +285,16 @@ impl FluxCore {
         &self,
         article_id: i64,
         starred: bool,
-    ) -> Result<(), CoreError> {
+    ) -> Result<SearchMutationDisposition, CoreError> {
         self.search_set_state(article_id, MutationField::Starred, starred, |remote| {
             remote.set_starred_state(article_id, starred)
         })
     }
-    pub fn search_set_read_state(&self, article_id: i64, read: bool) -> Result<(), CoreError> {
+    pub fn search_set_read_state(
+        &self,
+        article_id: i64,
+        read: bool,
+    ) -> Result<SearchMutationDisposition, CoreError> {
         self.search_set_state(article_id, MutationField::Read, read, |remote| {
             remote.set_read_state(&[article_id], read)
         })
@@ -440,16 +454,16 @@ impl FluxCore {
         field: MutationField,
         desired: bool,
         operation: impl FnOnce(&dyn RemoteSource) -> Result<(), CoreError>,
-    ) -> Result<(), CoreError> {
+    ) -> Result<SearchMutationDisposition, CoreError> {
         if article_id <= 0 {
             return Err(CoreError::data("article ID must be positive"));
         }
         let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
-            if self.store.article_exists(article_id)? {
+            if self.store.local_article_state(article_id)?.is_some() {
                 self.set_state_bulk_inner(&[article_id], field, desired)
-                    .map(|_| ())
+                    .map(|_| SearchMutationDisposition::LocalFirst)
             } else {
-                operation(self.remote.as_ref())
+                operation(self.remote.as_ref()).map(|_| SearchMutationDisposition::RemoteOnly)
             }
         });
         self.diagnostics.flush();
@@ -640,6 +654,7 @@ mod tests {
         read_calls: AtomicUsize,
         star_calls: AtomicUsize,
         failure: Mutex<Option<CoreError>>,
+        search_result: Mutex<SearchArticlesResult>,
     }
     struct ReentrantListener {
         core: Mutex<Option<Arc<FluxCore>>>,
@@ -736,23 +751,26 @@ mod tests {
         ) -> Result<SearchArticlesResult, CoreError> {
             self.search_calls.fetch_add(1, Ordering::SeqCst);
             assert_eq!(request.query, "rust");
-            Ok(SearchArticlesResult {
-                total: 1,
-                articles: vec![ArticleSummary {
-                    id: 99,
-                    feed_id: 10,
-                    category_id: 1,
-                    feed_title: "Feed A".into(),
-                    title: "Remote result".into(),
-                    url: "https://example.test/99".into(),
-                    comments_url: String::new(),
-                    published_at: "2026-01-02T03:04:05Z".into(),
-                    is_read: false,
-                    is_starred: false,
-                    preview: "Remote preview".into(),
-                    image_url: None,
-                }],
-            })
+            Ok(self.search_result.lock().unwrap().clone())
+        }
+    }
+    fn search_result() -> SearchArticlesResult {
+        SearchArticlesResult {
+            total: 1,
+            articles: vec![ArticleSummary {
+                id: 99,
+                feed_id: 10,
+                category_id: 1,
+                feed_title: "Feed A".into(),
+                title: "Remote result".into(),
+                url: "https://example.test/99".into(),
+                comments_url: String::new(),
+                published_at: "2026-01-02T03:04:05Z".into(),
+                is_read: false,
+                is_starred: false,
+                preview: "Remote preview".into(),
+                image_url: None,
+            }],
         }
     }
     fn article(id: i64, feed_id: i64, published_at: String, read: bool, starred: bool) -> Article {
@@ -859,6 +877,7 @@ mod tests {
             read_calls: AtomicUsize::new(0),
             star_calls: AtomicUsize::new(0),
             failure: Mutex::new(None),
+            search_result: Mutex::new(search_result()),
         });
         let core = Arc::new(FluxCore::with_remote(config(temp), source.clone()).unwrap());
         (core, source)
@@ -1501,6 +1520,94 @@ mod tests {
         }
     }
     #[test]
+    fn search_overlays_all_local_read_and_starred_state_combinations() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = search_core(&temp);
+        let mut data = snapshot();
+        data.articles
+            .push(article(4, 20, Utc::now().to_rfc3339(), false, true));
+        core.store
+            .reconcile(&data.categories, &data.feeds, &data.articles)
+            .unwrap();
+        source.search_result.lock().unwrap().articles = (1..=4)
+            .map(|id| ArticleSummary {
+                id,
+                feed_id: 10,
+                category_id: 1,
+                feed_title: "Remote".into(),
+                title: format!("Remote {id}"),
+                url: format!("https://example.test/{id}"),
+                comments_url: String::new(),
+                published_at: "2026-01-02T03:04:05Z".into(),
+                is_read: false,
+                is_starred: false,
+                preview: String::new(),
+                image_url: None,
+            })
+            .collect();
+
+        let result = core
+            .search_articles(SearchArticlesRequest {
+                query: "rust".into(),
+                offset: 0,
+                limit: 20,
+            })
+            .unwrap();
+
+        assert_eq!(
+            result
+                .articles
+                .iter()
+                .map(|article| (article.is_read, article.is_starred))
+                .collect::<Vec<_>>(),
+            vec![(false, false), (true, true), (true, false), (false, true)]
+        );
+    }
+    #[test]
+    fn search_overlays_pending_star_and_unstar_state() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = search_core(&temp);
+        let data = snapshot();
+        core.store
+            .reconcile(&data.categories, &data.feeds, &data.articles)
+            .unwrap();
+        source.search_result.lock().unwrap().articles[0].id = 1;
+
+        assert_eq!(
+            core.search_set_starred_state(1, true).unwrap(),
+            SearchMutationDisposition::LocalFirst
+        );
+        assert!(
+            core.search_articles(SearchArticlesRequest {
+                query: "rust".into(),
+                offset: 0,
+                limit: 20,
+            })
+            .unwrap()
+            .articles[0]
+                .is_starred
+        );
+        assert_eq!(
+            core.search_set_starred_state(1, false).unwrap(),
+            SearchMutationDisposition::LocalFirst
+        );
+        let pending = core.store.pending_mutations().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].field, MutationField::Starred);
+        assert!(!pending[0].desired);
+        assert!(
+            !core
+                .search_articles(SearchArticlesRequest {
+                    query: "rust".into(),
+                    offset: 0,
+                    limit: 20,
+                })
+                .unwrap()
+                .articles[0]
+                .is_starred
+        );
+    }
+    #[test]
     fn search_star_for_local_article_uses_local_first_mutation() {
         let temp = TempDir::new().unwrap();
         let (core, source) = search_core(&temp);
@@ -1509,7 +1616,10 @@ mod tests {
             .reconcile(&data.categories, &data.feeds, &data.articles)
             .unwrap();
 
-        core.search_set_starred_state(1, true).unwrap();
+        assert_eq!(
+            core.search_set_starred_state(1, true).unwrap(),
+            SearchMutationDisposition::LocalFirst
+        );
 
         assert!(
             core.query_articles(ArticleQuery {
@@ -1535,7 +1645,10 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (core, source) = search_core(&temp);
 
-        core.search_set_starred_state(99, true).unwrap();
+        assert_eq!(
+            core.search_set_starred_state(99, true).unwrap(),
+            SearchMutationDisposition::RemoteOnly
+        );
 
         assert_eq!(source.star_calls.load(Ordering::SeqCst), 1);
         assert!(core.store.pending_mutations().unwrap().is_empty());
@@ -1576,7 +1689,10 @@ mod tests {
             .reconcile(&data.categories, &data.feeds, &data.articles)
             .unwrap();
 
-        core.search_set_read_state(1, true).unwrap();
+        assert_eq!(
+            core.search_set_read_state(1, true).unwrap(),
+            SearchMutationDisposition::LocalFirst
+        );
 
         assert!(
             core.query_articles(ArticleQuery {
@@ -1602,7 +1718,10 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (core, source) = search_core(&temp);
 
-        core.search_set_read_state(99, true).unwrap();
+        assert_eq!(
+            core.search_set_read_state(99, true).unwrap(),
+            SearchMutationDisposition::RemoteOnly
+        );
 
         assert_eq!(source.read_calls.load(Ordering::SeqCst), 1);
         assert!(core.store.pending_mutations().unwrap().is_empty());
