@@ -75,6 +75,11 @@ requested separately for article detail.
 A background core change must not unexpectedly rebuild a list the user
 is currently using.
 
+Synchronization is independent of native presentation visibility.
+Periodic/background sync may run while a UI surface is visible; native
+refresh policy, rather than suppressed synchronization, protects stable
+visible snapshots.
+
 With Sync-on-Start enabled:
 
 1.  load and display local state immediately;

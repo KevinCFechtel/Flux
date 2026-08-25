@@ -156,13 +156,7 @@ final class BrowserStore: ObservableObject {
         activatePeriodicSyncScheduling()
         syncIfStale(reason: .resume)
     }
-    private func runPeriodicSync() {
-        guard !popoverVisible else {
-            NativeLog.sync.debug("periodic sync skipped while popover is visible")
-            return
-        }
-        sync(reason: .periodic)
-    }
+    private func runPeriodicSync() { sync(reason: .periodic) }
     func handle(event: CoreEvent) {
         guard case let .syncCompleted(metadata) = event else { return }
         isLoading = false
