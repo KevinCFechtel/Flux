@@ -1,6 +1,7 @@
 //! Miniflux HTTP adapter. It maps wire data into domain values and never persists it.
 
 use std::collections::HashMap;
+use std::io::Read;
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -17,12 +18,22 @@ pub struct RemoteSnapshot {
     pub articles: Vec<Article>,
 }
 
+pub struct RemoteImage {
+    pub content_type: Option<String>,
+    pub bytes: Vec<u8>,
+}
+
 pub trait RemoteSource: Send + Sync {
     fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError>;
     fn set_read_state(&self, article_ids: &[i64], read: bool) -> Result<(), CoreError>;
     fn set_starred_state(&self, article_id: i64, starred: bool) -> Result<(), CoreError>;
     fn fetch_feed_icon(&self, _feed_id: i64) -> Result<Option<String>, CoreError> {
         Err(CoreError::data("feed icon acquisition is unavailable"))
+    }
+    fn fetch_article_image(&self, _url: &str, _max_bytes: usize) -> Result<RemoteImage, CoreError> {
+        Err(CoreError::data(
+            "article thumbnail acquisition is unavailable",
+        ))
     }
 }
 
@@ -177,6 +188,34 @@ impl MinifluxClient {
         tracing::info!(target: "miniflux", "entry fetch completed set={} entries={} elapsed_ms={}", set, all.len(), started.elapsed().as_millis());
         Ok(all)
     }
+    fn download_image(&self, url: &str, max_bytes: usize) -> Result<RemoteImage, CoreError> {
+        let response = self
+            .agent
+            .get(url)
+            .set("Accept", "image/*")
+            .call()
+            .map_err(map_image_http_error)?;
+        if response
+            .header("Content-Length")
+            .and_then(|value| value.parse::<usize>().ok())
+            .is_some_and(|length| length > max_bytes)
+        {
+            return Err(CoreError::data("article image exceeds maximum payload"));
+        }
+        let content_type = response.header("Content-Type").map(str::to_owned);
+        let mut reader = response.into_reader().take((max_bytes + 1) as u64);
+        let mut bytes = Vec::with_capacity(max_bytes.min(64 * 1024));
+        reader.read_to_end(&mut bytes).map_err(|error| {
+            CoreError::connectivity(format!("article image download failed: {error}"))
+        })?;
+        if bytes.len() > max_bytes {
+            return Err(CoreError::data("article image exceeds maximum payload"));
+        }
+        Ok(RemoteImage {
+            content_type,
+            bytes,
+        })
+    }
 }
 
 impl RemoteSource for MinifluxClient {
@@ -275,6 +314,9 @@ impl RemoteSource for MinifluxClient {
         let icon: IconDto = self.get(&format!("/v1/feeds/{feed_id}/icon"), &[])?;
         Ok((!icon.data.trim().is_empty()).then_some(icon.data))
     }
+    fn fetch_article_image(&self, url: &str, max_bytes: usize) -> Result<RemoteImage, CoreError> {
+        self.download_image(url, max_bytes)
+    }
 }
 
 fn map_http_error(error: ureq::Error) -> CoreError {
@@ -289,6 +331,17 @@ fn map_http_error(error: ureq::Error) -> CoreError {
             CoreError::invalid_configuration(format!("Miniflux returned HTTP {status}"))
         }
         other => CoreError::connectivity(format!("Miniflux request failed: {other}")),
+    }
+}
+fn map_image_http_error(error: ureq::Error) -> CoreError {
+    match error {
+        ureq::Error::Status(status, _) if status == 429 || status >= 500 => {
+            CoreError::server_transient(format!("article image server returned HTTP {status}"))
+        }
+        ureq::Error::Status(status, _) => {
+            CoreError::data(format!("article image returned HTTP {status}"))
+        }
+        other => CoreError::connectivity(format!("article image request failed: {other}")),
     }
 }
 

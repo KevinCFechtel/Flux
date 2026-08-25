@@ -1,6 +1,7 @@
 //! Shared durable Flux domain core. Platform clients provide paths and secrets.
 
 pub mod article;
+mod article_thumbnail;
 pub mod diagnostics;
 pub mod domain;
 mod feed_icon;
@@ -19,9 +20,9 @@ use chrono::{DateTime, Utc};
 
 use diagnostics::{CoreDiagnosticListener, Diagnostics};
 use domain::{
-    ArticleQuery, ArticleSummary, CoreError, CoreErrorKind, CoreEvent, DeliveryDisposition,
-    DeliveryMode, FeedIcon, FeedIconVariant, MutationField, MutationResult, NavigationCatalog,
-    RuntimeHealth, RuntimeHealthStatus, SyncCompleted, SyncFailure, SyncReason,
+    ArticleQuery, ArticleSummary, ArticleThumbnailResult, CoreError, CoreErrorKind, CoreEvent,
+    DeliveryDisposition, DeliveryMode, FeedIcon, FeedIconVariant, MutationField, MutationResult,
+    NavigationCatalog, RuntimeHealth, RuntimeHealthStatus, SyncCompleted, SyncFailure, SyncReason,
 };
 use miniflux::{MinifluxClient, RemoteSource};
 use storage::Store;
@@ -41,6 +42,7 @@ pub struct FluxCore {
     store: Arc<Store>,
     remote: Arc<dyn RemoteSource>,
     feed_icons: feed_icon::FeedIconService,
+    article_thumbnails: article_thumbnail::ArticleThumbnailService,
     sync_gate: Mutex<()>,
     delivery_mode: Mutex<DeliveryMode>,
     runtime: Mutex<DeliveryRuntime>,
@@ -85,9 +87,11 @@ impl FluxCore {
             store.set_base_url(&config.base_url)?;
             let remote = Arc::new(MinifluxClient::new(&config.base_url, &config.api_key)?);
             let feed_icons = feed_icon::FeedIconService::new(config.cache.clone())?;
-            Ok::<_, CoreError>((store, remote, feed_icons))
+            let article_thumbnails =
+                article_thumbnail::ArticleThumbnailService::new(config.cache.clone())?;
+            Ok::<_, CoreError>((store, remote, feed_icons, article_thumbnails))
         });
-        let (store, remote, feed_icons) = match result {
+        let (store, remote, feed_icons, article_thumbnails) = match result {
             Ok(result) => result,
             Err(error) => {
                 tracing::dispatcher::with_default(
@@ -107,6 +111,7 @@ impl FluxCore {
             store,
             remote,
             feed_icons,
+            article_thumbnails,
             sync_gate: Mutex::new(()),
             delivery_mode: Mutex::new(DeliveryMode::Deferred),
             runtime: Mutex::new(DeliveryRuntime {
@@ -138,9 +143,11 @@ impl FluxCore {
             )?);
             store.set_base_url(&config.base_url)?;
             let feed_icons = feed_icon::FeedIconService::new(config.cache.clone())?;
-            Ok::<_, CoreError>((store, feed_icons))
+            let article_thumbnails =
+                article_thumbnail::ArticleThumbnailService::new(config.cache.clone())?;
+            Ok::<_, CoreError>((store, feed_icons, article_thumbnails))
         })?;
-        let (store, feed_icons) = store;
+        let (store, feed_icons, article_thumbnails) = store;
         tracing::dispatcher::with_default(
             &diagnostic_dispatcher,
             || tracing::info!(target: "core", "core initialization completed"),
@@ -149,6 +156,7 @@ impl FluxCore {
             store,
             remote,
             feed_icons,
+            article_thumbnails,
             sync_gate: Mutex::new(()),
             delivery_mode: Mutex::new(DeliveryMode::Deferred),
             runtime: Mutex::new(DeliveryRuntime {
@@ -251,6 +259,14 @@ impl FluxCore {
         variant: FeedIconVariant,
     ) -> Result<Option<FeedIcon>, CoreError> {
         self.feed_icons.get(self.remote.as_ref(), feed_id, variant)
+    }
+    pub fn article_thumbnail(
+        &self,
+        article_id: i64,
+        image_url: String,
+    ) -> Result<ArticleThumbnailResult, CoreError> {
+        self.article_thumbnails
+            .get(self.remote.as_ref(), article_id, &image_url)
     }
     pub fn last_successful_sync_at(&self) -> Result<Option<String>, CoreError> {
         self.store.last_successful_sync_at()

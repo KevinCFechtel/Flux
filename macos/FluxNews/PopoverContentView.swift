@@ -345,7 +345,12 @@ private struct ArticleItem: View {
     private var row: some View {
         HStack(alignment: .top, spacing: 12) {
             Button { onSelect(); store.open(article) } label: {
-                HStack(alignment: .top, spacing: 12) { ThumbnailSlot(width: 240, height: 168); textComposition }
+                HStack(alignment: .top, spacing: 12) {
+                    if article.imageUrl != nil, !store.unavailableArticleThumbnails.contains(store.articleThumbnailKey(article)) {
+                        ThumbnailSlot(article: article, store: store, width: 240, height: 168)
+                    }
+                    textComposition
+                }
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -358,8 +363,10 @@ private struct ArticleItem: View {
     }
     private var card: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button { onSelect(); store.open(article) } label: { ThumbnailSlot(width: PopoverLayout.cardWidth - 24, height: 206, cornerRadius: 10) }
-                .buttonStyle(.plain)
+            if article.imageUrl != nil, !store.unavailableArticleThumbnails.contains(store.articleThumbnailKey(article)) {
+                Button { onSelect(); store.open(article) } label: { ThumbnailSlot(article: article, store: store, width: PopoverLayout.cardWidth - 24, height: 206, cornerRadius: 10) }
+                    .buttonStyle(.plain)
+            }
             HStack(alignment: .top, spacing: 10) {
                 Button { onSelect(); store.open(article) } label: { textComposition.contentShape(Rectangle()) }.buttonStyle(.plain)
                 quickActions.opacity(hovered ? 1 : 0).allowsHitTesting(hovered)
@@ -418,16 +425,23 @@ private struct ArticleItem: View {
 }
 
 private struct ThumbnailSlot: View {
+    let article: ArticleSummary
+    @ObservedObject var store: BrowserStore
     let width: CGFloat
     let height: CGFloat
     var cornerRadius: CGFloat = 7
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: cornerRadius).fill(Color.secondary.opacity(0.10))
-            Image(systemName: "photo").font(.title2).foregroundStyle(.tertiary)
+            if let data = store.articleThumbnails[store.articleThumbnailKey(article)], let image = NSImage(data: data) {
+                Image(nsImage: image).resizable().interpolation(.high).scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: cornerRadius).fill(Color.secondary.opacity(0.10))
+                RoundedRectangle(cornerRadius: cornerRadius).fill(.primary.opacity(0.035))
+            }
         }
         .frame(width: width, height: height).clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         .accessibilityLabel("Article thumbnail")
+        .onAppear { store.requestArticleThumbnail(article) }
     }
 }
 

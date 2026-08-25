@@ -98,6 +98,11 @@ pub struct FeedIcon {
     pub variant: FeedIconVariant,
     pub png_data: Vec<u8>,
 }
+#[derive(uniffi::Enum)]
+pub enum ArticleThumbnailResult {
+    Available { png_data: Vec<u8> },
+    Unavailable,
+}
 #[derive(uniffi::Record)]
 pub struct NavigationCatalog {
     pub categories: Vec<Category>,
@@ -309,6 +314,16 @@ impl Flux {
         self.core
             .feed_icon(feed_id, variant.into())
             .map(|icon| icon.map(Into::into))
+            .map_err(map_error)
+    }
+    pub fn article_thumbnail(
+        &self,
+        article_id: i64,
+        image_url: String,
+    ) -> Result<ArticleThumbnailResult, FluxError> {
+        self.core
+            .article_thumbnail(article_id, image_url)
+            .map(Into::into)
             .map_err(map_error)
     }
     pub fn last_successful_sync_at(&self) -> Result<Option<String>, FluxError> {
@@ -636,6 +651,14 @@ impl From<domain::FeedIcon> for FeedIcon {
             feed_id: value.feed_id,
             variant: value.variant.into(),
             png_data: value.png_data,
+        }
+    }
+}
+impl From<domain::ArticleThumbnailResult> for ArticleThumbnailResult {
+    fn from(value: domain::ArticleThumbnailResult) -> Self {
+        match value {
+            domain::ArticleThumbnailResult::Available { png_data } => Self::Available { png_data },
+            domain::ArticleThumbnailResult::Unavailable => Self::Unavailable,
         }
     }
 }

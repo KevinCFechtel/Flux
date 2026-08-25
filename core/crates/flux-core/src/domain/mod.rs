@@ -27,6 +27,13 @@ pub struct FeedIcon {
     pub png_data: Vec<u8>,
 }
 
+/// A lazily acquired, normalized article thumbnail owned by the core cache.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ArticleThumbnailResult {
+    Available { png_data: Vec<u8> },
+    Unavailable,
+}
+
 /// Flexible local representation aligned with Miniflux's source article data.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Article {

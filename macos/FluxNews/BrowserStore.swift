@@ -17,6 +17,8 @@ final class BrowserStore: ObservableObject {
     @Published var categorySidebarCounts: [Int64: UInt64] = [:]
     @Published var feedSidebarCounts: [Int64: UInt64] = [:]
     @Published private(set) var feedIcons: [String: Data] = [:]
+    @Published private(set) var articleThumbnails: [String: Data] = [:]
+    @Published private(set) var unavailableArticleThumbnails = Set<String>()
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var scope: BrowserScope = .all
@@ -41,6 +43,7 @@ final class BrowserStore: ObservableObject {
     private var sharingPicker: NSSharingServicePicker?
     private var undoExpiry: Task<Void, Never>?
     private var requestedFeedIcons = Set<String>()
+    private var requestedArticleThumbnails = Set<String>()
 
     init() {
         markReadOnScrolloverEnabled = UserDefaults.standard.object(forKey: "FluxNews.markReadOnScrollover") as? Bool ?? true
@@ -123,6 +126,27 @@ final class BrowserStore: ObservableObject {
                 }
             } catch {
                 // Feed icon acquisition is advisory; retain the native fallback.
+            }
+        }
+    }
+    func articleThumbnailKey(_ article: ArticleSummary) -> String { "\(article.id)-\(article.imageUrl ?? "")" }
+    func requestArticleThumbnail(_ article: ArticleSummary) {
+        guard let imageURL = article.imageUrl else { return }
+        let key = articleThumbnailKey(article)
+        guard articleThumbnails[key] == nil, !unavailableArticleThumbnails.contains(key), requestedArticleThumbnails.insert(key).inserted, let core else { return }
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            do {
+                let result = try core.articleThumbnail(articleId: article.id, imageUrl: imageURL)
+                await MainActor.run {
+                    switch result {
+                    case let .available(pngData): store.value?.articleThumbnails[key] = Data(pngData)
+                    case .unavailable: store.value?.unavailableArticleThumbnails.insert(key)
+                    }
+                }
+            } catch {
+                // Optional thumbnails fail silently and remain retryable on a later presentation.
+                _ = await MainActor.run { store.value?.requestedArticleThumbnails.remove(key) }
             }
         }
     }
