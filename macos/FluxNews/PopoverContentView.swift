@@ -375,6 +375,7 @@ private struct ArticleItem: View {
             metadata
             Text(article.title).font(.system(size: 14, weight: article.isRead ? .regular : .semibold))
                 .foregroundStyle(article.isRead ? .secondary : .primary).lineLimit(3).multilineTextAlignment(.leading)
+            if !article.preview.isEmpty { Text(article.preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(3).multilineTextAlignment(.leading) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

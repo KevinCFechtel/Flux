@@ -217,6 +217,15 @@ impl RemoteSource for MinifluxClient {
             let published = DateTime::parse_from_rfc3339(&entry.published_at).map_err(|_| {
                 CoreError::data(format!("article {} has invalid publication time", entry.id))
             })?;
+            let enclosures = entry
+                .enclosures
+                .iter()
+                .map(|item| crate::article::EnclosureInput {
+                    url: item.url.clone(),
+                    mime_type: item.mime_type.clone(),
+                })
+                .collect::<Vec<_>>();
+            let processed = crate::article::process(&entry.content, &entry.url, &enclosures);
             articles.push(Article {
                 id: entry.id,
                 feed_id: entry.feed_id,
@@ -229,6 +238,8 @@ impl RemoteSource for MinifluxClient {
                 is_read: entry.status == "read",
                 is_starred: entry.starred,
                 raw_html_content: entry.content,
+                preview: processed.preview,
+                image_url: processed.image_url,
             });
         }
         Ok(RemoteSnapshot {
@@ -298,6 +309,15 @@ struct EntryDto {
     published_at: String,
     #[serde(default)]
     content: String,
+    #[serde(default)]
+    enclosures: Vec<EnclosureDto>,
+}
+#[derive(Deserialize)]
+struct EnclosureDto {
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    mime_type: String,
 }
 #[derive(Deserialize)]
 struct CategoryDto {

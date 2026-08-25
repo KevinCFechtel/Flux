@@ -25,6 +25,8 @@ pub struct Article {
     pub is_read: bool,
     pub is_starred: bool,
     pub raw_html_content: String,
+    pub preview: String,
+    pub image_url: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,6 +41,8 @@ pub struct ArticleSummary {
     pub published_at: String,
     pub is_read: bool,
     pub is_starred: bool,
+    pub preview: String,
+    pub image_url: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

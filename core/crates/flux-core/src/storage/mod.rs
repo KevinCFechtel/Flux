@@ -10,7 +10,7 @@ use crate::domain::{
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 #[derive(Clone, Debug)]
 pub struct PendingMutation {
@@ -115,7 +115,7 @@ impl Store {
         }
         for a in articles {
             let existing = tx
-                .query_row("SELECT feed_id,title,url,comments_url,published_at,remote_is_read,remote_is_starred,raw_html_content FROM articles WHERE id=?1", [a.id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, bool>(5)?, row.get::<_, bool>(6)?, row.get::<_, String>(7)?)))
+                .query_row("SELECT feed_id,title,url,comments_url,published_at,remote_is_read,remote_is_starred,raw_html_content,preview,image_url FROM articles WHERE id=?1", [a.id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, bool>(5)?, row.get::<_, bool>(6)?, row.get::<_, String>(7)?, row.get::<_, String>(8)?, row.get::<_, Option<String>>(9)?)))
                 .optional()
                 .map_err(sql_error)?;
             match existing {
@@ -131,13 +131,15 @@ impl Store {
                             a.is_read,
                             a.is_starred,
                             a.raw_html_content.clone(),
+                            a.preview.clone(),
+                            a.image_url.clone(),
                         ) =>
                 {
                     stats.updated_articles += 1
                 }
                 Some(_) => {}
             }
-            tx.execute("INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9) ON CONFLICT(id) DO UPDATE SET feed_id=excluded.feed_id,title=excluded.title,url=excluded.url,comments_url=excluded.comments_url,published_at=excluded.published_at,remote_is_read=excluded.remote_is_read,remote_is_starred=excluded.remote_is_starred,is_read=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='read') THEN articles.is_read ELSE excluded.is_read END,is_starred=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='starred') THEN articles.is_starred ELSE excluded.is_starred END,raw_html_content=excluded.raw_html_content", params![a.id,a.feed_id,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.raw_html_content]).map_err(sql_error)?;
+            tx.execute("INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,preview,image_url) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11) ON CONFLICT(id) DO UPDATE SET feed_id=excluded.feed_id,title=excluded.title,url=excluded.url,comments_url=excluded.comments_url,published_at=excluded.published_at,remote_is_read=excluded.remote_is_read,remote_is_starred=excluded.remote_is_starred,is_read=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='read') THEN articles.is_read ELSE excluded.is_read END,is_starred=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='starred') THEN articles.is_starred ELSE excluded.is_starred END,raw_html_content=excluded.raw_html_content,preview=excluded.preview,image_url=excluded.image_url", params![a.id,a.feed_id,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.raw_html_content,a.preview,a.image_url]).map_err(sql_error)?;
         }
         tx.commit().map_err(sql_error)?;
         Ok(stats)
@@ -328,7 +330,7 @@ impl Store {
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
-        let (mut sql,mut values)=article_filter_sql("SELECT a.id,a.feed_id,f.category_id,f.title,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE 1=1".into(),query);
+        let (mut sql,mut values)=article_filter_sql("SELECT a.id,a.feed_id,f.category_id,f.title,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.preview,a.image_url FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE 1=1".into(),query);
         let descending = query.sort == ArticleSort::NewestFirst;
         if let Some(cursor) = &query.cursor {
             let op = if descending { "<" } else { ">" };
@@ -361,6 +363,8 @@ impl Store {
                     published_at: r.get(7)?,
                     is_read: r.get(8)?,
                     is_starred: r.get(9)?,
+                    preview: r.get(10)?,
+                    image_url: r.get(11)?,
                 })
             })
             .map_err(sql_error)?
@@ -413,6 +417,11 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
     if current < 2 {
         let tx = connection.transaction().map_err(sql_error)?;
         tx.execute_batch("ALTER TABLE articles ADD COLUMN remote_is_read INTEGER; ALTER TABLE articles ADD COLUMN remote_is_starred INTEGER; UPDATE articles SET remote_is_read=is_read, remote_is_starred=is_starred WHERE remote_is_read IS NULL; CREATE TABLE pending_mutations (article_id INTEGER NOT NULL REFERENCES articles(id), field TEXT NOT NULL CHECK(field IN ('read','starred')), desired INTEGER NOT NULL CHECK(desired IN(0,1)), revision INTEGER NOT NULL, PRIMARY KEY(article_id,field)); PRAGMA user_version=2;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
+    if current < 3 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute_batch("ALTER TABLE articles ADD COLUMN preview TEXT NOT NULL DEFAULT ''; ALTER TABLE articles ADD COLUMN image_url TEXT; PRAGMA user_version=3;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
     Ok(())

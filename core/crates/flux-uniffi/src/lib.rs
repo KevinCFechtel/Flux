@@ -40,6 +40,8 @@ pub struct ArticleSummary {
     pub published_at: String,
     pub is_read: bool,
     pub is_starred: bool,
+    pub preview: String,
+    pub image_url: Option<String>,
 }
 
 #[derive(uniffi::Enum)]
@@ -569,6 +571,8 @@ impl From<domain::ArticleSummary> for ArticleSummary {
             published_at: value.published_at,
             is_read: value.is_read,
             is_starred: value.is_starred,
+            preview: value.preview,
+            image_url: value.image_url,
         }
     }
 }

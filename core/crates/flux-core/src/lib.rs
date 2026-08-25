@@ -1,5 +1,6 @@
 //! Shared durable Flux domain core. Platform clients provide paths and secrets.
 
+pub mod article;
 pub mod diagnostics;
 pub mod domain;
 pub mod miniflux;
@@ -583,6 +584,8 @@ mod tests {
             is_read: read,
             is_starred: starred,
             raw_html_content: format!("<p>{id}</p>"),
+            preview: id.to_string(),
+            image_url: None,
         }
     }
     fn snapshot() -> RemoteSnapshot {
@@ -679,7 +682,7 @@ mod tests {
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            2
+            3
         );
         let bytes = std::fs::read(core.database_path()).unwrap();
         assert!(

@@ -6,6 +6,8 @@ license.workspace = true
 
 [dependencies]
 chrono.workspace = true
+html5ever.workspace = true
+markup5ever_rcdom.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
