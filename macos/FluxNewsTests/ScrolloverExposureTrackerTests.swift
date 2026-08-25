@@ -47,4 +47,56 @@ final class ScrolloverExposureTrackerTests: XCTestCase {
         tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 1.7)
         XCTAssertEqual(tracker.process(frames: frame(-100), viewport: viewport, unread: unread, now: 1.8, offsetDelta: 50, userInitiated: true), [1])
     }
+
+    func testUndoBatchAccumulatesMultipleFlushesInOneScroll() {
+        var batch = ScrolloverUndoBatch()
+        batch.beginScroll()
+        XCTAssertEqual(batch.append([1]), [1])
+        XCTAssertFalse(batch.showsUndo)
+        XCTAssertEqual(batch.append([2]), [1, 2])
+        XCTAssertTrue(batch.showsUndo)
+    }
+
+    func testUndoBatchDeduplicatesFlushes() {
+        var batch = ScrolloverUndoBatch()
+        batch.beginScroll()
+        XCTAssertEqual(batch.append([1, 2]), [1, 2])
+        XCTAssertEqual(batch.append([2, 3]), [1, 2, 3])
+        XCTAssertTrue(batch.showsUndo)
+    }
+
+    func testNewScrollReplacesUndoBatchOnlyAfterItMarksArticles() {
+        var batch = ScrolloverUndoBatch()
+        batch.beginScroll()
+        XCTAssertEqual(batch.append([1, 2]), [1, 2])
+        batch.beginScroll()
+        XCTAssertEqual(batch.articleIDs, [1, 2])
+        XCTAssertEqual(batch.append([3]), [3])
+        XCTAssertFalse(batch.showsUndo)
+    }
+
+    func testFeedIconRequestStateCompletesEveryTerminalOutcome() {
+        var requests = FeedIconRequestState()
+        XCTAssertTrue(requests.begin("1-normal", cached: false))
+        XCTAssertFalse(requests.begin("1-normal", cached: false))
+        requests.complete("1-normal")
+        XCTAssertFalse(requests.isInFlight("1-normal"))
+
+        XCTAssertTrue(requests.begin("1-dark", cached: false))
+        requests.complete("1-dark")
+        XCTAssertTrue(requests.begin("1-dark", cached: false))
+        XCTAssertFalse(requests.begin("1-normal", cached: true))
+    }
+
+    func testArticleThumbnailRequestStateDoesNotSuppressTerminalOutcomes() {
+        var requests = ArticleThumbnailRequestState()
+        XCTAssertTrue(requests.begin("1-image", cached: false))
+        XCTAssertFalse(requests.begin("1-image", cached: false))
+        requests.complete("1-image")
+        XCTAssertFalse(requests.isInFlight("1-image"))
+
+        XCTAssertTrue(requests.begin("1-image", cached: false))
+        requests.complete("1-image")
+        XCTAssertFalse(requests.begin("1-image", cached: true))
+    }
 }

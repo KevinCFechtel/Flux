@@ -23,7 +23,7 @@ final class BrowserStore: ObservableObject {
     @Published var categorySidebarCounts: [Int64: UInt64] = [:]
     @Published var feedSidebarCounts: [Int64: UInt64] = [:]
     @Published private(set) var feedIcons: [String: Data] = [:]
-    @Published private(set) var articleThumbnails: [String: Data] = [:]
+    @Published private(set) var articleThumbnails: [String: NSImage] = [:]
     @Published private(set) var unavailableArticleThumbnails = Set<String>()
     @Published var isLoading = false
     @Published var errorMessage: String?
@@ -48,8 +48,10 @@ final class BrowserStore: ObservableObject {
     private var hasMeaningfullyInteracted = false
     private var sharingPicker: NSSharingServicePicker?
     private var undoExpiry: Task<Void, Never>?
-    private var requestedFeedIcons = Set<String>()
-    private var requestedArticleThumbnails = Set<String>()
+    private var feedIconRequests = FeedIconRequestState()
+    private var scrolloverUndoBatch = ScrolloverUndoBatch()
+    private var articleThumbnailRequests = ArticleThumbnailRequestState()
+    private var scrolloverCountsPending = false
 
     init() {
         markReadOnScrolloverEnabled = UserDefaults.standard.object(forKey: "FluxNews.markReadOnScrollover") as? Bool ?? true
@@ -122,7 +124,7 @@ final class BrowserStore: ObservableObject {
     func reloadNavigationAndCounts() { reloadNavigation(); reloadCounts() }
     func requestFeedIcon(_ feedID: Int64, darkAppearance: Bool) {
         let key = "\(feedID)-\(darkAppearance ? "dark" : "normal")"
-        guard feedIcons[key] == nil, requestedFeedIcons.insert(key).inserted, let core else { return }
+        guard feedIconRequests.begin(key, cached: feedIcons[key] != nil), let core else { return }
         let store = WeakBrowserStore(self)
         Task.detached {
             do {
@@ -132,15 +134,16 @@ final class BrowserStore: ObservableObject {
                     guard let store = store.value else { return }
                     if let icon {
                         store.feedIcons[key] = Data(icon.pngData)
+                        store.feedIconRequests.complete(key)
                         NativeLog.feedIcon.debug("feed icon available feed_id=\(feedID, privacy: .public) variant=\(darkAppearance ? "dark" : "normal", privacy: .public)")
                     } else {
-                        store.requestedFeedIcons.remove(key)
+                        store.feedIconRequests.complete(key)
                         NativeLog.feedIcon.debug("feed icon unavailable feed_id=\(feedID, privacy: .public) variant=\(darkAppearance ? "dark" : "normal", privacy: .public)")
                     }
                 }
             } catch {
                 await MainActor.run {
-                    store.value?.requestedFeedIcons.remove(key)
+                    store.value?.feedIconRequests.complete(key)
                     NativeLog.feedIcon.debug("feed icon request failed feed_id=\(feedID, privacy: .public) variant=\(darkAppearance ? "dark" : "normal", privacy: .public)")
                 }
             }
@@ -150,22 +153,35 @@ final class BrowserStore: ObservableObject {
     func requestArticleThumbnail(_ article: ArticleSummary) {
         guard let imageURL = article.imageUrl else { return }
         let key = articleThumbnailKey(article)
-        guard articleThumbnails[key] == nil, !unavailableArticleThumbnails.contains(key), requestedArticleThumbnails.insert(key).inserted, let core else { return }
+        guard !unavailableArticleThumbnails.contains(key), articleThumbnailRequests.begin(key, cached: articleThumbnails[key] != nil), let core else { return }
         let store = WeakBrowserStore(self)
         Task.detached {
             do {
                 let result = try core.articleThumbnail(articleId: article.id, imageUrl: imageURL)
+                let image: NSImage? = if case let .available(pngData) = result { NSImage(data: Data(pngData)) } else { nil }
                 await MainActor.run {
                     switch result {
-                    case let .available(pngData): store.value?.articleThumbnails[key] = Data(pngData)
-                    case .unavailable: store.value?.unavailableArticleThumbnails.insert(key)
+                    case .available:
+                        if let image { store.value?.articleThumbnails[key] = image }
+                        store.value?.articleThumbnailRequests.complete(key)
+                    case .unavailable:
+                        store.value?.unavailableArticleThumbnails.insert(key)
+                        store.value?.articleThumbnailRequests.complete(key)
                     }
                 }
             } catch {
                 // Optional thumbnails fail silently and remain retryable on a later presentation.
-                _ = await MainActor.run { store.value?.requestedArticleThumbnails.remove(key) }
+                _ = await MainActor.run {
+                    store.value?.unavailableArticleThumbnails.insert(key)
+                    store.value?.articleThumbnailRequests.complete(key)
+                }
             }
         }
+    }
+    func retryUnavailableArticleThumbnail(_ article: ArticleSummary) {
+        let key = articleThumbnailKey(article)
+        guard unavailableArticleThumbnails.contains(key) else { return }
+        unavailableArticleThumbnails.remove(key)
     }
     func select(_ scope: BrowserScope) { self.scope = scope; resetPresentation(); reloadVisibleArticles() }
     func route(to route: NavigationRoute) {
@@ -228,8 +244,30 @@ final class BrowserStore: ObservableObject {
     }
     func setRead(_ article: ArticleSummary, _ read: Bool) { guard let core else { return }; do { _ = try core.setReadState(articleId: article.id, read: read); updateVisible([article.id]) { $0.isRead = read }; reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
     func setStarred(_ article: ArticleSummary, _ starred: Bool) { guard let core else { return }; do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
-    func flushScrollover(_ ids: [Int64]) { guard let core, !ids.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: ids, read: true); lastScrolloverBatch = ids; updateVisible(ids) { $0.isRead = true }; reloadSelectionTotal(); reloadCounts(); showScrolloverUndo() } catch { errorMessage = String(describing: error) } }
-    func undoScrollover() { guard let core, !lastScrolloverBatch.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: lastScrolloverBatch, read: false); updateVisible(lastScrolloverBatch) { $0.isRead = false }; lastScrolloverBatch = []; scrolloverUndoVisible = false; undoExpiry?.cancel(); reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
+    func beginScrolloverUndoBatch() { scrolloverUndoBatch.beginScroll() }
+    func finishScrolloverUndoBatch() {
+        guard scrolloverCountsPending else { return }
+        scrolloverCountsPending = false
+        reloadScrolloverCounts()
+    }
+    func flushScrollover(_ ids: [Int64]) {
+        guard let core, !ids.isEmpty else { return }
+        let started = ContinuousClock.now
+        do {
+            _ = try core.setReadStateBulk(articleIds: ids, read: true)
+            let elapsed = started.duration(to: .now)
+            if elapsed >= .milliseconds(8) {
+                let components = elapsed.components
+                let milliseconds = components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000
+                NativeLog.scrollover.debug("scrollover mutation elapsed_ms=\(milliseconds, privacy: .public) ids=\(ids.count, privacy: .public)")
+            }
+            lastScrolloverBatch = scrolloverUndoBatch.append(ids)
+            updateVisible(ids) { $0.isRead = true }
+            scrolloverCountsPending = true
+            showScrolloverUndo()
+        } catch { errorMessage = String(describing: error) }
+    }
+    func undoScrollover() { guard let core, !lastScrolloverBatch.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: lastScrolloverBatch, read: false); updateVisible(lastScrolloverBatch) { $0.isRead = false }; scrolloverUndoBatch.clear(); lastScrolloverBatch = []; scrolloverUndoVisible = false; undoExpiry?.cancel(); reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
     func setScrolloverEnabled(_ enabled: Bool) { markReadOnScrolloverEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.markReadOnScrollover") }
     func setGlobalShortcut(_ shortcut: GlobalShortcutChoice) { guard shortcut != globalShortcut else { return }; globalShortcut = shortcut; shortcut.store() }
     func open(_ article: ArticleSummary) { setRead(article, true); if let url = URL(string: article.url) { NSWorkspace.shared.open(url) } }
@@ -237,7 +275,57 @@ final class BrowserStore: ObservableObject {
     func copyLink(_ article: ArticleSummary) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(article.url, forType: .string) }
     func share(_ article: ArticleSummary) { guard let url = URL(string: article.url) else { return }; DispatchQueue.main.async { [weak self] in guard let self, let view = NSApplication.shared.keyWindow?.contentView else { return }; let picker = NSSharingServicePicker(items: [article.title, url]); self.sharingPicker = picker; let point = view.convert(view.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil); picker.show(relativeTo: NSRect(origin: point, size: NSSize(width: 1, height: 1)), of: view, preferredEdge: .minY) } }
     private func updateVisible(_ ids: [Int64], _ change: (inout ArticleSummary) -> Void) { let ids = Set(ids); for index in articles.indices where ids.contains(articles[index].id) { change(&articles[index]) } }
-    private func showScrolloverUndo() { scrolloverUndoVisible = true; undoExpiry?.cancel(); undoExpiry = Task { [weak self] in try? await Task.sleep(for: .seconds(8)); guard !Task.isCancelled else { return }; self?.scrolloverUndoVisible = false } }
+    private func reloadScrolloverCounts() {
+        guard let core else { return }
+        let selectionQuery = query()
+        let categoryIDs = catalog.categories.map(\.id)
+        let feedIDs = catalog.feeds.map(\.id)
+        let readFilter: ReadFilter = unreadOnly ? .unread : .all
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            do {
+                let started = ContinuousClock.now
+                let selectionTotal = try core.countArticles(query: selectionQuery)
+                let unreadTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil))
+                let starredTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .all, starredFilter: .starred, sort: .newestFirst, limit: 0, cursor: nil))
+                var categoryCounts: [Int64: UInt64] = [:]
+                var feedCounts: [Int64: UInt64] = [:]
+                for id in categoryIDs { categoryCounts[id] = try core.countArticles(query: BrowserStore.countQuery(scope: .category(id: id), readFilter: readFilter)) }
+                for id in feedIDs { feedCounts[id] = try core.countArticles(query: BrowserStore.countQuery(scope: .feed(id: id), readFilter: readFilter)) }
+                let elapsed = started.duration(to: .now)
+                if elapsed >= .milliseconds(8) {
+                    let components = elapsed.components
+                    let milliseconds = components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000
+                    NativeLog.scrollover.debug("scrollover count refresh elapsed_ms=\(milliseconds, privacy: .public) queries=\(categoryIDs.count + feedIDs.count + 3, privacy: .public)")
+                }
+                let categoryCountsSnapshot = categoryCounts
+                let feedCountsSnapshot = feedCounts
+                await MainActor.run {
+                    guard let store = store.value else { return }
+                    store.selectionTotal = selectionTotal
+                    store.unreadTotal = unreadTotal
+                    store.starredTotal = starredTotal
+                    store.categorySidebarCounts = categoryCountsSnapshot
+                    store.feedSidebarCounts = feedCountsSnapshot
+                }
+            } catch {
+                await MainActor.run { store.value?.errorMessage = String(describing: error) }
+            }
+        }
+    }
+    nonisolated private static func countQuery(scope: ArticleScope, readFilter: ReadFilter) -> ArticleQuery {
+        ArticleQuery(scope: scope, readFilter: readFilter, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil)
+    }
+    private func showScrolloverUndo() {
+        guard scrolloverUndoBatch.showsUndo else {
+            scrolloverUndoVisible = false
+            undoExpiry?.cancel()
+            return
+        }
+        scrolloverUndoVisible = true
+        undoExpiry?.cancel()
+        undoExpiry = Task { [weak self] in try? await Task.sleep(for: .seconds(8)); guard !Task.isCancelled else { return }; self?.scrolloverUndoVisible = false }
+    }
 }
 
 private final class WeakBrowserStore: @unchecked Sendable { weak var value: BrowserStore?; init(_ value: BrowserStore) { self.value = value } }
@@ -266,4 +354,5 @@ enum NativeLog {
     static let launchAtLogin = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "launch_at_login")
     static let shortcut = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "shortcut")
     static let feedIcon = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "feed_icon")
+    static let scrollover = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "scrollover")
 }

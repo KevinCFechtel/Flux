@@ -308,8 +308,12 @@ impl RemoteSource for MinifluxClient {
         }
     }
     fn fetch_feed_icon(&self, feed_id: i64) -> Result<Option<String>, CoreError> {
-        let icon: IconDto = self.get(&format!("/v1/feeds/{feed_id}/icon"), &[])?;
-        Ok((!icon.data.trim().is_empty()).then_some(icon.data))
+        let icon: IconDto = match self.get(&format!("/v1/feeds/{feed_id}/icon"), &[]) {
+            Ok(icon) => icon,
+            Err(error) if error.message == "Miniflux returned HTTP 404" => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        Ok(icon.data_url())
     }
     fn fetch_article_image(&self, url: &str, max_bytes: usize) -> Result<RemoteImage, CoreError> {
         self.download_image(url, max_bytes)
@@ -396,7 +400,29 @@ struct CategoryRefDto {
 #[derive(Deserialize)]
 struct IconDto {
     #[serde(default)]
-    data: String,
+    data: Option<String>,
+    #[serde(default)]
+    mime_type: Option<String>,
+}
+impl IconDto {
+    fn data_url(self) -> Option<String> {
+        let data = self.data?.trim().to_string();
+        if data.is_empty() {
+            None
+        } else if data.starts_with("data:") {
+            Some(data)
+        } else if data.starts_with("image/") {
+            Some(format!("data:{data}"))
+        } else if self
+            .mime_type
+            .as_deref()
+            .is_some_and(|mime| mime.starts_with("image/"))
+        {
+            Some(format!("data:{};base64,{data}", self.mime_type.unwrap()))
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -643,7 +669,7 @@ mod tests {
                 }
             }
             assert!(request.starts_with("GET /v1/feeds/9/icon HTTP/1.1"));
-            let body = r#"{"id":9,"data":"data:image/png;base64,AA=="}"#;
+            let body = r#"{"id":9,"data":"image/png;base64,AA==","mime_type":"image/png"}"#;
             write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
         });
         let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
@@ -651,6 +677,26 @@ mod tests {
             client.fetch_feed_icon(9).unwrap().as_deref(),
             Some("data:image/png;base64,AA==")
         );
+        worker.join().unwrap();
+    }
+    #[test]
+    fn treats_missing_feed_icon_as_unavailable() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut request = String::new();
+            reader.read_line(&mut request).unwrap();
+            assert!(request.starts_with("GET /v1/feeds/9/icon HTTP/1.1"));
+            write!(
+                stream,
+                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+        });
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+        assert_eq!(client.fetch_feed_icon(9).unwrap(), None);
         worker.join().unwrap();
     }
 }

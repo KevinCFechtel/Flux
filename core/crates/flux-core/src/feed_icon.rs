@@ -15,7 +15,8 @@ use tiny_skia::{Pixmap, Transform};
 use crate::domain::{CoreError, FeedIcon, FeedIconVariant};
 use crate::miniflux::RemoteSource;
 
-const PROCESSING_VERSION: u8 = 1;
+// Version 1 negative-cached valid Miniflux payloads before their wire shape was handled.
+const PROCESSING_VERSION: u8 = 2;
 const SIZE: u32 = 32;
 const MAX_CACHE_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 

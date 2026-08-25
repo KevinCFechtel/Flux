@@ -188,7 +188,13 @@ private struct ArticlePane: View {
                     }
                     .coordinateSpace(name: ArticleScrollSpace.name)
                     .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in scrollChanged(new - old) }
-                    .onScrollPhaseChange { _, phase in
+                    .onScrollPhaseChange { previous, phase in
+                        if !isUserScrollPhase(previous), isUserScrollPhase(phase) {
+                            store.beginScrolloverUndoBatch()
+                        }
+                        if isUserScrollPhase(previous), !isUserScrollPhase(phase) {
+                            store.finishScrolloverUndoBatch()
+                        }
                         scrollPhase = phase
                         if !userScrolling { tracker.rebase(frames: frames, unread: unreadIDs) }
                     }
@@ -228,6 +234,7 @@ private struct ArticlePane: View {
 
     private var unreadIDs: Set<Int64> { Set(store.articles.filter { !$0.isRead }.map(\.id)) }
     private var userScrolling: Bool { scrollPhase != .idle && scrollPhase != .animating }
+    private func isUserScrollPhase(_ phase: ScrollPhase) -> Bool { phase != .idle && phase != .animating }
     private func setArticleListStyle(_ style: ArticleListStyle) { store.setArticleListStyle(style); layoutChanged(sidebarVisible) }
     private func toggleSidebar() {
         if reduceMotion { sidebarVisible.toggle() }
@@ -368,6 +375,7 @@ private struct ArticleItem: View {
         .padding(.horizontal, 12).padding(.vertical, 10)
         .contentShape(Rectangle()).background(interactionBackground)
         .onHover { hovered = $0 }.contextMenu { actionMenu }
+        .onDisappear { store.retryUnavailableArticleThumbnail(article) }
     }
     private var card: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -384,6 +392,7 @@ private struct ArticleItem: View {
         .frame(maxWidth: .infinity, alignment: .leading).background(interactionBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10)).padding(.horizontal, 12).padding(.vertical, 6)
         .contentShape(Rectangle()).onHover { hovered = $0 }.contextMenu { actionMenu }
+        .onDisappear { store.retryUnavailableArticleThumbnail(article) }
     }
     private var textComposition: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -440,7 +449,7 @@ private struct ThumbnailSlot: View {
     var cornerRadius: CGFloat = 7
     var body: some View {
         ZStack {
-            if let data = store.articleThumbnails[store.articleThumbnailKey(article)], let image = NSImage(data: data) {
+            if let image = store.articleThumbnails[store.articleThumbnailKey(article)] {
                 Image(nsImage: image).resizable().interpolation(.high).scaledToFill()
             } else {
                 RoundedRectangle(cornerRadius: cornerRadius).fill(Color.secondary.opacity(0.10))

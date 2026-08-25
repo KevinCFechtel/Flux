@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use image::{ImageFormat, imageops::FilterType};
@@ -26,7 +26,7 @@ struct Metadata {
 pub struct ArticleThumbnailService {
     root: PathBuf,
     max_cache_bytes: u64,
-    gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    gates: Mutex<HashMap<String, Weak<Mutex<()>>>>,
 }
 
 impl ArticleThumbnailService {
@@ -61,23 +61,49 @@ impl ArticleThumbnailService {
             return Err(CoreError::data("article image URL must use HTTP(S)"));
         }
         let key = resource_key(article_id, image_url);
-        let gate = self
-            .gates
-            .lock()
-            .map_err(|_| CoreError::internal("article thumbnail gates poisoned"))?
-            .entry(key.clone())
-            .or_insert_with(|| Arc::new(Mutex::new(())))
-            .clone();
+        let gate = {
+            let mut gates = self
+                .gates
+                .lock()
+                .map_err(|_| CoreError::internal("article thumbnail gates poisoned"))?;
+            match gates.entry(key.clone()) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    entry.get().upgrade().unwrap_or_else(|| {
+                        let gate = Arc::new(Mutex::new(()));
+                        entry.insert(Arc::downgrade(&gate));
+                        gate
+                    })
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    let gate = Arc::new(Mutex::new(()));
+                    entry.insert(Arc::downgrade(&gate));
+                    gate
+                }
+            }
+        };
         let _gate = gate
             .lock()
             .map_err(|_| CoreError::internal("article thumbnail gate poisoned"))?;
-        let thumbnail = self.thumbnail_path(&key);
+        let result = self.get_locked(remote, article_id, image_url, &key);
+        drop(_gate);
+        self.release_gate(&key, &gate)?;
+        result
+    }
+
+    fn get_locked(
+        &self,
+        remote: &dyn RemoteSource,
+        article_id: i64,
+        image_url: &str,
+        key: &str,
+    ) -> Result<ArticleThumbnailResult, CoreError> {
+        let thumbnail = self.thumbnail_path(key);
         if let Some(png_data) = read_if_file(&thumbnail)? {
-            self.write_metadata(&key)?;
+            self.write_metadata(key)?;
             tracing::debug!(target: "article_thumbnail", "thumbnail cache hit article_id={article_id}");
             return Ok(ArticleThumbnailResult::Available { png_data });
         }
-        let unavailable = self.unavailable_path(&key);
+        let unavailable = self.unavailable_path(key);
         if unavailable.exists() && is_fresh(&unavailable, NEGATIVE_CACHE_AGE) {
             tracing::debug!(target: "article_thumbnail", "thumbnail negative cache hit article_id={article_id}");
             return Ok(ArticleThumbnailResult::Unavailable);
@@ -90,7 +116,7 @@ impl ArticleThumbnailService {
         let image = match remote.fetch_article_image(image_url, MAX_PAYLOAD_BYTES) {
             Ok(image) => image,
             Err(error) if permanently_unavailable(&error) => {
-                self.write_unavailable(&key)?;
+                self.write_unavailable(key)?;
                 tracing::debug!(target: "article_thumbnail", "thumbnail unavailable article_id={article_id}");
                 return Ok(ArticleThumbnailResult::Unavailable);
             }
@@ -100,7 +126,7 @@ impl ArticleThumbnailService {
             }
         };
         if image.bytes.len() > MAX_PAYLOAD_BYTES {
-            self.write_unavailable(&key)?;
+            self.write_unavailable(key)?;
             return Ok(ArticleThumbnailResult::Unavailable);
         }
         if image
@@ -108,21 +134,41 @@ impl ArticleThumbnailService {
             .as_deref()
             .is_some_and(|content_type| !content_type.to_ascii_lowercase().starts_with("image/"))
         {
-            self.write_unavailable(&key)?;
+            self.write_unavailable(key)?;
             return Ok(ArticleThumbnailResult::Unavailable);
         }
         let png_data = match normalize(&image.bytes) {
             Ok(png_data) => png_data,
             Err(_) => {
-                self.write_unavailable(&key)?;
+                self.write_unavailable(key)?;
                 return Ok(ArticleThumbnailResult::Unavailable);
             }
         };
         write_file(&thumbnail, &png_data)?;
-        self.write_metadata(&key)?;
+        self.write_metadata(key)?;
         self.evict()?;
         tracing::debug!(target: "article_thumbnail", "thumbnail normalization completed article_id={article_id}");
         Ok(ArticleThumbnailResult::Available { png_data })
+    }
+
+    fn release_gate(&self, key: &str, gate: &Arc<Mutex<()>>) -> Result<(), CoreError> {
+        let mut gates = self
+            .gates
+            .lock()
+            .map_err(|_| CoreError::internal("article thumbnail gates poisoned"))?;
+        if Arc::strong_count(gate) == 1
+            && gates
+                .get(key)
+                .is_some_and(|current| current.ptr_eq(&Arc::downgrade(gate)))
+        {
+            gates.remove(key);
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn gate_count(&self) -> usize {
+        self.gates.lock().unwrap().len()
     }
 
     fn thumbnail_path(&self, key: &str) -> PathBuf {
@@ -340,6 +386,7 @@ mod tests {
         assert!(matches!(second, ArticleThumbnailResult::Available { .. }));
         assert_eq!(source.calls.load(Ordering::SeqCst), 1);
         assert_eq!(source.max_bytes.load(Ordering::SeqCst), MAX_PAYLOAD_BYTES);
+        assert_eq!(service.gate_count(), 0);
         let small = normalize(&png(80, 40)).unwrap();
         assert_eq!(
             image::load_from_memory(&small).unwrap().dimensions(),
@@ -360,10 +407,12 @@ mod tests {
             Ok(ArticleThumbnailResult::Unavailable)
         ));
         assert_eq!(permanent.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(service.gate_count(), 0);
         let transient = source(Err(CoreError::connectivity("offline")));
         assert!(service.get(&transient, 8, "https://image.test/b").is_err());
         assert!(service.get(&transient, 8, "https://image.test/b").is_err());
         assert_eq!(transient.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(service.gate_count(), 0);
     }
     #[test]
     fn concurrent_requests_for_one_resource_fetch_once() {
@@ -392,6 +441,7 @@ mod tests {
             Ok(ArticleThumbnailResult::Available { .. })
         ));
         assert_eq!(source.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(service.gate_count(), 0);
     }
     #[test]
     fn size_limit_evicts_least_recently_used_thumbnails() {
