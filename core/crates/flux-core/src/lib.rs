@@ -682,7 +682,7 @@ mod tests {
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            3
+            4
         );
         let bytes = std::fs::read(core.database_path()).unwrap();
         assert!(
