@@ -72,10 +72,10 @@ re-querying the visible list.
 Visible article snapshots remain stable according to the snapshot rules
 below, but selected status surfaces may intentionally show live core
 counts. In particular, the macOS menu-bar unread count reflects the
-current global core unread count after each successful sync even when the
-currently presented article/navigation snapshot has not yet adopted new
-data. Snapshot-relative navigation counts may remain stable until the UI
-intentionally refreshes them.
+current global core unread count after each successful sync even when
+the currently presented article/navigation snapshot has not yet adopted
+new data. Snapshot-relative navigation counts may remain stable until
+the UI intentionally refreshes them.
 
 List queries should return compact article summaries; full content is
 requested separately for article detail.
@@ -245,40 +245,121 @@ the same base URL retains the existing local server context and
 feed/category preferences; the long-lived core is recreated with the new
 runtime credential.
 
-Feed/category preferences are not deleted immediately when their
-referenced entity disappears from sync results. Orphaned preferences are
-retained for 90 days and may then be removed by a separate cleanup if
-the entity has not reappeared.
+Miniflux is authoritative for the synchronized feed/category catalog.
+When a feed is absent from a complete authoritative remote catalog, Flux
+removes the local feed and its articles and feed-bound preferences. Feed
+deletion is reconciled before category deletion. If the same feed ID
+later reappears, its feed preferences start from their defaults.
+Categories absent from the complete remote catalog are removed after
+stale feeds; empty categories that still exist remotely remain.
 
-## 9. Article data and content processing
+## 9. Article data, previews, and Reader content
 
-Persist a flexible Miniflux-aligned article model plus centrally
-processed content.
+Persist a flexible Miniflux-aligned article model. The original Miniflux
+HTML content is the durable local source of truth for full article
+content.
 
-Keep:
+List presentation uses separately persisted, regenerable derivatives:
 
--   original Miniflux HTML content;
--   canonical processed Markdown/full content;
--   cleaned text-only preview.
+-   cleaned text-only `preview_text`;
+-   discovered preview `image_url`.
 
-The core owns HTML sanitization/normalization, HTML → Markdown
-conversion, common content fixes, and preview generation. Native clients
-render the resulting content and own typography/theme/styling.
+The preview has a fixed Core maximum of **600 characters**. This is a
+technical processing limit, not a user setting. Native clients control
+only the number of visible preview lines. The agreed choices are **2
+(Compact), 3 (Standard), and 5 (Extended)** lines, with **3 lines as the
+default**.
 
-Content processing should support a processing-version concept so stored
-articles can be reprocessed after pipeline improvements.
+### Semantic Reader document
 
-The preview has a fixed core maximum of approximately 1000 characters.
-This is a technical content-processing limit, not a user-configurable
-truncation setting. Native clients decide how much of that preview is
-visible through presentation mechanisms such as line limits or
-platform-specific compact/standard/expanded density preferences.
+The full Reader does not persist a second Markdown/full-content shadow
+representation. When a Reader document is requested, the Rust Core
+parses the stored HTML and builds a semantic internal `ArticleDocument`.
+That document is then projected according to Reader/feed settings into a
+public `ReaderDocument` returned through UniFFI.
 
-Detail/full-content truncation is a separate concern. A global
-detail-content limit and optional per-feed override may control how much
-processed article detail is presented, but this remains non-destructive:
-stored complete source content is not truncated merely because a shorter
-representation is requested.
+The initial semantic model supports at least:
+
+-   Paragraph;
+-   Heading;
+-   Image, including optional alt text and an optional surrounding link;
+-   List, including ordered/unordered and nested content;
+-   Quote;
+-   CodeBlock;
+-   HorizontalRule;
+-   ExternalContent fallback.
+
+Textual blocks support inline semantics for plain text, bold, italic,
+inline code, and links.
+
+Semantics belong to the Core; typography, spacing, colors, and other
+visual styling belong to the native client. Unknown container elements
+are processed recursively so useful descendant content survives.
+Non-content elements such as scripts, styles, empty wrappers, and
+tracking content are discarded.
+
+V1 intentionally does **not** attempt browser-equivalent HTML/CSS
+rendering. Complex tables are flattened into readable semantic content
+while preserving useful text and links rather than reproducing their
+layout. Unsupported embeds may become `ExternalContent` links. Native
+tables, embedded WebViews, native video/audio embeds, syntax
+highlighting, complex CSS layout, and image lightboxes are not required
+for V1.
+
+If relevant content had to be simplified, `ReaderDocument` exposes this
+fact (for example `has_simplified_content`). Native clients show only a
+decent secondary note such as "Some content was simplified · Open
+Original"; ordinary ignored wrappers/styles/tracking must not trigger
+that notice.
+
+### Rendered and Text Only
+
+Reader mode is a per-feed Core preference:
+
+-   **Rendered** --- default; preserves supported semantic formatting,
+    links, and images for native rendering.
+-   **Text Only** --- projects the same parsed document into a
+    text-focused representation. Images are omitted; visible link text
+    remains. Image alt text is not automatically inserted into the
+    reading flow.
+
+Both modes derive from the same semantic parsing pipeline rather than
+separate HTML processors.
+
+### Detail truncation
+
+Detail truncation is non-destructive. Complete original HTML remains
+stored.
+
+A global Core setting stores the actual character limit. User-facing
+choices are **5,000 / 10,000 / 20,000 characters**, with **10,000 as the
+default**. The limit applies only to feeds whose per-feed **Truncate
+Detail** preference is enabled; there is no separate Unlimited choice
+and no free-form numeric input.
+
+Truncation is applied after semantic parsing and the Rendered/Text Only
+projection. The limit counts displayed text, not images. Natural block
+boundaries are preferred; an unusually large individual block may be cut
+at a sensible word/sentence boundary rather than allowing an unbounded
+overshoot. Images before the resulting cut remain; content after it does
+not.
+
+`ReaderDocument` exposes whether truncation actually occurred (for
+example `was_truncated`). Native clients show a subtle end-of-content
+note with an Open Original action. If content was both truncated and
+simplified, the UI combines those states into one unobtrusive notice
+rather than stacking warnings.
+
+### Reader persistence and caching
+
+`ArticleDocument` and `ReaderDocument` are generated on demand from the
+stored original HTML and are **not persisted in SQLite**. Parser
+improvements therefore apply automatically the next time an existing
+article is opened and do not require a Reader-document data migration.
+
+A regenerable in-memory cache may be added later if measurement shows a
+need, but persistent Reader-document caching is not part of the data
+model.
 
 ## 10. Retention and local article set
 
@@ -334,16 +415,31 @@ The core owns feed-icon acquisition, cache/processing, and suitable
 light/dark variants for transparent low-contrast icons. Native UI
 requests and renders the appropriate variant.
 
-Adaptive feed icons: If a feed-provided SVG contains author-defined light/dark appearance variants, Flux should prefer and render those variants for the corresponding appearance. Automatic contrast correction is only a fallback when the source icon does not provide a suitable adaptive appearance. This behavior is automatic and has no user-facing setting.
+Adaptive feed icons: If a feed-provided SVG contains author-defined
+light/dark appearance variants, Flux should prefer and render those
+variants for the corresponding appearance. Automatic contrast correction
+is only a fallback when the source icon does not provide a suitable
+adaptive appearance. This behavior is automatic and has no user-facing
+setting.
 
 Article image discovery/download/disk cache belongs to the core; native
 UI triggers lazy loading, decodes/renders images, and may maintain a
 memory cache. Background sync does not preload article images.
 
-Feed preferences have global defaults plus per-feed overrides. Current
-intended preferences include independent preview/full-text limits,
-enclosure-image preference, opening via Miniflux web instead of
-publisher URL, and text-only behavior.
+Feed-domain preferences are represented as one typed per-feed preference
+model rather than separate preference tables for every feature. The
+current intended `FeedPreferences` include:
+
+-   System Notifications enabled/disabled (default off);
+-   Detail Rendering: Rendered / Text Only (default Rendered);
+-   Truncate Detail enabled/disabled (default off);
+-   Open in Miniflux enabled/disabled (default off).
+
+The persistence model should use typed columns/constraints rather than a
+generic feed key/value table. Notification delivery/candidate state
+remains separate operational state and is not part of `FeedPreferences`.
+Public mutation APIs may remain field-specific so updating one control
+cannot accidentally overwrite another preference from a stale snapshot.
 
 Feed/category core preferences are device-local and are not
 automatically synchronized across devices. Device backup and explicit
@@ -378,11 +474,13 @@ Technical ownership must not dictate the eventual Settings UI grouping;
 native Settings screens should group options by user-facing concepts
 rather than by Core/Native/Secure-Store implementation boundaries.
 
-The initial shared Core settings foundation contains:
+The shared Core settings foundation contains:
 
 -   read-article retention with intended choices 30/60/90/180/365 days;
 -   mutation delivery mode: Live / Deferred;
--   background sync enabled / disabled.
+-   background sync enabled / disabled;
+-   global Reader detail character limit: 5,000 / 10,000 / 20,000,
+    default 10,000.
 
 Additional domain settings are added only with the feature that needs
 them rather than being modeled speculatively. Later examples include
@@ -393,9 +491,16 @@ Native presentation/OS preferences remain platform-local. Current
 examples include Sync on Start, Mark as Read on Scrollover, global
 shortcut, Launch at Login, startup destination, presentation filters,
 hiding empty navigation entries, removing read items from the visible
-snapshot, and optional preview presentation density. Appearance follows
-the native platform without a Flux Light/Dark/System setting; iOS Liquid
-Glass behavior is likewise platform-owned without a Flux setting.
+snapshot, Preview Lines, and Click on News.
+
+On macOS, Preview Lines offers 2 (Compact), 3 (Standard), and 5
+(Extended), default 3. `Click on News` offers **Open Link** (default) or
+**Open Detail View**. Mobile may later define additional native
+interaction modes without changing the Core contract.
+
+Appearance follows the native platform without a Flux Light/Dark/System
+setting; iOS Liquid Glass behavior is likewise platform-owned without a
+Flux setting.
 
 Feed icons are always shown where the product design calls for them.
 Automatic icon contrast handling is implementation behavior, not a user
@@ -462,8 +567,8 @@ retention.
 ## 16. Notifications
 
 Flux distinguishes **System Notifications** from **In-App New Data**.
-They have different lifecycles and acknowledgement semantics and must not
-clear each other implicitly.
+They have different lifecycles and acknowledgement semantics and must
+not clear each other implicitly.
 
 ### System Notifications
 
@@ -474,8 +579,8 @@ Settings area "System Notifications".
 For each enabled feed, an eligible background/automatic sync produces at
 most one aggregated System Notification for that feed when the sync has
 discovered articles that have not previously been successfully handed
-off as System Notifications. Flux does not create one OS notification per
-article.
+off as System Notifications. Flux does not create one OS notification
+per article.
 
 The core durably tracks which discovered articles have already been
 system-notified so later sync runs do not notify them again. If a later
@@ -504,18 +609,18 @@ For example, if one sync adds three articles to a feed and a later sync
 adds two more before the UI refreshes that scope, the feed's pending
 New-Data badge shows five.
 
-On macOS, affected feeds use the platform-native navigation badge to show
-the pending New-Data count. The badge should use native system styling;
-Flux does not require a custom badge color.
+On macOS, affected feeds use the platform-native navigation badge to
+show the pending New-Data count. The badge should use native system
+styling; Flux does not require a custom badge color.
 
 The macOS menu-bar item exposes two distinct signals:
 
-- the existing numeric title shows the **current global unread count from
-  the core** and is refreshed after every successful sync, even when the
-  visible article snapshot remains unchanged;
-- a small notification dot on the FluxNews status-item icon indicates
-  that at least one feed still has pending In-App New Data that has not
-  yet been adopted into the relevant UI snapshot.
+-   the existing numeric title shows the **current global unread count
+    from the core** and is refreshed after every successful sync, even
+    when the visible article snapshot remains unchanged;
+-   a small notification dot on the FluxNews status-item icon indicates
+    that at least one feed still has pending In-App New Data that has
+    not yet been adopted into the relevant UI snapshot.
 
 The dot is an aggregate signal only; the per-feed native badges provide
 the detailed counts. The dot remains visible across multiple background
@@ -523,23 +628,24 @@ syncs and disappears only when no pending per-feed In-App New Data
 remains.
 
 In-App New Data is acknowledged by **snapshot adoption**, not merely by
-opening the sidebar or selecting a navigation entry. When a newly queried
-snapshot is intentionally or policy-permittedly adopted, acknowledgement
-follows that snapshot's scope:
+opening the sidebar or selecting a navigation entry. When a newly
+queried snapshot is intentionally or policy-permittedly adopted,
+acknowledgement follows that snapshot's scope:
 
-- adopting **All News** clears all pending per-feed In-App New Data;
-- adopting a **Category** clears pending In-App New Data for feeds in
-  that category;
-- adopting a **Feed** clears pending In-App New Data only for that feed.
+-   adopting **All News** clears all pending per-feed In-App New Data;
+-   adopting a **Category** clears pending In-App New Data for feeds in
+    that category;
+-   adopting a **Feed** clears pending In-App New Data only for that
+    feed.
 
 The same rule applies when the existing New Data/Refresh action adopts a
-new snapshot. A feed does not need to be individually opened if a broader
-adopted snapshot already includes its new articles.
+new snapshot. A feed does not need to be individually opened if a
+broader adopted snapshot already includes its new articles.
 
 System Notification acknowledgement and In-App New Data acknowledgement
 are separate. Successfully handing an OS notification to the system does
-not clear an in-app badge or menu-bar dot, and adopting a UI snapshot does
-not mark an article as system-notified.
+not clear an in-app badge or menu-bar dot, and adopting a UI snapshot
+does not mark an article as system-notified.
 
 ## 17. Widgets
 
@@ -555,14 +661,59 @@ Widgets call the same standardized core operations and may trigger
 on a platform, the widget may open the main app with the required intent
 and let the normal app/core path execute it.
 
-## 18. Opening and sharing articles
+## 18. Opening, Reader navigation, and sharing articles
+
+The normal **Open** action is distinct from the Flux Reader.
+
+By default, Open targets the publisher/original article URL. A per-feed
+**Open in Miniflux** preference replaces that normal Open destination
+with the corresponding Miniflux web entry for that feed. It changes only
+the Open action; it does not disable the Flux Reader. Native code
+performs the actual URL/deep-link/browser opening.
+
+Native clients may expose explicit **Open Original** and **Open in
+Miniflux** actions independently of the configured normal Open
+destination. Open in Miniflux may be placed less prominently, such as in
+an overflow/submenu.
+
+### macOS Reader navigation
+
+macOS has one native Reader Window. It is a normal independent,
+resizable/movable macOS window and is not tied to the lifetime of the
+menu-bar popover.
+
+The native `Click on News` preference determines the normal row-click
+behavior:
+
+-   **Open Link** (default) → perform the feed's normal Open action;
+-   **Open Detail View** → open the article in the Flux Reader Window.
+
+macOS does not require the mobile split-click mode where image and text
+perform different actions; that remains a possible mobile-specific
+interaction decision.
+
+Pressing **Space** for the selected article always opens that article in
+the Flux Reader Window, independent of `Click on News` and independent
+of the feed's Open in Miniflux preference. An explicit **Open Detail
+View** article action does the same.
+
+Only one Reader Window exists. If it is already open, opening another
+article replaces its current article and brings the existing window
+forward rather than creating another Reader window.
+
+Opening an article in the Reader marks it read. The Reader uses the
+feed's Rendered/Text Only and Truncate Detail preferences. It does not
+provide an image lightbox/zoom feature; users can open the original site
+when they need the publisher's full media experience.
+
+The Reader and menu-bar UI use the same Core article state and mutation
+operations; the Reader does not own a second read/star state. Background
+sync must not replace the article currently shown in the Reader.
 
 When opening a publisher link, native code first tries an appropriate
 installed app/deep-link association. If unavailable and supported by the
 platform, a native user preference chooses in-app browser or
-external/default browser.
-
-Widgets follow the same opening policy.
+external/default browser. Widgets follow the same opening policy.
 
 App Intents, Spotlight, and equivalent OS integrations are native
 responsibilities. The core exposes stable feed/category IDs, titles, and
@@ -604,15 +755,16 @@ These should be decided when they materially affect durable
 implementation, not through broad speculative analysis:
 
 -   concrete SQLite schema;
--   concrete Rust HTML/Markdown/sanitization libraries;
+-   concrete Rust HTML parsing/sanitization libraries used to build the
+    semantic Reader document;
 -   exact backoff timings;
 -   exact encrypted config container/KDF/AEAD choices;
 -   logging library;
 -   final DTO/API names;
 -   detailed media cleanup options;
--   exact UI defaults;
 -   exact System Notification wording/content;
--   exact action/deep-link destination when the user activates a System Notification;
+-   exact action/deep-link destination when the user activates a System
+    Notification;
 -   remaining feature-gap details found while implementing against
     FluxNews/FluxBar reference evidence.
 
