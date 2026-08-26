@@ -425,7 +425,7 @@ private struct NewDataIndicator: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            Image(systemName: "sparkles")
+            Image(systemName: "plus")
             Text("\(count) new")
         }
         .font(.caption.monospacedDigit())
