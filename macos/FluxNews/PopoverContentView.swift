@@ -586,6 +586,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     case account
     case syncStorage
     case reading
+    case systemNotifications
     case general
 
     var id: Self { self }
@@ -595,6 +596,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .account: "Account"
         case .syncStorage: "Sync & Storage"
         case .reading: "Reading"
+        case .systemNotifications: "System Notifications"
         case .general: "General"
         }
     }
@@ -645,6 +647,8 @@ private struct SettingsView: View {
             SyncStorageSettingsView(store: store, syncOnStart: $syncOnStart, retention: retention, deliveryMode: deliveryMode, backgroundSyncEnabled: backgroundSyncEnabled)
         case .reading:
             ReadingSettingsView(scrollover: $scrollover)
+        case .systemNotifications:
+            SystemNotificationsSettingsView(store: store)
         case .general:
             GeneralSettingsView(launchAtLogin: $launchAtLogin, globalShortcut: $globalShortcut, registrationError: store.globalShortcutRegistrationError)
         }
@@ -743,6 +747,38 @@ private struct ReadingSettingsView: View {
             Toggle("Mark articles as read when scrolling past", isOn: $scrollover)
         }
         .formStyle(.grouped)
+    }
+}
+
+private struct SystemNotificationsSettingsView: View {
+    @ObservedObject var store: BrowserStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("System Notifications").font(.title2.bold())
+            Text("Choose which feeds may send macOS notifications.")
+                .foregroundStyle(.secondary)
+            if let error = store.systemNotificationSettingsError {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(.red)
+            }
+            if store.systemNotificationSettings.isEmpty {
+                ContentUnavailableView("No feeds available.", systemImage: "tray")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(store.systemNotificationSettings, id: \.feedId) { setting in
+                    Toggle(setting.feedTitle, isOn: Binding(
+                        get: { setting.systemNotificationsEnabled },
+                        set: { store.setSystemNotificationsEnabled(feedID: setting.feedId, enabled: $0) }
+                    ))
+                    .disabled(store.updatingSystemNotificationFeedIDs.contains(setting.feedId))
+                }
+                .listStyle(.inset)
+            }
+            Spacer()
+        }
+        .onAppear { store.reloadSystemNotificationSettings() }
     }
 }
 

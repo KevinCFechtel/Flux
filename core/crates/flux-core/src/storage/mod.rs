@@ -1,18 +1,19 @@
 //! SQLite persistence. Pending rows coalesce by article/field; acknowledgement
 //! deletes only the exact sent revision so later local intent always survives.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::domain::{
     Article, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary, Category, CoreError,
-    CoreSettings, DeliveryMode, Feed, MutationField, NavigationCatalog, ReadArticleRetention,
-    ReadFilter, StarredFilter,
+    CoreSettings, DeliveryMode, Feed, FeedSystemNotificationSetting, MutationField,
+    NavigationCatalog, ReadArticleRetention, ReadFilter, StarredFilter,
+    SystemNotificationCandidate,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 #[derive(Clone, Debug)]
 pub struct PendingMutation {
@@ -28,11 +29,12 @@ pub struct LocalArticleState {
     pub is_starred: bool,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ReconciliationStats {
     pub new_articles: u32,
     pub updated_articles: u32,
     pub navigation_changed: bool,
+    pub new_article_ids_by_feed: BTreeMap<i64, Vec<i64>>,
 }
 
 pub struct Store {
@@ -72,7 +74,27 @@ impl Store {
             .map_err(sql_error)
     }
     pub fn set_base_url(&self, base_url: &str) -> Result<(), CoreError> {
-        self.connection.lock().map_err(|_| CoreError::internal("database lock poisoned"))?.execute("INSERT INTO core_settings (key, value) VALUES ('base_url', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [base_url]).map_err(sql_error)?;
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let previous: Option<String> = connection
+            .query_row(
+                "SELECT value FROM core_settings WHERE key='base_url'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(sql_error)?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        if previous
+            .as_deref()
+            .is_some_and(|previous| previous != base_url)
+        {
+            tx.execute_batch("DELETE FROM notification_candidate_articles; DELETE FROM system_notification_candidates; DELETE FROM pending_system_notifications; DELETE FROM feed_system_notification_preferences; DELETE FROM pending_mutations; DELETE FROM articles; DELETE FROM feeds; DELETE FROM categories;").map_err(sql_error)?;
+        }
+        tx.execute("INSERT INTO core_settings (key, value) VALUES ('base_url', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [base_url]).map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
         Ok(())
     }
     pub fn base_url(&self) -> Result<Option<String>, CoreError> {
@@ -204,7 +226,14 @@ impl Store {
                 .optional()
                 .map_err(sql_error)?;
             match existing {
-                None => stats.new_articles += 1,
+                None => {
+                    stats.new_articles += 1;
+                    stats
+                        .new_article_ids_by_feed
+                        .entry(a.feed_id)
+                        .or_default()
+                        .push(a.id);
+                }
                 Some(existing)
                     if existing
                         != (
@@ -228,6 +257,135 @@ impl Store {
         }
         tx.commit().map_err(sql_error)?;
         Ok(stats)
+    }
+
+    pub fn feed_system_notification_settings(
+        &self,
+    ) -> Result<Vec<FeedSystemNotificationSetting>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut statement = connection.prepare("SELECT f.id,f.title,COALESCE(p.enabled,0) FROM feeds f LEFT JOIN feed_system_notification_preferences p ON p.feed_id=f.id ORDER BY f.category_id,f.title COLLATE NOCASE,f.id").map_err(sql_error)?;
+        statement
+            .query_map([], |row| {
+                Ok(FeedSystemNotificationSetting {
+                    feed_id: row.get(0)?,
+                    feed_title: row.get(1)?,
+                    system_notifications_enabled: row.get(2)?,
+                })
+            })
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)
+    }
+
+    pub fn set_feed_system_notifications_enabled(
+        &self,
+        feed_id: i64,
+        enabled: bool,
+    ) -> Result<(), CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        if connection
+            .query_row("SELECT 1 FROM feeds WHERE id=?1", [feed_id], |_| Ok(()))
+            .optional()
+            .map_err(sql_error)?
+            .is_none()
+        {
+            return Err(CoreError::data(format!("feed {feed_id} does not exist")));
+        }
+        connection.execute("INSERT INTO feed_system_notification_preferences(feed_id,enabled) VALUES(?1,?2) ON CONFLICT(feed_id) DO UPDATE SET enabled=excluded.enabled", params![feed_id, enabled]).map_err(sql_error)?;
+        Ok(())
+    }
+
+    pub fn prepare_system_notification_candidates(
+        &self,
+        new_article_ids_by_feed: &BTreeMap<i64, Vec<i64>>,
+    ) -> Result<Vec<SystemNotificationCandidate>, CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        for article_ids in new_article_ids_by_feed.values() {
+            for article_id in article_ids {
+                tx.execute("INSERT INTO pending_system_notifications(article_id) SELECT ?1 WHERE EXISTS(SELECT 1 FROM articles WHERE id=?1) ON CONFLICT(article_id) DO NOTHING", [article_id]).map_err(sql_error)?;
+            }
+        }
+        let feeds = {
+            let mut statement = tx.prepare("SELECT f.id,f.title FROM feeds f JOIN feed_system_notification_preferences p ON p.feed_id=f.id WHERE p.enabled=1 ORDER BY f.id").map_err(sql_error)?;
+            statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(sql_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(sql_error)?
+        };
+        let mut candidates = Vec::new();
+        for (feed_id, feed_title) in feeds {
+            let article_ids = {
+                let mut statement = tx.prepare("SELECT p.article_id FROM pending_system_notifications p JOIN articles a ON a.id=p.article_id WHERE a.feed_id=?1 AND NOT EXISTS(SELECT 1 FROM system_notified_articles n WHERE n.article_id=p.article_id) ORDER BY p.article_id").map_err(sql_error)?;
+                statement
+                    .query_map([feed_id], |row| row.get::<_, i64>(0))
+                    .map_err(sql_error)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(sql_error)?
+            };
+            if article_ids.is_empty() {
+                continue;
+            }
+            tx.execute(
+                "INSERT INTO system_notification_candidates(feed_id,feed_title) VALUES(?1,?2)",
+                params![feed_id, feed_title],
+            )
+            .map_err(sql_error)?;
+            let candidate_id = tx.last_insert_rowid();
+            for article_id in &article_ids {
+                tx.execute("INSERT INTO notification_candidate_articles(candidate_id,article_id) VALUES(?1,?2)", params![candidate_id, article_id]).map_err(sql_error)?;
+            }
+            candidates.push(SystemNotificationCandidate {
+                candidate_id,
+                feed_id,
+                feed_title,
+                new_count: article_ids.len() as u32,
+            });
+        }
+        tx.commit().map_err(sql_error)?;
+        Ok(candidates)
+    }
+
+    pub fn acknowledge_system_notification(&self, candidate_id: i64) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        let exists = tx
+            .query_row(
+                "SELECT 1 FROM system_notification_candidates WHERE id=?1",
+                [candidate_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(sql_error)?
+            .is_some();
+        if !exists {
+            return Ok(());
+        }
+        tx.execute("INSERT INTO system_notified_articles(article_id) SELECT article_id FROM notification_candidate_articles WHERE candidate_id=?1 ON CONFLICT(article_id) DO NOTHING", [candidate_id]).map_err(sql_error)?;
+        tx.execute("DELETE FROM pending_system_notifications WHERE article_id IN (SELECT article_id FROM notification_candidate_articles WHERE candidate_id=?1)", [candidate_id]).map_err(sql_error)?;
+        tx.execute(
+            "DELETE FROM system_notification_candidates WHERE id=?1",
+            [candidate_id],
+        )
+        .map_err(sql_error)?;
+        tx.execute("DELETE FROM system_notification_candidates WHERE NOT EXISTS(SELECT 1 FROM notification_candidate_articles ca WHERE ca.candidate_id=system_notification_candidates.id AND NOT EXISTS(SELECT 1 FROM system_notified_articles n WHERE n.article_id=ca.article_id))", []).map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+        Ok(())
     }
 
     pub fn cleanup_expired_read_articles(&self, cutoff: &str) -> Result<u32, CoreError> {
@@ -559,6 +717,11 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
         tx.commit().map_err(sql_error)?;
         tracing::info!(target: "storage", "article content reprocessing completed processed={}", rows.len());
     }
+    if current < 5 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute_batch("CREATE TABLE feed_system_notification_preferences (feed_id INTEGER PRIMARY KEY REFERENCES feeds(id) ON DELETE CASCADE, enabled INTEGER NOT NULL CHECK(enabled IN(0,1))); CREATE TABLE pending_system_notifications (article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE); CREATE TABLE system_notified_articles (article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE); CREATE TABLE system_notification_candidates (id INTEGER PRIMARY KEY, feed_id INTEGER NOT NULL REFERENCES feeds(id) ON DELETE CASCADE, feed_title TEXT NOT NULL); CREATE TABLE notification_candidate_articles (candidate_id INTEGER NOT NULL REFERENCES system_notification_candidates(id) ON DELETE CASCADE, article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, PRIMARY KEY(candidate_id,article_id)); CREATE INDEX pending_system_notifications_article ON pending_system_notifications(article_id); PRAGMA user_version=5;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
     Ok(())
 }
 fn initialize_core_settings(connection: &Connection) -> Result<(), CoreError> {
@@ -638,7 +801,7 @@ mod tests {
         let connection = store.connection.lock().unwrap();
         let row: (i64, String, Option<String>, String, bool, bool, i64, i64) = connection.query_row("SELECT content_processing_version,preview,image_url,raw_html_content,is_read,is_starred,feed_id,(SELECT COUNT(*) FROM pending_mutations) FROM articles WHERE id=3", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).unwrap();
         drop(connection);
-        assert_eq!(store.schema_version().unwrap(), 4);
+        assert_eq!(store.schema_version().unwrap(), 5);
         assert_eq!(row.0, crate::article::PROCESSING_VERSION);
         assert_eq!(row.1, "Hello world");
         assert_eq!(row.2.as_deref(), Some("https://example.test/cover.jpg"));

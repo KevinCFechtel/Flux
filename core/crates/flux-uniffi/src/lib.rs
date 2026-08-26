@@ -144,6 +144,26 @@ pub struct SyncCompleted {
     pub mutations_delivered: u32,
     pub data_changed: bool,
     pub navigation_changed: bool,
+    pub new_articles_by_feed: Vec<NewArticlesByFeed>,
+    pub system_notification_candidates: Vec<SystemNotificationCandidate>,
+}
+#[derive(uniffi::Record)]
+pub struct NewArticlesByFeed {
+    pub feed_id: i64,
+    pub count: u32,
+}
+#[derive(uniffi::Record)]
+pub struct FeedSystemNotificationSetting {
+    pub feed_id: i64,
+    pub feed_title: String,
+    pub system_notifications_enabled: bool,
+}
+#[derive(uniffi::Record)]
+pub struct SystemNotificationCandidate {
+    pub candidate_id: i64,
+    pub feed_id: i64,
+    pub feed_title: String,
+    pub new_count: u32,
 }
 #[derive(uniffi::Record)]
 pub struct SyncFailed {
@@ -362,8 +382,11 @@ impl Flux {
             core: Arc::new(core),
         }))
     }
-    pub fn sync(&self, reason: SyncReason) -> Result<(), FluxError> {
-        self.core.sync(reason.into()).map_err(map_error)
+    pub fn sync(&self, reason: SyncReason) -> Result<SyncCompleted, FluxError> {
+        self.core
+            .sync(reason.into())
+            .map(Into::into)
+            .map_err(map_error)
     }
     pub fn query_articles(&self, query: ArticleQuery) -> Result<Vec<ArticleSummary>, FluxError> {
         self.core
@@ -407,6 +430,28 @@ impl Flux {
         self.core
             .navigation_catalog()
             .map(Into::into)
+            .map_err(map_error)
+    }
+    pub fn feed_system_notification_settings(
+        &self,
+    ) -> Result<Vec<FeedSystemNotificationSetting>, FluxError> {
+        self.core
+            .feed_system_notification_settings()
+            .map(|settings| settings.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn set_feed_system_notifications_enabled(
+        &self,
+        feed_id: i64,
+        enabled: bool,
+    ) -> Result<(), FluxError> {
+        self.core
+            .set_feed_system_notifications_enabled(feed_id, enabled)
+            .map_err(map_error)
+    }
+    pub fn acknowledge_system_notification(&self, candidate_id: i64) -> Result<(), FluxError> {
+        self.core
+            .acknowledge_system_notification(candidate_id)
             .map_err(map_error)
     }
     pub fn feed_icon(
@@ -959,6 +1004,43 @@ impl From<domain::SyncCompleted> for SyncCompleted {
             mutations_delivered: value.mutations_delivered,
             data_changed: value.data_changed,
             navigation_changed: value.navigation_changed,
+            new_articles_by_feed: value
+                .new_articles_by_feed
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            system_notification_candidates: value
+                .system_notification_candidates
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        }
+    }
+}
+impl From<domain::NewArticlesByFeed> for NewArticlesByFeed {
+    fn from(value: domain::NewArticlesByFeed) -> Self {
+        Self {
+            feed_id: value.feed_id,
+            count: value.count,
+        }
+    }
+}
+impl From<domain::FeedSystemNotificationSetting> for FeedSystemNotificationSetting {
+    fn from(value: domain::FeedSystemNotificationSetting) -> Self {
+        Self {
+            feed_id: value.feed_id,
+            feed_title: value.feed_title,
+            system_notifications_enabled: value.system_notifications_enabled,
+        }
+    }
+}
+impl From<domain::SystemNotificationCandidate> for SystemNotificationCandidate {
+    fn from(value: domain::SystemNotificationCandidate) -> Self {
+        Self {
+            candidate_id: value.candidate_id,
+            feed_id: value.feed_id,
+            feed_title: value.feed_title,
+            new_count: value.new_count,
         }
     }
 }

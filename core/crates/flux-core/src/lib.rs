@@ -23,9 +23,10 @@ use domain::{
     ArticleQuery, ArticleSummary, ArticleThumbnailResult, CoreError, CoreErrorKind, CoreEvent,
     CoreSettings, CreateCategoryResult, CreateFeedRequest, CreateFeedResult, DeliveryDisposition,
     DeliveryMode, DiscoverSubscriptionsRequest, DiscoveredSubscription, FeedIcon, FeedIconVariant,
-    MutationField, MutationResult, NavigationCatalog, ReadArticleRetention, RuntimeHealth,
-    RuntimeHealthStatus, SaveToServiceResult, SearchArticlesRequest, SearchArticlesResult,
-    SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason,
+    FeedSystemNotificationSetting, MutationField, MutationResult, NavigationCatalog,
+    ReadArticleRetention, RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult,
+    SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition, SyncCompleted,
+    SyncFailure, SyncReason,
 };
 use miniflux::{MinifluxClient, RemoteSource};
 use storage::Store;
@@ -176,7 +177,7 @@ impl FluxCore {
         })
     }
 
-    pub fn sync(&self, reason: SyncReason) -> Result<(), CoreError> {
+    pub fn sync(&self, reason: SyncReason) -> Result<SyncCompleted, CoreError> {
         let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
             self.sync_inner(reason)
         });
@@ -184,7 +185,7 @@ impl FluxCore {
         result
     }
 
-    fn sync_inner(&self, reason: SyncReason) -> Result<(), CoreError> {
+    fn sync_inner(&self, reason: SyncReason) -> Result<SyncCompleted, CoreError> {
         let started = Instant::now();
         tracing::info!(target: "sync", "sync started reason={reason:?}");
         let _sync = self
@@ -193,15 +194,18 @@ impl FluxCore {
             .map_err(|_| CoreError::internal("sync gate poisoned"))?;
         if reason != SyncReason::Manual && self.in_backoff()? {
             tracing::info!(target: "sync", "sync skipped reason={reason:?} because runtime backoff is active");
-            self.emit(CoreEvent::SyncCompleted(SyncCompleted {
+            let completed = SyncCompleted {
                 reason,
                 new_articles: 0,
                 updated_articles: 0,
                 mutations_delivered: 0,
                 data_changed: false,
                 navigation_changed: false,
-            }));
-            return Ok(());
+                new_articles_by_feed: Vec::new(),
+                system_notification_candidates: Vec::new(),
+            };
+            self.emit(CoreEvent::SyncCompleted(completed.clone()));
+            return Ok(completed);
         }
         let mutations_delivered = match self.deliver_for_sync(reason) {
             Ok(count) => {
@@ -225,15 +229,18 @@ impl FluxCore {
         match sync::run(self.remote.as_ref(), self.store.as_ref(), retention, reason) {
             Ok(data) => {
                 tracing::info!(target: "sync", "sync completed new={} updated={} delivered={} elapsed_ms={}", data.new_articles, data.updated_articles, mutations_delivered, started.elapsed().as_millis());
-                self.emit(CoreEvent::SyncCompleted(SyncCompleted {
+                let completed = SyncCompleted {
                     reason,
                     new_articles: data.new_articles,
                     updated_articles: data.updated_articles,
                     mutations_delivered,
                     data_changed: data.data_changed,
                     navigation_changed: data.navigation_changed,
-                }));
-                Ok(())
+                    new_articles_by_feed: data.new_articles_by_feed,
+                    system_notification_candidates: data.system_notification_candidates,
+                };
+                self.emit(CoreEvent::SyncCompleted(completed.clone()));
+                Ok(completed)
             }
             Err(error) => {
                 tracing::warn!(target: "sync", "sync failed kind={:?} elapsed_ms={}", error.kind, started.elapsed().as_millis());
@@ -304,6 +311,22 @@ impl FluxCore {
     }
     pub fn navigation_catalog(&self) -> Result<NavigationCatalog, CoreError> {
         self.store.navigation_catalog()
+    }
+    pub fn feed_system_notification_settings(
+        &self,
+    ) -> Result<Vec<FeedSystemNotificationSetting>, CoreError> {
+        self.store.feed_system_notification_settings()
+    }
+    pub fn set_feed_system_notifications_enabled(
+        &self,
+        feed_id: i64,
+        enabled: bool,
+    ) -> Result<(), CoreError> {
+        self.store
+            .set_feed_system_notifications_enabled(feed_id, enabled)
+    }
+    pub fn acknowledge_system_notification(&self, candidate_id: i64) -> Result<(), CoreError> {
+        self.store.acknowledge_system_notification(candidate_id)
     }
     pub fn feed_icon(
         &self,
@@ -676,6 +699,13 @@ mod tests {
     struct DiagnosticCollector {
         records: Mutex<Vec<diagnostics::DiagnosticRecord>>,
     }
+    struct ControlledSyncSource {
+        snapshot: RemoteSnapshot,
+        calls: AtomicUsize,
+        fail_first: bool,
+        started: std::sync::mpsc::Sender<()>,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
     impl CoreEventListener for ReentrantListener {
         fn on_event(&self, event: CoreEvent) {
             if let Some(core) = self.core.lock().unwrap().as_ref() {
@@ -765,6 +795,23 @@ mod tests {
             self.search_calls.fetch_add(1, Ordering::SeqCst);
             assert_eq!(request.query, "rust");
             Ok(self.search_result.lock().unwrap().clone())
+        }
+    }
+    impl RemoteSource for ControlledSyncSource {
+        fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            self.started.send(()).unwrap();
+            self.release.lock().unwrap().recv().unwrap();
+            if self.fail_first && call == 0 {
+                return Err(CoreError::connectivity("offline"));
+            }
+            Ok(self.snapshot.clone())
+        }
+        fn set_read_state(&self, _: &[i64], _: bool) -> Result<(), CoreError> {
+            Ok(())
+        }
+        fn set_starred_state(&self, _: i64, _: bool) -> Result<(), CoreError> {
+            Ok(())
         }
     }
     fn search_result() -> SearchArticlesResult {
@@ -906,7 +953,7 @@ mod tests {
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            4
+            5
         );
         let bytes = std::fs::read(core.database_path()).unwrap();
         assert!(
@@ -1266,6 +1313,197 @@ mod tests {
         a.join().unwrap();
         b.join().unwrap();
         assert_eq!(source.calls.load(Ordering::SeqCst), 2);
+    }
+    #[test]
+    fn sync_serialization_waits_and_preserves_each_reason() {
+        let temp = TempDir::new().unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let source = Arc::new(ControlledSyncSource {
+            snapshot: snapshot(),
+            calls: AtomicUsize::new(0),
+            fail_first: false,
+            started: started_tx,
+            release: Mutex::new(release_rx),
+        });
+        let core = Arc::new(FluxCore::with_remote(config(&temp), source.clone()).unwrap());
+        let first = {
+            let core = core.clone();
+            thread::spawn(move || core.sync(SyncReason::Background).unwrap())
+        };
+        started_rx.recv().unwrap();
+        let second = {
+            let core = core.clone();
+            thread::spawn(move || core.sync(SyncReason::Manual).unwrap())
+        };
+        assert!(started_rx.try_recv().is_err());
+        release_tx.send(()).unwrap();
+        started_rx.recv().unwrap();
+        release_tx.send(()).unwrap();
+        assert_eq!(first.join().unwrap().reason, SyncReason::Background);
+        assert_eq!(second.join().unwrap().reason, SyncReason::Manual);
+        assert_eq!(source.calls.load(Ordering::SeqCst), 2);
+    }
+    #[test]
+    fn failed_sync_releases_serialization_for_the_next_request() {
+        let temp = TempDir::new().unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let source = Arc::new(ControlledSyncSource {
+            snapshot: snapshot(),
+            calls: AtomicUsize::new(0),
+            fail_first: true,
+            started: started_tx,
+            release: Mutex::new(release_rx),
+        });
+        let core = Arc::new(FluxCore::with_remote(config(&temp), source.clone()).unwrap());
+        let first = {
+            let core = core.clone();
+            thread::spawn(move || core.sync(SyncReason::Background))
+        };
+        started_rx.recv().unwrap();
+        let second = {
+            let core = core.clone();
+            thread::spawn(move || core.sync(SyncReason::Periodic))
+        };
+        release_tx.send(()).unwrap();
+        assert!(first.join().unwrap().is_err());
+        started_rx.recv().unwrap();
+        release_tx.send(()).unwrap();
+        assert_eq!(second.join().unwrap().unwrap().reason, SyncReason::Periodic);
+        assert_eq!(source.calls.load(Ordering::SeqCst), 2);
+    }
+    #[test]
+    fn notification_preferences_candidates_and_acknowledgement_are_durable() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = mutation_core(&temp);
+        assert!(
+            core.feed_system_notification_settings()
+                .unwrap()
+                .iter()
+                .all(|setting| !setting.system_notifications_enabled)
+        );
+        core.set_feed_system_notifications_enabled(10, true)
+            .unwrap();
+        source.snapshot.lock().unwrap().articles.extend([
+            article(4, 10, Utc::now().to_rfc3339(), false, false),
+            article(5, 10, Utc::now().to_rfc3339(), false, false),
+            article(6, 20, Utc::now().to_rfc3339(), false, false),
+        ]);
+        let result = core.sync(SyncReason::Periodic).unwrap();
+        assert_eq!(
+            result.new_articles_by_feed,
+            vec![
+                NewArticlesByFeed {
+                    feed_id: 10,
+                    count: 2
+                },
+                NewArticlesByFeed {
+                    feed_id: 20,
+                    count: 1
+                }
+            ]
+        );
+        assert_eq!(result.system_notification_candidates.len(), 1);
+        let candidate = result.system_notification_candidates[0].clone();
+        assert_eq!(
+            (
+                candidate.feed_id,
+                candidate.feed_title.as_str(),
+                candidate.new_count
+            ),
+            (10, "Feed A", 2)
+        );
+        source.snapshot.lock().unwrap().articles.push(article(
+            7,
+            10,
+            Utc::now().to_rfc3339(),
+            false,
+            false,
+        ));
+        let retry = core.sync(SyncReason::Periodic).unwrap();
+        assert_eq!(retry.system_notification_candidates[0].new_count, 3);
+        core.acknowledge_system_notification(candidate.candidate_id)
+            .unwrap();
+        core.acknowledge_system_notification(candidate.candidate_id)
+            .unwrap();
+        let after_ack = core.sync(SyncReason::Periodic).unwrap();
+        assert_eq!(after_ack.system_notification_candidates.len(), 1);
+        assert_eq!(after_ack.system_notification_candidates[0].new_count, 1);
+        source.snapshot.lock().unwrap().articles[0].title = "updated article".into();
+        assert!(
+            core.sync(SyncReason::Manual)
+                .unwrap()
+                .new_articles_by_feed
+                .is_empty()
+        );
+        core.set_read_state(1, true).unwrap();
+        assert!(
+            core.sync(SyncReason::Manual)
+                .unwrap()
+                .new_articles_by_feed
+                .is_empty()
+        );
+        drop(core);
+        let mut same_server_new_key = config(&temp);
+        same_server_new_key.api_key = "replacement-secret".into();
+        let reopened = FluxCore::with_remote(same_server_new_key, source.clone()).unwrap();
+        assert!(
+            reopened
+                .feed_system_notification_settings()
+                .unwrap()
+                .iter()
+                .find(|setting| setting.feed_id == 10)
+                .unwrap()
+                .system_notifications_enabled
+        );
+        assert_eq!(
+            reopened
+                .sync(SyncReason::Periodic)
+                .unwrap()
+                .system_notification_candidates[0]
+                .new_count,
+            1
+        );
+        drop(reopened);
+        let mut changed_server = config(&temp);
+        changed_server.base_url = "https://other-miniflux.example".into();
+        let changed_server = FluxCore::with_remote(changed_server, source).unwrap();
+        assert!(
+            changed_server
+                .feed_system_notification_settings()
+                .unwrap()
+                .is_empty()
+        );
+    }
+    #[test]
+    fn non_eligible_sync_reports_new_articles_without_creating_notification_backlog() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = mutation_core(&temp);
+        core.set_feed_system_notifications_enabled(10, true)
+            .unwrap();
+        source.snapshot.lock().unwrap().articles.push(article(
+            4,
+            10,
+            Utc::now().to_rfc3339(),
+            false,
+            false,
+        ));
+        let app_start = core.sync(SyncReason::AppStart).unwrap();
+        assert_eq!(
+            app_start.new_articles_by_feed,
+            vec![NewArticlesByFeed {
+                feed_id: 10,
+                count: 1
+            }]
+        );
+        assert!(app_start.system_notification_candidates.is_empty());
+        assert!(
+            core.sync(SyncReason::Periodic)
+                .unwrap()
+                .system_notification_candidates
+                .is_empty()
+        );
     }
     #[test]
     fn local_read_star_and_deduplicated_bulk_mutations_are_effective_and_durable() {

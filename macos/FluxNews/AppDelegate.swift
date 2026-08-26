@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import CoreSpotlight
 import SwiftUI
+import UserNotifications
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
@@ -17,6 +18,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var fallbackPanel: NSPanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        SystemNotificationManager.shared.configure()
+        SystemNotificationManager.shared.onFeedSelected = { [weak self] feedID in
+            guard let self else { return }
+            self.show()
+            self.store.selectNotificationFeed(feedID)
+        }
         statusItem = NSStatusBar.system.statusItem(withLength: 62)
         if let button = statusItem.button {
             button.image = Bundle.main.url(forResource: "FluxNewsTemplate", withExtension: "svg").flatMap(NSImage.init(contentsOf:))

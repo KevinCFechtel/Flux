@@ -3,6 +3,7 @@ import Combine
 import Foundation
 import OSLog
 import Security
+import UserNotifications
 
 enum BrowserScope: Hashable { case all, starred, search, category(Int64), feed(Int64) }
 enum ArticleListStyle: String { case row, card }
@@ -42,6 +43,9 @@ final class BrowserStore: ObservableObject {
     @Published var globalShortcut: GlobalShortcutChoice
     @Published var globalShortcutRegistrationError: String?
     @Published private(set) var coreSettings: CoreSettings?
+    @Published private(set) var systemNotificationSettings: [FeedSystemNotificationSetting] = []
+    @Published private(set) var systemNotificationSettingsError: String?
+    @Published private(set) var updatingSystemNotificationFeedIDs = Set<Int64>()
     @Published private(set) var listPresentationRevision: UInt64 = 0
     @Published private(set) var snapshotResetRevision: UInt64 = 0
 
@@ -312,7 +316,10 @@ final class BrowserStore: ObservableObject {
         if reason == .periodic { NativeLog.sync.notice("periodic sync triggered") }
         let store = WeakBrowserStore(self)
         Task.detached { [core, store] in
-            do { try core.sync(reason: reason) }
+            do {
+                let result = try core.sync(reason: reason)
+                await SystemNotificationManager.shared.deliver(result.systemNotificationCandidates, core: core)
+            }
             catch { await MainActor.run { store.value?.isLoading = false; store.value?.errorMessage = String(describing: error) } }
         }
     }
@@ -345,6 +352,42 @@ final class BrowserStore: ObservableObject {
                 else { self?.deactivatePeriodicSyncScheduling() }
             }
         )
+    }
+    func reloadSystemNotificationSettings() {
+        guard let core else { return }
+        do {
+            systemNotificationSettings = try core.feedSystemNotificationSettings()
+            systemNotificationSettingsError = nil
+        } catch {
+            systemNotificationSettingsError = String(describing: error)
+        }
+    }
+    func setSystemNotificationsEnabled(feedID: Int64, enabled: Bool) {
+        guard let core, !updatingSystemNotificationFeedIDs.contains(feedID) else { return }
+        updatingSystemNotificationFeedIDs.insert(feedID)
+        systemNotificationSettingsError = nil
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            do {
+                if enabled { try await SystemNotificationManager.shared.ensureAuthorization() }
+                try core.setFeedSystemNotificationsEnabled(feedId: feedID, enabled: enabled)
+                let settings = try core.feedSystemNotificationSettings()
+                await MainActor.run {
+                    guard let store = store.value else { return }
+                    store.updatingSystemNotificationFeedIDs.remove(feedID)
+                    store.systemNotificationSettings = settings
+                }
+            } catch {
+                await MainActor.run {
+                    guard let store = store.value else { return }
+                    store.updatingSystemNotificationFeedIDs.remove(feedID)
+                    store.systemNotificationSettingsError = error.localizedDescription
+                }
+            }
+        }
+    }
+    func selectNotificationFeed(_ feedID: Int64) {
+        select(.feed(feedID))
     }
     private func updateCoreSettings(_ update: @escaping (Flux) throws -> Void, afterSuccess: @escaping () -> Void = {}) {
         guard let core else { return }
@@ -645,6 +688,75 @@ enum AddFeedDiscoveryOutcome: Equatable {
 private final class WeakBrowserStore: @unchecked Sendable { weak var value: BrowserStore?; init(_ value: BrowserStore) { self.value = value } }
 private final class BrowserEventListener: EventListener, @unchecked Sendable { weak var store: BrowserStore?; init(store: BrowserStore) { self.store = store }; func onEvent(event: CoreEvent) { Task { @MainActor [weak store] in store?.handle(event: event) } } }
 
+final class SystemNotificationManager: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = SystemNotificationManager()
+
+    private enum PayloadKey {
+        static let candidateID = "flux.systemNotificationCandidateID"
+        static let feedID = "flux.systemNotificationFeedID"
+    }
+
+    var onFeedSelected: ((Int64) -> Void)?
+
+    func configure() { UNUserNotificationCenter.current().delegate = self }
+
+    func ensureAuthorization() async throws {
+        let center = UNUserNotificationCenter.current()
+        switch (await center.notificationSettings()).authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return
+        case .denied:
+            throw SystemNotificationError.authorizationDenied
+        case .notDetermined:
+            guard try await center.requestAuthorization(options: [.alert]) else {
+                throw SystemNotificationError.authorizationDenied
+            }
+        @unknown default:
+            throw SystemNotificationError.authorizationDenied
+        }
+    }
+
+    func deliver(_ candidates: [SystemNotificationCandidate], core: Flux) async {
+        for candidate in candidates {
+            do {
+                try await add(candidate)
+                try core.acknowledgeSystemNotification(candidateId: candidate.candidateId)
+            } catch {
+                NativeLog.notification.error("system notification delivery failed candidate_id=\(candidate.candidateId, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    private func add(_ candidate: SystemNotificationCandidate) async throws {
+        let content = UNMutableNotificationContent()
+        content.title = candidate.feedTitle
+        content.body = candidate.newCount == 1 ? "1 new article" : "\(candidate.newCount) new articles"
+        content.userInfo = [PayloadKey.candidateID: candidate.candidateId, PayloadKey.feedID: candidate.feedId]
+        try await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "flux.system-notification.\(candidate.candidateId)", content: content, trigger: nil))
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list])
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        if let feedID = response.notification.request.content.userInfo[PayloadKey.feedID] as? Int64 {
+            DispatchQueue.main.async { [weak self] in self?.onFeedSelected?(feedID) }
+        } else if let number = response.notification.request.content.userInfo[PayloadKey.feedID] as? NSNumber {
+            DispatchQueue.main.async { [weak self] in self?.onFeedSelected?(number.int64Value) }
+        }
+        completionHandler()
+    }
+}
+
+enum SystemNotificationError: LocalizedError {
+    case authorizationDenied
+
+    var errorDescription: String? {
+        "FluxNews notification permission is disabled. Enable notifications in macOS System Settings to use System Notifications."
+    }
+}
+
 private final class CoreDiagnosticLogger: DiagnosticListener, @unchecked Sendable {
     func onDiagnostic(record: DiagnosticRecord) {
         let logger = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "core.\(record.target)")
@@ -670,4 +782,5 @@ enum NativeLog {
     static let feedIcon = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "feed_icon")
     static let scrollover = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "scrollover")
     static let snapshot = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "snapshot")
+    static let notification = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "notification")
 }

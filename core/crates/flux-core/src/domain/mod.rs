@@ -228,6 +228,27 @@ pub struct NavigationCatalog {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NewArticlesByFeed {
+    pub feed_id: i64,
+    pub count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FeedSystemNotificationSetting {
+    pub feed_id: i64,
+    pub feed_title: String,
+    pub system_notifications_enabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SystemNotificationCandidate {
+    pub candidate_id: i64,
+    pub feed_id: i64,
+    pub feed_title: String,
+    pub new_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SyncCompleted {
     pub reason: SyncReason,
     pub new_articles: u32,
@@ -235,6 +256,8 @@ pub struct SyncCompleted {
     pub mutations_delivered: u32,
     pub data_changed: bool,
     pub navigation_changed: bool,
+    pub new_articles_by_feed: Vec<NewArticlesByFeed>,
+    pub system_notification_candidates: Vec<SystemNotificationCandidate>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
