@@ -37,9 +37,11 @@ final class BrowserStore: ObservableObject {
     @Published var lastScrolloverBatch: [Int64] = []
     @Published var scrolloverUndoVisible = false
     @Published var markReadOnScrolloverEnabled = true
+    @Published private(set) var syncOnStartEnabled: Bool
     @Published var articleListStyle: ArticleListStyle
     @Published var globalShortcut: GlobalShortcutChoice
     @Published var globalShortcutRegistrationError: String?
+    @Published private(set) var coreSettings: CoreSettings?
     @Published private(set) var listPresentationRevision: UInt64 = 0
     @Published private(set) var snapshotResetRevision: UInt64 = 0
 
@@ -60,6 +62,7 @@ final class BrowserStore: ObservableObject {
 
     init() {
         markReadOnScrolloverEnabled = UserDefaults.standard.object(forKey: "FluxNews.markReadOnScrollover") as? Bool ?? true
+        syncOnStartEnabled = UserDefaults.standard.object(forKey: "FluxNews.syncOnStart") as? Bool ?? true
         articleListStyle = UserDefaults.standard.string(forKey: "FluxNews.articleListStyle").flatMap(ArticleListStyle.init(rawValue:)) ?? .row
         globalShortcut = GlobalShortcutChoice.stored()
     }
@@ -83,15 +86,19 @@ final class BrowserStore: ObservableObject {
         let cache = fm.urls(for: .cachesDirectory, in: .userDomainMask).first!.appendingPathComponent("Flux", isDirectory: true)
         let media = fm.urls(for: .moviesDirectory, in: .userDomainMask).first!.appendingPathComponent("Flux", isDirectory: true)
         do {
-            core = try Flux.initializeWithDiagnostics(config: InitializationConfig(persistentData: support.path, cache: cache.path, media: media.path, baseUrl: server, apiKey: apiKey), listener: CoreDiagnosticLogger())
+            let configuredCore = try Flux.initializeWithDiagnostics(config: InitializationConfig(persistentData: support.path, cache: cache.path, media: media.path, baseUrl: server, apiKey: apiKey), listener: CoreDiagnosticLogger())
+            let settings = try configuredCore.coreSettings()
+            core = configuredCore
+            coreSettings = settings
             eventSubscription = try core?.subscribeEvents(listener: BrowserEventListener(store: self))
             if let launchAtLogin { try CredentialStore.setLaunchAtLogin(launchAtLogin) }
             try CredentialStore.save(MinifluxCredentials(server: server, apiKey: apiKey))
             NativeLog.app.notice("core configured")
             resetPresentation()
             reloadNavigationAndCounts(); reloadVisibleArticles()
-            sync(reason: .appStart)
-            if NSApp.isActive { activatePeriodicSyncScheduling() }
+            if syncOnStartEnabled { sync(reason: .appStart) }
+            if settings.backgroundSyncEnabled { activatePeriodicSyncScheduling() }
+            else { deactivatePeriodicSyncScheduling() }
             return true
         } catch {
             NativeLog.app.error("core configuration failed: \(error.localizedDescription, privacy: .public)")
@@ -313,7 +320,7 @@ final class BrowserStore: ObservableObject {
         if lastAutomaticSyncAttempt.map({ Date.now.timeIntervalSince($0) > 60 }) ?? true { sync(reason: reason) }
     }
     func activatePeriodicSyncScheduling() {
-        guard core != nil, periodicSyncTimer == nil else { return }
+        guard core != nil, coreSettings?.backgroundSyncEnabled == true, NSApp.isActive, periodicSyncTimer == nil else { return }
         periodicSyncTimer = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.runPeriodicSync() }
         }
@@ -324,10 +331,39 @@ final class BrowserStore: ObservableObject {
         periodicSyncTimer = nil
     }
     func resume() {
-        activatePeriodicSyncScheduling()
+        if coreSettings?.backgroundSyncEnabled == true { activatePeriodicSyncScheduling() }
         syncIfStale(reason: .resume)
     }
     private func runPeriodicSync() { sync(reason: .periodic) }
+    func setRetention(_ retention: ReadArticleRetention) { updateCoreSettings { try $0.setRetention(retention: retention) } }
+    func setDeliveryMode(_ mode: DeliveryMode) { updateCoreSettings { try $0.setDeliveryMode(mode: mode) } }
+    func setBackgroundSyncEnabled(_ enabled: Bool) {
+        updateCoreSettings(
+            { try $0.setBackgroundSyncEnabled(enabled: enabled) },
+            afterSuccess: { [weak self] in
+                if enabled { self?.activatePeriodicSyncScheduling() }
+                else { self?.deactivatePeriodicSyncScheduling() }
+            }
+        )
+    }
+    private func updateCoreSettings(_ update: @escaping (Flux) throws -> Void, afterSuccess: @escaping () -> Void = {}) {
+        guard let core else { return }
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result {
+                try update(core)
+                return try core.coreSettings()
+            }
+            await MainActor.run {
+                switch result {
+                case let .success(settings):
+                    store.value?.coreSettings = settings
+                    afterSuccess()
+                case let .failure(error): store.value?.errorMessage = String(describing: error)
+                }
+            }
+        }
+    }
     func handle(event: CoreEvent) {
         guard case let .syncCompleted(metadata) = event else { return }
         isLoading = false
@@ -456,6 +492,7 @@ final class BrowserStore: ObservableObject {
     }
     func undoScrollover() { guard let core, !lastScrolloverBatch.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: lastScrolloverBatch, read: false); updateVisible(lastScrolloverBatch) { $0.isRead = false }; scrolloverUndoBatch.clear(); lastScrolloverBatch = []; scrolloverUndoVisible = false; undoExpiry?.cancel(); reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
     func setScrolloverEnabled(_ enabled: Bool) { markReadOnScrolloverEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.markReadOnScrollover") }
+    func setSyncOnStartEnabled(_ enabled: Bool) { syncOnStartEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.syncOnStart") }
     func setGlobalShortcut(_ shortcut: GlobalShortcutChoice) { guard shortcut != globalShortcut else { return }; globalShortcut = shortcut; shortcut.store() }
     func open(_ article: ArticleSummary) { setRead(article, true); if let url = URL(string: article.url) { NSWorkspace.shared.open(url) } }
     func openComments(_ article: ArticleSummary) { if let url = URL(string: article.commentsUrl), !article.commentsUrl.isEmpty { NSWorkspace.shared.open(url) } }

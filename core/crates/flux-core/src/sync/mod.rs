@@ -1,10 +1,8 @@
-use crate::domain::{CoreError, SyncReason};
+use crate::domain::{CoreError, ReadArticleRetention, SyncReason};
 use crate::miniflux::RemoteSource;
 use crate::storage::Store;
 use chrono::{Duration, Utc};
 use std::time::Instant;
-
-pub const DEFAULT_RETENTION_DAYS: i64 = 90;
 
 /// Normal-sync orchestration after pending mutation delivery.
 #[derive(Clone, Copy, Debug, Default)]
@@ -18,6 +16,7 @@ pub struct SyncData {
 pub fn run(
     remote: &dyn RemoteSource,
     store: &Store,
+    retention: ReadArticleRetention,
     _reason: SyncReason,
 ) -> Result<SyncData, CoreError> {
     let fetch_started = Instant::now();
@@ -27,7 +26,7 @@ pub fn run(
     let reconcile_started = Instant::now();
     let stats = store.reconcile(&snapshot.categories, &snapshot.feeds, &snapshot.articles)?;
     tracing::info!(target: "storage", "reconciliation completed new={} updated={} elapsed_ms={}", stats.new_articles, stats.updated_articles, reconcile_started.elapsed().as_millis());
-    let cutoff = Utc::now() - Duration::days(DEFAULT_RETENTION_DAYS);
+    let cutoff = Utc::now() - Duration::days(retention.days());
     let cleanup_started = Instant::now();
     let removed_articles = store.cleanup_expired_read_articles(&cutoff.to_rfc3339())?;
     tracing::info!(target: "retention", "retention cleanup completed removed={} elapsed_ms={}", removed_articles, cleanup_started.elapsed().as_millis());

@@ -67,8 +67,15 @@ Counts are separate point-in-time core queries and respect the same
 scope/read/starred filter semantics as article queries, but do not
 require sorting or pagination. They can be refreshed independently from
 visible article snapshots, for example after Read-on-Scrollover, without
-re-querying the visible list. Background changes do not silently replace
-visible counts.
+re-querying the visible list.
+
+Visible article snapshots remain stable according to the snapshot rules
+below, but selected status surfaces may intentionally show live core
+counts. In particular, the macOS menu-bar unread count reflects the
+current global core unread count after each successful sync even when the
+currently presented article/navigation snapshot has not yet adopted new
+data. Snapshot-relative navigation counts may remain stable until the UI
+intentionally refreshes them.
 
 List queries should return compact article summaries; full content is
 requested separately for article detail.
@@ -452,18 +459,85 @@ retention.
 
 ## 16. Notifications
 
-OS notifications are off by default and can be enabled explicitly per
-category for background sync.
+Flux distinguishes **System Notifications** from **In-App New Data**.
+They have different lifecycles and acknowledgement semantics and must not
+clear each other implicitly.
 
-For each enabled category, a background sync produces at most one
-notification with the count of articles newly discovered by that sync.
-Already-notified articles must not be counted again.
+### System Notifications
 
-The core produces notification candidates; the native client posts the
-OS notification and acknowledges successful handoff before the core
-marks it delivered.
+System Notifications are OS-facing notifications and are off by default.
+They are configurable **per feed**, not per category, under the native
+Settings area "System Notifications".
+
+For each enabled feed, an eligible background/automatic sync produces at
+most one aggregated System Notification for that feed when the sync has
+discovered articles that have not previously been successfully handed
+off as System Notifications. Flux does not create one OS notification per
+article.
+
+The core durably tracks which discovered articles have already been
+system-notified so later sync runs do not notify them again. If a later
+sync discovers additional not-yet-notified articles for the same feed, a
+new aggregated notification may be produced for that new set.
+
+The core produces typed System Notification candidates. The native
+client performs the actual OS notification handoff and acknowledges the
+candidate only after successful handoff. System-notification delivery
+state is therefore independent from whether the corresponding articles
+have been adopted into an in-app visible snapshot.
 
 The design does not require Firebase/FCM or a custom push service.
+
+### In-App New Data
+
+In-App New Data represents articles discovered by background/automatic
+sync while the current UI snapshot is intentionally kept stable. It is
+not controlled by the System Notifications feed settings and does not
+require OS notification permission.
+
+The UI tracks pending newly discovered article counts per feed relative
+to the currently adopted presentation snapshots. These counts accumulate
+across multiple background syncs until the relevant new data is adopted.
+For example, if one sync adds three articles to a feed and a later sync
+adds two more before the UI refreshes that scope, the feed's pending
+New-Data badge shows five.
+
+On macOS, affected feeds use the platform-native navigation badge to show
+the pending New-Data count. The badge should use native system styling;
+Flux does not require a custom badge color.
+
+The macOS menu-bar item exposes two distinct signals:
+
+- the existing numeric title shows the **current global unread count from
+  the core** and is refreshed after every successful sync, even when the
+  visible article snapshot remains unchanged;
+- a small notification dot on the FluxNews status-item icon indicates
+  that at least one feed still has pending In-App New Data that has not
+  yet been adopted into the relevant UI snapshot.
+
+The dot is an aggregate signal only; the per-feed native badges provide
+the detailed counts. The dot remains visible across multiple background
+syncs and disappears only when no pending per-feed In-App New Data
+remains.
+
+In-App New Data is acknowledged by **snapshot adoption**, not merely by
+opening the sidebar or selecting a navigation entry. When a newly queried
+snapshot is intentionally or policy-permittedly adopted, acknowledgement
+follows that snapshot's scope:
+
+- adopting **All News** clears all pending per-feed In-App New Data;
+- adopting a **Category** clears pending In-App New Data for feeds in
+  that category;
+- adopting a **Feed** clears pending In-App New Data only for that feed.
+
+The same rule applies when the existing New Data/Refresh action adopts a
+new snapshot. A feed does not need to be individually opened if a broader
+adopted snapshot already includes its new articles.
+
+System Notification acknowledgement and In-App New Data acknowledgement
+are separate. Successfully handing an OS notification to the system does
+not clear an in-app badge or menu-bar dot, and adopting a UI snapshot does
+not mark an article as system-notified.
 
 ## 17. Widgets
 
@@ -535,6 +609,8 @@ implementation, not through broad speculative analysis:
 -   final DTO/API names;
 -   detailed media cleanup options;
 -   exact UI defaults;
+-   exact System Notification wording/content;
+-   exact action/deep-link destination when the user activates a System Notification;
 -   remaining feature-gap details found while implementing against
     FluxNews/FluxBar reference evidence.
 

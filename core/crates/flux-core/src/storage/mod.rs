@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::domain::{
-    Article, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary, Category, CoreError, Feed,
-    MutationField, NavigationCatalog, ReadFilter, StarredFilter,
+    Article, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary, Category, CoreError,
+    CoreSettings, DeliveryMode, Feed, MutationField, NavigationCatalog, ReadArticleRetention,
+    ReadFilter, StarredFilter,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -50,6 +51,7 @@ impl Store {
             .pragma_update(None, "foreign_keys", "ON")
             .map_err(sql_error)?;
         migrate(&mut connection)?;
+        initialize_core_settings(&connection)?;
         let schema_version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(sql_error)?;
@@ -84,6 +86,54 @@ impl Store {
             )
             .optional()
             .map_err(sql_error)
+    }
+    pub fn core_settings(&self) -> Result<CoreSettings, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let retention = setting_value(&connection, "read_article_retention")?;
+        let delivery_mode = setting_value(&connection, "delivery_mode")?;
+        let background_sync_enabled = setting_value(&connection, "background_sync_enabled")?;
+        Ok(CoreSettings {
+            retention: ReadArticleRetention::from_days(&retention)?,
+            delivery_mode: match delivery_mode.as_str() {
+                "live" => DeliveryMode::Live,
+                "deferred" => DeliveryMode::Deferred,
+                _ => return Err(CoreError::persistence("invalid delivery mode setting")),
+            },
+            background_sync_enabled: match background_sync_enabled.as_str() {
+                "0" => false,
+                "1" => true,
+                _ => return Err(CoreError::persistence("invalid background sync setting")),
+            },
+        })
+    }
+    pub fn set_retention(&self, retention: ReadArticleRetention) -> Result<(), CoreError> {
+        self.set_setting("read_article_retention", &retention.days().to_string())
+    }
+    pub fn set_delivery_mode(&self, mode: DeliveryMode) -> Result<(), CoreError> {
+        self.set_setting(
+            "delivery_mode",
+            match mode {
+                DeliveryMode::Live => "live",
+                DeliveryMode::Deferred => "deferred",
+            },
+        )
+    }
+    pub fn set_background_sync_enabled(&self, enabled: bool) -> Result<(), CoreError> {
+        self.set_setting("background_sync_enabled", if enabled { "1" } else { "0" })
+    }
+    fn set_setting(&self, key: &str, value: &str) -> Result<(), CoreError> {
+        self.connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .execute(
+                "INSERT INTO core_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![key, value],
+            )
+            .map_err(sql_error)?;
+        Ok(())
     }
     pub fn reconcile(
         &self,
@@ -511,6 +561,41 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
     }
     Ok(())
 }
+fn initialize_core_settings(connection: &Connection) -> Result<(), CoreError> {
+    let defaults = CoreSettings::default();
+    for (key, value) in [
+        (
+            "read_article_retention",
+            defaults.retention.days().to_string(),
+        ),
+        ("delivery_mode", "deferred".to_string()),
+        (
+            "background_sync_enabled",
+            if defaults.background_sync_enabled {
+                "1".to_string()
+            } else {
+                "0".to_string()
+            },
+        ),
+    ] {
+        connection
+            .execute(
+                "INSERT INTO core_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO NOTHING",
+                params![key, value],
+            )
+            .map_err(sql_error)?;
+    }
+    Ok(())
+}
+fn setting_value(connection: &Connection, key: &str) -> Result<String, CoreError> {
+    connection
+        .query_row(
+            "SELECT value FROM core_settings WHERE key=?1",
+            [key],
+            |row| row.get(0),
+        )
+        .map_err(sql_error)
+}
 fn field_name(field: MutationField) -> &'static str {
     match field {
         MutationField::Read => "read",
@@ -547,7 +632,7 @@ mod tests {
         let (data, cache, media) = roots(&temp);
         let path = data.join("flux.sqlite3");
         let connection = Connection::open(&path).unwrap();
-        connection.execute_batch("CREATE TABLE categories (id INTEGER PRIMARY KEY, title TEXT NOT NULL); CREATE TABLE feeds (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL, title TEXT NOT NULL); CREATE TABLE articles (id INTEGER PRIMARY KEY, feed_id INTEGER NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL, comments_url TEXT NOT NULL DEFAULT '', published_at TEXT NOT NULL, is_read INTEGER NOT NULL, is_starred INTEGER NOT NULL, raw_html_content TEXT NOT NULL, remote_is_read INTEGER, remote_is_starred INTEGER, preview TEXT NOT NULL DEFAULT '', image_url TEXT); CREATE TABLE pending_mutations (article_id INTEGER NOT NULL, field TEXT NOT NULL, desired INTEGER NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(article_id,field)); INSERT INTO categories VALUES (1,'Category'); INSERT INTO feeds VALUES (2,1,'Feed'); INSERT INTO articles VALUES (3,2,'Title','https://example.test/post','', '2024-01-01T00:00:00Z',1,1,'<p>Hello <b>world</b></p><img src=\"/cover.jpg\">',1,1,'',''); INSERT INTO pending_mutations VALUES (3,'read',0,7); PRAGMA user_version=3;").unwrap();
+        connection.execute_batch("CREATE TABLE core_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE categories (id INTEGER PRIMARY KEY, title TEXT NOT NULL); CREATE TABLE feeds (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL, title TEXT NOT NULL); CREATE TABLE articles (id INTEGER PRIMARY KEY, feed_id INTEGER NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL, comments_url TEXT NOT NULL DEFAULT '', published_at TEXT NOT NULL, is_read INTEGER NOT NULL, is_starred INTEGER NOT NULL, raw_html_content TEXT NOT NULL, remote_is_read INTEGER, remote_is_starred INTEGER, preview TEXT NOT NULL DEFAULT '', image_url TEXT); CREATE TABLE pending_mutations (article_id INTEGER NOT NULL, field TEXT NOT NULL, desired INTEGER NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(article_id,field)); INSERT INTO core_settings VALUES ('base_url','https://miniflux.example'); INSERT INTO categories VALUES (1,'Category'); INSERT INTO feeds VALUES (2,1,'Feed'); INSERT INTO articles VALUES (3,2,'Title','https://example.test/post','', '2024-01-01T00:00:00Z',1,1,'<p>Hello <b>world</b></p><img src=\"/cover.jpg\">',1,1,'',''); INSERT INTO pending_mutations VALUES (3,'read',0,7); PRAGMA user_version=3;").unwrap();
         drop(connection);
         let store = Store::open(&data, &cache, &media).unwrap();
         let connection = store.connection.lock().unwrap();
@@ -560,6 +645,11 @@ mod tests {
         assert!(row.3.contains("<b>world</b>"));
         assert!(row.4 && row.5);
         assert_eq!((row.6, row.7), (2, 1));
+        assert_eq!(store.core_settings().unwrap(), CoreSettings::default());
+        assert_eq!(
+            store.base_url().unwrap().as_deref(),
+            Some("https://miniflux.example")
+        );
     }
 
     #[test]

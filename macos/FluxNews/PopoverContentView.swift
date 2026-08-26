@@ -582,33 +582,186 @@ private struct FeedIconSlot: View {
     }
 }
 
+private enum SettingsSection: String, CaseIterable, Identifiable {
+    case account
+    case syncStorage
+    case reading
+    case general
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .account: "Account"
+        case .syncStorage: "Sync & Storage"
+        case .reading: "Reading"
+        case .general: "General"
+        }
+    }
+}
+
 private struct SettingsView: View {
     @ObservedObject var store: BrowserStore
     @State private var server = ""
     @State private var key = ""
     @State private var scrollover = true
+    @State private var syncOnStart = true
     @State private var launchAtLogin = false
     @State private var globalShortcut = GlobalShortcutChoice.optionCommandF
+    @State private var section: SettingsSection = .account
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("FluxNews Settings").font(.title2.bold())
-            Text("Credentials are stored securely in the macOS Keychain.").font(.caption).foregroundStyle(.secondary)
-            LabeledContent { TextField("", text: $server) } label: { Label("Miniflux Server", systemImage: "server.rack") }
-            LabeledContent { SecureField("", text: $key) } label: { Label("API Key", systemImage: "key") }
-            Toggle("Launch automatically at login", isOn: $launchAtLogin)
-            Toggle(isOn: $scrollover) { Label("Mark articles as read when scrolling past", systemImage: "eye") }
-            Picker("Global shortcut", selection: $globalShortcut) { ForEach(GlobalShortcutChoice.allCases, id: \.self) { Text($0.title).tag($0) } }
-            if let error = store.globalShortcutRegistrationError { Text(error).font(.caption).foregroundStyle(.red) }
-            HStack { Spacer(); Button("Cancel") { store.settingsVisible = false }; Button("Save") { store.setScrolloverEnabled(scrollover); store.setGlobalShortcut(globalShortcut); if store.configure(server: server.trimmingCharacters(in: .whitespacesAndNewlines), apiKey: key.trimmingCharacters(in: .whitespacesAndNewlines), launchAtLogin: launchAtLogin) { store.settingsVisible = false } }.keyboardShortcut(.defaultAction).disabled(server.isEmpty || key.isEmpty) }
+        VStack(spacing: 0) {
+            Text("FluxNews Settings")
+                .font(.title2.bold())
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+            Divider()
+            NavigationSplitView {
+                SettingsSidebar(selection: $section)
+            } detail: {
+                settingsPage
+                    .padding(20)
+            }
+            Divider()
+            HStack { Spacer(); Button("Cancel") { store.settingsVisible = false }; Button("Save") { store.setScrolloverEnabled(scrollover); store.setSyncOnStartEnabled(syncOnStart); store.setGlobalShortcut(globalShortcut); if store.configure(server: server.trimmingCharacters(in: .whitespacesAndNewlines), apiKey: key.trimmingCharacters(in: .whitespacesAndNewlines), launchAtLogin: launchAtLogin) { store.settingsVisible = false } }.keyboardShortcut(.defaultAction).disabled(server.isEmpty || key.isEmpty) }
+                .padding(16)
         }
-        .padding(20).frame(width: 420)
+        .frame(width: 700, height: 430)
         .onAppear {
             if let credentials = try? CredentialStore.load() { server = credentials.server; key = credentials.apiKey }
             launchAtLogin = CredentialStore.launchAtLoginEnabled
             scrollover = store.markReadOnScrolloverEnabled
+            syncOnStart = store.syncOnStartEnabled
             globalShortcut = store.globalShortcut
         }
+    }
+    @ViewBuilder private var settingsPage: some View {
+        switch section {
+        case .account:
+            AccountSettingsView(server: $server, key: $key)
+        case .syncStorage:
+            SyncStorageSettingsView(store: store, syncOnStart: $syncOnStart, retention: retention, deliveryMode: deliveryMode, backgroundSyncEnabled: backgroundSyncEnabled)
+        case .reading:
+            ReadingSettingsView(scrollover: $scrollover)
+        case .general:
+            GeneralSettingsView(launchAtLogin: $launchAtLogin, globalShortcut: $globalShortcut, registrationError: store.globalShortcutRegistrationError)
+        }
+    }
+    private var retention: Binding<ReadArticleRetention> {
+        Binding(
+            get: { store.coreSettings?.retention ?? .days90 },
+            set: { store.setRetention($0) }
+        )
+    }
+    private var deliveryMode: Binding<DeliveryMode> {
+        Binding(
+            get: { store.coreSettings?.deliveryMode ?? .deferred },
+            set: { store.setDeliveryMode($0) }
+        )
+    }
+    private var backgroundSyncEnabled: Binding<Bool> {
+        Binding(
+            get: { store.coreSettings?.backgroundSyncEnabled ?? false },
+            set: { store.setBackgroundSyncEnabled($0) }
+        )
+    }
+}
+
+private struct SettingsSidebar: View {
+    @Binding var selection: SettingsSection
+
+    var body: some View {
+        List {
+            ForEach(SettingsSection.allCases) { section in
+                Button { selection = section } label: {
+                    Text(section.title)
+                        .foregroundStyle(section == selection ? .white : .primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .listRowBackground(section == selection ? Color.accentColor : .clear)
+            }
+        }
+        .listStyle(.sidebar)
+        .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 190)
+    }
+}
+
+private struct AccountSettingsView: View {
+    @Binding var server: String
+    @Binding var key: String
+
+    var body: some View {
+        Form {
+            LabeledContent("Miniflux Server") { TextField("", text: $server) }
+            LabeledContent("API Key") { SecureField("", text: $key) }
+            Text("Credentials are stored securely in the macOS Keychain.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .formStyle(.grouped)
+    }
+}
+
+private struct SyncStorageSettingsView: View {
+    @ObservedObject var store: BrowserStore
+    @Binding var syncOnStart: Bool
+    let retention: Binding<ReadArticleRetention>
+    let deliveryMode: Binding<DeliveryMode>
+    let backgroundSyncEnabled: Binding<Bool>
+
+    var body: some View {
+        Form {
+            Toggle("Background Sync", isOn: backgroundSyncEnabled)
+                .disabled(store.coreSettings == nil)
+            Toggle("Sync on Start", isOn: $syncOnStart)
+            Picker("Mutation Delivery", selection: deliveryMode) {
+                Text("Deferred").tag(DeliveryMode.deferred)
+                Text("Live").tag(DeliveryMode.live)
+            }
+            .disabled(store.coreSettings == nil)
+            Picker("Retention", selection: retention) {
+                Text("30 days").tag(ReadArticleRetention.days30)
+                Text("60 days").tag(ReadArticleRetention.days60)
+                Text("90 days").tag(ReadArticleRetention.days90)
+                Text("180 days").tag(ReadArticleRetention.days180)
+                Text("365 days").tag(ReadArticleRetention.days365)
+            }
+            .disabled(store.coreSettings == nil)
+        }
+        .formStyle(.grouped)
+    }
+}
+
+private struct ReadingSettingsView: View {
+    @Binding var scrollover: Bool
+
+    var body: some View {
+        Form {
+            Toggle("Mark articles as read when scrolling past", isOn: $scrollover)
+        }
+        .formStyle(.grouped)
+    }
+}
+
+private struct GeneralSettingsView: View {
+    @Binding var launchAtLogin: Bool
+    @Binding var globalShortcut: GlobalShortcutChoice
+    let registrationError: String?
+
+    var body: some View {
+        Form {
+            Toggle("Launch automatically at login", isOn: $launchAtLogin)
+            Picker("Global Shortcut", selection: $globalShortcut) {
+                ForEach(GlobalShortcutChoice.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            if let registrationError {
+                Text(registrationError).font(.caption).foregroundStyle(.red)
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 

@@ -157,6 +157,57 @@ pub enum DeliveryMode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReadArticleRetention {
+    Days30,
+    Days60,
+    Days90,
+    Days180,
+    Days365,
+}
+
+impl ReadArticleRetention {
+    pub const fn days(self) -> i64 {
+        match self {
+            Self::Days30 => 30,
+            Self::Days60 => 60,
+            Self::Days90 => 90,
+            Self::Days180 => 180,
+            Self::Days365 => 365,
+        }
+    }
+
+    pub(crate) fn from_days(days: &str) -> Result<Self, CoreError> {
+        match days {
+            "30" => Ok(Self::Days30),
+            "60" => Ok(Self::Days60),
+            "90" => Ok(Self::Days90),
+            "180" => Ok(Self::Days180),
+            "365" => Ok(Self::Days365),
+            _ => Err(CoreError::persistence(
+                "invalid read article retention setting",
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CoreSettings {
+    pub retention: ReadArticleRetention,
+    pub delivery_mode: DeliveryMode,
+    pub background_sync_enabled: bool,
+}
+
+impl Default for CoreSettings {
+    fn default() -> Self {
+        Self {
+            retention: ReadArticleRetention::Days90,
+            delivery_mode: DeliveryMode::Deferred,
+            background_sync_enabled: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuntimeHealth {
     Healthy,
     ConnectivityDegraded,

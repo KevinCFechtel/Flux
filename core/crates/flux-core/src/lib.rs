@@ -21,11 +21,11 @@ use chrono::{DateTime, Utc};
 use diagnostics::{CoreDiagnosticListener, Diagnostics};
 use domain::{
     ArticleQuery, ArticleSummary, ArticleThumbnailResult, CoreError, CoreErrorKind, CoreEvent,
-    CreateCategoryResult, CreateFeedRequest, CreateFeedResult, DeliveryDisposition, DeliveryMode,
-    DiscoverSubscriptionsRequest, DiscoveredSubscription, FeedIcon, FeedIconVariant, MutationField,
-    MutationResult, NavigationCatalog, RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult,
-    SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition, SyncCompleted,
-    SyncFailure, SyncReason,
+    CoreSettings, CreateCategoryResult, CreateFeedRequest, CreateFeedResult, DeliveryDisposition,
+    DeliveryMode, DiscoverSubscriptionsRequest, DiscoveredSubscription, FeedIcon, FeedIconVariant,
+    MutationField, MutationResult, NavigationCatalog, ReadArticleRetention, RuntimeHealth,
+    RuntimeHealthStatus, SaveToServiceResult, SearchArticlesRequest, SearchArticlesResult,
+    SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason,
 };
 use miniflux::{MinifluxClient, RemoteSource};
 use storage::Store;
@@ -92,9 +92,10 @@ impl FluxCore {
             let feed_icons = feed_icon::FeedIconService::new(config.cache.clone())?;
             let article_thumbnails =
                 article_thumbnail::ArticleThumbnailService::new(config.cache.clone())?;
-            Ok::<_, CoreError>((store, remote, feed_icons, article_thumbnails))
+            let settings = store.core_settings()?;
+            Ok::<_, CoreError>((store, remote, feed_icons, article_thumbnails, settings))
         });
-        let (store, remote, feed_icons, article_thumbnails) = match result {
+        let (store, remote, feed_icons, article_thumbnails, settings) = match result {
             Ok(result) => result,
             Err(error) => {
                 tracing::dispatcher::with_default(
@@ -116,7 +117,7 @@ impl FluxCore {
             feed_icons,
             article_thumbnails,
             sync_gate: Mutex::new(()),
-            delivery_mode: Mutex::new(DeliveryMode::Deferred),
+            delivery_mode: Mutex::new(settings.delivery_mode),
             runtime: Mutex::new(DeliveryRuntime {
                 health: RuntimeHealth::Healthy,
                 next_retry_at: None,
@@ -148,9 +149,10 @@ impl FluxCore {
             let feed_icons = feed_icon::FeedIconService::new(config.cache.clone())?;
             let article_thumbnails =
                 article_thumbnail::ArticleThumbnailService::new(config.cache.clone())?;
-            Ok::<_, CoreError>((store, feed_icons, article_thumbnails))
+            let settings = store.core_settings()?;
+            Ok::<_, CoreError>((store, feed_icons, article_thumbnails, settings))
         })?;
-        let (store, feed_icons, article_thumbnails) = store;
+        let (store, feed_icons, article_thumbnails, settings) = store;
         tracing::dispatcher::with_default(
             &diagnostic_dispatcher,
             || tracing::info!(target: "core", "core initialization completed"),
@@ -161,7 +163,7 @@ impl FluxCore {
             feed_icons,
             article_thumbnails,
             sync_gate: Mutex::new(()),
-            delivery_mode: Mutex::new(DeliveryMode::Deferred),
+            delivery_mode: Mutex::new(settings.delivery_mode),
             runtime: Mutex::new(DeliveryRuntime {
                 health: RuntimeHealth::Healthy,
                 next_retry_at: None,
@@ -219,7 +221,8 @@ impl FluxCore {
                 return Err(error);
             }
         };
-        match sync::run(self.remote.as_ref(), self.store.as_ref(), reason) {
+        let retention = self.store.core_settings()?.retention;
+        match sync::run(self.remote.as_ref(), self.store.as_ref(), retention, reason) {
             Ok(data) => {
                 tracing::info!(target: "sync", "sync completed new={} updated={} delivered={} elapsed_ms={}", data.new_articles, data.updated_articles, mutations_delivered, started.elapsed().as_millis());
                 self.emit(CoreEvent::SyncCompleted(SyncCompleted {
@@ -324,7 +327,17 @@ impl FluxCore {
     pub fn database_path(&self) -> PathBuf {
         self.store.database_path()
     }
+    pub fn core_settings(&self) -> Result<CoreSettings, CoreError> {
+        self.store.core_settings()
+    }
+    pub fn set_retention(&self, retention: ReadArticleRetention) -> Result<(), CoreError> {
+        self.store.set_retention(retention)
+    }
+    pub fn set_background_sync_enabled(&self, enabled: bool) -> Result<(), CoreError> {
+        self.store.set_background_sync_enabled(enabled)
+    }
     pub fn set_delivery_mode(&self, mode: DeliveryMode) -> Result<(), CoreError> {
+        self.store.set_delivery_mode(mode)?;
         *self
             .delivery_mode
             .lock()
@@ -903,6 +916,77 @@ mod tests {
         );
     }
     #[test]
+    fn core_settings_default_and_persist_without_changing_articles_or_navigation() {
+        let temp = TempDir::new().unwrap();
+        let (core, _) = core(&temp, snapshot());
+        assert_eq!(core.core_settings().unwrap(), CoreSettings::default());
+
+        core.sync(SyncReason::Manual).unwrap();
+        assert_eq!(
+            core.set_read_state(1, true).unwrap().disposition,
+            DeliveryDisposition::Queued
+        );
+        let articles = core
+            .query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap();
+        let navigation = core.navigation_catalog().unwrap();
+        for retention in [
+            ReadArticleRetention::Days30,
+            ReadArticleRetention::Days60,
+            ReadArticleRetention::Days90,
+            ReadArticleRetention::Days180,
+            ReadArticleRetention::Days365,
+        ] {
+            core.set_retention(retention).unwrap();
+            assert_eq!(core.core_settings().unwrap().retention, retention);
+        }
+        core.set_delivery_mode(DeliveryMode::Live).unwrap();
+        core.set_background_sync_enabled(true).unwrap();
+        assert_eq!(
+            core.core_settings().unwrap(),
+            CoreSettings {
+                retention: ReadArticleRetention::Days365,
+                delivery_mode: DeliveryMode::Live,
+                background_sync_enabled: true,
+            }
+        );
+        assert_eq!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap(),
+            articles
+        );
+        assert_eq!(core.navigation_catalog().unwrap(), navigation);
+
+        drop(core);
+        let reopened = FluxCore::with_remote(
+            config(&temp),
+            Arc::new(Source {
+                snapshot: snapshot(),
+                calls: AtomicUsize::new(0),
+                delay: Duration::ZERO,
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            reopened.core_settings().unwrap(),
+            CoreSettings {
+                retention: ReadArticleRetention::Days365,
+                delivery_mode: DeliveryMode::Live,
+                background_sync_enabled: true,
+            }
+        );
+        assert_eq!(
+            reopened.set_read_state(1, false).unwrap().disposition,
+            DeliveryDisposition::Delivered
+        );
+    }
+    #[test]
     fn sync_persists_categories_feeds_and_articles() {
         let temp = TempDir::new().unwrap();
         let (core, source) = core(&temp, snapshot());
@@ -1067,6 +1151,29 @@ mod tests {
             .map(|a| a.id)
             .collect::<Vec<_>>(),
             vec![2, 1]
+        );
+    }
+    #[test]
+    fn configured_retention_controls_cleanup() {
+        let temp = TempDir::new().unwrap();
+        let mut data = snapshot();
+        data.articles = vec![article(
+            1,
+            10,
+            (Utc::now() - ChronoDuration::days(45)).to_rfc3339(),
+            true,
+            false,
+        )];
+        let (core, _) = core(&temp, data);
+        core.set_retention(ReadArticleRetention::Days30).unwrap();
+        core.sync(SyncReason::Manual).unwrap();
+        assert!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty()
         );
     }
     #[test]

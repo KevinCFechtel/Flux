@@ -160,6 +160,20 @@ pub enum DeliveryMode {
     Deferred,
 }
 #[derive(uniffi::Enum)]
+pub enum ReadArticleRetention {
+    Days30,
+    Days60,
+    Days90,
+    Days180,
+    Days365,
+}
+#[derive(uniffi::Record)]
+pub struct CoreSettings {
+    pub retention: ReadArticleRetention,
+    pub delivery_mode: DeliveryMode,
+    pub background_sync_enabled: bool,
+}
+#[derive(uniffi::Enum)]
 pub enum DeliveryDisposition {
     Queued,
     Delivered,
@@ -427,6 +441,17 @@ impl Flux {
     pub fn set_delivery_mode(&self, mode: DeliveryMode) -> Result<(), FluxError> {
         self.core.set_delivery_mode(mode.into()).map_err(map_error)
     }
+    pub fn core_settings(&self) -> Result<CoreSettings, FluxError> {
+        self.core.core_settings().map(Into::into).map_err(map_error)
+    }
+    pub fn set_retention(&self, retention: ReadArticleRetention) -> Result<(), FluxError> {
+        self.core.set_retention(retention.into()).map_err(map_error)
+    }
+    pub fn set_background_sync_enabled(&self, enabled: bool) -> Result<(), FluxError> {
+        self.core
+            .set_background_sync_enabled(enabled)
+            .map_err(map_error)
+    }
     pub fn set_read_state(&self, article_id: i64, read: bool) -> Result<MutationResult, FluxError> {
         self.core
             .set_read_state(article_id, read)
@@ -597,6 +622,35 @@ impl From<DeliveryMode> for domain::DeliveryMode {
         match value {
             DeliveryMode::Live => Self::Live,
             DeliveryMode::Deferred => Self::Deferred,
+        }
+    }
+}
+impl From<ReadArticleRetention> for domain::ReadArticleRetention {
+    fn from(value: ReadArticleRetention) -> Self {
+        match value {
+            ReadArticleRetention::Days30 => Self::Days30,
+            ReadArticleRetention::Days60 => Self::Days60,
+            ReadArticleRetention::Days90 => Self::Days90,
+            ReadArticleRetention::Days180 => Self::Days180,
+            ReadArticleRetention::Days365 => Self::Days365,
+        }
+    }
+}
+impl From<domain::CoreSettings> for CoreSettings {
+    fn from(value: domain::CoreSettings) -> Self {
+        Self {
+            retention: match value.retention {
+                domain::ReadArticleRetention::Days30 => ReadArticleRetention::Days30,
+                domain::ReadArticleRetention::Days60 => ReadArticleRetention::Days60,
+                domain::ReadArticleRetention::Days90 => ReadArticleRetention::Days90,
+                domain::ReadArticleRetention::Days180 => ReadArticleRetention::Days180,
+                domain::ReadArticleRetention::Days365 => ReadArticleRetention::Days365,
+            },
+            delivery_mode: match value.delivery_mode {
+                domain::DeliveryMode::Live => DeliveryMode::Live,
+                domain::DeliveryMode::Deferred => DeliveryMode::Deferred,
+            },
+            background_sync_enabled: value.background_sync_enabled,
         }
     }
 }
