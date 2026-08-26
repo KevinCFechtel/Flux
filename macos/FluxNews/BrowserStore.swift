@@ -89,9 +89,9 @@ final class BrowserStore: ObservableObject {
     @discardableResult
     func configure(server: String, apiKey: String, launchAtLogin: Bool? = nil) -> Bool {
         let fm = FileManager.default
-        let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Flux", isDirectory: true)
-        let cache = fm.urls(for: .cachesDirectory, in: .userDomainMask).first!.appendingPathComponent("Flux", isDirectory: true)
-        let media = fm.urls(for: .moviesDirectory, in: .userDomainMask).first!.appendingPathComponent("Flux", isDirectory: true)
+        let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("FluxNews", isDirectory: true)
+        let cache = fm.urls(for: .cachesDirectory, in: .userDomainMask).first!.appendingPathComponent("FluxNews", isDirectory: true)
+        let media = fm.urls(for: .moviesDirectory, in: .userDomainMask).first!.appendingPathComponent("FluxNews", isDirectory: true)
         do {
             let configuredCore = try Flux.initializeWithDiagnostics(config: InitializationConfig(persistentData: support.path, cache: cache.path, media: media.path, baseUrl: server, apiKey: apiKey), listener: CoreDiagnosticLogger())
             let settings = try configuredCore.coreSettings()
