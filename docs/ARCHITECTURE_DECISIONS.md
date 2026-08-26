@@ -334,6 +334,8 @@ The core owns feed-icon acquisition, cache/processing, and suitable
 light/dark variants for transparent low-contrast icons. Native UI
 requests and renders the appropriate variant.
 
+Adaptive feed icons: If a feed-provided SVG contains author-defined light/dark appearance variants, Flux should prefer and render those variants for the corresponding appearance. Automatic contrast correction is only a fallback when the source icon does not provide a suitable adaptive appearance. This behavior is automatic and has no user-facing setting.
+
 Article image discovery/download/disk cache belongs to the core; native
 UI triggers lazy loading, decodes/renders images, and may maintain a
 memory cache. Background sync does not preload article images.
