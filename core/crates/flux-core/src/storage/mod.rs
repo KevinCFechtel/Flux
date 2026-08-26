@@ -192,6 +192,32 @@ impl Store {
                 existing.as_ref() != Some(&(f.category_id, f.title.clone()));
             tx.execute("INSERT INTO feeds (id,category_id,title) VALUES (?1,?2,?3) ON CONFLICT(id) DO UPDATE SET category_id=excluded.category_id,title=excluded.title", params![f.id,f.category_id,f.title]).map_err(sql_error)?;
         }
+        let remote_feed_ids: HashSet<i64> = feeds.iter().map(|feed| feed.id).collect();
+        let stale_feed_ids = {
+            let mut statement = tx.prepare("SELECT id FROM feeds").map_err(sql_error)?;
+            statement
+                .query_map([], |row| row.get::<_, i64>(0))
+                .map_err(sql_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(sql_error)?
+                .into_iter()
+                .filter(|feed_id| !remote_feed_ids.contains(feed_id))
+                .collect::<Vec<_>>()
+        };
+        for feed_id in &stale_feed_ids {
+            // Pending mutations do not cascade from articles; all notification state cascades.
+            tx.execute("DELETE FROM pending_mutations WHERE article_id IN (SELECT id FROM articles WHERE feed_id=?1)", [feed_id]).map_err(sql_error)?;
+            tx.execute("DELETE FROM articles WHERE feed_id=?1", [feed_id])
+                .map_err(sql_error)?;
+            tx.execute(
+                "DELETE FROM feed_system_notification_preferences WHERE feed_id=?1",
+                [feed_id],
+            )
+            .map_err(sql_error)?;
+            tx.execute("DELETE FROM feeds WHERE id=?1", [feed_id])
+                .map_err(sql_error)?;
+        }
+        stats.navigation_changed |= !stale_feed_ids.is_empty();
         let remote_article_ids: HashSet<i64> = articles.iter().map(|article| article.id).collect();
         let absent_articles = {
             let mut statement = tx
@@ -255,6 +281,24 @@ impl Store {
             }
             tx.execute("INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11,?12) ON CONFLICT(id) DO UPDATE SET feed_id=excluded.feed_id,title=excluded.title,url=excluded.url,comments_url=excluded.comments_url,published_at=excluded.published_at,remote_is_read=excluded.remote_is_read,remote_is_starred=excluded.remote_is_starred,is_read=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='read') THEN articles.is_read ELSE excluded.is_read END,is_starred=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='starred') THEN articles.is_starred ELSE excluded.is_starred END,raw_html_content=excluded.raw_html_content,preview=excluded.preview,image_url=excluded.image_url,content_processing_version=excluded.content_processing_version", params![a.id,a.feed_id,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.raw_html_content,a.preview,a.image_url,crate::article::PROCESSING_VERSION]).map_err(sql_error)?;
         }
+        let remote_category_ids: HashSet<i64> =
+            categories.iter().map(|category| category.id).collect();
+        let stale_category_ids = {
+            let mut statement = tx.prepare("SELECT id FROM categories").map_err(sql_error)?;
+            statement
+                .query_map([], |row| row.get::<_, i64>(0))
+                .map_err(sql_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(sql_error)?
+                .into_iter()
+                .filter(|category_id| !remote_category_ids.contains(category_id))
+                .collect::<Vec<_>>()
+        };
+        for category_id in &stale_category_ids {
+            tx.execute("DELETE FROM categories WHERE id=?1", [category_id])
+                .map_err(sql_error)?;
+        }
+        stats.navigation_changed |= !stale_category_ids.is_empty();
         tx.commit().map_err(sql_error)?;
         Ok(stats)
     }
@@ -937,6 +981,224 @@ mod tests {
         assert_eq!(
             rows,
             vec![(1, true, false, true, false), (2, false, true, true, false)]
+        );
+    }
+
+    #[test]
+    fn reconcile_removes_absent_feed_data_and_notification_candidates() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [
+            Category {
+                id: 1,
+                title: "A".into(),
+            },
+            Category {
+                id: 2,
+                title: "B".into(),
+            },
+        ];
+        let feeds = [
+            Feed {
+                id: 10,
+                category_id: 1,
+                title: "Keep".into(),
+            },
+            Feed {
+                id: 20,
+                category_id: 2,
+                title: "Remove".into(),
+            },
+        ];
+        let articles = [
+            Article {
+                id: 1,
+                feed_id: 10,
+                title: "Keep".into(),
+                url: "https://example.test/1".into(),
+                comments_url: String::new(),
+                published_at: "2024-01-01T00:00:00Z".into(),
+                is_read: false,
+                is_starred: false,
+                raw_html_content: String::new(),
+                preview: String::new(),
+                image_url: None,
+            },
+            Article {
+                id: 2,
+                feed_id: 20,
+                title: "Unread".into(),
+                url: "https://example.test/2".into(),
+                comments_url: String::new(),
+                published_at: "2024-01-01T00:00:00Z".into(),
+                is_read: false,
+                is_starred: false,
+                raw_html_content: String::new(),
+                preview: String::new(),
+                image_url: None,
+            },
+            Article {
+                id: 3,
+                feed_id: 20,
+                title: "Starred".into(),
+                url: "https://example.test/3".into(),
+                comments_url: String::new(),
+                published_at: "2024-01-01T00:00:00Z".into(),
+                is_read: true,
+                is_starred: true,
+                raw_html_content: String::new(),
+                preview: String::new(),
+                image_url: None,
+            },
+        ];
+        let initial = store.reconcile(&categories, &feeds, &articles).unwrap();
+        store
+            .set_feed_system_notifications_enabled(20, true)
+            .unwrap();
+        assert_eq!(
+            store
+                .prepare_system_notification_candidates(&initial.new_article_ids_by_feed)
+                .unwrap()
+                .len(),
+            1
+        );
+        store
+            .set_feed_system_notifications_enabled(10, true)
+            .unwrap();
+        store
+            .set_state_bulk(&[2], MutationField::Read, true)
+            .unwrap();
+
+        let stats = store.reconcile(&categories[..1], &feeds[..1], &[]).unwrap();
+        assert!(stats.navigation_changed);
+        assert_eq!(
+            store
+                .navigation_catalog()
+                .unwrap()
+                .feeds
+                .iter()
+                .map(|feed| feed.id)
+                .collect::<Vec<_>>(),
+            vec![10]
+        );
+        assert_eq!(
+            store
+                .query_articles(&ArticleQuery {
+                    limit: 0,
+                    ..Default::default()
+                })
+                .unwrap()
+                .iter()
+                .map(|article| article.id)
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert!(store.pending_mutations().unwrap().is_empty());
+        assert_eq!(
+            store
+                .feed_system_notification_settings()
+                .unwrap()
+                .iter()
+                .map(|setting| setting.feed_id)
+                .collect::<Vec<_>>(),
+            vec![10]
+        );
+        assert!(store.feed_system_notification_settings().unwrap()[0].system_notifications_enabled);
+        let connection = store.connection.lock().unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM feed_system_notification_preferences WHERE feed_id=20",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM pending_system_notifications p LEFT JOIN articles a ON a.id=p.article_id WHERE a.id IS NULL", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM system_notified_articles n LEFT JOIN articles a ON a.id=n.article_id WHERE a.id IS NULL", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM system_notification_candidates WHERE feed_id=20",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM notification_candidate_articles",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        drop(connection);
+        store.reconcile(&categories, &feeds, &[]).unwrap();
+        assert!(
+            !store
+                .feed_system_notification_settings()
+                .unwrap()
+                .iter()
+                .find(|setting| setting.feed_id == 20)
+                .unwrap()
+                .system_notifications_enabled
+        );
+    }
+
+    #[test]
+    fn reconcile_removes_only_categories_absent_from_the_remote_catalog() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [
+            Category {
+                id: 1,
+                title: "A".into(),
+            },
+            Category {
+                id: 2,
+                title: "Removed".into(),
+            },
+            Category {
+                id: 3,
+                title: "Empty".into(),
+            },
+        ];
+        let feeds = [Feed {
+            id: 10,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        store.reconcile(&categories, &feeds, &[]).unwrap();
+
+        let stats = store
+            .reconcile(&[categories[0].clone(), categories[2].clone()], &feeds, &[])
+            .unwrap();
+        assert!(stats.navigation_changed);
+        let catalog = store.navigation_catalog().unwrap();
+        assert_eq!(
+            catalog
+                .categories
+                .iter()
+                .map(|category| category.id)
+                .collect::<Vec<_>>(),
+            vec![1, 3]
+        );
+        assert_eq!(
+            catalog.feeds.iter().map(|feed| feed.id).collect::<Vec<_>>(),
+            vec![10]
+        );
+        assert!(
+            !store
+                .reconcile(&[categories[0].clone(), categories[2].clone()], &feeds, &[])
+                .unwrap()
+                .navigation_changed
         );
     }
 }
