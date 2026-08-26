@@ -353,9 +353,9 @@ private struct NavigationSidebar: View {
         VStack(spacing: 0) {
             List(selection: selectedScope) {
                 Section {
-                    sidebarRow(SidebarItem(id: "all", scope: .all, title: "All News", count: store.unreadTotal, systemImage: "tray.full", feedID: nil, children: nil))
-                    sidebarRow(SidebarItem(id: "starred", scope: .starred, title: "Starred", count: store.starredTotal, systemImage: "star.fill", feedID: nil, children: nil))
-                    sidebarRow(SidebarItem(id: "search", scope: .search, title: "Search", count: 0, systemImage: "magnifyingglass", feedID: nil, children: nil))
+                    sidebarRow(SidebarItem(id: "all", scope: .all, title: "All News", count: store.unreadTotal, systemImage: "tray.full", feedID: nil, categoryID: nil, pendingNewCount: 0, children: nil))
+                    sidebarRow(SidebarItem(id: "starred", scope: .starred, title: "Starred", count: store.starredTotal, systemImage: "star.fill", feedID: nil, categoryID: nil, pendingNewCount: 0, children: nil))
+                    sidebarRow(SidebarItem(id: "search", scope: .search, title: "Search", count: 0, systemImage: "magnifyingglass", feedID: nil, categoryID: nil, pendingNewCount: 0, children: nil))
                 }
                 Section("Feeds") {
                     OutlineGroup(categoryItems, children: \.children) { item in sidebarRow(item) }
@@ -381,23 +381,18 @@ private struct NavigationSidebar: View {
     }
     private var categoryItems: [SidebarItem] {
         store.catalog.categories.map { category in
-            SidebarItem.category(
+            let feeds = store.catalog.feeds.filter { $0.categoryId == category.id }
+            return SidebarItem.category(
                 category,
                 count: store.categorySidebarCounts[category.id] ?? 0,
-                feeds: store.catalog.feeds.filter { $0.categoryId == category.id }.map {
-                    SidebarItem.feed($0, count: store.feedSidebarCounts[$0.id] ?? 0)
-                }
+                pendingNewCount: PendingNewDataAggregation.count(feedIDs: feeds.map(\.id), pendingByFeed: store.pendingNewByFeed),
+                feeds: feeds.map { SidebarItem.feed($0, count: store.feedSidebarCounts[$0.id] ?? 0, pendingNewCount: store.pendingNewByFeed[$0.id] ?? 0) }
             )
         }
     }
     @ViewBuilder private func sidebarRow(_ item: SidebarItem) -> some View {
-        if let feedID = item.feedID {
-            if let pending = store.pendingNewByFeed[feedID], pending > 0 {
-                sidebarLabel(item, showUnreadText: true)
-                    .badge(pending)
-            } else {
-                sidebarLabel(item, showUnreadText: true)
-            }
+        if item.feedID != nil || item.categoryID != nil {
+            sidebarLabel(item, showUnreadText: true)
         } else {
             sidebarLabel(item, showUnreadText: false)
                 .badge(Int(item.count))
@@ -413,12 +408,30 @@ private struct NavigationSidebar: View {
                 if showUnreadText, item.count > 0 {
                     Text("\(item.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
+                if item.pendingNewCount > 0 {
+                    NewDataIndicator(count: item.pendingNewCount)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())
         .tag(item.scope)
+    }
+}
+
+private struct NewDataIndicator: View {
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "sparkles")
+            Text("\(count) new")
+        }
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(count) new articles")
     }
 }
 
@@ -438,13 +451,15 @@ private struct SidebarItem: Identifiable {
     let count: UInt64
     let systemImage: String?
     let feedID: Int64?
+    let categoryID: Int64?
+    let pendingNewCount: Int
     let children: [SidebarItem]?
 
-    static func category(_ category: Category, count: UInt64, feeds: [SidebarItem]) -> SidebarItem {
-        SidebarItem(id: "category-\(category.id)", scope: .category(category.id), title: category.title, count: count, systemImage: nil, feedID: nil, children: feeds.isEmpty ? nil : feeds)
+    static func category(_ category: Category, count: UInt64, pendingNewCount: Int, feeds: [SidebarItem]) -> SidebarItem {
+        SidebarItem(id: "category-\(category.id)", scope: .category(category.id), title: category.title, count: count, systemImage: nil, feedID: nil, categoryID: category.id, pendingNewCount: pendingNewCount, children: feeds.isEmpty ? nil : feeds)
     }
-    static func feed(_ feed: Feed, count: UInt64) -> SidebarItem {
-        SidebarItem(id: "feed-\(feed.id)", scope: .feed(feed.id), title: feed.title, count: count, systemImage: nil, feedID: feed.id, children: nil)
+    static func feed(_ feed: Feed, count: UInt64, pendingNewCount: Int) -> SidebarItem {
+        SidebarItem(id: "feed-\(feed.id)", scope: .feed(feed.id), title: feed.title, count: count, systemImage: nil, feedID: feed.id, categoryID: nil, pendingNewCount: pendingNewCount, children: nil)
     }
 }
 

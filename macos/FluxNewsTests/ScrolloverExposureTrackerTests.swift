@@ -148,6 +148,18 @@ final class ScrolloverExposureTrackerTests: XCTestCase {
         XCTAssertEqual(pending.byFeed, [20: 1])
     }
 
+    func testCategoryPendingNewDataAggregatesCurrentFeedChildren() {
+        let pending: [Int64: Int] = [10: 2, 20: 5, 30: 0, 40: 4]
+
+        XCTAssertEqual(PendingNewDataAggregation.count(feedIDs: [], pendingByFeed: pending), 0)
+        XCTAssertEqual(PendingNewDataAggregation.count(feedIDs: [10], pendingByFeed: pending), 2)
+        XCTAssertEqual(PendingNewDataAggregation.count(feedIDs: [10, 20, 30], pendingByFeed: pending), 7)
+        XCTAssertEqual(PendingNewDataAggregation.count(feedIDs: [10, 20], pendingByFeed: [10: 0, 20: 5]), 5)
+        XCTAssertEqual(PendingNewDataAggregation.count(feedIDs: [10, 20], pendingByFeed: [:]), 0)
+        XCTAssertEqual(PendingNewDataAggregation.count(feedIDs: [10, 20], pendingByFeed: pending), 7)
+        XCTAssertEqual(PendingNewDataAggregation.count(feedIDs: [40], pendingByFeed: pending), 4)
+    }
+
     func testStatusItemTitleKeepsUnreadAndPendingNewDataIndependent() {
         XCTAssertEqual(StatusItemPresentation.title(unreadTotal: 127, hasPendingNewData: false), "127")
         XCTAssertEqual(StatusItemPresentation.title(unreadTotal: 127, hasPendingNewData: true), "• 127")

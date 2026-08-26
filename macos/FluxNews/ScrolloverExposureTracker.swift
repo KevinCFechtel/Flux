@@ -48,6 +48,16 @@ struct PendingNewData: Equatable {
     }
 }
 
+enum PendingNewDataAggregation {
+    static func count(feedIDs: [Int64], pendingByFeed: [Int64: Int]) -> Int {
+        feedIDs.reduce(0) { total, feedID in
+            let pending = max(0, pendingByFeed[feedID] ?? 0)
+            let (next, overflow) = total.addingReportingOverflow(pending)
+            return overflow ? Int.max : next
+        }
+    }
+}
+
 enum StatusItemPresentation {
     static func title(unreadTotal: UInt64, hasPendingNewData: Bool) -> String {
         let unread = unreadTotal == 0 ? "" : unreadTotal > 999 ? "999+" : "\(unreadTotal)"
