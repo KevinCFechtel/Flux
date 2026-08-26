@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private lazy var shortcutRegistrar = GlobalShortcutRegistrar { [weak self] in self?.show() }
     private var sidebarVisible = false
     private var fallbackPanel: NSPanel?
+    private var statusTemplateImage: NSImage?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         SystemNotificationManager.shared.configure()
@@ -26,9 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
         statusItem = NSStatusBar.system.statusItem(withLength: 62)
         if let button = statusItem.button {
-            button.image = Bundle.main.url(forResource: "FluxNewsTemplate", withExtension: "svg").flatMap(NSImage.init(contentsOf:))
-            button.image?.size = NSSize(width: 18, height: 18)
-            button.image?.isTemplate = true
+            statusTemplateImage = Bundle.main.url(forResource: "FluxNewsTemplate", withExtension: "svg").flatMap(NSImage.init(contentsOf:))
+            updateStatusIcon(hasPendingNewData: false)
             button.imagePosition = .imageLeading
             button.toolTip = "FluxNews"
             button.setAccessibilityLabel("FluxNews")
@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             button.action = #selector(togglePopover)
         }
         countObservation = store.$unreadTotal.removeDuplicates().sink { [weak self] count in self?.statusItem.button?.title = count == 0 ? "" : count > 999 ? "999+" : "\(count)" }
+        store.$hasPendingNewData.removeDuplicates().sink { [weak self] pending in self?.updateStatusIcon(hasPendingNewData: pending) }.store(in: &cancellables)
         popover.behavior = .transient; popover.animates = true; popover.delegate = self; popover.contentSize = size(sidebarVisible: false); popover.contentViewController = host()
         AppRouter.shared.configure(open: { [weak self] route in self?.store.route(to: route); self?.show() }, refresh: { [weak self] in self?.show(); self?.store.sync(reason: .manual) })
         catalogObservation = store.$catalog.dropFirst().removeDuplicates().sink { [weak self] catalog in
@@ -82,5 +83,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             width: PopoverLayout.width(style: store.articleListStyle, sidebarVisible: sidebarVisible),
             height: min(store.articleListStyle == .row ? PopoverLayout.rowHeight : PopoverLayout.cardHeight, max(320, visibleHeight - PopoverLayout.verticalScreenMargin))
         )
+    }
+    private var cancellables = Set<AnyCancellable>()
+    private func updateStatusIcon(hasPendingNewData: Bool) {
+        guard let statusTemplateImage else { return }
+        guard hasPendingNewData else {
+            statusTemplateImage.size = NSSize(width: 18, height: 18)
+            statusTemplateImage.isTemplate = true
+            statusItem?.button?.image = statusTemplateImage
+            return
+        }
+        let size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        statusTemplateImage.draw(in: NSRect(origin: .zero, size: size))
+        NSColor.black.setFill()
+        NSBezierPath(ovalIn: NSRect(x: 13, y: 0, width: 5, height: 5)).fill()
+        image.unlockFocus()
+        image.isTemplate = true
+        statusItem?.button?.image = image
     }
 }

@@ -390,20 +390,31 @@ private struct NavigationSidebar: View {
             )
         }
     }
-    private func sidebarRow(_ item: SidebarItem) -> some View {
+    @ViewBuilder private func sidebarRow(_ item: SidebarItem) -> some View {
+        if let feedID = item.feedID {
+            sidebarLabel(item, showUnreadText: true)
+                .badge(store.pendingNewByFeed[feedID] ?? 0)
+        } else {
+            sidebarLabel(item, showUnreadText: false)
+                .badge(Int(item.count))
+        }
+    }
+    private func sidebarLabel(_ item: SidebarItem, showUnreadText: Bool) -> some View {
         Button { store.select(item.scope) } label: {
             HStack(spacing: 8) {
                 if let image = item.systemImage { Image(systemName: image).frame(width: 16) }
                 else if let feedID = item.feedID { FeedIconSlot(feedID: feedID, store: store) }
                 Text(item.title).lineLimit(1)
                 Spacer(minLength: 0)
+                if showUnreadText {
+                    Text("\(item.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())
         .tag(item.scope)
-        .badge(Int(item.count))
     }
 }
 

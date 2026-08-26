@@ -119,4 +119,33 @@ final class ScrolloverExposureTrackerTests: XCTestCase {
         XCTAssertNotEqual(SnapshotRefreshPolicy.Action.preserve, .replace)
     }
 
+    func testPendingNewDataAccumulatesAcrossAutomaticSyncs() {
+        var pending = PendingNewData()
+        pending.accumulate([(feedID: 10, count: 3)])
+        pending.accumulate([(feedID: 10, count: 2), (feedID: 20, count: 4)])
+
+        XCTAssertEqual(pending.byFeed, [10: 5, 20: 4])
+        XCTAssertTrue(pending.hasPending)
+    }
+
+    func testPendingNewDataAcknowledgesOnlyTheAdoptedScope() {
+        var pending = PendingNewData()
+        pending.accumulate([(feedID: 10, count: 5), (feedID: 20, count: 4), (feedID: 30, count: 2)])
+
+        pending.adoptFeed(10)
+        XCTAssertEqual(pending.byFeed, [20: 4, 30: 2])
+        pending.adoptFeeds(in: [20])
+        XCTAssertEqual(pending.byFeed, [30: 2])
+        pending.adoptAll()
+        XCTAssertFalse(pending.hasPending)
+    }
+
+    func testPendingNewDataRemovesFeedsAbsentFromNavigation() {
+        var pending = PendingNewData()
+        pending.accumulate([(feedID: 10, count: 1), (feedID: 20, count: 1)])
+        pending.removeAbsentFeeds([20])
+
+        XCTAssertEqual(pending.byFeed, [20: 1])
+    }
+
 }

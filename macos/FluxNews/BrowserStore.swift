@@ -43,6 +43,8 @@ final class BrowserStore: ObservableObject {
     @Published var globalShortcut: GlobalShortcutChoice
     @Published var globalShortcutRegistrationError: String?
     @Published private(set) var coreSettings: CoreSettings?
+    @Published private(set) var pendingNewByFeed: [Int64: Int] = [:]
+    @Published private(set) var hasPendingNewData = false
     @Published private(set) var systemNotificationSettings: [FeedSystemNotificationSetting] = []
     @Published private(set) var systemNotificationSettingsError: String?
     @Published private(set) var updatingSystemNotificationFeedIDs = Set<Int64>()
@@ -62,6 +64,7 @@ final class BrowserStore: ObservableObject {
     private var articleThumbnailRequests = ArticleThumbnailRequestState()
     private var scrolloverCountsPending = false
     private var searchGeneration: UInt64 = 0
+    private var pendingNewData = PendingNewData()
     private let searchPageSize: UInt32 = 50
 
     init() {
@@ -116,13 +119,14 @@ final class BrowserStore: ObservableObject {
         let coreScope: ArticleScope = switch scope { case .all, .starred: .all; case .search: fatalError("Search has no local article query"); case let .category(id): .category(id: id); case let .feed(id): .feed(id: id) }
         return ArticleQuery(scope: coreScope, readFilter: scope == .starred ? .all : (unreadOnly ? .unread : .all), starredFilter: scope == .starred ? .starred : .all, sort: newestFirst ? .newestFirst : .oldestFirst, limit: 0, cursor: nil)
     }
-    func reloadVisibleArticles(resetPosition: Bool = false) {
+    func reloadVisibleArticles(resetPosition: Bool = false, acknowledgingPendingNewData: Bool = false) {
         guard scope != .search else { return }
         guard let core else { return }
         do {
             articles = try core.queryArticles(query: query())
             selectionTotal = try core.countArticles(query: query())
             errorMessage = nil
+            if acknowledgingPendingNewData { acknowledgePendingNewDataForCurrentScope() }
             if resetPosition {
                 resetPresentation()
                 snapshotResetRevision &+= 1
@@ -134,6 +138,8 @@ final class BrowserStore: ObservableObject {
         guard let core else { return }
         do {
             catalog = try core.navigationCatalog()
+            pendingNewData.removeAbsentFeeds(Set(catalog.feeds.map(\.id)))
+            publishPendingNewData()
         } catch { errorMessage = String(describing: error) }
     }
     func reloadCounts() {
@@ -217,7 +223,7 @@ final class BrowserStore: ObservableObject {
         if scope == .search { selectSearch(); return }
         self.scope = scope
         resetPresentation()
-        reloadVisibleArticles()
+        reloadVisibleArticles(acknowledgingPendingNewData: true)
     }
     func selectSearch() {
         guard scope != .search else { return }
@@ -299,12 +305,12 @@ final class BrowserStore: ObservableObject {
         case .feed(let id): select(.feed(id))
         }
     }
-    func setUnreadOnly(_ enabled: Bool) { unreadOnly = enabled; resetPresentation(); reloadCounts(); reloadVisibleArticles() }
-    func setNewestFirst(_ enabled: Bool) { newestFirst = enabled; resetPresentation(); reloadVisibleArticles() }
+    func setUnreadOnly(_ enabled: Bool) { unreadOnly = enabled; resetPresentation(); reloadCounts(); reloadVisibleArticles(acknowledgingPendingNewData: true) }
+    func setNewestFirst(_ enabled: Bool) { newestFirst = enabled; resetPresentation(); reloadVisibleArticles(acknowledgingPendingNewData: true) }
     func noteMeaningfulInteraction() { hasMeaningfullyInteracted = true }
     func resetPresentation() { hasMeaningfullyInteracted = false; newDataAvailable = false; listPresentationRevision &+= 1 }
     func setArticleListStyle(_ style: ArticleListStyle) { guard style != articleListStyle else { return }; articleListStyle = style; UserDefaults.standard.set(style.rawValue, forKey: "FluxNews.articleListStyle"); resetPresentation() }
-    func applyNewData() { reloadVisibleArticles(resetPosition: true) }
+    func applyNewData() { reloadVisibleArticles(resetPosition: true, acknowledgingPendingNewData: true) }
     func sync(reason: SyncReason = .manual) {
         guard let core else { return }
         guard !isLoading else {
@@ -410,18 +416,53 @@ final class BrowserStore: ObservableObject {
     func handle(event: CoreEvent) {
         guard case let .syncCompleted(metadata) = event else { return }
         isLoading = false
+        reloadLiveUnreadTotal()
+        if metadata.reason == .background || metadata.reason == .periodic {
+            pendingNewData.accumulate(metadata.newArticlesByFeed.map { (feedID: $0.feedId, count: $0.count) })
+            publishPendingNewData()
+        }
         if metadata.navigationChanged { reloadNavigationAndCounts() }
         else if metadata.reason == .manual { reloadCounts() }
         else if metadata.dataChanged { reloadCounts() }
         if metadata.reason == .periodic { NativeLog.sync.notice("periodic sync completed") }
-        switch SnapshotRefreshPolicy.action(manual: metadata.reason == .manual, dataChanged: metadata.dataChanged, popoverVisible: popoverVisible, hasMeaningfullyInteracted: hasMeaningfullyInteracted) {
+        let action: SnapshotRefreshPolicy.Action = if metadata.reason == .background || metadata.reason == .periodic {
+            metadata.dataChanged ? .signalNewData : .preserve
+        } else {
+            SnapshotRefreshPolicy.action(manual: metadata.reason == .manual, dataChanged: metadata.dataChanged, popoverVisible: popoverVisible, hasMeaningfullyInteracted: hasMeaningfullyInteracted)
+        }
+        switch action {
         case .replace:
-            reloadVisibleArticles(resetPosition: true)
+            reloadVisibleArticles(resetPosition: true, acknowledgingPendingNewData: metadata.reason == .manual)
         case .signalNewData:
             newDataAvailable = true
         case .preserve:
             break
         }
+    }
+    private func reloadLiveUnreadTotal() {
+        guard let core else { return }
+        do {
+            unreadTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil))
+        } catch {
+            NativeLog.sync.error("live unread count refresh failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+    private func acknowledgePendingNewDataForCurrentScope() {
+        switch scope {
+        case .all:
+            pendingNewData.adoptAll()
+        case let .category(categoryID):
+            pendingNewData.adoptFeeds(in: Set(catalog.feeds.filter { $0.categoryId == categoryID }.map(\.id)))
+        case let .feed(feedID):
+            pendingNewData.adoptFeed(feedID)
+        case .starred, .search:
+            return
+        }
+        publishPendingNewData()
+    }
+    private func publishPendingNewData() {
+        pendingNewByFeed = pendingNewData.byFeed
+        hasPendingNewData = pendingNewData.hasPending
     }
     func setRead(_ article: ArticleSummary, _ read: Bool) {
         guard let core else { return }

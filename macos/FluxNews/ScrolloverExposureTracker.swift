@@ -24,6 +24,30 @@ enum SnapshotRefreshPolicy {
     }
 }
 
+/// Runtime-only counts for local data not yet adopted by a visible Feed snapshot.
+struct PendingNewData: Equatable {
+    private(set) var byFeed: [Int64: Int] = [:]
+
+    var hasPending: Bool { byFeed.values.contains(where: { $0 > 0 }) }
+
+    mutating func accumulate(_ additions: [(feedID: Int64, count: UInt32)]) {
+        for addition in additions where addition.count > 0 {
+            let current = byFeed[addition.feedID] ?? 0
+            let (next, overflow) = current.addingReportingOverflow(Int(addition.count))
+            byFeed[addition.feedID] = overflow ? Int.max : next
+        }
+    }
+
+    mutating func adoptAll() { byFeed.removeAll() }
+    mutating func adoptFeed(_ feedID: Int64) { byFeed.removeValue(forKey: feedID) }
+    mutating func adoptFeeds(in categoryFeedIDs: Set<Int64>) {
+        byFeed = byFeed.filter { !categoryFeedIDs.contains($0.key) }
+    }
+    mutating func removeAbsentFeeds(_ feedIDs: Set<Int64>) {
+        byFeed = byFeed.filter { feedIDs.contains($0.key) }
+    }
+}
+
 /// Presentation-only policy for grouping tracker flushes from one scroll interaction.
 struct ScrolloverUndoBatch {
     private var session = 0
