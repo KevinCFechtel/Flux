@@ -7,13 +7,13 @@ use std::sync::Mutex;
 
 use crate::domain::{
     Article, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary, Category, CoreError,
-    CoreSettings, DeliveryMode, Feed, FeedSystemNotificationSetting, MutationField,
-    NavigationCatalog, ReadArticleRetention, ReadFilter, StarredFilter,
-    SystemNotificationCandidate,
+    CoreSettings, DeliveryMode, DetailRenderingMode, Feed, FeedPreferences,
+    FeedSystemNotificationSetting, MutationField, NavigationCatalog, ReadArticleRetention,
+    ReadFilter, StarredFilter, SystemNotificationCandidate,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 #[derive(Clone, Debug)]
 pub struct PendingMutation {
@@ -91,7 +91,7 @@ impl Store {
             .as_deref()
             .is_some_and(|previous| previous != base_url)
         {
-            tx.execute_batch("DELETE FROM notification_candidate_articles; DELETE FROM system_notification_candidates; DELETE FROM pending_system_notifications; DELETE FROM feed_system_notification_preferences; DELETE FROM pending_mutations; DELETE FROM articles; DELETE FROM feeds; DELETE FROM categories;").map_err(sql_error)?;
+            tx.execute_batch("DELETE FROM notification_candidate_articles; DELETE FROM system_notification_candidates; DELETE FROM pending_system_notifications; DELETE FROM feed_preferences; DELETE FROM pending_mutations; DELETE FROM articles; DELETE FROM feeds; DELETE FROM categories;").map_err(sql_error)?;
         }
         tx.execute("INSERT INTO core_settings (key, value) VALUES ('base_url', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [base_url]).map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
@@ -117,6 +117,7 @@ impl Store {
         let retention = setting_value(&connection, "read_article_retention")?;
         let delivery_mode = setting_value(&connection, "delivery_mode")?;
         let background_sync_enabled = setting_value(&connection, "background_sync_enabled")?;
+        let detail_character_limit = setting_value(&connection, "detail_character_limit")?;
         Ok(CoreSettings {
             retention: ReadArticleRetention::from_days(&retention)?,
             delivery_mode: match delivery_mode.as_str() {
@@ -129,6 +130,9 @@ impl Store {
                 "1" => true,
                 _ => return Err(CoreError::persistence("invalid background sync setting")),
             },
+            detail_character_limit: detail_character_limit
+                .parse()
+                .map_err(|_| CoreError::persistence("invalid detail character limit setting"))?,
         })
     }
     pub fn set_retention(&self, retention: ReadArticleRetention) -> Result<(), CoreError> {
@@ -145,6 +149,12 @@ impl Store {
     }
     pub fn set_background_sync_enabled(&self, enabled: bool) -> Result<(), CoreError> {
         self.set_setting("background_sync_enabled", if enabled { "1" } else { "0" })
+    }
+    pub fn set_detail_character_limit(&self, limit: u32) -> Result<(), CoreError> {
+        if !matches!(limit, 5_000 | 10_000 | 20_000) {
+            return Err(CoreError::data("unsupported detail character limit"));
+        }
+        self.set_setting("detail_character_limit", &limit.to_string())
     }
     fn set_setting(&self, key: &str, value: &str) -> Result<(), CoreError> {
         self.connection
@@ -209,11 +219,8 @@ impl Store {
             tx.execute("DELETE FROM pending_mutations WHERE article_id IN (SELECT id FROM articles WHERE feed_id=?1)", [feed_id]).map_err(sql_error)?;
             tx.execute("DELETE FROM articles WHERE feed_id=?1", [feed_id])
                 .map_err(sql_error)?;
-            tx.execute(
-                "DELETE FROM feed_system_notification_preferences WHERE feed_id=?1",
-                [feed_id],
-            )
-            .map_err(sql_error)?;
+            tx.execute("DELETE FROM feed_preferences WHERE feed_id=?1", [feed_id])
+                .map_err(sql_error)?;
             tx.execute("DELETE FROM feeds WHERE id=?1", [feed_id])
                 .map_err(sql_error)?;
         }
@@ -310,7 +317,7 @@ impl Store {
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
-        let mut statement = connection.prepare("SELECT f.id,f.title,COALESCE(p.enabled,0) FROM feeds f LEFT JOIN feed_system_notification_preferences p ON p.feed_id=f.id ORDER BY f.category_id,f.title COLLATE NOCASE,f.id").map_err(sql_error)?;
+        let mut statement = connection.prepare("SELECT f.id,f.title,COALESCE(p.system_notifications_enabled,0) FROM feeds f LEFT JOIN feed_preferences p ON p.feed_id=f.id ORDER BY f.category_id,f.title COLLATE NOCASE,f.id").map_err(sql_error)?;
         statement
             .query_map([], |row| {
                 Ok(FeedSystemNotificationSetting {
@@ -341,7 +348,77 @@ impl Store {
         {
             return Err(CoreError::data(format!("feed {feed_id} does not exist")));
         }
-        connection.execute("INSERT INTO feed_system_notification_preferences(feed_id,enabled) VALUES(?1,?2) ON CONFLICT(feed_id) DO UPDATE SET enabled=excluded.enabled", params![feed_id, enabled]).map_err(sql_error)?;
+        connection.execute("INSERT INTO feed_preferences(feed_id,system_notifications_enabled) VALUES(?1,?2) ON CONFLICT(feed_id) DO UPDATE SET system_notifications_enabled=excluded.system_notifications_enabled", params![feed_id, enabled]).map_err(sql_error)?;
+        Ok(())
+    }
+
+    pub fn feed_preferences(&self, feed_id: i64) -> Result<FeedPreferences, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        connection.query_row("SELECT system_notifications_enabled,detail_rendering,truncate_detail,open_in_miniflux FROM feed_preferences WHERE feed_id=?1", [feed_id], |row| {
+            Ok(FeedPreferences {
+                feed_id,
+                system_notifications_enabled: row.get(0)?,
+                detail_rendering: match row.get::<_, String>(1)?.as_str() {
+                    "rendered" => DetailRenderingMode::Rendered,
+                    "text_only" => DetailRenderingMode::TextOnly,
+                    _ => return Err(rusqlite::Error::InvalidQuery),
+                },
+                truncate_detail: row.get(2)?,
+                open_in_miniflux: row.get(3)?,
+            })
+        }).optional().map_err(sql_error)?.map_or_else(|| {
+            let exists = connection.query_row("SELECT 1 FROM feeds WHERE id=?1", [feed_id], |_| Ok(())).optional().map_err(sql_error)?.is_some();
+            if exists { Ok(FeedPreferences::defaults(feed_id)) } else { Err(CoreError::data(format!("feed {feed_id} does not exist"))) }
+        }, Ok)
+    }
+
+    pub fn set_feed_detail_rendering(
+        &self,
+        feed_id: i64,
+        mode: DetailRenderingMode,
+    ) -> Result<(), CoreError> {
+        self.set_feed_preference(
+            feed_id,
+            "detail_rendering",
+            match mode {
+                DetailRenderingMode::Rendered => "rendered",
+                DetailRenderingMode::TextOnly => "text_only",
+            },
+        )
+    }
+    pub fn set_feed_truncate_detail(&self, feed_id: i64, enabled: bool) -> Result<(), CoreError> {
+        self.set_feed_preference(feed_id, "truncate_detail", if enabled { "1" } else { "0" })
+    }
+    pub fn set_feed_open_in_miniflux(&self, feed_id: i64, enabled: bool) -> Result<(), CoreError> {
+        self.set_feed_preference(feed_id, "open_in_miniflux", if enabled { "1" } else { "0" })
+    }
+    fn set_feed_preference(
+        &self,
+        feed_id: i64,
+        column: &str,
+        value: &str,
+    ) -> Result<(), CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let exists = connection
+            .query_row("SELECT 1 FROM feeds WHERE id=?1", [feed_id], |_| Ok(()))
+            .optional()
+            .map_err(sql_error)?
+            .is_some();
+        if !exists {
+            return Err(CoreError::data(format!("feed {feed_id} does not exist")));
+        }
+        let sql = format!(
+            "INSERT INTO feed_preferences(feed_id,{column}) VALUES(?1,?2) ON CONFLICT(feed_id) DO UPDATE SET {column}=excluded.{column}"
+        );
+        connection
+            .execute(&sql, params![feed_id, value])
+            .map_err(sql_error)?;
         Ok(())
     }
 
@@ -360,7 +437,7 @@ impl Store {
             }
         }
         let feeds = {
-            let mut statement = tx.prepare("SELECT f.id,f.title FROM feeds f JOIN feed_system_notification_preferences p ON p.feed_id=f.id WHERE p.enabled=1 ORDER BY f.id").map_err(sql_error)?;
+            let mut statement = tx.prepare("SELECT f.id,f.title FROM feeds f JOIN feed_preferences p ON p.feed_id=f.id WHERE p.system_notifications_enabled=1 ORDER BY f.id").map_err(sql_error)?;
             statement
                 .query_map([], |row| {
                     Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
@@ -766,6 +843,11 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
         tx.execute_batch("CREATE TABLE feed_system_notification_preferences (feed_id INTEGER PRIMARY KEY REFERENCES feeds(id) ON DELETE CASCADE, enabled INTEGER NOT NULL CHECK(enabled IN(0,1))); CREATE TABLE pending_system_notifications (article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE); CREATE TABLE system_notified_articles (article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE); CREATE TABLE system_notification_candidates (id INTEGER PRIMARY KEY, feed_id INTEGER NOT NULL REFERENCES feeds(id) ON DELETE CASCADE, feed_title TEXT NOT NULL); CREATE TABLE notification_candidate_articles (candidate_id INTEGER NOT NULL REFERENCES system_notification_candidates(id) ON DELETE CASCADE, article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, PRIMARY KEY(candidate_id,article_id)); CREATE INDEX pending_system_notifications_article ON pending_system_notifications(article_id); PRAGMA user_version=5;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
+    if current < 6 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute_batch("CREATE TABLE feed_preferences (feed_id INTEGER PRIMARY KEY REFERENCES feeds(id) ON DELETE CASCADE, system_notifications_enabled INTEGER NOT NULL DEFAULT 0 CHECK(system_notifications_enabled IN(0,1)), detail_rendering TEXT NOT NULL DEFAULT 'rendered' CHECK(detail_rendering IN('rendered','text_only')), truncate_detail INTEGER NOT NULL DEFAULT 0 CHECK(truncate_detail IN(0,1)), open_in_miniflux INTEGER NOT NULL DEFAULT 0 CHECK(open_in_miniflux IN(0,1))); INSERT INTO feed_preferences(feed_id,system_notifications_enabled) SELECT feed_id,enabled FROM feed_system_notification_preferences; DROP TABLE feed_system_notification_preferences; PRAGMA user_version=6;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
     Ok(())
 }
 fn initialize_core_settings(connection: &Connection) -> Result<(), CoreError> {
@@ -783,6 +865,10 @@ fn initialize_core_settings(connection: &Connection) -> Result<(), CoreError> {
             } else {
                 "0".to_string()
             },
+        ),
+        (
+            "detail_character_limit",
+            defaults.detail_character_limit.to_string(),
         ),
     ] {
         connection
@@ -845,7 +931,7 @@ mod tests {
         let connection = store.connection.lock().unwrap();
         let row: (i64, String, Option<String>, String, bool, bool, i64, i64) = connection.query_row("SELECT content_processing_version,preview,image_url,raw_html_content,is_read,is_starred,feed_id,(SELECT COUNT(*) FROM pending_mutations) FROM articles WHERE id=3", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).unwrap();
         drop(connection);
-        assert_eq!(store.schema_version().unwrap(), 5);
+        assert_eq!(store.schema_version().unwrap(), 6);
         assert_eq!(row.0, crate::article::PROCESSING_VERSION);
         assert_eq!(row.1, "Hello world");
         assert_eq!(row.2.as_deref(), Some("https://example.test/cover.jpg"));
@@ -856,6 +942,95 @@ mod tests {
         assert_eq!(
             store.base_url().unwrap().as_deref(),
             Some("https://miniflux.example")
+        );
+    }
+
+    #[test]
+    fn v5_migration_preserves_notification_preferences_and_adds_reader_defaults() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let path = data.join("flux.sqlite3");
+        let connection = Connection::open(&path).unwrap();
+        connection.execute_batch("CREATE TABLE core_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE categories (id INTEGER PRIMARY KEY, title TEXT NOT NULL); CREATE TABLE feeds (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL REFERENCES categories(id), title TEXT NOT NULL); CREATE TABLE articles (id INTEGER PRIMARY KEY, feed_id INTEGER NOT NULL REFERENCES feeds(id), title TEXT NOT NULL, url TEXT NOT NULL, comments_url TEXT NOT NULL DEFAULT '', published_at TEXT NOT NULL, is_read INTEGER NOT NULL CHECK(is_read IN(0,1)), is_starred INTEGER NOT NULL CHECK(is_starred IN(0,1)), raw_html_content TEXT NOT NULL, remote_is_read INTEGER, remote_is_starred INTEGER, preview TEXT NOT NULL DEFAULT '', image_url TEXT, content_processing_version INTEGER NOT NULL DEFAULT 0); CREATE TABLE pending_mutations (article_id INTEGER NOT NULL REFERENCES articles(id), field TEXT NOT NULL CHECK(field IN ('read','starred')), desired INTEGER NOT NULL CHECK(desired IN(0,1)), revision INTEGER NOT NULL, PRIMARY KEY(article_id,field)); CREATE TABLE feed_system_notification_preferences (feed_id INTEGER PRIMARY KEY REFERENCES feeds(id) ON DELETE CASCADE, enabled INTEGER NOT NULL CHECK(enabled IN(0,1))); CREATE TABLE pending_system_notifications (article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE); CREATE TABLE system_notified_articles (article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE); CREATE TABLE system_notification_candidates (id INTEGER PRIMARY KEY, feed_id INTEGER NOT NULL REFERENCES feeds(id) ON DELETE CASCADE, feed_title TEXT NOT NULL); CREATE TABLE notification_candidate_articles (candidate_id INTEGER NOT NULL REFERENCES system_notification_candidates(id) ON DELETE CASCADE, article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, PRIMARY KEY(candidate_id,article_id)); CREATE INDEX pending_system_notifications_article ON pending_system_notifications(article_id); INSERT INTO categories VALUES (1,'Category'); INSERT INTO feeds VALUES (2,1,'Enabled'),(3,1,'Disabled'); INSERT INTO feed_system_notification_preferences VALUES (2,1),(3,0); PRAGMA user_version=5;").unwrap();
+        drop(connection);
+
+        let store = Store::open(&data, &cache, &media).unwrap();
+        assert_eq!(store.schema_version().unwrap(), 6);
+        assert_eq!(
+            store.feed_preferences(2).unwrap(),
+            FeedPreferences {
+                feed_id: 2,
+                system_notifications_enabled: true,
+                detail_rendering: DetailRenderingMode::Rendered,
+                truncate_detail: false,
+                open_in_miniflux: false
+            }
+        );
+        assert_eq!(
+            store.feed_preferences(3).unwrap(),
+            FeedPreferences::defaults(3)
+        );
+        assert_eq!(
+            store.core_settings().unwrap().detail_character_limit,
+            10_000
+        );
+    }
+
+    #[test]
+    fn feed_preferences_are_independent_persistent_and_reset_after_feed_reappears() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 2,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        store.reconcile(&categories, &feeds, &[]).unwrap();
+        assert_eq!(
+            store.feed_preferences(2).unwrap(),
+            FeedPreferences::defaults(2)
+        );
+        store
+            .set_feed_system_notifications_enabled(2, true)
+            .unwrap();
+        store
+            .set_feed_detail_rendering(2, DetailRenderingMode::TextOnly)
+            .unwrap();
+        store.set_feed_truncate_detail(2, true).unwrap();
+        store.set_feed_open_in_miniflux(2, true).unwrap();
+        assert_eq!(
+            store.feed_preferences(2).unwrap(),
+            FeedPreferences {
+                feed_id: 2,
+                system_notifications_enabled: true,
+                detail_rendering: DetailRenderingMode::TextOnly,
+                truncate_detail: true,
+                open_in_miniflux: true
+            }
+        );
+        drop(store);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        assert_eq!(
+            store.feed_preferences(2).unwrap(),
+            FeedPreferences {
+                feed_id: 2,
+                system_notifications_enabled: true,
+                detail_rendering: DetailRenderingMode::TextOnly,
+                truncate_detail: true,
+                open_in_miniflux: true
+            }
+        );
+        store.reconcile(&categories, &[], &[]).unwrap();
+        assert!(store.feed_preferences(2).is_err());
+        store.reconcile(&categories, &feeds, &[]).unwrap();
+        assert_eq!(
+            store.feed_preferences(2).unwrap(),
+            FeedPreferences::defaults(2)
         );
     }
 
@@ -1109,7 +1284,7 @@ mod tests {
         assert_eq!(
             connection
                 .query_row(
-                    "SELECT COUNT(*) FROM feed_system_notification_preferences WHERE feed_id=20",
+                    "SELECT COUNT(*) FROM feed_preferences WHERE feed_id=20",
                     [],
                     |row| row.get::<_, i64>(0)
                 )

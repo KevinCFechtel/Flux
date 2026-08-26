@@ -158,6 +158,19 @@ pub struct FeedSystemNotificationSetting {
     pub feed_title: String,
     pub system_notifications_enabled: bool,
 }
+#[derive(uniffi::Enum)]
+pub enum DetailRenderingMode {
+    Rendered,
+    TextOnly,
+}
+#[derive(uniffi::Record)]
+pub struct FeedPreferences {
+    pub feed_id: i64,
+    pub system_notifications_enabled: bool,
+    pub detail_rendering: DetailRenderingMode,
+    pub truncate_detail: bool,
+    pub open_in_miniflux: bool,
+}
 #[derive(uniffi::Record)]
 pub struct SystemNotificationCandidate {
     pub candidate_id: i64,
@@ -192,6 +205,7 @@ pub struct CoreSettings {
     pub retention: ReadArticleRetention,
     pub delivery_mode: DeliveryMode,
     pub background_sync_enabled: bool,
+    pub detail_character_limit: u32,
 }
 #[derive(uniffi::Enum)]
 pub enum DeliveryDisposition {
@@ -449,6 +463,31 @@ impl Flux {
             .set_feed_system_notifications_enabled(feed_id, enabled)
             .map_err(map_error)
     }
+    pub fn feed_preferences(&self, feed_id: i64) -> Result<FeedPreferences, FluxError> {
+        self.core
+            .feed_preferences(feed_id)
+            .map(Into::into)
+            .map_err(map_error)
+    }
+    pub fn set_feed_detail_rendering(
+        &self,
+        feed_id: i64,
+        mode: DetailRenderingMode,
+    ) -> Result<(), FluxError> {
+        self.core
+            .set_feed_detail_rendering(feed_id, mode.into())
+            .map_err(map_error)
+    }
+    pub fn set_feed_truncate_detail(&self, feed_id: i64, enabled: bool) -> Result<(), FluxError> {
+        self.core
+            .set_feed_truncate_detail(feed_id, enabled)
+            .map_err(map_error)
+    }
+    pub fn set_feed_open_in_miniflux(&self, feed_id: i64, enabled: bool) -> Result<(), FluxError> {
+        self.core
+            .set_feed_open_in_miniflux(feed_id, enabled)
+            .map_err(map_error)
+    }
     pub fn acknowledge_system_notification(&self, candidate_id: i64) -> Result<(), FluxError> {
         self.core
             .acknowledge_system_notification(candidate_id)
@@ -495,6 +534,11 @@ impl Flux {
     pub fn set_background_sync_enabled(&self, enabled: bool) -> Result<(), FluxError> {
         self.core
             .set_background_sync_enabled(enabled)
+            .map_err(map_error)
+    }
+    pub fn set_detail_character_limit(&self, limit: u32) -> Result<(), FluxError> {
+        self.core
+            .set_detail_character_limit(limit)
             .map_err(map_error)
     }
     pub fn set_read_state(&self, article_id: i64, read: bool) -> Result<MutationResult, FluxError> {
@@ -681,6 +725,14 @@ impl From<ReadArticleRetention> for domain::ReadArticleRetention {
         }
     }
 }
+impl From<DetailRenderingMode> for domain::DetailRenderingMode {
+    fn from(value: DetailRenderingMode) -> Self {
+        match value {
+            DetailRenderingMode::Rendered => Self::Rendered,
+            DetailRenderingMode::TextOnly => Self::TextOnly,
+        }
+    }
+}
 impl From<domain::CoreSettings> for CoreSettings {
     fn from(value: domain::CoreSettings) -> Self {
         Self {
@@ -696,6 +748,7 @@ impl From<domain::CoreSettings> for CoreSettings {
                 domain::DeliveryMode::Deferred => DeliveryMode::Deferred,
             },
             background_sync_enabled: value.background_sync_enabled,
+            detail_character_limit: value.detail_character_limit,
         }
     }
 }
@@ -1031,6 +1084,20 @@ impl From<domain::FeedSystemNotificationSetting> for FeedSystemNotificationSetti
             feed_id: value.feed_id,
             feed_title: value.feed_title,
             system_notifications_enabled: value.system_notifications_enabled,
+        }
+    }
+}
+impl From<domain::FeedPreferences> for FeedPreferences {
+    fn from(value: domain::FeedPreferences) -> Self {
+        Self {
+            feed_id: value.feed_id,
+            system_notifications_enabled: value.system_notifications_enabled,
+            detail_rendering: match value.detail_rendering {
+                domain::DetailRenderingMode::Rendered => DetailRenderingMode::Rendered,
+                domain::DetailRenderingMode::TextOnly => DetailRenderingMode::TextOnly,
+            },
+            truncate_detail: value.truncate_detail,
+            open_in_miniflux: value.open_in_miniflux,
         }
     }
 }

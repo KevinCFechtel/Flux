@@ -22,11 +22,11 @@ use diagnostics::{CoreDiagnosticListener, Diagnostics};
 use domain::{
     ArticleQuery, ArticleSummary, ArticleThumbnailResult, CoreError, CoreErrorKind, CoreEvent,
     CoreSettings, CreateCategoryResult, CreateFeedRequest, CreateFeedResult, DeliveryDisposition,
-    DeliveryMode, DiscoverSubscriptionsRequest, DiscoveredSubscription, FeedIcon, FeedIconVariant,
-    FeedSystemNotificationSetting, MutationField, MutationResult, NavigationCatalog,
-    ReadArticleRetention, RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult,
-    SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition, SyncCompleted,
-    SyncFailure, SyncReason,
+    DeliveryMode, DetailRenderingMode, DiscoverSubscriptionsRequest, DiscoveredSubscription,
+    FeedIcon, FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, MutationField,
+    MutationResult, NavigationCatalog, ReadArticleRetention, RuntimeHealth, RuntimeHealthStatus,
+    SaveToServiceResult, SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition,
+    SyncCompleted, SyncFailure, SyncReason,
 };
 use miniflux::{MinifluxClient, RemoteSource};
 use storage::Store;
@@ -325,6 +325,22 @@ impl FluxCore {
         self.store
             .set_feed_system_notifications_enabled(feed_id, enabled)
     }
+    pub fn feed_preferences(&self, feed_id: i64) -> Result<FeedPreferences, CoreError> {
+        self.store.feed_preferences(feed_id)
+    }
+    pub fn set_feed_detail_rendering(
+        &self,
+        feed_id: i64,
+        mode: DetailRenderingMode,
+    ) -> Result<(), CoreError> {
+        self.store.set_feed_detail_rendering(feed_id, mode)
+    }
+    pub fn set_feed_truncate_detail(&self, feed_id: i64, enabled: bool) -> Result<(), CoreError> {
+        self.store.set_feed_truncate_detail(feed_id, enabled)
+    }
+    pub fn set_feed_open_in_miniflux(&self, feed_id: i64, enabled: bool) -> Result<(), CoreError> {
+        self.store.set_feed_open_in_miniflux(feed_id, enabled)
+    }
     pub fn acknowledge_system_notification(&self, candidate_id: i64) -> Result<(), CoreError> {
         self.store.acknowledge_system_notification(candidate_id)
     }
@@ -358,6 +374,9 @@ impl FluxCore {
     }
     pub fn set_background_sync_enabled(&self, enabled: bool) -> Result<(), CoreError> {
         self.store.set_background_sync_enabled(enabled)
+    }
+    pub fn set_detail_character_limit(&self, limit: u32) -> Result<(), CoreError> {
+        self.store.set_detail_character_limit(limit)
     }
     pub fn set_delivery_mode(&self, mode: DeliveryMode) -> Result<(), CoreError> {
         self.store.set_delivery_mode(mode)?;
@@ -953,7 +972,7 @@ mod tests {
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            5
+            6
         );
         let bytes = std::fs::read(core.database_path()).unwrap();
         assert!(
@@ -992,12 +1011,17 @@ mod tests {
         }
         core.set_delivery_mode(DeliveryMode::Live).unwrap();
         core.set_background_sync_enabled(true).unwrap();
+        for limit in [5_000, 10_000, 20_000] {
+            core.set_detail_character_limit(limit).unwrap();
+            assert_eq!(core.core_settings().unwrap().detail_character_limit, limit);
+        }
         assert_eq!(
             core.core_settings().unwrap(),
             CoreSettings {
                 retention: ReadArticleRetention::Days365,
                 delivery_mode: DeliveryMode::Live,
                 background_sync_enabled: true,
+                detail_character_limit: 20_000,
             }
         );
         assert_eq!(
@@ -1026,6 +1050,7 @@ mod tests {
                 retention: ReadArticleRetention::Days365,
                 delivery_mode: DeliveryMode::Live,
                 background_sync_enabled: true,
+                detail_character_limit: 20_000,
             }
         );
         assert_eq!(

@@ -195,6 +195,7 @@ pub struct CoreSettings {
     pub retention: ReadArticleRetention,
     pub delivery_mode: DeliveryMode,
     pub background_sync_enabled: bool,
+    pub detail_character_limit: u32,
 }
 
 impl Default for CoreSettings {
@@ -203,6 +204,7 @@ impl Default for CoreSettings {
             retention: ReadArticleRetention::Days90,
             delivery_mode: DeliveryMode::Deferred,
             background_sync_enabled: true,
+            detail_character_limit: 10_000,
         }
     }
 }
@@ -238,6 +240,33 @@ pub struct FeedSystemNotificationSetting {
     pub feed_id: i64,
     pub feed_title: String,
     pub system_notifications_enabled: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DetailRenderingMode {
+    Rendered,
+    TextOnly,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FeedPreferences {
+    pub feed_id: i64,
+    pub system_notifications_enabled: bool,
+    pub detail_rendering: DetailRenderingMode,
+    pub truncate_detail: bool,
+    pub open_in_miniflux: bool,
+}
+
+impl FeedPreferences {
+    pub fn defaults(feed_id: i64) -> Self {
+        Self {
+            feed_id,
+            system_notifications_enabled: false,
+            detail_rendering: DetailRenderingMode::Rendered,
+            truncate_detail: false,
+            open_in_miniflux: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
