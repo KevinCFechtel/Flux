@@ -16,7 +16,7 @@ use crate::domain::{CoreError, FeedIcon, FeedIconVariant};
 use crate::miniflux::RemoteSource;
 
 // Version 1 negative-cached valid Miniflux payloads before their wire shape was handled.
-const PROCESSING_VERSION: u8 = 2;
+const PROCESSING_VERSION: u8 = 3;
 const SIZE: u32 = 32;
 const MAX_CACHE_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
@@ -89,16 +89,22 @@ impl FeedIconService {
             tracing::debug!(target: "feed_icon", "feed icon unavailable feed_id={feed_id}");
             return Ok(None);
         };
-        let Some(image) = decode_data_url(&data_url) else {
+        let Some(decoded) = decode_data_url(&data_url) else {
             self.write_missing(feed_id)?;
             tracing::warn!(target: "feed_icon", "feed icon processing failed feed_id={feed_id}");
             return Ok(None);
         };
-        let normal = normalize(&image)?;
-        let dark = if should_lighten(&image) {
-            normalize(&lighten(&image))?
-        } else {
-            normal.clone()
+        let (normal, dark) = match decoded {
+            DecodedIcon::AdaptiveSvg { light, dark } => (normalize(&light)?, normalize(&dark)?),
+            DecodedIcon::Image(image) => {
+                let normal = normalize(&image)?;
+                let dark = if should_lighten(&image) {
+                    normalize(&lighten(&image))?
+                } else {
+                    normal.clone()
+                };
+                (normal, dark)
+            }
         };
         write_file(&self.path(feed_id, FeedIconVariant::Normal), &normal)?;
         write_file(&self.path(feed_id, FeedIconVariant::Dark), &dark)?;
@@ -139,7 +145,18 @@ fn is_fresh(path: &Path) -> bool {
         .is_ok_and(|age| age < MAX_CACHE_AGE)
 }
 
-fn decode_data_url(value: &str) -> Option<RgbaImage> {
+enum DecodedIcon {
+    Image(RgbaImage),
+    AdaptiveSvg { light: RgbaImage, dark: RgbaImage },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ColorScheme {
+    Light,
+    Dark,
+}
+
+fn decode_data_url(value: &str) -> Option<DecodedIcon> {
     let (metadata, payload) = value.trim().strip_prefix("data:")?.split_once(',')?;
     let mime = metadata.split(';').next()?.to_ascii_lowercase();
     if !mime.starts_with("image/") {
@@ -156,22 +173,205 @@ fn decode_data_url(value: &str) -> Option<RgbaImage> {
         percent_decode(payload)?
     };
     if mime == "image/svg+xml" {
-        let tree = usvg::Tree::from_data(&bytes, &usvg::Options::default()).ok()?;
-        let size = tree.size();
-        let scale = (SIZE as f32 / size.width()).min(SIZE as f32 / size.height());
-        let mut pixmap = Pixmap::new(SIZE, SIZE)?;
-        let x = (SIZE as f32 - size.width() * scale) / 2.0;
-        let y = (SIZE as f32 - size.height() * scale) / 2.0;
-        resvg::render(
-            &tree,
-            Transform::from_translate(x, y).post_scale(scale, scale),
-            &mut pixmap.as_mut(),
-        );
-        RgbaImage::from_raw(SIZE, SIZE, pixmap.take())
+        let original = render_svg(&bytes)?;
+        // A dark rule is the minimum complete author-provided pair: default styling is Light.
+        let adaptive = prepare_svg_for_scheme(&bytes, ColorScheme::Light)
+            .ok()
+            .flatten()
+            .zip(
+                prepare_svg_for_scheme(&bytes, ColorScheme::Dark)
+                    .ok()
+                    .flatten(),
+            )
+            .and_then(|(light, dark)| Some((render_svg(&light)?, render_svg(&dark)?)));
+        Some(match adaptive {
+            Some((light, dark)) => DecodedIcon::AdaptiveSvg { light, dark },
+            None => DecodedIcon::Image(original),
+        })
     } else {
         image::load_from_memory(&bytes)
             .ok()
-            .map(|image| image.to_rgba8())
+            .map(|image| DecodedIcon::Image(image.to_rgba8()))
+    }
+}
+
+fn render_svg(bytes: &[u8]) -> Option<RgbaImage> {
+    let tree = usvg::Tree::from_data(bytes, &usvg::Options::default()).ok()?;
+    let size = tree.size();
+    let scale = (SIZE as f32 / size.width()).min(SIZE as f32 / size.height());
+    let mut pixmap = Pixmap::new(SIZE, SIZE)?;
+    let x = (SIZE as f32 - size.width() * scale) / 2.0;
+    let y = (SIZE as f32 - size.height() * scale) / 2.0;
+    resvg::render(
+        &tree,
+        Transform::from_translate(x, y).post_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    RgbaImage::from_raw(SIZE, SIZE, pixmap.take())
+}
+
+/// Resolves only standalone prefers-color-scheme media blocks inside SVG style elements.
+/// `None` means no supported dark rule was found, so callers retain normal SVG handling.
+fn prepare_svg_for_scheme(svg: &[u8], scheme: ColorScheme) -> Result<Option<Vec<u8>>, ()> {
+    let text = std::str::from_utf8(svg).map_err(|_| ())?;
+    let lower = text.to_ascii_lowercase();
+    let mut output = String::with_capacity(text.len());
+    let mut cursor = 0;
+    let mut found_dark = false;
+    while let Some(relative_start) = lower[cursor..].find("<style") {
+        let start = cursor + relative_start;
+        let tag_end = lower[start..].find('>').ok_or(())? + start + 1;
+        let content_start = tag_end;
+        let end_start = lower[content_start..].find("</style").ok_or(())? + content_start;
+        let end = lower[end_start..].find('>').ok_or(())? + end_start + 1;
+        output.push_str(&text[cursor..content_start]);
+        let (css, prefix, suffix) = split_cdata(&text[content_start..end_start]);
+        let (prepared, has_dark) = prepare_css(css, scheme)?;
+        found_dark |= has_dark;
+        output.push_str(prefix);
+        output.push_str(&prepared);
+        output.push_str(suffix);
+        cursor = end_start;
+        output.push_str(&text[cursor..end]);
+        cursor = end;
+    }
+    output.push_str(&text[cursor..]);
+    Ok(found_dark.then(|| output.into_bytes()))
+}
+
+fn split_cdata(css: &str) -> (&str, &str, &str) {
+    let trimmed = css.trim();
+    if let Some(body) = trimmed
+        .strip_prefix("<![CDATA[")
+        .and_then(|body| body.strip_suffix("]]>"))
+    {
+        (body, "<![CDATA[", "]]>")
+    } else {
+        (css, "", "")
+    }
+}
+
+fn prepare_css(css: &str, scheme: ColorScheme) -> Result<(String, bool), ()> {
+    let bytes = css.as_bytes();
+    let mut output = String::with_capacity(css.len());
+    let mut cursor = 0;
+    let mut found_dark = false;
+    while let Some(at) = find_media(bytes, cursor) {
+        output.push_str(&css[cursor..at]);
+        let condition_start = at + 6;
+        let open = scan_to_block(bytes, condition_start).ok_or(())?;
+        let close = matching_brace(bytes, open).ok_or(())?;
+        let appearance = color_scheme_condition(&css[condition_start..open]);
+        if let Some(appearance) = appearance {
+            found_dark |= appearance == ColorScheme::Dark;
+            if appearance == scheme {
+                let (inner, nested_dark) = prepare_css(&css[open + 1..close], scheme)?;
+                found_dark |= nested_dark;
+                output.push_str(&inner);
+            }
+        } else {
+            output.push_str(&css[at..=close]);
+        }
+        cursor = close + 1;
+    }
+    output.push_str(&css[cursor..]);
+    Ok((output, found_dark))
+}
+
+fn find_media(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut index = start;
+    let mut quote = None;
+    while index < bytes.len() {
+        if let Some(next) = skip_css_ignored(bytes, index, &mut quote) {
+            index = next;
+            continue;
+        }
+        if index + 6 <= bytes.len()
+            && bytes[index] == b'@'
+            && bytes[index + 1..index + 6].eq_ignore_ascii_case(b"media")
+            && !bytes.get(index + 6).is_some_and(u8::is_ascii_alphabetic)
+        {
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn skip_css_ignored(bytes: &[u8], index: usize, quote: &mut Option<u8>) -> Option<usize> {
+    if let Some(active_quote) = quote {
+        if bytes[index] == b'\\' {
+            return Some((index + 2).min(bytes.len()));
+        }
+        if bytes[index] == *active_quote {
+            *quote = None;
+        }
+        return Some(index + 1);
+    }
+    if bytes[index] == b'\'' || bytes[index] == b'"' {
+        *quote = Some(bytes[index]);
+        return Some(index + 1);
+    }
+    if bytes[index..].starts_with(b"/*") {
+        return bytes[index + 2..]
+            .windows(2)
+            .position(|window| window == b"*/")
+            .map(|offset| index + offset + 4);
+    }
+    None
+}
+
+fn scan_to_block(bytes: &[u8], mut index: usize) -> Option<usize> {
+    let mut quote = None;
+    while index < bytes.len() {
+        if let Some(next) = skip_css_ignored(bytes, index, &mut quote) {
+            index = next;
+            continue;
+        }
+        match bytes[index] {
+            b'{' => return Some(index),
+            b';' => return None,
+            _ => index += 1,
+        }
+    }
+    None
+}
+
+fn matching_brace(bytes: &[u8], open: usize) -> Option<usize> {
+    let mut depth = 0_u32;
+    let mut quote = None;
+    let mut index = open;
+    while index < bytes.len() {
+        if let Some(next) = skip_css_ignored(bytes, index, &mut quote) {
+            index = next;
+            continue;
+        }
+        match bytes[index] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+fn color_scheme_condition(condition: &str) -> Option<ColorScheme> {
+    let compact = condition
+        .bytes()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .map(char::from)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    match compact.as_str() {
+        "(prefers-color-scheme:light)" => Some(ColorScheme::Light),
+        "(prefers-color-scheme:dark)" => Some(ColorScheme::Dark),
+        _ => None,
     }
 }
 
@@ -303,6 +503,22 @@ mod tests {
             Ok(self.icon.clone())
         }
     }
+
+    fn svg_data_url(svg: &str) -> String {
+        format!(
+            "data:image/svg+xml;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(svg)
+        )
+    }
+
+    fn pixel(png: &[u8], x: u32, y: u32) -> image::Rgba<u8> {
+        image::load_from_memory(png)
+            .unwrap()
+            .to_rgba8()
+            .get_pixel(x, y)
+            .to_owned()
+    }
+
     #[test]
     fn normalizes_caches_and_creates_a_light_dark_variant() {
         let temp = TempDir::new().unwrap();
@@ -323,7 +539,127 @@ mod tests {
             (32, 32)
         );
         assert_ne!(normal.png_data, dark.png_data);
+        assert_eq!(pixel(&normal.png_data, 3, 3)[3], 0);
+        assert!(pixel(&dark.png_data, 3, 3)[0] > 240);
         assert_eq!(source.calls.load(Ordering::SeqCst), 1);
+    }
+    #[test]
+    fn dark_only_adaptive_svg_uses_author_dark_appearance_without_background() {
+        let temp = TempDir::new().unwrap();
+        let service = FeedIconService::new(temp.path().into()).unwrap();
+        let source = Source {
+            icon: Some(svg_data_url(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><style>.icon { fill: black; } @media ( prefers-color-scheme : DARK ) { .icon { fill: white; } }</style><circle class="icon" cx="5" cy="5" r="5"/></svg>"#,
+            )),
+            calls: AtomicUsize::new(0),
+        };
+        let normal = service
+            .get(&source, 4, FeedIconVariant::Normal)
+            .unwrap()
+            .unwrap();
+        let dark = service
+            .get(&source, 4, FeedIconVariant::Dark)
+            .unwrap()
+            .unwrap();
+        assert_ne!(normal.png_data, dark.png_data);
+        assert!(pixel(&normal.png_data, 16, 16)[0] < 10);
+        assert!(pixel(&dark.png_data, 16, 16)[0] > 245);
+        assert_eq!(pixel(&dark.png_data, 0, 0)[3], 0);
+    }
+    #[test]
+    fn explicit_light_and_dark_svg_rules_render_their_author_colors() {
+        let temp = TempDir::new().unwrap();
+        let service = FeedIconService::new(temp.path().into()).unwrap();
+        let source = Source {
+            icon: Some(svg_data_url(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><style>.icon { fill: black; } @media (prefers-color-scheme: light) { .icon { fill: red; } } @media (prefers-color-scheme: dark) { .icon { fill: blue; } }</style><rect class="icon" width="10" height="10"/></svg>"#,
+            )),
+            calls: AtomicUsize::new(0),
+        };
+        let normal = service
+            .get(&source, 4, FeedIconVariant::Normal)
+            .unwrap()
+            .unwrap();
+        let dark = service
+            .get(&source, 4, FeedIconVariant::Dark)
+            .unwrap()
+            .unwrap();
+        let light_pixel = pixel(&normal.png_data, 16, 16);
+        let dark_pixel = pixel(&dark.png_data, 16, 16);
+        assert!(light_pixel[0] > 245 && light_pixel[2] < 10);
+        assert!(dark_pixel[2] > 245 && dark_pixel[0] < 10);
+    }
+    #[test]
+    fn light_only_adaptive_svg_uses_existing_dark_fallback() {
+        let temp = TempDir::new().unwrap();
+        let service = FeedIconService::new(temp.path().into()).unwrap();
+        let source = Source {
+            icon: Some(svg_data_url(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><style>@media (prefers-color-scheme: light) { .icon { fill: red; } }</style><circle class="icon" cx="5" cy="5" r="5" fill="black"/></svg>"#,
+            )),
+            calls: AtomicUsize::new(0),
+        };
+        let normal = service
+            .get(&source, 4, FeedIconVariant::Normal)
+            .unwrap()
+            .unwrap();
+        let dark = service
+            .get(&source, 4, FeedIconVariant::Dark)
+            .unwrap()
+            .unwrap();
+        assert_ne!(normal.png_data, dark.png_data);
+        assert_eq!(pixel(&dark.png_data, 0, 0)[3], 0);
+        assert!(pixel(&dark.png_data, 16, 16)[0] < 10);
+    }
+    #[test]
+    fn malformed_adaptive_css_falls_back_to_original_svg_rendering() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><style>@media (prefers-color-scheme: dark) { .icon { fill: white; }</style><circle class="icon" cx="5" cy="5" r="5" fill="black"/></svg>"#;
+        assert!(prepare_svg_for_scheme(svg, ColorScheme::Dark).is_err());
+        assert!(matches!(
+            decode_data_url(&svg_data_url(std::str::from_utf8(svg).unwrap())),
+            Some(DecodedIcon::Image(_))
+        ));
+    }
+    #[test]
+    fn raster_icons_keep_existing_dark_fallback() {
+        let mut png = Vec::new();
+        DynamicImage::ImageRgba8(RgbaImage::from_pixel(10, 10, image::Rgba([0, 0, 0, 255])))
+            .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+            .unwrap();
+        let source = Source {
+            icon: Some(format!(
+                "data:image/png;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(png)
+            )),
+            calls: AtomicUsize::new(0),
+        };
+        let temp = TempDir::new().unwrap();
+        let service = FeedIconService::new(temp.path().into()).unwrap();
+        let normal = service
+            .get(&source, 4, FeedIconVariant::Normal)
+            .unwrap()
+            .unwrap();
+        let dark = service
+            .get(&source, 4, FeedIconVariant::Dark)
+            .unwrap()
+            .unwrap();
+        assert_eq!(normal.png_data, dark.png_data);
+    }
+    #[test]
+    fn caches_both_adaptive_variants_under_processing_version_three() {
+        let temp = TempDir::new().unwrap();
+        let service = FeedIconService::new(temp.path().into()).unwrap();
+        let source = Source {
+            icon: Some(svg_data_url(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><style>@media (prefers-color-scheme: dark) { .icon { fill: white; } }</style><circle class="icon" cx="5" cy="5" r="5" fill="black"/></svg>"#,
+            )),
+            calls: AtomicUsize::new(0),
+        };
+        service.get(&source, 4, FeedIconVariant::Normal).unwrap();
+        service.get(&source, 4, FeedIconVariant::Dark).unwrap();
+        assert_eq!(source.calls.load(Ordering::SeqCst), 1);
+        assert!(temp.path().join("feed-icons/v3/4-normal.png").is_file());
+        assert!(temp.path().join("feed-icons/v3/4-dark.png").is_file());
     }
     #[test]
     fn normalization_preserves_aspect_ratio_on_transparent_canvas() {
