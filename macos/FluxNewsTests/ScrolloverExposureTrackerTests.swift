@@ -148,4 +148,12 @@ final class ScrolloverExposureTrackerTests: XCTestCase {
         XCTAssertEqual(pending.byFeed, [20: 1])
     }
 
+    func testStatusItemTitleKeepsUnreadAndPendingNewDataIndependent() {
+        XCTAssertEqual(StatusItemPresentation.title(unreadTotal: 127, hasPendingNewData: false), "127")
+        XCTAssertEqual(StatusItemPresentation.title(unreadTotal: 127, hasPendingNewData: true), "• 127")
+        XCTAssertEqual(StatusItemPresentation.title(unreadTotal: 0, hasPendingNewData: false), "")
+        XCTAssertEqual(StatusItemPresentation.title(unreadTotal: 0, hasPendingNewData: true), "•")
+        XCTAssertEqual(StatusItemPresentation.title(unreadTotal: 1_200, hasPendingNewData: true), "• 999+")
+    }
+
 }

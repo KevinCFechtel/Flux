@@ -48,6 +48,22 @@ struct PendingNewData: Equatable {
     }
 }
 
+enum StatusItemPresentation {
+    static func title(unreadTotal: UInt64, hasPendingNewData: Bool) -> String {
+        let unread = unreadTotal == 0 ? "" : unreadTotal > 999 ? "999+" : "\(unreadTotal)"
+        return switch (hasPendingNewData, unread.isEmpty) {
+        case (false, _): unread
+        case (true, true): "•"
+        case (true, false): "• \(unread)"
+        }
+    }
+
+    static func accessibilityValue(unreadTotal: UInt64, hasPendingNewData: Bool) -> String {
+        let unread = unreadTotal == 1 ? "1 unread article" : "\(unreadTotal) unread articles"
+        return hasPendingNewData ? "\(unread), new data available" : unread
+    }
+}
+
 /// Presentation-only policy for grouping tracker flushes from one scroll interaction.
 struct ScrolloverUndoBatch {
     private var session = 0

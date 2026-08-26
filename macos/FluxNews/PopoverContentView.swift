@@ -392,8 +392,12 @@ private struct NavigationSidebar: View {
     }
     @ViewBuilder private func sidebarRow(_ item: SidebarItem) -> some View {
         if let feedID = item.feedID {
-            sidebarLabel(item, showUnreadText: true)
-                .badge(store.pendingNewByFeed[feedID] ?? 0)
+            if let pending = store.pendingNewByFeed[feedID], pending > 0 {
+                sidebarLabel(item, showUnreadText: true)
+                    .badge(pending)
+            } else {
+                sidebarLabel(item, showUnreadText: true)
+            }
         } else {
             sidebarLabel(item, showUnreadText: false)
                 .badge(Int(item.count))
@@ -406,7 +410,7 @@ private struct NavigationSidebar: View {
                 else if let feedID = item.feedID { FeedIconSlot(feedID: feedID, store: store) }
                 Text(item.title).lineLimit(1)
                 Spacer(minLength: 0)
-                if showUnreadText {
+                if showUnreadText, item.count > 0 {
                     Text("\(item.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
             }
