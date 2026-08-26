@@ -58,7 +58,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         store.start()
     }
     func applicationDidBecomeActive(_ notification: Notification) { store.resume() }
-    func applicationWillResignActive(_ notification: Notification) { store.deactivatePeriodicSyncScheduling() }
     @objc private func togglePopover() { if popover.isShown || fallbackPanel?.isVisible == true { dismiss() } else { show() } }
     func popoverWillShow(_ notification: Notification) { store.popoverVisible = true; popover.contentSize = size(sidebarVisible: sidebarVisible) }
     func popoverDidClose(_ notification: Notification) { store.popoverVisible = false; store.syncIfStale() }

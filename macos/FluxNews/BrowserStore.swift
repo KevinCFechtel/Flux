@@ -333,7 +333,7 @@ final class BrowserStore: ObservableObject {
         if lastAutomaticSyncAttempt.map({ Date.now.timeIntervalSince($0) > 60 }) ?? true { sync(reason: reason) }
     }
     func activatePeriodicSyncScheduling() {
-        guard core != nil, coreSettings?.backgroundSyncEnabled == true, NSApp.isActive, periodicSyncTimer == nil else { return }
+        guard core != nil, coreSettings?.backgroundSyncEnabled == true, periodicSyncTimer == nil else { return }
         periodicSyncTimer = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.runPeriodicSync() }
         }
