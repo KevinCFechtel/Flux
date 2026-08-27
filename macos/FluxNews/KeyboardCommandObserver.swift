@@ -2,6 +2,30 @@ import AppKit
 import SwiftUI
 
 enum ArticleKeyboardCommand { case moveUp, moveDown, open, openDetail, toggleRead, toggleStarred, refresh, dismiss }
+enum ArticleKeyboardRouting {
+    static func command(for event: NSEvent) -> ArticleKeyboardCommand? {
+        command(keyCode: event.keyCode, charactersIgnoringModifiers: event.charactersIgnoringModifiers, modifierFlags: event.modifierFlags)
+    }
+
+    static func command(keyCode: UInt16, charactersIgnoringModifiers: String?, modifierFlags: NSEvent.ModifierFlags) -> ArticleKeyboardCommand? {
+        let modifiers = modifierFlags.intersection([.command, .control, .option, .shift])
+        if modifiers == .command, charactersIgnoringModifiers?.lowercased() == "r" { return .refresh }
+        guard modifiers.isEmpty else { return nil }
+        switch keyCode {
+        case 49: return .openDetail
+        case 126: return .moveUp
+        case 125: return .moveDown
+        case 36, 76: return .open
+        case 53: return .dismiss
+        default:
+            switch charactersIgnoringModifiers?.lowercased() {
+            case "m": return .toggleRead
+            case "s": return .toggleStarred
+            default: return nil
+            }
+        }
+    }
+}
 struct KeyboardCommandObserver: NSViewRepresentable {
     let onCommand: (ArticleKeyboardCommand) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(onCommand: onCommand) }
@@ -11,8 +35,12 @@ struct KeyboardCommandObserver: NSViewRepresentable {
     final class Coordinator {
         weak var view: NSView?; var onCommand: (ArticleKeyboardCommand) -> Void; private var monitor: Any?
         init(onCommand: @escaping (ArticleKeyboardCommand) -> Void) { self.onCommand = onCommand }
-        func start() { guard monitor == nil else { return }; monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in guard let self, event.window === self.view?.window, !(event.window?.firstResponder is NSTextView), let command = self.command(for: event) else { return event }; self.onCommand(command); return nil } }
+        func start() { guard monitor == nil else { return }; monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in guard let self, event.window === self.view?.window, !self.isTextEntryActive(in: event.window), let command = ArticleKeyboardRouting.command(for: event) else { return event }; self.onCommand(command); return nil } }
         func stop() { if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil }
-        private func command(for event: NSEvent) -> ArticleKeyboardCommand? { let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift]); if modifiers == .command, event.charactersIgnoringModifiers?.lowercased() == "r" { return .refresh }; guard modifiers.isEmpty else { return nil }; switch event.keyCode { case 49: return .openDetail; case 126: return .moveUp; case 125: return .moveDown; case 36, 76: return .open; case 53: return .dismiss; default: switch event.charactersIgnoringModifiers?.lowercased() { case "m": return .toggleRead; case "s": return .toggleStarred; default: return nil } } }
+        private func isTextEntryActive(in window: NSWindow?) -> Bool {
+            guard let responder = window?.firstResponder else { return false }
+            if let textView = responder as? NSTextView { return textView.isEditable }
+            return responder is NSTextField
+        }
     }
 }

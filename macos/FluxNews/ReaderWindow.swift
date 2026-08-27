@@ -11,6 +11,8 @@ final class ReaderWindowController: NSObject, ObservableObject {
     private weak var store: BrowserStore?
     private var window: NSWindow?
     private var requests = ReaderRequestState()
+    private var sharingPicker: NSSharingServicePicker?
+    private weak var starButton: NSButton?
 
     init(store: BrowserStore) { self.store = store }
 
@@ -21,7 +23,6 @@ final class ReaderWindowController: NSObject, ObservableObject {
         errorMessage = nil
         isLoading = true
         makeWindowIfNeeded()
-        window?.title = article.title
         NSApplication.shared.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         store?.setRead(article, true)
@@ -44,16 +45,97 @@ final class ReaderWindowController: NSObject, ObservableObject {
         guard let article else { return }
         store?.setStarred(article, !article.isStarred)
         self.article = ArticleSummary(id: article.id, feedId: article.feedId, categoryId: article.categoryId, feedTitle: article.feedTitle, title: article.title, url: article.url, commentsUrl: article.commentsUrl, publishedAt: article.publishedAt, isRead: true, isStarred: !article.isStarred, preview: article.preview, imageUrl: article.imageUrl)
+        updateStarButton()
     }
+
+    @objc private func toggleStarredFromToolbar() { toggleStarred() }
+    @objc private func shareFromToolbar(_ sender: NSButton) {
+        guard let article, let url = URL(string: article.url) else { return }
+        let picker = NSSharingServicePicker(items: [article.title, url])
+        sharingPicker = picker
+        picker.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+    }
+    @objc private func openFromToolbar() { guard let article else { return }; store?.open(article) }
+    @objc private func showMoreMenu(_ sender: NSButton) { moreMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height), in: sender) }
+    @objc private func markUnread() { guard let article else { return }; store?.setRead(article, false) }
+    @objc private func openInMiniflux() { guard let article else { return }; store?.openInMiniflux(article) }
+    @objc private func openComments() { guard let article else { return }; store?.openComments(article) }
+    @objc private func copyLink() { guard let article else { return }; store?.copyLink(article) }
 
     private func makeWindowIfNeeded() {
         guard window == nil else { return }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 700), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Reader"
-        window.setFrameAutosaveName("FluxNews.Reader")
+        if !window.setFrameAutosaveName("FluxNews.Reader") { window.center() }
         window.isReleasedWhenClosed = false
+        let toolbar = NSToolbar(identifier: "FluxNews.Reader.Toolbar")
+        toolbar.delegate = self
+        toolbar.displayMode = .iconOnly
+        window.toolbar = toolbar
+        window.toolbarStyle = .unifiedCompact
+        window.titleVisibility = .hidden
         window.contentViewController = NSHostingController(rootView: ReaderWindowView(controller: self))
         self.window = window
+    }
+
+    private func updateStarButton() {
+        guard let button = starButton else { return }
+        button.image = NSImage(systemSymbolName: article?.isStarred == true ? "star.fill" : "star", accessibilityDescription: article?.isStarred == true ? "Unstar" : "Star")
+        button.toolTip = article?.isStarred == true ? "Unstar" : "Star"
+    }
+}
+
+extension NSToolbarItem.Identifier {
+    static let star = Self("FluxNews.Reader.Star")
+    static let share = Self("FluxNews.Reader.Share")
+    static let open = Self("FluxNews.Reader.Open")
+    static let more = Self("FluxNews.Reader.More")
+}
+
+extension ReaderWindowController: NSToolbarDelegate {
+    nonisolated func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [.star, .share, .open, .more, .flexibleSpace] }
+    nonisolated func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [.flexibleSpace, .star, .share, .open, .more] }
+
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        switch itemIdentifier {
+        case .star:
+            item.label = "Star"
+            let button = button(symbol: article?.isStarred == true ? "star.fill" : "star", label: article?.isStarred == true ? "Unstar" : "Star", action: #selector(toggleStarredFromToolbar))
+            starButton = button
+            item.view = button
+        case .share:
+            item.label = "Share"
+            item.view = button(symbol: "square.and.arrow.up", label: "Share", action: #selector(shareFromToolbar(_:)))
+        case .open:
+            item.label = "Open"
+            item.view = button(symbol: "arrow.up.forward.app", label: "Open", action: #selector(openFromToolbar))
+        case .more:
+            item.label = "More"
+            item.view = button(symbol: "ellipsis", label: "More", action: #selector(showMoreMenu(_:)))
+        default: return nil
+        }
+        return item
+    }
+
+    private func button(symbol: String, label: String, action: Selector?) -> NSButton {
+        let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: label)!, target: self, action: action)
+        button.bezelStyle = .texturedRounded
+        button.toolTip = label
+        button.setAccessibilityLabel(label)
+        return button
+    }
+
+    private func moreMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Mark as Unread", action: #selector(markUnread), keyEquivalent: "").target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Open Original", action: #selector(openFromToolbar), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Open in Miniflux", action: #selector(openInMiniflux), keyEquivalent: "").target = self
+        if article?.commentsUrl.isEmpty == false { menu.addItem(withTitle: "Open Comments", action: #selector(openComments), keyEquivalent: "").target = self }
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Copy Link", action: #selector(copyLink), keyEquivalent: "").target = self
+        return menu
     }
 }
 
@@ -62,7 +144,7 @@ private struct ReaderWindowView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let article = controller.article { ReaderHeader(article: article, openOriginal: controller.openOriginal, toggleStarred: controller.toggleStarred); Divider() }
+            if let article = controller.article { ReaderHeader(article: article); Divider() }
             Group {
                 if controller.isLoading { ProgressView("Loading article...") }
                 else if let error = controller.errorMessage { ContentUnavailableView("Unable to load article", systemImage: "exclamationmark.triangle", description: Text(error)) }
@@ -77,11 +159,9 @@ private struct ReaderWindowView: View {
 private struct ReaderHeader: View {
     private static let dateFormatter = ISO8601DateFormatter()
     let article: ArticleSummary
-    let openOriginal: () -> Void
-    let toggleStarred: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack { Text(article.feedTitle).font(.subheadline).foregroundStyle(.secondary); Spacer(); Button("Open", action: openOriginal); Button(action: toggleStarred) { Label(article.isStarred ? "Unstar" : "Star", systemImage: article.isStarred ? "star.fill" : "star") } }
+            Text(article.feedTitle).font(.subheadline).foregroundStyle(.secondary)
             Text(article.title).font(.title2.bold()).textSelection(.enabled)
             if let date = Self.dateFormatter.date(from: article.publishedAt) { Text(date.formatted(date: .long, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
         }.padding(20)
@@ -99,7 +179,7 @@ private struct ReaderDocumentView: View {
                     HStack(spacing: 4) { Text(readerNotice); Text("·").foregroundStyle(.tertiary); Button("Open Original", action: openOriginal).buttonStyle(.link) }
                         .font(.footnote).foregroundStyle(.secondary).padding(.top, 8)
                 }
-            }.frame(maxWidth: 720, alignment: .leading).padding(24).frame(maxWidth: .infinity, alignment: .center)
+            }.frame(maxWidth: 680, alignment: .leading).padding(24).frame(maxWidth: .infinity, alignment: .center)
         }.textSelection(.enabled)
     }
     private var readerNotice: String {

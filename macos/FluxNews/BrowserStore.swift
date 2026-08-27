@@ -66,6 +66,7 @@ final class BrowserStore: ObservableObject {
     private var searchGeneration: UInt64 = 0
     private var pendingNewData = PendingNewData()
     private var readerDocumentRequest: UInt64 = 0
+    private var minifluxServerURL: URL?
     private let searchPageSize: UInt32 = 50
 
     init() {
@@ -97,6 +98,7 @@ final class BrowserStore: ObservableObject {
             let configuredCore = try Flux.initializeWithDiagnostics(config: InitializationConfig(persistentData: support.path, cache: cache.path, media: media.path, baseUrl: server, apiKey: apiKey), listener: CoreDiagnosticLogger())
             let settings = try configuredCore.coreSettings()
             core = configuredCore
+            minifluxServerURL = URL(string: server)
             coreSettings = settings
             eventSubscription = try core?.subscribeEvents(listener: BrowserEventListener(store: self))
             if let launchAtLogin { try CredentialStore.setLaunchAtLogin(launchAtLogin) }
@@ -599,6 +601,10 @@ final class BrowserStore: ObservableObject {
     var onOpenDetail: ((ArticleSummary) -> Void)?
     func openDetail(_ article: ArticleSummary) { onOpenDetail?(article) }
     func openComments(_ article: ArticleSummary) { if let url = URL(string: article.commentsUrl), !article.commentsUrl.isEmpty { NSWorkspace.shared.open(url) } }
+    func openInMiniflux(_ article: ArticleSummary) {
+        guard let url = minifluxServerURL?.appendingPathComponent("entries").appendingPathComponent(String(article.id)) else { return }
+        NSWorkspace.shared.open(url)
+    }
     func copyLink(_ article: ArticleSummary) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(article.url, forType: .string) }
     func share(_ article: ArticleSummary) { guard let url = URL(string: article.url) else { return }; DispatchQueue.main.async { [weak self] in guard let self, let view = NSApplication.shared.keyWindow?.contentView else { return }; let picker = NSSharingServicePicker(items: [article.title, url]); self.sharingPicker = picker; let point = view.convert(view.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil); picker.show(relativeTo: NSRect(origin: point, size: NSSize(width: 1, height: 1)), of: view, preferredEdge: .minY) } }
     func showActionConfirmation(_ message: String) {
@@ -790,7 +796,7 @@ final class SystemNotificationManager: NSObject, UNUserNotificationCenterDelegat
     private func add(_ candidate: SystemNotificationCandidate) async throws {
         let content = UNMutableNotificationContent()
         content.title = candidate.feedTitle
-        content.body = candidate.newCount == 1 ? "1 new article" : "\(candidate.newCount) new articles"
+        content.body = SystemNotificationPresentation.body(newCount: candidate.newCount, submittedAt: Date())
         content.userInfo = [PayloadKey.candidateID: candidate.candidateId, PayloadKey.feedID: candidate.feedId]
         try await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "flux.system-notification.\(candidate.candidateId)", content: content, trigger: nil))
     }

@@ -557,6 +557,7 @@ private struct ArticleItem: View {
             Divider()
             Button { store.copyLink(article) } label: { Label("Copy Link", systemImage: "doc.on.doc") }
             Button { store.share(article) } label: { Label("Share...", systemImage: "square.and.arrow.up") }
+            Button { store.openInMiniflux(article) } label: { Label("Open in Miniflux", systemImage: "arrow.up.forward.app") }
             Button { store.select(.feed(article.feedId)) } label: { Label("Show Feed", systemImage: "line.3.horizontal.decrease.circle") }
             if !article.commentsUrl.isEmpty { Button { store.openComments(article) } label: { Label("Open Comments", systemImage: "bubble.left") } }
         }
