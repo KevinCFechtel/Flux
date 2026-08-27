@@ -735,6 +735,82 @@ does not mark an article as system-notified.
 Each native widget instance owns its own presentation/configuration
 state.
 
+WidgetKit and equivalent platform extensions are native/platform-owned. They
+never open the production Core SQLite database, initialize UniFFI/Core, call
+Miniflux, access credentials, or use Keychain/application-internal storage.
+The native app projects a versioned, credential-free App Group read model from
+Core data; the extension reads only that model and App Group icon files.
+
+The initial contract is `WidgetSnapshotV1`, stored as atomically replaced JSON
+in the existing FluxNews App Group `group.dev.kevincfechtel.fluxNews`. Its
+schema version is independent of backup, database, and UniFFI versions.
+Missing, corrupt, or unsupported snapshots are safe explicit extension states,
+as are no account, configured-but-never-successfully-synced, and valid-empty
+states. Snapshot creation time is distinct from Core's optional global
+`last_successful_sync_at`; only the latter is presented as a synchronization
+time.
+
+The snapshot contains the complete compact feed/category catalog (stable IDs,
+titles, and feed category IDs) for future per-widget AppIntent/AppEntity
+configuration. It has one bounded common article cache rather than
+scope-specific duplicates: up to 12 newest unread articles per feed plus up to
+48 newest starred articles globally, deduplicated by article ID and ordered
+newest-first. These fixed limits preserve quiet-feed coverage and several
+large-widget pages without serializing the full local article store. Feed icons
+are normalized Core PNGs copied by the native app into bounded App Group files;
+the extension performs no network fetch and handles absent files with a native
+fallback.
+
+Core supplies authoritative counts separately from that bounded cache: global
+unread, global starred, per-feed unread, and per-category unread. Therefore a
+widget can compare its locally available matching articles with the
+authoritative count. Cache exhaustion with a larger authoritative count leads
+to a future native "More News in FluxNews" action, not a large-unread warning.
+
+Planned Headlines instance scopes are All News, Category ID, Feed ID, and
+Bookmarks. All News, Category, and Feed intrinsically show unread articles;
+Bookmarks show starred articles regardless of read state. There is no global or
+per-widget unread-only setting. Article snapshots retain Article ID so a future
+tap enters the normal FluxNews article-open path, including Click on News and
+per-feed Open in Miniflux behavior; widgets do not choose their own destination.
+There is no widget-specific Open in Miniflux or translucent-background
+preference.
+
+The native app invalidates the App Group snapshot and icon cache before account
+replacement, configuration import, rebuild, and full reset so discarded
+account data cannot remain visible. Snapshot write failures are diagnostic and
+never roll back a successful Core sync or mutation.
+
+macOS provides separate, read-only Headlines and Compact Status WidgetKit kinds.
+Both use per-instance AppIntent configuration with All News as the default and
+stable Feed/Category AppEntity IDs sourced only from the App Group catalog. A
+missing configured feed or category remains visibly unavailable rather than
+falling back to All News. Headlines render the bounded cache; Compact Status
+renders the authoritative configured-scope count and optional
+`last_successful_sync_at`.
+
+Headlines is a bounded latest-articles view, not a pageable article list. Its
+WidgetFamily layout determines the capacity: one article in `systemSmall`,
+three in `systemMedium`, seven in `systemLarge`, and twelve in
+`systemExtraLarge`. It renders the latest available matching articles up to
+that capacity, without an overflow row. Pagination is deferred because the
+current WidgetKit interaction boundary has no durable per-instance identity;
+the snapshot remains suitable for a future instance-aware mechanism.
+
+Widget article links carry only an article ID and are handled by the main app
+through the same normal article-open route as a list click. Compact Status opens
+its configured scope, using stable IDs and retaining unavailable selections as
+unavailable. Widget Sync activates the app, which performs the normal Core
+`SyncReason::Widget` synchronization. The extension remains Core, database,
+Miniflux, credential, and Keychain-free.
+
+After a successful snapshot write or successful stale-snapshot invalidation,
+the app reloads the two stable kinds, `FluxNewsHeadlinesWidget` and
+`FluxNewsCompactStatusWidget`, with targeted `reloadTimelines(ofKind:)` calls.
+There is no delayed reload workaround or `reloadAllTimelines()` call. Incoming
+widget URLs are parsed once and retained until app/Core configuration is ready,
+so cold and warm launches do not duplicate or drop actions.
+
 Supported data scopes include All, Starred, Category, and Feed. Widget
 queries support pagination; `limit = 0` allows the complete matching
 list where the platform can display it.

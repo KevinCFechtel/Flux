@@ -56,18 +56,20 @@ final class AppRouter {
     private static let catalogKey = "FluxNews.navigationCatalog"
     private var openHandler: ((NavigationRoute) -> Void)?
     private var refreshHandler: (() -> Void)?
+    private var widgetActionHandler: ((WidgetAction) -> Void)?
     private var pendingActions: [Action] = []
     private(set) var catalog: RoutingCatalog
 
-    private enum Action { case open(NavigationRoute), refresh }
+    private enum Action { case open(NavigationRoute), refresh, widget(WidgetAction) }
 
     private init(defaults: UserDefaults = .standard) {
         catalog = defaults.data(forKey: Self.catalogKey).flatMap { try? JSONDecoder().decode(RoutingCatalog.self, from: $0) } ?? .empty
     }
 
-    func configure(open: @escaping (NavigationRoute) -> Void, refresh: @escaping () -> Void) {
+    func configure(open: @escaping (NavigationRoute) -> Void, refresh: @escaping () -> Void, widgetAction: @escaping (WidgetAction) -> Void) {
         openHandler = open
         refreshHandler = refresh
+        widgetActionHandler = widgetAction
         let actions = pendingActions
         pendingActions.removeAll()
         actions.forEach(perform)
@@ -75,6 +77,11 @@ final class AppRouter {
 
     func open(_ route: NavigationRoute) { perform(.open(route)) }
     func refresh() { perform(.refresh) }
+    func handle(url: URL) -> Bool {
+        guard let action = WidgetAction(url: url) else { return false }
+        perform(.widget(action))
+        return true
+    }
 
     func updateCatalog(_ catalog: NavigationCatalog, defaults: UserDefaults = .standard) {
         let routingCatalog = RoutingCatalog(catalog)
@@ -90,6 +97,9 @@ final class AppRouter {
         case .refresh:
             guard let refreshHandler else { pendingActions.append(action); return }
             refreshHandler()
+        case let .widget(action):
+            guard let widgetActionHandler else { pendingActions.append(.widget(action)); return }
+            widgetActionHandler(action)
         }
     }
 }

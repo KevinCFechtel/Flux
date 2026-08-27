@@ -101,6 +101,8 @@ final class BrowserStore: ObservableObject {
     private var pendingNewData = PendingNewData()
     private var readerDocumentRequest: UInt64 = 0
     private let searchPageSize: UInt32 = 50
+    private let widgetSnapshots = try? WidgetSnapshotStore()
+    private var pendingWidgetActions: [WidgetAction] = []
 
     init() {
         markReadOnScrolloverEnabled = UserDefaults.standard.object(forKey: "FluxNews.markReadOnScrollover") as? Bool ?? true
@@ -140,6 +142,8 @@ final class BrowserStore: ObservableObject {
             NativeLog.app.notice("core configured")
             resetPresentation()
             reloadNavigationAndCounts(); reloadVisibleArticles()
+            refreshWidgetSnapshot()
+            consumePendingWidgetActions()
             if startSync && syncOnStartEnabled { sync(reason: .appStart) }
             if settings.backgroundSyncEnabled { activatePeriodicSyncScheduling() }
             else { deactivatePeriodicSyncScheduling() }
@@ -174,6 +178,7 @@ final class BrowserStore: ObservableObject {
     private func commitValidatedAccount(_ validation: AccountValidationResult, apiKey: String, launchAtLogin: Bool, scrollover: Bool, syncOnStart: Bool, globalShortcut: GlobalShortcutChoice) {
         do {
             let previousCredentials = try CredentialStore.load()
+            invalidateWidgetSnapshot()
             try CredentialStore.save(MinifluxCredentials(server: validation.installationBase, apiKey: apiKey))
             guard configure(server: validation.installationBase, apiKey: apiKey, refreshVersion: false) else {
                 do { try restoreCredentials(previousCredentials) }
@@ -416,6 +421,17 @@ final class BrowserStore: ObservableObject {
         case .feed(let id): select(.feed(id))
         }
     }
+    func handleWidgetAction(_ action: WidgetAction) {
+        guard core != nil else { pendingWidgetActions.append(action); return }
+        switch action {
+        case let .article(id):
+            openArticle(id)
+        case let .open(selection):
+            openWidgetScope(selection)
+        case .sync:
+            sync(reason: .widget)
+        }
+    }
     func setUnreadOnly(_ enabled: Bool) { unreadOnly = enabled; resetPresentation(); reloadCounts(); reloadVisibleArticles(acknowledgingPendingNewData: true) }
     func setNewestFirst(_ enabled: Bool) { newestFirst = enabled; resetPresentation(); reloadVisibleArticles(acknowledgingPendingNewData: true) }
     func noteMeaningfulInteraction() { hasMeaningfullyInteracted = true }
@@ -526,7 +542,18 @@ final class BrowserStore: ObservableObject {
         }
     }
     func handle(event: CoreEvent) {
-        guard case let .syncCompleted(metadata) = event else { return }
+        switch event {
+        case .articleReadStateChanged, .articleStarredStateChanged:
+            refreshWidgetSnapshot()
+            return
+        case let .syncCompleted(metadata):
+            refreshWidgetSnapshot()
+            handleSyncCompleted(metadata)
+        default:
+            return
+        }
+    }
+    private func handleSyncCompleted(_ metadata: SyncCompleted) {
         isLoading = false
         reloadLiveUnreadTotal()
         if metadata.reason == .background || metadata.reason == .periodic {
@@ -739,6 +766,7 @@ final class BrowserStore: ObservableObject {
         let previousCredentials = try CredentialStore.load()
         let previousNative = nativeBackupSettings()
         do {
+            invalidateWidgetSnapshot()
             try core.replaceConfiguration(installationBase: restored.account.installationBase, coreSettings: restored.coreSettings, feedPreferences: restored.feedPreferences)
             try CredentialStore.save(MinifluxCredentials(server: restored.account.installationBase, apiKey: restored.account.apiKey))
             guard configure(server: restored.account.installationBase, apiKey: restored.account.apiKey, refreshVersion: false, startSync: false) else {
@@ -757,6 +785,7 @@ final class BrowserStore: ObservableObject {
     }
     func rebuildLocalState() {
         guard let core, !isLoading else { return }
+        invalidateWidgetSnapshot()
         isLoading = true
         let store = WeakBrowserStore(self)
         Task.detached {
@@ -785,6 +814,7 @@ final class BrowserStore: ObservableObject {
             minifluxVersion = nil
             coreSettings = nil
             deactivatePeriodicSyncScheduling()
+            invalidateWidgetSnapshot()
             invalidateLocalPresentation()
             showActionConfirmation("FluxNews was reset")
             settingsVisible = true
@@ -825,6 +855,25 @@ final class BrowserStore: ObservableObject {
         resetPresentation()
         snapshotResetRevision &+= 1
     }
+    private func refreshWidgetSnapshot() {
+        guard let core, let widgetSnapshots else { return }
+        Task.detached {
+            do {
+                try WidgetSnapshotWriter.refresh(core: core, store: widgetSnapshots)
+                WidgetTimelineReloader.reloadAll()
+            } catch {
+                NativeLog.app.error("widget snapshot refresh failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+    private func invalidateWidgetSnapshot() {
+        do {
+            try widgetSnapshots?.invalidate()
+            if widgetSnapshots != nil { WidgetTimelineReloader.reloadAll() }
+        } catch {
+            NativeLog.app.error("widget snapshot invalidation failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
     private func nativeBackupSettings() -> MacOSBackupSettingsV1 {
         MacOSBackupSettingsV1(
             version: MacOSBackupSettingsV1.version,
@@ -863,6 +912,38 @@ final class BrowserStore: ObservableObject {
         case .original: openOriginal(article)
         case .miniflux: openInMiniflux(article)
         }
+    }
+    private func openArticle(_ articleID: Int64) {
+        guard let core else { return }
+        do {
+            let query = ArticleQuery(scope: .all, readFilter: .all, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil)
+            guard let article = try core.queryArticles(query: query).first(where: { $0.id == articleID }) else { return }
+            open(article)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+    private func openWidgetScope(_ selection: WidgetContentSelection) {
+        switch selection.scope {
+        case .allNews:
+            unreadOnly = true
+            select(.all)
+        case .bookmarks:
+            select(.starred)
+        case .category:
+            guard let id = selection.categoryID, catalog.categories.contains(where: { $0.id == id }) else { return }
+            unreadOnly = true
+            select(.category(id))
+        case .feed:
+            guard let id = selection.feedID, catalog.feeds.contains(where: { $0.id == id }) else { return }
+            unreadOnly = true
+            select(.feed(id))
+        }
+    }
+    private func consumePendingWidgetActions() {
+        let actions = pendingWidgetActions
+        pendingWidgetActions.removeAll()
+        actions.forEach(handleWidgetAction)
     }
     var onOpenDetail: ((ArticleSummary, Bool) -> Void)?
     func openDetail(_ article: ArticleSummary, togglesPreview: Bool = false) { onOpenDetail?(article, togglesPreview) }

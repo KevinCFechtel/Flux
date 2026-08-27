@@ -9,7 +9,8 @@ use crate::domain::{
     Article, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary, Category, CoreError,
     CoreSettings, DeliveryMode, DetailRenderingMode, Feed, FeedPreferences,
     FeedSystemNotificationSetting, MutationField, NavigationCatalog, ReadArticleRetention,
-    ReadFilter, StarredFilter, SystemNotificationCandidate,
+    ReadFilter, StarredFilter, SystemNotificationCandidate, WidgetArticle, WidgetCounts,
+    WidgetData, WidgetScopedCount,
 };
 use crate::miniflux::normalize_installation_base;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -893,6 +894,132 @@ impl Store {
             .collect::<Result<Vec<_>, _>>()
             .map_err(sql_error)
     }
+    pub fn widget_data(&self) -> Result<WidgetData, CoreError> {
+        const UNREAD_PER_FEED: i64 = 12;
+        const BOOKMARKS: i64 = 48;
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let catalog = self.navigation_catalog_locked(&connection)?;
+        let mut statement = connection.prepare(
+            "WITH unread AS (\
+                SELECT a.id,a.feed_id,f.category_id,f.title AS feed_title,a.title AS article_title,a.published_at,a.is_read,a.is_starred,\
+                    ROW_NUMBER() OVER (PARTITION BY a.feed_id ORDER BY a.published_at DESC,a.id DESC) AS position \
+                FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE a.is_read=0 \
+             ), selected_unread AS (SELECT * FROM unread WHERE position <= ?1), \
+             selected_bookmarks AS (\
+                SELECT a.id,a.feed_id,f.category_id,f.title AS feed_title,a.title AS article_title,a.published_at,a.is_read,a.is_starred \
+                FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE a.is_starred=1 \
+                ORDER BY a.published_at DESC,a.id DESC LIMIT ?2 \
+             ) \
+             SELECT id,feed_id,category_id,feed_title,article_title,published_at,is_read,is_starred FROM selected_unread \
+             UNION ALL \
+             SELECT b.id,b.feed_id,b.category_id,b.feed_title,b.article_title,b.published_at,b.is_read,b.is_starred FROM selected_bookmarks b \
+             WHERE NOT EXISTS (SELECT 1 FROM selected_unread u WHERE u.id=b.id) \
+             ORDER BY published_at DESC,id DESC",
+        ).map_err(sql_error)?;
+        let articles = statement
+            .query_map(params![UNREAD_PER_FEED, BOOKMARKS], |r| {
+                Ok(WidgetArticle {
+                    id: r.get(0)?,
+                    feed_id: r.get(1)?,
+                    category_id: r.get(2)?,
+                    feed_title: r.get(3)?,
+                    title: r.get(4)?,
+                    published_at: r.get(5)?,
+                    is_read: r.get(6)?,
+                    is_starred: r.get(7)?,
+                })
+            })
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)?;
+        let all_unread = connection
+            .query_row("SELECT COUNT(*) FROM articles WHERE is_read=0", [], |r| {
+                r.get(0)
+            })
+            .map_err(sql_error)?;
+        let bookmarks = connection
+            .query_row(
+                "SELECT COUNT(*) FROM articles WHERE is_starred=1",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(sql_error)?;
+        let feed_unread = scoped_counts(
+            &connection,
+            "SELECT feed_id,COUNT(*) FROM articles WHERE is_read=0 GROUP BY feed_id ORDER BY feed_id",
+        )?;
+        let category_unread = scoped_counts(
+            &connection,
+            "SELECT f.category_id,COUNT(*) FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE a.is_read=0 GROUP BY f.category_id ORDER BY f.category_id",
+        )?;
+        let last_successful_sync_at = connection
+            .query_row(
+                "SELECT value FROM core_settings WHERE key='last_successful_sync_at'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(sql_error)?;
+        Ok(WidgetData {
+            categories: catalog.categories,
+            feeds: catalog.feeds,
+            articles,
+            counts: WidgetCounts {
+                all_unread,
+                bookmarks,
+                feed_unread,
+                category_unread,
+            },
+            last_successful_sync_at,
+        })
+    }
+    fn navigation_catalog_locked(
+        &self,
+        connection: &Connection,
+    ) -> Result<NavigationCatalog, CoreError> {
+        let mut categories = connection
+            .prepare("SELECT id,title FROM categories ORDER BY title COLLATE NOCASE,id")
+            .map_err(sql_error)?;
+        let categories = categories
+            .query_map([], |row| {
+                Ok(Category {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                })
+            })
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)?;
+        let mut feeds = connection.prepare("SELECT id,category_id,title FROM feeds ORDER BY category_id,title COLLATE NOCASE,id").map_err(sql_error)?;
+        let feeds = feeds
+            .query_map([], |row| {
+                Ok(Feed {
+                    id: row.get(0)?,
+                    category_id: row.get(1)?,
+                    title: row.get(2)?,
+                })
+            })
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)?;
+        Ok(NavigationCatalog { categories, feeds })
+    }
+}
+fn scoped_counts(connection: &Connection, sql: &str) -> Result<Vec<WidgetScopedCount>, CoreError> {
+    let mut statement = connection.prepare(sql).map_err(sql_error)?;
+    statement
+        .query_map([], |r| {
+            Ok(WidgetScopedCount {
+                id: r.get(0)?,
+                count: r.get(1)?,
+            })
+        })
+        .map_err(sql_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sql_error)
 }
 fn article_filter_sql(
     mut sql: String,

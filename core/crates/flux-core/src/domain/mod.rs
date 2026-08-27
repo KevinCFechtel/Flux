@@ -292,6 +292,43 @@ pub struct NavigationCatalog {
     pub feeds: Vec<Feed>,
 }
 
+/// Compact, widget-specific read model data. Native clients serialize this into
+/// their versioned App Group contract; it is not a persistence model.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WidgetData {
+    pub categories: Vec<Category>,
+    pub feeds: Vec<Feed>,
+    pub articles: Vec<WidgetArticle>,
+    pub counts: WidgetCounts,
+    pub last_successful_sync_at: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WidgetArticle {
+    pub id: i64,
+    pub feed_id: i64,
+    pub category_id: i64,
+    pub feed_title: String,
+    pub title: String,
+    pub published_at: String,
+    pub is_read: bool,
+    pub is_starred: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WidgetCounts {
+    pub all_unread: u64,
+    pub bookmarks: u64,
+    pub feed_unread: Vec<WidgetScopedCount>,
+    pub category_unread: Vec<WidgetScopedCount>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WidgetScopedCount {
+    pub id: i64,
+    pub count: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NewArticlesByFeed {
     pub feed_id: i64,

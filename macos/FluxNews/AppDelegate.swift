@@ -45,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             button.setAccessibilityValue(StatusItemPresentation.accessibilityValue(unreadTotal: unreadTotal, hasPendingNewData: hasPendingNewData))
         }
         popover.behavior = .transient; popover.animates = true; popover.delegate = self; popover.contentSize = size(sidebarVisible: false); popover.contentViewController = host()
-        AppRouter.shared.configure(open: { [weak self] route in self?.store.route(to: route); self?.show() }, refresh: { [weak self] in self?.show(); self?.store.sync(reason: .manual) })
+        AppRouter.shared.configure(open: { [weak self] route in self?.store.route(to: route); self?.show() }, refresh: { [weak self] in self?.show(); self?.store.sync(reason: .manual) }, widgetAction: { [weak self] action in self?.store.handleWidgetAction(action); self?.show() })
         store.onOpenDetail = { [weak self] article, togglesPreview in
             guard let self else { return }
             self.readerWindow.show(article: article, togglesPreview: togglesPreview, preferredScreen: self.detailScreen())
@@ -68,6 +68,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         store.start()
     }
     func applicationDidBecomeActive(_ notification: Notification) { store.resume() }
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls { _ = AppRouter.shared.handle(url: url) }
+    }
     @objc private func togglePopover() { if popover.isShown || fallbackPanel?.isVisible == true { dismiss() } else { show() } }
     func popoverWillShow(_ notification: Notification) { store.popoverVisible = true; popover.contentSize = size(sidebarVisible: sidebarVisible) }
     func popoverDidClose(_ notification: Notification) { store.popoverVisible = false; store.syncIfStale() }

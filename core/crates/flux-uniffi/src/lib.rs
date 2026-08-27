@@ -229,6 +229,37 @@ pub struct NavigationCatalog {
     pub categories: Vec<Category>,
     pub feeds: Vec<Feed>,
 }
+#[derive(uniffi::Record)]
+pub struct WidgetData {
+    pub categories: Vec<Category>,
+    pub feeds: Vec<Feed>,
+    pub articles: Vec<WidgetArticle>,
+    pub counts: WidgetCounts,
+    pub last_successful_sync_at: Option<String>,
+}
+#[derive(uniffi::Record)]
+pub struct WidgetArticle {
+    pub id: i64,
+    pub feed_id: i64,
+    pub category_id: i64,
+    pub feed_title: String,
+    pub title: String,
+    pub published_at: String,
+    pub is_read: bool,
+    pub is_starred: bool,
+}
+#[derive(uniffi::Record)]
+pub struct WidgetCounts {
+    pub all_unread: u64,
+    pub bookmarks: u64,
+    pub feed_unread: Vec<WidgetScopedCount>,
+    pub category_unread: Vec<WidgetScopedCount>,
+}
+#[derive(uniffi::Record)]
+pub struct WidgetScopedCount {
+    pub id: i64,
+    pub count: u64,
+}
 #[derive(uniffi::Enum)]
 pub enum RuntimeHealth {
     Healthy,
@@ -720,6 +751,9 @@ impl Flux {
     }
     pub fn last_successful_sync_at(&self) -> Result<Option<String>, FluxError> {
         self.core.last_successful_sync_at().map_err(map_error)
+    }
+    pub fn widget_data(&self) -> Result<WidgetData, FluxError> {
+        self.core.widget_data().map(Into::into).map_err(map_error)
     }
     pub fn runtime_health(&self) -> Result<RuntimeHealthStatus, FluxError> {
         self.core
@@ -1400,6 +1434,49 @@ impl From<domain::NavigationCatalog> for NavigationCatalog {
         Self {
             categories: value.categories.into_iter().map(Into::into).collect(),
             feeds: value.feeds.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+impl From<domain::WidgetData> for WidgetData {
+    fn from(value: domain::WidgetData) -> Self {
+        Self {
+            categories: value.categories.into_iter().map(Into::into).collect(),
+            feeds: value.feeds.into_iter().map(Into::into).collect(),
+            articles: value.articles.into_iter().map(Into::into).collect(),
+            counts: value.counts.into(),
+            last_successful_sync_at: value.last_successful_sync_at,
+        }
+    }
+}
+impl From<domain::WidgetArticle> for WidgetArticle {
+    fn from(value: domain::WidgetArticle) -> Self {
+        Self {
+            id: value.id,
+            feed_id: value.feed_id,
+            category_id: value.category_id,
+            feed_title: value.feed_title,
+            title: value.title,
+            published_at: value.published_at,
+            is_read: value.is_read,
+            is_starred: value.is_starred,
+        }
+    }
+}
+impl From<domain::WidgetCounts> for WidgetCounts {
+    fn from(value: domain::WidgetCounts) -> Self {
+        Self {
+            all_unread: value.all_unread,
+            bookmarks: value.bookmarks,
+            feed_unread: value.feed_unread.into_iter().map(Into::into).collect(),
+            category_unread: value.category_unread.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+impl From<domain::WidgetScopedCount> for WidgetScopedCount {
+    fn from(value: domain::WidgetScopedCount) -> Self {
+        Self {
+            id: value.id,
+            count: value.count,
         }
     }
 }

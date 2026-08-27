@@ -35,3 +35,9 @@ rustc-ice-*.txt
 dist/
 .build/
 macos/FluxNews/Generated/
+macos/Build/SwiftExplicitPrecompiledModules/
+macos/Build/XCBuildData/
+macos/Build/Debug
+macos/Build/EagerLinkingTBDs
+macos/Build/ExplicitPrecompiledModules
+macos/Build/FluxNews.build

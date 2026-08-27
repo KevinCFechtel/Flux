@@ -28,7 +28,7 @@ use domain::{
     FeedIcon, FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, MutationField,
     MutationResult, NavigationCatalog, ReadArticleRetention, ReaderDocument, RuntimeHealth,
     RuntimeHealthStatus, SaveToServiceResult, SearchArticlesRequest, SearchArticlesResult,
-    SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason,
+    SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason, WidgetData,
 };
 use miniflux::{
     AccountValidationError, AccountValidationResult, MinifluxClient, RemoteSource,
@@ -509,6 +509,11 @@ impl FluxCore {
     }
     pub fn last_successful_sync_at(&self) -> Result<Option<String>, CoreError> {
         self.store.last_successful_sync_at()
+    }
+    /// Builds the bounded domain data that a native client projects into its
+    /// platform-owned widget snapshot.
+    pub fn widget_data(&self) -> Result<WidgetData, CoreError> {
+        self.store.widget_data()
     }
 
     pub fn database_path(&self) -> PathBuf {
@@ -2451,5 +2456,106 @@ mod tests {
         assert!(core.store.base_url().unwrap().is_none());
         assert_eq!(source.fetch_calls.load(Ordering::SeqCst), fetches_before);
         assert_eq!(core.delivery_health().unwrap(), RuntimeHealth::Healthy);
+    }
+
+    #[test]
+    fn widget_data_is_bounded_per_feed_with_authoritative_counts() {
+        let temp = TempDir::new().unwrap();
+        let now = Utc::now();
+        let mut data = snapshot();
+        data.articles.clear();
+        for id in 1..=20 {
+            data.articles.push(article(
+                id,
+                10,
+                (now - ChronoDuration::minutes(id)).to_rfc3339(),
+                false,
+                id == 20,
+            ));
+        }
+        data.articles.push(article(
+            100,
+            20,
+            (now - ChronoDuration::days(1)).to_rfc3339(),
+            false,
+            false,
+        ));
+        data.articles.push(article(
+            101,
+            20,
+            (now - ChronoDuration::days(2)).to_rfc3339(),
+            true,
+            true,
+        ));
+        data.articles.push(article(
+            102,
+            20,
+            (now - ChronoDuration::days(3)).to_rfc3339(),
+            true,
+            false,
+        ));
+        let (core, _) = core(&temp, data);
+        assert!(
+            core.widget_data()
+                .unwrap()
+                .last_successful_sync_at
+                .is_none()
+        );
+        core.sync(SyncReason::Manual).unwrap();
+
+        let widget = core.widget_data().unwrap();
+        assert_eq!(widget.categories.len(), 2);
+        assert_eq!(
+            widget.feeds.iter().map(|feed| feed.id).collect::<Vec<_>>(),
+            [10, 20]
+        );
+        assert_eq!(widget.counts.all_unread, 21);
+        assert_eq!(widget.counts.bookmarks, 2);
+        assert_eq!(
+            widget.counts.feed_unread,
+            vec![
+                WidgetScopedCount { id: 10, count: 20 },
+                WidgetScopedCount { id: 20, count: 1 }
+            ]
+        );
+        assert_eq!(
+            widget.counts.category_unread,
+            vec![
+                WidgetScopedCount { id: 1, count: 20 },
+                WidgetScopedCount { id: 2, count: 1 }
+            ]
+        );
+        assert_eq!(
+            widget
+                .articles
+                .iter()
+                .filter(|article| article.feed_id == 10 && !article.is_starred)
+                .count(),
+            12
+        );
+        assert!(widget.articles.iter().any(|article| article.id == 100));
+        assert!(
+            widget
+                .articles
+                .iter()
+                .any(|article| article.id == 101 && article.is_read && article.is_starred)
+        );
+        assert!(!widget.articles.iter().any(|article| article.id == 102));
+        assert_eq!(
+            widget
+                .articles
+                .iter()
+                .filter(|article| article.id == 20)
+                .count(),
+            1
+        );
+        assert!(
+            widget
+                .articles
+                .windows(2)
+                .all(|pair| (pair[0].published_at.clone(), pair[0].id)
+                    >= (pair[1].published_at.clone(), pair[1].id))
+        );
+        assert!(widget.last_successful_sync_at.is_some());
     }
 }
