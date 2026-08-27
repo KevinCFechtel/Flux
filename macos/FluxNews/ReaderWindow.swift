@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -9,22 +10,36 @@ final class ReaderWindowController: NSObject, ObservableObject {
     @Published fileprivate var errorMessage: String?
 
     private weak var store: BrowserStore?
-    private var window: NSWindow?
+    private var panel: NSPanel?
     private var requests = ReaderRequestState()
     private var sharingPicker: NSSharingServicePicker?
-    private weak var starButton: NSButton?
+    private var articlesObservation: AnyCancellable?
 
-    init(store: BrowserStore) { self.store = store }
+    init(store: BrowserStore) {
+        self.store = store
+        super.init()
+        articlesObservation = store.$articles.sink { [weak self] articles in self?.synchronizeArticleState(from: articles) }
+    }
 
-    func show(article: ArticleSummary) {
+    func show(article: ArticleSummary, togglesPreview: Bool, preferredScreen: NSScreen?) {
+        makePanelIfNeeded()
+        guard let panel else { return }
+        switch ReaderPreviewAction.resolve(isVisible: panel.isVisible, currentArticleID: self.article?.id, requestedArticleID: article.id, togglesSameArticle: togglesPreview) {
+        case .hide:
+            panel.orderOut(nil)
+            return
+        case .show:
+            position(panel, on: preferredScreen ?? currentScreen())
+        case .replace:
+            break
+        }
         let requestID = requests.begin()
         self.article = article
         document = nil
         errorMessage = nil
         isLoading = true
-        makeWindowIfNeeded()
         NSApplication.shared.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
+        panel.makeKeyAndOrderFront(nil)
         store?.setRead(article, true)
         store?.loadReaderDocument(article) { [weak self] result in
             guard let self, self.requests.isCurrent(requestID) else { return }
@@ -43,9 +58,11 @@ final class ReaderWindowController: NSObject, ObservableObject {
 
     func toggleStarred() {
         guard let article else { return }
-        store?.setStarred(article, !article.isStarred)
-        self.article = ArticleSummary(id: article.id, feedId: article.feedId, categoryId: article.categoryId, feedTitle: article.feedTitle, title: article.title, url: article.url, commentsUrl: article.commentsUrl, publishedAt: article.publishedAt, isRead: true, isStarred: !article.isStarred, preview: article.preview, imageUrl: article.imageUrl)
-        updateStarButton()
+        store?.setStarred(article, !article.isStarred) { [weak self] accepted in
+            guard accepted, let self, self.article?.id == article.id else { return }
+            self.article = ArticleSummary(id: article.id, feedId: article.feedId, categoryId: article.categoryId, feedTitle: article.feedTitle, title: article.title, url: article.url, commentsUrl: article.commentsUrl, publishedAt: article.publishedAt, isRead: article.isRead, isStarred: !article.isStarred, preview: article.preview, imageUrl: article.imageUrl)
+            self.updateStarToolbarItem()
+        }
     }
 
     @objc private func toggleStarredFromToolbar() { toggleStarred() }
@@ -62,26 +79,78 @@ final class ReaderWindowController: NSObject, ObservableObject {
     @objc private func openComments() { guard let article else { return }; store?.openComments(article) }
     @objc private func copyLink() { guard let article else { return }; store?.copyLink(article) }
 
-    private func makeWindowIfNeeded() {
-        guard window == nil else { return }
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 700), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "Reader"
-        if !window.setFrameAutosaveName("FluxNews.Reader") { window.center() }
-        window.isReleasedWhenClosed = false
+    private func makePanelIfNeeded() {
+        guard panel == nil else { return }
+        UserDefaults.standard.removeObject(forKey: "NSWindow Frame FluxNews.Reader")
+        let panel = ReaderPreviewPanel(contentRect: NSRect(origin: .zero, size: ReaderPreviewGeometry.persistedSize()), styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        panel.title = "Detail Preview"
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = true
+        panel.level = .floating
+        panel.collectionBehavior = [.moveToActiveSpace, .transient]
+        panel.isReleasedWhenClosed = false
+        panel.delegate = self
+        panel.titlebarAppearsTransparent = true
         let toolbar = NSToolbar(identifier: "FluxNews.Reader.Toolbar")
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
-        window.toolbar = toolbar
-        window.toolbarStyle = .unifiedCompact
-        window.titleVisibility = .hidden
-        window.contentViewController = NSHostingController(rootView: ReaderWindowView(controller: self))
-        self.window = window
+        panel.toolbar = toolbar
+        panel.toolbarStyle = .unifiedCompact
+        panel.titleVisibility = .hidden
+        panel.contentViewController = ReaderVisualEffectViewController(rootView: ReaderWindowView(controller: self))
+        self.panel = panel
     }
 
-    private func updateStarButton() {
-        guard let button = starButton else { return }
-        button.image = NSImage(systemSymbolName: article?.isStarred == true ? "star.fill" : "star", accessibilityDescription: article?.isStarred == true ? "Unstar" : "Star")
-        button.toolTip = article?.isStarred == true ? "Unstar" : "Star"
+    private func position(_ panel: NSPanel, on screen: NSScreen?) {
+        let size = ReaderPreviewGeometry.persistedSize()
+        panel.setContentSize(size)
+        let visibleFrame = screen?.visibleFrame ?? NSRect(origin: .zero, size: size)
+        panel.setFrameOrigin(ReaderPreviewGeometry.centeredFrame(size: panel.frame.size, visibleFrame: visibleFrame).origin)
+    }
+
+    private func updateStarToolbarItem() {
+        guard let item = panel?.toolbar?.items.first(where: { $0.itemIdentifier == .star }) else { return }
+        let starred = article?.isStarred == true
+        item.image = NSImage(systemSymbolName: starred ? "star.fill" : "star", accessibilityDescription: starred ? "Unstar" : "Star")
+        item.label = starred ? "Unstar" : "Star"
+        item.paletteLabel = item.label
+        item.toolTip = item.label
+    }
+
+    private func currentScreen() -> NSScreen? {
+        NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main
+    }
+
+    private func synchronizeArticleState(from visibleArticles: [ArticleSummary]) {
+        guard let article,
+              let starred = ReaderArticleState.starredState(articleID: article.id, visibleArticles: visibleArticles.map { ($0.id, $0.isStarred) }),
+              starred != article.isStarred else { return }
+        self.article = ArticleSummary(id: article.id, feedId: article.feedId, categoryId: article.categoryId, feedTitle: article.feedTitle, title: article.title, url: article.url, commentsUrl: article.commentsUrl, publishedAt: article.publishedAt, isRead: article.isRead, isStarred: starred, preview: article.preview, imageUrl: article.imageUrl)
+        updateStarToolbarItem()
+    }
+}
+
+private final class ReaderPreviewPanel: NSPanel {
+    override func cancelOperation(_ sender: Any?) { orderOut(sender) }
+}
+
+private final class ReaderVisualEffectViewController: NSViewController {
+    private let rootView: ReaderWindowView
+
+    init(rootView: ReaderWindowView) { self.rootView = rootView; super.init(nibName: nil, bundle: nil) }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let effect = NSVisualEffectView()
+        effect.material = .underWindowBackground
+        effect.blendingMode = .withinWindow
+        effect.state = .followsWindowActiveState
+        let host = NSHostingController(rootView: rootView)
+        addChild(host)
+        host.view.frame = effect.bounds
+        host.view.autoresizingMask = [.width, .height]
+        effect.addSubview(host.view)
+        view = effect
     }
 }
 
@@ -100,10 +169,13 @@ extension ReaderWindowController: NSToolbarDelegate {
         let item = NSToolbarItem(itemIdentifier: itemIdentifier)
         switch itemIdentifier {
         case .star:
-            item.label = "Star"
-            let button = button(symbol: article?.isStarred == true ? "star.fill" : "star", label: article?.isStarred == true ? "Unstar" : "Star", action: #selector(toggleStarredFromToolbar))
-            starButton = button
-            item.view = button
+            let starred = article?.isStarred == true
+            item.label = starred ? "Unstar" : "Star"
+            item.paletteLabel = item.label
+            item.toolTip = item.label
+            item.image = NSImage(systemSymbolName: starred ? "star.fill" : "star", accessibilityDescription: item.label)
+            item.target = self
+            item.action = #selector(toggleStarredFromToolbar)
         case .share:
             item.label = "Share"
             item.view = button(symbol: "square.and.arrow.up", label: "Share", action: #selector(shareFromToolbar(_:)))
@@ -139,12 +211,24 @@ extension ReaderWindowController: NSToolbarDelegate {
     }
 }
 
+extension ReaderWindowController: NSWindowDelegate {
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.orderOut(nil)
+        return false
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        guard let panel, panel.isVisible, let contentView = panel.contentView else { return }
+        ReaderPreviewGeometry.persist(size: contentView.bounds.size)
+    }
+}
+
 private struct ReaderWindowView: View {
     @ObservedObject var controller: ReaderWindowController
 
     var body: some View {
         VStack(spacing: 0) {
-            if let article = controller.article { ReaderHeader(article: article); Divider() }
+            if let article = controller.article { ReaderHeader(article: article) }
             Group {
                 if controller.isLoading { ProgressView("Loading article...") }
                 else if let error = controller.errorMessage { ContentUnavailableView("Unable to load article", systemImage: "exclamationmark.triangle", description: Text(error)) }
@@ -164,7 +248,11 @@ private struct ReaderHeader: View {
             Text(article.feedTitle).font(.subheadline).foregroundStyle(.secondary)
             Text(article.title).font(.title2.bold()).textSelection(.enabled)
             if let date = Self.dateFormatter.date(from: article.publishedAt) { Text(date.formatted(date: .long, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
-        }.padding(20)
+        }
+        .frame(maxWidth: 680, alignment: .leading)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 

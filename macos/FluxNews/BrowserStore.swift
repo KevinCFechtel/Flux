@@ -486,8 +486,8 @@ final class BrowserStore: ObservableObject {
         }
         do { _ = try core.setReadState(articleId: article.id, read: read); updateVisible([article.id]) { $0.isRead = read }; reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) }
     }
-    func setStarred(_ article: ArticleSummary, _ starred: Bool) {
-        guard let core else { return }
+    func setStarred(_ article: ArticleSummary, _ starred: Bool, completion: ((Bool) -> Void)? = nil) {
+        guard let core else { completion?(false); return }
         if scope == .search {
             let store = WeakBrowserStore(self)
             Task.detached {
@@ -497,13 +497,14 @@ final class BrowserStore: ObservableObject {
                     case let .success(disposition):
                         store.value?.updateVisible([article.id]) { $0.isStarred = starred }
                         if case .localFirst = disposition { store.value?.reloadCounts() }
-                    case let .failure(error): store.value?.errorMessage = String(describing: error)
+                        completion?(true)
+                    case let .failure(error): store.value?.errorMessage = String(describing: error); completion?(false)
                     }
                 }
             }
             return
         }
-        do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) }
+        do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadSelectionTotal(); reloadCounts(); completion?(true) } catch { errorMessage = String(describing: error); completion?(false) }
     }
     func loadReaderDocument(_ article: ArticleSummary, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
         guard let core else {
@@ -598,8 +599,8 @@ final class BrowserStore: ObservableObject {
     func setSyncOnStartEnabled(_ enabled: Bool) { syncOnStartEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.syncOnStart") }
     func setGlobalShortcut(_ shortcut: GlobalShortcutChoice) { guard shortcut != globalShortcut else { return }; globalShortcut = shortcut; shortcut.store() }
     func open(_ article: ArticleSummary) { setRead(article, true); if let url = URL(string: article.url) { NSWorkspace.shared.open(url) } }
-    var onOpenDetail: ((ArticleSummary) -> Void)?
-    func openDetail(_ article: ArticleSummary) { onOpenDetail?(article) }
+    var onOpenDetail: ((ArticleSummary, Bool) -> Void)?
+    func openDetail(_ article: ArticleSummary, togglesPreview: Bool = false) { onOpenDetail?(article, togglesPreview) }
     func openComments(_ article: ArticleSummary) { if let url = URL(string: article.commentsUrl), !article.commentsUrl.isEmpty { NSWorkspace.shared.open(url) } }
     func openInMiniflux(_ article: ArticleSummary) {
         guard let url = minifluxServerURL?.appendingPathComponent("entries").appendingPathComponent(String(article.id)) else { return }

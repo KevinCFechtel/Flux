@@ -68,6 +68,7 @@ private struct ArticlePane: View {
     @State private var viewport = CGRect.zero
     @State private var trackerRevision: UInt64
     @State private var selectedID: Int64?
+    @State private var hoveredID: Int64?
     @State private var scrollPhase = ScrollPhase.idle
     @State private var suppressUntil: TimeInterval = 0
     @State private var scrollPosition = ScrollPosition()
@@ -188,7 +189,10 @@ private struct ArticlePane: View {
                     ScrollView {
                         LazyVStack(spacing: store.articleListStyle == .row ? 0 : 4) {
                             ForEach(store.articles, id: \.id) { article in
-                                ArticleItem(article: article, style: store.articleListStyle, selected: selectedID == article.id, store: store, onSelect: { selectedID = article.id })
+                                ArticleItem(article: article, style: store.articleListStyle, selected: selectedID == article.id, store: store, onSelect: { selectedID = article.id }, onHoverChanged: { hovering in
+                                    if hovering { hoveredID = article.id }
+                                    else if hoveredID == article.id { hoveredID = nil }
+                                })
                                     .id(article.id)
                                     .background {
                                         GeometryReader { row in
@@ -279,7 +283,7 @@ private struct ArticlePane: View {
         case .moveUp: move(-1, proxy)
         case .moveDown: move(1, proxy)
         case .open: if let article = selected { store.open(article) }
-        case .openDetail: if let article = selected { store.openDetail(article) }
+        case .openDetail: if let article = readerTarget { store.openDetail(article, togglesPreview: true) }
         case .toggleRead: if !store.isSearchActive, let article = selected { store.setRead(article, !article.isRead) }
         case .toggleStarred: if let article = selected { store.setStarred(article, !article.isStarred) }
         case .refresh: store.sync()
@@ -287,6 +291,10 @@ private struct ArticlePane: View {
         }
     }
     private var selected: ArticleSummary? { selectedID.flatMap { id in store.articles.first { $0.id == id } } }
+    private var readerTarget: ArticleSummary? {
+        let id = ArticleReaderTarget.articleID(hoveredID: hoveredID, selectedID: selectedID, availableIDs: Set(store.articles.map(\.id)))
+        return id.flatMap { targetID in store.articles.first { $0.id == targetID } }
+    }
     private func move(_ delta: Int, _ proxy: ScrollViewProxy) {
         guard !store.articles.isEmpty else { return }
         let current = selectedID.flatMap { id in store.articles.firstIndex { $0.id == id } }
@@ -334,7 +342,7 @@ private struct SearchResultsView: View {
                     ScrollView {
                         LazyVStack(spacing: store.articleListStyle == .row ? 0 : 4) {
                             ForEach(store.articles, id: \.id) { article in
-                                ArticleItem(article: article, style: store.articleListStyle, selected: false, store: store, onSelect: {})
+                                ArticleItem(article: article, style: store.articleListStyle, selected: false, store: store, onSelect: {}, onHoverChanged: { _ in })
                                     .onAppear { if article.id == store.articles.last?.id { store.loadMoreSearchResults() } }
                                 if store.articleListStyle == .row { Divider().padding(.leading, 264) }
                             }
@@ -477,6 +485,7 @@ private struct ArticleItem: View {
     let selected: Bool
     @ObservedObject var store: BrowserStore
     let onSelect: () -> Void
+    let onHoverChanged: (Bool) -> Void
     @State private var hovered = false
 
     var body: some View { style == .row ? AnyView(row) : AnyView(card) }
@@ -497,7 +506,7 @@ private struct ArticleItem: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12).padding(.vertical, 10)
         .contentShape(Rectangle()).background(interactionBackground)
-        .onHover { hovered = $0 }.contextMenu { actionMenu }
+        .onHover { hovering in hovered = hovering; onHoverChanged(hovering) }.contextMenu { actionMenu }
         .onDisappear { store.retryUnavailableArticleThumbnail(article) }
     }
     private var card: some View {
@@ -514,7 +523,7 @@ private struct ArticleItem: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading).background(interactionBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10)).padding(.horizontal, 12).padding(.vertical, 6)
-        .contentShape(Rectangle()).onHover { hovered = $0 }.contextMenu { actionMenu }
+        .contentShape(Rectangle()).onHover { hovering in hovered = hovering; onHoverChanged(hovering) }.contextMenu { actionMenu }
         .onDisappear { store.retryUnavailableArticleThumbnail(article) }
     }
     private var textComposition: some View {

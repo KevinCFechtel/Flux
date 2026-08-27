@@ -676,32 +676,35 @@ Miniflux** actions independently of the configured normal Open
 destination. Open in Miniflux may be placed less prominently, such as in
 an overflow/submenu.
 
-### macOS Reader navigation
+### macOS Detail Preview navigation
 
-macOS has one native Reader Window. It is a normal independent,
-resizable/movable macOS window and is not tied to the lifetime of the
-menu-bar popover.
+macOS has one reusable native Detail Preview Panel. It is an interactive,
+resizable Quick Look-style NSPanel used for temporary article inspection,
+not a persistent Reader document window. It moves to the active Space when
+shown and is not tied to the lifetime of the menu-bar popover.
 
 The native `Click on News` preference determines the normal row-click
 behavior:
 
 -   **Open Link** (default) → perform the feed's normal Open action;
--   **Open Detail View** → open the article in the Flux Reader Window.
+-   **Open Detail View** → open the article in the Flux Detail Preview Panel.
 
 macOS does not require the mobile split-click mode where image and text
 perform different actions; that remains a possible mobile-specific
 interaction decision.
 
 Pressing **Space** for the selected article always opens that article in
-the Flux Reader Window, independent of `Click on News` and independent
-of the feed's Open in Miniflux preference. An explicit **Open Detail
-View** article action does the same.
+the Flux Detail Preview Panel, independent of `Click on News` and
+independent of the feed's Open in Miniflux preference. If the panel is
+already showing that article, Space hides it; Space on another article
+reuses the panel with replacement content. An explicit **Open Detail View**
+article action shows or reuses the panel without toggling it.
 
-Only one Reader Window exists. If it is already open, opening another
-article replaces its current article and brings the existing window
-forward rather than creating another Reader window.
+Only one Detail Preview Panel exists. If it is already open, opening
+another article replaces its current article and brings the existing panel
+forward rather than creating another preview.
 
-Opening an article in the Reader marks it read. The Reader uses the
+Opening an article in the Detail Preview marks it read. The preview uses the
 feed's Rendered/Text Only and Truncate Detail preferences. It does not
 provide an image lightbox/zoom feature; users can open the original site
 when they need the publisher's full media experience.

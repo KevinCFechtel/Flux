@@ -2,6 +2,13 @@ import AppKit
 import SwiftUI
 
 enum ArticleKeyboardCommand { case moveUp, moveDown, open, openDetail, toggleRead, toggleStarred, refresh, dismiss }
+enum ArticleReaderTarget {
+    static func articleID(hoveredID: Int64?, selectedID: Int64?, availableIDs: Set<Int64>) -> Int64? {
+        if let hoveredID, availableIDs.contains(hoveredID) { return hoveredID }
+        if let selectedID, availableIDs.contains(selectedID) { return selectedID }
+        return nil
+    }
+}
 enum ArticleKeyboardRouting {
     static func command(for event: NSEvent) -> ArticleKeyboardCommand? {
         command(keyCode: event.keyCode, charactersIgnoringModifiers: event.charactersIgnoringModifiers, modifierFlags: event.modifierFlags)

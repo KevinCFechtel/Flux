@@ -42,7 +42,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
         popover.behavior = .transient; popover.animates = true; popover.delegate = self; popover.contentSize = size(sidebarVisible: false); popover.contentViewController = host()
         AppRouter.shared.configure(open: { [weak self] route in self?.store.route(to: route); self?.show() }, refresh: { [weak self] in self?.show(); self?.store.sync(reason: .manual) })
-        store.onOpenDetail = { [weak self] article in self?.readerWindow.show(article: article) }
+        store.onOpenDetail = { [weak self] article, togglesPreview in
+            guard let self else { return }
+            self.readerWindow.show(article: article, togglesPreview: togglesPreview, preferredScreen: self.detailScreen())
+        }
         catalogObservation = store.$catalog.dropFirst().removeDuplicates().sink { [weak self] catalog in
             AppRouter.shared.updateCatalog(catalog)
             self?.spotlightIndexer.update(catalog)
@@ -73,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
     private func host() -> NSHostingController<PopoverContentView> { NSHostingController(rootView: PopoverContentView(store: store, layoutChanged: { [weak self] visible in self?.resize(sidebarVisible: visible) }, dismiss: { [weak self] in self?.dismiss() })) }
     private func show() { NSApplication.shared.activate(ignoringOtherApps: true); if let button = usableButton() { popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY); popover.contentViewController?.view.window?.makeKey() } else { showFallback() } }
+    private func detailScreen() -> NSScreen? { popover.contentViewController?.view.window?.screen ?? fallbackPanel?.screen ?? statusItem.button?.window?.screen }
     private func usableButton() -> NSStatusBarButton? { guard let button = statusItem.button, let window = button.window, let screen = window.screen else { return nil }; return screen.frame.intersects(window.convertToScreen(button.convert(button.bounds, to: nil))) ? button : nil }
     private func dismiss() { if popover.isShown { popover.performClose(nil) }; fallbackPanel?.close() }
     private func showFallback() { let panel = fallbackPanel ?? makeFallback(); fallbackPanel = panel; panel.setContentSize(size(sidebarVisible: sidebarVisible)); store.popoverVisible = true; panel.center(); panel.makeKeyAndOrderFront(nil) }
