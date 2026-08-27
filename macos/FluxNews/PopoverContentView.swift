@@ -695,25 +695,43 @@ private struct SettingsView: View {
                 .padding(16)
         }
         .frame(width: 700, height: 430)
+        .overlay(alignment: .bottom) {
+            if let confirmation = store.actionConfirmation {
+                Text(confirmation)
+                    .font(.subheadline)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.regularMaterial, in: Capsule())
+                    .shadow(radius: 3)
+                    .padding(.bottom, 16)
+            }
+        }
         .background(SettingsWindowReader { window in
             guard settingsWindow !== window else { return }
             settingsWindow = window
         })
         .sheet(item: $backupFlow) { flow in
-            BackupPasswordSheet(flow: flow) { password in
+            BackupPasswordSheet(flow: flow, submit: { password in
                 switch flow {
                 case let .export(url):
                     do {
                         try store.exportConfigurationBackup(password: password).write(to: url, options: .atomic)
                         store.showActionConfirmation("Configuration backup exported")
-                    } catch { store.errorMessage = error.localizedDescription }
+                        return .success()
+                    } catch {
+                        return .failure(error.localizedDescription)
+                    }
                 case let .importBackup(data):
-                    Task {
-                        do { try await store.importConfigurationBackup(bytes: data, password: password) }
-                        catch { store.errorMessage = backupImportErrorMessage(error) }
+                    do {
+                        let outcome = try await store.importConfigurationBackup(bytes: data, password: password)
+                        return .success(outcome.confirmationMessage)
+                    } catch {
+                        return .failure(backupImportErrorMessage(error))
                     }
                 }
-            }
+            }, onSuccess: { message in
+                store.showActionConfirmation(message)
+            })
         }
         .onAppear {
             if let credentials = try? CredentialStore.load() { server = credentials.server; key = credentials.apiKey }
@@ -831,28 +849,47 @@ private enum BackupPasswordFlow: Identifiable {
 private struct BackupPasswordSheet: View {
     @Environment(\.dismiss) private var dismiss
     let flow: BackupPasswordFlow
-    let submit: (String) -> Void
+    let submit: (String) async -> BackupPasswordSubmissionResult
+    let onSuccess: (String) -> Void
     @State private var password = ""
     @State private var confirmation = ""
-    @State private var error: String?
+    @State private var submission = BackupPasswordSubmissionState()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(flow.isExport ? "Encrypt Configuration Backup" : "Import Configuration Backup").font(.title2.bold())
             SecureField("Backup Password", text: $password)
             if flow.isExport { SecureField("Confirm Password", text: $confirmation) }
-            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+            if submission.isProcessing { ProgressView().controlSize(.small) }
+            if let error = submission.error { Text(error).font(.caption).foregroundStyle(.red) }
             Text("FluxNews cannot recover this password.").font(.caption).foregroundStyle(.secondary)
-            HStack { Spacer(); Button("Cancel") { dismiss() }; Button(flow.isExport ? "Export" : "Import") { perform() }.keyboardShortcut(.defaultAction) }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.disabled(submission.isProcessing)
+                Button(submission.isProcessing ? "Processing…" : (flow.isExport ? "Export" : "Import")) { perform() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(submission.isProcessing)
+            }
         }
         .padding(20)
         .frame(width: 360)
+        .onChange(of: password) { _, _ in submission.clearError() }
+        .onChange(of: confirmation) { _, _ in submission.clearError() }
     }
     private func perform() {
-        guard !password.isEmpty else { error = "Enter a backup password."; return }
-        guard !flow.isExport || password == confirmation else { error = "The passwords do not match."; return }
-        submit(password)
-        dismiss()
+        guard submission.begin(isExport: flow.isExport, password: password, confirmation: confirmation) else { return }
+        Task {
+            switch await submit(password) {
+            case let .success(confirmation):
+                guard submission.complete(error: nil) else { return }
+                dismiss()
+                if let confirmation {
+                    DispatchQueue.main.async { onSuccess(confirmation) }
+                }
+            case let .failure(error):
+                _ = submission.complete(error: error)
+            }
+        }
     }
 }
 

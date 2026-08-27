@@ -723,7 +723,7 @@ final class BrowserStore: ObservableObject {
         )
         return Data(try exportConfigBackup(input: input, password: password))
     }
-    func importConfigurationBackup(bytes: Data, password: String) async throws {
+    func importConfigurationBackup(bytes: Data, password: String) async throws -> BackupImportOutcome {
         let restored = try await Task.detached(priority: .userInitiated) {
             try parseConfigBackup(bytes: bytes, password: password, expectedPlatform: .macos)
         }.value
@@ -753,8 +753,7 @@ final class BrowserStore: ObservableObject {
             throw error
         }
         invalidateLocalPresentation()
-        showActionConfirmation("Backup imported successfully")
-        syncAfterImport()
+        return await syncAfterImport()
     }
     func rebuildLocalState() {
         guard let core, !isLoading else { return }
@@ -794,19 +793,18 @@ final class BrowserStore: ObservableObject {
         }
     }
     var onInvalidateContent: (() -> Void)?
-    private func syncAfterImport() {
-        guard let core else { return }
+    private func syncAfterImport() async -> BackupImportOutcome {
+        guard let core else { return .synchronizationFailed }
         isLoading = true
-        let store = WeakBrowserStore(self)
-        Task.detached {
-            let result = Result { try core.sync(reason: .manual) }
-            await MainActor.run {
-                guard let store = store.value else { return }
-                store.isLoading = false
-                if case .failure = result {
-                    store.errorMessage = "Backup imported successfully. Synchronization could not be completed."
-                }
-            }
+        let result = await Task.detached {
+            Result { try core.sync(reason: .manual) }
+        }.value
+        isLoading = false
+        switch result {
+        case .success:
+            return .synchronized
+        case .failure:
+            return .synchronizationFailed
         }
     }
     private func invalidateLocalPresentation() {

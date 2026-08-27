@@ -10,6 +10,26 @@
     "%@ articles marked as read" : {
 
     },
+    "Backup imported successfully." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sicherung wurde erfolgreich importiert."
+          }
+        }
+      }
+    },
+    "Backup imported successfully. Synchronization could not be completed and will be retried later." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sicherung wurde erfolgreich importiert. Die Synchronisierung konnte nicht abgeschlossen werden und wird später erneut versucht."
+          }
+        }
+      }
+    },
     "Category in FluxNews" : {
       "comment" : "Spotlight category description"
     },
