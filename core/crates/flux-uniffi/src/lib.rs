@@ -4,6 +4,8 @@ use flux_core::domain;
 use flux_core::{CoreConfig, FluxCore};
 use std::sync::Arc;
 
+use flux_core::config_backup;
+
 uniffi::setup_scaffolding!();
 
 #[derive(uniffi::Record)]
@@ -13,6 +15,44 @@ pub struct InitializationConfig {
     pub media: String,
     pub base_url: String,
     pub api_key: String,
+}
+#[derive(uniffi::Enum)]
+pub enum BackupPlatform {
+    Macos,
+    Ios,
+    Android,
+}
+#[derive(uniffi::Record)]
+pub struct BackupAccount {
+    pub installation_base: String,
+    pub api_key: String,
+}
+#[derive(uniffi::Record)]
+pub struct PlatformSettingsPayload {
+    pub schema_version: u32,
+    pub data_json: String,
+}
+#[derive(uniffi::Record)]
+pub struct ConfigBackupInput {
+    pub platform: BackupPlatform,
+    pub account: BackupAccount,
+    pub core_settings: CoreSettings,
+    pub feed_preferences: Vec<FeedPreferences>,
+    pub platform_settings: PlatformSettingsPayload,
+}
+#[derive(uniffi::Record)]
+pub struct ConfigBackupRestoreModel {
+    pub platform: BackupPlatform,
+    pub account: BackupAccount,
+    pub core_settings: CoreSettings,
+    pub feed_preferences: Vec<FeedPreferences>,
+    pub platform_settings: PlatformSettingsPayload,
+}
+#[derive(uniffi::Record)]
+pub struct ConfigurationSnapshot {
+    pub installation_base: String,
+    pub core_settings: CoreSettings,
+    pub feed_preferences: Vec<FeedPreferences>,
 }
 #[derive(uniffi::Record)]
 pub struct AccountValidationResult {
@@ -413,6 +453,25 @@ pub enum AccountValidationError {
     InvalidResponse,
     ServerUnavailable,
 }
+#[derive(Debug, uniffi::Error)]
+pub enum ConfigBackupError {
+    EmptyPassword,
+    NotFluxBackup,
+    UnsupportedVersion,
+    PlatformMismatch,
+    InvalidCryptoMetadata,
+    DecryptionFailed,
+    MalformedPayload,
+    InvalidContents,
+    InputTooLarge,
+    Internal,
+}
+
+impl std::fmt::Display for ConfigBackupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
 
 impl std::fmt::Display for AccountValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -449,6 +508,23 @@ pub fn validate_miniflux_account(
     FluxCore::validate_miniflux_account(&server_url, &api_key)
         .map(Into::into)
         .map_err(map_account_validation_error)
+}
+#[uniffi::export]
+pub fn export_config_backup(
+    input: ConfigBackupInput,
+    password: String,
+) -> Result<Vec<u8>, ConfigBackupError> {
+    config_backup::export_config_backup(input.try_into()?, &password).map_err(Into::into)
+}
+#[uniffi::export]
+pub fn parse_config_backup(
+    bytes: Vec<u8>,
+    password: String,
+    expected_platform: BackupPlatform,
+) -> Result<ConfigBackupRestoreModel, ConfigBackupError> {
+    config_backup::parse_config_backup(&bytes, &password, expected_platform.into())
+        .map(Into::into)
+        .map_err(Into::into)
 }
 
 #[uniffi::export]
@@ -501,6 +577,26 @@ impl Flux {
     }
     pub fn reset_core_state(&self) -> Result<(), FluxError> {
         self.core.reset_core_state().map_err(map_error)
+    }
+    pub fn configuration_snapshot(&self) -> Result<ConfigurationSnapshot, FluxError> {
+        self.core
+            .configuration_snapshot()
+            .map(Into::into)
+            .map_err(map_error)
+    }
+    pub fn replace_configuration(
+        &self,
+        installation_base: String,
+        core_settings: CoreSettings,
+        feed_preferences: Vec<FeedPreferences>,
+    ) -> Result<(), FluxError> {
+        self.core
+            .replace_configuration(
+                installation_base,
+                core_settings.into(),
+                feed_preferences.into_iter().map(Into::into).collect(),
+            )
+            .map_err(map_error)
     }
     pub fn query_articles(&self, query: ArticleQuery) -> Result<Vec<ArticleSummary>, FluxError> {
         self.core
@@ -839,6 +935,112 @@ impl From<DetailRenderingMode> for domain::DetailRenderingMode {
         match value {
             DetailRenderingMode::Rendered => Self::Rendered,
             DetailRenderingMode::TextOnly => Self::TextOnly,
+        }
+    }
+}
+impl From<CoreSettings> for domain::CoreSettings {
+    fn from(value: CoreSettings) -> Self {
+        Self {
+            retention: value.retention.into(),
+            delivery_mode: value.delivery_mode.into(),
+            background_sync_enabled: value.background_sync_enabled,
+            detail_character_limit: value.detail_character_limit,
+        }
+    }
+}
+impl From<FeedPreferences> for domain::FeedPreferences {
+    fn from(value: FeedPreferences) -> Self {
+        Self {
+            feed_id: value.feed_id,
+            system_notifications_enabled: value.system_notifications_enabled,
+            detail_rendering: value.detail_rendering.into(),
+            truncate_detail: value.truncate_detail,
+            open_in_miniflux: value.open_in_miniflux,
+        }
+    }
+}
+impl From<BackupPlatform> for config_backup::BackupPlatform {
+    fn from(value: BackupPlatform) -> Self {
+        match value {
+            BackupPlatform::Macos => Self::Macos,
+            BackupPlatform::Ios => Self::Ios,
+            BackupPlatform::Android => Self::Android,
+        }
+    }
+}
+impl From<config_backup::BackupPlatform> for BackupPlatform {
+    fn from(value: config_backup::BackupPlatform) -> Self {
+        match value {
+            config_backup::BackupPlatform::Macos => Self::Macos,
+            config_backup::BackupPlatform::Ios => Self::Ios,
+            config_backup::BackupPlatform::Android => Self::Android,
+        }
+    }
+}
+impl TryFrom<PlatformSettingsPayload> for config_backup::PlatformSettingsPayload {
+    type Error = ConfigBackupError;
+    fn try_from(value: PlatformSettingsPayload) -> Result<Self, Self::Error> {
+        Ok(Self {
+            schema_version: value.schema_version,
+            data: serde_json::from_str(&value.data_json)
+                .map_err(|_| ConfigBackupError::InvalidContents)?,
+        })
+    }
+}
+impl TryFrom<ConfigBackupInput> for config_backup::ConfigBackupInput {
+    type Error = ConfigBackupError;
+    fn try_from(value: ConfigBackupInput) -> Result<Self, Self::Error> {
+        Ok(Self {
+            platform: value.platform.into(),
+            account: config_backup::BackupAccount {
+                installation_base: value.account.installation_base,
+                api_key: value.account.api_key,
+            },
+            core_settings: value.core_settings.into(),
+            feed_preferences: value.feed_preferences.into_iter().map(Into::into).collect(),
+            platform_settings: value.platform_settings.try_into()?,
+        })
+    }
+}
+impl From<config_backup::ConfigBackupRestoreModel> for ConfigBackupRestoreModel {
+    fn from(value: config_backup::ConfigBackupRestoreModel) -> Self {
+        Self {
+            platform: value.platform.into(),
+            account: BackupAccount {
+                installation_base: value.account.installation_base,
+                api_key: value.account.api_key,
+            },
+            core_settings: value.core_settings.into(),
+            feed_preferences: value.feed_preferences.into_iter().map(Into::into).collect(),
+            platform_settings: PlatformSettingsPayload {
+                schema_version: value.platform_settings.schema_version,
+                data_json: value.platform_settings.data.to_string(),
+            },
+        }
+    }
+}
+impl From<flux_core::ConfigurationSnapshot> for ConfigurationSnapshot {
+    fn from(value: flux_core::ConfigurationSnapshot) -> Self {
+        Self {
+            installation_base: value.installation_base,
+            core_settings: value.core_settings.into(),
+            feed_preferences: value.feed_preferences.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+impl From<config_backup::ConfigBackupError> for ConfigBackupError {
+    fn from(value: config_backup::ConfigBackupError) -> Self {
+        match value {
+            config_backup::ConfigBackupError::EmptyPassword => Self::EmptyPassword,
+            config_backup::ConfigBackupError::NotFluxBackup => Self::NotFluxBackup,
+            config_backup::ConfigBackupError::UnsupportedVersion => Self::UnsupportedVersion,
+            config_backup::ConfigBackupError::PlatformMismatch => Self::PlatformMismatch,
+            config_backup::ConfigBackupError::InvalidCryptoMetadata => Self::InvalidCryptoMetadata,
+            config_backup::ConfigBackupError::DecryptionFailed => Self::DecryptionFailed,
+            config_backup::ConfigBackupError::MalformedPayload => Self::MalformedPayload,
+            config_backup::ConfigBackupError::InvalidContents => Self::InvalidContents,
+            config_backup::ConfigBackupError::InputTooLarge => Self::InputTooLarge,
+            config_backup::ConfigBackupError::Internal => Self::Internal,
         }
     }
 }

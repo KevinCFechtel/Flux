@@ -50,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             guard let self else { return }
             self.readerWindow.show(article: article, togglesPreview: togglesPreview, preferredScreen: self.detailScreen())
         }
+        store.onInvalidateContent = { [weak self] in self?.readerWindow.hide() }
         catalogObservation = store.$catalog.dropFirst().removeDuplicates().sink { [weak self] catalog in
             AppRouter.shared.updateCatalog(catalog)
             self?.spotlightIndexer.update(catalog)

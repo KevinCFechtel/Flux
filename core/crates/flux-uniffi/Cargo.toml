@@ -9,4 +9,5 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 flux-core = { path = "../flux-core" }
+serde_json.workspace = true
 uniffi.workspace = true

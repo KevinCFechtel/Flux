@@ -578,9 +578,29 @@ authoritative catalog. Synchronized articles, cache/media, pending mutations,
 notification/runtime state, and presentation state are excluded.
 
 Backup parsing validates and returns a restore model without mutating core or
-native state. A later native restore phase validates candidate Miniflux
-credentials and performs the transactional replacement. Native settings remain
-owned by their platform even while carried in that platform's backup.
+native state. The Core parser is authoritative for import validity. macOS
+decodes its explicit `MacOSBackupSettingsV1` payload only to safely apply native
+settings; it does not reinterpret Core data. Import does not validate candidate
+credentials, call `/v1/version`, or otherwise require Miniflux connectivity.
+A valid backup replaces the account association, credentials, CoreSettings,
+FeedPreferences, and native configuration; it clears synchronized state and
+then attempts a normal sync. A failed follow-up sync does not roll back a
+successful import. Native settings remain owned by their platform even while
+carried in that platform's backup.
+
+On macOS, the v1 native payload explicitly includes Mark Read on Scrollover,
+Sync on Start, article list style, Preview Lines, Click on News, Global
+Shortcut, and Launch at Login. It excludes navigation/Spotlight caches, Reader
+window geometry, AppKit window restoration, and other transient presentation
+state. Rebuild preserves configured account, credentials, CoreSettings,
+FeedPreferences, and native settings while clearing synchronized state and
+pending mutations. Full Reset is local-only: it resets Core state, removes the
+Keychain credential, unregisters Launch at Login, resets explicit native
+settings, and returns FluxNews to fresh-install semantics.
+
+Manual Account save remains intentionally different from backup restore:
+manual edits validate credentials with `GET /v1/version` before commit; backup
+restore never performs that validation.
 
 `rebuild_local_state()` destructively clears synchronized local state,
 pending mutations, notification bookkeeping, sync metadata, and regenerable

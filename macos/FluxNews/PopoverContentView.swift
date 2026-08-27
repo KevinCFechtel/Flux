@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum PopoverLayout {
     static let rowWidth: CGFloat = 620
@@ -639,6 +640,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     case reading
     case systemNotifications
     case general
+    case data
 
     var id: Self { self }
 
@@ -649,6 +651,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .reading: "Reading"
         case .systemNotifications: "System Notifications"
         case .general: "General"
+        case .data: "Data & Backup"
         }
     }
 }
@@ -662,6 +665,8 @@ private struct SettingsView: View {
     @State private var launchAtLogin = false
     @State private var globalShortcut = GlobalShortcutChoice.optionCommandF
     @State private var section: SettingsSection = .account
+    @State private var backupFlow: BackupPasswordFlow?
+    @State private var settingsWindow: NSWindow?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -678,10 +683,38 @@ private struct SettingsView: View {
                     .padding(20)
             }
             Divider()
-            HStack { Spacer(); Button("Cancel") { store.settingsVisible = false }; Button(store.isSavingAccount ? "Validating…" : "Save") { store.saveAccount(server: server.trimmingCharacters(in: .whitespacesAndNewlines), apiKey: key.trimmingCharacters(in: .whitespacesAndNewlines), launchAtLogin: launchAtLogin, scrollover: scrollover, syncOnStart: syncOnStart, globalShortcut: globalShortcut) }.keyboardShortcut(.defaultAction).disabled(server.isEmpty || key.isEmpty || store.isSavingAccount) }
+            HStack {
+                Spacer()
+                Button(section == .account ? "Cancel" : "Done") { store.settingsVisible = false }
+                if section == .account {
+                    Button(store.isSavingAccount ? "Validating…" : "Save") { store.saveAccount(server: server.trimmingCharacters(in: .whitespacesAndNewlines), apiKey: key.trimmingCharacters(in: .whitespacesAndNewlines), launchAtLogin: launchAtLogin, scrollover: scrollover, syncOnStart: syncOnStart, globalShortcut: globalShortcut) }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(server.isEmpty || key.isEmpty || store.isSavingAccount)
+                }
+            }
                 .padding(16)
         }
         .frame(width: 700, height: 430)
+        .background(SettingsWindowReader { window in
+            guard settingsWindow !== window else { return }
+            settingsWindow = window
+        })
+        .sheet(item: $backupFlow) { flow in
+            BackupPasswordSheet(flow: flow) { password in
+                switch flow {
+                case let .export(url):
+                    do {
+                        try store.exportConfigurationBackup(password: password).write(to: url, options: .atomic)
+                        store.showActionConfirmation("Configuration backup exported")
+                    } catch { store.errorMessage = error.localizedDescription }
+                case let .importBackup(data):
+                    Task {
+                        do { try await store.importConfigurationBackup(bytes: data, password: password) }
+                        catch { store.errorMessage = backupImportErrorMessage(error) }
+                    }
+                }
+            }
+        }
         .onAppear {
             if let credentials = try? CredentialStore.load() { server = credentials.server; key = credentials.apiKey }
             launchAtLogin = CredentialStore.launchAtLoginEnabled
@@ -702,6 +735,8 @@ private struct SettingsView: View {
             SystemNotificationsSettingsView(store: store)
         case .general:
             GeneralSettingsView(launchAtLogin: $launchAtLogin, globalShortcut: $globalShortcut, registrationError: store.globalShortcutRegistrationError)
+        case .data:
+            DataBackupSettingsView(store: store, export: chooseExportDestination, importBackup: chooseImportSource, filePanelsAvailable: settingsWindow != nil)
         }
     }
     private var retention: Binding<ReadArticleRetention> {
@@ -727,6 +762,152 @@ private struct SettingsView: View {
             get: { store.coreSettings?.detailCharacterLimit ?? 10_000 },
             set: { store.setDetailCharacterLimit($0) }
         )
+    }
+    private func chooseExportDestination() {
+        guard let settingsWindow, settingsWindow.attachedSheet == nil else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "fluxbackup") ?? .data]
+        panel.nameFieldStringValue = "FluxNews Backup.fluxbackup"
+        panel.beginSheetModal(for: settingsWindow) { response in
+            guard response == .OK, let url = panel.url else { return }
+            // AppKit must finish detaching its sheet before SwiftUI presents the password sheet.
+            DispatchQueue.main.async { backupFlow = .export(url) }
+        }
+    }
+    private func chooseImportSource() {
+        guard let settingsWindow, settingsWindow.attachedSheet == nil else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "fluxbackup") ?? .data]
+        panel.allowsMultipleSelection = false
+        panel.beginSheetModal(for: settingsWindow) { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                let data = try Data(contentsOf: url)
+                // AppKit must finish detaching its sheet before SwiftUI presents the password sheet.
+                DispatchQueue.main.async { backupFlow = .importBackup(data) }
+            } catch {
+                store.errorMessage = error.localizedDescription
+            }
+        }
+    }
+}
+
+private struct SettingsWindowReader: NSViewRepresentable {
+    let onWindowChanged: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> SettingsWindowReportingView {
+        SettingsWindowReportingView(onWindowChanged: onWindowChanged)
+    }
+
+    func updateNSView(_ view: SettingsWindowReportingView, context: Context) {
+        view.onWindowChanged = onWindowChanged
+        onWindowChanged(view.window)
+    }
+}
+
+private final class SettingsWindowReportingView: NSView {
+    var onWindowChanged: (NSWindow?) -> Void
+
+    init(onWindowChanged: @escaping (NSWindow?) -> Void) {
+        self.onWindowChanged = onWindowChanged
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onWindowChanged(window)
+    }
+}
+
+private enum BackupPasswordFlow: Identifiable {
+    case export(URL)
+    case importBackup(Data)
+    var id: String { switch self { case .export: "export"; case .importBackup: "import" } }
+    var isExport: Bool { if case .export = self { true } else { false } }
+}
+
+private struct BackupPasswordSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let flow: BackupPasswordFlow
+    let submit: (String) -> Void
+    @State private var password = ""
+    @State private var confirmation = ""
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(flow.isExport ? "Encrypt Configuration Backup" : "Import Configuration Backup").font(.title2.bold())
+            SecureField("Backup Password", text: $password)
+            if flow.isExport { SecureField("Confirm Password", text: $confirmation) }
+            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+            Text("FluxNews cannot recover this password.").font(.caption).foregroundStyle(.secondary)
+            HStack { Spacer(); Button("Cancel") { dismiss() }; Button(flow.isExport ? "Export" : "Import") { perform() }.keyboardShortcut(.defaultAction) }
+        }
+        .padding(20)
+        .frame(width: 360)
+    }
+    private func perform() {
+        guard !password.isEmpty else { error = "Enter a backup password."; return }
+        guard !flow.isExport || password == confirmation else { error = "The passwords do not match."; return }
+        submit(password)
+        dismiss()
+    }
+}
+
+private struct DataBackupSettingsView: View {
+    @ObservedObject var store: BrowserStore
+    let export: () -> Void
+    let importBackup: () -> Void
+    let filePanelsAvailable: Bool
+    @State private var confirmRebuild = false
+    @State private var confirmReset = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            GroupBox("Configuration Backup") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Export or import your account, FluxNews settings, Feed Settings, and macOS preferences. Backups are password encrypted.")
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Button("Export Configuration Backup...") { export() }
+                        Button("Import Configuration Backup...") { importBackup() }
+                    }
+                    .disabled(!filePanelsAvailable)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(4)
+            }
+            GroupBox("Destructive Operations") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Button("Rebuild Local State...") { confirmRebuild = true }
+                    Text("Discard synchronized local content. Miniflux becomes authoritative again; FluxNews and Feed Settings are preserved. Unsynchronized Read or Star changes may be lost.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Divider()
+                    Button("Reset FluxNews...") { confirmReset = true }.foregroundStyle(.red)
+                    Text("Remove the configured account, API key, Core and Feed Settings, local data, and FluxNews preferences.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(4)
+            }
+            Spacer()
+        }
+        .alert("Rebuild Local State?", isPresented: $confirmRebuild) {
+            Button("Cancel", role: .cancel) {}
+            Button("Rebuild", role: .destructive) { store.rebuildLocalState() }
+        } message: { Text("Synchronized local content will be discarded and Miniflux will become authoritative again. FluxNews and Feed Settings are preserved.") }
+        .alert("Reset FluxNews?", isPresented: $confirmReset) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) { store.resetFluxNews() }
+        } message: { Text("This removes your account, API key, settings, Feed Settings, and local data. FluxNews will return to its first-run state.") }
+    }
+}
+
+private func backupImportErrorMessage(_ error: Error) -> String {
+    switch error {
+    case ConfigBackupError.NotFluxBackup: "Not a valid FluxNews backup."
+    case ConfigBackupError.PlatformMismatch: "This backup was created for another platform."
+    case ConfigBackupError.UnsupportedVersion: "This backup uses a newer unsupported format."
+    case ConfigBackupError.DecryptionFailed: "The backup could not be decrypted. The password may be incorrect or the file may be damaged."
+    default: "The backup could not be imported. \(error.localizedDescription)"
     }
 }
 

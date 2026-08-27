@@ -174,6 +174,67 @@ impl Store {
                 .map_err(|_| CoreError::persistence("invalid detail character limit setting"))?,
         })
     }
+    pub fn all_feed_preferences(&self) -> Result<Vec<FeedPreferences>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut statement = connection
+            .prepare("SELECT feed_id, system_notifications_enabled, detail_rendering, truncate_detail, open_in_miniflux FROM feed_preferences ORDER BY feed_id")
+            .map_err(sql_error)?;
+        statement
+            .query_map([], |row| {
+                Ok(FeedPreferences {
+                    feed_id: row.get(0)?,
+                    system_notifications_enabled: row.get(1)?,
+                    detail_rendering: match row.get::<_, String>(2)?.as_str() {
+                        "rendered" => DetailRenderingMode::Rendered,
+                        "text_only" => DetailRenderingMode::TextOnly,
+                        _ => return Err(rusqlite::Error::InvalidQuery),
+                    },
+                    truncate_detail: row.get(3)?,
+                    open_in_miniflux: row.get(4)?,
+                })
+            })
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)
+    }
+    /// Replaces all Core configuration and discards server-derived state in one transaction.
+    pub fn replace_configuration(
+        &self,
+        base_url: &str,
+        settings: &CoreSettings,
+        preferences: &[FeedPreferences],
+    ) -> Result<(), CoreError> {
+        if !matches!(settings.detail_character_limit, 5_000 | 10_000 | 20_000) {
+            return Err(CoreError::data("unsupported detail character limit"));
+        }
+        let mut ids = HashSet::with_capacity(preferences.len());
+        if preferences
+            .iter()
+            .any(|preference| preference.feed_id <= 0 || !ids.insert(preference.feed_id))
+        {
+            return Err(CoreError::data(
+                "feed preferences must have unique positive feed IDs",
+            ));
+        }
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        clear_synchronized_state(&tx, true)?;
+        tx.execute("INSERT INTO core_settings (key, value) VALUES ('base_url', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [base_url]).map_err(sql_error)?;
+        tx.execute("INSERT INTO core_settings (key, value) VALUES ('read_article_retention', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [settings.retention.days().to_string()]).map_err(sql_error)?;
+        tx.execute("INSERT INTO core_settings (key, value) VALUES ('delivery_mode', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [match settings.delivery_mode { DeliveryMode::Live => "live", DeliveryMode::Deferred => "deferred" }]).map_err(sql_error)?;
+        tx.execute("INSERT INTO core_settings (key, value) VALUES ('background_sync_enabled', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [if settings.background_sync_enabled { "1" } else { "0" }]).map_err(sql_error)?;
+        tx.execute("INSERT INTO core_settings (key, value) VALUES ('detail_character_limit', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [settings.detail_character_limit.to_string()]).map_err(sql_error)?;
+        for preference in preferences {
+            tx.execute("INSERT INTO feed_preferences(feed_id, system_notifications_enabled, detail_rendering, truncate_detail, open_in_miniflux) VALUES(?1, ?2, ?3, ?4, ?5)", params![preference.feed_id, preference.system_notifications_enabled, match preference.detail_rendering { DetailRenderingMode::Rendered => "rendered", DetailRenderingMode::TextOnly => "text_only" }, preference.truncate_detail, preference.open_in_miniflux]).map_err(sql_error)?;
+        }
+        tx.commit().map_err(sql_error)
+    }
     pub fn set_retention(&self, retention: ReadArticleRetention) -> Result<(), CoreError> {
         self.set_setting("read_article_retention", &retention.days().to_string())
     }
@@ -1043,6 +1104,59 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM categories", [], |row| row.get(0))
             .unwrap();
         assert_eq!(category_count, 1);
+    }
+
+    #[test]
+    fn configuration_replacement_discards_server_state_and_replaces_orphan_preferences() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        store.set_base_url("https://old.example").unwrap();
+        store
+            .connection
+            .lock()
+            .unwrap()
+            .execute_batch("INSERT INTO categories VALUES(1, 'Old'); INSERT INTO feeds VALUES(2, 1, 'Old Feed'); INSERT INTO articles(id,feed_id,title,url,published_at,is_read,is_starred,raw_html_content,preview) VALUES(3,2,'Old','https://old.example/post','2024-01-01T00:00:00Z',0,0,'',''); INSERT INTO pending_mutations VALUES(3,'read',1,1);")
+            .unwrap();
+        store.set_feed_open_in_miniflux(2, true).unwrap();
+
+        let settings = CoreSettings {
+            retention: ReadArticleRetention::Days30,
+            delivery_mode: DeliveryMode::Live,
+            background_sync_enabled: true,
+            detail_character_limit: 5_000,
+        };
+        let preferences = vec![FeedPreferences {
+            feed_id: 999,
+            system_notifications_enabled: true,
+            detail_rendering: DetailRenderingMode::TextOnly,
+            truncate_detail: true,
+            open_in_miniflux: true,
+        }];
+        store
+            .replace_configuration("https://new.example", &settings, &preferences)
+            .unwrap();
+
+        assert_eq!(
+            store.base_url().unwrap().as_deref(),
+            Some("https://new.example")
+        );
+        assert_eq!(store.core_settings().unwrap(), settings);
+        assert_eq!(store.all_feed_preferences().unwrap(), preferences);
+        let connection = store.connection.lock().unwrap();
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>("SELECT COUNT(*) FROM articles", [], |row| row.get(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>("SELECT COUNT(*) FROM pending_mutations", [], |row| row
+                    .get(0))
+                .unwrap(),
+            0
+        );
     }
 
     #[test]

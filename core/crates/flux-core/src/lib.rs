@@ -46,6 +46,13 @@ pub struct CoreConfig {
     pub api_key: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConfigurationSnapshot {
+    pub installation_base: String,
+    pub core_settings: CoreSettings,
+    pub feed_preferences: Vec<FeedPreferences>,
+}
+
 /// Long-lived, thread-safe shared core. No API key is written to disk.
 pub struct FluxCore {
     store: Arc<Store>,
@@ -337,6 +344,43 @@ impl FluxCore {
                 .lock()
                 .map_err(|_| CoreError::internal("delivery mode lock poisoned"))? =
                 CoreSettings::default().delivery_mode;
+            Ok(())
+        });
+        self.diagnostics.flush();
+        result
+    }
+
+    pub fn configuration_snapshot(&self) -> Result<ConfigurationSnapshot, CoreError> {
+        Ok(ConfigurationSnapshot {
+            installation_base: self.store.base_url()?.unwrap_or_default(),
+            core_settings: self.store.core_settings()?,
+            feed_preferences: self.store.all_feed_preferences()?,
+        })
+    }
+
+    /// Applies a previously parsed configuration backup without contacting Miniflux.
+    pub fn replace_configuration(
+        &self,
+        installation_base: String,
+        core_settings: CoreSettings,
+        feed_preferences: Vec<FeedPreferences>,
+    ) -> Result<(), CoreError> {
+        let canonical_base = normalize_installation_base(&installation_base)
+            .map_err(|_| CoreError::invalid_configuration("backup installation base is invalid"))?;
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            let _sync = self
+                .sync_gate
+                .lock()
+                .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+            self.store
+                .replace_configuration(&canonical_base, &core_settings, &feed_preferences)?;
+            self.clear_regenerable_caches();
+            self.clear_backoff()?;
+            *self
+                .delivery_mode
+                .lock()
+                .map_err(|_| CoreError::internal("delivery mode lock poisoned"))? =
+                core_settings.delivery_mode;
             Ok(())
         });
         self.diagnostics.flush();

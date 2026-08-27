@@ -9,6 +9,32 @@ enum BrowserScope: Hashable { case all, starred, search, category(Int64), feed(I
 enum ArticleListStyle: String { case row, card }
 struct FeedSettingsTarget: Identifiable { let id: Int64; let title: String }
 
+private struct MacOSBackupSettingsV1: Codable {
+    static let version: UInt32 = 1
+    let version: UInt32
+    let markReadOnScrollover: Bool
+    let syncOnStart: Bool
+    let articleListStyle: String
+    let previewLines: Int
+    let clickOnNews: String
+    let globalShortcut: String
+    let launchAtLogin: Bool
+}
+
+private enum ConfigurationBackupPresentationError: LocalizedError {
+    case noConfiguredAccount
+    case unsupportedPlatformSettings
+    case coreInitialization
+
+    var errorDescription: String? {
+        switch self {
+        case .noConfiguredAccount: "Configure a Miniflux account before exporting a backup."
+        case .unsupportedPlatformSettings: "This backup contains unsupported macOS settings."
+        case .coreInitialization: "The restored account could not be activated locally."
+        }
+    }
+}
+
 @MainActor
 final class BrowserStore: ObservableObject {
     @Published var articles: [ArticleSummary] = []
@@ -98,7 +124,7 @@ final class BrowserStore: ObservableObject {
     }
 
     @discardableResult
-    func configure(server: String, apiKey: String, refreshVersion: Bool = true) -> Bool {
+    func configure(server: String, apiKey: String, refreshVersion: Bool = true, startSync: Bool = true) -> Bool {
         let fm = FileManager.default
         let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("FluxNews", isDirectory: true)
         let cache = fm.urls(for: .cachesDirectory, in: .userDomainMask).first!.appendingPathComponent("FluxNews", isDirectory: true)
@@ -114,7 +140,7 @@ final class BrowserStore: ObservableObject {
             NativeLog.app.notice("core configured")
             resetPresentation()
             reloadNavigationAndCounts(); reloadVisibleArticles()
-            if syncOnStartEnabled { sync(reason: .appStart) }
+            if startSync && syncOnStartEnabled { sync(reason: .appStart) }
             if settings.backgroundSyncEnabled { activatePeriodicSyncScheduling() }
             else { deactivatePeriodicSyncScheduling() }
             if refreshVersion { refreshMinifluxVersion(server: server, apiKey: apiKey, for: configuredCore) }
@@ -683,6 +709,154 @@ final class BrowserStore: ObservableObject {
     func setArticlePreviewLines(_ lines: ArticlePreviewLines) { articlePreviewLines = lines; UserDefaults.standard.set(lines.rawValue, forKey: "FluxNews.articlePreviewLines") }
     func setClickOnNews(_ preference: ClickOnNews) { clickOnNews = preference; UserDefaults.standard.set(preference.rawValue, forKey: "FluxNews.clickOnNews") }
     func setGlobalShortcut(_ shortcut: GlobalShortcutChoice) { guard shortcut != globalShortcut else { return }; globalShortcut = shortcut; shortcut.store() }
+    func exportConfigurationBackup(password: String) throws -> Data {
+        guard let core else { throw ConfigurationBackupPresentationError.noConfiguredAccount }
+        guard let credentials = try CredentialStore.load() else { throw ConfigurationBackupPresentationError.noConfiguredAccount }
+        let snapshot = try core.configurationSnapshot()
+        let payload = try JSONEncoder().encode(nativeBackupSettings())
+        let input = ConfigBackupInput(
+            platform: .macos,
+            account: BackupAccount(installationBase: snapshot.installationBase, apiKey: credentials.apiKey),
+            coreSettings: snapshot.coreSettings,
+            feedPreferences: snapshot.feedPreferences,
+            platformSettings: PlatformSettingsPayload(schemaVersion: MacOSBackupSettingsV1.version, dataJson: String(decoding: payload, as: UTF8.self))
+        )
+        return Data(try exportConfigBackup(input: input, password: password))
+    }
+    func importConfigurationBackup(bytes: Data, password: String) async throws {
+        let restored = try await Task.detached(priority: .userInitiated) {
+            try parseConfigBackup(bytes: bytes, password: password, expectedPlatform: .macos)
+        }.value
+        guard restored.platformSettings.schemaVersion == MacOSBackupSettingsV1.version else {
+            throw ConfigurationBackupPresentationError.unsupportedPlatformSettings
+        }
+        let native = try JSONDecoder().decode(MacOSBackupSettingsV1.self, from: Data(restored.platformSettings.dataJson.utf8))
+        guard native.version == MacOSBackupSettingsV1.version else {
+            throw ConfigurationBackupPresentationError.unsupportedPlatformSettings
+        }
+        guard let core else { throw ConfigurationBackupPresentationError.noConfiguredAccount }
+        let previousSnapshot = try core.configurationSnapshot()
+        let previousCredentials = try CredentialStore.load()
+        let previousNative = nativeBackupSettings()
+        do {
+            try core.replaceConfiguration(installationBase: restored.account.installationBase, coreSettings: restored.coreSettings, feedPreferences: restored.feedPreferences)
+            try CredentialStore.save(MinifluxCredentials(server: restored.account.installationBase, apiKey: restored.account.apiKey))
+            guard configure(server: restored.account.installationBase, apiKey: restored.account.apiKey, refreshVersion: false, startSync: false) else {
+                throw ConfigurationBackupPresentationError.coreInitialization
+            }
+            try applyNativeBackupSettings(native)
+        } catch {
+            try? core.replaceConfiguration(installationBase: previousSnapshot.installationBase, coreSettings: previousSnapshot.coreSettings, feedPreferences: previousSnapshot.feedPreferences)
+            try? restoreCredentials(previousCredentials)
+            _ = configure(server: previousSnapshot.installationBase, apiKey: previousCredentials?.apiKey ?? "", refreshVersion: false, startSync: false)
+            try? applyNativeBackupSettings(previousNative)
+            throw error
+        }
+        invalidateLocalPresentation()
+        showActionConfirmation("Backup imported successfully")
+        syncAfterImport()
+    }
+    func rebuildLocalState() {
+        guard let core, !isLoading else { return }
+        isLoading = true
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result { try core.rebuildLocalState() }
+            await MainActor.run {
+                guard let store = store.value else { return }
+                store.invalidateLocalPresentation()
+                store.isLoading = false
+                switch result {
+                case .success: store.showActionConfirmation("Local state rebuilt")
+                case .failure: store.errorMessage = "Local state was cleared, but synchronization could not be completed."
+                }
+            }
+        }
+    }
+    func resetFluxNews() {
+        guard let core else { return }
+        do {
+            try core.resetCoreState()
+            try CredentialStore.remove()
+            try CredentialStore.setLaunchAtLogin(false)
+            resetNativeSettings()
+            eventSubscription = nil
+            self.core = nil
+            configuredServer = nil
+            minifluxVersion = nil
+            coreSettings = nil
+            deactivatePeriodicSyncScheduling()
+            invalidateLocalPresentation()
+            showActionConfirmation("FluxNews was reset")
+            settingsVisible = true
+        } catch {
+            errorMessage = "FluxNews could not be fully reset. \(error.localizedDescription)"
+        }
+    }
+    var onInvalidateContent: (() -> Void)?
+    private func syncAfterImport() {
+        guard let core else { return }
+        isLoading = true
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result { try core.sync(reason: .manual) }
+            await MainActor.run {
+                guard let store = store.value else { return }
+                store.isLoading = false
+                if case .failure = result {
+                    store.errorMessage = "Backup imported successfully. Synchronization could not be completed."
+                }
+            }
+        }
+    }
+    private func invalidateLocalPresentation() {
+        articles = []
+        catalog = NavigationCatalog(categories: [], feeds: [])
+        unreadTotal = 0
+        starredTotal = 0
+        selectionTotal = 0
+        categorySidebarCounts = [:]
+        feedSidebarCounts = [:]
+        feedIcons = [:]
+        articleThumbnails = [:]
+        unavailableArticleThumbnails = []
+        pendingNewData = PendingNewData()
+        publishPendingNewData()
+        clearSearch()
+        onInvalidateContent?()
+        resetPresentation()
+        snapshotResetRevision &+= 1
+    }
+    private func nativeBackupSettings() -> MacOSBackupSettingsV1 {
+        MacOSBackupSettingsV1(
+            version: MacOSBackupSettingsV1.version,
+            markReadOnScrollover: markReadOnScrolloverEnabled,
+            syncOnStart: syncOnStartEnabled,
+            articleListStyle: articleListStyle.rawValue,
+            previewLines: articlePreviewLines.rawValue,
+            clickOnNews: clickOnNews.rawValue,
+            globalShortcut: globalShortcut.rawValue,
+            launchAtLogin: CredentialStore.launchAtLoginEnabled
+        )
+    }
+    private func applyNativeBackupSettings(_ settings: MacOSBackupSettingsV1) throws {
+        try CredentialStore.setLaunchAtLogin(settings.launchAtLogin)
+        setScrolloverEnabled(settings.markReadOnScrollover)
+        setSyncOnStartEnabled(settings.syncOnStart)
+        setArticleListStyle(ArticleListStyle(rawValue: settings.articleListStyle) ?? .row)
+        setArticlePreviewLines(ArticlePreviewLines(rawValue: settings.previewLines) ?? .standard)
+        setClickOnNews(ClickOnNews(rawValue: settings.clickOnNews) ?? .openLink)
+        setGlobalShortcut(GlobalShortcutChoice(rawValue: settings.globalShortcut) ?? .optionCommandF)
+    }
+    private func resetNativeSettings() {
+        try? CredentialStore.setLaunchAtLogin(false)
+        setScrolloverEnabled(true)
+        setSyncOnStartEnabled(true)
+        setArticleListStyle(.row)
+        setArticlePreviewLines(.standard)
+        setClickOnNews(.openLink)
+        setGlobalShortcut(.optionCommandF)
+    }
     func open(_ article: ArticleSummary) {
         setRead(article, true)
         let prefersMiniflux = (try? core?.feedPreferences(feedId: article.feedId).openInMiniflux) ?? false
