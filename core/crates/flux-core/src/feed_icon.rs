@@ -119,6 +119,17 @@ impl FeedIconService {
             },
         }))
     }
+    pub fn clear(&self) -> Result<(), CoreError> {
+        if self.root.exists() {
+            fs::remove_dir_all(&self.root).map_err(cache_error)?;
+        }
+        fs::create_dir_all(&self.root).map_err(cache_error)?;
+        self.gates
+            .lock()
+            .map_err(|_| CoreError::internal("feed icon gates poisoned"))?
+            .clear();
+        Ok(())
+    }
 
     fn path(&self, feed_id: i64, variant: FeedIconVariant) -> PathBuf {
         let name = match variant {
@@ -660,6 +671,17 @@ mod tests {
         assert_eq!(source.calls.load(Ordering::SeqCst), 1);
         assert!(temp.path().join("feed-icons/v3/4-normal.png").is_file());
         assert!(temp.path().join("feed-icons/v3/4-dark.png").is_file());
+    }
+    #[test]
+    fn clear_removes_regenerable_cached_icons() {
+        let temp = TempDir::new().unwrap();
+        let service = FeedIconService::new(temp.path().into()).unwrap();
+        fs::write(service.root.join("stale.png"), b"stale").unwrap();
+
+        service.clear().unwrap();
+
+        assert!(service.root.is_dir());
+        assert!(fs::read_dir(&service.root).unwrap().next().is_none());
     }
     #[test]
     fn normalization_preserves_aspect_ratio_on_transparent_canvas() {

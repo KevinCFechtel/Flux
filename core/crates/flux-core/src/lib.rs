@@ -232,12 +232,15 @@ impl FluxCore {
     }
 
     fn sync_inner(&self, reason: SyncReason) -> Result<SyncCompleted, CoreError> {
-        let started = Instant::now();
-        tracing::info!(target: "sync", "sync started reason={reason:?}");
         let _sync = self
             .sync_gate
             .lock()
             .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.sync_locked(reason)
+    }
+    fn sync_locked(&self, reason: SyncReason) -> Result<SyncCompleted, CoreError> {
+        let started = Instant::now();
+        tracing::info!(target: "sync", "sync started reason={reason:?}");
         if reason != SyncReason::Manual && self.in_backoff()? {
             tracing::info!(target: "sync", "sync skipped reason={reason:?} because runtime backoff is active");
             let completed = SyncCompleted {
@@ -301,6 +304,43 @@ impl FluxCore {
                 Err(error)
             }
         }
+    }
+
+    /// Discards synchronized local state and immediately rebuilds it from Miniflux.
+    pub fn rebuild_local_state(&self) -> Result<SyncCompleted, CoreError> {
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            let _sync = self
+                .sync_gate
+                .lock()
+                .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+            self.store.clear_synchronized_state_for_rebuild()?;
+            self.clear_regenerable_caches();
+            self.clear_backoff()?;
+            self.sync_locked(SyncReason::Manual)
+        });
+        self.diagnostics.flush();
+        result
+    }
+
+    /// Resets Core-owned persistent state without contacting Miniflux.
+    pub fn reset_core_state(&self) -> Result<(), CoreError> {
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            let _sync = self
+                .sync_gate
+                .lock()
+                .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+            self.store.reset_core_state()?;
+            self.clear_regenerable_caches();
+            self.clear_backoff()?;
+            *self
+                .delivery_mode
+                .lock()
+                .map_err(|_| CoreError::internal("delivery mode lock poisoned"))? =
+                CoreSettings::default().delivery_mode;
+            Ok(())
+        });
+        self.diagnostics.flush();
+        result
     }
 
     pub fn query_articles(&self, query: ArticleQuery) -> Result<Vec<ArticleSummary>, CoreError> {
@@ -562,6 +602,10 @@ impl FluxCore {
         desired: bool,
     ) -> Result<MutationResult, CoreError> {
         let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            let _sync = self
+                .sync_gate
+                .lock()
+                .map_err(|_| CoreError::internal("sync gate poisoned"))?;
             self.set_state_bulk_inner(ids, field, desired)
         });
         self.diagnostics.flush();
@@ -578,6 +622,10 @@ impl FluxCore {
             return Err(CoreError::data("article ID must be positive"));
         }
         let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            let _sync = self
+                .sync_gate
+                .lock()
+                .map_err(|_| CoreError::internal("sync gate poisoned"))?;
             if self.store.local_article_state(article_id)?.is_some() {
                 self.set_state_bulk_inner(&[article_id], field, desired)
                     .map(|_| SearchMutationDisposition::LocalFirst)
@@ -622,10 +670,6 @@ impl FluxCore {
                 disposition: DeliveryDisposition::Queued,
             });
         }
-        let _gate = self
-            .sync_gate
-            .lock()
-            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
         if self.in_backoff()? {
             return Ok(MutationResult {
                 disposition: DeliveryDisposition::DeferredByBackoff,
@@ -699,6 +743,14 @@ impl FluxCore {
         state.next_retry_at = None;
         state.next_retry_at_utc = None;
         Ok(())
+    }
+    fn clear_regenerable_caches(&self) {
+        if let Err(error) = self.feed_icons.clear() {
+            tracing::warn!(target: "storage", "feed icon cache cleanup failed kind={:?}", error.kind);
+        }
+        if let Err(error) = self.article_thumbnails.clear() {
+            tracing::warn!(target: "storage", "article thumbnail cache cleanup failed kind={:?}", error.kind);
+        }
     }
     fn emit(&self, event: CoreEvent) {
         let listeners = self
@@ -806,6 +858,9 @@ mod tests {
         fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError> {
             self.fetch_calls.fetch_add(1, Ordering::SeqCst);
             self.log.lock().unwrap().push("fetch");
+            if let Some(error) = self.failure.lock().unwrap().clone() {
+                return Err(error);
+            }
             Ok(self.snapshot.lock().unwrap().clone())
         }
         fn set_read_state(&self, ids: &[i64], read: bool) -> Result<(), CoreError> {
@@ -2232,5 +2287,125 @@ mod tests {
             .unwrap()
             .is_empty()
         );
+    }
+
+    #[test]
+    fn rebuild_discards_synchronized_state_and_pending_mutations_but_preserves_configuration() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = mutation_core(&temp);
+        core.set_retention(ReadArticleRetention::Days365).unwrap();
+        core.set_background_sync_enabled(false).unwrap();
+        core.set_detail_character_limit(20_000).unwrap();
+        core.set_feed_system_notifications_enabled(10, true)
+            .unwrap();
+        core.set_feed_detail_rendering(10, DetailRenderingMode::TextOnly)
+            .unwrap();
+        core.set_feed_truncate_detail(10, true).unwrap();
+        core.set_feed_open_in_miniflux(10, true).unwrap();
+        let settings = core.core_settings().unwrap();
+        let preferences = core.feed_preferences(10).unwrap();
+        core.set_read_state(1, true).unwrap();
+        assert_eq!(core.store.pending_mutations().unwrap().len(), 1);
+        source.log.lock().unwrap().clear();
+
+        let completed = core.rebuild_local_state().unwrap();
+
+        assert_eq!(completed.reason, SyncReason::Manual);
+        assert_eq!(completed.mutations_delivered, 0);
+        assert_eq!(*source.log.lock().unwrap(), vec!["fetch"]);
+        assert_eq!(core.core_settings().unwrap(), settings);
+        assert_eq!(core.feed_preferences(10).unwrap(), preferences);
+        assert!(core.store.pending_mutations().unwrap().is_empty());
+        assert_eq!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .iter()
+            .find(|article| article.id == 1)
+            .unwrap()
+            .is_read,
+            false
+        );
+        assert!(core.last_successful_sync_at().unwrap().is_some());
+    }
+
+    #[test]
+    fn rebuild_failure_leaves_discarded_state_empty_and_later_sync_recovers() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = mutation_core(&temp);
+        core.set_feed_open_in_miniflux(10, true).unwrap();
+        let preferences = core.feed_preferences(10).unwrap();
+        core.set_read_state(1, true).unwrap();
+        *source.failure.lock().unwrap() = Some(CoreError::connectivity("offline"));
+
+        assert!(core.rebuild_local_state().is_err());
+
+        assert!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty()
+        );
+        assert!(core.store.pending_mutations().unwrap().is_empty());
+        assert_eq!(core.feed_preferences(10).unwrap(), preferences);
+        assert!(core.last_successful_sync_at().unwrap().is_none());
+        *source.failure.lock().unwrap() = None;
+        core.sync(SyncReason::Manual).unwrap();
+        assert!(
+            !core
+                .query_articles(ArticleQuery {
+                    limit: 0,
+                    ..Default::default()
+                })
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn full_reset_restores_fresh_core_state_without_remote_requests() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = mutation_core(&temp);
+        core.set_retention(ReadArticleRetention::Days365).unwrap();
+        core.set_delivery_mode(DeliveryMode::Live).unwrap();
+        core.set_feed_system_notifications_enabled(10, true)
+            .unwrap();
+        core.set_read_state(1, true).unwrap();
+        let fetches_before = source.fetch_calls.load(Ordering::SeqCst);
+        let fresh = {
+            let other = TempDir::new().unwrap();
+            FluxCore::with_remote(
+                config(&other),
+                Arc::new(Source {
+                    snapshot: snapshot(),
+                    calls: AtomicUsize::new(0),
+                    delay: Duration::ZERO,
+                }),
+            )
+            .unwrap()
+            .core_settings()
+            .unwrap()
+        };
+
+        core.reset_core_state().unwrap();
+
+        assert_eq!(core.core_settings().unwrap(), fresh);
+        assert!(core.navigation_catalog().unwrap().feeds.is_empty());
+        assert!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty()
+        );
+        assert!(core.store.pending_mutations().unwrap().is_empty());
+        assert!(core.store.base_url().unwrap().is_none());
+        assert_eq!(source.fetch_calls.load(Ordering::SeqCst), fetches_before);
+        assert_eq!(core.delivery_health().unwrap(), RuntimeHealth::Healthy);
     }
 }

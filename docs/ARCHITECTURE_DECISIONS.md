@@ -582,13 +582,28 @@ native state. A later native restore phase validates candidate Miniflux
 credentials and performs the transactional replacement. Native settings remain
 owned by their platform even while carried in that platform's backup.
 
-A local core-data reset removes synchronized core data and regenerable
-caches but preserves settings/preferences, native UI preferences,
-credentials, and downloaded media.
+`rebuild_local_state()` destructively clears synchronized local state,
+pending mutations, notification bookkeeping, sync metadata, and regenerable
+Core caches, then immediately performs a fresh Miniflux sync. It preserves
+the canonical account association, CoreSettings, FeedPreferences, native
+settings, and platform credentials. If that immediate sync fails, the old
+local dataset is not restored. Schema-v7 orphan preferences make this
+preservation possible; normal authoritative reconciliation removes preferences
+for feed IDs absent from the returned catalog.
+Cache cleanup is best-effort after the authoritative database clear: a cleanup
+failure is diagnostic only and never restores discarded synchronized state.
 
-`rebuild_local_state()` then restores the required local article set,
-including starred articles and article records needed for preserved
-downloads.
+`reset_core_state()` restores all Core-owned persisted state to fresh-install
+semantics: synchronized data, CoreSettings customizations, FeedPreferences,
+base-url association, sync metadata, and regenerable caches are removed or
+reset. It does not contact Miniflux and does not manipulate Keychain,
+UserDefaults, or native OS registrations. The media root is currently
+unaffected because durable download/media state is not implemented yet.
+
+Account/server replacement, Rebuild, and Full Reset intentionally have
+different FeedPreferences policies: account replacement and Full Reset remove
+them; Rebuild preserves them. Backup Import remains a separate future
+transactional configuration-replace operation.
 
 ## 15. Media and podcasts
 

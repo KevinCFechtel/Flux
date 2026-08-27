@@ -493,6 +493,15 @@ impl Flux {
             .map(Into::into)
             .map_err(map_error)
     }
+    pub fn rebuild_local_state(&self) -> Result<SyncCompleted, FluxError> {
+        self.core
+            .rebuild_local_state()
+            .map(Into::into)
+            .map_err(map_error)
+    }
+    pub fn reset_core_state(&self) -> Result<(), FluxError> {
+        self.core.reset_core_state().map_err(map_error)
+    }
     pub fn query_articles(&self, query: ArticleQuery) -> Result<Vec<ArticleSummary>, FluxError> {
         self.core
             .query_articles(query.into())

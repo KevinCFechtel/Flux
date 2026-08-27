@@ -89,6 +89,17 @@ impl ArticleThumbnailService {
         self.release_gate(&key, &gate)?;
         result
     }
+    pub fn clear(&self) -> Result<(), CoreError> {
+        if self.root.exists() {
+            fs::remove_dir_all(&self.root).map_err(cache_error)?;
+        }
+        fs::create_dir_all(&self.root).map_err(cache_error)?;
+        self.gates
+            .lock()
+            .map_err(|_| CoreError::internal("article thumbnail gates poisoned"))?
+            .clear();
+        Ok(())
+    }
 
     fn get_locked(
         &self,
@@ -462,5 +473,16 @@ mod tests {
         assert_eq!(source.calls.load(Ordering::SeqCst), 2);
         service.get(&source, 7, "https://image.test/a").unwrap();
         assert_eq!(source.calls.load(Ordering::SeqCst), 3);
+    }
+    #[test]
+    fn clear_removes_regenerable_cached_thumbnails() {
+        let temp = TempDir::new().unwrap();
+        let service = ArticleThumbnailService::new(temp.path().into()).unwrap();
+        fs::write(service.root.join("stale.png"), b"stale").unwrap();
+
+        service.clear().unwrap();
+
+        assert!(service.root.is_dir());
+        assert!(fs::read_dir(&service.root).unwrap().next().is_none());
     }
 }

@@ -12,7 +12,7 @@ use crate::domain::{
     ReadFilter, StarredFilter, SystemNotificationCandidate,
 };
 use crate::miniflux::normalize_installation_base;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 const SCHEMA_VERSION: i64 = 7;
 
@@ -101,11 +101,40 @@ impl Store {
                 .unwrap_or(false)
         });
         if previous.is_some() && !same_installation {
-            tx.execute_batch("DELETE FROM notification_candidate_articles; DELETE FROM system_notification_candidates; DELETE FROM pending_system_notifications; DELETE FROM feed_preferences; DELETE FROM pending_mutations; DELETE FROM articles; DELETE FROM feeds; DELETE FROM categories;").map_err(sql_error)?;
+            clear_synchronized_state(&tx, true)?;
         }
         tx.execute("INSERT INTO core_settings (key, value) VALUES ('base_url', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [base_url]).map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
         Ok(())
+    }
+    /// Discards server-derived state while preserving account association and user configuration.
+    pub fn clear_synchronized_state_for_rebuild(&self) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        clear_synchronized_state(&tx, false)?;
+        tx.commit().map_err(sql_error)
+    }
+    /// Restores all Core-owned persistent state to fresh-install defaults.
+    pub fn reset_core_state(&self) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        clear_synchronized_state(&tx, true)?;
+        tx.execute("DELETE FROM core_settings", [])
+            .map_err(sql_error)?;
+        for (key, value) in core_setting_defaults() {
+            tx.execute(
+                "INSERT INTO core_settings (key, value) VALUES (?1, ?2)",
+                params![key, value],
+            )
+            .map_err(sql_error)?;
+        }
+        tx.commit().map_err(sql_error)
     }
     pub fn base_url(&self) -> Result<Option<String>, CoreError> {
         self.connection
@@ -224,14 +253,29 @@ impl Store {
                 .filter(|feed_id| !remote_feed_ids.contains(feed_id))
                 .collect::<Vec<_>>()
         };
+        let removed_preference_ids = {
+            let mut statement = tx
+                .prepare("SELECT feed_id FROM feed_preferences")
+                .map_err(sql_error)?;
+            statement
+                .query_map([], |row| row.get::<_, i64>(0))
+                .map_err(sql_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(sql_error)?
+                .into_iter()
+                .filter(|feed_id| !remote_feed_ids.contains(feed_id))
+                .collect::<Vec<_>>()
+        };
         for feed_id in &stale_feed_ids {
             // Pending mutations do not cascade from articles; all notification state cascades.
             tx.execute("DELETE FROM pending_mutations WHERE article_id IN (SELECT id FROM articles WHERE feed_id=?1)", [feed_id]).map_err(sql_error)?;
             tx.execute("DELETE FROM articles WHERE feed_id=?1", [feed_id])
                 .map_err(sql_error)?;
-            tx.execute("DELETE FROM feed_preferences WHERE feed_id=?1", [feed_id])
-                .map_err(sql_error)?;
             tx.execute("DELETE FROM feeds WHERE id=?1", [feed_id])
+                .map_err(sql_error)?;
+        }
+        for feed_id in removed_preference_ids {
+            tx.execute("DELETE FROM feed_preferences WHERE feed_id=?1", [feed_id])
                 .map_err(sql_error)?;
         }
         stats.navigation_changed |= !stale_feed_ids.is_empty();
@@ -886,8 +930,19 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
     Ok(())
 }
 fn initialize_core_settings(connection: &Connection) -> Result<(), CoreError> {
+    for (key, value) in core_setting_defaults() {
+        connection
+            .execute(
+                "INSERT INTO core_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO NOTHING",
+                params![key, value],
+            )
+            .map_err(sql_error)?;
+    }
+    Ok(())
+}
+fn core_setting_defaults() -> Vec<(&'static str, String)> {
     let defaults = CoreSettings::default();
-    for (key, value) in [
+    vec![
         (
             "read_article_retention",
             defaults.retention.days().to_string(),
@@ -905,15 +960,18 @@ fn initialize_core_settings(connection: &Connection) -> Result<(), CoreError> {
             "detail_character_limit",
             defaults.detail_character_limit.to_string(),
         ),
-    ] {
-        connection
-            .execute(
-                "INSERT INTO core_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO NOTHING",
-                params![key, value],
-            )
+    ]
+}
+fn clear_synchronized_state(
+    tx: &Transaction<'_>,
+    remove_feed_preferences: bool,
+) -> Result<(), CoreError> {
+    tx.execute_batch("DELETE FROM notification_candidate_articles; DELETE FROM system_notification_candidates; DELETE FROM pending_system_notifications; DELETE FROM system_notified_articles; DELETE FROM pending_mutations; DELETE FROM articles;").map_err(sql_error)?;
+    if remove_feed_preferences {
+        tx.execute("DELETE FROM feed_preferences", [])
             .map_err(sql_error)?;
     }
-    Ok(())
+    tx.execute_batch("DELETE FROM feeds; DELETE FROM categories; DELETE FROM core_settings WHERE key='last_successful_sync_at';").map_err(sql_error)
 }
 fn setting_value(connection: &Connection, key: &str) -> Result<String, CoreError> {
     connection
@@ -1297,6 +1355,32 @@ mod tests {
                 open_in_miniflux: true
             }
         );
+    }
+
+    #[test]
+    fn reconciliation_removes_orphan_preferences_absent_from_authoritative_catalog() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        store
+            .connection
+            .lock()
+            .unwrap()
+            .execute("INSERT INTO feed_preferences(feed_id) VALUES(999)", [])
+            .unwrap();
+
+        store
+            .reconcile(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[],
+                &[],
+            )
+            .unwrap();
+
+        assert!(store.feed_preferences(999).is_err());
     }
 
     #[test]
