@@ -53,6 +53,10 @@ final class BrowserStore: ObservableObject {
     @Published private(set) var updatingSystemNotificationFeedIDs = Set<Int64>()
     @Published private(set) var listPresentationRevision: UInt64 = 0
     @Published private(set) var snapshotResetRevision: UInt64 = 0
+    @Published private(set) var configuredServer: String?
+    @Published private(set) var minifluxVersion: String?
+    @Published private(set) var accountValidationError: String?
+    @Published private(set) var isSavingAccount = false
     @Published var feedSettingsTarget: FeedSettingsTarget?
 
     private var core: Flux?
@@ -70,7 +74,6 @@ final class BrowserStore: ObservableObject {
     private var searchGeneration: UInt64 = 0
     private var pendingNewData = PendingNewData()
     private var readerDocumentRequest: UInt64 = 0
-    private var minifluxServerURL: URL?
     private let searchPageSize: UInt32 = 50
 
     init() {
@@ -95,7 +98,7 @@ final class BrowserStore: ObservableObject {
     }
 
     @discardableResult
-    func configure(server: String, apiKey: String, launchAtLogin: Bool? = nil) -> Bool {
+    func configure(server: String, apiKey: String, refreshVersion: Bool = true) -> Bool {
         let fm = FileManager.default
         let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("FluxNews", isDirectory: true)
         let cache = fm.urls(for: .cachesDirectory, in: .userDomainMask).first!.appendingPathComponent("FluxNews", isDirectory: true)
@@ -103,23 +106,96 @@ final class BrowserStore: ObservableObject {
         do {
             let configuredCore = try Flux.initializeWithDiagnostics(config: InitializationConfig(persistentData: support.path, cache: cache.path, media: media.path, baseUrl: server, apiKey: apiKey), listener: CoreDiagnosticLogger())
             let settings = try configuredCore.coreSettings()
+            let subscription = try configuredCore.subscribeEvents(listener: BrowserEventListener(store: self))
             core = configuredCore
-            minifluxServerURL = URL(string: server)
+            configuredServer = server
             coreSettings = settings
-            eventSubscription = try core?.subscribeEvents(listener: BrowserEventListener(store: self))
-            if let launchAtLogin { try CredentialStore.setLaunchAtLogin(launchAtLogin) }
-            try CredentialStore.save(MinifluxCredentials(server: server, apiKey: apiKey))
+            eventSubscription = subscription
             NativeLog.app.notice("core configured")
             resetPresentation()
             reloadNavigationAndCounts(); reloadVisibleArticles()
             if syncOnStartEnabled { sync(reason: .appStart) }
             if settings.backgroundSyncEnabled { activatePeriodicSyncScheduling() }
             else { deactivatePeriodicSyncScheduling() }
+            if refreshVersion { refreshMinifluxVersion(server: server, apiKey: apiKey, for: configuredCore) }
             return true
         } catch {
             NativeLog.app.error("core configuration failed: \(error.localizedDescription, privacy: .public)")
             errorMessage = error.localizedDescription
             return false
+        }
+    }
+
+    func saveAccount(server: String, apiKey: String, launchAtLogin: Bool, scrollover: Bool, syncOnStart: Bool, globalShortcut: GlobalShortcutChoice) {
+        guard !isSavingAccount else { return }
+        isSavingAccount = true
+        accountValidationError = nil
+        Task { [weak self] in
+            let validation = await Task.detached(priority: .userInitiated) {
+                Result { try validateMinifluxAccount(serverUrl: server, apiKey: apiKey) }
+            }.value
+            guard let self else { return }
+            self.isSavingAccount = false
+            switch validation {
+            case let .success(result):
+                self.commitValidatedAccount(result, apiKey: apiKey, launchAtLogin: launchAtLogin, scrollover: scrollover, syncOnStart: syncOnStart, globalShortcut: globalShortcut)
+            case let .failure(error):
+                self.accountValidationError = AccountValidationPresentation.message(for: accountValidationFailure(for: error))
+            }
+        }
+    }
+
+    private func commitValidatedAccount(_ validation: AccountValidationResult, apiKey: String, launchAtLogin: Bool, scrollover: Bool, syncOnStart: Bool, globalShortcut: GlobalShortcutChoice) {
+        do {
+            let previousCredentials = try CredentialStore.load()
+            try CredentialStore.save(MinifluxCredentials(server: validation.installationBase, apiKey: apiKey))
+            guard configure(server: validation.installationBase, apiKey: apiKey, refreshVersion: false) else {
+                do { try restoreCredentials(previousCredentials) }
+                catch { accountValidationError = "The account could not be saved. \(error.localizedDescription)"; return }
+                accountValidationError = "The validated account could not be configured. Your previous account is still active."
+                return
+            }
+            try CredentialStore.setLaunchAtLogin(launchAtLogin)
+            setScrolloverEnabled(scrollover)
+            setSyncOnStartEnabled(syncOnStart)
+            setGlobalShortcut(globalShortcut)
+            configuredServer = validation.installationBase
+            minifluxVersion = validation.version
+            accountValidationError = nil
+        } catch {
+            accountValidationError = "The account could not be saved. \(error.localizedDescription)"
+        }
+    }
+
+    private func restoreCredentials(_ credentials: MinifluxCredentials?) throws {
+        if let credentials { try CredentialStore.save(credentials) }
+        else { try CredentialStore.remove() }
+    }
+
+    private func accountValidationFailure(for error: Error) -> AccountValidationFailure {
+        switch error {
+        case AccountValidationError.InvalidUrl, AccountValidationError.UnsupportedUrlScheme:
+            .invalidURL
+        case AccountValidationError.Network, AccountValidationError.ServerUnavailable:
+            .network
+        case AccountValidationError.Unauthorized:
+            .unauthorized
+        case AccountValidationError.IncompatibleServer:
+            .incompatibleServer
+        case AccountValidationError.InvalidResponse:
+            .invalidResponse
+        default:
+            .invalidResponse
+        }
+    }
+
+    private func refreshMinifluxVersion(server: String, apiKey: String, for configuredCore: Flux) {
+        Task { [weak self] in
+            let validation = await Task.detached(priority: .utility) {
+                try? validateMinifluxAccount(serverUrl: server, apiKey: apiKey)
+            }.value
+            guard let self, self.core === configuredCore, let validation else { return }
+            self.minifluxVersion = validation.version
         }
     }
 
@@ -621,7 +697,10 @@ final class BrowserStore: ObservableObject {
     func openOriginal(_ article: ArticleSummary) { if let url = URL(string: article.url) { NSWorkspace.shared.open(url) } }
     func openComments(_ article: ArticleSummary) { if let url = URL(string: article.commentsUrl), !article.commentsUrl.isEmpty { NSWorkspace.shared.open(url) } }
     func openInMiniflux(_ article: ArticleSummary) {
-        guard let url = minifluxServerURL?.appendingPathComponent("entries").appendingPathComponent(String(article.id)) else { return }
+        guard let core, let url = MinifluxEntryURL.resolve(articleID: article.id, using: core.minifluxEntryUrl) else {
+            errorMessage = "Flux could not resolve the Miniflux entry URL."
+            return
+        }
         NSWorkspace.shared.open(url)
     }
     func copyLink(_ article: ArticleSummary) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(article.url, forType: .string) }

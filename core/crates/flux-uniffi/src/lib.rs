@@ -15,6 +15,11 @@ pub struct InitializationConfig {
     pub api_key: String,
 }
 #[derive(uniffi::Record)]
+pub struct AccountValidationResult {
+    pub installation_base: String,
+    pub version: String,
+}
+#[derive(uniffi::Record)]
 pub struct ArticleCursor {
     pub published_at: String,
     pub article_id: i64,
@@ -398,6 +403,23 @@ pub enum FluxError {
     Internal { message: String },
 }
 
+#[derive(Debug, uniffi::Error)]
+pub enum AccountValidationError {
+    InvalidUrl,
+    UnsupportedUrlScheme,
+    Network,
+    Unauthorized,
+    IncompatibleServer,
+    InvalidResponse,
+    ServerUnavailable,
+}
+
+impl std::fmt::Display for AccountValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
 impl std::fmt::Display for FluxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self:?}")
@@ -417,6 +439,16 @@ pub struct EventSubscription {
 pub struct DiagnosticSubscription {
     core: Arc<FluxCore>,
     id: u64,
+}
+
+#[uniffi::export]
+pub fn validate_miniflux_account(
+    server_url: String,
+    api_key: String,
+) -> Result<AccountValidationResult, AccountValidationError> {
+    FluxCore::validate_miniflux_account(&server_url, &api_key)
+        .map(Into::into)
+        .map_err(map_account_validation_error)
 }
 
 #[uniffi::export]
@@ -472,6 +504,9 @@ impl Flux {
             .reader_document(article_id)
             .map(Into::into)
             .map_err(map_error)
+    }
+    pub fn miniflux_entry_url(&self, article_id: i64) -> String {
+        self.core.miniflux_entry_url(article_id)
     }
     pub fn count_articles(&self, query: ArticleQuery) -> Result<u64, FluxError> {
         self.core.count_articles(query.into()).map_err(map_error)
@@ -932,6 +967,14 @@ impl From<domain::CoreErrorKind> for ErrorKind {
         }
     }
 }
+impl From<flux_core::miniflux::AccountValidationResult> for AccountValidationResult {
+    fn from(value: flux_core::miniflux::AccountValidationResult) -> Self {
+        Self {
+            installation_base: value.installation_base,
+            version: value.version,
+        }
+    }
+}
 impl From<domain::CoreEvent> for CoreEvent {
     fn from(value: domain::CoreEvent) -> Self {
         match value {
@@ -1265,5 +1308,30 @@ fn map_error(error: domain::CoreError) -> FluxError {
         domain::CoreErrorKind::Persistence => FluxError::Persistence { message },
         domain::CoreErrorKind::Data => FluxError::Data { message },
         domain::CoreErrorKind::Internal => FluxError::Internal { message },
+    }
+}
+fn map_account_validation_error(
+    error: flux_core::miniflux::AccountValidationError,
+) -> AccountValidationError {
+    match error {
+        flux_core::miniflux::AccountValidationError::InvalidUrl => {
+            AccountValidationError::InvalidUrl
+        }
+        flux_core::miniflux::AccountValidationError::UnsupportedUrlScheme => {
+            AccountValidationError::UnsupportedUrlScheme
+        }
+        flux_core::miniflux::AccountValidationError::Network => AccountValidationError::Network,
+        flux_core::miniflux::AccountValidationError::Unauthorized => {
+            AccountValidationError::Unauthorized
+        }
+        flux_core::miniflux::AccountValidationError::IncompatibleServer => {
+            AccountValidationError::IncompatibleServer
+        }
+        flux_core::miniflux::AccountValidationError::InvalidResponse => {
+            AccountValidationError::InvalidResponse
+        }
+        flux_core::miniflux::AccountValidationError::ServerUnavailable => {
+            AccountValidationError::ServerUnavailable
+        }
     }
 }

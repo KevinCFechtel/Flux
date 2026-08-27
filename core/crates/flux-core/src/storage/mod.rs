@@ -11,6 +11,7 @@ use crate::domain::{
     FeedSystemNotificationSetting, MutationField, NavigationCatalog, ReadArticleRetention,
     ReadFilter, StarredFilter, SystemNotificationCandidate,
 };
+use crate::miniflux::normalize_installation_base;
 use rusqlite::{Connection, OptionalExtension, params};
 
 const SCHEMA_VERSION: i64 = 6;
@@ -94,10 +95,12 @@ impl Store {
             .optional()
             .map_err(sql_error)?;
         let tx = connection.transaction().map_err(sql_error)?;
-        if previous
-            .as_deref()
-            .is_some_and(|previous| previous != base_url)
-        {
+        let same_installation = previous.as_deref().is_some_and(|previous| {
+            normalize_installation_base(previous)
+                .map(|previous| previous == base_url)
+                .unwrap_or(false)
+        });
+        if previous.is_some() && !same_installation {
             tx.execute_batch("DELETE FROM notification_candidate_articles; DELETE FROM system_notification_candidates; DELETE FROM pending_system_notifications; DELETE FROM feed_preferences; DELETE FROM pending_mutations; DELETE FROM articles; DELETE FROM feeds; DELETE FROM categories;").map_err(sql_error)?;
         }
         tx.execute("INSERT INTO core_settings (key, value) VALUES ('base_url', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [base_url]).map_err(sql_error)?;
@@ -944,6 +947,39 @@ mod tests {
         let media = temp.path().join("media");
         std::fs::create_dir_all(&data).unwrap();
         (data, cache, media)
+    }
+
+    #[test]
+    fn legacy_api_url_keeps_the_existing_server_context_when_canonicalized() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        store
+            .set_base_url("https://miniflux.example/news/v1")
+            .unwrap();
+        store
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO categories (id, title) VALUES (1, 'Existing')",
+                [],
+            )
+            .unwrap();
+
+        store.set_base_url("https://miniflux.example/news").unwrap();
+
+        assert_eq!(
+            store.base_url().unwrap().as_deref(),
+            Some("https://miniflux.example/news")
+        );
+        let category_count: i64 = store
+            .connection
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM categories", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(category_count, 1);
     }
 
     #[test]

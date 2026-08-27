@@ -29,6 +29,9 @@
 		A29 /* ReaderPresentationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24 /* ReaderPresentationState.swift */; };
 		A30 /* ReaderPresentationState.swift in Tests */ = {isa = PBXBuildFile; fileRef = B24 /* ReaderPresentationState.swift */; };
 		A31 /* ReaderSettingsRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B25 /* ReaderSettingsRoutingTests.swift */; };
+		A32 /* AccountPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B26 /* AccountPresentation.swift */; };
+		A33 /* AccountPresentation.swift in Tests */ = {isa = PBXBuildFile; fileRef = B26 /* AccountPresentation.swift */; };
+		A34 /* AccountPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B27 /* AccountPresentationTests.swift */; };
 		A2 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2 /* AppDelegate.swift */; };
 		A3 /* BrowserStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3 /* BrowserStore.swift */; };
 		A4 /* PopoverContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4 /* PopoverContentView.swift */; };
@@ -67,6 +70,8 @@
 		B23 /* SystemNotificationPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemNotificationPresentationTests.swift; sourceTree = "<group>"; };
 		B24 /* ReaderPresentationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderPresentationState.swift; sourceTree = "<group>"; };
 		B25 /* ReaderSettingsRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSettingsRoutingTests.swift; sourceTree = "<group>"; };
+		B26 /* AccountPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountPresentation.swift; sourceTree = "<group>"; };
+		B27 /* AccountPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountPresentationTests.swift; sourceTree = "<group>"; };
 		B2 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		B3 /* BrowserStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserStore.swift; sourceTree = "<group>"; };
 		B4 /* PopoverContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverContentView.swift; sourceTree = "<group>"; };
@@ -129,6 +134,7 @@
 				B19 /* ReaderRequestState.swift */,
 				B21 /* SystemNotificationPresentation.swift */,
 				B24 /* ReaderPresentationState.swift */,
+				B26 /* AccountPresentation.swift */,
 				B13 /* FluxNewsTemplate.svg */,
 				B14 /* Localizable.xcstrings */,
 				B15 /* en.lproj/AppShortcuts.strings */,
@@ -154,6 +160,7 @@
 				B22 /* KeyboardCommandRoutingTests.swift */,
 				B23 /* SystemNotificationPresentationTests.swift */,
 				B25 /* ReaderSettingsRoutingTests.swift */,
+				B27 /* AccountPresentationTests.swift */,
 			);
 			path = FluxNewsTests;
 			sourceTree = "<group>";
@@ -275,6 +282,7 @@
 				A21 /* ReaderRequestState.swift in Sources */,
 				A25 /* SystemNotificationPresentation.swift in Sources */,
 				A29 /* ReaderPresentationState.swift in Sources */,
+				A32 /* AccountPresentation.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -292,6 +300,8 @@
 				A28 /* SystemNotificationPresentationTests.swift in Sources */,
 				A30 /* ReaderPresentationState.swift in Tests */,
 				A31 /* ReaderSettingsRoutingTests.swift in Sources */,
+				A33 /* AccountPresentation.swift in Tests */,
+				A34 /* AccountPresentationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

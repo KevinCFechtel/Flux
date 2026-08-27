@@ -34,6 +34,16 @@ enum CredentialStore {
         guard insertionStatus == errSecSuccess else { throw statusError(insertionStatus) }
     }
 
+    static func remove() throws {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+        ]
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else { throw statusError(status) }
+    }
+
     static var launchAtLoginEnabled: Bool { SMAppService.mainApp.status == .enabled }
 
     static func setLaunchAtLogin(_ enabled: Bool) throws {

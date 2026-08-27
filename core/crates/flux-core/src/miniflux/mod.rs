@@ -15,6 +15,40 @@ use serde::Deserialize;
 
 const PAGE_SIZE: i64 = 100;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountValidationResult {
+    pub installation_base: String,
+    pub version: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AccountValidationError {
+    InvalidUrl,
+    UnsupportedUrlScheme,
+    Network,
+    Unauthorized,
+    IncompatibleServer,
+    InvalidResponse,
+    ServerUnavailable,
+}
+
+impl std::fmt::Display for AccountValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::InvalidUrl => "Miniflux installation URL is invalid",
+            Self::UnsupportedUrlScheme => "Miniflux installation URL must use HTTP(S)",
+            Self::Network => "Miniflux server could not be reached",
+            Self::Unauthorized => "Miniflux rejected credentials",
+            Self::IncompatibleServer => "Miniflux version endpoint was not found",
+            Self::InvalidResponse => "Miniflux version response is invalid",
+            Self::ServerUnavailable => "Miniflux server is temporarily unavailable",
+        };
+        f.write_str(message)
+    }
+}
+
+impl std::error::Error for AccountValidationError {}
+
 #[derive(Clone, Debug)]
 pub struct RemoteSnapshot {
     pub categories: Vec<Category>,
@@ -25,6 +59,36 @@ pub struct RemoteSnapshot {
 pub struct RemoteImage {
     pub content_type: Option<String>,
     pub bytes: Vec<u8>,
+}
+
+/// Parses a configured installation URL. Query strings, fragments, and userinfo are rejected
+/// because they cannot identify a stable Miniflux installation base.
+pub fn normalize_installation_base(input: &str) -> Result<String, AccountValidationError> {
+    let mut url = url::Url::parse(input).map_err(|_| AccountValidationError::InvalidUrl)?;
+    if !matches!(url.scheme(), "https" | "http") {
+        return Err(AccountValidationError::UnsupportedUrlScheme);
+    }
+    if url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(AccountValidationError::InvalidUrl);
+    }
+
+    let path = url.path().trim_end_matches('/').to_string();
+    let installation_path = if path.rsplit('/').next() == Some("v1") {
+        path.strip_suffix("/v1").unwrap_or(&path)
+    } else {
+        &path
+    };
+    url.set_path(installation_path);
+    Ok(url.as_str().trim_end_matches('/').to_string())
+}
+
+pub fn miniflux_entry_url(installation_base: &str, article_id: i64) -> String {
+    format!("{installation_base}/unread/entry/{article_id}")
 }
 
 pub trait RemoteSource: Send + Sync {
@@ -64,33 +128,46 @@ pub trait RemoteSource: Send + Sync {
 
 pub struct MinifluxClient {
     agent: ureq::Agent,
-    base_url: String,
+    installation_base: String,
+    api_base: String,
     api_key: String,
     request_lock: Mutex<()>,
 }
 
 impl MinifluxClient {
     pub fn new(base_url: &str, api_key: &str) -> Result<Self, CoreError> {
-        let base_url = base_url
-            .trim_end_matches('/')
-            .trim_end_matches("/v1")
-            .to_string();
-        let parsed = url::Url::parse(&base_url)
-            .map_err(|_| CoreError::invalid_configuration("base URL is invalid"))?;
-        if !matches!(parsed.scheme(), "https" | "http") {
-            return Err(CoreError::invalid_configuration(
-                "base URL must use HTTP(S)",
-            ));
-        }
+        let installation_base =
+            normalize_installation_base(base_url).map_err(|error| match error {
+                AccountValidationError::InvalidUrl => {
+                    CoreError::invalid_configuration("base URL is invalid")
+                }
+                AccountValidationError::UnsupportedUrlScheme => {
+                    CoreError::invalid_configuration("base URL must use HTTP(S)")
+                }
+                _ => unreachable!("URL normalization only returns URL errors"),
+            })?;
+        let api_base = format!("{installation_base}/v1");
         Ok(Self {
             agent: ureq::AgentBuilder::new()
                 .timeout(std::time::Duration::from_secs(80))
                 .redirects(10)
                 .build(),
-            base_url,
+            installation_base,
+            api_base,
             api_key: api_key.to_string(),
             request_lock: Mutex::new(()),
         })
+    }
+    pub fn installation_base(&self) -> &str {
+        &self.installation_base
+    }
+    fn api_url(&self, path: &str) -> String {
+        debug_assert!(path == "/v1" || path.starts_with("/v1/"));
+        format!(
+            "{}{}",
+            self.api_base,
+            path.strip_prefix("/v1").unwrap_or(path)
+        )
     }
     fn get<T: for<'a> Deserialize<'a>>(
         &self,
@@ -107,9 +184,9 @@ impl MinifluxClient {
         }
         let suffix = serializer.finish();
         let url = if suffix.is_empty() {
-            format!("{}{path}", self.base_url)
+            self.api_url(path)
         } else {
-            format!("{}{path}?{suffix}", self.base_url)
+            format!("{}?{suffix}", self.api_url(path))
         };
         let started = Instant::now();
         tracing::debug!(target: "miniflux", "request started endpoint={path}");
@@ -149,7 +226,7 @@ impl MinifluxClient {
         tracing::debug!(target: "miniflux", "request started endpoint={path}");
         match self
             .agent
-            .put(&format!("{}{path}", self.base_url))
+            .put(&self.api_url(path))
             .set("Content-Type", "application/json")
             .set("X-Auth-Token", &self.api_key)
             .send_string(&body)
@@ -175,7 +252,7 @@ impl MinifluxClient {
         tracing::debug!(target: "miniflux", "request started endpoint={path}");
         match self
             .agent
-            .post(&format!("{}{path}", self.base_url))
+            .post(&self.api_url(&path))
             .set("X-Auth-Token", &self.api_key)
             .call()
         {
@@ -227,7 +304,7 @@ impl MinifluxClient {
         tracing::debug!(target: "miniflux", "request started endpoint={path}");
         let response = match self
             .agent
-            .post(&format!("{}{path}", self.base_url))
+            .post(&self.api_url(path))
             .set("Content-Type", "application/json")
             .set("X-Auth-Token", &self.api_key)
             .send_string(&body)
@@ -386,6 +463,38 @@ impl MinifluxClient {
             bytes,
         })
     }
+
+    pub fn validate_account(
+        server_url: &str,
+        api_key: &str,
+    ) -> Result<AccountValidationResult, AccountValidationError> {
+        if api_key.is_empty() {
+            return Err(AccountValidationError::Unauthorized);
+        }
+        let installation_base = normalize_installation_base(server_url)?;
+        let client = Self::new(&installation_base, api_key)
+            .map_err(|_| AccountValidationError::InvalidUrl)?;
+        let _request = client
+            .request_lock
+            .lock()
+            .map_err(|_| AccountValidationError::Network)?;
+        let response = client
+            .agent
+            .get(&client.api_url("/v1/version"))
+            .set("Accept", "application/json")
+            .set("X-Auth-Token", &client.api_key)
+            .call()
+            .map_err(map_account_validation_error)?;
+        let response: VersionDto = serde_json::from_reader(response.into_reader())
+            .map_err(|_| AccountValidationError::InvalidResponse)?;
+        if response.version.trim().is_empty() {
+            return Err(AccountValidationError::InvalidResponse);
+        }
+        Ok(AccountValidationResult {
+            installation_base: client.installation_base,
+            version: response.version,
+        })
+    }
 }
 
 impl RemoteSource for MinifluxClient {
@@ -528,6 +637,19 @@ fn map_http_error(error: ureq::Error) -> CoreError {
         other => CoreError::connectivity(format!("Miniflux request failed: {other}")),
     }
 }
+fn map_account_validation_error(error: ureq::Error) -> AccountValidationError {
+    match error {
+        ureq::Error::Status(401, _) | ureq::Error::Status(403, _) => {
+            AccountValidationError::Unauthorized
+        }
+        ureq::Error::Status(404, _) => AccountValidationError::IncompatibleServer,
+        ureq::Error::Status(status, _) if status == 429 || status >= 500 => {
+            AccountValidationError::ServerUnavailable
+        }
+        ureq::Error::Status(_, _) => AccountValidationError::IncompatibleServer,
+        ureq::Error::Transport(_) => AccountValidationError::Network,
+    }
+}
 fn map_image_http_error(error: ureq::Error) -> CoreError {
     match error {
         ureq::Error::Status(status, _) if status == 429 || status >= 500 => {
@@ -538,6 +660,11 @@ fn map_image_http_error(error: ureq::Error) -> CoreError {
         }
         other => CoreError::connectivity(format!("article image request failed: {other}")),
     }
+}
+
+#[derive(Deserialize)]
+struct VersionDto {
+    version: String,
 }
 
 #[derive(Deserialize)]
@@ -739,6 +866,177 @@ mod tests {
     use std::io::{BufRead, BufReader, Write};
     use std::net::{SocketAddr, TcpListener};
     use std::thread;
+
+    fn version_server(
+        status: u16,
+        body: &'static str,
+    ) -> (SocketAddr, thread::JoinHandle<(String, bool)>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut request = String::new();
+            reader.read_line(&mut request).unwrap();
+            let target = request.split_whitespace().nth(1).unwrap().to_string();
+            let mut authenticated = false;
+            loop {
+                request.clear();
+                reader.read_line(&mut request).unwrap();
+                if request == "\r\n" {
+                    break;
+                }
+                authenticated |= request
+                    .to_ascii_lowercase()
+                    .starts_with("x-auth-token: test-key");
+            }
+            write!(stream, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            (target, authenticated)
+        });
+        (address, worker)
+    }
+
+    #[test]
+    fn normalizes_installation_urls_and_rejects_non_base_components() {
+        for (input, expected) in [
+            ("https://example.com", "https://example.com"),
+            ("https://example.com/", "https://example.com"),
+            ("https://example.com/v1", "https://example.com"),
+            ("https://example.com/v1/", "https://example.com"),
+            (
+                "https://example.com/miniflux",
+                "https://example.com/miniflux",
+            ),
+            (
+                "https://example.com/miniflux/",
+                "https://example.com/miniflux",
+            ),
+            (
+                "https://example.com/miniflux/v1",
+                "https://example.com/miniflux",
+            ),
+            (
+                "https://example.com/miniflux/v1/",
+                "https://example.com/miniflux",
+            ),
+            (
+                "https://example.com/foo/bar/v1",
+                "https://example.com/foo/bar",
+            ),
+            (
+                "https://example.com/v1/miniflux",
+                "https://example.com/v1/miniflux",
+            ),
+            (
+                "https://example.com:8443/miniflux",
+                "https://example.com:8443/miniflux",
+            ),
+            ("http://example.com/miniflux", "http://example.com/miniflux"),
+        ] {
+            assert_eq!(normalize_installation_base(input).unwrap(), expected);
+        }
+        assert_eq!(
+            normalize_installation_base("ftp://example.com").unwrap_err(),
+            AccountValidationError::UnsupportedUrlScheme
+        );
+        for input in [
+            "not a URL",
+            "https://example.com/miniflux?next=/v1",
+            "https://example.com/miniflux#settings",
+        ] {
+            assert_eq!(
+                normalize_installation_base(input).unwrap_err(),
+                AccountValidationError::InvalidUrl
+            );
+        }
+    }
+
+    #[test]
+    fn builds_api_and_web_routes_from_installation_base() {
+        let root = MinifluxClient::new("https://example.com", "test-key").unwrap();
+        assert_eq!(
+            root.api_url("/v1/version"),
+            "https://example.com/v1/version"
+        );
+        assert_eq!(
+            root.api_url("/v1/entries"),
+            "https://example.com/v1/entries"
+        );
+        assert_eq!(
+            miniflux_entry_url(root.installation_base(), 583862),
+            "https://example.com/unread/entry/583862"
+        );
+
+        let subpath = MinifluxClient::new("https://example.com/miniflux/v1", "test-key").unwrap();
+        assert_eq!(
+            subpath.api_url("/v1/version"),
+            "https://example.com/miniflux/v1/version"
+        );
+        assert_eq!(
+            subpath.api_url("/v1/entries"),
+            "https://example.com/miniflux/v1/entries"
+        );
+        assert_eq!(
+            miniflux_entry_url(subpath.installation_base(), 583862),
+            "https://example.com/miniflux/unread/entry/583862"
+        );
+    }
+
+    #[test]
+    fn validates_candidate_account_without_configuration_mutation() {
+        let (address, worker) = version_server(200, r#"{"version":"2.0.49","commit":"abc"}"#);
+        let result =
+            MinifluxClient::validate_account(&format!("http://{address}/v1"), "test-key").unwrap();
+        assert_eq!(result.installation_base, format!("http://{address}"));
+        assert_eq!(result.version, "2.0.49");
+        assert_eq!(worker.join().unwrap(), ("/v1/version".into(), true));
+
+        let (address, worker) = version_server(200, r#"{"version":"2.0.50"}"#);
+        let result =
+            MinifluxClient::validate_account(&format!("http://{address}/miniflux"), "test-key")
+                .unwrap();
+        assert_eq!(
+            result.installation_base,
+            format!("http://{address}/miniflux")
+        );
+        assert_eq!(
+            worker.join().unwrap(),
+            ("/miniflux/v1/version".into(), true)
+        );
+    }
+
+    #[test]
+    fn validation_maps_auth_endpoint_and_response_failures() {
+        for (status, expected) in [
+            (401, AccountValidationError::Unauthorized),
+            (403, AccountValidationError::Unauthorized),
+            (404, AccountValidationError::IncompatibleServer),
+        ] {
+            let (address, worker) = version_server(status, "");
+            assert_eq!(
+                MinifluxClient::validate_account(&format!("http://{address}"), "test-key")
+                    .unwrap_err(),
+                expected
+            );
+            worker.join().unwrap();
+        }
+        for body in ["not JSON", r#"{}"#, r#"{"version":""}"#] {
+            let (address, worker) = version_server(200, body);
+            assert_eq!(
+                MinifluxClient::validate_account(&format!("http://{address}"), "test-key")
+                    .unwrap_err(),
+                AccountValidationError::InvalidResponse
+            );
+            worker.join().unwrap();
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        assert_eq!(
+            MinifluxClient::validate_account(&format!("http://{address}"), "test-key").unwrap_err(),
+            AccountValidationError::Network
+        );
+    }
 
     fn entry_page(total: i64, ids: impl IntoIterator<Item = i64>) -> String {
         let entries = ids

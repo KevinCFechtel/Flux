@@ -238,6 +238,20 @@ persisted in the core database, and never logged.
 Non-sensitive connection configuration such as the Miniflux base URL may
 be persisted by the core.
 
+The configured Miniflux URL represents the installation base, not an API
+URL. A legacy final `/v1` path component is normalized away while an
+installation subpath is preserved. The Rust Miniflux adapter owns API
+version routing (`/v1`), and Core owns Miniflux Web UI route construction;
+native shells must not construct Miniflux API or Web routes. Configuration
+URLs reject query strings and fragments because they do not identify a
+stable installation base. Candidate credentials are validated without
+committing account configuration through an authenticated `GET /v1/version`.
+Successful validation returns the canonical installation base and the server
+version. That version is runtime metadata, not authoritative persisted
+configuration. Credential persistence remains a platform concern; macOS
+validates a candidate before committing credentials or configuration, and a
+failed validation preserves the working account.
+
 Changing the Miniflux base URL creates a new server context.
 Server-bound synchronized data and feed/category preferences are not
 carried into that new context. Changing only the API key while keeping

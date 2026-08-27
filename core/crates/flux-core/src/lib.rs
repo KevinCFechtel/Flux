@@ -29,7 +29,10 @@ use domain::{
     RuntimeHealthStatus, SaveToServiceResult, SearchArticlesRequest, SearchArticlesResult,
     SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason,
 };
-use miniflux::{MinifluxClient, RemoteSource};
+use miniflux::{
+    AccountValidationError, AccountValidationResult, MinifluxClient, RemoteSource,
+    miniflux_entry_url, normalize_installation_base,
+};
 use storage::Store;
 
 /// Platform-provided roots and runtime-only Miniflux credentials.
@@ -46,6 +49,7 @@ pub struct CoreConfig {
 pub struct FluxCore {
     store: Arc<Store>,
     remote: Arc<dyn RemoteSource>,
+    installation_base: String,
     feed_icons: feed_icon::FeedIconService,
     article_thumbnails: article_thumbnail::ArticleThumbnailService,
     sync_gate: Mutex<()>,
@@ -68,6 +72,14 @@ pub trait CoreEventListener: Send + Sync {
 }
 
 impl FluxCore {
+    /// Validates candidate credentials without opening or mutating a local core store.
+    pub fn validate_miniflux_account(
+        server_url: &str,
+        api_key: &str,
+    ) -> Result<AccountValidationResult, AccountValidationError> {
+        MinifluxClient::validate_account(server_url, api_key)
+    }
+
     pub fn initialize(config: CoreConfig) -> Result<Self, CoreError> {
         Self::initialize_with_diagnostics(config, None)
     }
@@ -84,30 +96,40 @@ impl FluxCore {
         let result = tracing::dispatcher::with_default(&diagnostic_dispatcher, || {
             tracing::info!(target: "core", "core initialization started");
             validate_config(&config)?;
+            let remote = MinifluxClient::new(&config.base_url, &config.api_key)?;
+            let installation_base = remote.installation_base().to_string();
             let store = Arc::new(Store::open(
                 &config.persistent_data,
                 &config.cache,
                 &config.media,
             )?);
-            store.set_base_url(&config.base_url)?;
-            let remote = Arc::new(MinifluxClient::new(&config.base_url, &config.api_key)?);
+            store.set_base_url(&installation_base)?;
+            let remote: Arc<dyn RemoteSource> = Arc::new(remote);
             let feed_icons = feed_icon::FeedIconService::new(config.cache.clone())?;
             let article_thumbnails =
                 article_thumbnail::ArticleThumbnailService::new(config.cache.clone())?;
             let settings = store.core_settings()?;
-            Ok::<_, CoreError>((store, remote, feed_icons, article_thumbnails, settings))
+            Ok::<_, CoreError>((
+                store,
+                remote,
+                installation_base,
+                feed_icons,
+                article_thumbnails,
+                settings,
+            ))
         });
-        let (store, remote, feed_icons, article_thumbnails, settings) = match result {
-            Ok(result) => result,
-            Err(error) => {
-                tracing::dispatcher::with_default(
-                    &diagnostic_dispatcher,
-                    || tracing::error!(target: "core", "core initialization failed kind={:?}", error.kind),
-                );
-                diagnostics.flush();
-                return Err(error);
-            }
-        };
+        let (store, remote, installation_base, feed_icons, article_thumbnails, settings) =
+            match result {
+                Ok(result) => result,
+                Err(error) => {
+                    tracing::dispatcher::with_default(
+                        &diagnostic_dispatcher,
+                        || tracing::error!(target: "core", "core initialization failed kind={:?}", error.kind),
+                    );
+                    diagnostics.flush();
+                    return Err(error);
+                }
+            };
         tracing::dispatcher::with_default(
             &diagnostic_dispatcher,
             || tracing::info!(target: "core", "core initialization completed"),
@@ -116,6 +138,7 @@ impl FluxCore {
         Ok(Self {
             store,
             remote,
+            installation_base,
             feed_icons,
             article_thumbnails,
             sync_gate: Mutex::new(()),
@@ -142,19 +165,35 @@ impl FluxCore {
         let store = tracing::dispatcher::with_default(&diagnostic_dispatcher, || {
             tracing::info!(target: "core", "core initialization started");
             validate_config(&config)?;
+            let installation_base =
+                normalize_installation_base(&config.base_url).map_err(|error| match error {
+                    AccountValidationError::InvalidUrl => {
+                        CoreError::invalid_configuration("base URL is invalid")
+                    }
+                    AccountValidationError::UnsupportedUrlScheme => {
+                        CoreError::invalid_configuration("base URL must use HTTP(S)")
+                    }
+                    _ => unreachable!("URL normalization only returns URL errors"),
+                })?;
             let store = Arc::new(Store::open(
                 &config.persistent_data,
                 &config.cache,
                 &config.media,
             )?);
-            store.set_base_url(&config.base_url)?;
+            store.set_base_url(&installation_base)?;
             let feed_icons = feed_icon::FeedIconService::new(config.cache.clone())?;
             let article_thumbnails =
                 article_thumbnail::ArticleThumbnailService::new(config.cache.clone())?;
             let settings = store.core_settings()?;
-            Ok::<_, CoreError>((store, feed_icons, article_thumbnails, settings))
+            Ok::<_, CoreError>((
+                store,
+                installation_base,
+                feed_icons,
+                article_thumbnails,
+                settings,
+            ))
         })?;
-        let (store, feed_icons, article_thumbnails, settings) = store;
+        let (store, installation_base, feed_icons, article_thumbnails, settings) = store;
         tracing::dispatcher::with_default(
             &diagnostic_dispatcher,
             || tracing::info!(target: "core", "core initialization completed"),
@@ -162,6 +201,7 @@ impl FluxCore {
         Ok(Self {
             store,
             remote,
+            installation_base,
             feed_icons,
             article_thumbnails,
             sync_gate: Mutex::new(()),
@@ -184,6 +224,10 @@ impl FluxCore {
         });
         self.diagnostics.flush();
         result
+    }
+
+    pub fn miniflux_entry_url(&self, article_id: i64) -> String {
+        miniflux_entry_url(&self.installation_base, article_id)
     }
 
     fn sync_inner(&self, reason: SyncReason) -> Result<SyncCompleted, CoreError> {
@@ -998,6 +1042,28 @@ mod tests {
             !bytes
                 .windows(b"test-secret".len())
                 .any(|w| w == b"test-secret")
+        );
+    }
+
+    #[test]
+    fn configured_installation_base_is_canonical_and_resolves_web_entries() {
+        let temp = TempDir::new().unwrap();
+        let source = Arc::new(Source {
+            snapshot: snapshot(),
+            calls: AtomicUsize::new(0),
+            delay: Duration::ZERO,
+        });
+        let mut configuration = config(&temp);
+        configuration.base_url = "https://miniflux.example/news/v1/".into();
+        let core = FluxCore::with_remote(configuration, source).unwrap();
+
+        assert_eq!(
+            core.store.base_url().unwrap().as_deref(),
+            Some("https://miniflux.example/news")
+        );
+        assert_eq!(
+            core.miniflux_entry_url(583862),
+            "https://miniflux.example/news/unread/entry/583862"
         );
     }
     #[test]

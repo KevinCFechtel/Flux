@@ -678,7 +678,7 @@ private struct SettingsView: View {
                     .padding(20)
             }
             Divider()
-            HStack { Spacer(); Button("Cancel") { store.settingsVisible = false }; Button("Save") { store.setScrolloverEnabled(scrollover); store.setSyncOnStartEnabled(syncOnStart); store.setGlobalShortcut(globalShortcut); if store.configure(server: server.trimmingCharacters(in: .whitespacesAndNewlines), apiKey: key.trimmingCharacters(in: .whitespacesAndNewlines), launchAtLogin: launchAtLogin) { store.settingsVisible = false } }.keyboardShortcut(.defaultAction).disabled(server.isEmpty || key.isEmpty) }
+            HStack { Spacer(); Button("Cancel") { store.settingsVisible = false }; Button(store.isSavingAccount ? "Validating…" : "Save") { store.saveAccount(server: server.trimmingCharacters(in: .whitespacesAndNewlines), apiKey: key.trimmingCharacters(in: .whitespacesAndNewlines), launchAtLogin: launchAtLogin, scrollover: scrollover, syncOnStart: syncOnStart, globalShortcut: globalShortcut) }.keyboardShortcut(.defaultAction).disabled(server.isEmpty || key.isEmpty || store.isSavingAccount) }
                 .padding(16)
         }
         .frame(width: 700, height: 430)
@@ -693,7 +693,7 @@ private struct SettingsView: View {
     @ViewBuilder private var settingsPage: some View {
         switch section {
         case .account:
-            AccountSettingsView(server: $server, key: $key)
+            AccountSettingsView(server: $server, key: $key, configuredServer: store.configuredServer, version: store.minifluxVersion, validationError: store.accountValidationError)
         case .syncStorage:
             SyncStorageSettingsView(store: store, syncOnStart: $syncOnStart, retention: retention, deliveryMode: deliveryMode, backgroundSyncEnabled: backgroundSyncEnabled)
         case .reading:
@@ -753,16 +753,28 @@ private struct SettingsSidebar: View {
 private struct AccountSettingsView: View {
     @Binding var server: String
     @Binding var key: String
+    let configuredServer: String?
+    let version: String?
+    let validationError: String?
 
     var body: some View {
         Form {
             LabeledContent("Miniflux Server") { TextField("", text: $server) }
             LabeledContent("API Key") { SecureField("", text: $key) }
+            LabeledContent("Miniflux") { Text(version ?? "—").foregroundStyle(.secondary) }
+            if let validationError {
+                Text(validationError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
             Text("Credentials are stored securely in the macOS Keychain.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
+        .onChange(of: configuredServer) { _, server in
+            if let server { self.server = server }
+        }
     }
 }
 
