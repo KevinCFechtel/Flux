@@ -14,7 +14,7 @@ use crate::domain::{
 use crate::miniflux::normalize_installation_base;
 use rusqlite::{Connection, OptionalExtension, params};
 
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 #[derive(Clone, Debug)]
 pub struct PendingMutation {
@@ -875,7 +875,12 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
     }
     if current < 6 {
         let tx = connection.transaction().map_err(sql_error)?;
-        tx.execute_batch("CREATE TABLE feed_preferences (feed_id INTEGER PRIMARY KEY REFERENCES feeds(id) ON DELETE CASCADE, system_notifications_enabled INTEGER NOT NULL DEFAULT 0 CHECK(system_notifications_enabled IN(0,1)), detail_rendering TEXT NOT NULL DEFAULT 'rendered' CHECK(detail_rendering IN('rendered','text_only')), truncate_detail INTEGER NOT NULL DEFAULT 0 CHECK(truncate_detail IN(0,1)), open_in_miniflux INTEGER NOT NULL DEFAULT 0 CHECK(open_in_miniflux IN(0,1))); INSERT INTO feed_preferences(feed_id,system_notifications_enabled) SELECT feed_id,enabled FROM feed_system_notification_preferences; DROP TABLE feed_system_notification_preferences; PRAGMA user_version=6;").map_err(sql_error)?;
+        tx.execute_batch("CREATE TABLE feed_preferences (feed_id INTEGER PRIMARY KEY, system_notifications_enabled INTEGER NOT NULL DEFAULT 0 CHECK(system_notifications_enabled IN(0,1)), detail_rendering TEXT NOT NULL DEFAULT 'rendered' CHECK(detail_rendering IN('rendered','text_only')), truncate_detail INTEGER NOT NULL DEFAULT 0 CHECK(truncate_detail IN(0,1)), open_in_miniflux INTEGER NOT NULL DEFAULT 0 CHECK(open_in_miniflux IN(0,1))); INSERT INTO feed_preferences(feed_id,system_notifications_enabled) SELECT feed_id,enabled FROM feed_system_notification_preferences; DROP TABLE feed_system_notification_preferences; PRAGMA user_version=7;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
+    if current == 6 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute_batch("CREATE TABLE feed_preferences_replacement (feed_id INTEGER PRIMARY KEY, system_notifications_enabled INTEGER NOT NULL DEFAULT 0 CHECK(system_notifications_enabled IN(0,1)), detail_rendering TEXT NOT NULL DEFAULT 'rendered' CHECK(detail_rendering IN('rendered','text_only')), truncate_detail INTEGER NOT NULL DEFAULT 0 CHECK(truncate_detail IN(0,1)), open_in_miniflux INTEGER NOT NULL DEFAULT 0 CHECK(open_in_miniflux IN(0,1))); INSERT INTO feed_preferences_replacement (feed_id,system_notifications_enabled,detail_rendering,truncate_detail,open_in_miniflux) SELECT feed_id,system_notifications_enabled,detail_rendering,truncate_detail,open_in_miniflux FROM feed_preferences; DROP TABLE feed_preferences; ALTER TABLE feed_preferences_replacement RENAME TO feed_preferences; PRAGMA user_version=7;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
     Ok(())
@@ -994,7 +999,7 @@ mod tests {
         let connection = store.connection.lock().unwrap();
         let row: (i64, String, Option<String>, String, bool, bool, i64, i64) = connection.query_row("SELECT content_processing_version,preview,image_url,raw_html_content,is_read,is_starred,feed_id,(SELECT COUNT(*) FROM pending_mutations) FROM articles WHERE id=3", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).unwrap();
         drop(connection);
-        assert_eq!(store.schema_version().unwrap(), 6);
+        assert_eq!(store.schema_version().unwrap(), 7);
         assert_eq!(row.0, crate::article::PROCESSING_VERSION);
         assert_eq!(row.1, "Hello world");
         assert_eq!(row.2.as_deref(), Some("https://example.test/cover.jpg"));
@@ -1018,7 +1023,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 6);
+        assert_eq!(store.schema_version().unwrap(), 7);
         assert_eq!(
             store.feed_preferences(2).unwrap(),
             FeedPreferences {
@@ -1094,6 +1099,203 @@ mod tests {
         assert_eq!(
             store.feed_preferences(2).unwrap(),
             FeedPreferences::defaults(2)
+        );
+    }
+
+    #[test]
+    fn v7_migration_preserves_preferences_and_removes_feed_foreign_key() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let path = data.join("flux.sqlite3");
+        let connection = Connection::open(&path).unwrap();
+        connection.execute_batch("CREATE TABLE core_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE categories (id INTEGER PRIMARY KEY, title TEXT NOT NULL); CREATE TABLE feeds (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL REFERENCES categories(id), title TEXT NOT NULL); CREATE TABLE articles (id INTEGER PRIMARY KEY, feed_id INTEGER NOT NULL REFERENCES feeds(id), title TEXT NOT NULL, url TEXT NOT NULL, comments_url TEXT NOT NULL DEFAULT '', published_at TEXT NOT NULL, is_read INTEGER NOT NULL CHECK(is_read IN(0,1)), is_starred INTEGER NOT NULL CHECK(is_starred IN(0,1)), raw_html_content TEXT NOT NULL, remote_is_read INTEGER, remote_is_starred INTEGER, preview TEXT NOT NULL DEFAULT '', image_url TEXT, content_processing_version INTEGER NOT NULL DEFAULT 0); CREATE TABLE pending_mutations (article_id INTEGER NOT NULL REFERENCES articles(id), field TEXT NOT NULL CHECK(field IN ('read','starred')), desired INTEGER NOT NULL CHECK(desired IN(0,1)), revision INTEGER NOT NULL, PRIMARY KEY(article_id,field)); CREATE TABLE pending_system_notifications (article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE); CREATE TABLE system_notified_articles (article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE); CREATE TABLE system_notification_candidates (id INTEGER PRIMARY KEY, feed_id INTEGER NOT NULL REFERENCES feeds(id) ON DELETE CASCADE, feed_title TEXT NOT NULL); CREATE TABLE notification_candidate_articles (candidate_id INTEGER NOT NULL REFERENCES system_notification_candidates(id) ON DELETE CASCADE, article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, PRIMARY KEY(candidate_id,article_id)); CREATE TABLE feed_preferences (feed_id INTEGER PRIMARY KEY REFERENCES feeds(id) ON DELETE CASCADE, system_notifications_enabled INTEGER NOT NULL DEFAULT 0 CHECK(system_notifications_enabled IN(0,1)), detail_rendering TEXT NOT NULL DEFAULT 'rendered' CHECK(detail_rendering IN('rendered','text_only')), truncate_detail INTEGER NOT NULL DEFAULT 0 CHECK(truncate_detail IN(0,1)), open_in_miniflux INTEGER NOT NULL DEFAULT 0 CHECK(open_in_miniflux IN(0,1))); INSERT INTO categories VALUES (1,'Category'); INSERT INTO feeds VALUES (123,1,'One'); INSERT INTO feeds VALUES (456,1,'Two'); INSERT INTO articles VALUES (9,123,'Article','https://example.test','', '2026-01-01T00:00:00Z',0,0,0,0,'content','',NULL,0); INSERT INTO feed_preferences VALUES (123,1,'text_only',1,1); INSERT INTO feed_preferences VALUES (456,0,'rendered',0,1); PRAGMA user_version=6;").unwrap();
+        drop(connection);
+
+        let store = Store::open(&data, &cache, &media).unwrap();
+        assert_eq!(store.schema_version().unwrap(), 7);
+        assert_eq!(
+            store.feed_preferences(123).unwrap(),
+            FeedPreferences {
+                feed_id: 123,
+                system_notifications_enabled: true,
+                detail_rendering: DetailRenderingMode::TextOnly,
+                truncate_detail: true,
+                open_in_miniflux: true
+            }
+        );
+        assert_eq!(
+            store.feed_preferences(456).unwrap(),
+            FeedPreferences {
+                feed_id: 456,
+                system_notifications_enabled: false,
+                detail_rendering: DetailRenderingMode::Rendered,
+                truncate_detail: false,
+                open_in_miniflux: true
+            }
+        );
+        let connection = store.connection.lock().unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT feed_id FROM articles WHERE id=9", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            123
+        );
+        let foreign_key_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_foreign_key_list('feed_preferences')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(foreign_key_count, 0);
+    }
+
+    #[test]
+    fn fresh_schema_permits_orphan_preferences_without_cascade() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let connection = store.connection.lock().unwrap();
+        let foreign_key_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_foreign_key_list('feed_preferences')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(foreign_key_count, 0);
+        connection.execute("INSERT INTO feed_preferences(feed_id,system_notifications_enabled,detail_rendering,truncate_detail,open_in_miniflux) VALUES(999,1,'text_only',1,1)", []).unwrap();
+        drop(connection);
+        assert_eq!(
+            store.feed_preferences(999).unwrap(),
+            FeedPreferences {
+                feed_id: 999,
+                system_notifications_enabled: true,
+                detail_rendering: DetailRenderingMode::TextOnly,
+                truncate_detail: true,
+                open_in_miniflux: true
+            }
+        );
+    }
+
+    #[test]
+    fn local_feed_removal_does_not_delete_orphan_preferences() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 123,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        store.reconcile(&categories, &feeds, &[]).unwrap();
+        store
+            .set_feed_system_notifications_enabled(123, true)
+            .unwrap();
+        store
+            .set_feed_detail_rendering(123, DetailRenderingMode::TextOnly)
+            .unwrap();
+        store.set_feed_truncate_detail(123, true).unwrap();
+        store.set_feed_open_in_miniflux(123, true).unwrap();
+        store
+            .connection
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM feeds WHERE id=123", [])
+            .unwrap();
+        assert_eq!(
+            store.feed_preferences(123).unwrap(),
+            FeedPreferences {
+                feed_id: 123,
+                system_notifications_enabled: true,
+                detail_rendering: DetailRenderingMode::TextOnly,
+                truncate_detail: true,
+                open_in_miniflux: true
+            }
+        );
+    }
+
+    #[test]
+    fn changing_installations_explicitly_removes_all_preferences() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        store.set_base_url("https://server-a.example").unwrap();
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 123,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        store.reconcile(&categories, &feeds, &[]).unwrap();
+        store
+            .set_feed_system_notifications_enabled(123, true)
+            .unwrap();
+
+        store.set_base_url("https://server-b.example").unwrap();
+
+        assert!(store.navigation_catalog().unwrap().feeds.is_empty());
+        let connection = store.connection.lock().unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM feed_preferences", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn reconciliation_removes_only_preferences_for_remotely_removed_feeds() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [
+            Feed {
+                id: 123,
+                category_id: 1,
+                title: "Removed".into(),
+            },
+            Feed {
+                id: 456,
+                category_id: 1,
+                title: "Remaining".into(),
+            },
+        ];
+        store.reconcile(&categories, &feeds, &[]).unwrap();
+        store
+            .set_feed_system_notifications_enabled(123, true)
+            .unwrap();
+        store
+            .set_feed_detail_rendering(123, DetailRenderingMode::TextOnly)
+            .unwrap();
+        store.set_feed_open_in_miniflux(456, true).unwrap();
+
+        store.reconcile(&categories, &feeds[1..], &[]).unwrap();
+
+        assert!(store.feed_preferences(123).is_err());
+        assert_eq!(
+            store.feed_preferences(456).unwrap(),
+            FeedPreferences {
+                feed_id: 456,
+                system_notifications_enabled: false,
+                detail_rendering: DetailRenderingMode::Rendered,
+                truncate_detail: false,
+                open_in_miniflux: true
+            }
         );
     }
 

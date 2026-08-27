@@ -455,6 +455,16 @@ remains separate operational state and is not part of `FeedPreferences`.
 Public mutation APIs may remain field-specific so updating one control
 cannot accidentally overwrite another preference from a stale snapshot.
 
+FeedPreferences are user configuration keyed solely by Miniflux feed ID,
+not relationally owned by a locally cached `feeds` row. The
+`feed_preferences.feed_id` storage key intentionally has no foreign key or
+cascade to `feeds`, so temporary orphan preferences are valid. Normal remote
+reconciliation explicitly removes preferences only for feeds confirmed absent
+from Miniflux; Rebuild Local State will preserve them, while account/server
+replacement and Full Reset will remove them. There is no feed URL or title
+matching. This schema ownership correction is required by the agreed Rebuild
+semantics.
+
 Feed/category core preferences are device-local and are not
 automatically synchronized across devices. Device backup and explicit
 config export/import are separate mechanisms.
@@ -548,11 +558,29 @@ remains persistent.
 
 ## 14. Config export/import and local reset
 
-Configuration export contains configuration, not article/media/cache
-data.
+Flux Config Backup is a versioned, platform-specific configuration backup,
+not a cross-platform interchange format. Its format version is independent
+of the SQLite schema, application version, and Miniflux version. A backup
+contains complete configurable state for its originating platform, including
+the canonical Miniflux installation base, credentials, CoreSettings,
+FeedPreferences, and a versioned native-platform settings payload.
 
-The user can export without secrets or include secrets only in a
-strongly encrypted password-protected export.
+Backups are always password-encrypted; Flux neither stores nor recovers the
+password. V1 derives an encryption key with Argon2id (64 MiB, three passes,
+one lane) and uses AES-256-GCM authenticated encryption. Only the format,
+platform, and crypto/KDF metadata remain cleartext; credentials and all
+settings remain encrypted.
+
+FeedPreferences use Miniflux feed ID only. There is no URL/title matching.
+Imports intentionally accept orphan feed IDs without server lookup; normal
+later reconciliation removes preferences for feeds absent from the
+authoritative catalog. Synchronized articles, cache/media, pending mutations,
+notification/runtime state, and presentation state are excluded.
+
+Backup parsing validates and returns a restore model without mutating core or
+native state. A later native restore phase validates candidate Miniflux
+credentials and performs the transactional replacement. Native settings remain
+owned by their platform even while carried in that platform's backup.
 
 A local core-data reset removes synchronized core data and regenerable
 caches but preserves settings/preferences, native UI preferences,
@@ -781,7 +809,6 @@ implementation, not through broad speculative analysis:
 -   concrete Rust HTML parsing/sanitization libraries used to build the
     semantic Reader document;
 -   exact backoff timings;
--   exact encrypted config container/KDF/AEAD choices;
 -   logging library;
 -   final DTO/API names;
 -   detailed media cleanup options;

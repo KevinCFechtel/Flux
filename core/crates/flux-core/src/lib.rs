@@ -3,6 +3,7 @@
 pub mod article;
 mod article_document;
 mod article_thumbnail;
+pub mod config_backup;
 pub mod diagnostics;
 pub mod domain;
 mod feed_icon;
@@ -1035,7 +1036,7 @@ mod tests {
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            6
+            7
         );
         let bytes = std::fs::read(core.database_path()).unwrap();
         assert!(
