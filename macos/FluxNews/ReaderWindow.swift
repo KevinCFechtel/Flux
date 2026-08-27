@@ -82,7 +82,9 @@ final class ReaderWindowController: NSObject, ObservableObject {
     private func makePanelIfNeeded() {
         guard panel == nil else { return }
         UserDefaults.standard.removeObject(forKey: "NSWindow Frame FluxNews.Reader")
-        let panel = ReaderPreviewPanel(contentRect: NSRect(origin: .zero, size: ReaderPreviewGeometry.persistedSize()), styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        let panel = ReaderPreviewPanel(contentRect: NSRect(origin: .zero, size: ReaderPreviewGeometry.persistedSize()), styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .hudWindow], backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
         panel.title = "Detail Preview"
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = true
@@ -108,10 +110,25 @@ final class ReaderWindowController: NSObject, ObservableObject {
         panel.setFrameOrigin(ReaderPreviewGeometry.centeredFrame(size: panel.frame.size, visibleFrame: visibleFrame).origin)
     }
 
+    private func starImage(starred: Bool) -> NSImage? {
+        let base = NSImage(
+            systemSymbolName: starred ? "star.fill" : "star",
+            accessibilityDescription: starred ? "Unstar" : "Star"
+        )
+
+        return base?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(
+                pointSize: 16,
+                weight: .regular
+            )
+        )
+    }
+
     private func updateStarToolbarItem() {
+
         guard let item = panel?.toolbar?.items.first(where: { $0.itemIdentifier == .star }) else { return }
         let starred = article?.isStarred == true
-        item.image = NSImage(systemSymbolName: starred ? "star.fill" : "star", accessibilityDescription: starred ? "Unstar" : "Star")
+        item.image = starImage(starred: starred)
         item.label = starred ? "Unstar" : "Star"
         item.paletteLabel = item.label
         item.toolTip = item.label
@@ -142,8 +159,8 @@ private final class ReaderVisualEffectViewController: NSViewController {
 
     override func loadView() {
         let effect = NSVisualEffectView()
-        effect.material = .underWindowBackground
-        effect.blendingMode = .withinWindow
+        effect.material = .hudWindow
+        effect.blendingMode = .behindWindow
         effect.state = .followsWindowActiveState
         let host = NSHostingController(rootView: rootView)
         addChild(host)
@@ -173,7 +190,7 @@ extension ReaderWindowController: NSToolbarDelegate {
             item.label = starred ? "Unstar" : "Star"
             item.paletteLabel = item.label
             item.toolTip = item.label
-            item.image = NSImage(systemSymbolName: starred ? "star.fill" : "star", accessibilityDescription: item.label)
+            item.image = starImage(starred: starred)
             item.target = self
             item.action = #selector(toggleStarredFromToolbar)
         case .share:
@@ -191,7 +208,18 @@ extension ReaderWindowController: NSToolbarDelegate {
     }
 
     private func button(symbol: String, label: String, action: Selector?) -> NSButton {
-        let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: label)!, target: self, action: action)
+      let baseImage = NSImage(
+          systemSymbolName: symbol,
+          accessibilityDescription: label
+      )!
+
+      let image = baseImage.withSymbolConfiguration(
+          NSImage.SymbolConfiguration(
+              pointSize: 16,
+              weight: .regular
+          )
+      ) ?? baseImage
+      let button = NSButton(image: image, target: self, action: action)
         button.bezelStyle = .texturedRounded
         button.toolTip = label
         button.setAccessibilityLabel(label)
