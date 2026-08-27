@@ -7,6 +7,7 @@ import UserNotifications
 
 enum BrowserScope: Hashable { case all, starred, search, category(Int64), feed(Int64) }
 enum ArticleListStyle: String { case row, card }
+struct FeedSettingsTarget: Identifiable { let id: Int64; let title: String }
 
 @MainActor
 final class BrowserStore: ObservableObject {
@@ -40,6 +41,8 @@ final class BrowserStore: ObservableObject {
     @Published var markReadOnScrolloverEnabled = true
     @Published private(set) var syncOnStartEnabled: Bool
     @Published var articleListStyle: ArticleListStyle
+    @Published var articlePreviewLines: ArticlePreviewLines
+    @Published var clickOnNews: ClickOnNews
     @Published var globalShortcut: GlobalShortcutChoice
     @Published var globalShortcutRegistrationError: String?
     @Published private(set) var coreSettings: CoreSettings?
@@ -50,6 +53,7 @@ final class BrowserStore: ObservableObject {
     @Published private(set) var updatingSystemNotificationFeedIDs = Set<Int64>()
     @Published private(set) var listPresentationRevision: UInt64 = 0
     @Published private(set) var snapshotResetRevision: UInt64 = 0
+    @Published var feedSettingsTarget: FeedSettingsTarget?
 
     private var core: Flux?
     private var eventSubscription: EventSubscription?
@@ -73,6 +77,8 @@ final class BrowserStore: ObservableObject {
         markReadOnScrolloverEnabled = UserDefaults.standard.object(forKey: "FluxNews.markReadOnScrollover") as? Bool ?? true
         syncOnStartEnabled = UserDefaults.standard.object(forKey: "FluxNews.syncOnStart") as? Bool ?? true
         articleListStyle = UserDefaults.standard.string(forKey: "FluxNews.articleListStyle").flatMap(ArticleListStyle.init(rawValue:)) ?? .row
+        articlePreviewLines = ArticlePreviewLines(rawValue: UserDefaults.standard.integer(forKey: "FluxNews.articlePreviewLines")) ?? .standard
+        clickOnNews = UserDefaults.standard.string(forKey: "FluxNews.clickOnNews").flatMap(ClickOnNews.init(rawValue:)) ?? .openLink
         globalShortcut = GlobalShortcutChoice.stored()
     }
 
@@ -362,6 +368,7 @@ final class BrowserStore: ObservableObject {
             }
         )
     }
+    func setDetailCharacterLimit(_ limit: UInt32) { updateCoreSettings { try $0.setDetailCharacterLimit(limit: limit) } }
     func reloadSystemNotificationSettings() {
         guard let core else { return }
         do {
@@ -597,16 +604,31 @@ final class BrowserStore: ObservableObject {
     func undoScrollover() { guard let core, !lastScrolloverBatch.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: lastScrolloverBatch, read: false); updateVisible(lastScrolloverBatch) { $0.isRead = false }; scrolloverUndoBatch.clear(); lastScrolloverBatch = []; scrolloverUndoVisible = false; undoExpiry?.cancel(); reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
     func setScrolloverEnabled(_ enabled: Bool) { markReadOnScrolloverEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.markReadOnScrollover") }
     func setSyncOnStartEnabled(_ enabled: Bool) { syncOnStartEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.syncOnStart") }
+    func setArticlePreviewLines(_ lines: ArticlePreviewLines) { articlePreviewLines = lines; UserDefaults.standard.set(lines.rawValue, forKey: "FluxNews.articlePreviewLines") }
+    func setClickOnNews(_ preference: ClickOnNews) { clickOnNews = preference; UserDefaults.standard.set(preference.rawValue, forKey: "FluxNews.clickOnNews") }
     func setGlobalShortcut(_ shortcut: GlobalShortcutChoice) { guard shortcut != globalShortcut else { return }; globalShortcut = shortcut; shortcut.store() }
-    func open(_ article: ArticleSummary) { setRead(article, true); if let url = URL(string: article.url) { NSWorkspace.shared.open(url) } }
+    func open(_ article: ArticleSummary) {
+        setRead(article, true)
+        let prefersMiniflux = (try? core?.feedPreferences(feedId: article.feedId).openInMiniflux) ?? false
+        switch ArticleOpenRouting.action(clickOnNews: clickOnNews, openInMiniflux: prefersMiniflux) {
+        case .detail: openDetail(article)
+        case .original: openOriginal(article)
+        case .miniflux: openInMiniflux(article)
+        }
+    }
     var onOpenDetail: ((ArticleSummary, Bool) -> Void)?
     func openDetail(_ article: ArticleSummary, togglesPreview: Bool = false) { onOpenDetail?(article, togglesPreview) }
+    func openOriginal(_ article: ArticleSummary) { if let url = URL(string: article.url) { NSWorkspace.shared.open(url) } }
     func openComments(_ article: ArticleSummary) { if let url = URL(string: article.commentsUrl), !article.commentsUrl.isEmpty { NSWorkspace.shared.open(url) } }
     func openInMiniflux(_ article: ArticleSummary) {
         guard let url = minifluxServerURL?.appendingPathComponent("entries").appendingPathComponent(String(article.id)) else { return }
         NSWorkspace.shared.open(url)
     }
     func copyLink(_ article: ArticleSummary) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(article.url, forType: .string) }
+    func feedPreferences(feedID: Int64) throws -> FeedPreferences { guard let core else { throw NSError(domain: "FluxNews", code: 1) }; return try core.feedPreferences(feedId: feedID) }
+    func setFeedDetailRendering(feedID: Int64, mode: DetailRenderingMode) throws { try core?.setFeedDetailRendering(feedId: feedID, mode: mode) }
+    func setFeedTruncateDetail(feedID: Int64, enabled: Bool) throws { try core?.setFeedTruncateDetail(feedId: feedID, enabled: enabled) }
+    func setFeedOpenInMiniflux(feedID: Int64, enabled: Bool) throws { try core?.setFeedOpenInMiniflux(feedId: feedID, enabled: enabled) }
     func share(_ article: ArticleSummary) { guard let url = URL(string: article.url) else { return }; DispatchQueue.main.async { [weak self] in guard let self, let view = NSApplication.shared.keyWindow?.contentView else { return }; let picker = NSSharingServicePicker(items: [article.title, url]); self.sharingPicker = picker; let point = view.convert(view.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil); picker.show(relativeTo: NSRect(origin: point, size: NSSize(width: 1, height: 1)), of: view, preferredEdge: .minY) } }
     func showActionConfirmation(_ message: String) {
         actionConfirmation = message

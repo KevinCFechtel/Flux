@@ -1,5 +1,20 @@
 import AppKit
 
+enum ArticlePreviewLines: Int, CaseIterable { case compact = 2, standard = 3, extended = 5 }
+enum ClickOnNews: String, CaseIterable { case openLink, openDetailView }
+enum NormalOpenAction: Equatable { case original, miniflux, detail }
+
+enum ArticleOpenRouting {
+    static func action(clickOnNews: ClickOnNews, openInMiniflux: Bool) -> NormalOpenAction {
+        if clickOnNews == .openDetailView { return .detail }
+        return openInMiniflux ? .miniflux : .original
+    }
+}
+
+enum FeedSettingsRouting {
+    static func isAvailable(feedID: Int64?) -> Bool { feedID != nil }
+}
+
 enum ReaderPreviewAction: Equatable {
     case show
     case replace

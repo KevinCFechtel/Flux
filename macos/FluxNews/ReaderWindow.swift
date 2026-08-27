@@ -73,6 +73,7 @@ final class ReaderWindowController: NSObject, ObservableObject {
         picker.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
     }
     @objc private func openFromToolbar() { guard let article else { return }; store?.open(article) }
+    @objc private func openOriginalFromToolbar() { openOriginal() }
     @objc private func showMoreMenu(_ sender: NSButton) { moreMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height), in: sender) }
     @objc private func markUnread() { guard let article else { return }; store?.setRead(article, false) }
     @objc private func openInMiniflux() { guard let article else { return }; store?.openInMiniflux(article) }
@@ -234,7 +235,7 @@ extension ReaderWindowController: NSToolbarDelegate {
         let menu = NSMenu()
         menu.addItem(withTitle: "Mark as Unread", action: #selector(markUnread), keyEquivalent: "").target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Open Original", action: #selector(openFromToolbar), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Open Original", action: #selector(openOriginalFromToolbar), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Open in Miniflux", action: #selector(openInMiniflux), keyEquivalent: "").target = self
         if article?.commentsUrl.isEmpty == false { menu.addItem(withTitle: "Open Comments", action: #selector(openComments), keyEquivalent: "").target = self }
         menu.addItem(.separator())

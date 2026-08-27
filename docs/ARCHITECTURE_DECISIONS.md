@@ -498,6 +498,12 @@ On macOS, Preview Lines offers 2 (Compact), 3 (Standard), and 5
 **Open Detail View**. Mobile may later define additional native
 interaction modes without changing the Core contract.
 
+On macOS, Feed Settings are reached from a context menu on an individual
+feed. `Preview Lines` is presentation state only and does not affect
+Reader content processing. Per-feed `Open in Miniflux` changes the normal
+Open destination between the publisher URL and the Miniflux entry URL;
+explicit Open Original and Open in Miniflux actions remain available.
+
 Appearance follows the native platform without a Flux Light/Dark/System
 setting; iOS Liquid Glass behavior is likewise platform-owned without a
 Flux setting.

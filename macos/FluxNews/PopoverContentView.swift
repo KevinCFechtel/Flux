@@ -52,6 +52,7 @@ struct PopoverContentView: View {
         .frame(width: PopoverLayout.width(style: store.articleListStyle, sidebarVisible: sidebarVisible))
         .frame(maxHeight: .infinity)
         .sheet(isPresented: $store.settingsVisible) { SettingsView(store: store) }
+        .sheet(item: $store.feedSettingsTarget) { target in FeedSettingsView(store: store, target: target) }
         .sheet(isPresented: $store.addFeedVisible) { AddFeedView(store: store) }
         .sheet(isPresented: $store.addCategoryVisible) { AddCategoryView(store: store) }
     }
@@ -426,6 +427,13 @@ private struct NavigationSidebar: View {
         .buttonStyle(.plain)
         .contentShape(Rectangle())
         .tag(item.scope)
+        .contextMenu {
+            if FeedSettingsRouting.isAvailable(feedID: item.feedID), let feedID = item.feedID {
+                Button("Feed Settings...") {
+                    store.feedSettingsTarget = FeedSettingsTarget(id: feedID, title: item.title)
+                }
+            }
+        }
     }
 }
 
@@ -531,7 +539,7 @@ private struct ArticleItem: View {
             metadata
             Text(article.title).font(.system(size: 14, weight: article.isRead ? .regular : .semibold))
                 .foregroundStyle(article.isRead ? .secondary : .primary).lineLimit(3).multilineTextAlignment(.leading)
-            if !article.preview.isEmpty { Text(article.preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(3).multilineTextAlignment(.leading) }
+            if !article.preview.isEmpty { Text(article.preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(store.articlePreviewLines.rawValue).multilineTextAlignment(.leading) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -557,7 +565,7 @@ private struct ArticleItem: View {
     }
     private var interactionBackground: Color { selected ? Color.accentColor.opacity(0.16) : hovered ? Color.primary.opacity(0.055) : .clear }
     @ViewBuilder private var actionMenu: some View {
-        Button { store.open(article) } label: { Label("Open in Browser", systemImage: "safari") }
+        Button { store.open(article) } label: { Label("Open", systemImage: "safari") }
         Button { store.openDetail(article) } label: { Label("Open Detail View", systemImage: "doc.text") }
         Button { store.setStarred(article, !article.isStarred) } label: { Label(article.isStarred ? "Unstar" : "Star", systemImage: article.isStarred ? "star.slash" : "star") }
         if !store.isSearchActive {
@@ -566,6 +574,7 @@ private struct ArticleItem: View {
             Divider()
             Button { store.copyLink(article) } label: { Label("Copy Link", systemImage: "doc.on.doc") }
             Button { store.share(article) } label: { Label("Share...", systemImage: "square.and.arrow.up") }
+            Button { store.openOriginal(article) } label: { Label("Open Original", systemImage: "safari") }
             Button { store.openInMiniflux(article) } label: { Label("Open in Miniflux", systemImage: "arrow.up.forward.app") }
             Button { store.select(.feed(article.feedId)) } label: { Label("Show Feed", systemImage: "line.3.horizontal.decrease.circle") }
             if !article.commentsUrl.isEmpty { Button { store.openComments(article) } label: { Label("Open Comments", systemImage: "bubble.left") } }
@@ -688,7 +697,7 @@ private struct SettingsView: View {
         case .syncStorage:
             SyncStorageSettingsView(store: store, syncOnStart: $syncOnStart, retention: retention, deliveryMode: deliveryMode, backgroundSyncEnabled: backgroundSyncEnabled)
         case .reading:
-            ReadingSettingsView(scrollover: $scrollover)
+            ReadingSettingsView(store: store, scrollover: $scrollover, detailCharacterLimit: detailCharacterLimit)
         case .systemNotifications:
             SystemNotificationsSettingsView(store: store)
         case .general:
@@ -711,6 +720,12 @@ private struct SettingsView: View {
         Binding(
             get: { store.coreSettings?.backgroundSyncEnabled ?? false },
             set: { store.setBackgroundSyncEnabled($0) }
+        )
+    }
+    private var detailCharacterLimit: Binding<UInt32> {
+        Binding(
+            get: { store.coreSettings?.detailCharacterLimit ?? 10_000 },
+            set: { store.setDetailCharacterLimit($0) }
         )
     }
 }
@@ -782,13 +797,81 @@ private struct SyncStorageSettingsView: View {
 }
 
 private struct ReadingSettingsView: View {
+    @ObservedObject var store: BrowserStore
     @Binding var scrollover: Bool
+    let detailCharacterLimit: Binding<UInt32>
 
     var body: some View {
         Form {
+            Picker("Preview Lines", selection: Binding(get: { store.articlePreviewLines }, set: { store.setArticlePreviewLines($0) })) {
+                Text("2 lines").tag(ArticlePreviewLines.compact)
+                Text("3 lines").tag(ArticlePreviewLines.standard)
+                Text("5 lines").tag(ArticlePreviewLines.extended)
+            }
+            Picker("Click on News", selection: Binding(get: { store.clickOnNews }, set: { store.setClickOnNews($0) })) {
+                Text("Open Link").tag(ClickOnNews.openLink)
+                Text("Open Detail View").tag(ClickOnNews.openDetailView)
+            }
+            Picker("Detail Character Limit", selection: detailCharacterLimit) {
+                Text("5,000 characters").tag(UInt32(5_000))
+                Text("10,000 characters").tag(UInt32(10_000))
+                Text("20,000 characters").tag(UInt32(20_000))
+            }
+            .disabled(store.coreSettings == nil)
             Toggle("Mark articles as read when scrolling past", isOn: $scrollover)
         }
         .formStyle(.grouped)
+    }
+}
+
+private struct FeedSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: BrowserStore
+    let target: FeedSettingsTarget
+    @State private var preferences: FeedPreferences?
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Feed Settings").font(.title2.bold())
+            Text(target.title).foregroundStyle(.secondary)
+            if let preferences {
+                Form {
+                    Picker("Detail Rendering", selection: Binding(get: { preferences.detailRendering }, set: updateDetailRendering)) {
+                        Text("Rendered").tag(DetailRenderingMode.rendered)
+                        Text("Text Only").tag(DetailRenderingMode.textOnly)
+                    }
+                    Toggle("Truncate Detail", isOn: Binding(get: { preferences.truncateDetail }, set: updateTruncateDetail))
+                    Toggle("Open in Miniflux", isOn: Binding(get: { preferences.openInMiniflux }, set: updateOpenInMiniflux))
+                }
+                .formStyle(.grouped)
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 120)
+            }
+            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+        }
+        .padding(20)
+        .frame(width: 400)
+        .onAppear(perform: load)
+    }
+
+    private func load() {
+        do { preferences = try store.feedPreferences(feedID: target.id); error = nil }
+        catch { self.error = error.localizedDescription }
+    }
+    private func updateDetailRendering(_ mode: DetailRenderingMode) {
+        do { try store.setFeedDetailRendering(feedID: target.id, mode: mode); preferences = try store.feedPreferences(feedID: target.id) }
+        catch { self.error = error.localizedDescription }
+    }
+    private func updateTruncateDetail(_ enabled: Bool) {
+        do { try store.setFeedTruncateDetail(feedID: target.id, enabled: enabled); preferences = try store.feedPreferences(feedID: target.id) }
+        catch { self.error = error.localizedDescription }
+    }
+    private func updateOpenInMiniflux(_ enabled: Bool) {
+        do { try store.setFeedOpenInMiniflux(feedID: target.id, enabled: enabled); preferences = try store.feedPreferences(feedID: target.id) }
+        catch { self.error = error.localizedDescription }
     }
 }
 
