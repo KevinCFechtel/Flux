@@ -87,7 +87,7 @@ final class ReaderWindowController: NSObject, ObservableObject {
         panel.backgroundColor = .clear
         panel.title = "Detail Preview"
         panel.isFloatingPanel = true
-        panel.hidesOnDeactivate = true
+        panel.hidesOnDeactivate = false
         panel.level = .floating
         panel.collectionBehavior = [.moveToActiveSpace, .transient]
         panel.isReleasedWhenClosed = false
@@ -108,6 +108,10 @@ final class ReaderWindowController: NSObject, ObservableObject {
         panel.setContentSize(size)
         let visibleFrame = screen?.visibleFrame ?? NSRect(origin: .zero, size: size)
         panel.setFrameOrigin(ReaderPreviewGeometry.centeredFrame(size: panel.frame.size, visibleFrame: visibleFrame).origin)
+    }
+
+    func hide() {
+        panel?.orderOut(nil)
     }
 
     private func starImage(starred: Bool) -> NSImage? {

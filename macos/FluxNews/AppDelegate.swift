@@ -17,6 +17,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var fallbackPanel: NSPanel?
     private lazy var readerWindow = ReaderWindowController(store: store)
 
+    func applicationDidResignActive(_ notification: Notification) {
+        readerWindow.hide()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         SystemNotificationManager.shared.configure()
         SystemNotificationManager.shared.onFeedSelected = { [weak self] feedID in
