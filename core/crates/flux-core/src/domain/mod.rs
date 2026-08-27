@@ -66,6 +66,69 @@ pub struct ArticleSummary {
     pub image_url: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReaderDocument {
+    pub blocks: Vec<ReaderBlock>,
+    pub has_simplified_content: bool,
+    pub was_truncated: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReaderBlock {
+    Paragraph {
+        inlines: Vec<ReaderInline>,
+    },
+    Heading {
+        level: u8,
+        inlines: Vec<ReaderInline>,
+    },
+    Image {
+        url: String,
+        alt: Option<String>,
+        link: Option<String>,
+    },
+    List {
+        ordered: bool,
+        items: Vec<ReaderListItem>,
+    },
+    Quote {
+        blocks: Vec<ReaderBlock>,
+    },
+    CodeBlock {
+        text: String,
+    },
+    HorizontalRule,
+    ExternalContent {
+        url: String,
+        label: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReaderListItem {
+    pub blocks: Vec<ReaderBlock>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReaderInline {
+    Text {
+        text: String,
+    },
+    Bold {
+        inlines: Vec<ReaderInline>,
+    },
+    Italic {
+        inlines: Vec<ReaderInline>,
+    },
+    Code {
+        text: String,
+    },
+    Link {
+        url: String,
+        inlines: Vec<ReaderInline>,
+    },
+}
+
 /// A page of temporary, remote Miniflux search results.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SearchArticlesRequest {

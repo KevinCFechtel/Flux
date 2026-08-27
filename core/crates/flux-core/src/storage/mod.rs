@@ -29,6 +29,12 @@ pub struct LocalArticleState {
     pub is_starred: bool,
 }
 
+pub(crate) struct ReaderArticle {
+    pub feed_id: i64,
+    pub url: String,
+    pub raw_html_content: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ReconciliationStats {
     pub new_articles: u32,
@@ -543,6 +549,25 @@ impl Store {
             )
             .optional()
             .map_err(sql_error)
+    }
+    pub(crate) fn reader_article(&self, article_id: i64) -> Result<ReaderArticle, CoreError> {
+        self.connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .query_row(
+                "SELECT feed_id,url,raw_html_content FROM articles WHERE id=?1",
+                [article_id],
+                |row| {
+                    Ok(ReaderArticle {
+                        feed_id: row.get(0)?,
+                        url: row.get(1)?,
+                        raw_html_content: row.get(2)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(sql_error)?
+            .ok_or_else(|| CoreError::data(format!("article {article_id} does not exist")))
     }
 
     pub fn set_state_bulk(

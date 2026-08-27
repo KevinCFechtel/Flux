@@ -279,6 +279,7 @@ private struct ArticlePane: View {
         case .moveUp: move(-1, proxy)
         case .moveDown: move(1, proxy)
         case .open: if let article = selected { store.open(article) }
+        case .openDetail: if let article = selected { store.openDetail(article) }
         case .toggleRead: if !store.isSearchActive, let article = selected { store.setRead(article, !article.isRead) }
         case .toggleStarred: if let article = selected { store.setStarred(article, !article.isStarred) }
         case .refresh: store.sync()
@@ -548,6 +549,7 @@ private struct ArticleItem: View {
     private var interactionBackground: Color { selected ? Color.accentColor.opacity(0.16) : hovered ? Color.primary.opacity(0.055) : .clear }
     @ViewBuilder private var actionMenu: some View {
         Button { store.open(article) } label: { Label("Open in Browser", systemImage: "safari") }
+        Button { store.openDetail(article) } label: { Label("Open Detail View", systemImage: "doc.text") }
         Button { store.setStarred(article, !article.isStarred) } label: { Label(article.isStarred ? "Unstar" : "Star", systemImage: article.isStarred ? "star.slash" : "star") }
         if !store.isSearchActive {
             Button { store.setRead(article, !article.isRead) } label: { Label(article.isRead ? "Mark as Unread" : "Mark as Read", systemImage: article.isRead ? "circle.fill" : "checkmark.circle") }

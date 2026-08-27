@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private lazy var shortcutRegistrar = GlobalShortcutRegistrar { [weak self] in self?.show() }
     private var sidebarVisible = false
     private var fallbackPanel: NSPanel?
+    private lazy var readerWindow = ReaderWindowController(store: store)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         SystemNotificationManager.shared.configure()
@@ -41,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
         popover.behavior = .transient; popover.animates = true; popover.delegate = self; popover.contentSize = size(sidebarVisible: false); popover.contentViewController = host()
         AppRouter.shared.configure(open: { [weak self] route in self?.store.route(to: route); self?.show() }, refresh: { [weak self] in self?.show(); self?.store.sync(reason: .manual) })
+        store.onOpenDetail = { [weak self] article in self?.readerWindow.show(article: article) }
         catalogObservation = store.$catalog.dropFirst().removeDuplicates().sink { [weak self] catalog in
             AppRouter.shared.updateCatalog(catalog)
             self?.spotlightIndexer.update(catalog)

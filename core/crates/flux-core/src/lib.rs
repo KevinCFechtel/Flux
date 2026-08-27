@@ -1,6 +1,7 @@
 //! Shared durable Flux domain core. Platform clients provide paths and secrets.
 
 pub mod article;
+mod article_document;
 mod article_thumbnail;
 pub mod diagnostics;
 pub mod domain;
@@ -24,9 +25,9 @@ use domain::{
     CoreSettings, CreateCategoryResult, CreateFeedRequest, CreateFeedResult, DeliveryDisposition,
     DeliveryMode, DetailRenderingMode, DiscoverSubscriptionsRequest, DiscoveredSubscription,
     FeedIcon, FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, MutationField,
-    MutationResult, NavigationCatalog, ReadArticleRetention, RuntimeHealth, RuntimeHealthStatus,
-    SaveToServiceResult, SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition,
-    SyncCompleted, SyncFailure, SyncReason,
+    MutationResult, NavigationCatalog, ReadArticleRetention, ReaderDocument, RuntimeHealth,
+    RuntimeHealthStatus, SaveToServiceResult, SearchArticlesRequest, SearchArticlesResult,
+    SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason,
 };
 use miniflux::{MinifluxClient, RemoteSource};
 use storage::Store;
@@ -259,6 +260,23 @@ impl FluxCore {
 
     pub fn query_articles(&self, query: ArticleQuery) -> Result<Vec<ArticleSummary>, CoreError> {
         self.store.query_articles(&query)
+    }
+    pub fn reader_document(&self, article_id: i64) -> Result<ReaderDocument, CoreError> {
+        let article = self.store.reader_article(article_id)?;
+        let preferences = self.store.feed_preferences(article.feed_id)?;
+        let limit = preferences
+            .truncate_detail
+            .then(|| {
+                self.store
+                    .core_settings()
+                    .map(|settings| settings.detail_character_limit)
+            })
+            .transpose()?;
+        Ok(article_document::project(
+            article_document::parse(&article.raw_html_content, &article.url),
+            preferences.detail_rendering,
+            limit,
+        ))
     }
     pub fn count_articles(&self, query: ArticleQuery) -> Result<u64, CoreError> {
         self.store.count_articles(&query)
@@ -1073,6 +1091,35 @@ mod tests {
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].feed_title, "Feed A");
         assert_eq!(rows[0].category_id, 1);
+    }
+    #[test]
+    fn reader_document_loads_stored_html_using_feed_preferences_and_global_limit() {
+        let temp = TempDir::new().unwrap();
+        let mut data = snapshot();
+        data.articles[0].raw_html_content = format!(
+            "<p>First block</p><img src=\"/image.jpg\"><p>{}</p>",
+            "long ".repeat(1_001)
+        );
+        let (core, _) = core(&temp, data);
+        core.sync(SyncReason::Manual).unwrap();
+
+        let rendered = core.reader_document(1).unwrap();
+        assert!(matches!(rendered.blocks[1], ReaderBlock::Image { .. }));
+        assert!(!rendered.was_truncated);
+
+        core.set_feed_detail_rendering(10, DetailRenderingMode::TextOnly)
+            .unwrap();
+        core.set_feed_truncate_detail(10, true).unwrap();
+        core.set_detail_character_limit(5_000).unwrap();
+        let text_only = core.reader_document(1).unwrap();
+        assert!(
+            !text_only
+                .blocks
+                .iter()
+                .any(|block| matches!(block, ReaderBlock::Image { .. }))
+        );
+        assert!(text_only.was_truncated);
+        assert!(core.reader_document(999).is_err());
     }
     #[test]
     fn diagnostics_are_structured_safe_and_advisory() {

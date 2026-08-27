@@ -44,6 +44,65 @@ pub struct ArticleSummary {
     pub image_url: Option<String>,
 }
 #[derive(uniffi::Record)]
+pub struct ReaderDocument {
+    pub blocks: Vec<ReaderBlock>,
+    pub has_simplified_content: bool,
+    pub was_truncated: bool,
+}
+#[derive(uniffi::Enum)]
+pub enum ReaderBlock {
+    Paragraph {
+        inlines: Vec<ReaderInline>,
+    },
+    Heading {
+        level: u8,
+        inlines: Vec<ReaderInline>,
+    },
+    Image {
+        url: String,
+        alt: Option<String>,
+        link: Option<String>,
+    },
+    List {
+        ordered: bool,
+        items: Vec<ReaderListItem>,
+    },
+    Quote {
+        blocks: Vec<ReaderBlock>,
+    },
+    CodeBlock {
+        text: String,
+    },
+    HorizontalRule,
+    ExternalContent {
+        url: String,
+        label: Option<String>,
+    },
+}
+#[derive(uniffi::Record)]
+pub struct ReaderListItem {
+    pub blocks: Vec<ReaderBlock>,
+}
+#[derive(uniffi::Enum)]
+pub enum ReaderInline {
+    Text {
+        text: String,
+    },
+    Bold {
+        inlines: Vec<ReaderInline>,
+    },
+    Italic {
+        inlines: Vec<ReaderInline>,
+    },
+    Code {
+        text: String,
+    },
+    Link {
+        url: String,
+        inlines: Vec<ReaderInline>,
+    },
+}
+#[derive(uniffi::Record)]
 pub struct SearchArticlesRequest {
     pub query: String,
     pub offset: i64,
@@ -406,6 +465,12 @@ impl Flux {
         self.core
             .query_articles(query.into())
             .map(|rows| rows.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn reader_document(&self, article_id: i64) -> Result<ReaderDocument, FluxError> {
+        self.core
+            .reader_document(article_id)
+            .map(Into::into)
             .map_err(map_error)
     }
     pub fn count_articles(&self, query: ArticleQuery) -> Result<u64, FluxError> {
@@ -963,6 +1028,66 @@ impl From<domain::ArticleSummary> for ArticleSummary {
             is_starred: value.is_starred,
             preview: value.preview,
             image_url: value.image_url,
+        }
+    }
+}
+impl From<domain::ReaderDocument> for ReaderDocument {
+    fn from(value: domain::ReaderDocument) -> Self {
+        Self {
+            blocks: value.blocks.into_iter().map(Into::into).collect(),
+            has_simplified_content: value.has_simplified_content,
+            was_truncated: value.was_truncated,
+        }
+    }
+}
+impl From<domain::ReaderBlock> for ReaderBlock {
+    fn from(value: domain::ReaderBlock) -> Self {
+        match value {
+            domain::ReaderBlock::Paragraph { inlines } => Self::Paragraph {
+                inlines: inlines.into_iter().map(Into::into).collect(),
+            },
+            domain::ReaderBlock::Heading { level, inlines } => Self::Heading {
+                level,
+                inlines: inlines.into_iter().map(Into::into).collect(),
+            },
+            domain::ReaderBlock::Image { url, alt, link } => Self::Image { url, alt, link },
+            domain::ReaderBlock::List { ordered, items } => Self::List {
+                ordered,
+                items: items.into_iter().map(Into::into).collect(),
+            },
+            domain::ReaderBlock::Quote { blocks } => Self::Quote {
+                blocks: blocks.into_iter().map(Into::into).collect(),
+            },
+            domain::ReaderBlock::CodeBlock { text } => Self::CodeBlock { text },
+            domain::ReaderBlock::HorizontalRule => Self::HorizontalRule,
+            domain::ReaderBlock::ExternalContent { url, label } => {
+                Self::ExternalContent { url, label }
+            }
+        }
+    }
+}
+impl From<domain::ReaderListItem> for ReaderListItem {
+    fn from(value: domain::ReaderListItem) -> Self {
+        Self {
+            blocks: value.blocks.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+impl From<domain::ReaderInline> for ReaderInline {
+    fn from(value: domain::ReaderInline) -> Self {
+        match value {
+            domain::ReaderInline::Text { text } => Self::Text { text },
+            domain::ReaderInline::Bold { inlines } => Self::Bold {
+                inlines: inlines.into_iter().map(Into::into).collect(),
+            },
+            domain::ReaderInline::Italic { inlines } => Self::Italic {
+                inlines: inlines.into_iter().map(Into::into).collect(),
+            },
+            domain::ReaderInline::Code { text } => Self::Code { text },
+            domain::ReaderInline::Link { url, inlines } => Self::Link {
+                url,
+                inlines: inlines.into_iter().map(Into::into).collect(),
+            },
         }
     }
 }

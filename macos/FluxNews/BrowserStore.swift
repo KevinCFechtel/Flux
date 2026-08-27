@@ -65,6 +65,7 @@ final class BrowserStore: ObservableObject {
     private var scrolloverCountsPending = false
     private var searchGeneration: UInt64 = 0
     private var pendingNewData = PendingNewData()
+    private var readerDocumentRequest: UInt64 = 0
     private let searchPageSize: UInt32 = 50
 
     init() {
@@ -502,6 +503,22 @@ final class BrowserStore: ObservableObject {
         }
         do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) }
     }
+    func loadReaderDocument(_ article: ArticleSummary, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            return
+        }
+        readerDocumentRequest &+= 1
+        let request = readerDocumentRequest
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result { try core.readerDocument(articleId: article.id) }
+            await MainActor.run {
+                guard let store = store.value, store.readerDocumentRequest == request else { return }
+                completion(result)
+            }
+        }
+    }
     func saveToService(_ article: ArticleSummary) {
         guard let core else { return }
         let store = WeakBrowserStore(self)
@@ -579,6 +596,8 @@ final class BrowserStore: ObservableObject {
     func setSyncOnStartEnabled(_ enabled: Bool) { syncOnStartEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.syncOnStart") }
     func setGlobalShortcut(_ shortcut: GlobalShortcutChoice) { guard shortcut != globalShortcut else { return }; globalShortcut = shortcut; shortcut.store() }
     func open(_ article: ArticleSummary) { setRead(article, true); if let url = URL(string: article.url) { NSWorkspace.shared.open(url) } }
+    var onOpenDetail: ((ArticleSummary) -> Void)?
+    func openDetail(_ article: ArticleSummary) { onOpenDetail?(article) }
     func openComments(_ article: ArticleSummary) { if let url = URL(string: article.commentsUrl), !article.commentsUrl.isEmpty { NSWorkspace.shared.open(url) } }
     func copyLink(_ article: ArticleSummary) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(article.url, forType: .string) }
     func share(_ article: ArticleSummary) { guard let url = URL(string: article.url) else { return }; DispatchQueue.main.async { [weak self] in guard let self, let view = NSApplication.shared.keyWindow?.contentView else { return }; let picker = NSSharingServicePicker(items: [article.title, url]); self.sharingPicker = picker; let point = view.convert(view.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil); picker.show(relativeTo: NSRect(origin: point, size: NSSize(width: 1, height: 1)), of: view, preferredEdge: .minY) } }
