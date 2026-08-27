@@ -268,6 +268,11 @@ private struct ReaderWindowView: View {
                 else { ContentUnavailableView("No article selected", systemImage: "doc.text") }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .background {
+            KeyboardCommandObserver { command in
+                if command == .openDetail || command == .dismiss { controller.hide() }
+            }
+        }
         .environment(\.openURL, OpenURLAction { url in NSWorkspace.shared.open(url); return .handled })
     }
 }

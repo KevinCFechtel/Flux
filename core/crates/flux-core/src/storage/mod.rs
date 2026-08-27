@@ -33,6 +33,7 @@ pub(crate) struct ReaderArticle {
     pub feed_id: i64,
     pub url: String,
     pub raw_html_content: String,
+    pub image_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -555,13 +556,14 @@ impl Store {
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?
             .query_row(
-                "SELECT feed_id,url,raw_html_content FROM articles WHERE id=?1",
+                "SELECT feed_id,url,raw_html_content,image_url FROM articles WHERE id=?1",
                 [article_id],
                 |row| {
                     Ok(ReaderArticle {
                         feed_id: row.get(0)?,
                         url: row.get(1)?,
                         raw_html_content: row.get(2)?,
+                        image_url: row.get(3)?,
                     })
                 },
             )

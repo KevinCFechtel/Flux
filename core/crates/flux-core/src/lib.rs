@@ -272,10 +272,11 @@ impl FluxCore {
                     .map(|settings| settings.detail_character_limit)
             })
             .transpose()?;
-        Ok(article_document::project(
+        Ok(article_document::project_with_fallback_image(
             article_document::parse(&article.raw_html_content, &article.url),
             preferences.detail_rendering,
             limit,
+            article.image_url.as_deref(),
         ))
     }
     pub fn count_articles(&self, query: ArticleQuery) -> Result<u64, CoreError> {
@@ -1120,6 +1121,20 @@ mod tests {
         );
         assert!(text_only.was_truncated);
         assert!(core.reader_document(999).is_err());
+    }
+    #[test]
+    fn reader_document_loads_persisted_image_url_for_rendered_fallback() {
+        let temp = TempDir::new().unwrap();
+        let mut data = snapshot();
+        data.articles[0].raw_html_content = "<p>Article text</p>".into();
+        data.articles[0].image_url = Some("https://images.test/persisted.jpg".into());
+        let (core, _) = core(&temp, data);
+        core.sync(SyncReason::Manual).unwrap();
+
+        let document = core.reader_document(1).unwrap();
+        assert!(
+            matches!(&document.blocks[..], [ReaderBlock::Image { url, alt: None, link: None }, ReaderBlock::Paragraph { .. }] if url == "https://images.test/persisted.jpg")
+        );
     }
     #[test]
     fn diagnostics_are_structured_safe_and_advisory() {

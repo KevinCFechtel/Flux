@@ -32,6 +32,12 @@ const WRAPPERS: &[&str] = &[
 ];
 
 pub(crate) fn parse(html: &str, article_url: &str) -> ArticleDocument {
+    if !contains_html_markup(html) {
+        return ArticleDocument {
+            blocks: text_block(html),
+            has_simplified_content: false,
+        };
+    }
     let base = url::Url::parse(article_url).ok();
     let dom = match std::panic::catch_unwind(|| {
         parse_document(RcDom::default(), Default::default())
@@ -58,12 +64,35 @@ pub(crate) fn parse(html: &str, article_url: &str) -> ArticleDocument {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn project(
     document: ArticleDocument,
     mode: DetailRenderingMode,
     limit: Option<u32>,
 ) -> ReaderDocument {
-    let blocks = project_blocks(document.blocks, mode);
+    project_with_fallback_image(document, mode, limit, None)
+}
+
+pub(crate) fn project_with_fallback_image(
+    document: ArticleDocument,
+    mode: DetailRenderingMode,
+    limit: Option<u32>,
+    fallback_image_url: Option<&str>,
+) -> ReaderDocument {
+    let mut blocks = project_blocks(document.blocks, mode);
+    if mode == DetailRenderingMode::Rendered
+        && !contains_image(&blocks)
+        && fallback_image_url.is_some_and(valid_image_url)
+    {
+        blocks.insert(
+            0,
+            ReaderBlock::Image {
+                url: fallback_image_url.expect("checked above").to_string(),
+                alt: None,
+                link: None,
+            },
+        );
+    }
     let (blocks, was_truncated) = if let Some(limit) = limit {
         truncate(blocks, limit)
     } else {
@@ -74,6 +103,21 @@ pub(crate) fn project(
         has_simplified_content: document.has_simplified_content,
         was_truncated,
     }
+}
+
+fn contains_image(blocks: &[ReaderBlock]) -> bool {
+    blocks.iter().any(|block| match block {
+        ReaderBlock::Image { .. } => true,
+        ReaderBlock::List { items, .. } => items.iter().any(|item| contains_image(&item.blocks)),
+        ReaderBlock::Quote { blocks } => contains_image(blocks),
+        _ => false,
+    })
+}
+
+fn valid_image_url(value: &str) -> bool {
+    url::Url::parse(value)
+        .map(|url| matches!(url.scheme(), "http" | "https"))
+        .unwrap_or(false)
 }
 
 fn blocks_from_children(
@@ -503,6 +547,48 @@ fn text_block(text: &str) -> Vec<ReaderBlock> {
         .into_iter()
         .collect()
 }
+fn contains_html_markup(input: &str) -> bool {
+    let bytes = input.as_bytes();
+    for (index, _) in input.char_indices() {
+        if bytes[index] != b'<' {
+            continue;
+        }
+        let remainder = &input[index..];
+        if remainder.starts_with("<!--") {
+            if remainder.contains("-->") {
+                return true;
+            }
+        } else if remainder
+            .get(..9)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("<!doctype"))
+        {
+            if remainder
+                .as_bytes()
+                .get(9)
+                .is_some_and(|byte| byte.is_ascii_whitespace() || *byte == b'>')
+                && remainder.contains('>')
+            {
+                return true;
+            }
+        } else if let Some(tag) = remainder.strip_prefix("</") {
+            if tag.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+                && tag.find('>').is_some_and(|end| !tag[..end].contains('<'))
+            {
+                return true;
+            }
+        } else if let Some(first) = remainder.as_bytes().get(1) {
+            let after_open = &remainder[1..];
+            if first.is_ascii_alphabetic()
+                && after_open
+                    .find('>')
+                    .is_some_and(|end| !after_open[..end].contains('<'))
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
 fn text_content(node: &Handle) -> String {
     inline_text(&inlines(node, None))
 }
@@ -651,6 +737,180 @@ mod tests {
     }
 
     #[test]
+    fn rendered_projection_uses_enclosure_derived_image_as_fallback() {
+        let persisted_image = crate::article::process(
+            "<p>Article text</p>",
+            "https://example.test/post",
+            &[crate::article::EnclosureInput {
+                url: "/cover.jpg".into(),
+                mime_type: "image/jpeg".into(),
+            }],
+        )
+        .image_url;
+        let document = project_with_fallback_image(
+            parse("<p>Article text</p>", "https://example.test/post"),
+            DetailRenderingMode::Rendered,
+            None,
+            persisted_image.as_deref(),
+        );
+
+        assert!(
+            matches!(&document.blocks[..], [ReaderBlock::Image { url, alt: None, link: None }, ReaderBlock::Paragraph { .. }] if url == "https://example.test/cover.jpg")
+        );
+    }
+
+    #[test]
+    fn rendered_projection_prepends_persisted_image_without_html_image() {
+        let document = project_with_fallback_image(
+            parse("<p>Article text</p>", "https://example.test/post"),
+            DetailRenderingMode::Rendered,
+            None,
+            Some("https://images.test/hero.jpg"),
+        );
+
+        assert!(
+            matches!(&document.blocks[0], ReaderBlock::Image { url, alt: None, link: None } if url == "https://images.test/hero.jpg")
+        );
+    }
+
+    #[test]
+    fn rendered_projection_does_not_duplicate_html_or_nested_images() {
+        let document = project_with_fallback_image(
+            parse(
+                "<p>Article text</p><img src=\"/html.jpg\">",
+                "https://example.test/post",
+            ),
+            DetailRenderingMode::Rendered,
+            None,
+            Some("https://images.test/fallback.jpg"),
+        );
+        assert_eq!(
+            document
+                .blocks
+                .iter()
+                .filter(|block| matches!(block, ReaderBlock::Image { .. }))
+                .count(),
+            1
+        );
+
+        assert!(contains_image(&[ReaderBlock::Quote {
+            blocks: vec![ReaderBlock::List {
+                ordered: false,
+                items: vec![ReaderListItem {
+                    blocks: vec![ReaderBlock::Image {
+                        url: "https://images.test/nested.jpg".into(),
+                        alt: None,
+                        link: None,
+                    }],
+                }],
+            }],
+        }]));
+    }
+
+    #[test]
+    fn text_only_projection_never_uses_persisted_image_fallback() {
+        let document = project_with_fallback_image(
+            parse("<p>Article text</p>", "https://example.test/post"),
+            DetailRenderingMode::TextOnly,
+            None,
+            Some("https://images.test/hero.jpg"),
+        );
+
+        assert!(!contains_image(&document.blocks));
+    }
+
+    #[test]
+    fn rendered_projection_without_any_image_remains_unchanged() {
+        let parsed = parse("<p>Article text</p>", "https://example.test/post");
+        assert_eq!(
+            project(parsed.clone(), DetailRenderingMode::Rendered, None),
+            project_with_fallback_image(parsed, DetailRenderingMode::Rendered, None, None)
+        );
+    }
+
+    #[test]
+    fn fallback_image_precedes_truncation_without_counting_as_text() {
+        let document = project_with_fallback_image(
+            parse("<p>One two three four</p>", "https://example.test/post"),
+            DetailRenderingMode::Rendered,
+            Some(7),
+            Some("https://images.test/hero.jpg"),
+        );
+
+        assert!(document.was_truncated);
+        assert!(
+            matches!(&document.blocks[0], ReaderBlock::Image { url, .. } if url == "https://images.test/hero.jpg")
+        );
+        assert!(
+            matches!(&document.blocks[1], ReaderBlock::Paragraph { inlines } if inline_text(inlines) == "One")
+        );
+    }
+
+    #[test]
+    fn plaintext_content_projects_as_a_paragraph_in_both_modes() {
+        let content = "His performance as Frank-N-Furter, the cross-dressing mad scientist of “The Rocky Horror Picture Show,” was ahead of its time.";
+        for mode in [DetailRenderingMode::Rendered, DetailRenderingMode::TextOnly] {
+            let document = project(parse(content, "https://example.test/post"), mode, None);
+            assert!(
+                matches!(&document.blocks[..], [ReaderBlock::Paragraph { inlines }] if inline_text(inlines) == content)
+            );
+        }
+    }
+
+    #[test]
+    fn plaintext_variants_do_not_require_html_markup() {
+        for (input, expected) in [
+            ("Simple plain text", "Simple plain text"),
+            ("First line\nSecond line", "First line\nSecond line"),
+            (
+                "  Surrounded by whitespace  ",
+                "  Surrounded by whitespace  ",
+            ),
+            ("A & B, 1 < 2, and 3 > 2", "A & B, 1 < 2, and 3 > 2"),
+        ] {
+            let document = parse(input, "https://example.test/post");
+            assert!(
+                matches!(&document.blocks[..], [ReaderBlock::Paragraph { inlines }] if inline_text(inlines) == expected)
+            );
+        }
+        assert!(
+            parse(" \n\t ", "https://example.test/post")
+                .blocks
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn plaintext_content_uses_existing_truncation() {
+        let document = project(
+            parse("One two three four", "https://example.test/post"),
+            DetailRenderingMode::Rendered,
+            Some(7),
+        );
+        assert!(document.was_truncated);
+        assert!(
+            matches!(&document.blocks[..], [ReaderBlock::Paragraph { inlines }] if inline_text(inlines) == "One")
+        );
+    }
+
+    #[test]
+    fn html_and_ignored_only_html_are_not_treated_as_plaintext() {
+        let html = parse(
+            "<p>Normal <strong>HTML</strong></p>",
+            "https://example.test/post",
+        );
+        assert!(matches!(&html.blocks[..], [ReaderBlock::Paragraph { .. }]));
+        assert!(
+            parse(
+                "<script>hidden()</script><style>.hidden {}</style>",
+                "https://example.test/post"
+            )
+            .blocks
+            .is_empty()
+        );
+    }
+
+    #[test]
     fn rendered_projection_preserves_nested_inline_semantics() {
         let document = project(
             parse(
@@ -728,13 +988,14 @@ mod tests {
 
     #[test]
     fn wordpress_fixture_preserves_content_and_simplifies_product_table() {
-        let document = project(
+        let document = project_with_fallback_image(
             parse(
                 include_str!("../tests/wordpress_reader_fixture.html"),
                 "https://publisher.test/posts/grinders",
             ),
             DetailRenderingMode::Rendered,
             None,
+            Some("https://images.test/fallback.jpg"),
         );
         assert!(document.has_simplified_content);
         assert!(document.blocks.iter().any(|block| matches!(block, ReaderBlock::Image { url, .. } if url == "https://publisher.test/images/lead.jpg")));
@@ -750,6 +1011,7 @@ mod tests {
         assert!(text.contains("Grinder A"));
         assert!(text.contains("affiliate commission"));
         assert!(document.blocks.iter().any(|block| matches!(block, ReaderBlock::Image { link: Some(link), .. } if link == "https://shop.test/grinder-a")));
+        assert!(!document.blocks.iter().any(|block| matches!(block, ReaderBlock::Image { url, .. } if url == "https://images.test/fallback.jpg")));
 
         let text_only = project(
             parse(

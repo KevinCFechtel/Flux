@@ -32,6 +32,10 @@ final class KeyboardCommandRoutingTests: XCTestCase {
         XCTAssertEqual(ReaderPreviewAction.resolve(isVisible: true, currentArticleID: 1, requestedArticleID: 1, togglesSameArticle: true), .hide)
     }
 
+    func testSpaceCommandIsAvailableToPreviewFocus() {
+        XCTAssertEqual(ArticleKeyboardRouting.command(keyCode: 49, charactersIgnoringModifiers: " ", modifierFlags: []), .openDetail)
+    }
+
     func testSpaceForDifferentArticleReplacesPreviewContent() {
         XCTAssertEqual(ReaderPreviewAction.resolve(isVisible: true, currentArticleID: 1, requestedArticleID: 2, togglesSameArticle: true), .replace)
     }

@@ -6,6 +6,14 @@
     {
       "layers" : [
         {
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:0.15294,0.68235,0.85098,1.00000"
+              }
+            }
+          ],
           "image-name" : "01_Book.svg",
           "name" : "01_Book"
         }
