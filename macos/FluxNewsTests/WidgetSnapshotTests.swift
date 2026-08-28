@@ -36,6 +36,29 @@ final class WidgetSnapshotTests: XCTestCase {
         XCTAssertThrowsError(try store.read()) { XCTAssertEqual($0 as? WidgetSnapshotStoreError, .corruptSnapshot) }
     }
 
+    func testUnavailableStoreDoesNotPreventLaterStoreFromWriting() throws {
+        XCTAssertThrowsError(try WidgetSnapshotStore(appGroupContainer: nil)) { XCTAssertEqual($0 as? WidgetSnapshotStoreError, .unavailableAppGroup) }
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let store = WidgetSnapshotStore(root: temporary)
+        let snapshot = WidgetSnapshotV1(schemaVersion: 1, state: .ready, generatedAt: "", lastSuccessfulSyncAt: nil, feeds: [], categories: [], articles: [], counts: .init(allUnread: 0, bookmarks: 0, feedUnread: [], categoryUnread: []))
+
+        try store.write(snapshot)
+
+        XCTAssertEqual(try store.read(), snapshot)
+    }
+
+    func testSnapshotWritesWhenFeedIconsAreMissing() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let snapshot = WidgetSnapshotV1(schemaVersion: 1, state: .ready, generatedAt: "", lastSuccessfulSyncAt: "2026-08-28T07:04:07Z", feeds: [.init(id: 42, categoryID: 7, title: "Development", normalIconFile: nil, darkIconFile: nil)], categories: [.init(id: 7, title: "Work")], articles: [], counts: .init(allUnread: 0, bookmarks: 0, feedUnread: [], categoryUnread: []))
+        let store = WidgetSnapshotStore(root: temporary)
+
+        try store.write(snapshot)
+
+        XCTAssertEqual(try store.read(), snapshot)
+    }
+
     func testV1SnapshotDecodesMixedTimestampFormats() throws {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: temporary) }

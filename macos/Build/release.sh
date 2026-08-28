@@ -43,7 +43,9 @@ CHECK_DIR="$(mktemp -d /tmp/flux-release-check.XXXXXX)"
 trap 'rm -rf -- "${CHECK_DIR}"' EXIT
 
 echo "1/8 Building the Release app with the Rust/UniFFI core"
-CONFIGURATION=Release "${SCRIPT_DIR}/build-app.sh"
+# The release signing identity is intentionally reserved for the timestamped
+# hardened-runtime signing step below. The shared build baseline stays ad-hoc.
+CONFIGURATION=Release DEVELOPMENT_SIGNING=0 SIGNING_IDENTITY=- "${SCRIPT_DIR}/build-app.sh"
 
 timestamp_args=(--timestamp)
 if [[ -z "${SIGNING_TIMESTAMP_URL}" ]]; then

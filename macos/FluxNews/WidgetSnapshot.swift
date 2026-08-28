@@ -212,6 +212,8 @@ final class WidgetSnapshotStore {
         return try? Data(contentsOf: iconsURL.appendingPathComponent(URL(fileURLWithPath: relativePath).lastPathComponent))
     }
 
+    var snapshotPath: String { snapshotURL.path }
+
     private var snapshotURL: URL { root.appendingPathComponent(Self.fileName) }
     private var iconsURL: URL { root.appendingPathComponent("icons", isDirectory: true) }
 

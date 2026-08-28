@@ -31,6 +31,31 @@ Build the macOS app for normal development. The resulting ad-hoc-signed app is a
 bash macos/Build/build-app.sh
 ```
 
+Install that exact build into `/Applications` and launch it, including its embedded WidgetKit extension:
+
+```bash
+bash macos/Build/install-local.sh
+```
+
+For WidgetKit and App Group testing, use Xcode automatic Apple Development signing rather than ad-hoc signing. This requires a local Apple Development certificate and a signed-in Xcode account that belongs to the supplied team:
+
+```bash
+DEVELOPMENT_SIGNING=1 \
+DEVELOPMENT_TEAM=<TEAM_ID> \
+bash macos/Build/build-app.sh
+
+bash macos/Build/install-local.sh
+```
+
+Set `DEVELOPMENT_SIGNING_IDENTITY` only when Xcode must use a specific Apple Development identity; it defaults to `Apple Development`. The Development build retains Xcode's target-specific signatures and validates Apple Development authority, the supplied team identifier, both App Group entitlements, the widget sandbox, and recursive code signing. The default remains the fast ad-hoc build.
+
+Before building, configure the Apple Developer portal for the same team:
+
+- Register the macOS App ID `dev.kevincfechtel.fluxNews` and the App Extension App ID `dev.kevincfechtel.fluxNews.widgets`.
+- Register App Group `group.dev.kevincfechtel.fluxNews` and associate it with both App IDs.
+- Enable the App Groups capability for both IDs and let Xcode Automatic Signing create or update the matching Apple Development provisioning profiles. If automatic signing cannot do so, create and download matching development profiles manually.
+- Keep Developer ID/notarization separate from this development setup; `release.sh` continues to perform that distribution flow.
+
 ## Diagnostics
 
 FluxNews forwards structured Rust Core diagnostics to macOS Unified Logging. Stream all application activity with:

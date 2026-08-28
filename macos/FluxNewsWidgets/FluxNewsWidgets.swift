@@ -27,13 +27,29 @@ struct FluxNewsCategoryEntity: AppEntity, Hashable {
 struct FluxNewsFeedQuery: EntityQuery {
     func entities(for identifiers: [String]) async throws -> [FluxNewsFeedEntity] { entities().filter { identifiers.contains($0.id) } }
     func suggestedEntities() async throws -> [FluxNewsFeedEntity] { entities() }
-    private func entities() -> [FluxNewsFeedEntity] { (try? WidgetSnapshotStore().read())??.feeds.map { .init(id: String($0.id), title: $0.title) } ?? [] }
+    private func entities() -> [FluxNewsFeedEntity] {
+        do {
+            let store = try WidgetSnapshotStore(diagnostics: WidgetSnapshotDiagnostics.logger)
+            return try store.read(diagnostics: WidgetSnapshotDiagnostics.logger)?.feeds.map { .init(id: String($0.id), title: $0.title) } ?? []
+        } catch {
+            WidgetSnapshotDiagnostics.logger.error("Widget feed configuration could not read snapshot error=\(error.localizedDescription, privacy: .public)")
+            return []
+        }
+    }
 }
 
 struct FluxNewsCategoryQuery: EntityQuery {
     func entities(for identifiers: [String]) async throws -> [FluxNewsCategoryEntity] { entities().filter { identifiers.contains($0.id) } }
     func suggestedEntities() async throws -> [FluxNewsCategoryEntity] { entities() }
-    private func entities() -> [FluxNewsCategoryEntity] { (try? WidgetSnapshotStore().read())??.categories.map { .init(id: String($0.id), title: $0.title) } ?? [] }
+    private func entities() -> [FluxNewsCategoryEntity] {
+        do {
+            let store = try WidgetSnapshotStore(diagnostics: WidgetSnapshotDiagnostics.logger)
+            return try store.read(diagnostics: WidgetSnapshotDiagnostics.logger)?.categories.map { .init(id: String($0.id), title: $0.title) } ?? []
+        } catch {
+            WidgetSnapshotDiagnostics.logger.error("Widget category configuration could not read snapshot error=\(error.localizedDescription, privacy: .public)")
+            return []
+        }
+    }
 }
 
 struct FluxNewsWidgetConfigurationIntent: WidgetConfigurationIntent {

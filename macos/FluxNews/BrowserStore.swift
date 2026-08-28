@@ -101,7 +101,6 @@ final class BrowserStore: ObservableObject {
     private var pendingNewData = PendingNewData()
     private var readerDocumentRequest: UInt64 = 0
     private let searchPageSize: UInt32 = 50
-    private let widgetSnapshots = try? WidgetSnapshotStore()
     private var pendingWidgetActions: [WidgetAction] = []
 
     init() {
@@ -856,22 +855,35 @@ final class BrowserStore: ObservableObject {
         snapshotResetRevision &+= 1
     }
     private func refreshWidgetSnapshot() {
-        guard let core, let widgetSnapshots else { return }
+        guard let core else {
+            WidgetSnapshotDiagnostics.logger.error("Widget snapshot refresh skipped because Flux core is unavailable")
+            return
+        }
         Task.detached {
+            let store: WidgetSnapshotStore
             do {
-                try WidgetSnapshotWriter.refresh(core: core, store: widgetSnapshots)
+                store = try WidgetSnapshotStore(diagnostics: WidgetSnapshotDiagnostics.logger)
+            } catch {
+                WidgetSnapshotDiagnostics.logger.error("Widget snapshot refresh could not resolve App Group container error=\(error.localizedDescription, privacy: .public)")
+                return
+            }
+            do {
+                try WidgetSnapshotWriter.refresh(core: core, store: store)
+                WidgetSnapshotDiagnostics.logger.notice("Widget snapshot refresh succeeded path=\(store.snapshotPath, privacy: .public)")
                 WidgetTimelineReloader.reloadAll()
             } catch {
-                NativeLog.app.error("widget snapshot refresh failed: \(error.localizedDescription, privacy: .public)")
+                WidgetSnapshotDiagnostics.logger.error("Widget snapshot refresh failed error=\(error.localizedDescription, privacy: .public)")
             }
         }
     }
     private func invalidateWidgetSnapshot() {
         do {
-            try widgetSnapshots?.invalidate()
-            if widgetSnapshots != nil { WidgetTimelineReloader.reloadAll() }
+            let store = try WidgetSnapshotStore(diagnostics: WidgetSnapshotDiagnostics.logger)
+            try store.invalidate()
+            WidgetSnapshotDiagnostics.logger.notice("Widget snapshot invalidated path=\(store.snapshotPath, privacy: .public)")
+            WidgetTimelineReloader.reloadAll()
         } catch {
-            NativeLog.app.error("widget snapshot invalidation failed: \(error.localizedDescription, privacy: .public)")
+            WidgetSnapshotDiagnostics.logger.error("Widget snapshot invalidation failed error=\(error.localizedDescription, privacy: .public)")
         }
     }
     private func nativeBackupSettings() -> MacOSBackupSettingsV1 {
