@@ -100,7 +100,10 @@ trap 'rm -f -- "${ENTITLEMENTS_FILE}"' EXIT
 
 verify_app_group_entitlement() {
   local component="$1"
-  codesign -d --entitlements :- "${component}" > "${ENTITLEMENTS_FILE}"
+
+  rm -f -- "${ENTITLEMENTS_FILE}"
+  codesign -d --entitlements "${ENTITLEMENTS_FILE}" "${component}"
+
   [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "${ENTITLEMENTS_FILE}")" == "${APP_GROUP_IDENTIFIER}" ]] || {
     echo "Expected App Group entitlement is missing: ${component}" >&2
     exit 1
@@ -113,7 +116,10 @@ if /usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "${ENTITLE
   exit 1
 fi
 verify_app_group_entitlement "${WIDGET_EXTENSION}"
-codesign -d --entitlements :- "${WIDGET_EXTENSION}" > "${ENTITLEMENTS_FILE}"
+
+rm -f -- "${ENTITLEMENTS_FILE}"
+codesign -d --entitlements "${ENTITLEMENTS_FILE}" "${WIDGET_EXTENSION}"
+
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "${ENTITLEMENTS_FILE}")" == "true" ]] || {
   echo "Widget App Sandbox entitlement is missing." >&2
   exit 1

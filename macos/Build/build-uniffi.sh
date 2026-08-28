@@ -43,6 +43,13 @@ done
 # Swift discovers Clang modules through the conventional module.modulemap name.
 cp "$generated/flux_uniffiFFI.modulemap" "$generated/module.modulemap"
 
+
+# Xcode signs the containing app after this build phase. Any nested Mach-O
+# code must therefore already have a valid signature. Sign the copied dylib
+# after install_name_tool has made its final modification.
+#
+# Release builds with CODE_SIGNING_ALLOWED=NO intentionally skip this step;
+# release.sh applies the final Developer ID/hardened-runtime signature.
 if [[ -n "${TARGET_BUILD_DIR:-}" ]]; then
   embedded_library="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/libflux_uniffi.dylib"
 
