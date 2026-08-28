@@ -36,6 +36,22 @@ final class WidgetSnapshotTests: XCTestCase {
         XCTAssertThrowsError(try store.read()) { XCTAssertEqual($0 as? WidgetSnapshotStoreError, .corruptSnapshot) }
     }
 
+    func testV1SnapshotDecodesMixedTimestampFormats() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        let snapshotJSON = """
+        {"schemaVersion":1,"state":"ready","generatedAt":"2026-08-28T07:04:07Z","lastSuccessfulSyncAt":"2026-08-28 07:04:07","feeds":[],"categories":[],"articles":[],"counts":{"allUnread":21,"bookmarks":4,"feedUnread":[],"categoryUnread":[]}}
+        """
+        try Data(snapshotJSON.utf8).write(to: temporary.appendingPathComponent("widget-snapshot-v1.json"))
+
+        let snapshot = try XCTUnwrap(try WidgetSnapshotStore(root: temporary).read())
+
+        XCTAssertEqual(snapshot.generatedAt, "2026-08-28T07:04:07Z")
+        XCTAssertEqual(snapshot.lastSuccessfulSyncAt, "2026-08-28 07:04:07")
+        XCTAssertEqual(snapshot.counts.allUnread, 21)
+    }
+
     func testPresentationUsesAuthoritativeCountsAndFiltersBookmarksIndependentlyOfReadState() {
         let model = WidgetContentModel.make(snapshotResult: .success(sampleSnapshot), selection: .init(scope: .bookmarks, categoryID: nil, feedID: nil))
 
