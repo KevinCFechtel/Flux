@@ -12,6 +12,7 @@ WIDGET_ENTITLEMENTS="${REPOSITORY_DIR}/macos/FluxNewsWidgets/FluxNewsWidgets.ent
 HOST_BUNDLE_IDENTIFIER="dev.kevincfechtel.fluxNews"
 WIDGET_BUNDLE_IDENTIFIER="dev.kevincfechtel.fluxNews.FluxNewsWidgets"
 APP_GROUP_IDENTIFIER="group.dev.kevincfechtel.fluxNews"
+DEVELOPMENT_SIGNING="${DEVELOPMENT_SIGNING:-1}"
 
 for command_name in codesign ditto plutil /usr/libexec/PlistBuddy xcodebuild; do
   command -v "${command_name}" >/dev/null 2>&1 || { echo "Required command missing: ${command_name}" >&2; exit 1; }
@@ -101,8 +102,7 @@ trap 'rm -f -- "${ENTITLEMENTS_FILE}"' EXIT
 verify_app_group_entitlement() {
   local component="$1"
 
-  rm -f -- "${ENTITLEMENTS_FILE}"
-  codesign -d --entitlements "${ENTITLEMENTS_FILE}" "${component}"
+  codesign -d --entitlements :- "${component}" > "${ENTITLEMENTS_FILE}"
 
   [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "${ENTITLEMENTS_FILE}")" == "${APP_GROUP_IDENTIFIER}" ]] || {
     echo "Expected App Group entitlement is missing: ${component}" >&2
@@ -117,8 +117,7 @@ if /usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "${ENTITLE
 fi
 verify_app_group_entitlement "${WIDGET_EXTENSION}"
 
-rm -f -- "${ENTITLEMENTS_FILE}"
-codesign -d --entitlements "${ENTITLEMENTS_FILE}" "${WIDGET_EXTENSION}"
+codesign -d --entitlements :- "${WIDGET_EXTENSION}" > "${ENTITLEMENTS_FILE}"
 
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "${ENTITLEMENTS_FILE}")" == "true" ]] || {
   echo "Widget App Sandbox entitlement is missing." >&2
