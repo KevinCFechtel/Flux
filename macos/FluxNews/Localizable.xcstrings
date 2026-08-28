@@ -10,7 +10,53 @@
     "%@ articles marked as read" : {
 
     },
+    "%@ new" : {
+
+    },
+    "%@ results" : {
+
+    },
+    "2 lines" : {
+
+    },
+    "3 lines" : {
+
+    },
+    "5 lines" : {
+
+    },
+    "5,000 characters" : {
+
+    },
+    "10,000 characters" : {
+
+    },
+    "20,000 characters" : {
+
+    },
+    "30 days" : {
+
+    },
+    "60 days" : {
+
+    },
+    "90 days" : {
+
+    },
+    "180 days" : {
+
+    },
+    "365 days" : {
+
+    },
+    "Add Category" : {
+
+    },
+    "Add Feed" : {
+
+    },
     "Backup imported successfully." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -21,6 +67,7 @@
       }
     },
     "Backup imported successfully. Synchronization could not be completed and will be retried later." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -33,7 +80,25 @@
     "Category in FluxNews" : {
       "comment" : "Spotlight category description"
     },
+    "Choose a Feed" : {
+
+    },
+    "Choose which feeds may send macOS notifications." : {
+
+    },
     "Credentials are stored securely in the macOS Keychain." : {
+
+    },
+    "Deferred" : {
+
+    },
+    "Discard synchronized local content. Miniflux becomes authoritative again; FluxNews and Feed Settings are preserved. Unsynchronized Read or Star changes may be lost." : {
+
+    },
+    "Enter a query and press Return." : {
+
+    },
+    "Enter a website or feed URL. Flux asks Miniflux to discover available subscriptions." : {
 
     },
     "entity.category.type" : {
@@ -70,8 +135,17 @@
         }
       }
     },
+    "Export or import your account, FluxNews settings, Feed Settings, and macOS preferences. Backups are password encrypted." : {
+
+    },
     "Feed in FluxNews" : {
       "comment" : "Spotlight feed description"
+    },
+    "Feed Settings" : {
+
+    },
+    "FluxNews cannot recover this password." : {
+
     },
     "FluxNews Settings" : {
 
@@ -280,13 +354,49 @@
         }
       }
     },
+    "Live" : {
+
+    },
     "Loading Miniflux..." : {
+
+    },
+    "Miniflux found multiple subscriptions for this URL." : {
 
     },
     "New articles available" : {
 
     },
+    "No Miniflux entries matched your search." : {
+
+    },
+    "Open Detail View" : {
+
+    },
+    "Open Link" : {
+
+    },
+    "Remove the configured account, API key, Core and Feed Settings, local data, and FluxNews preferences." : {
+
+    },
+    "Rendered" : {
+
+    },
+    "Synchronized local content will be discarded and Miniflux will become authoritative again. FluxNews and Feed Settings are preserved." : {
+
+    },
+    "System Notifications" : {
+
+    },
+    "Text Only" : {
+
+    },
     "There are no articles in this selection." : {
+
+    },
+    "This removes your account, API key, settings, Feed Settings, and local data. FluxNews will return to its first-run state." : {
+
+    },
+    "Use Miniflux default" : {
 
     }
   },

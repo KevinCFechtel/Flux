@@ -8,13 +8,11 @@ DERIVED_DATA="${DERIVED_DATA:-${REPOSITORY_DIR}/.build/DerivedData}"
 APP_DIR="${APP_DIR:-${REPOSITORY_DIR}/dist/FluxNews.app}"
 BUILT_APP="${DERIVED_DATA}/Build/Products/${CONFIGURATION}/FluxNews.app"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:--}"
-DEVELOPMENT_SIGNING="${DEVELOPMENT_SIGNING:-0}"
-DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-}"
-DEVELOPMENT_SIGNING_IDENTITY="${DEVELOPMENT_SIGNING_IDENTITY:-Apple Development}"
+DEVELOPMENT_SIGNING="${DEVELOPMENT_SIGNING:-1}"
 APP_ENTITLEMENTS="${REPOSITORY_DIR}/macos/FluxNews/FluxNews.entitlements"
 WIDGET_ENTITLEMENTS="${REPOSITORY_DIR}/macos/FluxNewsWidgets/FluxNewsWidgets.entitlements"
 HOST_BUNDLE_IDENTIFIER="dev.kevincfechtel.fluxNews"
-WIDGET_BUNDLE_IDENTIFIER="dev.kevincfechtel.fluxNews.widgets"
+WIDGET_BUNDLE_IDENTIFIER="dev.kevincfechtel.fluxNews.FluxNewsWidgets"
 APP_GROUP_IDENTIFIER="group.dev.kevincfechtel.fluxNews"
 
 for command_name in codesign ditto plutil /usr/libexec/PlistBuddy xcodebuild; do
@@ -37,15 +35,6 @@ case "${DEVELOPMENT_SIGNING}" in
     ;;
 esac
 
-if [[ "${DEVELOPMENT_SIGNING}" == "1" ]]; then
-  [[ -n "${DEVELOPMENT_TEAM}" ]] || { echo "DEVELOPMENT_TEAM is required when DEVELOPMENT_SIGNING=1." >&2; exit 1; }
-  command -v security >/dev/null 2>&1 || { echo "Required command missing: security" >&2; exit 1; }
-  security find-identity -v -p codesigning | grep -F -- "${DEVELOPMENT_SIGNING_IDENTITY}" >/dev/null || {
-    echo "Apple Development signing identity is not available: ${DEVELOPMENT_SIGNING_IDENTITY}" >&2
-    exit 1
-  }
-fi
-
 "${SCRIPT_DIR}/build-uniffi.sh"
 
 xcodebuild_args=(
@@ -58,15 +47,7 @@ xcodebuild_args=(
   ONLY_ACTIVE_ARCH=NO
 )
 
-if [[ "${DEVELOPMENT_SIGNING}" == "1" ]]; then
-  xcodebuild_args+=(
-    CODE_SIGNING_ALLOWED=YES
-    CODE_SIGN_STYLE=Automatic
-    DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM}"
-    CODE_SIGN_IDENTITY="${DEVELOPMENT_SIGNING_IDENTITY}"
-    -allowProvisioningUpdates
-  )
-else
+if [[ "${DEVELOPMENT_SIGNING}" != "1" ]]; then
   xcodebuild_args+=(CODE_SIGNING_ALLOWED=NO)
 fi
 
@@ -84,7 +65,7 @@ UNIFFI_LIBRARY="${APP_DIR}/Contents/Frameworks/libflux_uniffi.dylib"
 [[ -d "${WIDGET_EXTENSION}" ]] || { echo "Embedded widget extension is missing: ${WIDGET_EXTENSION}" >&2; exit 1; }
 [[ -f "${UNIFFI_LIBRARY}" ]] || { echo "Embedded UniFFI library is missing: ${UNIFFI_LIBRARY}" >&2; exit 1; }
 if [[ "${DEVELOPMENT_SIGNING}" == "1" ]]; then
-  echo "Using Xcode Apple Development signing for team ${DEVELOPMENT_TEAM}."
+  echo "Using Xcode-configured Apple Development signing."
 else
   # Sign nested code explicitly: --deep would replace the extension signature
   # and discard its distinct App Group entitlement.
@@ -144,7 +125,22 @@ if [[ "${DEVELOPMENT_SIGNING}" == "1" ]]; then
     local details
     details="$(codesign -dvvv "${component}" 2>&1)"
     grep -F -- "Authority=Apple Development" <<<"${details}" >/dev/null || { echo "Apple Development authority missing: ${component}" >&2; exit 1; }
-    grep -F -- "TeamIdentifier=${DEVELOPMENT_TEAM}" <<<"${details}" >/dev/null || { echo "Unexpected development team: ${component}" >&2; exit 1; }
+    host_details="$(codesign -dvvv "${APP_DIR}" 2>&1)"
+    widget_details="$(codesign -dvvv "${WIDGET_EXTENSION}" 2>&1)"
+
+    grep -F -- "Authority=Apple Development" <<<"${host_details}" >/dev/null
+    grep -F -- "Authority=Apple Development" <<<"${widget_details}" >/dev/null
+
+    host_team="$(
+      sed -n 's/^TeamIdentifier=//p' <<<"${host_details}"
+    )"
+
+    widget_team="$(
+      sed -n 's/^TeamIdentifier=//p' <<<"${widget_details}"
+    )"
+
+    [[ -n "${host_team}" ]]
+    [[ "${host_team}" == "${widget_team}" ]]
   }
 
   verify_development_component "${WIDGET_EXTENSION}"
