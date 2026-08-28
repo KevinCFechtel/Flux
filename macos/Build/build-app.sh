@@ -7,8 +7,6 @@ CONFIGURATION="${CONFIGURATION:-Debug}"
 DERIVED_DATA="${DERIVED_DATA:-${REPOSITORY_DIR}/.build/DerivedData}"
 APP_DIR="${APP_DIR:-${REPOSITORY_DIR}/dist/FluxNews.app}"
 BUILT_APP="${DERIVED_DATA}/Build/Products/${CONFIGURATION}/FluxNews.app"
-SIGNING_IDENTITY="${SIGNING_IDENTITY:--}"
-DEVELOPMENT_SIGNING="${DEVELOPMENT_SIGNING:-1}"
 APP_ENTITLEMENTS="${REPOSITORY_DIR}/macos/FluxNews/FluxNews.entitlements"
 WIDGET_ENTITLEMENTS="${REPOSITORY_DIR}/macos/FluxNewsWidgets/FluxNewsWidgets.entitlements"
 HOST_BUNDLE_IDENTIFIER="dev.kevincfechtel.fluxNews"
@@ -47,8 +45,14 @@ xcodebuild_args=(
   ONLY_ACTIVE_ARCH=NO
 )
 
-if [[ "${DEVELOPMENT_SIGNING}" != "1" ]]; then
-  xcodebuild_args+=(CODE_SIGNING_ALLOWED=NO)
+if [[ "${DEVELOPMENT_SIGNING}" == "1" ]]; then
+  xcodebuild_args+=(
+    -allowProvisioningUpdates
+  )
+else
+  xcodebuild_args+=(
+    CODE_SIGNING_ALLOWED=NO
+  )
 fi
 
 FLUX_UNIFFI_PREPARED=1 xcodebuild "${xcodebuild_args[@]}" build

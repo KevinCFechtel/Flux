@@ -44,7 +44,17 @@ done
 cp "$generated/flux_uniffiFFI.modulemap" "$generated/module.modulemap"
 
 if [[ -n "${TARGET_BUILD_DIR:-}" ]]; then
+  embedded_library="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/libflux_uniffi.dylib"
+
   mkdir -p "$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH"
-  cp "$library" "$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/libflux_uniffi.dylib"
-  install_name_tool -id "@rpath/libflux_uniffi.dylib" "$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/libflux_uniffi.dylib"
+  cp "$library" "$embedded_library"
+  install_name_tool -id "@rpath/libflux_uniffi.dylib" "$embedded_library"
+
+  if [[ "${CODE_SIGNING_ALLOWED:-NO}" == "YES" && -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]]; then
+    codesign \
+      --force \
+      --sign "$EXPANDED_CODE_SIGN_IDENTITY" \
+      --timestamp=none \
+      "$embedded_library"
+  fi
 fi
