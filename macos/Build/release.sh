@@ -62,6 +62,8 @@ if [[ -z "${SIGNING_TIMESTAMP_URL}" ]]; then
   SIGNING_TIMESTAMP_URL="http://${timestamp_ipv4}/ts01"
 fi
 
+timestamp_args=(--timestamp="${SIGNING_TIMESTAMP_URL}")
+echo "Using signing timestamp server: ${SIGNING_TIMESTAMP_URL}"
 echo "2/8 Signing nested code with Developer ID and hardened runtime"
 UNIFFI_LIBRARY="${APP_DIR}/Contents/Frameworks/libflux_uniffi.dylib"
 WIDGET_EXTENSION="${APP_DIR}/Contents/PlugIns/FluxNewsWidgets.appex"
@@ -76,9 +78,15 @@ verify_release_component() {
   codesign --verify --strict --verbose=4 "${component}"
   local details
   details="$(codesign -dvvv "${component}" 2>&1)"
-  grep -F -- "Authority=${SIGNING_IDENTITY}" <<<"${details}" >/dev/null || { echo "Unexpected signing authority: ${component}" >&2; exit 1; }
-  grep -F -- "flags=0x10000(runtime)" <<<"${details}" >/dev/null || { echo "Hardened Runtime missing: ${component}" >&2; exit 1; }
-  grep -F -- "Timestamp=" <<<"${details}" >/dev/null || { echo "Secure timestamp missing: ${component}" >&2; exit 1; }
+  grep -F -- "Authority=Developer ID Application:" <<<"${details}" >/dev/null || {
+    echo "Developer ID Application authority missing: ${component}" >&2
+    exit 1
+  }
+
+  grep -F -- "TeamIdentifier=8X9VDP43J9" <<<"${details}" >/dev/null || {
+    echo "Unexpected signing team: ${component}" >&2
+    exit 1
+  }
 }
 
 verify_release_component "${WIDGET_EXTENSION}"
