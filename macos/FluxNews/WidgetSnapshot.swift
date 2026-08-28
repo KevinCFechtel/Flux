@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import WidgetKit
 
 enum FluxNewsWidgetKind {
@@ -122,6 +123,10 @@ struct WidgetSnapshotV1: Codable, Equatable {
 
 enum WidgetSnapshotStoreError: Error, Equatable { case unavailableAppGroup, unsupportedVersion, corruptSnapshot }
 
+enum WidgetSnapshotDiagnostics {
+    static let logger = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "widget_snapshot")
+}
+
 final class WidgetSnapshotStore {
     static let appGroupIdentifier = "group.dev.kevincfechtel.fluxNews"
     private static let fileName = "widget-snapshot-v1.json"
@@ -132,6 +137,17 @@ final class WidgetSnapshotStore {
     convenience init(appGroupContainer: URL? = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)) throws {
         guard let appGroupContainer else { throw WidgetSnapshotStoreError.unavailableAppGroup }
         self.init(root: appGroupContainer.appendingPathComponent("Widgets", isDirectory: true))
+    }
+
+    convenience init(diagnostics logger: Logger) throws {
+        guard let appGroupContainer = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupIdentifier) else {
+            logger.error("Widget snapshot App Group container resolution failed")
+            throw WidgetSnapshotStoreError.unavailableAppGroup
+        }
+        let root = appGroupContainer.appendingPathComponent("Widgets", isDirectory: true)
+        logger.notice("Widget snapshot App Group container resolved path=\(appGroupContainer.path, privacy: .public)")
+        logger.notice("Widget snapshot expected path=\(root.appendingPathComponent(Self.fileName).path, privacy: .public)")
+        self.init(root: root)
     }
 
     func write(_ snapshot: WidgetSnapshotV1) throws {
@@ -148,6 +164,32 @@ final class WidgetSnapshotStore {
             return snapshot
         } catch let error as WidgetSnapshotStoreError { throw error }
         catch { throw WidgetSnapshotStoreError.corruptSnapshot }
+    }
+
+    func read(diagnostics logger: Logger) throws -> WidgetSnapshotV1? {
+        let exists = FileManager.default.fileExists(atPath: snapshotURL.path)
+        logger.notice("Widget snapshot file exists=\(exists, privacy: .public) path=\(self.snapshotURL.path, privacy: .public)")
+        guard exists else { return nil }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: snapshotURL)
+            logger.notice("Widget snapshot read succeeded")
+        } catch {
+            log(error, operation: "read", to: logger)
+            throw error
+        }
+
+        do {
+            let snapshot = try JSONDecoder().decode(WidgetSnapshotV1.self, from: data)
+            guard snapshot.schemaVersion == WidgetSnapshotV1.schemaVersion else { throw WidgetSnapshotStoreError.unsupportedVersion }
+            logger.notice("Widget snapshot JSON decoding succeeded")
+            return snapshot
+        } catch {
+            log(error, operation: "decode", to: logger)
+            if let error = error as? WidgetSnapshotStoreError { throw error }
+            throw WidgetSnapshotStoreError.corruptSnapshot
+        }
     }
 
     func invalidate() throws {
@@ -172,4 +214,8 @@ final class WidgetSnapshotStore {
 
     private var snapshotURL: URL { root.appendingPathComponent(Self.fileName) }
     private var iconsURL: URL { root.appendingPathComponent("icons", isDirectory: true) }
+
+    private func log(_ error: Error, operation: String, to logger: Logger) {
+        logger.error("Widget snapshot \(operation, privacy: .public) failed error_type=\(String(reflecting: type(of: error)), privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+    }
 }

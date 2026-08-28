@@ -51,8 +51,10 @@ struct FluxNewsWidgetProvider: AppIntentTimelineProvider {
     func snapshot(for configuration: FluxNewsWidgetConfigurationIntent, in context: Context) async -> FluxNewsWidgetEntry { entry(configuration) }
     func timeline(for configuration: FluxNewsWidgetConfigurationIntent, in context: Context) async -> Timeline<FluxNewsWidgetEntry> { .init(entries: [entry(configuration)], policy: .never) }
     private func entry(_ configuration: FluxNewsWidgetConfigurationIntent) -> FluxNewsWidgetEntry {
-        let store = try? WidgetSnapshotStore()
-        let result: Result<WidgetSnapshotV1?, Error> = Result { try store?.read() }
+        let result: Result<WidgetSnapshotV1?, Error> = Result {
+            let store = try WidgetSnapshotStore(diagnostics: WidgetSnapshotDiagnostics.logger)
+            return try store.read(diagnostics: WidgetSnapshotDiagnostics.logger)
+        }
         let scope = WidgetContentScope(rawValue: configuration.scope.rawValue) ?? .allNews
         let selection = WidgetContentSelection(scope: scope, categoryID: configuration.category.flatMap { Int64($0.id) }, feedID: configuration.feed.flatMap { Int64($0.id) })
         let model = WidgetContentModel.make(snapshotResult: result, selection: selection)
