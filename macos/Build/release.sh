@@ -6,6 +6,8 @@ REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 APP_DIR="${REPOSITORY_DIR}/dist/FluxNews.app"
 RELEASE_DIR="${REPOSITORY_DIR}/dist/release"
 INFO_PLIST="${REPOSITORY_DIR}/macos/FluxNews/Info.plist"
+APP_ENTITLEMENTS="${REPOSITORY_DIR}/macos/FluxNews/FluxNews.entitlements"
+WIDGET_ENTITLEMENTS="${REPOSITORY_DIR}/macos/FluxNewsWidgets/FluxNewsWidgets.entitlements"
 RELEASE_ENV_FILE="${FLUX_RELEASE_ENV_FILE:-${SCRIPT_DIR}/.env}"
 
 if [[ -f "${RELEASE_ENV_FILE}" ]]; then
@@ -59,11 +61,28 @@ if [[ -z "${SIGNING_TIMESTAMP_URL}" ]]; then
   timestamp_args=("--timestamp=${SIGNING_TIMESTAMP_URL}")
 fi
 
-echo "2/8 Signing with Developer ID and hardened runtime"
+echo "2/8 Signing nested code with Developer ID and hardened runtime"
 UNIFFI_LIBRARY="${APP_DIR}/Contents/Frameworks/libflux_uniffi.dylib"
+WIDGET_EXTENSION="${APP_DIR}/Contents/PlugIns/FluxNewsWidgets.appex"
 [[ -f "${UNIFFI_LIBRARY}" ]] || { echo "Embedded UniFFI library is missing: ${UNIFFI_LIBRARY}" >&2; exit 1; }
+[[ -d "${WIDGET_EXTENSION}" ]] || { echo "Embedded widget extension is missing: ${WIDGET_EXTENSION}" >&2; exit 1; }
+codesign --force --options runtime "${timestamp_args[@]}" --sign "${SIGNING_IDENTITY}" --entitlements "${WIDGET_ENTITLEMENTS}" "${WIDGET_EXTENSION}"
 codesign --force --options runtime "${timestamp_args[@]}" --sign "${SIGNING_IDENTITY}" "${UNIFFI_LIBRARY}"
-codesign --force --options runtime "${timestamp_args[@]}" --sign "${SIGNING_IDENTITY}" "${APP_DIR}"
+codesign --force --options runtime "${timestamp_args[@]}" --sign "${SIGNING_IDENTITY}" --entitlements "${APP_ENTITLEMENTS}" "${APP_DIR}"
+
+verify_release_component() {
+  local component="$1"
+  codesign --verify --strict --verbose=4 "${component}"
+  local details
+  details="$(codesign -dvvv "${component}" 2>&1)"
+  grep -F -- "Authority=${SIGNING_IDENTITY}" <<<"${details}" >/dev/null || { echo "Unexpected signing authority: ${component}" >&2; exit 1; }
+  grep -F -- "flags=0x10000(runtime)" <<<"${details}" >/dev/null || { echo "Hardened Runtime missing: ${component}" >&2; exit 1; }
+  grep -F -- "Timestamp=" <<<"${details}" >/dev/null || { echo "Secure timestamp missing: ${component}" >&2; exit 1; }
+}
+
+verify_release_component "${WIDGET_EXTENSION}"
+verify_release_component "${UNIFFI_LIBRARY}"
+verify_release_component "${APP_DIR}"
 codesign --verify --deep --strict --verbose=4 "${APP_DIR}"
 
 mkdir -p "${RELEASE_DIR}"
@@ -72,7 +91,18 @@ rm -f -- "${SUBMISSION_ARCHIVE}"
 COPYFILE_DISABLE=1 ditto -c -k --keepParent --norsrc --noextattr "${APP_DIR}" "${SUBMISSION_ARCHIVE}"
 
 echo "4/8 Submitting to Apple and waiting for notarization"
-xcrun notarytool submit "${SUBMISSION_ARCHIVE}" --keychain-profile "${NOTARY_PROFILE}" --wait --timeout "${NOTARY_TIMEOUT}"
+set +e
+NOTARY_RESULT="$(xcrun notarytool submit "${SUBMISSION_ARCHIVE}" --keychain-profile "${NOTARY_PROFILE}" --wait --timeout "${NOTARY_TIMEOUT}" --output-format json)"
+NOTARY_EXIT=$?
+set -e
+printf '%s\n' "${NOTARY_RESULT}"
+NOTARY_ID="$(plutil -extract id raw - <<<"${NOTARY_RESULT}" 2>/dev/null || true)"
+NOTARY_STATUS="$(plutil -extract status raw - <<<"${NOTARY_RESULT}" 2>/dev/null || true)"
+if [[ ${NOTARY_EXIT} -ne 0 || "${NOTARY_STATUS}" != "Accepted" ]]; then
+  if [[ -n "${NOTARY_ID}" ]]; then xcrun notarytool log "${NOTARY_ID}" --keychain-profile "${NOTARY_PROFILE}"; fi
+  echo "Notarization was not accepted; skipping stapling." >&2
+  exit 1
+fi
 
 echo "5/8 Stapling and validating the notarization ticket"
 xcrun stapler staple "${APP_DIR}"
