@@ -54,6 +54,7 @@
 		A8 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8 /* CredentialStore.swift */; };
 		A9 /* GlobalShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9 /* GlobalShortcut.swift */; };
 		E184D499303DEC29009B16A3 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = E184D498303DEC29009B16A3 /* AppIcon.icon */; };
+		E19B91123042A9B3006481A6 /* FluxNewsTemplate.svg in Resources */ = {isa = PBXBuildFile; fileRef = E1E5DA9E3042A5C1007550DC /* FluxNewsTemplate.svg */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -284,6 +285,7 @@
 			buildPhases = (
 				PW0 /* Sources */,
 				PW /* Frameworks */,
+				E19B91113042A9A7006481A6 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -322,6 +324,14 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		E19B91113042A9A7006481A6 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E19B91123042A9B3006481A6 /* FluxNewsTemplate.svg in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		P3 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
