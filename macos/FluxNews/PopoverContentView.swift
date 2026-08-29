@@ -391,8 +391,16 @@ private struct NavigationSidebar: View {
         Binding { store.scope } set: { scope in if let scope { store.select(scope) } }
     }
     private var categoryItems: [SidebarItem] {
-        store.catalog.categories.map { category in
-            let feeds = store.catalog.feeds.filter { $0.categoryId == category.id }
+        let visibleFeeds = NavigationVisibility.visibleFeeds(
+            store.catalog.feeds.map { NavigationPresentationFeed(id: $0.id, categoryID: $0.categoryId) },
+            hidingEmpty: store.hideEmptyNavigationEntries,
+            counts: store.feedSidebarCounts
+        )
+        let visibleFeedIDs = Set(visibleFeeds.map(\.id))
+        let visibleCategoryIDs = Set(NavigationVisibility.visibleCategoryIDs(store.catalog.categories.map(\.id), feeds: visibleFeeds))
+        return store.catalog.categories.compactMap { category in
+            guard !store.hideEmptyNavigationEntries || visibleCategoryIDs.contains(category.id) else { return nil }
+            let feeds = store.catalog.feeds.filter { $0.categoryId == category.id && visibleFeedIDs.contains($0.id) }
             return SidebarItem.category(
                 category,
                 count: store.categorySidebarCounts[category.id] ?? 0,
@@ -1033,6 +1041,24 @@ private struct ReadingSettingsView: View {
 
     var body: some View {
         Form {
+            Picker("Startup Scope", selection: Binding(get: { store.startupScope }, set: { store.setStartupScope($0) })) {
+                Text("All News").tag(StartupScopePreference.allNews)
+                Text("Starred").tag(StartupScopePreference.starred)
+                Text("Category").tag(StartupScopePreference.category)
+                Text("Feed").tag(StartupScopePreference.feed)
+            }
+            if store.startupScope == .category {
+                Picker("Startup Category", selection: Binding(get: { store.startupCategoryID }, set: { store.setStartupCategoryID($0) })) {
+                    ForEach(store.catalog.categories, id: \.id) { category in Text(category.title).tag(Optional(category.id)) }
+                }
+                .disabled(store.catalog.categories.isEmpty)
+            }
+            if store.startupScope == .feed {
+                Picker("Startup Feed", selection: Binding(get: { store.startupFeedID }, set: { store.setStartupFeedID($0) })) {
+                    ForEach(store.catalog.feeds, id: \.id) { feed in Text(feed.title).tag(Optional(feed.id)) }
+                }
+                .disabled(store.catalog.feeds.isEmpty)
+            }
             Picker("Preview Lines", selection: Binding(get: { store.articlePreviewLines }, set: { store.setArticlePreviewLines($0) })) {
                 Text("2 lines").tag(ArticlePreviewLines.compact)
                 Text("3 lines").tag(ArticlePreviewLines.standard)
@@ -1049,6 +1075,8 @@ private struct ReadingSettingsView: View {
             }
             .disabled(store.coreSettings == nil)
             Toggle("Mark articles as read when scrolling past", isOn: $scrollover)
+            Toggle("Remove article from list when marked read", isOn: Binding(get: { store.removeArticlesWhenMarkedRead }, set: { store.setRemoveArticlesWhenMarkedRead($0) }))
+            Toggle("Hide Empty Feeds / Categories", isOn: Binding(get: { store.hideEmptyNavigationEntries }, set: { store.setHideEmptyNavigationEntries($0) }))
         }
         .formStyle(.grouped)
     }

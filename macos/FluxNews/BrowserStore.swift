@@ -5,7 +5,6 @@ import OSLog
 import Security
 import UserNotifications
 
-enum BrowserScope: Hashable { case all, starred, search, category(Int64), feed(Int64) }
 enum ArticleListStyle: String { case row, card }
 struct FeedSettingsTarget: Identifiable { let id: Int64; let title: String }
 
@@ -19,6 +18,11 @@ private struct MacOSBackupSettingsV1: Codable {
     let clickOnNews: String
     let globalShortcut: String
     let launchAtLogin: Bool
+    let startupScope: String?
+    let startupCategoryID: Int64?
+    let startupFeedID: Int64?
+    let hideEmptyNavigationEntries: Bool?
+    let removeArticlesWhenMarkedRead: Bool?
 }
 
 private enum ConfigurationBackupPresentationError: LocalizedError {
@@ -65,6 +69,11 @@ final class BrowserStore: ObservableObject {
     @Published var lastScrolloverBatch: [Int64] = []
     @Published var scrolloverUndoVisible = false
     @Published var markReadOnScrolloverEnabled = true
+    @Published var startupScope: StartupScopePreference
+    @Published var startupCategoryID: Int64?
+    @Published var startupFeedID: Int64?
+    @Published var hideEmptyNavigationEntries: Bool
+    @Published var removeArticlesWhenMarkedRead: Bool
     @Published private(set) var syncOnStartEnabled: Bool
     @Published var articleListStyle: ArticleListStyle
     @Published var articlePreviewLines: ArticlePreviewLines
@@ -102,9 +111,18 @@ final class BrowserStore: ObservableObject {
     private var readerDocumentRequest: UInt64 = 0
     private let searchPageSize: UInt32 = 50
     private var pendingWidgetActions: [WidgetAction] = []
+    private var hasExplicitStartupRoute = false
+    private var hasAppliedStartupScope = false
+    private var scrolloverRemovedArticles: [Int64: ArticleSummary] = [:]
+    private var scrolloverOriginalOrder: [Int64: Int] = [:]
 
     init() {
         markReadOnScrolloverEnabled = UserDefaults.standard.object(forKey: "FluxNews.markReadOnScrollover") as? Bool ?? true
+        startupScope = UserDefaults.standard.string(forKey: "FluxNews.startupScope").flatMap(StartupScopePreference.init(rawValue:)) ?? .allNews
+        startupCategoryID = UserDefaults.standard.object(forKey: "FluxNews.startupCategoryID") as? Int64
+        startupFeedID = UserDefaults.standard.object(forKey: "FluxNews.startupFeedID") as? Int64
+        hideEmptyNavigationEntries = UserDefaults.standard.object(forKey: "FluxNews.hideEmptyNavigationEntries") as? Bool ?? false
+        removeArticlesWhenMarkedRead = UserDefaults.standard.object(forKey: "FluxNews.removeArticlesWhenMarkedRead") as? Bool ?? false
         syncOnStartEnabled = UserDefaults.standard.object(forKey: "FluxNews.syncOnStart") as? Bool ?? true
         articleListStyle = UserDefaults.standard.string(forKey: "FluxNews.articleListStyle").flatMap(ArticleListStyle.init(rawValue:)) ?? .row
         articlePreviewLines = ArticlePreviewLines(rawValue: UserDefaults.standard.integer(forKey: "FluxNews.articlePreviewLines")) ?? .standard
@@ -140,9 +158,11 @@ final class BrowserStore: ObservableObject {
             eventSubscription = subscription
             NativeLog.app.notice("core configured")
             resetPresentation()
-            reloadNavigationAndCounts(); reloadVisibleArticles()
+            reloadNavigationAndCounts()
             refreshWidgetSnapshot()
             consumePendingWidgetActions()
+            applyStartupScopeIfNeeded()
+            reloadVisibleArticles()
             if startSync && syncOnStartEnabled { sync(reason: .appStart) }
             if settings.backgroundSyncEnabled { activatePeriodicSyncScheduling() }
             else { deactivatePeriodicSyncScheduling() }
@@ -230,9 +250,9 @@ final class BrowserStore: ObservableObject {
     }
 
     func query(scope: BrowserScope? = nil) -> ArticleQuery {
-        let scope = scope ?? self.scope
-        let coreScope: ArticleScope = switch scope { case .all, .starred: .all; case .search: fatalError("Search has no local article query"); case let .category(id): .category(id: id); case let .feed(id): .feed(id: id) }
-        return ArticleQuery(scope: coreScope, readFilter: scope == .starred ? .all : (unreadOnly ? .unread : .all), starredFilter: scope == .starred ? .starred : .all, sort: newestFirst ? .newestFirst : .oldestFirst, limit: 0, cursor: nil)
+        let requestedScope = scope ?? self.scope
+        let coreScope: ArticleScope = switch requestedScope { case .all, .starred: .all; case .search: fatalError("Search has no local article query"); case let .category(id): .category(id: id); case let .feed(id): .feed(id: id) }
+        return ArticleQuery(scope: coreScope, readFilter: self.scope == .starred ? .all : (unreadOnly ? .unread : .all), starredFilter: self.scope == .starred ? .starred : .all, sort: newestFirst ? .newestFirst : .oldestFirst, limit: 0, cursor: nil)
     }
     func reloadVisibleArticles(resetPosition: Bool = false, acknowledgingPendingNewData: Bool = false) {
         guard scope != .search else { return }
@@ -413,6 +433,7 @@ final class BrowserStore: ObservableObject {
         }
     }
     func route(to route: NavigationRoute) {
+        hasExplicitStartupRoute = true
         switch route {
         case .all: select(.all)
         case .starred: select(.starred)
@@ -422,6 +443,7 @@ final class BrowserStore: ObservableObject {
     }
     func handleWidgetAction(_ action: WidgetAction) {
         guard core != nil else { pendingWidgetActions.append(action); return }
+        hasExplicitStartupRoute = true
         switch action {
         case let .article(id):
             openArticle(id)
@@ -520,6 +542,7 @@ final class BrowserStore: ObservableObject {
         }
     }
     func selectNotificationFeed(_ feedID: Int64) {
+        hasExplicitStartupRoute = true
         select(.feed(feedID))
     }
     private func updateCoreSettings(_ update: @escaping (Flux) throws -> Void, afterSuccess: @escaping () -> Void = {}) {
@@ -611,7 +634,7 @@ final class BrowserStore: ObservableObject {
                 await MainActor.run {
                     switch result {
                     case let .success(disposition):
-                        store.value?.updateVisible([article.id]) { $0.isRead = read }
+                        store.value?.updateVisibleRead([article.id], read: read)
                         if case .localFirst = disposition { store.value?.reloadCounts() }
                     case let .failure(error): store.value?.errorMessage = String(describing: error)
                     }
@@ -619,7 +642,7 @@ final class BrowserStore: ObservableObject {
             }
             return
         }
-        do { _ = try core.setReadState(articleId: article.id, read: read); updateVisible([article.id]) { $0.isRead = read }; reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) }
+        do { _ = try core.setReadState(articleId: article.id, read: read); updateVisibleRead([article.id], read: read); reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) }
     }
     func setStarred(_ article: ArticleSummary, _ starred: Bool, completion: ((Bool) -> Void)? = nil) {
         guard let core else { completion?(false); return }
@@ -706,7 +729,11 @@ final class BrowserStore: ObservableObject {
             await MainActor.run { completion(result) }
         }
     }
-    func beginScrolloverUndoBatch() { scrolloverUndoBatch.beginScroll() }
+    func beginScrolloverUndoBatch() {
+        scrolloverUndoBatch.beginScroll()
+        scrolloverRemovedArticles = [:]
+        scrolloverOriginalOrder = Dictionary(uniqueKeysWithValues: articles.enumerated().map { ($0.element.id, $0.offset) })
+    }
     func finishScrolloverUndoBatch() {
         guard scrolloverCountsPending else { return }
         scrolloverCountsPending = false
@@ -724,13 +751,24 @@ final class BrowserStore: ObservableObject {
                 NativeLog.scrollover.debug("scrollover mutation elapsed_ms=\(milliseconds, privacy: .public) ids=\(ids.count, privacy: .public)")
             }
             lastScrolloverBatch = scrolloverUndoBatch.append(ids)
-            updateVisible(ids) { $0.isRead = true }
+            updateVisibleRead(ids, read: true, retainingForScrolloverUndo: true)
             scrolloverCountsPending = true
             showScrolloverUndo()
         } catch { errorMessage = String(describing: error) }
     }
-    func undoScrollover() { guard let core, !lastScrolloverBatch.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: lastScrolloverBatch, read: false); updateVisible(lastScrolloverBatch) { $0.isRead = false }; scrolloverUndoBatch.clear(); lastScrolloverBatch = []; scrolloverUndoVisible = false; undoExpiry?.cancel(); reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
+    func undoScrollover() { guard let core, !lastScrolloverBatch.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: lastScrolloverBatch, read: false); updateVisibleRead(lastScrolloverBatch, read: false); restoreScrolloverRemovedArticles(); scrolloverUndoBatch.clear(); lastScrolloverBatch = []; scrolloverUndoVisible = false; undoExpiry?.cancel(); reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
     func setScrolloverEnabled(_ enabled: Bool) { markReadOnScrolloverEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.markReadOnScrollover") }
+    func setStartupScope(_ preference: StartupScopePreference) {
+        startupScope = preference
+        if preference == .category, startupCategoryID == nil { startupCategoryID = catalog.categories.first?.id }
+        if preference == .feed, startupFeedID == nil { startupFeedID = catalog.feeds.first?.id }
+        UserDefaults.standard.set(preference.rawValue, forKey: "FluxNews.startupScope")
+        persistStartupTargets()
+    }
+    func setStartupCategoryID(_ id: Int64?) { startupCategoryID = id; persistStartupTargets() }
+    func setStartupFeedID(_ id: Int64?) { startupFeedID = id; persistStartupTargets() }
+    func setHideEmptyNavigationEntries(_ enabled: Bool) { hideEmptyNavigationEntries = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.hideEmptyNavigationEntries") }
+    func setRemoveArticlesWhenMarkedRead(_ enabled: Bool) { removeArticlesWhenMarkedRead = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.removeArticlesWhenMarkedRead") }
     func setSyncOnStartEnabled(_ enabled: Bool) { syncOnStartEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.syncOnStart") }
     func setArticlePreviewLines(_ lines: ArticlePreviewLines) { articlePreviewLines = lines; UserDefaults.standard.set(lines.rawValue, forKey: "FluxNews.articlePreviewLines") }
     func setClickOnNews(_ preference: ClickOnNews) { clickOnNews = preference; UserDefaults.standard.set(preference.rawValue, forKey: "FluxNews.clickOnNews") }
@@ -895,7 +933,12 @@ final class BrowserStore: ObservableObject {
             previewLines: articlePreviewLines.rawValue,
             clickOnNews: clickOnNews.rawValue,
             globalShortcut: globalShortcut.rawValue,
-            launchAtLogin: CredentialStore.launchAtLoginEnabled
+            launchAtLogin: CredentialStore.launchAtLoginEnabled,
+            startupScope: startupScope.rawValue,
+            startupCategoryID: startupCategoryID,
+            startupFeedID: startupFeedID,
+            hideEmptyNavigationEntries: hideEmptyNavigationEntries,
+            removeArticlesWhenMarkedRead: removeArticlesWhenMarkedRead
         )
     }
     private func applyNativeBackupSettings(_ settings: MacOSBackupSettingsV1) throws {
@@ -906,6 +949,11 @@ final class BrowserStore: ObservableObject {
         setArticlePreviewLines(ArticlePreviewLines(rawValue: settings.previewLines) ?? .standard)
         setClickOnNews(ClickOnNews(rawValue: settings.clickOnNews) ?? .openLink)
         setGlobalShortcut(GlobalShortcutChoice(rawValue: settings.globalShortcut) ?? .optionCommandF)
+        setStartupScope(StartupScopePreference(rawValue: settings.startupScope ?? "") ?? .allNews)
+        setStartupCategoryID(settings.startupCategoryID)
+        setStartupFeedID(settings.startupFeedID)
+        setHideEmptyNavigationEntries(settings.hideEmptyNavigationEntries ?? false)
+        setRemoveArticlesWhenMarkedRead(settings.removeArticlesWhenMarkedRead ?? false)
     }
     private func resetNativeSettings() {
         try? CredentialStore.setLaunchAtLogin(false)
@@ -915,6 +963,11 @@ final class BrowserStore: ObservableObject {
         setArticlePreviewLines(.standard)
         setClickOnNews(.openLink)
         setGlobalShortcut(.optionCommandF)
+        setStartupScope(.allNews)
+        setStartupCategoryID(nil)
+        setStartupFeedID(nil)
+        setHideEmptyNavigationEntries(false)
+        setRemoveArticlesWhenMarkedRead(false)
     }
     func open(_ article: ArticleSummary) {
         setRead(article, true)
@@ -983,13 +1036,53 @@ final class BrowserStore: ObservableObject {
             self?.actionConfirmation = nil
         }
     }
+    private func applyStartupScopeIfNeeded() {
+        guard !hasAppliedStartupScope else { return }
+        hasAppliedStartupScope = true
+        guard !hasExplicitStartupRoute else { return }
+        let resolved = StartupScopeResolver.resolve(startupScope, categoryID: startupCategoryID, feedID: startupFeedID, categoryIDs: Set(catalog.categories.map(\.id)), feedIDs: Set(catalog.feeds.map(\.id)))
+        if resolved == .all && (startupScope == .category || startupScope == .feed) {
+            if startupScope == .category { startupCategoryID = nil }
+            if startupScope == .feed { startupFeedID = nil }
+            startupScope = .allNews
+            UserDefaults.standard.set(StartupScopePreference.allNews.rawValue, forKey: "FluxNews.startupScope")
+            persistStartupTargets()
+        }
+        scope = resolved
+    }
+    private func persistStartupTargets() {
+        if let startupCategoryID { UserDefaults.standard.set(startupCategoryID, forKey: "FluxNews.startupCategoryID") }
+        else { UserDefaults.standard.removeObject(forKey: "FluxNews.startupCategoryID") }
+        if let startupFeedID { UserDefaults.standard.set(startupFeedID, forKey: "FluxNews.startupFeedID") }
+        else { UserDefaults.standard.removeObject(forKey: "FluxNews.startupFeedID") }
+    }
+    private func updateVisibleRead(_ ids: [Int64], read: Bool, retainingForScrolloverUndo: Bool = false) {
+        let ids = Set(ids)
+        if read && ArticleListPresentationPolicy.removesMarkedReadArticle(removeWhenMarkedRead: removeArticlesWhenMarkedRead, unreadOnly: unreadOnly, scope: scope) {
+            if retainingForScrolloverUndo {
+                for article in articles where ids.contains(article.id) { scrolloverRemovedArticles[article.id] = article }
+            }
+            articles.removeAll { ids.contains($0.id) }
+        } else {
+            updateVisible(Array(ids)) { $0.isRead = read }
+        }
+    }
+    private func restoreScrolloverRemovedArticles() {
+        guard !scrolloverRemovedArticles.isEmpty else { return }
+        let visibleIDs = Set(articles.map(\.id))
+        articles.append(contentsOf: scrolloverRemovedArticles.values.filter { !visibleIDs.contains($0.id) })
+        articles.sort { scrolloverOriginalOrder[$0.id, default: .max] < scrolloverOriginalOrder[$1.id, default: .max] }
+        scrolloverRemovedArticles = [:]
+        scrolloverOriginalOrder = [:]
+    }
     private func updateVisible(_ ids: [Int64], _ change: (inout ArticleSummary) -> Void) { let ids = Set(ids); for index in articles.indices where ids.contains(articles[index].id) { change(&articles[index]) } }
     private func reloadScrolloverCounts() {
         guard let core else { return }
         let selectionQuery = query()
         let categoryIDs = catalog.categories.map(\.id)
         let feedIDs = catalog.feeds.map(\.id)
-        let readFilter: ReadFilter = unreadOnly ? .unread : .all
+        let categoryQueries = categoryIDs.map { (id: $0, query: query(scope: .category($0))) }
+        let feedQueries = feedIDs.map { (id: $0, query: query(scope: .feed($0))) }
         let store = WeakBrowserStore(self)
         Task.detached {
             do {
@@ -999,8 +1092,8 @@ final class BrowserStore: ObservableObject {
                 let starredTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .all, starredFilter: .starred, sort: .newestFirst, limit: 0, cursor: nil))
                 var categoryCounts: [Int64: UInt64] = [:]
                 var feedCounts: [Int64: UInt64] = [:]
-                for id in categoryIDs { categoryCounts[id] = try core.countArticles(query: BrowserStore.countQuery(scope: .category(id: id), readFilter: readFilter)) }
-                for id in feedIDs { feedCounts[id] = try core.countArticles(query: BrowserStore.countQuery(scope: .feed(id: id), readFilter: readFilter)) }
+                for item in categoryQueries { categoryCounts[item.id] = try core.countArticles(query: item.query) }
+                for item in feedQueries { feedCounts[item.id] = try core.countArticles(query: item.query) }
                 let elapsed = started.duration(to: .now)
                 if elapsed >= .milliseconds(8) {
                     let components = elapsed.components
@@ -1021,9 +1114,6 @@ final class BrowserStore: ObservableObject {
                 await MainActor.run { store.value?.errorMessage = String(describing: error) }
             }
         }
-    }
-    nonisolated private static func countQuery(scope: ArticleScope, readFilter: ReadFilter) -> ArticleQuery {
-        ArticleQuery(scope: scope, readFilter: readFilter, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil)
     }
     private func showScrolloverUndo() {
         guard scrolloverUndoBatch.showsUndo else {
