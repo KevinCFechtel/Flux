@@ -24,6 +24,33 @@ struct FluxNewsCategoryEntity: AppEntity, Hashable {
     var displayRepresentation: DisplayRepresentation { .init(title: "\(title)") }
 }
 
+struct FluxNewsTemplateIcon: View {
+    private var image: NSImage? {
+        guard
+            let url = Bundle.main.url(
+                forResource: "FluxNewsTemplate",
+                withExtension: "svg"
+            ),
+            let image = NSImage(contentsOf: url)
+        else {
+            return nil
+        }
+
+        image.isTemplate = true
+        return image
+    }
+
+    var body: some View {
+        if let image {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 18, height: 18)
+                .foregroundStyle(.tint)
+        }
+    }
+}
+
 struct FluxNewsFeedQuery: EntityQuery {
     func entities(for identifiers: [String]) async throws -> [FluxNewsFeedEntity] { entities().filter { identifiers.contains($0.id) } }
     func suggestedEntities() async throws -> [FluxNewsFeedEntity] { entities() }
@@ -92,8 +119,8 @@ struct HeadlinesView: View {
     @Environment(\.widgetFamily) private var family
     @Environment(\.colorScheme) private var colorScheme
     let entry: FluxNewsWidgetEntry
-    var body: some View { VStack(alignment: .leading, spacing: 8) { header; content }.padding(12).containerBackground(for: .widget) { Color.clear } }
-    private var header: some View { HStack { Image("FluxNewsTemplate").resizable().scaledToFit(); Text(entry.model.title).font(.headline).lineLimit(1); Spacer(); Text("\(entry.model.count)").font(.headline.monospacedDigit()); Text(entry.model.countLabel).font(.caption).foregroundStyle(.secondary); Link(destination: WidgetAction.sync.url()) { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Sync") } }
+    var body: some View { VStack(alignment: .leading, spacing: 8) { header; content }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(6).containerBackground(for: .widget) { Color.clear } }
+    private var header: some View { HStack { FluxNewsTemplateIcon(); Text(entry.model.title).font(.headline).lineLimit(1); Spacer(); Text("\(entry.model.count)").font(.headline.monospacedDigit()); Text(entry.model.countLabel).font(.caption).foregroundStyle(.secondary); Link(destination: WidgetAction.sync.url()) { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Sync") } }
     @ViewBuilder private var content: some View {
         switch entry.model.state {
         case .ready, .empty:
@@ -111,10 +138,24 @@ struct HeadlinesView: View {
 }
 
 struct StatusView: View {
+  @Environment(\.widgetFamily) private var family
     let entry: FluxNewsWidgetEntry
-    var body: some View { VStack(alignment: .leading) { HStack { Image("FluxNewsTemplate").resizable().scaledToFit(); Spacer(); Link(destination: WidgetAction.sync.url()) { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Sync") }; Spacer(); Text(entry.model.title).font(.headline).lineLimit(2); Text("\(entry.model.count)").font(.system(size: 32, weight: .bold, design: .rounded)).monospacedDigit(); Text(entry.model.countLabel).font(.caption).foregroundStyle(.secondary); Spacer(); Text(lastSync).font(.caption2).foregroundStyle(.secondary).lineLimit(2) }.padding(12).containerBackground(for: .widget) { Color.clear }.widgetURL(scopeURL) }
+    var body: some View { VStack(alignment: .leading) { HStack { FluxNewsTemplateIcon(); Spacer(); Link(destination: WidgetAction.sync.url()) { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Sync") }; Text(entry.model.title).font(.headline).lineLimit(2); Text("\(entry.model.count)").font(.system(size: 32, weight: .bold, design: .rounded)).monospacedDigit(); Text(entry.model.countLabel).font(.caption).foregroundStyle(.secondary); Spacer();
+      if family == .systemSmall {
+          VStack(alignment: .leading, spacing: 1) {
+              Text("Last sync:")
+              Text(entry.model.lastSuccessfulSyncAt ?? "Never")
+          }
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      } else {
+          Text(lastSync)
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+              .lineLimit(2)
+      } }.padding(6).containerBackground(for: .widget) { Color.clear }.widgetURL(scopeURL) }
     private var scopeURL: URL { WidgetAction.open(entry.selection).url() }
-    private var lastSync: String { guard let value = entry.model.lastSuccessfulSyncAt else { return "Last sync: Never" }; return "Last sync: \(value)" }
+    private var lastSync: String { guard let value = entry.model.lastSuccessfulSyncAt else { return "Last sync:\nNever" }; return "Last sync:\n\(value)" }
 }
 
 struct FeedIcon: View {

@@ -6,7 +6,7 @@ enum HeadlinesPresentation {
         switch family {
         case .systemSmall: 1
         case .systemMedium: 3
-        case .systemLarge: 7
+        case .systemLarge: 8
         case .systemExtraLarge: 12
         default: 1
         }
