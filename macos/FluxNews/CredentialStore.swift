@@ -2,11 +2,26 @@ import Foundation
 import Security
 import ServiceManagement
 
+struct CustomHTTPHeader: Codable, Equatable, Identifiable {
+    var id: UUID
+    var name: String
+    var value: String
+
+    init(id: UUID = UUID(), name: String = "", value: String = "") {
+        self.id = id
+        self.name = name
+        self.value = value
+    }
+}
+
 struct MinifluxCredentials: Codable {
     var server: String
     var apiKey: String
     var showSplash: Bool?
     var newestFirst: Bool?
+    var customHeaders: [CustomHTTPHeader]?
+
+    var resolvedCustomHeaders: [CustomHTTPHeader] { customHeaders ?? [] }
 }
 
 enum CredentialStore {

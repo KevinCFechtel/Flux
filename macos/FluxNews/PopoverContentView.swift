@@ -668,6 +668,7 @@ private struct SettingsView: View {
     @ObservedObject var store: BrowserStore
     @State private var server = ""
     @State private var key = ""
+    @State private var customHeaders: [CustomHTTPHeader] = []
     @State private var scrollover = true
     @State private var syncOnStart = true
     @State private var launchAtLogin = false
@@ -695,14 +696,14 @@ private struct SettingsView: View {
                 Spacer()
                 Button(section == .account ? "Cancel" : "Done") { store.settingsVisible = false }
                 if section == .account {
-                    Button(store.isSavingAccount ? "Validating…" : "Save") { store.saveAccount(server: server.trimmingCharacters(in: .whitespacesAndNewlines), apiKey: key.trimmingCharacters(in: .whitespacesAndNewlines), launchAtLogin: launchAtLogin, scrollover: scrollover, syncOnStart: syncOnStart, globalShortcut: globalShortcut) }
+                    Button(store.isSavingAccount ? "Validating…" : "Save") { store.saveAccount(server: server.trimmingCharacters(in: .whitespacesAndNewlines), apiKey: key.trimmingCharacters(in: .whitespacesAndNewlines), customHeaders: customHeaders, launchAtLogin: launchAtLogin, scrollover: scrollover, syncOnStart: syncOnStart, globalShortcut: globalShortcut) }
                         .keyboardShortcut(.defaultAction)
                         .disabled(server.isEmpty || key.isEmpty || store.isSavingAccount)
                 }
             }
                 .padding(16)
         }
-        .frame(width: 700, height: 430)
+        .frame(width: 1_140, height: 500)
         .overlay(alignment: .bottom) {
             if let confirmation = store.actionConfirmation {
                 Text(confirmation)
@@ -742,7 +743,7 @@ private struct SettingsView: View {
             })
         }
         .onAppear {
-            if let credentials = try? CredentialStore.load() { server = credentials.server; key = credentials.apiKey }
+            if let credentials = try? CredentialStore.load() { server = credentials.server; key = credentials.apiKey; customHeaders = credentials.resolvedCustomHeaders }
             launchAtLogin = CredentialStore.launchAtLoginEnabled
             scrollover = store.markReadOnScrolloverEnabled
             syncOnStart = store.syncOnStartEnabled
@@ -752,7 +753,7 @@ private struct SettingsView: View {
     @ViewBuilder private var settingsPage: some View {
         switch section {
         case .account:
-            AccountSettingsView(server: $server, key: $key, configuredServer: store.configuredServer, version: store.minifluxVersion, validationError: store.accountValidationError)
+            AccountSettingsView(server: $server, key: $key, customHeaders: $customHeaders, configuredServer: store.configuredServer, version: store.minifluxVersion, validationError: store.accountValidationError)
         case .syncStorage:
             SyncStorageSettingsView(store: store, syncOnStart: $syncOnStart, retention: retention, deliveryMode: deliveryMode, backgroundSyncEnabled: backgroundSyncEnabled)
         case .reading:
@@ -979,27 +980,106 @@ private struct SettingsSidebar: View {
 private struct AccountSettingsView: View {
     @Binding var server: String
     @Binding var key: String
+    @Binding var customHeaders: [CustomHTTPHeader]
     let configuredServer: String?
     let version: String?
     let validationError: String?
+    @State private var revealedHeaderIDs = Set<UUID>()
 
     var body: some View {
-        Form {
-            LabeledContent("Miniflux Server") { TextField("", text: $server) }
-            LabeledContent("API Key") { SecureField("", text: $key) }
-            LabeledContent("Miniflux") { Text(version ?? "—").foregroundStyle(.secondary) }
-            if let validationError {
-                Text(validationError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+        VStack(alignment: .leading, spacing: 16) {
+            Form {
+                LabeledContent("Miniflux Server") { TextField("", text: $server) }
+                LabeledContent("API Key") { SecureField("", text: $key) }
             }
-            Text("Credentials are stored securely in the macOS Keychain.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            .formStyle(.grouped)
+
+            GroupBox("Custom HTTP Headers") {
+                customHeadersEditor
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Form {
+                LabeledContent("Miniflux") { Text(version ?? "—").foregroundStyle(.secondary) }
+                if let validationError {
+                    Text(validationError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                Text("API keys and custom header values are stored securely in the macOS Keychain.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .formStyle(.grouped)
         }
-        .formStyle(.grouped)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: configuredServer) { _, server in
             if let server { self.server = server }
+        }
+        .onAppear { revealedHeaderIDs = [] }
+    }
+
+    private var customHeadersEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Header Name")
+                    .frame(minWidth: 240, idealWidth: 260, maxWidth: 300, alignment: .leading)
+                Text("Value")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Color.clear.frame(width: 24)
+                Text("Remove")
+                    .hidden()
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            ForEach(customHeaders.indices, id: \.self) { index in
+                HStack(spacing: 8) {
+                    TextField("", text: $customHeaders[index].name)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(minWidth: 240, idealWidth: 260, maxWidth: 300)
+                    headerValueField(at: index)
+                        .frame(minWidth: 300, maxWidth: .infinity)
+                        .layoutPriority(1)
+                    Button {
+                        toggleHeaderValueVisibility(for: customHeaders[index].id)
+                    } label: {
+                        Image(systemName: revealedHeaderIDs.contains(customHeaders[index].id) ? "eye.slash" : "eye")
+                    }
+                    .buttonStyle(.borderless)
+                    .help(revealedHeaderIDs.contains(customHeaders[index].id) ? "Hide header value" : "Show header value")
+                    .accessibilityLabel(revealedHeaderIDs.contains(customHeaders[index].id) ? "Hide header value" : "Show header value")
+                    .frame(width: 24)
+                    Button("Remove", role: .destructive) {
+                        revealedHeaderIDs.remove(customHeaders[index].id)
+                        customHeaders.remove(at: index)
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+
+            Button("Add Header") { customHeaders.append(CustomHTTPHeader()) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func headerValueField(at index: Int) -> some View {
+        if revealedHeaderIDs.contains(customHeaders[index].id) {
+            TextField("", text: $customHeaders[index].value)
+                .textFieldStyle(.roundedBorder)
+        } else {
+            SecureField("", text: $customHeaders[index].value)
+                .textFieldStyle(.roundedBorder)
+        }
+    }
+
+    private func toggleHeaderValueVisibility(for id: UUID) {
+        if revealedHeaderIDs.contains(id) {
+            revealedHeaderIDs.remove(id)
+        } else {
+            revealedHeaderIDs.insert(id)
         }
     }
 }

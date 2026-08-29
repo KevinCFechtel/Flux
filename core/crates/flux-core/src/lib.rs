@@ -31,19 +31,20 @@ use domain::{
     SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason, WidgetData,
 };
 use miniflux::{
-    AccountValidationError, AccountValidationResult, MinifluxClient, RemoteSource,
-    miniflux_entry_url, normalize_installation_base,
+    AccountValidationError, AccountValidationResult, HttpHeader, MinifluxClient, RemoteSource,
+    miniflux_entry_url, normalize_installation_base, validate_custom_headers,
 };
 use storage::Store;
 
 /// Platform-provided roots and runtime-only Miniflux credentials.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CoreConfig {
     pub persistent_data: PathBuf,
     pub cache: PathBuf,
     pub media: PathBuf,
     pub base_url: String,
     pub api_key: String,
+    pub custom_headers: Vec<HttpHeader>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,8 +85,9 @@ impl FluxCore {
     pub fn validate_miniflux_account(
         server_url: &str,
         api_key: &str,
+        custom_headers: Vec<HttpHeader>,
     ) -> Result<AccountValidationResult, AccountValidationError> {
-        MinifluxClient::validate_account(server_url, api_key)
+        MinifluxClient::validate_account(server_url, api_key, custom_headers)
     }
 
     pub fn initialize(config: CoreConfig) -> Result<Self, CoreError> {
@@ -104,7 +106,11 @@ impl FluxCore {
         let result = tracing::dispatcher::with_default(&diagnostic_dispatcher, || {
             tracing::info!(target: "core", "core initialization started");
             validate_config(&config)?;
-            let remote = MinifluxClient::new(&config.base_url, &config.api_key)?;
+            let remote = MinifluxClient::new_with_headers(
+                &config.base_url,
+                &config.api_key,
+                config.custom_headers.clone(),
+            )?;
             let installation_base = remote.installation_base().to_string();
             let store = Arc::new(Store::open(
                 &config.persistent_data,
@@ -826,6 +832,8 @@ fn validate_config(config: &CoreConfig) -> Result<(), CoreError> {
     if config.api_key.is_empty() {
         return Err(CoreError::invalid_configuration("API key is required"));
     }
+    validate_custom_headers(&config.custom_headers)
+        .map_err(|_| CoreError::invalid_configuration("custom HTTP headers are invalid"))?;
     for path in [&config.persistent_data, &config.cache, &config.media] {
         if path.as_os_str().is_empty() {
             return Err(CoreError::invalid_configuration(
@@ -1092,6 +1100,7 @@ mod tests {
             media: temp.path().join("media"),
             base_url: "https://miniflux.example".into(),
             api_key: "test-secret".into(),
+            custom_headers: vec![],
         }
     }
     fn core(temp: &TempDir, snapshot: RemoteSnapshot) -> (Arc<FluxCore>, Arc<Source>) {

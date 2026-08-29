@@ -15,6 +15,12 @@ pub struct InitializationConfig {
     pub media: String,
     pub base_url: String,
     pub api_key: String,
+    pub custom_headers: Vec<HttpHeader>,
+}
+#[derive(uniffi::Record)]
+pub struct HttpHeader {
+    pub name: String,
+    pub value: String,
 }
 #[derive(uniffi::Enum)]
 pub enum BackupPlatform {
@@ -483,6 +489,7 @@ pub enum AccountValidationError {
     IncompatibleServer,
     InvalidResponse,
     ServerUnavailable,
+    InvalidCustomHeader,
 }
 #[derive(Debug, uniffi::Error)]
 pub enum ConfigBackupError {
@@ -535,10 +542,15 @@ pub struct DiagnosticSubscription {
 pub fn validate_miniflux_account(
     server_url: String,
     api_key: String,
+    custom_headers: Vec<HttpHeader>,
 ) -> Result<AccountValidationResult, AccountValidationError> {
-    FluxCore::validate_miniflux_account(&server_url, &api_key)
-        .map(Into::into)
-        .map_err(map_account_validation_error)
+    FluxCore::validate_miniflux_account(
+        &server_url,
+        &api_key,
+        custom_headers.into_iter().map(Into::into).collect(),
+    )
+    .map(Into::into)
+    .map_err(map_account_validation_error)
 }
 #[uniffi::export]
 pub fn export_config_backup(
@@ -568,6 +580,7 @@ impl Flux {
             media: config.media.into(),
             base_url: config.base_url,
             api_key: config.api_key,
+            custom_headers: config.custom_headers.into_iter().map(Into::into).collect(),
         })
         .map_err(map_error)?;
         Ok(Arc::new(Self {
@@ -586,6 +599,7 @@ impl Flux {
                 media: config.media.into(),
                 base_url: config.base_url,
                 api_key: config.api_key,
+                custom_headers: config.custom_headers.into_iter().map(Into::into).collect(),
             },
             Some(Arc::new(DiagnosticListenerBridge { listener })),
         )
@@ -1220,6 +1234,14 @@ impl From<flux_core::miniflux::AccountValidationResult> for AccountValidationRes
         }
     }
 }
+impl From<HttpHeader> for flux_core::miniflux::HttpHeader {
+    fn from(value: HttpHeader) -> Self {
+        Self {
+            name: value.name,
+            value: value.value,
+        }
+    }
+}
 impl From<domain::CoreEvent> for CoreEvent {
     fn from(value: domain::CoreEvent) -> Self {
         match value {
@@ -1620,6 +1642,9 @@ fn map_account_validation_error(
         }
         flux_core::miniflux::AccountValidationError::ServerUnavailable => {
             AccountValidationError::ServerUnavailable
+        }
+        flux_core::miniflux::AccountValidationError::InvalidCustomHeader => {
+            AccountValidationError::InvalidCustomHeader
         }
     }
 }

@@ -14,6 +14,25 @@ use chrono::{DateTime, SecondsFormat};
 use serde::Deserialize;
 
 const PAGE_SIZE: i64 = 100;
+const MAX_CUSTOM_HEADERS: usize = 32;
+const MAX_HEADER_NAME_BYTES: usize = 256;
+const MAX_HEADER_VALUE_BYTES: usize = 8 * 1024;
+
+/// Runtime-only transport configuration supplied by the native secure store.
+#[derive(Clone, PartialEq, Eq)]
+pub struct HttpHeader {
+    pub name: String,
+    pub value: String,
+}
+
+impl std::fmt::Debug for HttpHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpHeader")
+            .field("name", &self.name)
+            .field("value", &"<redacted>")
+            .finish()
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountValidationResult {
@@ -30,6 +49,7 @@ pub enum AccountValidationError {
     IncompatibleServer,
     InvalidResponse,
     ServerUnavailable,
+    InvalidCustomHeader,
 }
 
 impl std::fmt::Display for AccountValidationError {
@@ -42,9 +62,72 @@ impl std::fmt::Display for AccountValidationError {
             Self::IncompatibleServer => "Miniflux version endpoint was not found",
             Self::InvalidResponse => "Miniflux version response is invalid",
             Self::ServerUnavailable => "Miniflux server is temporarily unavailable",
+            Self::InvalidCustomHeader => "custom HTTP headers are invalid",
         };
         f.write_str(message)
     }
+}
+
+pub fn validate_custom_headers(headers: &[HttpHeader]) -> Result<(), AccountValidationError> {
+    if headers.len() > MAX_CUSTOM_HEADERS {
+        return Err(AccountValidationError::InvalidCustomHeader);
+    }
+    let mut names = std::collections::HashSet::with_capacity(headers.len());
+    for header in headers {
+        let name = header.name.as_bytes();
+        let value = header.value.as_bytes();
+        if name.is_empty()
+            || name.len() > MAX_HEADER_NAME_BYTES
+            || value.len() > MAX_HEADER_VALUE_BYTES
+            || !name.iter().all(|byte| {
+                byte.is_ascii_alphanumeric()
+                    || matches!(
+                        byte,
+                        b'!' | b'#'
+                            | b'$'
+                            | b'%'
+                            | b'&'
+                            | b'\''
+                            | b'*'
+                            | b'+'
+                            | b'-'
+                            | b'.'
+                            | b'^'
+                            | b'_'
+                            | b'`'
+                            | b'|'
+                            | b'~'
+                    )
+            })
+            || value
+                .iter()
+                .any(|byte| *byte < 0x20 && *byte != b'\t' || *byte == 0x7f)
+        {
+            return Err(AccountValidationError::InvalidCustomHeader);
+        }
+        let normalized = header.name.to_ascii_lowercase();
+        if matches!(
+            normalized.as_str(),
+            "accept"
+                | "authorization"
+                | "connection"
+                | "content-length"
+                | "content-type"
+                | "host"
+                | "proxy-authenticate"
+                | "proxy-authorization"
+                | "te"
+                | "trailer"
+                | "transfer-encoding"
+                | "upgrade"
+                | "user-agent"
+                | "x-auth-token"
+        ) || !names.insert(normalized)
+        {
+            return Err(AccountValidationError::InvalidCustomHeader);
+        }
+    }
+    Ok(())
 }
 
 impl std::error::Error for AccountValidationError {}
@@ -131,11 +214,21 @@ pub struct MinifluxClient {
     installation_base: String,
     api_base: String,
     api_key: String,
+    custom_headers: Vec<HttpHeader>,
     request_lock: Mutex<()>,
 }
 
 impl MinifluxClient {
     pub fn new(base_url: &str, api_key: &str) -> Result<Self, CoreError> {
+        Self::new_with_headers(base_url, api_key, Vec::new())
+    }
+    pub fn new_with_headers(
+        base_url: &str,
+        api_key: &str,
+        custom_headers: Vec<HttpHeader>,
+    ) -> Result<Self, CoreError> {
+        validate_custom_headers(&custom_headers)
+            .map_err(|_| CoreError::invalid_configuration("custom HTTP headers are invalid"))?;
         let installation_base =
             normalize_installation_base(base_url).map_err(|error| match error {
                 AccountValidationError::InvalidUrl => {
@@ -155,8 +248,15 @@ impl MinifluxClient {
             installation_base,
             api_base,
             api_key: api_key.to_string(),
+            custom_headers,
             request_lock: Mutex::new(()),
         })
+    }
+    fn authenticated_request(&self, mut request: ureq::Request) -> ureq::Request {
+        for header in &self.custom_headers {
+            request = request.set(&header.name, &header.value);
+        }
+        request.set("X-Auth-Token", &self.api_key)
     }
     pub fn installation_base(&self) -> &str {
         &self.installation_base
@@ -191,10 +291,8 @@ impl MinifluxClient {
         let started = Instant::now();
         tracing::debug!(target: "miniflux", "request started endpoint={path}");
         let response = match self
-            .agent
-            .get(&url)
+            .authenticated_request(self.agent.get(&url))
             .set("Accept", "application/json")
-            .set("X-Auth-Token", &self.api_key)
             .call()
             .map_err(map_http_error)
         {
@@ -225,10 +323,8 @@ impl MinifluxClient {
         let started = Instant::now();
         tracing::debug!(target: "miniflux", "request started endpoint={path}");
         match self
-            .agent
-            .put(&self.api_url(path))
+            .authenticated_request(self.agent.put(&self.api_url(path)))
             .set("Content-Type", "application/json")
-            .set("X-Auth-Token", &self.api_key)
             .send_string(&body)
             .map_err(map_http_error)
         {
@@ -251,9 +347,7 @@ impl MinifluxClient {
         let started = Instant::now();
         tracing::debug!(target: "miniflux", "request started endpoint={path}");
         match self
-            .agent
-            .post(&self.api_url(&path))
-            .set("X-Auth-Token", &self.api_key)
+            .authenticated_request(self.agent.post(&self.api_url(&path)))
             .call()
         {
             Ok(response) if response.status() == 202 => {
@@ -303,10 +397,8 @@ impl MinifluxClient {
         let started = Instant::now();
         tracing::debug!(target: "miniflux", "request started endpoint={path}");
         let response = match self
-            .agent
-            .post(&self.api_url(path))
+            .authenticated_request(self.agent.post(&self.api_url(path)))
             .set("Content-Type", "application/json")
-            .set("X-Auth-Token", &self.api_key)
             .send_string(&body)
             .map_err(map_http_error)
         {
@@ -467,22 +559,22 @@ impl MinifluxClient {
     pub fn validate_account(
         server_url: &str,
         api_key: &str,
+        custom_headers: Vec<HttpHeader>,
     ) -> Result<AccountValidationResult, AccountValidationError> {
         if api_key.is_empty() {
             return Err(AccountValidationError::Unauthorized);
         }
+        validate_custom_headers(&custom_headers)?;
         let installation_base = normalize_installation_base(server_url)?;
-        let client = Self::new(&installation_base, api_key)
+        let client = Self::new_with_headers(&installation_base, api_key, custom_headers)
             .map_err(|_| AccountValidationError::InvalidUrl)?;
         let _request = client
             .request_lock
             .lock()
             .map_err(|_| AccountValidationError::Network)?;
         let response = client
-            .agent
-            .get(&client.api_url("/v1/version"))
+            .authenticated_request(client.agent.get(&client.api_url("/v1/version")))
             .set("Accept", "application/json")
-            .set("X-Auth-Token", &client.api_key)
             .call()
             .map_err(map_account_validation_error)?;
         let response: VersionDto = serde_json::from_reader(response.into_reader())
@@ -896,6 +988,29 @@ mod tests {
         (address, worker)
     }
 
+    fn header_server(body: &'static str) -> (SocketAddr, thread::JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut headers = Vec::new();
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            loop {
+                line.clear();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+                headers.push(line.trim().to_ascii_lowercase());
+            }
+            write!(stream, "HTTP/1.1 200 Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            headers
+        });
+        (address, worker)
+    }
+
     #[test]
     fn normalizes_installation_urls_and_rejects_non_base_components() {
         for (input, expected) in [
@@ -986,15 +1101,19 @@ mod tests {
     fn validates_candidate_account_without_configuration_mutation() {
         let (address, worker) = version_server(200, r#"{"version":"2.0.49","commit":"abc"}"#);
         let result =
-            MinifluxClient::validate_account(&format!("http://{address}/v1"), "test-key").unwrap();
+            MinifluxClient::validate_account(&format!("http://{address}/v1"), "test-key", vec![])
+                .unwrap();
         assert_eq!(result.installation_base, format!("http://{address}"));
         assert_eq!(result.version, "2.0.49");
         assert_eq!(worker.join().unwrap(), ("/v1/version".into(), true));
 
         let (address, worker) = version_server(200, r#"{"version":"2.0.50"}"#);
-        let result =
-            MinifluxClient::validate_account(&format!("http://{address}/miniflux"), "test-key")
-                .unwrap();
+        let result = MinifluxClient::validate_account(
+            &format!("http://{address}/miniflux"),
+            "test-key",
+            vec![],
+        )
+        .unwrap();
         assert_eq!(
             result.installation_base,
             format!("http://{address}/miniflux")
@@ -1014,7 +1133,7 @@ mod tests {
         ] {
             let (address, worker) = version_server(status, "");
             assert_eq!(
-                MinifluxClient::validate_account(&format!("http://{address}"), "test-key")
+                MinifluxClient::validate_account(&format!("http://{address}"), "test-key", vec![])
                     .unwrap_err(),
                 expected
             );
@@ -1023,7 +1142,7 @@ mod tests {
         for body in ["not JSON", r#"{}"#, r#"{"version":""}"#] {
             let (address, worker) = version_server(200, body);
             assert_eq!(
-                MinifluxClient::validate_account(&format!("http://{address}"), "test-key")
+                MinifluxClient::validate_account(&format!("http://{address}"), "test-key", vec![])
                     .unwrap_err(),
                 AccountValidationError::InvalidResponse
             );
@@ -1033,8 +1152,105 @@ mod tests {
         let address = listener.local_addr().unwrap();
         drop(listener);
         assert_eq!(
-            MinifluxClient::validate_account(&format!("http://{address}"), "test-key").unwrap_err(),
+            MinifluxClient::validate_account(&format!("http://{address}"), "test-key", vec![])
+                .unwrap_err(),
             AccountValidationError::Network
+        );
+    }
+
+    #[test]
+    fn custom_headers_are_applied_to_miniflux_requests_and_validation() {
+        let headers = vec![HttpHeader {
+            name: "X-Proxy-Route".into(),
+            value: "account-route".into(),
+        }];
+        let (address, worker) = header_server(r#"{"version":"2.0.50"}"#);
+        MinifluxClient::validate_account(&format!("http://{address}"), "test-key", headers.clone())
+            .unwrap();
+        assert!(
+            worker
+                .join()
+                .unwrap()
+                .iter()
+                .any(|header| header == "x-proxy-route: account-route")
+        );
+
+        let (address, worker) = header_server(r#"{"total":0,"entries":[]}"#);
+        let client =
+            MinifluxClient::new_with_headers(&format!("http://{address}"), "test-key", headers)
+                .unwrap();
+        let _: EntriesDto = client.get("/v1/entries", &[]).unwrap();
+        assert!(
+            worker
+                .join()
+                .unwrap()
+                .iter()
+                .any(|header| header == "x-proxy-route: account-route")
+        );
+    }
+
+    #[test]
+    fn custom_headers_are_not_sent_to_external_images() {
+        let (address, worker) = header_server("image");
+        let client = MinifluxClient::new_with_headers(
+            "https://miniflux.example",
+            "test-key",
+            vec![HttpHeader {
+                name: "X-Proxy-Route".into(),
+                value: "account-route".into(),
+            }],
+        )
+        .unwrap();
+        client
+            .download_image(&format!("http://{address}/image"), 1024)
+            .unwrap();
+        assert!(
+            worker
+                .join()
+                .unwrap()
+                .iter()
+                .all(|header| !header.starts_with("x-proxy-route:"))
+        );
+    }
+
+    #[test]
+    fn custom_header_validation_is_case_insensitive_and_redacts_values() {
+        for name in [
+            "X-Auth-Token",
+            "x-auth-token",
+            "CONTENT-TYPE",
+            "Authorization",
+        ] {
+            assert_eq!(
+                validate_custom_headers(&[HttpHeader {
+                    name: name.into(),
+                    value: "secret-value".into(),
+                }]),
+                Err(AccountValidationError::InvalidCustomHeader)
+            );
+        }
+        assert_eq!(
+            validate_custom_headers(&[
+                HttpHeader {
+                    name: "X-Route".into(),
+                    value: "one".into()
+                },
+                HttpHeader {
+                    name: "x-route".into(),
+                    value: "two".into()
+                },
+            ]),
+            Err(AccountValidationError::InvalidCustomHeader)
+        );
+        assert!(
+            !format!(
+                "{:?}",
+                HttpHeader {
+                    name: "X-Route".into(),
+                    value: "secret-value".into()
+                }
+            )
+            .contains("secret-value")
         );
     }
 

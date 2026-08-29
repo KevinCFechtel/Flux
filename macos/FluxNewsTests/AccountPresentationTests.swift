@@ -16,6 +16,13 @@ final class AccountPresentationTests: XCTestCase {
         )
     }
 
+    func testCustomHeaderValidationExplainsTheTransportPolicy() {
+        XCTAssertEqual(
+            AccountValidationPresentation.message(for: .invalidCustomHeader),
+            "Custom headers must have unique valid names and cannot replace FluxNews transport headers."
+        )
+    }
+
     func testMinifluxEntryURLUsesCoreResolvedRootAndSubpathURLs() {
         XCTAssertEqual(
             MinifluxEntryURL.resolve(articleID: 583862) { _ in

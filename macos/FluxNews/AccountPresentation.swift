@@ -6,6 +6,7 @@ enum AccountValidationFailure {
     case unauthorized
     case incompatibleServer
     case invalidResponse
+    case invalidCustomHeader
 }
 
 enum AccountValidationPresentation {
@@ -21,6 +22,8 @@ enum AccountValidationPresentation {
             "This server does not provide the required Miniflux endpoint."
         case .invalidResponse:
             "The Miniflux server returned an unexpected response."
+        case .invalidCustomHeader:
+            "Custom headers must have unique valid names and cannot replace FluxNews transport headers."
         }
     }
 }
