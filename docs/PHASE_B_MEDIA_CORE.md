@@ -253,7 +253,202 @@ Local playback must remain fully functional on older Miniflux versions.
 
 ---
 
-## 7. Download Domain
+## 7. Saved Media / Episode Library
+
+Flux must distinguish between the user's durable intent to keep an episode in the media library and the technical decision to download that episode.
+
+The episode library is therefore a separate core concept and must not be derived from download state.
+
+Conceptual model:
+
+```text
+SavedMedia
+  enclosure_id
+  added_at
+```
+
+### Semantics
+
+`SavedMedia` means:
+
+> The user deliberately wants this playable enclosure to remain available in their personal episode library.
+
+It does **not** mean that the media file must be downloaded.
+
+These combinations are all valid:
+
+```text
+Saved + NotDownloaded
+Saved + Requested
+Saved + Downloaded
+Saved + InProgress
+
+NotSaved + Downloaded
+NotSaved + InProgress
+```
+
+Saved/library state, download state, and playback state are independent domain dimensions.
+
+### Core operations
+
+Conceptually expose:
+
+```text
+save_media(enclosure_id)
+unsave_media(enclosure_id)
+saved_playable_media()
+saved_media_by_feed(feed_id)
+```
+
+Exact public API names are implementation details.
+
+### Persistence
+
+Persist the library relationship in the shared core database:
+
+```text
+saved_media
+--------------------------------
+enclosure_id PRIMARY KEY
+added_at
+```
+
+The enclosure ID is the stable identity.
+
+Do not create article-keyed, URL-keyed, synthetic, or download-derived saved-media identities.
+
+### Local-only Phase B V1
+
+For Phase B V1, `SavedMedia` is intentionally **local-only**.
+
+Do not:
+
+- map it to Miniflux starred state
+- encode it in `media_progression`
+- introduce a Flux-specific remote synchronization service
+- create synthetic Miniflux state to imitate episode-library synchronization
+
+The absence of cross-device synchronization is an accepted V1 limitation.
+
+The domain model must remain replication-ready so that synchronization can be added later without changing what `SavedMedia` means.
+
+### Relationship to article starred state
+
+`SavedMedia` and article `starred` represent different user intents.
+
+An article may be starred without its media being saved. A media enclosure may be saved without the article being starred.
+
+Do not automatically couple these states.
+
+This distinction is especially important because an article may contain multiple playable enclosures while Miniflux starring applies to the article as a whole.
+
+### Retention protection
+
+A saved enclosure protects both itself and its associated article from normal article retention:
+
+```text
+SavedMedia
+-> protects Enclosure
+-> protects Article
+```
+
+Protection remains until the user explicitly removes the enclosure from the saved-media library.
+
+Download cleanup must not remove `SavedMedia`.
+
+Playback completion must not remove `SavedMedia`.
+
+### Episode overview / media library
+
+The primary persistent episode overview must be based on `SavedMedia`, not on downloaded files.
+
+The previous conceptual download-only episode overview is replaced by a media-library/read-model view based on saved episodes.
+
+The core should provide an efficient denormalized read model conceptually similar to:
+
+```text
+SavedPlayableMediaItem
+  enclosure_id
+  article_id
+  feed_id
+  title
+  feed_title
+  published_at
+  added_at
+  playback_status
+  resume_position_ms
+  duration_ms?
+  download_state
+  local_source?
+  artwork?
+```
+
+The exact fields are implementation details. Native clients must not reconstruct article/feed/media relationships through many UniFFI round trips.
+
+Downloads may still have dedicated management views, but download state is no longer the definition of the episode library.
+
+### Feed-scoped library
+
+The saved-media layer is also the durable content basis for feed-scoped playback navigation.
+
+The core should provide deterministic feed-scoped access, conceptually:
+
+```text
+saved_media_by_feed(feed_id)
+```
+
+Default ordering is by episode publication time unless a later explicit product decision changes it.
+
+This allows native clients to construct temporary playback queues from the durable library.
+
+### Foundation for next/previous playback
+
+The core still does **not** persist the active playback queue.
+
+Native playback coordinators continue to own:
+
+```text
+current queue
+current item
+current index
+```
+
+However, `SavedMedia` becomes the canonical durable episode set for features such as:
+
+- play the next saved episode from the same feed
+- continue through saved episodes of a feed
+- construct a temporary "Up Next" queue
+- resume from the saved episode overview
+
+Native code may obtain an ordered feed-scoped saved-media read model and derive next/previous items from it.
+
+Do not introduce a durable `NextEpisode`, `UpNext`, or queue state for this Phase B requirement.
+
+If Flux later introduces a user-editable persistent queue, model it as a separate domain concept instead of overloading `SavedMedia`.
+
+### Save and download interaction
+
+Saving and downloading remain separate operations.
+
+A UI flow may choose to perform both:
+
+```text
+save_media(enclosure_id)
++
+request_download(enclosure_id)
+```
+
+but this is composition of two domain intents, not one shared state.
+
+A future preference such as "automatically download saved episodes" may be added without changing the meaning of `SavedMedia`.
+
+Manual download does not implicitly mean saved unless a later explicit product decision changes that UX.
+
+Deleting a downloaded file must never unsave the episode.
+
+---
+
+## 8. Download Domain
 
 Durable states:
 
@@ -327,7 +522,7 @@ DeleteRequested
 
 ---
 
-## 8. Native Background Transfers
+## 9. Native Background Transfers
 
 Core rule:
 
@@ -384,7 +579,7 @@ The cross-platform contract deliberately does not freeze a single Android API. T
 
 ---
 
-## 9. Download Network Policy
+## 10. Download Network Policy
 
 Core model:
 
@@ -400,7 +595,7 @@ A `Requested` download waiting for an allowed network remains `Requested`.
 
 ---
 
-## 10. Auto-Download
+## 11. Auto-Download
 
 Auto-download is a feed-level policy:
 
@@ -432,7 +627,7 @@ Do not include transient Wi-Fi, power, battery, or runtime OS state in core elig
 
 ---
 
-## 11. Auto-Download Suppression
+## 12. Auto-Download Suppression
 
 Conceptual entity:
 
@@ -460,7 +655,7 @@ Suppression ends with the final enclosure lifecycle.
 
 ---
 
-## 12. Media Metadata
+## 13. Media Metadata
 
 Persist durable deterministic media metadata separately from `Enclosure`.
 
@@ -528,7 +723,7 @@ Do not store large artwork blobs in SQLite. Persist a logical or relative cache/
 
 ---
 
-## 13. Remote Metadata Probe
+## 14. Remote Metadata Probe
 
 The core may perform optional bounded HTTP Range probes against remote media.
 
@@ -550,7 +745,7 @@ Remote probing is optional for Phase B completion and must not block the rest of
 
 ---
 
-## 14. Playback Preparation
+## 15. Playback Preparation
 
 The core returns a durable playback snapshot.
 
@@ -591,7 +786,7 @@ A remote metadata probe must never block `prepare_playback()`.
 
 ---
 
-## 15. Native Playback Runtime
+## 16. Native Playback Runtime
 
 Native code owns:
 
@@ -614,7 +809,7 @@ Per client, Flux should behave as if there is at most one active media playback 
 
 ---
 
-## 16. Cleanup and Download Retention
+## 17. Cleanup and Download Retention
 
 Core model:
 
@@ -651,13 +846,14 @@ Automatic cleanup does not create auto-download suppression.
 
 ---
 
-## 17. Article Retention Protection
+## 18. Article Retention Protection
 
 Media state protects an article when durable unfinished media work depends on it.
 
 ### Protecting states
 
 ```text
+SavedMedia
 MediaDownload = Requested
 MediaDownload = Downloaded
 PlaybackState = InProgress
@@ -677,7 +873,7 @@ A starred article follows existing article-retention rules, but starring an arti
 
 ---
 
-## 18. Automotive and System Media Integration
+## 19. Automotive and System Media Integration
 
 Automotive is not a separate domain.
 
@@ -713,7 +909,7 @@ Remote automotive streaming is not a mandatory V1 requirement.
 
 ---
 
-## 19. Continue Listening
+## 20. Continue Listening
 
 Expose a domain query conceptually similar to:
 
@@ -737,7 +933,7 @@ updated_at descending
 
 ---
 
-## 20. Queue and Next / Previous
+## 21. Queue and Next / Previous
 
 The core does not persist an active playback queue.
 
@@ -761,7 +957,7 @@ Different queue contexts may be introduced later without changing the durable me
 
 ---
 
-## 21. Optional Mark-Read-on-Completion
+## 22. Optional Mark-Read-on-Completion
 
 If the product supports marking an article read after media completion, model it as core policy:
 
@@ -775,13 +971,14 @@ Native playback code must never call Miniflux directly.
 
 ---
 
-## 22. Persistence Structure
+## 23. Persistence Structure
 
 Conceptual structure:
 
 ```text
 articles
    └── enclosures
+        ├── saved_media
         ├── playback_states
         ├── media_downloads
         ├── media_metadata
@@ -807,7 +1004,7 @@ Do not create shared-core tables for:
 
 ---
 
-## 23. Sync Integration
+## 24. Sync Integration
 
 Do not introduce a separate media sync.
 
@@ -828,7 +1025,7 @@ Media-protected articles become part of the existing explicit special remote-fet
 
 ---
 
-## 24. Auto-Download Discovery Semantics
+## 25. Auto-Download Discovery Semantics
 
 Reconciliation must distinguish live discovery from restoration/rebuild.
 
@@ -845,7 +1042,7 @@ Do not leak the generic `SyncReason` deeply into media domain logic when a narro
 
 ---
 
-## 25. Search Integration
+## 26. Search Integration
 
 Search remains remote.
 
@@ -863,7 +1060,7 @@ Never create synthetic enclosure identities for search results.
 
 ---
 
-## 26. Required Atomic Core Operations
+## 27. Required Atomic Core Operations
 
 At minimum, keep the following operations transactionally atomic.
 
@@ -904,7 +1101,7 @@ Remote delivery remains separate and offline-first after the local transaction s
 
 ---
 
-## 27. Legacy FluxNews Migration
+## 28. Legacy FluxNews Migration
 
 The Flutter FluxNews implementation is a behavioral/capability reference, not a technical migration template.
 
@@ -928,7 +1125,7 @@ Legacy migration must adapt to the new model. It must never deform the new model
 
 ---
 
-## 28. Schema Migration
+## 29. Schema Migration
 
 Continue using sequential schema migrations.
 
@@ -952,7 +1149,7 @@ Every migration must be:
 
 ---
 
-## 29. Required Test Coverage
+## 30. Required Test Coverage
 
 ### Enclosures
 
@@ -962,6 +1159,17 @@ Every migration must be:
 - remote progression mapping
 - changed enclosure
 - remotely removed but locally retained enclosure
+
+### Saved media / episode library
+
+- save and unsave
+- saved without download
+- downloaded without saved state
+- deleting a download does not unsave
+- playback completion does not unsave
+- saved state protects enclosure/article retention
+- feed-scoped deterministic ordering
+- local-only saved state creates no remote mutation
 
 ### Playback reconciliation
 
@@ -1038,7 +1246,28 @@ Do not implement playback or downloads yet.
 
 ---
 
-## B2 — Playback State & Miniflux Progress
+## B2 — Saved Media / Episode Library
+
+Implement:
+
+- `SavedMedia`
+- `save_media`
+- `unsave_media`
+- `saved_playable_media`
+- feed-scoped saved-media query/read model
+- retention protection for saved enclosures/articles
+- episode-library read model including playback/download projections
+- deterministic ordering suitable for native next/previous queue construction
+
+Keep the feature local-only in Phase B V1.
+
+Do not introduce Miniflux synchronization, article-star coupling, or a Flux-specific remote synchronization mechanism.
+
+**Exit condition:** Flux has a durable local episode library independent of downloads, and native clients can use it as the basis for episode browsing and temporary feed-scoped playback queues.
+
+---
+
+## B3 — Playback State & Miniflux Progress
 
 Implement:
 
@@ -1057,7 +1286,7 @@ Implement:
 
 ---
 
-## B3 — Download Domain State Machine
+## B4 — Download Domain State Machine
 
 Implement:
 
@@ -1078,7 +1307,7 @@ Do not implement real OS transfers yet.
 
 ---
 
-## B4 — Auto-Download & Cleanup Policies
+## B5 — Auto-Download & Cleanup Policies
 
 Implement:
 
@@ -1094,7 +1323,7 @@ Implement:
 
 ---
 
-## B5 — Media Metadata
+## B6 — Media Metadata
 
 Implement:
 
@@ -1115,7 +1344,7 @@ Remote probing is not a blocker for the rest of Phase B.
 
 ---
 
-## B6 — UniFFI Media API
+## B7 — UniFFI Media API
 
 Expose the stable core domain API required by native clients, including:
 
@@ -1134,7 +1363,7 @@ Do not redesign the architecture at this stage.
 
 ---
 
-## B7 — Native Playback & Transfers
+## B8 — Native Playback & Transfers
 
 ### Apple
 
@@ -1164,7 +1393,7 @@ Both platforms must consume the same core contract even when their OS mechanisms
 
 ---
 
-## B8 — Automotive & Legacy Migration
+## B9 — Automotive & Legacy Migration
 
 Implement:
 
@@ -1185,6 +1414,11 @@ The following topics are considered decided for Phase B and must not be routinel
 
 - enclosure identity and domain model
 - media-kind classification
+- `SavedMedia` as the durable local episode-library layer
+- `SavedMedia` independent from download, playback, and article-starred state
+- `SavedMedia` local-only in Phase B V1
+- saved-media retention protection
+- saved-media/feed queries as the basis for temporary native next/previous queues
 - local playback persistence
 - local/remote playback reconciliation
 - no `max(local, remote)`
@@ -1247,6 +1481,6 @@ Phase B architecture is considered complete.
 
 > Do not perform another full media architecture analysis before implementation.
 
-Implementation starts with **B1 — Enclosure Domain & Persistence** and proceeds through B8.
+Implementation starts with **B1 — Enclosure Domain & Persistence** and proceeds through B9.
 
 New architectural decisions should only be introduced when implementation reveals a concrete previously unknown platform, API, persistence, or compatibility constraint that conflicts with this contract.
