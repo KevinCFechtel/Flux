@@ -125,7 +125,7 @@ struct HeadlinesView: View {
         switch entry.model.state {
         case .ready, .empty:
             if entry.model.articles.isEmpty { Text(entry.model.countLabel == "bookmarked" ? "No bookmarks" : "No unread news").foregroundStyle(.secondary) }
-            else if family == .systemExtraLarge { let articles = entry.model.latestArticles(limit: HeadlinesPresentation.capacity(for: family)); HStack(alignment: .top) { articleColumn(Array(articles.prefix(6))); articleColumn(Array(articles.dropFirst(6).prefix(6))) } }
+            else if family == .systemExtraLarge { let articles = entry.model.latestArticles(limit: HeadlinesPresentation.capacity(for: family)); HStack(alignment: .top) { articleColumn(Array(articles.prefix(8))); articleColumn(Array(articles.dropFirst(8).prefix(8))) } }
             else { articleColumn(entry.model.latestArticles(limit: HeadlinesPresentation.capacity(for: family))) }
         case .noAccount: fallback("Open FluxNews to configure")
         case .awaitingSuccessfulSync: fallback("Waiting for first successful sync")
@@ -155,7 +155,7 @@ struct StatusView: View {
               .lineLimit(2)
       } }.padding(6).containerBackground(for: .widget) { Color.clear }.widgetURL(scopeURL) }
     private var scopeURL: URL { WidgetAction.open(entry.selection).url() }
-    private var lastSync: String { guard let value = entry.model.lastSuccessfulSyncAt else { return "Last sync:\nNever" }; return "Last sync:\n\(value)" }
+    private var lastSync: String { guard let value = entry.model.lastSuccessfulSyncAt else { return "Last sync: Never" }; return "Last sync: \(value)" }
 }
 
 struct FeedIcon: View {

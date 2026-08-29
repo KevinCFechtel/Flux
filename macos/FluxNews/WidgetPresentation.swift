@@ -7,7 +7,7 @@ enum HeadlinesPresentation {
         case .systemSmall: 1
         case .systemMedium: 3
         case .systemLarge: 8
-        case .systemExtraLarge: 12
+        case .systemExtraLarge: 16
         default: 1
         }
     }
