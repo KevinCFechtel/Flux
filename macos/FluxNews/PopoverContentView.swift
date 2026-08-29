@@ -131,8 +131,8 @@ private struct ArticlePane: View {
         HStack(spacing: 8) {
             Button { toggleSidebar() } label: { Image(systemName: "sidebar.left") }
                 .buttonStyle(.borderless)
-                .help(sidebarVisible ? "Hide navigation" : "Show navigation")
-                .accessibilityLabel(sidebarVisible ? "Hide navigation" : "Show navigation")
+                .help(sidebarToggleLabel)
+                .accessibilityLabel(sidebarToggleLabel)
             Text(title).font(.headline).lineLimit(1)
             Text("\(store.selectionTotal)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             Spacer()
@@ -168,6 +168,10 @@ private struct ArticlePane: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
+    }
+
+    private var sidebarToggleLabel: String {
+        sidebarVisible ? String(localized: "Hide navigation") : String(localized: "Show navigation")
     }
 
     @ViewBuilder private var content: some View {
@@ -566,9 +570,9 @@ private struct ArticleItem: View {
     private var quickActions: some View {
         VStack(spacing: 8) {
             if !store.isSearchActive {
-                iconButton(article.isRead ? "circle.fill" : "checkmark.circle", label: article.isRead ? "Mark as Unread" : "Mark as Read") { store.setRead(article, !article.isRead) }
+                iconButton(article.isRead ? "circle.fill" : "checkmark.circle", label: readActionLabel) { store.setRead(article, !article.isRead) }
             }
-            iconButton(article.isStarred ? "star.fill" : "star", label: article.isStarred ? "Unstar" : "Star") { store.setStarred(article, !article.isStarred) }
+            iconButton(article.isStarred ? "star.fill" : "star", label: starActionLabel) { store.setStarred(article, !article.isStarred) }
             Menu { actionMenu } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 22).help("More").accessibilityLabel("More")
         }
     }
@@ -576,9 +580,9 @@ private struct ArticleItem: View {
     @ViewBuilder private var actionMenu: some View {
         Button { store.open(article) } label: { Label("Open", systemImage: "safari") }
         Button { store.openDetail(article) } label: { Label("Open Detail View", systemImage: "doc.text") }
-        Button { store.setStarred(article, !article.isStarred) } label: { Label(article.isStarred ? "Unstar" : "Star", systemImage: article.isStarred ? "star.slash" : "star") }
+        Button { store.setStarred(article, !article.isStarred) } label: { Label(starActionLabel, systemImage: article.isStarred ? "star.slash" : "star") }
         if !store.isSearchActive {
-            Button { store.setRead(article, !article.isRead) } label: { Label(article.isRead ? "Mark as Unread" : "Mark as Read", systemImage: article.isRead ? "circle.fill" : "checkmark.circle") }
+            Button { store.setRead(article, !article.isRead) } label: { Label(readActionLabel, systemImage: article.isRead ? "circle.fill" : "checkmark.circle") }
             Button { store.saveToService(article) } label: { Label("Save to Third-Party Service", systemImage: "tray.and.arrow.down") }
             Divider()
             Button { store.copyLink(article) } label: { Label("Copy Link", systemImage: "doc.on.doc") }
@@ -592,6 +596,8 @@ private struct ArticleItem: View {
     private func iconButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: icon) }.buttonStyle(.borderless).help(label).accessibilityLabel(label)
     }
+    private var readActionLabel: String { article.isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read") }
+    private var starActionLabel: String { article.isStarred ? String(localized: "Unstar") : String(localized: "Star") }
     private var relativeDate: String {
         guard let date = Self.isoFormatter.date(from: article.publishedAt) else { return "" }
         return Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
@@ -652,7 +658,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     var id: Self { self }
 
-    var title: String {
+    var title: LocalizedStringResource {
         switch self {
         case .account: "Account"
         case .syncStorage: "Sync & Storage"
@@ -694,9 +700,13 @@ private struct SettingsView: View {
             Divider()
             HStack {
                 Spacer()
-                Button(section == .account ? "Cancel" : "Done") { store.settingsVisible = false }
+                Button { store.settingsVisible = false } label: {
+                    if section == .account { Text("Cancel") } else { Text("Done") }
+                }
                 if section == .account {
-                    Button(store.isSavingAccount ? "Validating…" : "Save") { store.saveAccount(server: server.trimmingCharacters(in: .whitespacesAndNewlines), apiKey: key.trimmingCharacters(in: .whitespacesAndNewlines), customHeaders: customHeaders, launchAtLogin: launchAtLogin, scrollover: scrollover, syncOnStart: syncOnStart, globalShortcut: globalShortcut) }
+                    Button { store.saveAccount(server: server.trimmingCharacters(in: .whitespacesAndNewlines), apiKey: key.trimmingCharacters(in: .whitespacesAndNewlines), customHeaders: customHeaders, launchAtLogin: launchAtLogin, scrollover: scrollover, syncOnStart: syncOnStart, globalShortcut: globalShortcut) } label: {
+                        if store.isSavingAccount { Text("Validating…") } else { Text("Save") }
+                    }
                         .keyboardShortcut(.defaultAction)
                         .disabled(server.isEmpty || key.isEmpty || store.isSavingAccount)
                 }
@@ -866,7 +876,11 @@ private struct BackupPasswordSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(flow.isExport ? "Encrypt Configuration Backup" : "Import Configuration Backup").font(.title2.bold())
+            Group {
+                if flow.isExport { Text("Encrypt Configuration Backup") }
+                else { Text("Import Configuration Backup") }
+            }
+                .font(.title2.bold())
             SecureField("Backup Password", text: $password)
             if flow.isExport { SecureField("Confirm Password", text: $confirmation) }
             if submission.isProcessing { ProgressView().controlSize(.small) }
@@ -875,7 +889,11 @@ private struct BackupPasswordSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.disabled(submission.isProcessing)
-                Button(submission.isProcessing ? "Processing…" : (flow.isExport ? "Export" : "Import")) { perform() }
+                Button { perform() } label: {
+                    if submission.isProcessing { Text("Processing…") }
+                    else if flow.isExport { Text("Export") }
+                    else { Text("Import") }
+                }
                     .keyboardShortcut(.defaultAction)
                     .disabled(submission.isProcessing)
             }
@@ -1067,8 +1085,8 @@ private struct AccountSettingsView: View {
                         Image(systemName: revealedHeaderIDs.contains(customHeaders[index].id) ? "eye.slash" : "eye")
                     }
                     .buttonStyle(.borderless)
-                    .help(revealedHeaderIDs.contains(customHeaders[index].id) ? "Hide header value" : "Show header value")
-                    .accessibilityLabel(revealedHeaderIDs.contains(customHeaders[index].id) ? "Hide header value" : "Show header value")
+                    .help(revealedHeaderIDs.contains(customHeaders[index].id) ? String(localized: "Hide header value") : String(localized: "Show header value"))
+                    .accessibilityLabel(revealedHeaderIDs.contains(customHeaders[index].id) ? String(localized: "Hide header value") : String(localized: "Show header value"))
                     .frame(width: 24)
                     Button("Remove", role: .destructive) {
                         revealedHeaderIDs.remove(customHeaders[index].id)
@@ -1316,11 +1334,15 @@ private struct AddFeedView: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                 if candidates.isEmpty {
-                    Button(isDiscovering ? "Discovering..." : "Continue") { discover() }
+                    Button { discover() } label: {
+                        if isDiscovering { Text("Discovering...") } else { Text("Continue") }
+                    }
                         .keyboardShortcut(.defaultAction)
                         .disabled(isDiscovering || isCreating || form.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 } else {
-                    Button(isCreating ? "Adding..." : "Add Feed") { createSelectedCandidate() }
+                    Button { createSelectedCandidate() } label: {
+                        if isCreating { Text("Adding...") } else { Text("Add Feed") }
+                    }
                         .keyboardShortcut(.defaultAction)
                         .disabled(selectedCandidateIndex == nil || isCreating)
                 }
@@ -1459,7 +1481,9 @@ private struct AddCategoryView: View {
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
-                Button(isCreating ? "Adding..." : "Add") { create() }
+                Button { create() } label: {
+                    if isCreating { Text("Adding...") } else { Text("Add") }
+                }
                     .keyboardShortcut(.defaultAction)
                     .disabled(isCreating || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }

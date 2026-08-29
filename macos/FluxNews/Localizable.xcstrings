@@ -2129,6 +2129,116 @@
         }
       }
     },
+    "Adding...": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wird hinzugefügt..." } }
+      }
+    },
+    "Continue": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Fortfahren" } }
+      }
+    },
+    "Control-Option-F": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Ctrl-Wahl-F" } }
+      }
+    },
+    "Discovering...": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wird gesucht..." } }
+      }
+    },
+    "Encrypt Configuration Backup": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Konfigurationssicherung verschlüsseln" } }
+      }
+    },
+    "Export": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Exportieren" } }
+      }
+    },
+    "Import": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Importieren" } }
+      }
+    },
+    "Import Configuration Backup": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Konfigurationssicherung importieren" } }
+      }
+    },
+    "Option-Command-F": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wahl-Befehl-F" } }
+      }
+    },
+    "Processing…": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wird verarbeitet…" } }
+      }
+    },
+    "Save": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Speichern" } }
+      }
+    },
+    "Some content was simplified": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Einige Inhalte wurden vereinfacht" } }
+      }
+    },
+    "Some content was simplified and truncated": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Einige Inhalte wurden vereinfacht und gekürzt" } }
+      }
+    },
+    "Some content was truncated": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Einige Inhalte wurden gekürzt" } }
+      }
+    },
+    "Validating…": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wird überprüft…" } }
+      }
+    },
+    "Hide header value": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Headerwert ausblenden" } }
+      }
+    },
+    "Hide navigation": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Navigation ausblenden" } }
+      }
+    },
+    "Mark as Read": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Als gelesen markieren" } }
+      }
+    },
+    "No bookmarks": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Keine Markierungen" } }
+      }
+    },
+    "No unread news": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Keine ungelesenen Nachrichten" } }
+      }
+    },
+    "Show header value": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Headerwert anzeigen" } }
+      }
+    },
+    "Show navigation": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Navigation einblenden" } }
+      }
+    },
     "·": {}
   },
   "version": "1.0"

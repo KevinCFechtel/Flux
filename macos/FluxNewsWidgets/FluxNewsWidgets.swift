@@ -124,7 +124,13 @@ struct HeadlinesView: View {
     @ViewBuilder private var content: some View {
         switch entry.model.state {
         case .ready, .empty:
-            if entry.model.articles.isEmpty { Text(entry.model.countLabel == "bookmarked" ? "No bookmarks" : "No unread news").foregroundStyle(.secondary) }
+            if entry.model.articles.isEmpty {
+                Group {
+                    if entry.model.countLabel == "bookmarked" { Text("No bookmarks") }
+                    else { Text("No unread news") }
+                }
+                .foregroundStyle(.secondary)
+            }
             else if family == .systemExtraLarge { let articles = entry.model.latestArticles(limit: HeadlinesPresentation.capacity(for: family)); HStack(alignment: .top) { articleColumn(Array(articles.prefix(8))); articleColumn(Array(articles.dropFirst(8).prefix(8))) } }
             else { articleColumn(entry.model.latestArticles(limit: HeadlinesPresentation.capacity(for: family))) }
         case .noAccount: fallback("Open FluxNews to configure")

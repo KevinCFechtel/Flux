@@ -310,9 +310,9 @@ private struct ReaderDocumentView: View {
     }
     private var readerNotice: String {
         switch (document.hasSimplifiedContent, document.wasTruncated) {
-        case (true, true): "Some content was simplified and truncated"
-        case (true, false): "Some content was simplified"
-        case (false, true): "Some content was truncated"
+        case (true, true): String(localized: "Some content was simplified and truncated")
+        case (true, false): String(localized: "Some content was simplified")
+        case (false, true): String(localized: "Some content was truncated")
         case (false, false): ""
         }
     }

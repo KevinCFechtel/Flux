@@ -1145,9 +1145,9 @@ enum AddFeedOptionalBoolean: String, CaseIterable, Identifiable {
     }
     var title: String {
         switch self {
-        case .serverDefault: "Use Miniflux default"
-        case .enabled: "Enabled"
-        case .disabled: "Disabled"
+        case .serverDefault: String(localized: "Use Miniflux default")
+        case .enabled: String(localized: "Enabled")
+        case .disabled: String(localized: "Disabled")
         }
     }
 }
