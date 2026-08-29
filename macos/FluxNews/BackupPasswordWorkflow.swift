@@ -28,11 +28,11 @@ struct BackupPasswordSubmissionState: Equatable {
     mutating func begin(isExport: Bool, password: String, confirmation: String) -> Bool {
         guard !isProcessing else { return false }
         guard !password.isEmpty else {
-            error = "Enter a backup password."
+            error = String(localized: "Enter a backup password.")
             return false
         }
         guard !isExport || password == confirmation else {
-            error = "The passwords do not match."
+            error = String(localized: "The passwords do not match.")
             return false
         }
         error = nil

@@ -728,7 +728,7 @@ private struct SettingsView: View {
                         store.showActionConfirmation("Configuration backup exported")
                         return .success()
                     } catch {
-                        return .failure(error.localizedDescription)
+                        return .failure(NativeErrorPresentation.message(for: error))
                     }
                 case let .importBackup(data):
                     do {
@@ -813,7 +813,7 @@ private struct SettingsView: View {
                 // AppKit must finish detaching its sheet before SwiftUI presents the password sheet.
                 DispatchQueue.main.async { backupFlow = .importBackup(data) }
             } catch {
-                store.errorMessage = error.localizedDescription
+                store.errorMessage = NativeErrorPresentation.message(for: error)
             }
         }
     }
@@ -953,7 +953,7 @@ private func backupImportErrorMessage(_ error: Error) -> String {
     case ConfigBackupError.PlatformMismatch: "This backup was created for another platform."
     case ConfigBackupError.UnsupportedVersion: "This backup uses a newer unsupported format."
     case ConfigBackupError.DecryptionFailed: "The backup could not be decrypted. The password may be incorrect or the file may be damaged."
-    default: "The backup could not be imported. \(error.localizedDescription)"
+    default: String(localized: "The backup could not be imported. Please try again.")
     }
 }
 
@@ -1218,19 +1218,19 @@ private struct FeedSettingsView: View {
 
     private func load() {
         do { preferences = try store.feedPreferences(feedID: target.id); error = nil }
-        catch { self.error = error.localizedDescription }
+        catch { self.error = NativeErrorPresentation.message(for: error) }
     }
     private func updateDetailRendering(_ mode: DetailRenderingMode) {
         do { try store.setFeedDetailRendering(feedID: target.id, mode: mode); preferences = try store.feedPreferences(feedID: target.id) }
-        catch { self.error = error.localizedDescription }
+        catch { self.error = NativeErrorPresentation.message(for: error) }
     }
     private func updateTruncateDetail(_ enabled: Bool) {
         do { try store.setFeedTruncateDetail(feedID: target.id, enabled: enabled); preferences = try store.feedPreferences(feedID: target.id) }
-        catch { self.error = error.localizedDescription }
+        catch { self.error = NativeErrorPresentation.message(for: error) }
     }
     private func updateOpenInMiniflux(_ enabled: Bool) {
         do { try store.setFeedOpenInMiniflux(feedID: target.id, enabled: enabled); preferences = try store.feedPreferences(feedID: target.id) }
-        catch { self.error = error.localizedDescription }
+        catch { self.error = NativeErrorPresentation.message(for: error) }
     }
 }
 
@@ -1408,8 +1408,8 @@ private struct AddFeedView: View {
                 case .choose:
                     candidates = subscriptions
                 }
-            case let .failure(error):
-                showError("Could not discover feeds: \(error.localizedDescription)")
+            case .failure:
+                showError(String(localized: "Could not discover feeds. Please try again."))
             }
         }
     }
@@ -1428,8 +1428,8 @@ private struct AddFeedView: View {
             case .success:
                 store.showActionConfirmation("Feed added. It will appear after the next refresh.")
                 dismiss()
-            case let .failure(error):
-                showError("Could not add feed: \(error.localizedDescription)")
+            case .failure:
+                showError(String(localized: "Could not add feed. Please try again."))
             }
         }
     }
@@ -1479,8 +1479,8 @@ private struct AddCategoryView: View {
             case .success:
                 store.showActionConfirmation("Category added. It will appear after the next refresh.")
                 dismiss()
-            case let .failure(error):
-                let message = "Could not add category: \(error.localizedDescription)"
+            case .failure:
+                let message = String(localized: "Could not add category. Please try again.")
                 self.message = message
                 store.errorMessage = message
             }

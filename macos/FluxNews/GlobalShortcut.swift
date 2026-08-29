@@ -20,7 +20,7 @@ enum GlobalShortcutChoice: String, CaseIterable {
         switch self {
         case .optionCommandF: return "Option-Command-F"
         case .controlOptionF: return "Control-Option-F"
-        case .disabled: return "Disabled"
+        case .disabled: return String(localized: "Disabled")
         }
     }
 

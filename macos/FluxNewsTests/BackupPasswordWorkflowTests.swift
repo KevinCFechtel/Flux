@@ -41,9 +41,9 @@ final class BackupPasswordWorkflowTests: XCTestCase {
         var state = BackupPasswordSubmissionState()
 
         XCTAssertFalse(state.begin(isExport: true, password: "", confirmation: ""))
-        XCTAssertEqual(state.error, "Enter a backup password.")
+        XCTAssertEqual(state.error, String(localized: "Enter a backup password."))
         XCTAssertFalse(state.begin(isExport: true, password: "one", confirmation: "two"))
-        XCTAssertEqual(state.error, "The passwords do not match.")
+        XCTAssertEqual(state.error, String(localized: "The passwords do not match."))
         XCTAssertTrue(state.begin(isExport: true, password: "one", confirmation: "one"))
         XCTAssertFalse(state.begin(isExport: true, password: "one", confirmation: "one"))
         XCTAssertFalse(state.complete(error: "The backup could not be written."))

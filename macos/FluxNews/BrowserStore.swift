@@ -138,7 +138,7 @@ final class BrowserStore: ObservableObject {
             configure(server: credentials.server, apiKey: credentials.apiKey, customHeaders: credentials.resolvedCustomHeaders)
         } catch {
             NativeLog.keychain.error("credential lookup failed: \(error.localizedDescription, privacy: .public)")
-            errorMessage = error.localizedDescription
+            errorMessage = NativeErrorPresentation.message(for: error)
             settingsVisible = true
         }
     }
@@ -171,7 +171,7 @@ final class BrowserStore: ObservableObject {
             return true
         } catch {
             NativeLog.app.error("core configuration failed: \(error.localizedDescription, privacy: .public)")
-            errorMessage = error.localizedDescription
+            errorMessage = NativeErrorPresentation.message(for: error)
             return false
         }
     }
@@ -202,8 +202,8 @@ final class BrowserStore: ObservableObject {
             try CredentialStore.save(MinifluxCredentials(server: validation.installationBase, apiKey: apiKey, customHeaders: customHeaders))
             guard configure(server: validation.installationBase, apiKey: apiKey, customHeaders: customHeaders, refreshVersion: false) else {
                 do { try restoreCredentials(previousCredentials) }
-                catch { accountValidationError = "The account could not be saved. \(error.localizedDescription)"; return }
-                accountValidationError = "The validated account could not be configured. Your previous account is still active."
+                catch { accountValidationError = String(localized: "The account could not be saved."); return }
+                accountValidationError = String(localized: "The validated account could not be configured. Your previous account is still active.")
                 return
             }
             try CredentialStore.setLaunchAtLogin(launchAtLogin)
@@ -214,7 +214,7 @@ final class BrowserStore: ObservableObject {
             minifluxVersion = validation.version
             accountValidationError = nil
         } catch {
-            accountValidationError = "The account could not be saved. \(error.localizedDescription)"
+            accountValidationError = String(localized: "The account could not be saved.")
         }
     }
 
@@ -269,16 +269,16 @@ final class BrowserStore: ObservableObject {
                 resetPresentation()
                 snapshotResetRevision &+= 1
             }
-        } catch { errorMessage = String(describing: error) }
+        } catch { errorMessage = NativeErrorPresentation.message(for: error) }
     }
-    func reloadSelectionTotal() { guard let core else { return }; do { selectionTotal = try core.countArticles(query: query()); errorMessage = nil } catch { errorMessage = String(describing: error) } }
+    func reloadSelectionTotal() { guard let core else { return }; do { selectionTotal = try core.countArticles(query: query()); errorMessage = nil } catch { errorMessage = NativeErrorPresentation.message(for: error) } }
     func reloadNavigation() {
         guard let core else { return }
         do {
             catalog = try core.navigationCatalog()
             pendingNewData.removeAbsentFeeds(Set(catalog.feeds.map(\.id)))
             publishPendingNewData()
-        } catch { errorMessage = String(describing: error) }
+        } catch { errorMessage = NativeErrorPresentation.message(for: error) }
     }
     func reloadCounts() {
         guard let core else { return }
@@ -291,7 +291,7 @@ final class BrowserStore: ObservableObject {
             for feed in catalog.feeds { feedCounts[feed.id] = try core.countArticles(query: query(scope: .feed(feed.id))) }
             categorySidebarCounts = categoryCounts
             feedSidebarCounts = feedCounts
-        } catch { errorMessage = String(describing: error) }
+        } catch { errorMessage = NativeErrorPresentation.message(for: error) }
     }
     func reloadNavigationAndCounts() { reloadNavigation(); reloadCounts() }
     func requestFeedIcon(_ feedID: Int64, darkAppearance: Bool) {
@@ -398,7 +398,7 @@ final class BrowserStore: ObservableObject {
                 case let .success(page):
                     store.articles = page.articles
                     store.searchTotal = page.total
-                case let .failure(error): store.errorMessage = String(describing: error)
+                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
                 }
             }
         }
@@ -430,7 +430,7 @@ final class BrowserStore: ObservableObject {
                     let existing = Set(store.articles.map(\.id))
                     store.articles.append(contentsOf: page.articles.filter { !existing.contains($0.id) })
                     store.searchTotal = page.total
-                case let .failure(error): store.errorMessage = String(describing: error)
+                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
                 }
             }
         }
@@ -477,7 +477,7 @@ final class BrowserStore: ObservableObject {
                 let result = try core.sync(reason: reason)
                 await SystemNotificationManager.shared.deliver(result.systemNotificationCandidates, core: core)
             }
-            catch { await MainActor.run { store.value?.isLoading = false; store.value?.errorMessage = String(describing: error) } }
+            catch { await MainActor.run { store.value?.isLoading = false; store.value?.errorMessage = NativeErrorPresentation.message(for: error) } }
         }
     }
     func syncIfStale(reason: SyncReason = .periodic) {
@@ -517,7 +517,7 @@ final class BrowserStore: ObservableObject {
             systemNotificationSettings = try core.feedSystemNotificationSettings()
             systemNotificationSettingsError = nil
         } catch {
-            systemNotificationSettingsError = String(describing: error)
+            systemNotificationSettingsError = NativeErrorPresentation.message(for: error)
         }
     }
     func setSystemNotificationsEnabled(feedID: Int64, enabled: Bool) {
@@ -539,7 +539,7 @@ final class BrowserStore: ObservableObject {
                 await MainActor.run {
                     guard let store = store.value else { return }
                     store.updatingSystemNotificationFeedIDs.remove(feedID)
-                    store.systemNotificationSettingsError = error.localizedDescription
+                    store.systemNotificationSettingsError = NativeErrorPresentation.message(for: error)
                 }
             }
         }
@@ -561,7 +561,7 @@ final class BrowserStore: ObservableObject {
                 case let .success(settings):
                     store.value?.coreSettings = settings
                     afterSuccess()
-                case let .failure(error): store.value?.errorMessage = String(describing: error)
+                case let .failure(error): store.value?.errorMessage = NativeErrorPresentation.message(for: error)
                 }
             }
         }
@@ -639,13 +639,13 @@ final class BrowserStore: ObservableObject {
                     case let .success(disposition):
                         store.value?.updateVisibleRead([article.id], read: read)
                         if case .localFirst = disposition { store.value?.reloadCounts() }
-                    case let .failure(error): store.value?.errorMessage = String(describing: error)
+                    case let .failure(error): store.value?.errorMessage = NativeErrorPresentation.message(for: error)
                     }
                 }
             }
             return
         }
-        do { _ = try core.setReadState(articleId: article.id, read: read); updateVisibleRead([article.id], read: read); reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) }
+        do { _ = try core.setReadState(articleId: article.id, read: read); updateVisibleRead([article.id], read: read); reloadSelectionTotal(); reloadCounts() } catch { errorMessage = NativeErrorPresentation.message(for: error) }
     }
     func setStarred(_ article: ArticleSummary, _ starred: Bool, completion: ((Bool) -> Void)? = nil) {
         guard let core else { completion?(false); return }
@@ -659,13 +659,13 @@ final class BrowserStore: ObservableObject {
                         store.value?.updateVisible([article.id]) { $0.isStarred = starred }
                         if case .localFirst = disposition { store.value?.reloadCounts() }
                         completion?(true)
-                    case let .failure(error): store.value?.errorMessage = String(describing: error); completion?(false)
+                    case let .failure(error): store.value?.errorMessage = NativeErrorPresentation.message(for: error); completion?(false)
                     }
                 }
             }
             return
         }
-        do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadSelectionTotal(); reloadCounts(); completion?(true) } catch { errorMessage = String(describing: error); completion?(false) }
+        do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadSelectionTotal(); reloadCounts(); completion?(true) } catch { errorMessage = NativeErrorPresentation.message(for: error); completion?(false) }
     }
     func loadReaderDocument(_ article: ArticleSummary, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
         guard let core else {
@@ -692,13 +692,13 @@ final class BrowserStore: ObservableObject {
                 await MainActor.run {
                     switch result {
                     case .saved:
-                        store.value?.showActionConfirmation("Saved to third-party service")
+                        store.value?.showActionConfirmation(String(localized: "Saved to third-party service"))
                     case .noIntegrationConfigured:
-                        store.value?.showActionConfirmation("No third-party integration is configured in Miniflux")
+                        store.value?.showActionConfirmation(String(localized: "No third-party integration is configured in Miniflux"))
                     }
                 }
             } catch {
-                await MainActor.run { store.value?.errorMessage = String(describing: error) }
+                await MainActor.run { store.value?.errorMessage = NativeErrorPresentation.message(for: error) }
             }
         }
     }
@@ -757,9 +757,9 @@ final class BrowserStore: ObservableObject {
             updateVisibleRead(ids, read: true, retainingForScrolloverUndo: true)
             scrolloverCountsPending = true
             showScrolloverUndo()
-        } catch { errorMessage = String(describing: error) }
+        } catch { errorMessage = NativeErrorPresentation.message(for: error) }
     }
-    func undoScrollover() { guard let core, !lastScrolloverBatch.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: lastScrolloverBatch, read: false); updateVisibleRead(lastScrolloverBatch, read: false); restoreScrolloverRemovedArticles(); scrolloverUndoBatch.clear(); lastScrolloverBatch = []; scrolloverUndoVisible = false; undoExpiry?.cancel(); reloadSelectionTotal(); reloadCounts() } catch { errorMessage = String(describing: error) } }
+    func undoScrollover() { guard let core, !lastScrolloverBatch.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: lastScrolloverBatch, read: false); updateVisibleRead(lastScrolloverBatch, read: false); restoreScrolloverRemovedArticles(); scrolloverUndoBatch.clear(); lastScrolloverBatch = []; scrolloverUndoVisible = false; undoExpiry?.cancel(); reloadSelectionTotal(); reloadCounts() } catch { errorMessage = NativeErrorPresentation.message(for: error) } }
     func setScrolloverEnabled(_ enabled: Bool) { markReadOnScrolloverEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.markReadOnScrollover") }
     func setStartupScope(_ preference: StartupScopePreference) {
         startupScope = preference
@@ -836,8 +836,8 @@ final class BrowserStore: ObservableObject {
                 store.invalidateLocalPresentation()
                 store.isLoading = false
                 switch result {
-                case .success: store.showActionConfirmation("Local state rebuilt")
-                case .failure: store.errorMessage = "Local state was cleared, but synchronization could not be completed."
+                case .success: store.showActionConfirmation(String(localized: "Local state rebuilt"))
+                case .failure: store.errorMessage = String(localized: "Local state was cleared, but synchronization could not be completed.")
                 }
             }
         }
@@ -857,10 +857,10 @@ final class BrowserStore: ObservableObject {
             deactivatePeriodicSyncScheduling()
             invalidateWidgetSnapshot()
             invalidateLocalPresentation()
-            showActionConfirmation("FluxNews was reset")
+            showActionConfirmation(String(localized: "FluxNews was reset"))
             settingsVisible = true
         } catch {
-            errorMessage = "FluxNews could not be fully reset. \(error.localizedDescription)"
+            errorMessage = String(localized: "FluxNews could not be fully reset.")
         }
     }
     var onInvalidateContent: (() -> Void)?
@@ -990,7 +990,7 @@ final class BrowserStore: ObservableObject {
             guard let article = try core.queryArticles(query: query).first(where: { $0.id == articleID }) else { return }
             open(article)
         } catch {
-            errorMessage = String(describing: error)
+            errorMessage = NativeErrorPresentation.message(for: error)
         }
     }
     private func openWidgetScope(_ selection: WidgetContentSelection) {
@@ -1021,7 +1021,7 @@ final class BrowserStore: ObservableObject {
     func openComments(_ article: ArticleSummary) { if let url = URL(string: article.commentsUrl), !article.commentsUrl.isEmpty { NSWorkspace.shared.open(url) } }
     func openInMiniflux(_ article: ArticleSummary) {
         guard let core, let url = MinifluxEntryURL.resolve(articleID: article.id, using: core.minifluxEntryUrl) else {
-            errorMessage = "Flux could not resolve the Miniflux entry URL."
+            errorMessage = String(localized: "Flux could not resolve the Miniflux entry URL.")
             return
         }
         NSWorkspace.shared.open(url)
@@ -1116,7 +1116,7 @@ final class BrowserStore: ObservableObject {
                     store.feedSidebarCounts = feedCountsSnapshot
                 }
             } catch {
-                await MainActor.run { store.value?.errorMessage = String(describing: error) }
+                await MainActor.run { store.value?.errorMessage = NativeErrorPresentation.message(for: error) }
             }
         }
     }
@@ -1274,14 +1274,6 @@ final class SystemNotificationManager: NSObject, UNUserNotificationCenterDelegat
             DispatchQueue.main.async { [weak self] in self?.onFeedSelected?(number.int64Value) }
         }
         completionHandler()
-    }
-}
-
-enum SystemNotificationError: LocalizedError {
-    case authorizationDenied
-
-    var errorDescription: String? {
-        "FluxNews notification permission is disabled. Enable notifications in macOS System Settings to use System Notifications."
     }
 }
 

@@ -28,6 +28,25 @@ enum AccountValidationPresentation {
     }
 }
 
+enum NativeErrorPresentation {
+    static func message(for error: Error) -> String {
+        switch error {
+        case SystemNotificationError.authorizationDenied:
+            String(localized: "FluxNews notification permission is disabled. Enable notifications in macOS System Settings to use System Notifications.")
+        default:
+            String(localized: "Something went wrong. Please try again.")
+        }
+    }
+}
+
+enum SystemNotificationError: LocalizedError {
+    case authorizationDenied
+
+    var errorDescription: String? {
+        String(localized: "FluxNews notification permission is disabled. Enable notifications in macOS System Settings to use System Notifications.")
+    }
+}
+
 enum MinifluxEntryURL {
     static func resolve(articleID: Int64, using coreURL: (Int64) -> String) -> URL? {
         guard let url = URL(string: coreURL(articleID)),

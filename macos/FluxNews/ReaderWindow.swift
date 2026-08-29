@@ -46,7 +46,7 @@ final class ReaderWindowController: NSObject, ObservableObject {
             self.isLoading = false
             switch result {
             case let .success(document): self.document = document
-            case let .failure(error): self.errorMessage = error.localizedDescription
+            case let .failure(error): self.errorMessage = NativeErrorPresentation.message(for: error)
             }
         }
     }
@@ -86,7 +86,7 @@ final class ReaderWindowController: NSObject, ObservableObject {
         let panel = ReaderPreviewPanel(contentRect: NSRect(origin: .zero, size: ReaderPreviewGeometry.persistedSize()), styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .hudWindow], backing: .buffered, defer: false)
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.title = "Detail Preview"
+        panel.title = String(localized: "Detail Preview")
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.level = .floating
@@ -118,7 +118,7 @@ final class ReaderWindowController: NSObject, ObservableObject {
     private func starImage(starred: Bool) -> NSImage? {
         let base = NSImage(
             systemSymbolName: starred ? "star.fill" : "star",
-            accessibilityDescription: starred ? "Unstar" : "Star"
+            accessibilityDescription: starred ? String(localized: "Unstar") : String(localized: "Star")
         )
 
         return base?.withSymbolConfiguration(
@@ -134,7 +134,7 @@ final class ReaderWindowController: NSObject, ObservableObject {
         guard let item = panel?.toolbar?.items.first(where: { $0.itemIdentifier == .star }) else { return }
         let starred = article?.isStarred == true
         item.image = starImage(starred: starred)
-        item.label = starred ? "Unstar" : "Star"
+        item.label = starred ? String(localized: "Unstar") : String(localized: "Star")
         item.paletteLabel = item.label
         item.toolTip = item.label
     }
@@ -192,21 +192,21 @@ extension ReaderWindowController: NSToolbarDelegate {
         switch itemIdentifier {
         case .star:
             let starred = article?.isStarred == true
-            item.label = starred ? "Unstar" : "Star"
+            item.label = starred ? String(localized: "Unstar") : String(localized: "Star")
             item.paletteLabel = item.label
             item.toolTip = item.label
             item.image = starImage(starred: starred)
             item.target = self
             item.action = #selector(toggleStarredFromToolbar)
         case .share:
-            item.label = "Share"
-            item.view = button(symbol: "square.and.arrow.up", label: "Share", action: #selector(shareFromToolbar(_:)))
+            item.label = String(localized: "Share")
+            item.view = button(symbol: "square.and.arrow.up", label: String(localized: "Share"), action: #selector(shareFromToolbar(_:)))
         case .open:
-            item.label = "Open"
-            item.view = button(symbol: "arrow.up.forward.app", label: "Open", action: #selector(openFromToolbar))
+            item.label = String(localized: "Open")
+            item.view = button(symbol: "arrow.up.forward.app", label: String(localized: "Open"), action: #selector(openFromToolbar))
         case .more:
-            item.label = "More"
-            item.view = button(symbol: "ellipsis", label: "More", action: #selector(showMoreMenu(_:)))
+            item.label = String(localized: "More")
+            item.view = button(symbol: "ellipsis", label: String(localized: "More"), action: #selector(showMoreMenu(_:)))
         default: return nil
         }
         return item
@@ -233,13 +233,13 @@ extension ReaderWindowController: NSToolbarDelegate {
 
     private func moreMenu() -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(withTitle: "Mark as Unread", action: #selector(markUnread), keyEquivalent: "").target = self
+        menu.addItem(withTitle: String(localized: "Mark as Unread"), action: #selector(markUnread), keyEquivalent: "").target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Open Original", action: #selector(openOriginalFromToolbar), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Open in Miniflux", action: #selector(openInMiniflux), keyEquivalent: "").target = self
-        if article?.commentsUrl.isEmpty == false { menu.addItem(withTitle: "Open Comments", action: #selector(openComments), keyEquivalent: "").target = self }
+        menu.addItem(withTitle: String(localized: "Open Original"), action: #selector(openOriginalFromToolbar), keyEquivalent: "").target = self
+        menu.addItem(withTitle: String(localized: "Open in Miniflux"), action: #selector(openInMiniflux), keyEquivalent: "").target = self
+        if article?.commentsUrl.isEmpty == false { menu.addItem(withTitle: String(localized: "Open Comments"), action: #selector(openComments), keyEquivalent: "").target = self }
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Copy Link", action: #selector(copyLink), keyEquivalent: "").target = self
+        menu.addItem(withTitle: String(localized: "Copy Link"), action: #selector(copyLink), keyEquivalent: "").target = self
         return menu
     }
 }
@@ -362,7 +362,7 @@ private struct ReaderImage: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityLabel(alt ?? "Article image")
+        .accessibilityLabel(alt ?? String(localized: "Article image"))
     }
     @ViewBuilder private var imageContent: some View {
         if let imageURL = URL(string: url) {
@@ -376,6 +376,6 @@ private struct ReaderImage: View {
         } else { fallback }
     }
     @ViewBuilder private var fallback: some View {
-        if let link, let destination = URL(string: link) { Link(alt?.isEmpty == false ? alt! : "Open image", destination: destination).padding(12).background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 6)) }
+        if let link, let destination = URL(string: link) { Link(alt?.isEmpty == false ? alt! : String(localized: "Open image"), destination: destination).padding(12).background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 6)) }
     }
 }

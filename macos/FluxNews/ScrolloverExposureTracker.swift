@@ -69,8 +69,12 @@ enum StatusItemPresentation {
     }
 
     static func accessibilityValue(unreadTotal: UInt64, hasPendingNewData: Bool) -> String {
-        let unread = unreadTotal == 1 ? "1 unread article" : "\(unreadTotal) unread articles"
-        return hasPendingNewData ? "\(unread), new data available" : unread
+        let unread = unreadTotal == 1
+            ? String(localized: "1 unread article")
+            : String(format: String(localized: "%lld unread articles"), unreadTotal)
+        return hasPendingNewData
+            ? String(format: String(localized: "%@, new data available"), unread)
+            : unread
     }
 }
 

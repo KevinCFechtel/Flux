@@ -4,12 +4,12 @@ import WidgetKit
 
 enum FluxNewsWidgetScope: String, AppEnum {
     case allNews, bookmarks, category, feed
-    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Content")
-    static var caseDisplayRepresentations: [Self: DisplayRepresentation] = [.allNews: "All News", .bookmarks: "Bookmarks", .category: "Category", .feed: "Feed"]
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: LocalizedStringResource("Content"))
+    static var caseDisplayRepresentations: [Self: DisplayRepresentation] = [.allNews: DisplayRepresentation(title: LocalizedStringResource("All News")), .bookmarks: DisplayRepresentation(title: LocalizedStringResource("Bookmarks")), .category: DisplayRepresentation(title: LocalizedStringResource("Category")), .feed: DisplayRepresentation(title: LocalizedStringResource("Feed"))]
 }
 
 struct FluxNewsFeedEntity: AppEntity, Hashable {
-    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Feed")
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: LocalizedStringResource("Feed"))
     static var defaultQuery = FluxNewsFeedQuery()
     let id: String
     let title: String
@@ -17,7 +17,7 @@ struct FluxNewsFeedEntity: AppEntity, Hashable {
 }
 
 struct FluxNewsCategoryEntity: AppEntity, Hashable {
-    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Category")
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: LocalizedStringResource("Category"))
     static var defaultQuery = FluxNewsCategoryQuery()
     let id: String
     let title: String
@@ -81,10 +81,10 @@ struct FluxNewsCategoryQuery: EntityQuery {
 
 struct FluxNewsWidgetConfigurationIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource = "FluxNews Widget"
-    static var description = IntentDescription("Choose the FluxNews content this widget shows.")
-    @Parameter(title: "Content", default: .allNews) var scope: FluxNewsWidgetScope
-    @Parameter(title: "Category") var category: FluxNewsCategoryEntity?
-    @Parameter(title: "Feed") var feed: FluxNewsFeedEntity?
+    static var description = IntentDescription(LocalizedStringResource("Choose the FluxNews content this widget shows."))
+    @Parameter(title: LocalizedStringResource("Content"), default: .allNews) var scope: FluxNewsWidgetScope
+    @Parameter(title: LocalizedStringResource("Category")) var category: FluxNewsCategoryEntity?
+    @Parameter(title: LocalizedStringResource("Feed")) var feed: FluxNewsFeedEntity?
 }
 
 struct FluxNewsWidgetEntry: TimelineEntry { let date: Date; let model: WidgetContentModel; let snapshot: WidgetSnapshotV1?; let selection: WidgetContentSelection }
@@ -120,7 +120,7 @@ struct HeadlinesView: View {
     @Environment(\.colorScheme) private var colorScheme
     let entry: FluxNewsWidgetEntry
     var body: some View { VStack(alignment: .leading, spacing: 8) { header; content }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(6).containerBackground(for: .widget) { Color.clear } }
-    private var header: some View { HStack { FluxNewsTemplateIcon(); Text(entry.model.title).font(.headline).lineLimit(1); Spacer(); Text("\(entry.model.count)").font(.headline.monospacedDigit()); Text(entry.model.countLabel).font(.caption).foregroundStyle(.secondary); Link(destination: WidgetAction.sync.url()) { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Sync") } }
+    private var header: some View { HStack { FluxNewsTemplateIcon(); Text(title).font(.headline).lineLimit(1); Spacer(); Text("\(entry.model.count)").font(.headline.monospacedDigit()); Text(LocalizedStringKey(entry.model.countLabel)).font(.caption).foregroundStyle(.secondary); Link(destination: WidgetAction.sync.url()) { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Sync") } }
     @ViewBuilder private var content: some View {
         switch entry.model.state {
         case .ready, .empty:
@@ -134,17 +134,26 @@ struct HeadlinesView: View {
         }
     }
     private func articleColumn(_ articles: [WidgetSnapshotV1.Article]) -> some View { VStack(alignment: .leading, spacing: 7) { ForEach(articles, id: \.id) { article in Link(destination: WidgetAction.article(article.id).url()) { HStack(spacing: 6) { FeedIcon(snapshot: entry.snapshot, feedID: article.feedID, title: article.feedTitle, dark: colorScheme == .dark); VStack(alignment: .leading, spacing: 1) { Text(article.title).font(.subheadline.weight(.semibold)).lineLimit(1); Text(article.feedTitle).font(.caption).foregroundStyle(.secondary).lineLimit(1) } }.accessibilityLabel("Open \(article.title) in FluxNews") } } } }
-    private func fallback(_ text: String) -> some View { Text(text).font(.subheadline).foregroundStyle(.secondary) }
+    private func fallback(_ text: String) -> some View { Text(LocalizedStringKey(text)).font(.subheadline).foregroundStyle(.secondary) }
+    private var title: String {
+        switch entry.selection.scope {
+        case .allNews: String(localized: "All News")
+        case .bookmarks: String(localized: "Bookmarks")
+        case .category where entry.model.title == "Category": String(localized: "Category")
+        case .feed where entry.model.title == "Feed": String(localized: "Feed")
+        default: entry.model.title
+        }
+    }
 }
 
 struct StatusView: View {
   @Environment(\.widgetFamily) private var family
     let entry: FluxNewsWidgetEntry
-    var body: some View { VStack(alignment: .leading) { HStack { FluxNewsTemplateIcon(); Spacer(); Link(destination: WidgetAction.sync.url()) { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Sync") }; Text(entry.model.title).font(.headline).lineLimit(2); Text("\(entry.model.count)").font(.system(size: 32, weight: .bold, design: .rounded)).monospacedDigit(); Text(entry.model.countLabel).font(.caption).foregroundStyle(.secondary); Spacer();
+    var body: some View { VStack(alignment: .leading) { HStack { FluxNewsTemplateIcon(); Spacer(); Link(destination: WidgetAction.sync.url()) { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Sync") }; Text(title).font(.headline).lineLimit(2); Text("\(entry.model.count)").font(.system(size: 32, weight: .bold, design: .rounded)).monospacedDigit(); Text(LocalizedStringKey(entry.model.countLabel)).font(.caption).foregroundStyle(.secondary); Spacer();
       if family == .systemSmall {
           VStack(alignment: .leading, spacing: 1) {
               Text("Last sync:")
-              Text(entry.model.lastSuccessfulSyncAt ?? "Never")
+              Text(lastSuccessfulSync)
           }
           .font(.caption2)
           .foregroundStyle(.secondary)
@@ -155,7 +164,17 @@ struct StatusView: View {
               .lineLimit(2)
       } }.padding(6).containerBackground(for: .widget) { Color.clear }.widgetURL(scopeURL) }
     private var scopeURL: URL { WidgetAction.open(entry.selection).url() }
-    private var lastSync: String { guard let value = entry.model.lastSuccessfulSyncAt else { return "Last sync: Never" }; return "Last sync: \(value)" }
+    private var title: String {
+        switch entry.selection.scope {
+        case .allNews: String(localized: "All News")
+        case .bookmarks: String(localized: "Bookmarks")
+        case .category where entry.model.title == "Category": String(localized: "Category")
+        case .feed where entry.model.title == "Feed": String(localized: "Feed")
+        default: entry.model.title
+        }
+    }
+    private var lastSuccessfulSync: String { guard let value = entry.model.lastSuccessfulSyncAt, let date = ISO8601DateFormatter().date(from: value) else { return String(localized: "Never") }; return date.formatted(date: .abbreviated, time: .shortened) }
+    private var lastSync: String { String(format: String(localized: "Last sync: %@"), lastSuccessfulSync) }
 }
 
 struct FeedIcon: View {

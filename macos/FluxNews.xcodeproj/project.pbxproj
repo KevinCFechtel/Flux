@@ -51,6 +51,7 @@
 		A48 /* BrowserPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B38 /* BrowserPresentation.swift */; };
 		A49 /* BrowserPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B38 /* BrowserPresentation.swift */; };
 		A50 /* BrowserPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B39 /* BrowserPresentationTests.swift */; };
+		A51 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = B14 /* Localizable.xcstrings */; };
 		A5 /* ScrolloverExposureTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5 /* ScrolloverExposureTracker.swift */; };
 		A6 /* Generated/flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6 /* Generated/flux_uniffi.swift */; };
 		A7 /* KeyboardCommandObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7 /* KeyboardCommandObserver.swift */; };
@@ -316,6 +317,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				de,
 				Base,
 			);
 			mainGroup = G0;
@@ -336,6 +338,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				E19B91123042A9B3006481A6 /* FluxNewsTemplate.svg in Resources */,
+				A51 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

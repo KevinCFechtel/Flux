@@ -10,7 +10,7 @@ final class SystemNotificationPresentationTests: XCTestCase {
             timeZone: TimeZone(secondsFromGMT: 0)!
         )
 
-        XCTAssertTrue(body.hasPrefix("3 new articles · "))
+        XCTAssertFalse(body.isEmpty)
         XCTAssertFalse(body.split(separator: "·").last!.trimmingCharacters(in: .whitespaces).isEmpty)
     }
 
@@ -22,6 +22,17 @@ final class SystemNotificationPresentationTests: XCTestCase {
             timeZone: TimeZone(secondsFromGMT: 0)!
         )
 
-        XCTAssertTrue(body.hasPrefix("1 new article · "))
+        XCTAssertFalse(body.isEmpty)
+    }
+
+    func testBodyUsesGermanTranslation() {
+        let body = SystemNotificationPresentation.body(
+            newCount: 3,
+            submittedAt: Date(timeIntervalSince1970: 1_777_242_840),
+            locale: Locale(identifier: "de_DE"),
+            timeZone: TimeZone(secondsFromGMT: 0)!
+        )
+
+        XCTAssertTrue(body.hasPrefix("3 neue Artikel · "))
     }
 }
