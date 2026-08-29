@@ -988,8 +988,8 @@ private struct AccountSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Form {
-              Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+
+          Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
                   GridRow {
                       Text("Miniflux Server")
                           .frame(width: 140, alignment: .leading)
@@ -1009,8 +1009,8 @@ private struct AccountSettingsView: View {
                   }
               }
               .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .formStyle(.grouped)
+
+
 
             GroupBox("Custom HTTP Headers") {
                 customHeadersEditor
