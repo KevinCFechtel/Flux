@@ -80,7 +80,7 @@ struct FluxNewsWidgetProvider: AppIntentTimelineProvider {
 
 struct FluxNewsHeadlinesWidget: Widget {
     let kind = FluxNewsWidgetKind.headlines
-    var body: some WidgetConfiguration { AppIntentConfiguration(kind: kind, intent: FluxNewsWidgetConfigurationIntent.self, provider: FluxNewsWidgetProvider()) { HeadlinesView(entry: $0) }.configurationDisplayName("FluxNews Headlines").description("Shows the latest articles from your selected FluxNews view.").supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge]) }
+    var body: some WidgetConfiguration { AppIntentConfiguration(kind: kind, intent: FluxNewsWidgetConfigurationIntent.self, provider: FluxNewsWidgetProvider()) { HeadlinesView(entry: $0) }.configurationDisplayName("FluxNews Headlines").description("Shows the latest articles from your selected FluxNews view.").supportedFamilies([.systemMedium, .systemLarge, .systemExtraLarge]) }
 }
 
 struct FluxNewsCompactStatusWidget: Widget {
@@ -92,8 +92,8 @@ struct HeadlinesView: View {
     @Environment(\.widgetFamily) private var family
     @Environment(\.colorScheme) private var colorScheme
     let entry: FluxNewsWidgetEntry
-    var body: some View { VStack(alignment: .leading, spacing: 8) { header; content }.padding().containerBackground(for: .widget) { Color.clear } }
-    private var header: some View { HStack { Image(systemName: "newspaper.fill").foregroundStyle(.tint); Text(entry.model.title).font(.headline).lineLimit(1); Spacer(); Text("\(entry.model.count)").font(.headline.monospacedDigit()); Text(entry.model.countLabel).font(.caption).foregroundStyle(.secondary); Link(destination: WidgetAction.sync.url()) { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Sync") } }
+    var body: some View { VStack(alignment: .leading, spacing: 8) { header; content }.padding(12).containerBackground(for: .widget) { Color.clear } }
+    private var header: some View { HStack { Image("FluxNewsTemplate").resizable().scaledToFit(); Text(entry.model.title).font(.headline).lineLimit(1); Spacer(); Text("\(entry.model.count)").font(.headline.monospacedDigit()); Text(entry.model.countLabel).font(.caption).foregroundStyle(.secondary); Link(destination: WidgetAction.sync.url()) { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Sync") } }
     @ViewBuilder private var content: some View {
         switch entry.model.state {
         case .ready, .empty:
@@ -112,7 +112,7 @@ struct HeadlinesView: View {
 
 struct StatusView: View {
     let entry: FluxNewsWidgetEntry
-    var body: some View { VStack(alignment: .leading) { HStack { Image(systemName: "newspaper.fill").foregroundStyle(.tint); Spacer(); Link(destination: WidgetAction.sync.url()) { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Sync") }; Spacer(); Text(entry.model.title).font(.headline).lineLimit(2); Text("\(entry.model.count)").font(.system(size: 32, weight: .bold, design: .rounded)).monospacedDigit(); Text(entry.model.countLabel).font(.caption).foregroundStyle(.secondary); Spacer(); Text(lastSync).font(.caption2).foregroundStyle(.secondary).lineLimit(2) }.padding().containerBackground(for: .widget) { Color.clear }.widgetURL(scopeURL) }
+    var body: some View { VStack(alignment: .leading) { HStack { Image("FluxNewsTemplate").resizable().scaledToFit(); Spacer(); Link(destination: WidgetAction.sync.url()) { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Sync") }; Spacer(); Text(entry.model.title).font(.headline).lineLimit(2); Text("\(entry.model.count)").font(.system(size: 32, weight: .bold, design: .rounded)).monospacedDigit(); Text(entry.model.countLabel).font(.caption).foregroundStyle(.secondary); Spacer(); Text(lastSync).font(.caption2).foregroundStyle(.secondary).lineLimit(2) }.padding(12).containerBackground(for: .widget) { Color.clear }.widgetURL(scopeURL) }
     private var scopeURL: URL { WidgetAction.open(entry.selection).url() }
     private var lastSync: String { guard let value = entry.model.lastSuccessfulSyncAt else { return "Last sync: Never" }; return "Last sync: \(value)" }
 }

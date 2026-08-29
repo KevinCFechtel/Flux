@@ -128,6 +128,7 @@
 		BT /* FluxNewsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = FluxNewsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		BW /* FluxNewsWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = FluxNewsWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		E184D498303DEC29009B16A3 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
+		E1E5DA9E3042A5C1007550DC /* FluxNewsTemplate.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = FluxNewsTemplate.svg; sourceTree = "<group>"; };
 		F1 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -229,6 +230,7 @@
 		GW /* FluxNewsWidgets */ = {
 			isa = PBXGroup;
 			children = (
+				E1E5DA9E3042A5C1007550DC /* FluxNewsTemplate.svg */,
 				B35 /* FluxNewsWidgets.swift */,
 				B36 /* FluxNewsWidgets.entitlements */,
 				B37 /* Info.plist */,
