@@ -109,7 +109,6 @@ pub fn validate_custom_headers(headers: &[HttpHeader]) -> Result<(), AccountVali
         if matches!(
             normalized.as_str(),
             "accept"
-                | "authorization"
                 | "connection"
                 | "content-length"
                 | "content-type"

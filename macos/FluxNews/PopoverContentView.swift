@@ -703,7 +703,7 @@ private struct SettingsView: View {
             }
                 .padding(16)
         }
-        .frame(width: 1_140, height: 500)
+        .frame(width: 900, height: 500)
         .overlay(alignment: .bottom) {
             if let confirmation = store.actionConfirmation {
                 Text(confirmation)
@@ -989,8 +989,26 @@ private struct AccountSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Form {
-                LabeledContent("Miniflux Server") { TextField("", text: $server) }
-                LabeledContent("API Key") { SecureField("", text: $key) }
+              Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+                  GridRow {
+                      Text("Miniflux Server")
+                          .frame(width: 140, alignment: .leading)
+
+                      TextField("", text: $server)
+                          .textFieldStyle(.roundedBorder)
+                          .frame(maxWidth: .infinity)
+                  }
+
+                  GridRow {
+                      Text("API Key")
+                          .frame(width: 140, alignment: .leading)
+
+                      SecureField("", text: $key)
+                          .textFieldStyle(.roundedBorder)
+                          .frame(maxWidth: .infinity)
+                  }
+              }
+              .frame(maxWidth: .infinity, alignment: .leading)
             }
             .formStyle(.grouped)
 
@@ -1038,6 +1056,7 @@ private struct AccountSettingsView: View {
                 HStack(spacing: 8) {
                     TextField("", text: $customHeaders[index].name)
                         .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.leading)
                         .frame(minWidth: 240, idealWidth: 260, maxWidth: 300)
                     headerValueField(at: index)
                         .frame(minWidth: 300, maxWidth: .infinity)
@@ -1069,9 +1088,11 @@ private struct AccountSettingsView: View {
         if revealedHeaderIDs.contains(customHeaders[index].id) {
             TextField("", text: $customHeaders[index].value)
                 .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.leading)
         } else {
             SecureField("", text: $customHeaders[index].value)
                 .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.leading)
         }
     }
 
