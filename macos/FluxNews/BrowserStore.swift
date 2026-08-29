@@ -112,7 +112,7 @@ final class BrowserStore: ObservableObject {
     private var readerDocumentRequest: UInt64 = 0
     private let searchPageSize: UInt32 = 50
     private var pendingWidgetActions: [WidgetAction] = []
-    private var hasExplicitStartupRoute = false
+    private var startupRouteState = StartupRouteState()
     private var hasAppliedStartupScope = false
     private var scrolloverRemovedArticles: [Int64: ArticleSummary] = [:]
     private var scrolloverOriginalOrder: [Int64: Int] = [:]
@@ -436,7 +436,7 @@ final class BrowserStore: ObservableObject {
         }
     }
     func route(to route: NavigationRoute) {
-        hasExplicitStartupRoute = true
+        startupRouteState.markExplicitRoute()
         switch route {
         case .all: select(.all)
         case .starred: select(.starred)
@@ -446,7 +446,7 @@ final class BrowserStore: ObservableObject {
     }
     func handleWidgetAction(_ action: WidgetAction) {
         guard core != nil else { pendingWidgetActions.append(action); return }
-        hasExplicitStartupRoute = true
+        startupRouteState.markExplicitRoute()
         switch action {
         case let .article(id):
             openArticle(id)
@@ -545,7 +545,7 @@ final class BrowserStore: ObservableObject {
         }
     }
     func selectNotificationFeed(_ feedID: Int64) {
-        hasExplicitStartupRoute = true
+        startupRouteState.markExplicitRoute()
         select(.feed(feedID))
     }
     private func updateCoreSettings(_ update: @escaping (Flux) throws -> Void, afterSuccess: @escaping () -> Void = {}) {
@@ -1044,7 +1044,7 @@ final class BrowserStore: ObservableObject {
     private func applyStartupScopeIfNeeded() {
         guard !hasAppliedStartupScope else { return }
         hasAppliedStartupScope = true
-        guard !hasExplicitStartupRoute else { return }
+        guard startupRouteState.shouldApplyStartupScope else { return }
         let resolved = StartupScopeResolver.resolve(startupScope, categoryID: startupCategoryID, feedID: startupFeedID, categoryIDs: Set(catalog.categories.map(\.id)), feedIDs: Set(catalog.feeds.map(\.id)))
         if resolved == .all && (startupScope == .category || startupScope == .feed) {
             if startupScope == .category { startupCategoryID = nil }

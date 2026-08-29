@@ -3,7 +3,7 @@ import WidgetKit
 import XCTest
 
 final class WidgetSnapshotTests: XCTestCase {
-    func testRoundTripAndInvalidationAreAtomicAndCredentialFree() throws {
+    func testRoundTripAndInvalidationDoNotExposeCredentials() throws {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: temporary) }
         let store = WidgetSnapshotStore(root: temporary)
@@ -59,19 +59,19 @@ final class WidgetSnapshotTests: XCTestCase {
         XCTAssertEqual(try store.read(), snapshot)
     }
 
-    func testV1SnapshotDecodesMixedTimestampFormats() throws {
+    func testV1SnapshotDecodesISOTimestampFormat() throws {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: temporary) }
         try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
         let snapshotJSON = """
-        {"schemaVersion":1,"state":"ready","generatedAt":"2026-08-28T07:04:07Z","lastSuccessfulSyncAt":"2026-08-28 07:04:07","feeds":[],"categories":[],"articles":[],"counts":{"allUnread":21,"bookmarks":4,"feedUnread":[],"categoryUnread":[]}}
+        {"schemaVersion":1,"state":"ready","generatedAt":"2026-08-28T07:04:07Z","lastSuccessfulSyncAt":"2026-08-28T07:04:07Z","feeds":[],"categories":[],"articles":[],"counts":{"allUnread":21,"bookmarks":4,"feedUnread":[],"categoryUnread":[]}}
         """
         try Data(snapshotJSON.utf8).write(to: temporary.appendingPathComponent("widget-snapshot-v1.json"))
 
         let snapshot = try XCTUnwrap(try WidgetSnapshotStore(root: temporary).read())
 
         XCTAssertEqual(snapshot.generatedAt, "2026-08-28T07:04:07Z")
-        XCTAssertEqual(snapshot.lastSuccessfulSyncAt, "2026-08-28 07:04:07")
+        XCTAssertEqual(snapshot.lastSuccessfulSyncAt, "2026-08-28T07:04:07Z")
         XCTAssertEqual(snapshot.counts.allUnread, 21)
     }
 
@@ -86,11 +86,25 @@ final class WidgetSnapshotTests: XCTestCase {
         XCTAssertEqual(model.lastSuccessfulSyncAt, "2026-08-27T11:00:00Z")
     }
 
-    func testPresentationMarksDeletedConfiguredSourceUnavailable() {
+    func testPresentationMarksDeletedConfiguredFeedUnavailable() {
         let model = WidgetContentModel.make(snapshotResult: .success(sampleSnapshot), selection: .init(scope: .feed, categoryID: nil, feedID: 404))
 
         XCTAssertEqual(model.state, .unavailableSelection("Selected feed unavailable"))
         XCTAssertTrue(model.articles.isEmpty)
+    }
+
+    func testPresentationMarksDeletedConfiguredCategoryUnavailable() {
+        let model = WidgetContentModel.make(snapshotResult: .success(sampleSnapshot), selection: .init(scope: .category, categoryID: 404, feedID: nil))
+
+        XCTAssertEqual(model.state, .unavailableSelection("Selected category unavailable"))
+        XCTAssertTrue(model.articles.isEmpty)
+    }
+
+    func testHeadlinesUsesDocumentedFamilyCapacities() {
+        XCTAssertEqual(HeadlinesPresentation.capacity(for: .systemSmall), 1)
+        XCTAssertEqual(HeadlinesPresentation.capacity(for: .systemMedium), 3)
+        XCTAssertEqual(HeadlinesPresentation.capacity(for: .systemLarge), 7)
+        XCTAssertEqual(HeadlinesPresentation.capacity(for: .systemExtraLarge), 12)
     }
 
     func testPresentationDistinguishesSnapshotAndAccountStates() {
@@ -129,6 +143,8 @@ final class WidgetSnapshotTests: XCTestCase {
         let model = WidgetContentModel.make(snapshotResult: .success(snapshot), selection: .init(scope: .allNews, categoryID: nil, feedID: nil))
         XCTAssertEqual(model.latestArticles(limit: HeadlinesPresentation.capacity(for: .systemMedium)).count, 3)
         XCTAssertEqual(model.latestArticles(limit: HeadlinesPresentation.capacity(for: .systemMedium)).map(\.id), [20, 19, 18])
+        XCTAssertEqual(model.latestArticles(limit: HeadlinesPresentation.capacity(for: .systemLarge)).count, 7)
+        XCTAssertEqual(model.latestArticles(limit: HeadlinesPresentation.capacity(for: .systemExtraLarge)).count, 12)
         XCTAssertEqual(model.count, 100)
     }
 

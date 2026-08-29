@@ -12,6 +12,11 @@
 Flux uses one shared Rust core for business/background responsibilities
 and native clients for macOS, iOS, and Android.
 
+macOS is the current native reference client. Future iOS/iPadOS clients use
+Swift/SwiftUI and future Android clients use Kotlin/Jetpack Compose; all consume
+the shared Rust Core through UniFFI. This does not prescribe either platform's
+UI design.
+
 The former Go core is retired. No new work should preserve Go
 compatibility or build transitional Go/Rust parity unless explicitly
 requested for historical investigation.
@@ -24,22 +29,41 @@ The shared Rust implementation is organized as a workspace under
 `ios/` and `android/`). The workspace manifest and lockfile belong to
 that shared-core workspace rather than the repository root.
 
+### Phase status
+
+**Phase A — Newsreader Completion is complete and architecture-frozen.**
+The automated validation baseline at this freeze was 129 passing Rust workspace
+tests, 66 passing macOS XCTest cases, and a passing signed macOS Debug build.
+These counts record the freeze baseline; they are not permanent architectural
+invariants.
+
+Phase A is not an open Flutter-to-native parity checklist. New Newsreader work
+extends the decisions in this document and current product requirements;
+intentionally dropped Flutter behavior remains dropped unless a new product
+decision explicitly reintroduces it. Flutter remains historical behavioral
+reference evidence where useful, particularly for Podcast/Media work in later
+phases.
+
 ## 2. Responsibility boundary
 
 ### Rust core
 
-Owns persistence and durable data state, Miniflux API communication,
-sync/reconciliation, durable mutations, article/feed/category domain
-data, core settings, content processing, cache/media metadata, queries,
-and structured change/error events.
+Owns domain models; SQLite/local persistence and durable data state; Miniflux
+networking; sync/reconciliation; durable offline mutations; article/feed/category
+data; account/server configuration semantics; core settings; article/Reader
+content processing; feed-icon acquisition/cache; article-image discovery/cache;
+search requests; notification candidate/domain data; widget projection/domain
+data; queries; and structured errors/events. Phase B will add the shared media
+domain, persistence, download policies, progress, and media-retention integration.
 
 ### Native clients
 
-Own UI/presentation state and OS integration: navigation, visible list
-snapshots, scroll position, gestures, dialogs, layout/theme,
-browser/share behavior, secure credential storage, native
-scheduling/background transfer, playback engines, widgets, and OS
-notification presentation.
+Own UI/presentation state and OS integration: navigation, visible/stable list
+snapshots, scroll position and geometry, gestures, dialogs, layout/theme,
+platform-specific accessibility/presentation behavior, native browser/share
+behavior, secure credential storage, native scheduling/background execution and
+transfer, system-notification presentation/delivery, WidgetKit/App Intent
+presentation and routing, playback engines, and OS media integrations.
 
 Core APIs express domain intent, never UI mechanisms. A swipe, button,
 context menu, pull-to-refresh, or scroll gesture is translated by the
@@ -235,6 +259,14 @@ The native secure store permanently owns the API key/secret. It is
 injected once into core runtime state during initialization, never
 persisted in the core database, and never logged.
 
+Custom HTTP headers are account/transport configuration, not Core settings.
+They are stored by the native secure credential layer, never in Core SQLite or
+UserDefaults, and their values never appear in logs or diagnostics. They apply
+to Miniflux/server requests but are never forwarded to arbitrary external
+article-image hosts. `Authorization` is allowed for reverse-proxy
+authentication; `X-Auth-Token` and protected transport/framing headers may not
+be overridden.
+
 Non-sensitive connection configuration such as the Miniflux base URL may
 be persisted by the core.
 
@@ -385,8 +417,8 @@ Unread articles are retained regardless of age.
 Independent retention protections include:
 
 -   starred;
--   active download;
--   existing download.
+-   active download (Phase B);
+-   existing download (Phase B).
 
 Removing one protection does not negate another.
 
@@ -399,7 +431,8 @@ Initial/rebuilt local state includes at least:
 -   all unread articles;
 -   read articles inside retention;
 -   all starred articles;
--   articles required by active/existing downloads.
+-   articles required by active/existing downloads when Phase B media state
+    exists.
 
 ## 11. Search
 
@@ -513,9 +546,10 @@ preferences.
 
 Native presentation/OS preferences remain platform-local. Current
 examples include Sync on Start, Mark as Read on Scrollover, global
-shortcut, Launch at Login, startup destination, presentation filters,
-hiding empty navigation entries, removing read items from the visible
-snapshot, Preview Lines, and Click on News.
+shortcut, Launch at Login, Startup Scope, presentation filters, Hide Empty
+Feeds/Categories, Remove Article from List When Marked Read, Preview Lines,
+and Click on News. System Notifications remain a separate native settings area,
+not part of normal Feed Settings.
 
 On macOS, Preview Lines offers 2 (Compact), 3 (Standard), and 5
 (Extended), default 3. `Click on News` offers **Open Link** (default) or
@@ -625,27 +659,38 @@ different FeedPreferences policies: account replacement and Full Reset remove
 them; Rebuild preserves them. Backup Import remains a separate future
 transactional configuration-replace operation.
 
-## 15. Media and podcasts
+## 15. Phase B — Shared Podcast / Media Core
 
-The core persists enclosure/download metadata, durable download state,
-article↔download association, playback progress, cleanup rules, and
-downloaded-file metadata analysis.
+Phase B is the next development phase. It extends the shared Rust architecture
+without reopening Phase A Newsreader scope. The dependency guide is:
 
-Actual long-running background file transfer is native so each OS can
-use its supported background facilities. Native transfer reports
-completion/result back to the core; the core validates/analyzes the file
-and emits state changes.
+```text
+Enclosures
+    |
+Podcast / Episode Domain
+    |
+Download State
+    |
+Download Policies
+    |
+Playback Position / Checkpoints
+    |
+Miniflux Progress Sync
+    |
+Retention Integration
+```
 
-Downloaded files may be inspected for chapters, artwork, and embedded
-metadata because enclosure metadata can be sparse.
+Phase B will give the Rust Core ownership of enclosure/media and
+podcast/episode domains, durable download metadata/state, download policies,
+playback progress/checkpoints, Miniflux progress synchronization, and
+media-related retention integration. It will not move platform playback or
+transfer mechanisms into the Core.
 
-Playback itself is native: audio engine/session, play/pause/seek, Now
-Playing/lockscreen, CarPlay/Android Auto. The core persists playback
-progress. Native players write periodic checkpoints (roughly 15--30s)
-and event checkpoints such as pause/stop/seek/lifecycle transitions.
-
-Downloaded/active media protects the associated article from normal
-retention.
+Native clients will continue to own audio playback engines, AVAudioSession or
+platform equivalents, Now Playing/MediaSession, headset/media controls, native
+background transfer execution, CarPlay, Android Auto, and other OS-specific
+media presentation/integration. Native transfer reports results to the Core;
+the Core owns durable state and any downloaded-file metadata analysis.
 
 ## 16. Notifications
 
@@ -895,6 +940,11 @@ title/URL.
 All user-facing localization is native and managed through Weblate
 across platforms.
 
+The macOS Phase-A baseline is English and German. Application-owned user-facing
+Swift strings use localization-aware APIs such as `LocalizedStringResource`,
+`String(localized:)`, or SwiftUI localization mechanisms as appropriate.
+Runtime/user/server content is data, not a localization key.
+
 The core emits stable structured error/event codes and English technical
 diagnostic messages, not localized UI strings.
 
@@ -911,7 +961,19 @@ Secrets (API keys, authorization headers, tokens, passwords,
 credentials) are never logged. Prefer preventing sensitive fields from
 reaching logging APIs rather than relying only on redaction.
 
-## 21. Decisions intentionally still open
+## 21. Testing philosophy
+
+Prefer deterministic Rust unit/integration tests using fake Miniflux transport,
+temporary SQLite databases, fixtures, and synchronization primitives rather
+than arbitrary sleeps. Native tests should favor pure presentation/state,
+routing, and snapshot/state-mutation coverage.
+
+Manual or system testing is reserved for real OS behavior: WidgetKit refresh or
+display, notification delivery/activation, lifecycle/background scheduling,
+real scroll geometry, and native media integrations. Broad UI automation is not
+required when a smaller deterministic test protects the contract.
+
+## 22. Decisions intentionally still open
 
 These should be decided when they materially affect durable
 implementation, not through broad speculative analysis:
@@ -925,11 +987,11 @@ implementation, not through broad speculative analysis:
 -   detailed media cleanup options;
 -   exact System Notification wording/content;
 -   exact action/deep-link destination when the user activates a System
-    Notification;
--   remaining feature-gap details found while implementing against
-    FluxNews/FluxBar reference evidence.
+  Notification;
+-   concrete future feature requirements where historical FluxNews/FluxBar
+    evidence is relevant.
 
-## 22. Working principle
+## 23. Working principle
 
 Prefer durable implementation over possibility analysis.
 

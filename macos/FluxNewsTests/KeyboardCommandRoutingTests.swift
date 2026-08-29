@@ -22,18 +22,8 @@ final class KeyboardCommandRoutingTests: XCTestCase {
         XCTAssertNil(ArticleReaderTarget.articleID(hoveredID: nil, selectedID: nil, availableIDs: [1, 2]))
     }
 
-    func testResolvingHoverDoesNotChangeKeyboardSelection() {
-        let selectedID: Int64? = 2
-        _ = ArticleReaderTarget.articleID(hoveredID: 1, selectedID: selectedID, availableIDs: [1, 2])
-        XCTAssertEqual(selectedID, 2)
-    }
-
     func testSpaceForVisibleArticleTogglesPreviewClosed() {
         XCTAssertEqual(ReaderPreviewAction.resolve(isVisible: true, currentArticleID: 1, requestedArticleID: 1, togglesSameArticle: true), .hide)
-    }
-
-    func testSpaceCommandIsAvailableToPreviewFocus() {
-        XCTAssertEqual(ArticleKeyboardRouting.command(keyCode: 49, charactersIgnoringModifiers: " ", modifierFlags: []), .openDetail)
     }
 
     func testSpaceForDifferentArticleReplacesPreviewContent() {

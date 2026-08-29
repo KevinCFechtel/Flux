@@ -107,7 +107,7 @@ struct FluxNewsWidgetProvider: AppIntentTimelineProvider {
 
 struct FluxNewsHeadlinesWidget: Widget {
     let kind = FluxNewsWidgetKind.headlines
-    var body: some WidgetConfiguration { AppIntentConfiguration(kind: kind, intent: FluxNewsWidgetConfigurationIntent.self, provider: FluxNewsWidgetProvider()) { HeadlinesView(entry: $0) }.configurationDisplayName("FluxNews Headlines").description("Shows the latest articles from your selected FluxNews view.").supportedFamilies([.systemMedium, .systemLarge, .systemExtraLarge]) }
+    var body: some WidgetConfiguration { AppIntentConfiguration(kind: kind, intent: FluxNewsWidgetConfigurationIntent.self, provider: FluxNewsWidgetProvider()) { HeadlinesView(entry: $0) }.configurationDisplayName("FluxNews Headlines").description("Shows the latest articles from your selected FluxNews view.").supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge]) }
 }
 
 struct FluxNewsCompactStatusWidget: Widget {
@@ -131,7 +131,7 @@ struct HeadlinesView: View {
                 }
                 .foregroundStyle(.secondary)
             }
-            else if family == .systemExtraLarge { let articles = entry.model.latestArticles(limit: HeadlinesPresentation.capacity(for: family)); HStack(alignment: .top) { articleColumn(Array(articles.prefix(8))); articleColumn(Array(articles.dropFirst(8).prefix(8))) } }
+            else if family == .systemExtraLarge { let articles = entry.model.latestArticles(limit: HeadlinesPresentation.capacity(for: family)); HStack(alignment: .top) { articleColumn(Array(articles.prefix(6))); articleColumn(Array(articles.dropFirst(6).prefix(6))) } }
             else { articleColumn(entry.model.latestArticles(limit: HeadlinesPresentation.capacity(for: family))) }
         case .noAccount: fallback("Open FluxNews to configure")
         case .awaitingSuccessfulSync: fallback("Waiting for first successful sync")

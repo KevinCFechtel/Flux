@@ -1214,20 +1214,36 @@ mod tests {
 
     #[test]
     fn custom_header_validation_is_case_insensitive_and_redacts_values() {
-        for name in [
-            "X-Auth-Token",
-            "x-auth-token",
-            "CONTENT-TYPE",
-            "Authorization",
-        ] {
+        // Flux uses X-Auth-Token for Miniflux authentication; it must not be
+        // replaceable by a custom header. Authorization is intentionally
+        // allowed so users can provide reverse-proxy Basic/Bearer credentials.
+        for protected_name in ["X-Auth-Token", "x-auth-token", "CONTENT-TYPE"] {
             assert_eq!(
                 validate_custom_headers(&[HttpHeader {
-                    name: name.into(),
+                    name: protected_name.into(),
                     value: "secret-value".into(),
                 }]),
-                Err(AccountValidationError::InvalidCustomHeader)
+                Err(AccountValidationError::InvalidCustomHeader),
+                "{} should be protected",
+                protected_name
             );
         }
+        assert!(
+            validate_custom_headers(&[HttpHeader {
+                name: "Authorization".into(),
+                value: "Bearer abc".into(),
+            }])
+            .is_ok(),
+            "Authorization should be allowed as a custom header"
+        );
+        assert!(
+            validate_custom_headers(&[HttpHeader {
+                name: "authorization".into(),
+                value: "Basic dXNlcjpwYXNz".into(),
+            }])
+            .is_ok(),
+            "Authorization should be allowed case-insensitively"
+        );
         assert_eq!(
             validate_custom_headers(&[
                 HttpHeader {

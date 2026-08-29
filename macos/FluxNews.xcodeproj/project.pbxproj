@@ -41,6 +41,7 @@
 		A39 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30 /* WidgetSnapshot.swift */; };
 		A4 /* PopoverContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4 /* PopoverContentView.swift */; };
 		A40 /* WidgetSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B32 /* WidgetSnapshotTests.swift */; };
+		A401 /* ExplicitRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B401 /* ExplicitRoutingTests.swift */; };
 		A41 /* WidgetSnapshotWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B33 /* WidgetSnapshotWriter.swift */; };
 		A42 /* WidgetPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B34 /* WidgetPresentation.swift */; };
 		A43 /* WidgetPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B34 /* WidgetPresentation.swift */; };
@@ -52,6 +53,8 @@
 		A49 /* BrowserPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B38 /* BrowserPresentation.swift */; };
 		A50 /* BrowserPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B39 /* BrowserPresentationTests.swift */; };
 		A51 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = B14 /* Localizable.xcstrings */; };
+		A53 /* StartupRouteState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B51 /* StartupRouteState.swift */; };
+		A54 /* StartupRouteState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B51 /* StartupRouteState.swift */; };
 		A5 /* ScrolloverExposureTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5 /* ScrolloverExposureTracker.swift */; };
 		A6 /* Generated/flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6 /* Generated/flux_uniffi.swift */; };
 		A7 /* KeyboardCommandObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7 /* KeyboardCommandObserver.swift */; };
@@ -125,6 +128,8 @@
 		B37 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B38 /* BrowserPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserPresentation.swift; sourceTree = "<group>"; };
 		B39 /* BrowserPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserPresentationTests.swift; sourceTree = "<group>"; };
+		B401 /* ExplicitRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplicitRoutingTests.swift; sourceTree = "<group>"; };
+		B51 /* StartupRouteState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartupRouteState.swift; sourceTree = "<group>"; };
 		B4 /* PopoverContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverContentView.swift; sourceTree = "<group>"; };
 		B5 /* ScrolloverExposureTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrolloverExposureTracker.swift; sourceTree = "<group>"; };
 		B6 /* Generated/flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Generated/flux_uniffi.swift; sourceTree = "<group>"; };
@@ -201,6 +206,7 @@
 				B33 /* WidgetSnapshotWriter.swift */,
 				B34 /* WidgetPresentation.swift */,
 				B38 /* BrowserPresentation.swift */,
+				B51 /* StartupRouteState.swift */,
 				B31 /* FluxNews.entitlements */,
 				B13 /* FluxNewsTemplate.svg */,
 				B14 /* Localizable.xcstrings */,
@@ -231,6 +237,7 @@
 				B27 /* AccountPresentationTests.swift */,
 				B29 /* BackupPasswordWorkflowTests.swift */,
 				B32 /* WidgetSnapshotTests.swift */,
+				B401 /* ExplicitRoutingTests.swift */,
 				B39 /* BrowserPresentationTests.swift */,
 			);
 			path = FluxNewsTests;
@@ -400,6 +407,7 @@
 				A41 /* WidgetSnapshotWriter.swift in Sources */,
 				A42 /* WidgetPresentation.swift in Sources */,
 				A48 /* BrowserPresentation.swift in Sources */,
+				A53 /* StartupRouteState.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -423,9 +431,11 @@
 				A37 /* BackupPasswordWorkflowTests.swift in Sources */,
 				A39 /* WidgetSnapshot.swift in Sources */,
 				A40 /* WidgetSnapshotTests.swift in Sources */,
+				A401 /* ExplicitRoutingTests.swift in Sources */,
 				A43 /* WidgetPresentation.swift in Sources */,
 				A49 /* BrowserPresentation.swift in Sources */,
 				A50 /* BrowserPresentationTests.swift in Sources */,
+				A54 /* StartupRouteState.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -536,7 +546,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNewsTests;
 				PRODUCT_NAME = FluxNewsTests;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FluxNews.app/Contents/MacOS/FluxNews";
 			};
 			name = Debug;
 		};
@@ -549,7 +558,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNewsTests;
 				PRODUCT_NAME = FluxNewsTests;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FluxNews.app/Contents/MacOS/FluxNews";
 			};
 			name = Release;
 		};

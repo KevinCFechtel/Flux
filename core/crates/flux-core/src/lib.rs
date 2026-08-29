@@ -883,6 +883,7 @@ mod tests {
         star_calls: AtomicUsize,
         failure: Mutex<Option<CoreError>>,
         search_result: Mutex<SearchArticlesResult>,
+        captured_requests: Mutex<Vec<SearchArticlesRequest>>,
     }
     struct ReentrantListener {
         core: Mutex<Option<Arc<FluxCore>>>,
@@ -897,6 +898,10 @@ mod tests {
         fail_first: bool,
         started: std::sync::mpsc::Sender<()>,
         release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+    struct PhaseLoggingSource {
+        inner: Mutex<MutationSource>,
+        fail_fetch: Mutex<bool>,
     }
     impl CoreEventListener for ReentrantListener {
         fn on_event(&self, event: CoreEvent) {
@@ -988,8 +993,48 @@ mod tests {
             request: SearchArticlesRequest,
         ) -> Result<SearchArticlesResult, CoreError> {
             self.search_calls.fetch_add(1, Ordering::SeqCst);
+            self.captured_requests.lock().unwrap().push(request.clone());
             assert_eq!(request.query, "rust");
             Ok(self.search_result.lock().unwrap().clone())
+        }
+    }
+    impl RemoteSource for PhaseLoggingSource {
+        fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError> {
+            let inner = self.inner.lock().unwrap();
+            inner.fetch_calls.fetch_add(1, Ordering::SeqCst);
+            inner.log.lock().unwrap().push("fetch");
+            if *self.fail_fetch.lock().unwrap() {
+                return Err(CoreError::connectivity("offline"));
+            }
+            Ok(inner.snapshot.lock().unwrap().clone())
+        }
+        fn set_read_state(&self, ids: &[i64], read: bool) -> Result<(), CoreError> {
+            let inner = self.inner.lock().unwrap();
+            inner.read_calls.fetch_add(1, Ordering::SeqCst);
+            inner.log.lock().unwrap().push("read");
+            if let Some(error) = inner.failure.lock().unwrap().clone() {
+                return Err(error);
+            }
+            for article in &mut inner.snapshot.lock().unwrap().articles {
+                if ids.contains(&article.id) {
+                    article.is_read = read;
+                }
+            }
+            Ok(())
+        }
+        fn set_starred_state(&self, id: i64, starred: bool) -> Result<(), CoreError> {
+            let inner = self.inner.lock().unwrap();
+            inner.star_calls.fetch_add(1, Ordering::SeqCst);
+            inner.log.lock().unwrap().push("star");
+            if let Some(error) = inner.failure.lock().unwrap().clone() {
+                return Err(error);
+            }
+            for article in &mut inner.snapshot.lock().unwrap().articles {
+                if article.id == id {
+                    article.is_starred = starred;
+                }
+            }
+            Ok(())
         }
     }
     impl RemoteSource for ControlledSyncSource {
@@ -1134,8 +1179,28 @@ mod tests {
             star_calls: AtomicUsize::new(0),
             failure: Mutex::new(None),
             search_result: Mutex::new(search_result()),
+            captured_requests: Mutex::new(vec![]),
         });
         let core = Arc::new(FluxCore::with_remote(config(temp), source.clone()).unwrap());
+        (core, source)
+    }
+    fn phase_core(temp: &TempDir) -> (Arc<FluxCore>, Arc<PhaseLoggingSource>) {
+        let inner = MutationSource {
+            snapshot: Mutex::new(snapshot()),
+            read_calls: AtomicUsize::new(0),
+            star_calls: AtomicUsize::new(0),
+            fetch_calls: AtomicUsize::new(0),
+            failure: Mutex::new(None),
+            log: Mutex::new(vec![]),
+            delay: Mutex::new(Duration::ZERO),
+        };
+        let source = Arc::new(PhaseLoggingSource {
+            inner: Mutex::new(inner),
+            fail_fetch: Mutex::new(false),
+        });
+        let core = Arc::new(FluxCore::with_remote(config(temp), source.clone()).unwrap());
+        core.sync(SyncReason::Manual).unwrap();
+        source.inner.lock().unwrap().log.lock().unwrap().clear();
         (core, source)
     }
 
@@ -2030,6 +2095,162 @@ mod tests {
             1
         );
     }
+    #[test]
+    fn successful_sync_runs_full_phase_order_and_updates_sync_timestamp() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = phase_core(&temp);
+        let before = core.last_successful_sync_at().unwrap();
+        assert!(before.is_some());
+        // Sleep briefly so the new timestamp will differ if updated.
+        thread::sleep(Duration::from_millis(1_100));
+        core.set_read_state(1, true).unwrap();
+        assert_eq!(core.store.pending_mutations().unwrap().len(), 1);
+
+        let completed = core.sync(SyncReason::Manual).unwrap();
+
+        assert_eq!(completed.reason, SyncReason::Manual);
+        assert_eq!(completed.mutations_delivered, 1);
+        assert_eq!(
+            *source.inner.lock().unwrap().log.lock().unwrap(),
+            vec!["read", "fetch"]
+        );
+        assert!(core.store.pending_mutations().unwrap().is_empty());
+        assert_eq!(
+            core.query_articles(ArticleQuery {
+                scope: ArticleScope::Feed(10),
+                read_filter: ReadFilter::Unread,
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .len(),
+            0
+        );
+        let after = core.last_successful_sync_at().unwrap();
+        assert!(
+            after.as_deref().unwrap() > before.as_deref().unwrap(),
+            "last_successful_sync_at must advance after a successful sync"
+        );
+        assert_eq!(core.delivery_health().unwrap(), RuntimeHealth::Healthy);
+    }
+
+    #[test]
+    fn sync_failure_after_mutation_delivery_reports_completed_phases_and_preserves_timestamp() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = phase_core(&temp);
+        // Seed one pending mutation that will be delivered before fetch fails.
+        let before = core.last_successful_sync_at().unwrap();
+        assert!(before.is_some());
+        core.set_read_state(1, true).unwrap();
+        *source.fail_fetch.lock().unwrap() = true;
+        let listener = Arc::new(ReentrantListener {
+            core: Mutex::new(None),
+            events: Mutex::new(vec![]),
+        });
+        let id = core.subscribe_events(listener.clone()).unwrap();
+
+        let error = core.sync(SyncReason::Manual).unwrap_err();
+
+        assert_eq!(error.kind, CoreErrorKind::Connectivity);
+        assert_eq!(
+            *source.inner.lock().unwrap().log.lock().unwrap(),
+            vec!["read", "fetch"]
+        );
+        assert!(
+            core.query_articles(ArticleQuery {
+                scope: ArticleScope::Feed(10),
+                read_filter: ReadFilter::Read,
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .iter()
+            .any(|a| a.id == 1 && a.is_read),
+            "delivered mutation must remain effective after fetch failure"
+        );
+        assert_eq!(
+            core.last_successful_sync_at().unwrap(),
+            before,
+            "timestamp must not advance after a failed sync"
+        );
+        assert!(listener.events.lock().unwrap().iter().any(|event| matches!(
+            event,
+            CoreEvent::SyncFailed(SyncFailure {
+                reason: SyncReason::Manual,
+                error_kind: CoreErrorKind::Connectivity,
+                mutation_delivery_completed: true,
+                remote_fetch_started: true,
+                remote_fetch_completed: false,
+                mutations_delivered: 1,
+            })
+        )));
+        let _ = core.unsubscribe_events(id);
+    }
+
+    #[test]
+    fn search_pagination_forwards_offsets_and_does_not_auto_persist() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = search_core(&temp);
+        let mut page_one = Vec::with_capacity(5);
+        let mut page_two = Vec::with_capacity(5);
+        for id in 1..=10 {
+            let summary = ArticleSummary {
+                id,
+                feed_id: 10,
+                category_id: 1,
+                feed_title: "Feed A".into(),
+                title: format!("Result {id}"),
+                url: format!("https://example.test/{id}"),
+                comments_url: String::new(),
+                published_at: format!("2026-01-02T03:04:{id:02}Z"),
+                is_read: false,
+                is_starred: false,
+                preview: String::new(),
+                image_url: None,
+            };
+            if id <= 5 {
+                page_one.push(summary);
+            } else {
+                page_two.push(summary);
+            }
+        }
+        source.search_result.lock().unwrap().total = 10;
+        source.search_result.lock().unwrap().articles = page_one.clone();
+        let first = core
+            .search_articles(SearchArticlesRequest {
+                query: "rust".into(),
+                offset: 0,
+                limit: 5,
+            })
+            .unwrap();
+        assert_eq!(first.total, 10);
+        assert_eq!(first.articles.iter().map(|a| a.id).collect::<Vec<_>>(), vec![1, 2, 3, 4, 5]);
+        source.search_result.lock().unwrap().articles = page_two;
+        let second = core
+            .search_articles(SearchArticlesRequest {
+                query: "rust".into(),
+                offset: 5,
+                limit: 5,
+            })
+            .unwrap();
+        assert_eq!(second.articles.iter().map(|a| a.id).collect::<Vec<_>>(), vec![6, 7, 8, 9, 10]);
+        let requests = source.captured_requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests.iter().map(|r| (r.offset, r.limit)).collect::<Vec<_>>(),
+            vec![(0, 5), (5, 5)]
+        );
+        assert!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty(),
+            "remote search results must not be persisted automatically"
+        );
+    }
+
     #[test]
     fn comments_sync_metadata_and_runtime_health_are_public_state() {
         let temp = TempDir::new().unwrap();

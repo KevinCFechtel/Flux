@@ -1,4 +1,4 @@
-> **Status: historical feature-inventory evidence.** Use this document to avoid losing existing FluxNews capabilities, not as an implementation roadmap or target architecture. If it conflicts with `docs/ARCHITECTURE_DECISIONS.md`, the architecture decisions win.
+> **Status: historical feature-inventory evidence.** Phase A — Newsreader Completion is complete and architecture-frozen; this document is not an open Flutter parity checklist or implementation roadmap. Use it only as behavioral reference evidence, especially for future Podcast/Media work. If it conflicts with `docs/ARCHITECTURE_DECISIONS.md`, the architecture decisions win.
 
 # FluxNews to Rust Core GAP Analysis
 
