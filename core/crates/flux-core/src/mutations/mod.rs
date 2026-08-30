@@ -15,6 +15,12 @@ pub(crate) fn deliver_pending(
         let result = match pending.field {
             MutationField::Read => remote.set_read_state(&[pending.article_id], pending.desired),
             MutationField::Starred => remote.set_starred_state(pending.article_id, pending.desired),
+            MutationField::MediaProgress => remote.set_media_progression(
+                pending.article_id,
+                pending.progression_seconds.ok_or_else(|| {
+                    CoreError::internal("media progress mutation has no progression")
+                })?,
+            ),
         };
         match result {
             Ok(()) => {

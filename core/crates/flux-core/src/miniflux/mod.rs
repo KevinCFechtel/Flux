@@ -264,6 +264,9 @@ pub trait RemoteSource: Send + Sync {
     fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError>;
     fn set_read_state(&self, article_ids: &[i64], read: bool) -> Result<(), CoreError>;
     fn set_starred_state(&self, article_id: i64, starred: bool) -> Result<(), CoreError>;
+    fn set_media_progression(&self, _enclosure_id: i64, _seconds: u64) -> Result<(), CoreError> {
+        Err(CoreError::data("media progression updates are unavailable"))
+    }
     fn search_articles(
         &self,
         _request: SearchArticlesRequest,
@@ -892,6 +895,12 @@ impl RemoteSource for MinifluxClient {
         } else {
             Ok(())
         }
+    }
+    fn set_media_progression(&self, enclosure_id: i64, seconds: u64) -> Result<(), CoreError> {
+        self.put(
+            &format!("/v1/enclosures/{enclosure_id}"),
+            serde_json::json!({ "media_progression": seconds }).to_string(),
+        )
     }
     fn search_articles(
         &self,

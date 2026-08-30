@@ -116,6 +116,21 @@ pub struct SavedPlayableMediaItem {
     pub remote_present: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaybackStatus {
+    InProgress,
+    Completed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlaybackState {
+    pub enclosure_id: i64,
+    pub position_ms: u64,
+    pub duration_ms: Option<u64>,
+    pub status: PlaybackStatus,
+    pub updated_at: String,
+}
+
 /// Optional replication configuration. Local SavedMedia remains available in every state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SavedMediaSyncConfiguration {
@@ -490,6 +505,7 @@ pub struct SyncFailure {
 pub enum MutationField {
     Read,
     Starred,
+    MediaProgress,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

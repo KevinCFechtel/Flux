@@ -27,10 +27,10 @@ use domain::{
     CoreSettings, CreateCategoryResult, CreateFeedRequest, CreateFeedResult, DeliveryDisposition,
     DeliveryMode, DetailRenderingMode, DiscoverSubscriptionsRequest, DiscoveredSubscription,
     FeedIcon, FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, MutationField,
-    MutationResult, NavigationCatalog, ReadArticleRetention, ReaderDocument, RuntimeHealth,
-    RuntimeHealthStatus, SaveToServiceResult, SavedMediaSyncConfiguration, SavedMediaSyncSetupInfo,
-    SavedPlayableMediaItem, SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition,
-    SyncCompleted, SyncFailure, SyncReason, WidgetData,
+    MutationResult, NavigationCatalog, PlaybackState, ReadArticleRetention, ReaderDocument,
+    RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult, SavedMediaSyncConfiguration,
+    SavedMediaSyncSetupInfo, SavedPlayableMediaItem, SearchArticlesRequest, SearchArticlesResult,
+    SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason, WidgetData,
 };
 use miniflux::{
     AccountValidationError, AccountValidationResult, HttpHeader, MinifluxClient, RemoteSource,
@@ -65,6 +65,7 @@ pub struct FluxCore {
     article_thumbnails: article_thumbnail::ArticleThumbnailService,
     sync_gate: Mutex<()>,
     delivery_mode: Mutex<DeliveryMode>,
+    media_progress_supported: Mutex<Option<bool>>,
     runtime: Mutex<DeliveryRuntime>,
     listeners: Mutex<HashMap<u64, Arc<dyn CoreEventListener>>>,
     next_listener_id: std::sync::atomic::AtomicU64,
@@ -159,6 +160,7 @@ impl FluxCore {
             article_thumbnails,
             sync_gate: Mutex::new(()),
             delivery_mode: Mutex::new(settings.delivery_mode),
+            media_progress_supported: Mutex::new(None),
             runtime: Mutex::new(DeliveryRuntime {
                 health: RuntimeHealth::Healthy,
                 next_retry_at: None,
@@ -222,6 +224,7 @@ impl FluxCore {
             article_thumbnails,
             sync_gate: Mutex::new(()),
             delivery_mode: Mutex::new(settings.delivery_mode),
+            media_progress_supported: Mutex::new(None),
             runtime: Mutex::new(DeliveryRuntime {
                 health: RuntimeHealth::Healthy,
                 next_retry_at: None,
@@ -270,6 +273,15 @@ impl FluxCore {
             };
             self.emit(CoreEvent::SyncCompleted(completed.clone()));
             return Ok(completed);
+        }
+        // Capability discovery is advisory: an unreachable version endpoint must not block local sync.
+        if self
+            .media_progress_supported
+            .lock()
+            .map_err(|_| CoreError::internal("media progression capability lock poisoned"))?
+            .is_none()
+        {
+            let _ = self.update_miniflux_capabilities();
         }
         let mutations_delivered = match self.deliver_for_sync(reason) {
             Ok(count) => {
@@ -479,6 +491,82 @@ impl FluxCore {
         feed_id: i64,
     ) -> Result<Vec<SavedPlayableMediaItem>, CoreError> {
         self.store.saved_media_by_feed(feed_id)
+    }
+    /// Refreshes Core-owned, non-persistent Miniflux capability state after validation/connectivity.
+    pub fn update_miniflux_capabilities(&self) -> Result<(), CoreError> {
+        let supported = self
+            .remote
+            .miniflux_capabilities()?
+            .contains(&miniflux::MinifluxCapability::MediaProgressSync);
+        *self
+            .media_progress_supported
+            .lock()
+            .map_err(|_| CoreError::internal("media progression capability lock poisoned"))? =
+            Some(supported);
+        if supported {
+            self.store.promote_playback_progress()?;
+        }
+        Ok(())
+    }
+    pub fn playback_state(&self, enclosure_id: i64) -> Result<Option<PlaybackState>, CoreError> {
+        self.store.playback_state(enclosure_id)
+    }
+    pub fn checkpoint_playback(
+        &self,
+        enclosure_id: i64,
+        position_ms: u64,
+        duration_ms: Option<u64>,
+    ) -> Result<(), CoreError> {
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        let supported = *self
+            .media_progress_supported
+            .lock()
+            .map_err(|_| CoreError::internal("media progression capability lock poisoned"))?
+            == Some(true);
+        self.store.checkpoint_playback(
+            enclosure_id,
+            position_ms,
+            duration_ms,
+            &Utc::now().to_rfc3339(),
+            supported,
+        )
+    }
+    pub fn playback_completed(
+        &self,
+        enclosure_id: i64,
+        duration_ms: Option<u64>,
+    ) -> Result<(), CoreError> {
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        let supported = *self
+            .media_progress_supported
+            .lock()
+            .map_err(|_| CoreError::internal("media progression capability lock poisoned"))?
+            == Some(true);
+        self.store.complete_playback(
+            enclosure_id,
+            duration_ms,
+            &Utc::now().to_rfc3339(),
+            supported,
+        )
+    }
+    pub fn restart_playback(&self, enclosure_id: i64) -> Result<(), CoreError> {
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        let supported = *self
+            .media_progress_supported
+            .lock()
+            .map_err(|_| CoreError::internal("media progression capability lock poisoned"))?
+            == Some(true);
+        self.store
+            .restart_playback(enclosure_id, &Utc::now().to_rfc3339(), supported)
     }
     pub fn search_articles(
         &self,
@@ -772,6 +860,11 @@ impl FluxCore {
                     article_id: item.article_id,
                     starred: desired,
                 },
+                MutationField::MediaProgress => {
+                    return Err(CoreError::internal(
+                        "media progress is not an article state",
+                    ));
+                }
             });
             self.emit(CoreEvent::MutationQueued {
                 article_id: item.article_id,
@@ -1279,7 +1372,7 @@ mod tests {
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            10
+            11
         );
         let bytes = std::fs::read(core.database_path()).unwrap();
         assert!(
