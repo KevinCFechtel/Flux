@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import XCTest
 @testable import FluxNews
 
@@ -39,12 +40,15 @@ private final class FakePlaybackEngine: NativePlaybackEngine {
     var onDuration: (@MainActor (UInt64) -> Void)?
     var loadedStartMs: UInt64?
     var playCount = 0
+    var unloadCount = 0
 
     func load(url: URL, startAtMs: UInt64) { loadedStartMs = startAtMs; durationMs = 120_000; onDuration?(120_000) }
     func play() { isPlaying = true; playCount += 1 }
     func pause() { isPlaying = false }
+    func unload() { unloadCount += 1; isPlaying = false; currentPositionMs = 0; durationMs = nil }
     func seek(toMs: UInt64) { currentPositionMs = toMs }
     func finish() { isPlaying = false; onEnded?() }
+    func emitDuration(_ duration: UInt64) { onDuration?(duration) }
 }
 
 @MainActor
@@ -136,6 +140,65 @@ final class MediaCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(core.checkpoints.map(\.1), [36_000])
         XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
+    }
+
+    func testPeriodicCheckpointUsesPositionWhilePlaybackRuns() async throws {
+        let core = FakePlaybackCore(status: .inProgress)
+        let engine = FakePlaybackEngine()
+        let coordinator = MediaPlaybackCoordinator(core: core, engine: engine, checkpointInterval: 0.01)
+        try coordinator.play(enclosureID: 7)
+        engine.currentPositionMs = 42_000
+
+        let deadline = Date().addingTimeInterval(1)
+        while core.checkpoints.isEmpty && Date() < deadline { await Task.yield() }
+        XCTAssertEqual(core.checkpoints.first?.1, 42_000)
+    }
+
+    func testDeactivationCheckpointsWithoutPausingPlayback() throws {
+        let core = FakePlaybackCore(status: .inProgress)
+        let engine = FakePlaybackEngine()
+        let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
+        try coordinator.play(enclosureID: 7)
+        engine.currentPositionMs = 18_000
+
+        coordinator.applicationDidResignActive()
+
+        XCTAssertTrue(engine.isPlaying)
+        XCTAssertEqual(core.checkpoints.last?.1, 18_000)
+    }
+
+    func testStopUnloadsNativePlaybackItem() throws {
+        let core = FakePlaybackCore(status: .inProgress)
+        let engine = FakePlaybackEngine()
+        let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
+        try coordinator.play(enclosureID: 7)
+
+        coordinator.stop()
+
+        XCTAssertEqual(engine.unloadCount, 1)
+        XCTAssertFalse(coordinator.isUsing(enclosureID: 7))
+    }
+
+    func testAsynchronousDurationIsObservedOnlyWhenItChanges() throws {
+        let core = FakePlaybackCore()
+        let engine = FakePlaybackEngine()
+        let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
+        _ = try coordinator.prepare(enclosureID: 7)
+
+        engine.emitDuration(130_000)
+        engine.emitDuration(130_000)
+
+        XCTAssertEqual(core.observedDurations.count, 1)
+        XCTAssertEqual(core.observedDurations[0].0, 7)
+        XCTAssertEqual(core.observedDurations[0].1, 130_000)
+    }
+
+    func testInvalidAVPlayerDurationsAreIgnored() {
+        XCTAssertNil(AVFoundationPlaybackEngine.milliseconds(.invalid, requiresPositive: true))
+        XCTAssertNil(AVFoundationPlaybackEngine.milliseconds(.indefinite, requiresPositive: true))
+        XCTAssertNil(AVFoundationPlaybackEngine.milliseconds(CMTime.zero, requiresPositive: true))
+        XCTAssertNil(AVFoundationPlaybackEngine.milliseconds(CMTime(seconds: -1, preferredTimescale: 1_000), requiresPositive: true))
+        XCTAssertEqual(AVFoundationPlaybackEngine.milliseconds(CMTime(seconds: 12.5, preferredTimescale: 1_000), requiresPositive: true), 12_500)
     }
 
     func testCompletedDoesNotImplicitlyRestartAndExplicitRestartUsesCore() throws {

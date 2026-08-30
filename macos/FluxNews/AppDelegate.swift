@@ -20,8 +20,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private lazy var readerWindow = ReaderWindowController(store: store)
 
     func applicationDidResignActive(_ notification: Notification) {
-        playbackCoordinator?.pause()
+        playbackCoordinator?.applicationDidResignActive()
         readerWindow.hide()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        playbackCoordinator?.applicationWillTerminate()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

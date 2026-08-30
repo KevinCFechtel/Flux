@@ -9,10 +9,22 @@ Core remains authoritative for durable state and policy.
 `MediaPlaybackCoordinator` uses `AVPlayer` and accepts only Core-owned
 `PlaybackPreparation` data. It prefers a validated local media file, falls
 back to the Core-resolved remote URL, restores the Core position for in-progress
-items, and does not implicitly restart completed items. Position checkpoints
-are written on pause, seek, lifecycle transitions, and a periodic 20-second
-cadence. Natural completion calls `playback_completed` once and records the
-observed duration through Core.
+items, and does not implicitly restart completed items. The AVPlayer runtime
+position is updated by a native periodic time observer while playback is
+running. Position checkpoints are written on pause, seek, lifecycle
+transitions, and a periodic 20-second cadence; the observer does not checkpoint
+Core on every callback. Natural completion calls `playback_completed` once and
+records the observed duration through Core.
+
+AVPlayer duration can be unavailable during initial preparation. The native
+engine observes the current item and reports each newly discovered valid
+duration through the existing Core `observe_media_duration` operation. Invalid,
+indefinite, zero, and non-finite durations are ignored. Replacing an item
+removes its observers and guards queued callbacks against the active item.
+
+Application deactivation checkpoints the active item but does not pause
+playback. Explicit pause and real playback/session interruptions remain
+playback controls; lifecycle checkpointing is separate from playback control.
 
 The coordinator also publishes duration, chapters, artwork, and Now Playing
 metadata to the macOS media session. It does not mark articles read or mutate

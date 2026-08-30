@@ -31,6 +31,7 @@ protocol NativePlaybackEngine: AnyObject {
     func load(url: URL, startAtMs: UInt64)
     func play()
     func pause()
+    func unload()
     func seek(toMs: UInt64)
 }
 
@@ -38,6 +39,9 @@ protocol NativePlaybackEngine: AnyObject {
 final class AVFoundationPlaybackEngine: NativePlaybackEngine {
     private let player = AVPlayer()
     private var endObserver: NSObjectProtocol?
+    private var timeObserver: Any?
+    private var durationObservation: NSKeyValueObservation?
+    private weak var observedItem: AVPlayerItem?
     private(set) var currentPositionMs: UInt64 = 0
     private(set) var durationMs: UInt64?
     private(set) var isPlaying = false
@@ -46,27 +50,47 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
 
     func load(url: URL, startAtMs: UInt64) {
         let item = AVPlayerItem(url: url)
-        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        removeObservers()
+        observedItem = item
+        currentPositionMs = 0
+        durationMs = nil
+        isPlaying = false
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
             queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
+        ) { [weak self, weak item] _ in
+            Task { @MainActor [weak self, weak item] in
+                guard let self, let item, self.observedItem === item else { return }
                 self.isPlaying = false
                 self.currentPositionMs = self.durationMs ?? self.currentPositionMs
                 self.onEnded?()
             }
         }
         player.replaceCurrentItem(with: item)
-        durationMs = Self.milliseconds(item.duration)
-        if let durationMs { onDuration?(durationMs) }
+        observeDuration(for: item)
+        timeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.5, preferredTimescale: 1_000),
+            queue: .main
+        ) { [weak self, weak item] time in
+            Task { @MainActor [weak self, weak item] in
+                guard let self, let item, self.observedItem === item else { return }
+                self.updatePosition(time)
+            }
+        }
         seek(toMs: startAtMs)
     }
 
     func play() { player.play(); isPlaying = true }
     func pause() { player.pause(); updatePosition(); isPlaying = false }
+    func unload() {
+        player.pause()
+        removeObservers()
+        player.replaceCurrentItem(with: nil)
+        currentPositionMs = 0
+        durationMs = nil
+        isPlaying = false
+    }
 
     func seek(toMs: UInt64) {
         let seconds = CMTime(seconds: Double(toMs) / 1_000, preferredTimescale: 1_000)
@@ -75,20 +99,59 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
         }
     }
 
-    private func updatePosition() {
-        let seconds = player.currentTime().seconds
-        guard seconds.isFinite, seconds >= 0 else { return }
-        currentPositionMs = UInt64(seconds * 1_000)
+    private func observeDuration(for item: AVPlayerItem) {
+        durationObservation = item.observe(\AVPlayerItem.duration, options: [.initial, .new]) { [weak self, weak observedItem = item] _, _ in
+            guard let observedItem else { return }
+            Task { @MainActor [weak self, weak observedItem] in
+                guard let self, let observedItem, self.observedItem === observedItem else { return }
+                self.updateDuration(observedItem.duration)
+            }
+        }
+        updateDuration(item.duration)
     }
 
-    private static func milliseconds(_ time: CMTime) -> UInt64? {
+    private func updateDuration(_ time: CMTime) {
+        guard let duration = Self.milliseconds(time, requiresPositive: true), durationMs != duration else { return }
+        durationMs = duration
+        onDuration?(duration)
+    }
+
+    private func updatePosition() { updatePosition(player.currentTime()) }
+
+    private func updatePosition(_ time: CMTime) {
+        guard let position = Self.milliseconds(time, requiresPositive: false) else { return }
+        currentPositionMs = position
+    }
+
+    static func milliseconds(_ time: CMTime, requiresPositive: Bool) -> UInt64? {
+        guard time.isValid, time.isNumeric else { return nil }
         let seconds = time.seconds
-        guard seconds.isFinite, seconds > 0 else { return nil }
-        return UInt64(seconds * 1_000)
+        guard seconds.isFinite, seconds >= 0, (!requiresPositive || seconds > 0) else { return nil }
+        let milliseconds = seconds * 1_000
+        guard milliseconds <= Double(UInt64.max) else { return nil }
+        return UInt64(milliseconds)
+    }
+
+    private func removeObservers() {
+        if let timeObserver {
+            player.removeTimeObserver(timeObserver)
+            self.timeObserver = nil
+        }
+        durationObservation = nil
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+            self.endObserver = nil
+        }
+        observedItem = nil
     }
 
     deinit {
-        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        if let timeObserver {
+            player.removeTimeObserver(timeObserver)
+        }
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+        }
     }
 }
 
@@ -97,14 +160,17 @@ final class MediaPlaybackCoordinator {
     private let core: MediaPlaybackCore
     private let engine: NativePlaybackEngine
     private let nowPlaying = MPNowPlayingInfoCenter.default()
+    private let checkpointInterval: TimeInterval
     private var checkpointTimer: Timer?
     private var activeEnclosureID: Int64?
     private var completionSent = false
     private var preparedDurationMs: UInt64?
+    private var lastObservedDurationMs: UInt64?
     private var preparedStatus: PlaybackStatus = .notStarted
 
-    init(core: MediaPlaybackCore, engine: NativePlaybackEngine? = nil) {
+    init(core: MediaPlaybackCore, engine: NativePlaybackEngine? = nil, checkpointInterval: TimeInterval = 20) {
         self.core = core
+        self.checkpointInterval = checkpointInterval
         let engine = engine ?? AVFoundationPlaybackEngine()
         self.engine = engine
         engine.onEnded = { @MainActor [weak self] in self?.handleNaturalEnd() }
@@ -117,6 +183,7 @@ final class MediaPlaybackCoordinator {
         activeEnclosureID = enclosureID
         completionSent = false
         preparedDurationMs = preparation.durationMs ?? preparation.playbackState.durationMs
+        lastObservedDurationMs = preparedDurationMs
         preparedStatus = preparation.playbackState.status
         let source: URL
         if let localFile = preparation.localFile,
@@ -144,7 +211,9 @@ final class MediaPlaybackCoordinator {
     }
 
     func pause() { engine.pause(); checkpoint(); stopCheckpointTimer(); updateNowPlayingPlaybackState() }
-    func stop() { engine.pause(); checkpoint(); stopCheckpointTimer(); activeEnclosureID = nil; nowPlaying.playbackState = .stopped }
+    func stop() { engine.pause(); checkpoint(); stopCheckpointTimer(); engine.unload(); activeEnclosureID = nil; nowPlaying.playbackState = .stopped }
+    func applicationDidResignActive() { checkpoint() }
+    func applicationWillTerminate() { checkpoint(); stopCheckpointTimer(); engine.unload() }
 
     func seek(toMs: UInt64) {
         engine.seek(toMs: toMs)
@@ -193,6 +262,8 @@ final class MediaPlaybackCoordinator {
     }
 
     private func handleDuration(_ duration: UInt64) {
+        guard lastObservedDurationMs != duration else { return }
+        lastObservedDurationMs = duration
         preparedDurationMs = duration
         guard let activeEnclosureID else { return }
         do { try core.observeMediaDuration(enclosureId: activeEnclosureID, durationMs: duration) }
@@ -202,7 +273,7 @@ final class MediaPlaybackCoordinator {
 
     private func startCheckpointTimer() {
         guard checkpointTimer == nil else { return }
-        checkpointTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
+        checkpointTimer = Timer.scheduledTimer(withTimeInterval: checkpointInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, self.engine.isPlaying else { return }
                 self.checkpoint()
