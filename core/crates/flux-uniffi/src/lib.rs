@@ -405,7 +405,6 @@ pub enum SaveToServiceResult {
 pub enum MutationField {
     Read,
     Starred,
-    MediaProgress,
 }
 #[derive(uniffi::Enum)]
 pub enum CoreEvent {
@@ -1191,7 +1190,6 @@ impl From<domain::MutationField> for MutationField {
         match value {
             domain::MutationField::Read => Self::Read,
             domain::MutationField::Starred => Self::Starred,
-            domain::MutationField::MediaProgress => Self::MediaProgress,
         }
     }
 }

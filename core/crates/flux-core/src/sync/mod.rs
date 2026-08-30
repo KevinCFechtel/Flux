@@ -36,10 +36,19 @@ pub fn run(
         .iter()
         .map(|article| article.id)
         .collect::<std::collections::HashSet<_>>();
+    let protected_requirements = store.protected_playback_requirements()?;
     for article_id in store.protected_playback_article_ids()? {
-        if !known_articles.contains(&article_id)
-            && let Ok(protected) = remote.fetch_article_by_id(article_id)
-        {
+        let article_needs_enclosures = protected_requirements
+            .iter()
+            .filter(|(required_article_id, _)| *required_article_id == article_id)
+            .any(|(_, enclosure_id)| {
+                !snapshot
+                    .enclosures
+                    .iter()
+                    .any(|enclosure| enclosure.id == *enclosure_id)
+            });
+        if !known_articles.contains(&article_id) || article_needs_enclosures {
+            let protected = remote.fetch_article_by_id(article_id)?;
             snapshot.articles.push(protected.article);
             snapshot.enclosures.extend(protected.enclosures);
         }
@@ -103,4 +112,108 @@ pub fn run(
         new_articles_by_feed,
         system_notification_candidates,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{Article, Category, Enclosure, Feed};
+    use crate::miniflux::{RemoteSnapshot, RemoteSource};
+    use tempfile::TempDir;
+
+    struct ProtectedFetchFailure;
+
+    impl RemoteSource for ProtectedFetchFailure {
+        fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError> {
+            Ok(RemoteSnapshot {
+                categories: vec![Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                feeds: vec![Feed {
+                    id: 2,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                articles: Vec::new(),
+                enclosures: Vec::new(),
+            })
+        }
+        fn set_read_state(&self, _: &[i64], _: bool) -> Result<(), CoreError> {
+            Ok(())
+        }
+        fn set_starred_state(&self, _: i64, _: bool) -> Result<(), CoreError> {
+            Ok(())
+        }
+        fn fetch_article_by_id(
+            &self,
+            _: i64,
+        ) -> Result<crate::miniflux::RemoteSavedMediaArticle, CoreError> {
+            Err(CoreError::server_transient("protected fetch failed"))
+        }
+    }
+
+    #[test]
+    fn required_protected_fetch_failure_aborts_sync() {
+        let temp = TempDir::new().unwrap();
+        let data = temp.path().join("data");
+        let cache = temp.path().join("cache");
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::create_dir_all(&media).unwrap();
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let article = Article {
+            id: 9,
+            feed_id: 2,
+            title: "Protected".into(),
+            url: "https://example.test/9".into(),
+            comments_url: String::new(),
+            published_at: "2020-01-01T00:00:00Z".into(),
+            is_read: true,
+            is_starred: false,
+            raw_html_content: String::new(),
+            preview: String::new(),
+            image_url: None,
+        };
+        store
+            .reconcile_with_enclosures(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 2,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                std::slice::from_ref(&article),
+                &[Enclosure {
+                    id: 90,
+                    article_id: 9,
+                    url: "https://example.test/90.mp3".into(),
+                    mime_type: "audio/mpeg".into(),
+                    size_bytes: None,
+                    remote_media_progression_seconds: 0,
+                }],
+            )
+            .unwrap();
+        store
+            .checkpoint_playback(90, 1_000, None, "2026-01-01T00:00:00Z", false)
+            .unwrap();
+
+        let result = run(
+            &ProtectedFetchFailure,
+            &store,
+            ReadArticleRetention::Days30,
+            SyncReason::Manual,
+            HashMap::new(),
+        );
+
+        assert_eq!(
+            result.unwrap_err().kind,
+            crate::domain::CoreErrorKind::ServerTransient
+        );
+        assert!(store.last_successful_sync_at().unwrap().is_none());
+    }
 }

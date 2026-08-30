@@ -880,11 +880,6 @@ impl FluxCore {
                     article_id: item.article_id,
                     starred: desired,
                 },
-                MutationField::MediaProgress => {
-                    return Err(CoreError::internal(
-                        "media progress is not an article state",
-                    ));
-                }
             });
             self.emit(CoreEvent::MutationQueued {
                 article_id: item.article_id,

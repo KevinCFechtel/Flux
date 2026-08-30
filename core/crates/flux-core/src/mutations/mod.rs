@@ -21,9 +21,6 @@ pub(crate) fn deliver_pending(
         match pending.field {
             MutationField::Read => remote.set_read_state(&[pending.article_id], pending.desired),
             MutationField::Starred => remote.set_starred_state(pending.article_id, pending.desired),
-            MutationField::MediaProgress => {
-                Err(CoreError::internal("media progress is not article-scoped"))
-            }
         }?;
         store.acknowledge(&pending)?;
         result.count += 1;
@@ -39,10 +36,6 @@ pub(crate) fn deliver_pending(
         result
             .media_progress
             .insert(pending.enclosure_id, pending.progression_seconds);
-        emit(CoreEvent::MutationDeliverySucceeded {
-            article_id: pending.enclosure_id,
-            field: MutationField::MediaProgress,
-        });
     }
     Ok(result)
 }

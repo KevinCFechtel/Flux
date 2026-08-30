@@ -505,7 +505,6 @@ pub struct SyncFailure {
 pub enum MutationField {
     Read,
     Starred,
-    MediaProgress,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

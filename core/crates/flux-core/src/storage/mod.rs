@@ -39,7 +39,6 @@ pub struct PendingMutation {
     pub field: MutationField,
     pub desired: bool,
     pub revision: i64,
-    pub progression_seconds: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -802,6 +801,32 @@ impl Store {
             .map_err(sql_error)
     }
 
+    pub fn protected_playback_enclosure_ids(&self) -> Result<Vec<i64>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut statement = connection.prepare("SELECT DISTINCT e.id FROM enclosures e LEFT JOIN playback_states p ON p.enclosure_id=e.id AND p.status='in_progress' LEFT JOIN pending_media_progress_mutations m ON m.enclosure_id=e.id WHERE p.enclosure_id IS NOT NULL OR m.enclosure_id IS NOT NULL ORDER BY e.id").map_err(sql_error)?;
+        statement
+            .query_map([], |row| row.get(0))
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)
+    }
+
+    pub fn protected_playback_requirements(&self) -> Result<Vec<(i64, i64)>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut statement = connection.prepare("SELECT DISTINCT e.article_id,e.id FROM enclosures e LEFT JOIN playback_states p ON p.enclosure_id=e.id AND p.status='in_progress' LEFT JOIN pending_media_progress_mutations m ON m.enclosure_id=e.id WHERE p.enclosure_id IS NOT NULL OR m.enclosure_id IS NOT NULL ORDER BY e.article_id,e.id").map_err(sql_error)?;
+        statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)
+    }
+
     pub fn checkpoint_playback(
         &self,
         enclosure_id: i64,
@@ -1300,11 +1325,6 @@ impl Store {
             let column = match field {
                 MutationField::Read => "is_read",
                 MutationField::Starred => "is_starred",
-                MutationField::MediaProgress => {
-                    return Err(CoreError::internal(
-                        "media progress is not an article state",
-                    ));
-                }
             };
             if tx
                 .execute(
@@ -1329,7 +1349,6 @@ impl Store {
                 field,
                 desired,
                 revision,
-                progression_seconds: None,
             });
         }
         tx.commit().map_err(sql_error)?;
@@ -1340,20 +1359,14 @@ impl Store {
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
-        let mut statement=connection.prepare("SELECT article_id,field,desired,NULL,revision FROM pending_mutations ORDER BY article_id,field").map_err(sql_error)?;
+        let mut statement=connection.prepare("SELECT article_id,field,desired,revision FROM pending_mutations ORDER BY article_id,field").map_err(sql_error)?;
         statement
             .query_map([], |r| {
                 Ok(PendingMutation {
                     article_id: r.get(0)?,
                     field: parse_field(r.get::<_, String>(1)?.as_str())?,
                     desired: r.get(2)?,
-                    progression_seconds: r
-                        .get::<_, Option<i64>>(3)?
-                        .map(|value| {
-                            u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery)
-                        })
-                        .transpose()?,
-                    revision: r.get(4)?,
+                    revision: r.get(3)?,
                 })
             })
             .map_err(sql_error)?
@@ -1410,21 +1423,12 @@ impl Store {
         let remote_column = match pending.field {
             MutationField::Read => "remote_is_read",
             MutationField::Starred => "remote_is_starred",
-            MutationField::MediaProgress => "remote_media_progression_seconds",
         };
-        if pending.field == MutationField::MediaProgress {
-            tx.execute(
-                "UPDATE enclosures SET remote_media_progression_seconds=?1 WHERE id=?2",
-                params![pending.progression_seconds, pending.article_id],
-            )
-            .map_err(sql_error)?;
-        } else {
-            tx.execute(
-                &format!("UPDATE articles SET {remote_column}=?1 WHERE id=?2"),
-                params![pending.desired, pending.article_id],
-            )
-            .map_err(sql_error)?;
-        }
+        tx.execute(
+            &format!("UPDATE articles SET {remote_column}=?1 WHERE id=?2"),
+            params![pending.desired, pending.article_id],
+        )
+        .map_err(sql_error)?;
         let deleted = tx
             .execute(
                 "DELETE FROM pending_mutations WHERE article_id=?1 AND field=?2 AND revision=?3",
@@ -2159,14 +2163,12 @@ fn field_name(field: MutationField) -> &'static str {
     match field {
         MutationField::Read => "read",
         MutationField::Starred => "starred",
-        MutationField::MediaProgress => "media_progress",
     }
 }
 fn parse_field(field: &str) -> Result<MutationField, rusqlite::Error> {
     match field {
         "read" => Ok(MutationField::Read),
         "starred" => Ok(MutationField::Starred),
-        "media_progress" => Ok(MutationField::MediaProgress),
         _ => Err(rusqlite::Error::InvalidQuery),
     }
 }
