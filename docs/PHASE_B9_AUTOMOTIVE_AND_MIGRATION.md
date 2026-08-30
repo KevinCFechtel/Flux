@@ -84,6 +84,22 @@ app sandbox. Accordingly:
   association; UI-only and runtime-only settings are dropped;
 - legacy data is never deleted by the migration.
 
+Core migration semantics deliberately adapt this legacy behavior rather than
+copying its implicit completion convention:
+
+- explicit legacy zero does not become `Completed`;
+- explicit legacy zero does not become resumable `InProgress` and is excluded
+  from `continue_listening()`;
+- positive legacy progress may become `InProgress` and queues normal Core media
+  progression delivery;
+- zero does not queue remote progression or overwrite existing Core playback;
+- existing playback state wins, and repeated imports are harmless;
+- `import_legacy_playback()` does not write a global completion marker, including
+  for empty or partial batches;
+- the future native platform migration coordinator owns final completion because
+  only it can know whether Keychain, SharedPreferences, files, and other legacy
+  sources were fully evaluated. No explicit completion API is currently needed.
+
 The unresolved case is platform extraction and verification of Keychain,
 SharedPreferences, and files. It does not block Core automotive browsing or
 Continue Listening, which use the current Core models directly.

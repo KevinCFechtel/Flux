@@ -1719,7 +1719,8 @@ impl Store {
     }
 
     /// Imports article-keyed legacy progress without guessing an enclosure.
-    /// The marker makes retries after a successful batch harmless.
+    /// Completion of the overall platform migration belongs to the native
+    /// coordinator, which also evaluates non-Core legacy sources.
     pub fn import_legacy_playback(
         &self,
         records: &[LegacyPlaybackImport],
@@ -1728,20 +1729,14 @@ impl Store {
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
-        let already_imported: Option<String> = connection
-            .query_row(
-                "SELECT value FROM core_settings WHERE key='legacy_media_migration_v1'",
-                [],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(sql_error)?;
-        if already_imported.is_some_and(|value| value == "completed") {
-            return Ok(LegacyPlaybackImportResult::default());
-        }
         let tx = connection.transaction().map_err(sql_error)?;
         let mut result = LegacyPlaybackImportResult::default();
         for record in records {
+            // Legacy zero means reset/completion-like input, not resumable
+            // progress. Keep the new model neutral and do not queue a PUT.
+            if record.position_ms == 0 {
+                continue;
+            }
             let article_exists: bool = tx
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM articles WHERE id=?1)",
@@ -1791,11 +1786,6 @@ impl Store {
             queue_media_progress(&tx, enclosure_id, record.position_ms / 1_000)?;
             result.imported += 1;
         }
-        tx.execute(
-            "INSERT INTO core_settings(key,value) VALUES('legacy_media_migration_v1','completed') ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            [],
-        )
-        .map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
         Ok(result)
     }
@@ -4731,7 +4721,7 @@ mod tests {
             category_id: 1,
             title: "Feed".into(),
         }];
-        let articles = (1..=2)
+        let articles = (1..=5)
             .map(|id| Article {
                 id,
                 feed_id: 2,
@@ -4771,6 +4761,30 @@ mod tests {
                 size_bytes: None,
                 remote_media_progression_seconds: 0,
             },
+            Enclosure {
+                id: 30,
+                article_id: 3,
+                url: "https://cdn.test/3.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+            Enclosure {
+                id: 40,
+                article_id: 4,
+                url: "https://cdn.test/4.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+            Enclosure {
+                id: 50,
+                article_id: 5,
+                url: "https://cdn.test/5.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
         ];
         store
             .reconcile_with_enclosures(&category, &feeds, &articles, &enclosures)
@@ -4787,19 +4801,82 @@ mod tests {
                 updated_at: "2026-01-01T00:00:00Z".into(),
             },
             LegacyPlaybackImport {
+                article_id: 3,
+                position_ms: 3_000,
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            },
+            LegacyPlaybackImport {
+                article_id: 4,
+                position_ms: 4_000,
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            },
+            LegacyPlaybackImport {
                 article_id: 99,
                 position_ms: 3_000,
                 updated_at: "2026-01-01T00:00:00Z".into(),
             },
         ];
+        store
+            .checkpoint_playback(40, 9_000, None, "2026-01-01T00:00:00Z", false)
+            .unwrap();
         let result = store.import_legacy_playback(&records).unwrap();
         assert_eq!(result.imported, 1);
         assert_eq!(result.skipped_ambiguous, 1);
         assert_eq!(result.skipped_missing, 1);
-        assert_eq!(store.playback_state(10).unwrap().unwrap().position_ms, 0);
+        assert_eq!(store.playback_state(10).unwrap(), None);
+        assert_eq!(
+            store.playback_state(30).unwrap().unwrap().position_ms,
+            3_000
+        );
+        assert_eq!(
+            store.playback_state(40).unwrap().unwrap().position_ms,
+            9_000
+        );
+        assert!(
+            store
+                .continue_listening()
+                .unwrap()
+                .iter()
+                .all(|item| item.enclosure_id != 10)
+        );
+        assert!(
+            store
+                .pending_media_progress_mutations()
+                .unwrap()
+                .iter()
+                .all(|mutation| mutation.enclosure_id != 10)
+        );
         assert_eq!(
             store.import_legacy_playback(&records).unwrap(),
+            LegacyPlaybackImportResult {
+                skipped_missing: 1,
+                skipped_ambiguous: 1,
+                already_present: 2,
+                ..LegacyPlaybackImportResult::default()
+            }
+        );
+        let later = [LegacyPlaybackImport {
+            article_id: 5,
+            position_ms: 5_000,
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        }];
+        assert_eq!(store.import_legacy_playback(&later).unwrap().imported, 1);
+        assert_eq!(
+            store.import_legacy_playback(&[]).unwrap(),
             LegacyPlaybackImportResult::default()
+        );
+        assert_eq!(
+            store
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM core_settings WHERE key='legacy_media_migration_v1'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
         );
     }
 
