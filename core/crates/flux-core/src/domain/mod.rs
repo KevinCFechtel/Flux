@@ -397,6 +397,9 @@ pub struct CoreSettings {
     pub delivery_mode: DeliveryMode,
     pub background_sync_enabled: bool,
     pub detail_character_limit: u32,
+    pub download_network_policy: DownloadNetworkPolicy,
+    pub download_retention: DownloadRetention,
+    pub delete_after_playback: bool,
 }
 
 impl Default for CoreSettings {
@@ -406,8 +409,29 @@ impl Default for CoreSettings {
             delivery_mode: DeliveryMode::Deferred,
             background_sync_enabled: true,
             detail_character_limit: 10_000,
+            download_network_policy: DownloadNetworkPolicy::AnyNetwork,
+            download_retention: DownloadRetention::Forever,
+            delete_after_playback: false,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DownloadNetworkPolicy {
+    AnyNetwork,
+    UnmeteredOnly,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DownloadRetention {
+    Forever,
+    Days(u32),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiscoveryMode {
+    Restore,
+    LiveDiscovery,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -493,6 +517,7 @@ pub struct FeedPreferences {
     pub detail_rendering: DetailRenderingMode,
     pub truncate_detail: bool,
     pub open_in_miniflux: bool,
+    pub auto_download_audio: bool,
 }
 
 impl FeedPreferences {
@@ -503,6 +528,7 @@ impl FeedPreferences {
             detail_rendering: DetailRenderingMode::Rendered,
             truncate_detail: false,
             open_in_miniflux: false,
+            auto_download_audio: false,
         }
     }
 }

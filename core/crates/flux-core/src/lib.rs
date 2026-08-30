@@ -26,12 +26,12 @@ use domain::{
     ArticleQuery, ArticleSummary, ArticleThumbnailResult, CoreError, CoreErrorKind, CoreEvent,
     CoreSettings, CreateCategoryResult, CreateFeedRequest, CreateFeedResult, DeliveryDisposition,
     DeliveryMode, DetailRenderingMode, DiscoverSubscriptionsRequest, DiscoveredSubscription,
-    DownloadFailureKind, DownloadOrigin, FeedIcon, FeedIconVariant, FeedPreferences,
-    FeedSystemNotificationSetting, MediaDownload, MutationField, MutationResult, NavigationCatalog,
-    PlaybackState, ReadArticleRetention, ReaderDocument, RuntimeHealth, RuntimeHealthStatus,
-    SaveToServiceResult, SavedMediaSyncConfiguration, SavedMediaSyncSetupInfo,
-    SavedPlayableMediaItem, SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition,
-    SyncCompleted, SyncFailure, SyncReason, WidgetData,
+    DownloadFailureKind, DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, FeedIcon,
+    FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, MediaDownload, MutationField,
+    MutationResult, NavigationCatalog, PlaybackState, ReadArticleRetention, ReaderDocument,
+    RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult, SavedMediaSyncConfiguration,
+    SavedMediaSyncSetupInfo, SavedPlayableMediaItem, SearchArticlesRequest, SearchArticlesResult,
+    SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason, WidgetData,
 };
 use miniflux::{
     AccountValidationError, AccountValidationResult, HttpHeader, MinifluxClient, RemoteSource,
@@ -651,6 +651,13 @@ impl FluxCore {
             .map_err(|_| CoreError::internal("sync gate poisoned"))?;
         self.store.request_download_deletion(enclosure_id)
     }
+    pub fn evaluate_media_cleanup(&self, now: DateTime<Utc>) -> Result<Vec<i64>, CoreError> {
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.store.evaluate_media_cleanup(now)
+    }
     pub fn download_deleted(&self, enclosure_id: i64) -> Result<(), CoreError> {
         let _sync = self
             .sync_gate
@@ -736,6 +743,13 @@ impl FluxCore {
     pub fn set_feed_open_in_miniflux(&self, feed_id: i64, enabled: bool) -> Result<(), CoreError> {
         self.store.set_feed_open_in_miniflux(feed_id, enabled)
     }
+    pub fn set_feed_auto_download_audio(
+        &self,
+        feed_id: i64,
+        enabled: bool,
+    ) -> Result<(), CoreError> {
+        self.store.set_feed_auto_download_audio(feed_id, enabled)
+    }
     pub fn acknowledge_system_notification(&self, candidate_id: i64) -> Result<(), CoreError> {
         self.store.acknowledge_system_notification(candidate_id)
     }
@@ -785,6 +799,18 @@ impl FluxCore {
             .lock()
             .map_err(|_| CoreError::internal("delivery mode lock poisoned"))? = mode;
         Ok(())
+    }
+    pub fn set_download_network_policy(
+        &self,
+        policy: DownloadNetworkPolicy,
+    ) -> Result<(), CoreError> {
+        self.store.set_download_network_policy(policy)
+    }
+    pub fn set_download_retention(&self, retention: DownloadRetention) -> Result<(), CoreError> {
+        self.store.set_download_retention(retention)
+    }
+    pub fn set_delete_after_playback(&self, enabled: bool) -> Result<(), CoreError> {
+        self.store.set_delete_after_playback(enabled)
     }
     pub fn runtime_health(&self) -> Result<RuntimeHealthStatus, CoreError> {
         let state = self
@@ -1456,7 +1482,7 @@ mod tests {
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            14
+            15
         );
         let bytes = std::fs::read(core.database_path()).unwrap();
         assert!(
@@ -1528,6 +1554,7 @@ mod tests {
                 delivery_mode: DeliveryMode::Live,
                 background_sync_enabled: true,
                 detail_character_limit: 20_000,
+                ..CoreSettings::default()
             }
         );
         assert_eq!(
@@ -1557,6 +1584,7 @@ mod tests {
                 delivery_mode: DeliveryMode::Live,
                 background_sync_enabled: true,
                 detail_character_limit: 20_000,
+                ..CoreSettings::default()
             }
         );
         assert_eq!(

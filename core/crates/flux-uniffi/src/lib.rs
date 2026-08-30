@@ -993,6 +993,9 @@ impl From<CoreSettings> for domain::CoreSettings {
             delivery_mode: value.delivery_mode.into(),
             background_sync_enabled: value.background_sync_enabled,
             detail_character_limit: value.detail_character_limit,
+            download_network_policy: flux_core::domain::DownloadNetworkPolicy::AnyNetwork,
+            download_retention: flux_core::domain::DownloadRetention::Forever,
+            delete_after_playback: false,
         }
     }
 }
@@ -1004,6 +1007,7 @@ impl From<FeedPreferences> for domain::FeedPreferences {
             detail_rendering: value.detail_rendering.into(),
             truncate_detail: value.truncate_detail,
             open_in_miniflux: value.open_in_miniflux,
+            auto_download_audio: false,
         }
     }
 }

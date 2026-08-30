@@ -15,7 +15,8 @@ use serde_json::Value;
 
 use crate::{
     domain::{
-        CoreSettings, DeliveryMode, DetailRenderingMode, FeedPreferences, ReadArticleRetention,
+        CoreSettings, DeliveryMode, DetailRenderingMode, DownloadNetworkPolicy, DownloadRetention,
+        FeedPreferences, ReadArticleRetention,
     },
     miniflux::normalize_installation_base,
 };
@@ -169,6 +170,12 @@ struct CoreSettingsV1 {
     delivery_mode: String,
     background_sync_enabled: bool,
     detail_character_limit: u32,
+    #[serde(default)]
+    download_network_policy: Option<String>,
+    #[serde(default)]
+    download_retention_days: Option<u32>,
+    #[serde(default)]
+    delete_after_playback: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -179,6 +186,8 @@ struct FeedPreferencesV1 {
     detail_rendering: String,
     truncate_detail: bool,
     open_in_miniflux: bool,
+    #[serde(default)]
+    auto_download_audio: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -321,6 +330,18 @@ fn to_payload(input: ConfigBackupInput) -> Result<PayloadV1, ConfigBackupError> 
             .into(),
             background_sync_enabled: input.core_settings.background_sync_enabled,
             detail_character_limit: input.core_settings.detail_character_limit,
+            download_network_policy: Some(
+                match input.core_settings.download_network_policy {
+                    DownloadNetworkPolicy::AnyNetwork => "any_network",
+                    DownloadNetworkPolicy::UnmeteredOnly => "unmetered_only",
+                }
+                .into(),
+            ),
+            download_retention_days: match input.core_settings.download_retention {
+                DownloadRetention::Forever => None,
+                DownloadRetention::Days(days) => Some(days),
+            },
+            delete_after_playback: Some(input.core_settings.delete_after_playback),
         },
         feed_preferences: input
             .feed_preferences
@@ -335,6 +356,7 @@ fn to_payload(input: ConfigBackupInput) -> Result<PayloadV1, ConfigBackupError> 
                 .into(),
                 truncate_detail: preference.truncate_detail,
                 open_in_miniflux: preference.open_in_miniflux,
+                auto_download_audio: preference.auto_download_audio,
             })
             .collect(),
         platform_settings: PlatformSettingsV1 {
@@ -372,6 +394,17 @@ fn from_payload(
         },
         background_sync_enabled: payload.core_settings.background_sync_enabled,
         detail_character_limit: payload.core_settings.detail_character_limit,
+        download_network_policy: match payload.core_settings.download_network_policy.as_deref() {
+            None | Some("any_network") => DownloadNetworkPolicy::AnyNetwork,
+            Some("unmetered_only") => DownloadNetworkPolicy::UnmeteredOnly,
+            _ => return Err(ConfigBackupError::InvalidContents),
+        },
+        download_retention: match payload.core_settings.download_retention_days {
+            None => DownloadRetention::Forever,
+            Some(days) if days > 0 => DownloadRetention::Days(days),
+            Some(_) => return Err(ConfigBackupError::InvalidContents),
+        },
+        delete_after_playback: payload.core_settings.delete_after_playback.unwrap_or(false),
     };
     validate_settings(&settings)?;
     let preferences = payload
@@ -388,6 +421,7 @@ fn from_payload(
                 },
                 truncate_detail: preference.truncate_detail,
                 open_in_miniflux: preference.open_in_miniflux,
+                auto_download_audio: preference.auto_download_audio,
             })
         })
         .collect::<Result<Vec<_>, ConfigBackupError>>()?;
@@ -521,6 +555,7 @@ mod tests {
                 delivery_mode: DeliveryMode::Live,
                 background_sync_enabled: false,
                 detail_character_limit: 20_000,
+                ..CoreSettings::default()
             },
             feed_preferences: vec![
                 FeedPreferences {
@@ -529,6 +564,7 @@ mod tests {
                     detail_rendering: DetailRenderingMode::TextOnly,
                     truncate_detail: true,
                     open_in_miniflux: true,
+                    auto_download_audio: false,
                 },
                 FeedPreferences {
                     feed_id: 999_999,
@@ -536,6 +572,7 @@ mod tests {
                     detail_rendering: DetailRenderingMode::Rendered,
                     truncate_detail: false,
                     open_in_miniflux: false,
+                    auto_download_audio: false,
                 },
             ],
             platform_settings: PlatformSettingsPayload {

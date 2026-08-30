@@ -1,5 +1,6 @@
 use crate::domain::{
-    CoreError, NewArticlesByFeed, ReadArticleRetention, SyncReason, SystemNotificationCandidate,
+    CoreError, DiscoveryMode, NewArticlesByFeed, ReadArticleRetention, SyncReason,
+    SystemNotificationCandidate,
 };
 use crate::miniflux::RemoteSource;
 use crate::storage::Store;
@@ -94,19 +95,27 @@ pub fn run(
             .retain(|enclosure| !technical_article_ids.contains(&enclosure.article_id));
     }
     let reconcile_started = Instant::now();
-    let stats = store.reconcile_with_enclosures_and_progress(
+    let discovery_mode = if store.last_successful_sync_at()?.is_some() {
+        DiscoveryMode::LiveDiscovery
+    } else {
+        DiscoveryMode::Restore
+    };
+    let stats = store.reconcile_with_enclosures_and_progress_mode(
         &snapshot.categories,
         &snapshot.feeds,
         &snapshot.articles,
         &snapshot.enclosures,
         &media_progress_writes,
+        discovery_mode,
     )?;
     let saved_media_changed = crate::saved_media_sync::run(remote, store)?;
     tracing::info!(target: "storage", "reconciliation completed new={} updated={} elapsed_ms={}", stats.new_articles, stats.updated_articles, reconcile_started.elapsed().as_millis());
     let cutoff = Utc::now() - Duration::days(retention.days());
     let cleanup_started = Instant::now();
     let removed_articles = store.cleanup_expired_read_articles(&cutoff.to_rfc3339())?;
+    let removed_media = store.evaluate_media_cleanup(Utc::now())?;
     tracing::info!(target: "retention", "retention cleanup completed removed={} elapsed_ms={}", removed_articles, cleanup_started.elapsed().as_millis());
+    tracing::info!(target: "retention", "media cleanup evaluated delete_requested={}", removed_media.len());
     let new_articles_by_feed = stats
         .new_article_ids_by_feed
         .iter()

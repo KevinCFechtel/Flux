@@ -7,18 +7,18 @@ use std::sync::Mutex;
 
 use crate::domain::{
     Article, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary, Category, CoreError,
-    CoreSettings, DeliveryMode, DetailRenderingMode, DownloadFailureKind, DownloadOrigin,
-    DownloadState, Enclosure, Feed, FeedPreferences, FeedSystemNotificationSetting, MediaDownload,
-    MutationField, NavigationCatalog, PlaybackState, PlaybackStatus, ReadArticleRetention,
-    ReadFilter, SavedMedia, SavedMediaMarkerState, SavedMediaSyncConfiguration,
-    SavedPlayableMediaItem, StarredFilter, SystemNotificationCandidate, WidgetArticle,
-    WidgetCounts, WidgetData, WidgetScopedCount,
+    CoreSettings, DeliveryMode, DetailRenderingMode, DiscoveryMode, DownloadFailureKind,
+    DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, DownloadState, Enclosure, Feed,
+    FeedPreferences, FeedSystemNotificationSetting, MediaDownload, MutationField,
+    NavigationCatalog, PlaybackState, PlaybackStatus, ReadArticleRetention, ReadFilter, SavedMedia,
+    SavedMediaMarkerState, SavedMediaSyncConfiguration, SavedPlayableMediaItem, StarredFilter,
+    SystemNotificationCandidate, WidgetArticle, WidgetCounts, WidgetData, WidgetScopedCount,
 };
 use crate::miniflux::normalize_installation_base;
 use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-const SCHEMA_VERSION: i64 = 14;
+const SCHEMA_VERSION: i64 = 15;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingSavedMediaReplication {
@@ -189,6 +189,9 @@ impl Store {
         let delivery_mode = setting_value(&connection, "delivery_mode")?;
         let background_sync_enabled = setting_value(&connection, "background_sync_enabled")?;
         let detail_character_limit = setting_value(&connection, "detail_character_limit")?;
+        let download_network_policy = setting_value(&connection, "download_network_policy")?;
+        let download_retention = setting_value(&connection, "download_retention")?;
+        let delete_after_playback = setting_value(&connection, "delete_after_playback")?;
         Ok(CoreSettings {
             retention: ReadArticleRetention::from_days(&retention)?,
             delivery_mode: match delivery_mode.as_str() {
@@ -204,6 +207,25 @@ impl Store {
             detail_character_limit: detail_character_limit
                 .parse()
                 .map_err(|_| CoreError::persistence("invalid detail character limit setting"))?,
+            download_network_policy: match download_network_policy.as_str() {
+                "any_network" => DownloadNetworkPolicy::AnyNetwork,
+                "unmetered_only" => DownloadNetworkPolicy::UnmeteredOnly,
+                _ => {
+                    return Err(CoreError::persistence(
+                        "invalid download network policy setting",
+                    ));
+                }
+            },
+            download_retention: download_retention_from_db(&download_retention)?,
+            delete_after_playback: match delete_after_playback.as_str() {
+                "0" => false,
+                "1" => true,
+                _ => {
+                    return Err(CoreError::persistence(
+                        "invalid delete after playback setting",
+                    ));
+                }
+            },
         })
     }
     pub fn all_feed_preferences(&self) -> Result<Vec<FeedPreferences>, CoreError> {
@@ -212,7 +234,7 @@ impl Store {
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let mut statement = connection
-            .prepare("SELECT feed_id, system_notifications_enabled, detail_rendering, truncate_detail, open_in_miniflux FROM feed_preferences ORDER BY feed_id")
+            .prepare("SELECT feed_id, system_notifications_enabled, detail_rendering, truncate_detail, open_in_miniflux, auto_download_audio FROM feed_preferences ORDER BY feed_id")
             .map_err(sql_error)?;
         statement
             .query_map([], |row| {
@@ -226,6 +248,7 @@ impl Store {
                     },
                     truncate_detail: row.get(3)?,
                     open_in_miniflux: row.get(4)?,
+                    auto_download_audio: row.get(5)?,
                 })
             })
             .map_err(sql_error)?
@@ -262,8 +285,9 @@ impl Store {
         tx.execute("INSERT INTO core_settings (key, value) VALUES ('delivery_mode', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [match settings.delivery_mode { DeliveryMode::Live => "live", DeliveryMode::Deferred => "deferred" }]).map_err(sql_error)?;
         tx.execute("INSERT INTO core_settings (key, value) VALUES ('background_sync_enabled', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [if settings.background_sync_enabled { "1" } else { "0" }]).map_err(sql_error)?;
         tx.execute("INSERT INTO core_settings (key, value) VALUES ('detail_character_limit', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [settings.detail_character_limit.to_string()]).map_err(sql_error)?;
+        write_media_settings(&tx, settings)?;
         for preference in preferences {
-            tx.execute("INSERT INTO feed_preferences(feed_id, system_notifications_enabled, detail_rendering, truncate_detail, open_in_miniflux) VALUES(?1, ?2, ?3, ?4, ?5)", params![preference.feed_id, preference.system_notifications_enabled, match preference.detail_rendering { DetailRenderingMode::Rendered => "rendered", DetailRenderingMode::TextOnly => "text_only" }, preference.truncate_detail, preference.open_in_miniflux]).map_err(sql_error)?;
+            tx.execute("INSERT INTO feed_preferences(feed_id, system_notifications_enabled, detail_rendering, truncate_detail, open_in_miniflux, auto_download_audio) VALUES(?1, ?2, ?3, ?4, ?5, ?6)", params![preference.feed_id, preference.system_notifications_enabled, match preference.detail_rendering { DetailRenderingMode::Rendered => "rendered", DetailRenderingMode::TextOnly => "text_only" }, preference.truncate_detail, preference.open_in_miniflux, preference.auto_download_audio]).map_err(sql_error)?;
         }
         tx.commit().map_err(sql_error)
     }
@@ -278,6 +302,27 @@ impl Store {
                 DeliveryMode::Deferred => "deferred",
             },
         )
+    }
+    pub fn set_download_network_policy(
+        &self,
+        policy: DownloadNetworkPolicy,
+    ) -> Result<(), CoreError> {
+        self.set_setting(
+            "download_network_policy",
+            match policy {
+                DownloadNetworkPolicy::AnyNetwork => "any_network",
+                DownloadNetworkPolicy::UnmeteredOnly => "unmetered_only",
+            },
+        )
+    }
+    pub fn set_download_retention(&self, retention: DownloadRetention) -> Result<(), CoreError> {
+        if matches!(retention, DownloadRetention::Days(0)) {
+            return Err(CoreError::data("download retention days must be positive"));
+        }
+        self.set_setting("download_retention", &download_retention_db(retention))
+    }
+    pub fn set_delete_after_playback(&self, enabled: bool) -> Result<(), CoreError> {
+        self.set_setting("delete_after_playback", if enabled { "1" } else { "0" })
     }
     pub fn set_background_sync_enabled(&self, enabled: bool) -> Result<(), CoreError> {
         self.set_setting("background_sync_enabled", if enabled { "1" } else { "0" })
@@ -314,12 +359,13 @@ impl Store {
         articles: &[Article],
         enclosures: &[Enclosure],
     ) -> Result<ReconciliationStats, CoreError> {
-        self.reconcile_with_enclosures_and_progress(
+        self.reconcile_with_enclosures_and_progress_mode(
             categories,
             feeds,
             articles,
             enclosures,
             &HashMap::new(),
+            DiscoveryMode::Restore,
         )
     }
     pub fn reconcile_with_enclosures_and_progress(
@@ -329,6 +375,25 @@ impl Store {
         articles: &[Article],
         enclosures: &[Enclosure],
         media_progress_writes: &HashMap<i64, u64>,
+    ) -> Result<ReconciliationStats, CoreError> {
+        self.reconcile_with_enclosures_and_progress_mode(
+            categories,
+            feeds,
+            articles,
+            enclosures,
+            media_progress_writes,
+            DiscoveryMode::Restore,
+        )
+    }
+
+    pub fn reconcile_with_enclosures_and_progress_mode(
+        &self,
+        categories: &[Category],
+        feeds: &[Feed],
+        articles: &[Article],
+        enclosures: &[Enclosure],
+        media_progress_writes: &HashMap<i64, u64>,
+        discovery_mode: DiscoveryMode,
     ) -> Result<ReconciliationStats, CoreError> {
         let mut connection = self
             .connection
@@ -460,7 +525,26 @@ impl Store {
             }
             tx.execute("INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11,?12) ON CONFLICT(id) DO UPDATE SET feed_id=excluded.feed_id,title=excluded.title,url=excluded.url,comments_url=excluded.comments_url,published_at=excluded.published_at,remote_is_read=excluded.remote_is_read,remote_is_starred=excluded.remote_is_starred,is_read=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='read') THEN articles.is_read ELSE excluded.is_read END,is_starred=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='starred') THEN articles.is_starred ELSE excluded.is_starred END,raw_html_content=excluded.raw_html_content,preview=excluded.preview,image_url=excluded.image_url,content_processing_version=excluded.content_processing_version", params![a.id,a.feed_id,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.raw_html_content,a.preview,a.image_url,crate::article::PROCESSING_VERSION]).map_err(sql_error)?;
         }
+        let new_live_enclosures = if matches!(discovery_mode, DiscoveryMode::LiveDiscovery) {
+            enclosures
+                .iter()
+                .filter(|enclosure| {
+                    !tx.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM enclosures WHERE id=?1)",
+                        [enclosure.id],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(true)
+                })
+                .map(|enclosure| enclosure.id)
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         reconcile_remote_enclosures(&tx, articles, enclosures, media_progress_writes)?;
+        for enclosure_id in new_live_enclosures {
+            tx.execute("INSERT INTO media_downloads(enclosure_id,state,origin) SELECT e.id,'requested','automatic' FROM enclosures e JOIN articles a ON a.id=e.article_id JOIN feed_preferences p ON p.feed_id=a.feed_id WHERE e.id=?1 AND e.mime_type LIKE 'audio/%' AND p.auto_download_audio=1 AND NOT EXISTS(SELECT 1 FROM auto_download_suppressions s WHERE s.enclosure_id=e.id) AND NOT EXISTS(SELECT 1 FROM media_downloads d WHERE d.enclosure_id=e.id)", [enclosure_id]).map_err(sql_error)?;
+        }
         let remote_category_ids: HashSet<i64> =
             categories.iter().map(|category| category.id).collect();
         let stale_category_ids = {
@@ -933,6 +1017,13 @@ impl Store {
         let existing = read_download_state(&tx, enclosure_id)?;
         match existing {
             None | Some(DownloadState::Failed) => {
+                if matches!(origin, DownloadOrigin::Manual) {
+                    tx.execute(
+                        "DELETE FROM auto_download_suppressions WHERE enclosure_id=?1",
+                        [enclosure_id],
+                    )
+                    .map_err(sql_error)?;
+                }
                 tx.execute(
                     "INSERT INTO media_downloads(enclosure_id,state,origin,local_file,file_size_bytes,downloaded_at,failure_kind) VALUES(?1,'requested',?2,NULL,NULL,NULL,NULL) ON CONFLICT(enclosure_id) DO UPDATE SET state='requested',origin=excluded.origin,local_file=NULL,file_size_bytes=NULL,downloaded_at=NULL,failure_kind=NULL",
                     params![enclosure_id, origin_db(origin)],
@@ -954,6 +1045,14 @@ impl Store {
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let tx = connection.transaction().map_err(sql_error)?;
+        let origin: Option<String> = tx
+            .query_row(
+                "SELECT origin FROM media_downloads WHERE enclosure_id=?1",
+                [enclosure_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(sql_error)?;
         match read_download_state(&tx, enclosure_id)? {
             None => return Ok(()),
             Some(DownloadState::Requested) | Some(DownloadState::Failed) => {
@@ -962,6 +1061,13 @@ impl Store {
                     [enclosure_id],
                 )
                 .map_err(sql_error)?;
+                if origin.as_deref() == Some("automatic") {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO auto_download_suppressions(enclosure_id) VALUES(?1)",
+                        [enclosure_id],
+                    )
+                    .map_err(sql_error)?;
+                }
             }
             Some(other) => {
                 return Err(CoreError::data(format!(
@@ -1065,6 +1171,14 @@ impl Store {
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let tx = connection.transaction().map_err(sql_error)?;
+        let origin: Option<String> = tx
+            .query_row(
+                "SELECT origin FROM media_downloads WHERE enclosure_id=?1",
+                [enclosure_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(sql_error)?;
         match read_download_state(&tx, enclosure_id)? {
             Some(DownloadState::Downloaded) => {
                 tx.execute(
@@ -1072,6 +1186,9 @@ impl Store {
                     [enclosure_id],
                 )
                 .map_err(sql_error)?;
+                if origin.as_deref() == Some("automatic") && tx.query_row("SELECT EXISTS(SELECT 1 FROM articles a JOIN enclosures e ON e.article_id=a.id JOIN feed_preferences p ON p.feed_id=a.feed_id WHERE e.id=?1 AND p.auto_download_audio=1)", [enclosure_id], |row| row.get::<_, bool>(0)).map_err(sql_error)? {
+                    tx.execute("INSERT OR IGNORE INTO auto_download_suppressions(enclosure_id) VALUES(?1)", [enclosure_id]).map_err(sql_error)?;
+                }
             }
             Some(DownloadState::DeleteRequested) => {}
             Some(other) => {
@@ -1121,6 +1238,61 @@ impl Store {
             .map_err(sql_error)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(sql_error)
+    }
+
+    pub fn auto_download_suppressed(&self, enclosure_id: i64) -> Result<bool, CoreError> {
+        self.connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM auto_download_suppressions WHERE enclosure_id=?1)",
+                [enclosure_id],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)
+    }
+
+    pub fn evaluate_media_cleanup(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<i64>, CoreError> {
+        let settings = self.core_settings()?;
+        let cutoff = match settings.download_retention {
+            DownloadRetention::Forever => None,
+            DownloadRetention::Days(days) => Some(now - chrono::Duration::days(i64::from(days))),
+        };
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        let mut statement = tx.prepare("SELECT d.enclosure_id,d.downloaded_at,EXISTS(SELECT 1 FROM playback_states p WHERE p.enclosure_id=d.enclosure_id AND p.status='completed') FROM media_downloads d WHERE d.state='downloaded'").map_err(sql_error)?;
+        let candidates = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, bool>(2)?,
+                ))
+            })
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)?;
+        drop(statement);
+        let mut deleted = Vec::new();
+        for (enclosure_id, downloaded_at, completed) in candidates {
+            let expired = cutoff.is_some_and(|cutoff| {
+                chrono::DateTime::parse_from_rfc3339(&downloaded_at)
+                    .map(|value| value.with_timezone(&chrono::Utc) <= cutoff)
+                    .unwrap_or(false)
+            });
+            if expired || (settings.delete_after_playback && completed) {
+                tx.execute("UPDATE media_downloads SET state='delete_requested' WHERE enclosure_id=?1 AND state='downloaded'", [enclosure_id]).map_err(sql_error)?;
+                deleted.push(enclosure_id);
+            }
+        }
+        tx.commit().map_err(sql_error)?;
+        Ok(deleted)
     }
 
     pub fn materialize_download_request(
@@ -1209,6 +1381,16 @@ impl Store {
         )?;
         if queue_progress && let Some(duration) = duration_ms {
             queue_media_progress(&tx, enclosure_id, milliseconds_to_seconds(duration)?)?;
+        }
+        let delete_after_playback: bool = tx
+            .query_row(
+                "SELECT value='1' FROM core_settings WHERE key='delete_after_playback'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)?;
+        if delete_after_playback {
+            tx.execute("UPDATE media_downloads SET state='delete_requested' WHERE enclosure_id=?1 AND state='downloaded'", [enclosure_id]).map_err(sql_error)?;
         }
         tx.commit().map_err(sql_error)
     }
@@ -1363,7 +1545,7 @@ impl Store {
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
-        connection.query_row("SELECT system_notifications_enabled,detail_rendering,truncate_detail,open_in_miniflux FROM feed_preferences WHERE feed_id=?1", [feed_id], |row| {
+        connection.query_row("SELECT system_notifications_enabled,detail_rendering,truncate_detail,open_in_miniflux,auto_download_audio FROM feed_preferences WHERE feed_id=?1", [feed_id], |row| {
             Ok(FeedPreferences {
                 feed_id,
                 system_notifications_enabled: row.get(0)?,
@@ -1374,6 +1556,7 @@ impl Store {
                 },
                 truncate_detail: row.get(2)?,
                 open_in_miniflux: row.get(3)?,
+                auto_download_audio: row.get(4)?,
             })
         }).optional().map_err(sql_error)?.map_or_else(|| {
             let exists = connection.query_row("SELECT 1 FROM feeds WHERE id=?1", [feed_id], |_| Ok(())).optional().map_err(sql_error)?.is_some();
@@ -1400,6 +1583,17 @@ impl Store {
     }
     pub fn set_feed_open_in_miniflux(&self, feed_id: i64, enabled: bool) -> Result<(), CoreError> {
         self.set_feed_preference(feed_id, "open_in_miniflux", if enabled { "1" } else { "0" })
+    }
+    pub fn set_feed_auto_download_audio(
+        &self,
+        feed_id: i64,
+        enabled: bool,
+    ) -> Result<(), CoreError> {
+        self.set_feed_preference(
+            feed_id,
+            "auto_download_audio",
+            if enabled { "1" } else { "0" },
+        )
     }
     fn set_feed_preference(
         &self,
@@ -2048,7 +2242,7 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
     }
     if current < 8 {
         let tx = connection.transaction().map_err(sql_error)?;
-        tx.execute_batch("CREATE TABLE enclosures (id INTEGER PRIMARY KEY, article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, url TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER, remote_media_progression_seconds INTEGER NOT NULL CHECK(remote_media_progression_seconds >= 0), remote_present INTEGER NOT NULL DEFAULT 1 CHECK(remote_present IN(0,1)), CHECK(size_bytes IS NULL OR size_bytes > 0)); CREATE INDEX enclosures_article ON enclosures(article_id,id); PRAGMA user_version=8;").map_err(sql_error)?;
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS feed_preferences (feed_id INTEGER PRIMARY KEY, system_notifications_enabled INTEGER NOT NULL DEFAULT 0 CHECK(system_notifications_enabled IN(0,1)), detail_rendering TEXT NOT NULL DEFAULT 'rendered' CHECK(detail_rendering IN('rendered','text_only')), truncate_detail INTEGER NOT NULL DEFAULT 0 CHECK(truncate_detail IN(0,1)), open_in_miniflux INTEGER NOT NULL DEFAULT 0 CHECK(open_in_miniflux IN(0,1))); CREATE TABLE enclosures (id INTEGER PRIMARY KEY, article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, url TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER, remote_media_progression_seconds INTEGER NOT NULL CHECK(remote_media_progression_seconds >= 0), remote_present INTEGER NOT NULL DEFAULT 1 CHECK(remote_present IN(0,1)), CHECK(size_bytes IS NULL OR size_bytes > 0)); CREATE INDEX enclosures_article ON enclosures(article_id,id); PRAGMA user_version=8;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
     if current < 9 {
@@ -2085,6 +2279,11 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
         tx.execute_batch("CREATE TABLE media_downloads_replacement (enclosure_id INTEGER PRIMARY KEY REFERENCES enclosures(id) ON DELETE CASCADE, state TEXT NOT NULL CHECK(state IN ('requested','downloaded','failed','delete_requested')), origin TEXT NOT NULL CHECK(origin IN ('manual','automatic')), local_file TEXT, file_size_bytes INTEGER CHECK(file_size_bytes IS NULL OR file_size_bytes > 0), downloaded_at TEXT, failure_kind TEXT CHECK(failure_kind IS NULL OR failure_kind IN ('network','storage','invalid_media','unknown')), CHECK(state != 'requested' OR (local_file IS NULL AND file_size_bytes IS NULL AND downloaded_at IS NULL AND failure_kind IS NULL)), CHECK(state != 'failed' OR (local_file IS NULL AND file_size_bytes IS NULL AND downloaded_at IS NULL AND failure_kind IS NOT NULL)), CHECK(state NOT IN ('downloaded','delete_requested') OR (local_file IS NOT NULL AND file_size_bytes IS NOT NULL AND downloaded_at IS NOT NULL AND failure_kind IS NULL))); INSERT INTO media_downloads_replacement(enclosure_id,state,origin,local_file,file_size_bytes,downloaded_at,failure_kind) SELECT enclosure_id,state,origin,local_file,file_size_bytes,downloaded_at,failure_kind FROM media_downloads; DROP TABLE media_downloads; ALTER TABLE media_downloads_replacement RENAME TO media_downloads; PRAGMA user_version=14;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
+    if current < 15 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS feed_preferences (feed_id INTEGER PRIMARY KEY, system_notifications_enabled INTEGER NOT NULL DEFAULT 0 CHECK(system_notifications_enabled IN(0,1)), detail_rendering TEXT NOT NULL DEFAULT 'rendered' CHECK(detail_rendering IN('rendered','text_only')), truncate_detail INTEGER NOT NULL DEFAULT 0 CHECK(truncate_detail IN(0,1)), open_in_miniflux INTEGER NOT NULL DEFAULT 0 CHECK(open_in_miniflux IN(0,1))); ALTER TABLE feed_preferences ADD COLUMN auto_download_audio INTEGER NOT NULL DEFAULT 0 CHECK(auto_download_audio IN(0,1)); CREATE TABLE auto_download_suppressions (enclosure_id INTEGER PRIMARY KEY REFERENCES enclosures(id) ON DELETE CASCADE); PRAGMA user_version=15;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
     Ok(())
 }
 fn initialize_core_settings(connection: &Connection) -> Result<(), CoreError> {
@@ -2118,7 +2317,45 @@ fn core_setting_defaults() -> Vec<(&'static str, String)> {
             "detail_character_limit",
             defaults.detail_character_limit.to_string(),
         ),
+        ("download_network_policy", "any_network".to_string()),
+        ("download_retention", "forever".to_string()),
+        (
+            "delete_after_playback",
+            if defaults.delete_after_playback {
+                "1"
+            } else {
+                "0"
+            }
+            .to_string(),
+        ),
     ]
+}
+
+fn download_retention_db(retention: DownloadRetention) -> String {
+    match retention {
+        DownloadRetention::Forever => "forever".to_string(),
+        DownloadRetention::Days(days) => format!("days:{days}"),
+    }
+}
+
+fn download_retention_from_db(value: &str) -> Result<DownloadRetention, CoreError> {
+    if value == "forever" {
+        return Ok(DownloadRetention::Forever);
+    }
+    match value
+        .strip_prefix("days:")
+        .and_then(|value| value.parse().ok())
+    {
+        Some(days) if days > 0 => Ok(DownloadRetention::Days(days)),
+        _ => Err(CoreError::persistence("invalid download retention setting")),
+    }
+}
+
+fn write_media_settings(tx: &Transaction<'_>, settings: &CoreSettings) -> Result<(), CoreError> {
+    tx.execute("INSERT INTO core_settings(key,value) VALUES('download_network_policy',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [match settings.download_network_policy { DownloadNetworkPolicy::AnyNetwork => "any_network", DownloadNetworkPolicy::UnmeteredOnly => "unmetered_only" }]).map_err(sql_error)?;
+    tx.execute("INSERT INTO core_settings(key,value) VALUES('download_retention',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [download_retention_db(settings.download_retention)]).map_err(sql_error)?;
+    tx.execute("INSERT INTO core_settings(key,value) VALUES('delete_after_playback',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [if settings.delete_after_playback { "1" } else { "0" }]).map_err(sql_error)?;
+    Ok(())
 }
 fn clear_synchronized_state(
     tx: &Transaction<'_>,
@@ -2604,6 +2841,9 @@ mod tests {
             delivery_mode: DeliveryMode::Live,
             background_sync_enabled: true,
             detail_character_limit: 5_000,
+            download_network_policy: DownloadNetworkPolicy::AnyNetwork,
+            download_retention: DownloadRetention::Forever,
+            delete_after_playback: false,
         };
         let preferences = vec![FeedPreferences {
             feed_id: 999,
@@ -2611,6 +2851,7 @@ mod tests {
             detail_rendering: DetailRenderingMode::TextOnly,
             truncate_detail: true,
             open_in_miniflux: true,
+            auto_download_audio: false,
         }];
         store
             .replace_configuration("https://new.example", &settings, &preferences)
@@ -2650,7 +2891,7 @@ mod tests {
         let connection = store.connection.lock().unwrap();
         let row: (i64, String, Option<String>, String, bool, bool, i64, i64) = connection.query_row("SELECT content_processing_version,preview,image_url,raw_html_content,is_read,is_starred,feed_id,(SELECT COUNT(*) FROM pending_mutations) FROM articles WHERE id=3", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).unwrap();
         drop(connection);
-        assert_eq!(store.schema_version().unwrap(), 14);
+        assert_eq!(store.schema_version().unwrap(), 15);
         assert_eq!(row.0, crate::article::PROCESSING_VERSION);
         assert_eq!(row.1, "Hello world");
         assert_eq!(row.2.as_deref(), Some("https://example.test/cover.jpg"));
@@ -2674,7 +2915,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 14);
+        assert_eq!(store.schema_version().unwrap(), 15);
         assert_eq!(
             store.feed_preferences(2).unwrap(),
             FeedPreferences {
@@ -2682,7 +2923,8 @@ mod tests {
                 system_notifications_enabled: true,
                 detail_rendering: DetailRenderingMode::Rendered,
                 truncate_detail: false,
-                open_in_miniflux: false
+                open_in_miniflux: false,
+                auto_download_audio: false
             }
         );
         assert_eq!(
@@ -2729,7 +2971,8 @@ mod tests {
                 system_notifications_enabled: true,
                 detail_rendering: DetailRenderingMode::TextOnly,
                 truncate_detail: true,
-                open_in_miniflux: true
+                open_in_miniflux: true,
+                auto_download_audio: false
             }
         );
         drop(store);
@@ -2741,7 +2984,8 @@ mod tests {
                 system_notifications_enabled: true,
                 detail_rendering: DetailRenderingMode::TextOnly,
                 truncate_detail: true,
-                open_in_miniflux: true
+                open_in_miniflux: true,
+                auto_download_audio: false
             }
         );
         store.reconcile(&categories, &[], &[]).unwrap();
@@ -2763,7 +3007,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 14);
+        assert_eq!(store.schema_version().unwrap(), 15);
         assert_eq!(
             store.feed_preferences(123).unwrap(),
             FeedPreferences {
@@ -2771,7 +3015,8 @@ mod tests {
                 system_notifications_enabled: true,
                 detail_rendering: DetailRenderingMode::TextOnly,
                 truncate_detail: true,
-                open_in_miniflux: true
+                open_in_miniflux: true,
+                auto_download_audio: false
             }
         );
         assert_eq!(
@@ -2781,7 +3026,8 @@ mod tests {
                 system_notifications_enabled: false,
                 detail_rendering: DetailRenderingMode::Rendered,
                 truncate_detail: false,
-                open_in_miniflux: true
+                open_in_miniflux: true,
+                auto_download_audio: false
             }
         );
         let connection = store.connection.lock().unwrap();
@@ -2812,7 +3058,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 14);
+        assert_eq!(store.schema_version().unwrap(), 15);
         let connection = store.connection.lock().unwrap();
         assert_eq!(
             connection
@@ -3078,7 +3324,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 14);
+        assert_eq!(store.schema_version().unwrap(), 15);
         assert!(!store.enclosure(10).unwrap().unwrap().remote_present);
         assert_eq!(
             store
@@ -3119,7 +3365,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 14);
+        assert_eq!(store.schema_version().unwrap(), 15);
         // existing B1/B2/B3 data survives
         assert!(store.saved_media(10).unwrap().is_some());
         assert_eq!(store.playback_state(10).unwrap().unwrap().position_ms, 5000);
@@ -3158,7 +3404,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 14);
+        assert_eq!(store.schema_version().unwrap(), 15);
         // Existing valid v13 rows survive intact.
         let requested = store.media_download(10).unwrap().unwrap();
         assert_eq!(requested.state, DownloadState::Requested);
@@ -3413,7 +3659,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 14);
+        assert_eq!(store.schema_version().unwrap(), 15);
         let connection = store.connection.lock().unwrap();
         let foreign_key_count: i64 = connection
             .query_row(
@@ -3432,7 +3678,8 @@ mod tests {
                 system_notifications_enabled: true,
                 detail_rendering: DetailRenderingMode::TextOnly,
                 truncate_detail: true,
-                open_in_miniflux: true
+                open_in_miniflux: true,
+                auto_download_audio: false
             }
         );
     }
@@ -3473,7 +3720,8 @@ mod tests {
                 system_notifications_enabled: true,
                 detail_rendering: DetailRenderingMode::TextOnly,
                 truncate_detail: true,
-                open_in_miniflux: true
+                open_in_miniflux: true,
+                auto_download_audio: false
             }
         );
     }
@@ -3552,7 +3800,8 @@ mod tests {
                 system_notifications_enabled: false,
                 detail_rendering: DetailRenderingMode::Rendered,
                 truncate_detail: false,
-                open_in_miniflux: true
+                open_in_miniflux: true,
+                auto_download_audio: false
             }
         );
     }
@@ -4210,6 +4459,147 @@ mod tests {
         assert_eq!(deleting.local_file.as_deref(), Some("enclosure/1000.mp3"));
         store.download_deleted(1000).unwrap();
         assert!(store.media_download(1000).unwrap().is_none());
+    }
+
+    #[test]
+    fn live_discovery_auto_downloads_only_new_audio_and_never_backfills() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 10,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        let (article, enclosure) = media_article_enclosure_pair();
+        store
+            .reconcile_with_enclosures(
+                &categories,
+                &feeds,
+                std::slice::from_ref(&article),
+                std::slice::from_ref(&enclosure),
+            )
+            .unwrap();
+        store.set_feed_auto_download_audio(10, true).unwrap();
+        assert!(store.media_download(1000).unwrap().is_none());
+        let new_article = Article {
+            id: 101,
+            title: "New".into(),
+            ..article
+        };
+        let audio = Enclosure {
+            id: 1001,
+            article_id: 101,
+            ..enclosure
+        };
+        let video = Enclosure {
+            id: 1002,
+            article_id: 101,
+            mime_type: "video/mp4".into(),
+            ..audio.clone()
+        };
+        store
+            .reconcile_with_enclosures_and_progress_mode(
+                &categories,
+                &feeds,
+                &[new_article],
+                &[audio, video],
+                &HashMap::new(),
+                DiscoveryMode::LiveDiscovery,
+            )
+            .unwrap();
+        assert_eq!(
+            store.media_download(1001).unwrap().unwrap().origin,
+            Some(DownloadOrigin::Automatic)
+        );
+        assert!(store.media_download(1002).unwrap().is_none());
+    }
+
+    #[test]
+    fn automatic_cancel_and_manual_download_manage_suppression_atomically() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let (article, enclosure) = media_article_enclosure_pair();
+        store
+            .reconcile_with_enclosures(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 10,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                &[article],
+                &[enclosure],
+            )
+            .unwrap();
+        store
+            .request_download(1000, DownloadOrigin::Automatic)
+            .unwrap();
+        store.cancel_download(1000).unwrap();
+        assert!(store.auto_download_suppressed(1000).unwrap());
+        store
+            .request_download(1000, DownloadOrigin::Manual)
+            .unwrap();
+        assert!(!store.auto_download_suppressed(1000).unwrap());
+        assert_eq!(
+            store.media_download(1000).unwrap().unwrap().origin,
+            Some(DownloadOrigin::Manual)
+        );
+    }
+
+    #[test]
+    fn cleanup_uses_download_age_and_completed_playback_without_touching_other_domains() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let (article, enclosure) = media_article_enclosure_pair();
+        store
+            .reconcile_with_enclosures(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 10,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                &[article],
+                &[enclosure],
+            )
+            .unwrap();
+        store
+            .request_download(1000, DownloadOrigin::Automatic)
+            .unwrap();
+        store.download_finished(1000, "episode.mp3", 10).unwrap();
+        store
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE media_downloads SET downloaded_at='2026-01-01T00:00:00Z' WHERE enclosure_id=1000",
+                [],
+            )
+            .unwrap();
+        store.save_media(1000, "2026-01-01T00:00:00Z").unwrap();
+        store
+            .set_download_retention(DownloadRetention::Days(30))
+            .unwrap();
+        let now = chrono::DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        assert_eq!(store.evaluate_media_cleanup(now).unwrap(), vec![1000]);
+        assert!(!store.auto_download_suppressed(1000).unwrap());
+        assert!(store.saved_media(1000).unwrap().is_some());
+        assert!(store.playback_state(1000).unwrap().is_none());
     }
 
     #[test]
