@@ -53,6 +53,13 @@ pub fn run(
             snapshot.enclosures.extend(protected.enclosures);
         }
     }
+    for article_id in store.protected_download_article_ids()? {
+        if !known_articles.contains(&article_id) {
+            let protected = remote.fetch_article_by_id(article_id)?;
+            snapshot.articles.push(protected.article);
+            snapshot.enclosures.extend(protected.enclosures);
+        }
+    }
     if saved_media_sync.enabled {
         let Some(feed_id) = saved_media_sync.sync_feed_id else {
             return Err(CoreError::data("SavedMedia Sync setup requires repair"));
@@ -215,5 +222,80 @@ mod tests {
             crate::domain::CoreErrorKind::ServerTransient
         );
         assert!(store.last_successful_sync_at().unwrap().is_none());
+    }
+
+    #[test]
+    fn protected_download_articles_extend_the_protected_fetch_set() {
+        let temp = TempDir::new().unwrap();
+        let data = temp.path().join("data");
+        let cache = temp.path().join("cache");
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::create_dir_all(&media).unwrap();
+        let store = Store::open(&data, &cache, &media).unwrap();
+
+        let article = Article {
+            id: 9,
+            feed_id: 2,
+            title: "Download-protected".into(),
+            url: "https://example.test/9".into(),
+            comments_url: String::new(),
+            published_at: "2020-01-01T00:00:00Z".into(),
+            is_read: true,
+            is_starred: false,
+            raw_html_content: String::new(),
+            preview: String::new(),
+            image_url: None,
+        };
+        let enclosure = Enclosure {
+            id: 90,
+            article_id: 9,
+            url: "https://example.test/90.mp3".into(),
+            mime_type: "audio/mpeg".into(),
+            size_bytes: None,
+            remote_media_progression_seconds: 0,
+        };
+        store
+            .reconcile_with_enclosures(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 2,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                std::slice::from_ref(&article),
+                std::slice::from_ref(&enclosure),
+            )
+            .unwrap();
+        // Requested + Downloaded must appear in the protected set;
+        // Failed + DeleteRequested must not.
+        store
+            .request_download(90, crate::domain::DownloadOrigin::Manual)
+            .unwrap();
+        assert_eq!(store.protected_download_article_ids().unwrap(), vec![9]);
+        store
+            .download_finished(90, "enclosure/90.mp3", 1024)
+            .unwrap();
+        assert_eq!(store.protected_download_article_ids().unwrap(), vec![9]);
+        store.request_download_deletion(90).unwrap();
+        assert_eq!(
+            store.protected_download_article_ids().unwrap(),
+            Vec::<i64>::new()
+        );
+        store.download_deleted(90).unwrap();
+        store
+            .request_download(90, crate::domain::DownloadOrigin::Manual)
+            .unwrap();
+        store
+            .download_failed(90, crate::domain::DownloadFailureKind::Network)
+            .unwrap();
+        assert_eq!(
+            store.protected_download_article_ids().unwrap(),
+            Vec::<i64>::new()
+        );
     }
 }

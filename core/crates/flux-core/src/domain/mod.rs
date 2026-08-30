@@ -131,6 +131,42 @@ pub struct PlaybackState {
     pub updated_at: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DownloadState {
+    NotDownloaded,
+    Requested,
+    Downloaded,
+    Failed,
+    DeleteRequested,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DownloadOrigin {
+    Manual,
+    Automatic,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DownloadFailureKind {
+    Network,
+    Storage,
+    InvalidMedia,
+    Unknown,
+}
+
+/// Durable Core-owned download state for a single Enclosure.
+/// `NotDownloaded` is represented as the absence of a row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MediaDownload {
+    pub enclosure_id: i64,
+    pub state: DownloadState,
+    pub origin: Option<DownloadOrigin>,
+    pub local_file: Option<String>,
+    pub file_size_bytes: Option<u64>,
+    pub downloaded_at: Option<String>,
+    pub failure_kind: Option<DownloadFailureKind>,
+}
+
 /// Optional replication configuration. Local SavedMedia remains available in every state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SavedMediaSyncConfiguration {

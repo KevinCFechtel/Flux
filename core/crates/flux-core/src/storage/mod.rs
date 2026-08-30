@@ -7,16 +7,18 @@ use std::sync::Mutex;
 
 use crate::domain::{
     Article, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary, Category, CoreError,
-    CoreSettings, DeliveryMode, DetailRenderingMode, Enclosure, Feed, FeedPreferences,
-    FeedSystemNotificationSetting, MutationField, NavigationCatalog, PlaybackState, PlaybackStatus,
-    ReadArticleRetention, ReadFilter, SavedMedia, SavedMediaMarkerState,
-    SavedMediaSyncConfiguration, SavedPlayableMediaItem, StarredFilter,
-    SystemNotificationCandidate, WidgetArticle, WidgetCounts, WidgetData, WidgetScopedCount,
+    CoreSettings, DeliveryMode, DetailRenderingMode, DownloadFailureKind, DownloadOrigin,
+    DownloadState, Enclosure, Feed, FeedPreferences, FeedSystemNotificationSetting, MediaDownload,
+    MutationField, NavigationCatalog, PlaybackState, PlaybackStatus, ReadArticleRetention,
+    ReadFilter, SavedMedia, SavedMediaMarkerState, SavedMediaSyncConfiguration,
+    SavedPlayableMediaItem, StarredFilter, SystemNotificationCandidate, WidgetArticle,
+    WidgetCounts, WidgetData, WidgetScopedCount,
 };
 use crate::miniflux::normalize_installation_base;
+use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-const SCHEMA_VERSION: i64 = 12;
+const SCHEMA_VERSION: i64 = 13;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingSavedMediaReplication {
@@ -902,6 +904,256 @@ impl Store {
         tx.commit().map_err(sql_error)
     }
 
+    pub fn media_download(&self, enclosure_id: i64) -> Result<Option<MediaDownload>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        connection
+            .query_row(
+                "SELECT enclosure_id,state,origin,local_file,file_size_bytes,downloaded_at,failure_kind FROM media_downloads WHERE enclosure_id=?1",
+                [enclosure_id],
+                media_download_from_row,
+            )
+            .optional()
+            .map_err(sql_error)
+    }
+
+    pub fn request_download(
+        &self,
+        enclosure_id: i64,
+        origin: DownloadOrigin,
+    ) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        ensure_enclosure(&tx, enclosure_id)?;
+        let existing = read_download_state(&tx, enclosure_id)?;
+        match existing {
+            None | Some(DownloadState::Failed) => {
+                tx.execute(
+                    "INSERT INTO media_downloads(enclosure_id,state,origin,local_file,file_size_bytes,downloaded_at,failure_kind) VALUES(?1,'requested',?2,NULL,NULL,NULL,NULL) ON CONFLICT(enclosure_id) DO UPDATE SET state='requested',origin=excluded.origin,local_file=NULL,file_size_bytes=NULL,downloaded_at=NULL,failure_kind=NULL",
+                    params![enclosure_id, origin_db(origin)],
+                )
+                .map_err(sql_error)?;
+            }
+            Some(other) => {
+                return Err(CoreError::data(format!(
+                    "cannot request download from {other:?}"
+                )));
+            }
+        }
+        tx.commit().map_err(sql_error)
+    }
+
+    pub fn cancel_download(&self, enclosure_id: i64) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        match read_download_state(&tx, enclosure_id)? {
+            None => return Ok(()),
+            Some(DownloadState::Requested) | Some(DownloadState::Failed) => {
+                tx.execute(
+                    "DELETE FROM media_downloads WHERE enclosure_id=?1",
+                    [enclosure_id],
+                )
+                .map_err(sql_error)?;
+            }
+            Some(other) => {
+                return Err(CoreError::data(format!(
+                    "cannot cancel download in {other:?}"
+                )));
+            }
+        }
+        tx.commit().map_err(sql_error)
+    }
+
+    pub fn retry_download(&self, enclosure_id: i64) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        match read_download_state(&tx, enclosure_id)? {
+            Some(DownloadState::Failed) => {
+                tx.execute("UPDATE media_downloads SET state='requested',failure_kind=NULL,local_file=NULL,file_size_bytes=NULL,downloaded_at=NULL WHERE enclosure_id=?1", [enclosure_id]).map_err(sql_error)?;
+            }
+            Some(other) => {
+                return Err(CoreError::data(format!(
+                    "cannot retry download in {other:?}"
+                )));
+            }
+            None => {
+                return Err(CoreError::data("cannot retry download in NotDownloaded"));
+            }
+        }
+        tx.commit().map_err(sql_error)
+    }
+
+    pub fn download_finished(
+        &self,
+        enclosure_id: i64,
+        local_file: &str,
+        file_size_bytes: u64,
+    ) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        match read_download_state(&tx, enclosure_id)? {
+            Some(DownloadState::Requested) => {
+                tx.execute(
+                    "UPDATE media_downloads SET state='downloaded',local_file=?1,file_size_bytes=?2,downloaded_at=?3,failure_kind=NULL WHERE enclosure_id=?4",
+                    params![local_file, file_size_bytes as i64, Utc::now().to_rfc3339(), enclosure_id],
+                )
+                .map_err(sql_error)?;
+            }
+            _ => {
+                return Err(CoreError::data(
+                    "download_finished requires Requested state",
+                ));
+            }
+        }
+        tx.commit().map_err(sql_error)
+    }
+
+    pub fn download_failed(
+        &self,
+        enclosure_id: i64,
+        failure_kind: DownloadFailureKind,
+    ) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        match read_download_state(&tx, enclosure_id)? {
+            Some(DownloadState::Requested) => {
+                tx.execute(
+                    "UPDATE media_downloads SET state='failed',local_file=NULL,file_size_bytes=NULL,downloaded_at=NULL,failure_kind=?1 WHERE enclosure_id=?2",
+                    params![failure_kind_db(failure_kind), enclosure_id],
+                )
+                .map_err(sql_error)?;
+            }
+            _ => return Err(CoreError::data("download_failed requires Requested state")),
+        }
+        tx.commit().map_err(sql_error)
+    }
+
+    pub fn request_download_deletion(&self, enclosure_id: i64) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        match read_download_state(&tx, enclosure_id)? {
+            Some(DownloadState::Downloaded) => {
+                tx.execute(
+                    "UPDATE media_downloads SET state='delete_requested' WHERE enclosure_id=?1",
+                    [enclosure_id],
+                )
+                .map_err(sql_error)?;
+            }
+            Some(DownloadState::DeleteRequested) => {}
+            Some(other) => {
+                return Err(CoreError::data(format!(
+                    "cannot request download deletion from {other:?}"
+                )));
+            }
+            None => return Err(CoreError::data("cannot delete a non-downloaded enclosure")),
+        }
+        tx.commit().map_err(sql_error)
+    }
+
+    pub fn download_deleted(&self, enclosure_id: i64) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        match read_download_state(&tx, enclosure_id)? {
+            Some(DownloadState::DeleteRequested) => {
+                tx.execute(
+                    "DELETE FROM media_downloads WHERE enclosure_id=?1",
+                    [enclosure_id],
+                )
+                .map_err(sql_error)?;
+            }
+            Some(other) => {
+                return Err(CoreError::data(format!(
+                    "download_deleted requires DeleteRequested state, found {other:?}"
+                )));
+            }
+            None => return Ok(()),
+        }
+        tx.commit().map_err(sql_error)
+    }
+
+    pub fn downloads_requiring_transfer(&self) -> Result<Vec<i64>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut statement = connection
+            .prepare("SELECT enclosure_id FROM media_downloads WHERE state='requested' ORDER BY enclosure_id")
+            .map_err(sql_error)?;
+        statement
+            .query_map([], |row| row.get(0))
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)
+    }
+
+    pub fn materialize_download_request(
+        &self,
+        article: &Article,
+        enclosure: &Enclosure,
+        origin: DownloadOrigin,
+    ) -> Result<(), CoreError> {
+        if enclosure.article_id != article.id {
+            return Err(CoreError::data(
+                "search enclosure does not belong to the materialized article",
+            ));
+        }
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute(
+            "INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11,?12) ON CONFLICT(id) DO NOTHING",
+            params![article.id, article.feed_id, article.title, article.url, article.comments_url, article.published_at, article.is_read, article.is_starred, article.raw_html_content, article.preview, article.image_url, crate::article::PROCESSING_VERSION],
+        )
+        .map_err(sql_error)?;
+        upsert_remote_enclosures(&tx, std::slice::from_ref(enclosure))?;
+        tx.execute(
+            "INSERT INTO media_downloads(enclosure_id,state,origin,local_file,file_size_bytes,downloaded_at,failure_kind) VALUES(?1,'requested',?2,NULL,NULL,NULL,NULL) ON CONFLICT(enclosure_id) DO UPDATE SET state='requested',origin=excluded.origin,local_file=NULL,file_size_bytes=NULL,downloaded_at=NULL,failure_kind=NULL",
+            params![enclosure.id, origin_db(origin)],
+        )
+        .map_err(sql_error)?;
+        tx.commit().map_err(sql_error)
+    }
+
+    pub fn protected_download_article_ids(&self) -> Result<Vec<i64>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut statement = connection
+            .prepare("SELECT DISTINCT e.article_id FROM enclosures e JOIN media_downloads d ON d.enclosure_id=e.id WHERE d.state IN ('requested','downloaded') ORDER BY e.article_id")
+            .map_err(sql_error)?;
+        statement
+            .query_map([], |row| row.get(0))
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)
+    }
+
     pub fn complete_playback(
         &self,
         enclosure_id: i64,
@@ -1255,7 +1507,7 @@ impl Store {
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?
             .execute(
-                "DELETE FROM articles WHERE is_read=1 AND is_starred=0 AND published_at < ?1 AND NOT EXISTS(SELECT 1 FROM saved_media s JOIN enclosures e ON e.id=s.enclosure_id WHERE e.article_id=articles.id) AND NOT EXISTS(SELECT 1 FROM playback_states p JOIN enclosures e ON e.id=p.enclosure_id WHERE e.article_id=articles.id AND p.status='in_progress')",
+                "DELETE FROM articles WHERE is_read=1 AND is_starred=0 AND published_at < ?1 AND NOT EXISTS(SELECT 1 FROM saved_media s JOIN enclosures e ON e.id=s.enclosure_id WHERE e.article_id=articles.id) AND NOT EXISTS(SELECT 1 FROM playback_states p JOIN enclosures e ON e.id=p.enclosure_id WHERE e.article_id=articles.id AND p.status='in_progress') AND NOT EXISTS(SELECT 1 FROM media_downloads d JOIN enclosures e ON e.id=d.enclosure_id WHERE e.article_id=articles.id AND d.state IN ('requested','downloaded'))",
                 [cutoff],
             )
             .map_err(sql_error)?;
@@ -1805,6 +2057,11 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
         tx.execute_batch("CREATE TABLE pending_media_progress_mutations (enclosure_id INTEGER PRIMARY KEY REFERENCES enclosures(id) ON DELETE CASCADE, progression_seconds INTEGER NOT NULL CHECK(progression_seconds >= 0), revision INTEGER NOT NULL); INSERT INTO pending_media_progress_mutations(enclosure_id,progression_seconds,revision) SELECT article_id,progression_seconds,revision FROM pending_mutations WHERE field='media_progress'; CREATE TABLE pending_mutations_repaired (article_id INTEGER NOT NULL REFERENCES articles(id), field TEXT NOT NULL CHECK(field IN ('read','starred')), desired INTEGER NOT NULL CHECK(desired IN(0,1)), revision INTEGER NOT NULL, PRIMARY KEY(article_id,field)); INSERT INTO pending_mutations_repaired(article_id,field,desired,revision) SELECT article_id,field,desired,revision FROM pending_mutations WHERE field IN ('read','starred'); DROP TABLE pending_mutations; ALTER TABLE pending_mutations_repaired RENAME TO pending_mutations; PRAGMA user_version=12;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
+    if current < 13 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute_batch("CREATE TABLE media_downloads (enclosure_id INTEGER PRIMARY KEY REFERENCES enclosures(id) ON DELETE CASCADE, state TEXT NOT NULL CHECK(state IN ('requested','downloaded','failed','delete_requested')), origin TEXT CHECK(origin IN ('manual','automatic')), local_file TEXT, file_size_bytes INTEGER CHECK(file_size_bytes IS NULL OR file_size_bytes >= 0), downloaded_at TEXT, failure_kind TEXT CHECK(failure_kind IS NULL OR failure_kind IN ('network','storage','invalid_media','unknown')), CHECK(state IN ('downloaded','delete_requested') OR local_file IS NULL), CHECK(state IN ('downloaded','delete_requested') OR file_size_bytes IS NULL), CHECK(state IN ('downloaded','delete_requested') OR downloaded_at IS NULL), CHECK(state != 'failed' OR failure_kind IS NOT NULL), CHECK(state = 'failed' OR failure_kind IS NULL)); PRAGMA user_version=13;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
     Ok(())
 }
 fn initialize_core_settings(connection: &Connection) -> Result<(), CoreError> {
@@ -1948,6 +2205,89 @@ fn upsert_playback_state(
 }
 fn milliseconds_to_seconds(milliseconds: u64) -> Result<u64, CoreError> {
     Ok(milliseconds / 1_000)
+}
+fn read_download_state(
+    tx: &Transaction<'_>,
+    enclosure_id: i64,
+) -> Result<Option<DownloadState>, CoreError> {
+    let value: Option<String> = tx
+        .query_row(
+            "SELECT state FROM media_downloads WHERE enclosure_id=?1",
+            [enclosure_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sql_error)?;
+    match value {
+        None => Ok(None),
+        Some(state) => match download_state_from_db(&state) {
+            Ok(parsed) => Ok(Some(parsed)),
+            Err(error) => Err(sql_error(error)),
+        },
+    }
+}
+fn origin_db(origin: DownloadOrigin) -> &'static str {
+    match origin {
+        DownloadOrigin::Manual => "manual",
+        DownloadOrigin::Automatic => "automatic",
+    }
+}
+fn origin_from_db(value: &str) -> rusqlite::Result<DownloadOrigin> {
+    match value {
+        "manual" => Ok(DownloadOrigin::Manual),
+        "automatic" => Ok(DownloadOrigin::Automatic),
+        _ => Err(rusqlite::Error::InvalidQuery),
+    }
+}
+fn failure_kind_db(kind: DownloadFailureKind) -> &'static str {
+    match kind {
+        DownloadFailureKind::Network => "network",
+        DownloadFailureKind::Storage => "storage",
+        DownloadFailureKind::InvalidMedia => "invalid_media",
+        DownloadFailureKind::Unknown => "unknown",
+    }
+}
+fn failure_kind_from_db(value: &str) -> rusqlite::Result<DownloadFailureKind> {
+    match value {
+        "network" => Ok(DownloadFailureKind::Network),
+        "storage" => Ok(DownloadFailureKind::Storage),
+        "invalid_media" => Ok(DownloadFailureKind::InvalidMedia),
+        "unknown" => Ok(DownloadFailureKind::Unknown),
+        _ => Err(rusqlite::Error::InvalidQuery),
+    }
+}
+fn download_state_from_db(value: &str) -> rusqlite::Result<DownloadState> {
+    match value {
+        "requested" => Ok(DownloadState::Requested),
+        "downloaded" => Ok(DownloadState::Downloaded),
+        "failed" => Ok(DownloadState::Failed),
+        "delete_requested" => Ok(DownloadState::DeleteRequested),
+        _ => Err(rusqlite::Error::InvalidQuery),
+    }
+}
+fn media_download_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MediaDownload> {
+    let state = download_state_from_db(&row.get::<_, String>(1)?)?;
+    let origin = row
+        .get::<_, Option<String>>(2)?
+        .map(|value| origin_from_db(&value))
+        .transpose()?;
+    let failure_kind = row
+        .get::<_, Option<String>>(6)?
+        .map(|value| failure_kind_from_db(&value))
+        .transpose()?;
+    let file_size_bytes = row
+        .get::<_, Option<i64>>(4)?
+        .map(|value| u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery))
+        .transpose()?;
+    Ok(MediaDownload {
+        enclosure_id: row.get(0)?,
+        state,
+        origin,
+        local_file: row.get(3)?,
+        file_size_bytes,
+        downloaded_at: row.get(5)?,
+        failure_kind,
+    })
 }
 fn queue_media_progress(
     tx: &Transaction<'_>,
@@ -2287,7 +2627,7 @@ mod tests {
         let connection = store.connection.lock().unwrap();
         let row: (i64, String, Option<String>, String, bool, bool, i64, i64) = connection.query_row("SELECT content_processing_version,preview,image_url,raw_html_content,is_read,is_starred,feed_id,(SELECT COUNT(*) FROM pending_mutations) FROM articles WHERE id=3", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).unwrap();
         drop(connection);
-        assert_eq!(store.schema_version().unwrap(), 12);
+        assert_eq!(store.schema_version().unwrap(), 13);
         assert_eq!(row.0, crate::article::PROCESSING_VERSION);
         assert_eq!(row.1, "Hello world");
         assert_eq!(row.2.as_deref(), Some("https://example.test/cover.jpg"));
@@ -2311,7 +2651,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 12);
+        assert_eq!(store.schema_version().unwrap(), 13);
         assert_eq!(
             store.feed_preferences(2).unwrap(),
             FeedPreferences {
@@ -2400,7 +2740,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 12);
+        assert_eq!(store.schema_version().unwrap(), 13);
         assert_eq!(
             store.feed_preferences(123).unwrap(),
             FeedPreferences {
@@ -2449,7 +2789,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 12);
+        assert_eq!(store.schema_version().unwrap(), 13);
         let connection = store.connection.lock().unwrap();
         assert_eq!(
             connection
@@ -2715,7 +3055,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 12);
+        assert_eq!(store.schema_version().unwrap(), 13);
         assert!(!store.enclosure(10).unwrap().unwrap().remote_present);
         assert_eq!(
             store
@@ -2726,6 +3066,48 @@ mod tests {
                     .get::<_, i64>(0))
                 .unwrap(),
             0
+        );
+    }
+
+    #[test]
+    fn v12_migration_creates_media_downloads_and_preserves_phase_b_data() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let connection = Connection::open(data.join("flux.sqlite3")).unwrap();
+        connection.execute_batch(
+            "CREATE TABLE core_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL); \
+             CREATE TABLE categories (id INTEGER PRIMARY KEY, title TEXT NOT NULL); \
+             CREATE TABLE feeds (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL REFERENCES categories(id), title TEXT NOT NULL); \
+             CREATE TABLE articles (id INTEGER PRIMARY KEY, feed_id INTEGER NOT NULL REFERENCES feeds(id), title TEXT NOT NULL, url TEXT NOT NULL, comments_url TEXT NOT NULL DEFAULT '', published_at TEXT NOT NULL, is_read INTEGER NOT NULL, is_starred INTEGER NOT NULL, raw_html_content TEXT NOT NULL, remote_is_read INTEGER, remote_is_starred INTEGER, preview TEXT NOT NULL DEFAULT '', image_url TEXT, content_processing_version INTEGER NOT NULL DEFAULT 0); \
+             CREATE TABLE pending_mutations (article_id INTEGER NOT NULL, field TEXT NOT NULL CHECK(field IN ('read','starred')), desired INTEGER NOT NULL CHECK(desired IN(0,1)), revision INTEGER NOT NULL, PRIMARY KEY(article_id,field)); \
+             CREATE TABLE enclosures (id INTEGER PRIMARY KEY, article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, url TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER, remote_media_progression_seconds INTEGER NOT NULL, remote_present INTEGER NOT NULL DEFAULT 1); \
+             CREATE TABLE saved_media (enclosure_id INTEGER PRIMARY KEY REFERENCES enclosures(id) ON DELETE CASCADE, added_at TEXT NOT NULL); \
+             CREATE TABLE playback_states (enclosure_id INTEGER PRIMARY KEY REFERENCES enclosures(id) ON DELETE CASCADE, position_ms INTEGER NOT NULL, duration_ms INTEGER, status TEXT NOT NULL CHECK(status IN ('in_progress','completed')), updated_at TEXT NOT NULL); \
+             CREATE TABLE pending_media_progress_mutations (enclosure_id INTEGER PRIMARY KEY REFERENCES enclosures(id) ON DELETE CASCADE, progression_seconds INTEGER NOT NULL, revision INTEGER NOT NULL); \
+             INSERT INTO categories VALUES(1,'Category'); \
+             INSERT INTO feeds VALUES(2,1,'Feed'); \
+             INSERT INTO articles VALUES(3,2,'Article','https://example.test/article','','2024-01-01T00:00:00Z',1,0,'',1,0,'',NULL,1); \
+             INSERT INTO enclosures VALUES(10,3,'https://cdn.test/episode.mp3','audio/mpeg',123,4,1); \
+             INSERT INTO saved_media VALUES(10,'2024-01-01T00:00:00Z'); \
+             INSERT INTO playback_states VALUES(10,5000,NULL,'in_progress','2024-01-02T00:00:00Z'); \
+             INSERT INTO pending_media_progress_mutations VALUES(10,5,1); \
+             PRAGMA user_version=12;",
+        ).unwrap();
+        drop(connection);
+
+        let store = Store::open(&data, &cache, &media).unwrap();
+        assert_eq!(store.schema_version().unwrap(), 13);
+        // existing B1/B2/B3 data survives
+        assert!(store.saved_media(10).unwrap().is_some());
+        assert_eq!(store.playback_state(10).unwrap().unwrap().position_ms, 5000);
+        let pending = store.pending_media_progress_mutations().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].progression_seconds, 5);
+        // new download table is usable right away
+        store.request_download(10, DownloadOrigin::Manual).unwrap();
+        assert_eq!(
+            store.media_download(10).unwrap().unwrap().state,
+            DownloadState::Requested
         );
     }
 
@@ -2974,7 +3356,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 12);
+        assert_eq!(store.schema_version().unwrap(), 13);
         let connection = store.connection.lock().unwrap();
         let foreign_key_count: i64 = connection
             .query_row(
@@ -3666,6 +4048,327 @@ mod tests {
                 .enclosure
                 .remote_media_progression_seconds,
             120
+        );
+    }
+
+    fn media_article_enclosure_pair() -> (Article, Enclosure) {
+        (
+            Article {
+                id: 100,
+                feed_id: 10,
+                title: "Article".into(),
+                url: "https://example.test/100".into(),
+                comments_url: String::new(),
+                published_at: "2020-01-01T00:00:00Z".into(),
+                is_read: true,
+                is_starred: false,
+                raw_html_content: String::new(),
+                preview: String::new(),
+                image_url: None,
+            },
+            Enclosure {
+                id: 1000,
+                article_id: 100,
+                url: "https://cdn.test/100.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+        )
+    }
+
+    #[test]
+    fn media_download_request_lifecycle() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let category = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 10,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        let (article, enclosure) = media_article_enclosure_pair();
+        store
+            .reconcile_with_enclosures(
+                &category,
+                &feeds,
+                std::slice::from_ref(&article),
+                std::slice::from_ref(&enclosure),
+            )
+            .unwrap();
+
+        assert!(store.media_download(1000).unwrap().is_none());
+
+        store
+            .request_download(1000, DownloadOrigin::Manual)
+            .unwrap();
+        let requested = store.media_download(1000).unwrap().unwrap();
+        assert_eq!(requested.state, DownloadState::Requested);
+        assert_eq!(requested.origin, Some(DownloadOrigin::Manual));
+        assert!(requested.local_file.is_none());
+        assert!(requested.failure_kind.is_none());
+
+        // stale completion after cancel must not resurrect into Downloaded
+        store.cancel_download(1000).unwrap();
+        store
+            .download_finished(1000, "enclosure/1000.mp3", 4096)
+            .unwrap_err();
+        assert!(store.media_download(1000).unwrap().is_none());
+
+        // Failed -> Requested with cleared failure and preserved origin
+        store
+            .request_download(1000, DownloadOrigin::Manual)
+            .unwrap();
+        store
+            .download_failed(1000, DownloadFailureKind::Network)
+            .unwrap();
+        let failed = store.media_download(1000).unwrap().unwrap();
+        assert_eq!(failed.state, DownloadState::Failed);
+        assert_eq!(failed.failure_kind, Some(DownloadFailureKind::Network));
+        assert_eq!(failed.origin, Some(DownloadOrigin::Manual));
+
+        store.retry_download(1000).unwrap();
+        let retried = store.media_download(1000).unwrap().unwrap();
+        assert_eq!(retried.state, DownloadState::Requested);
+        assert!(retried.failure_kind.is_none());
+
+        store
+            .download_finished(1000, "enclosure/1000.mp3", 4096)
+            .unwrap();
+        let finished = store.media_download(1000).unwrap().unwrap();
+        assert_eq!(finished.state, DownloadState::Downloaded);
+        assert_eq!(finished.local_file.as_deref(), Some("enclosure/1000.mp3"));
+        assert_eq!(finished.file_size_bytes, Some(4096));
+        assert!(finished.downloaded_at.is_some());
+        assert_eq!(finished.origin, Some(DownloadOrigin::Manual));
+
+        // deletion flow
+        store.request_download_deletion(1000).unwrap();
+        let deleting = store.media_download(1000).unwrap().unwrap();
+        assert_eq!(deleting.state, DownloadState::DeleteRequested);
+        assert_eq!(deleting.local_file.as_deref(), Some("enclosure/1000.mp3"));
+        store.download_deleted(1000).unwrap();
+        assert!(store.media_download(1000).unwrap().is_none());
+    }
+
+    #[test]
+    fn download_operations_are_independent_from_saved_media_and_playback() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let category = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 10,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        let (article, enclosure) = media_article_enclosure_pair();
+        store
+            .reconcile_with_enclosures(
+                &category,
+                &feeds,
+                std::slice::from_ref(&article),
+                std::slice::from_ref(&enclosure),
+            )
+            .unwrap();
+        store
+            .checkpoint_playback(1000, 30_000, None, "2026-01-01T00:00:00Z", false)
+            .unwrap();
+
+        store
+            .request_download(1000, DownloadOrigin::Manual)
+            .unwrap();
+        store
+            .download_finished(1000, "enclosure/1000.mp3", 1024)
+            .unwrap();
+        // download lifecycle must not save or unsave media
+        assert!(store.saved_media(1000).unwrap().is_none());
+        // playback state must be preserved
+        assert_eq!(
+            store.playback_state(1000).unwrap().unwrap().position_ms,
+            30_000
+        );
+
+        store.save_media(1000, "2026-01-01T00:00:00Z").unwrap();
+        // unsaving SavedMedia must not delete the download row
+        store.unsave_media(1000).unwrap();
+        let after_unsave = store.media_download(1000).unwrap().unwrap();
+        assert_eq!(after_unsave.state, DownloadState::Downloaded);
+
+        store.request_download_deletion(1000).unwrap();
+        store.download_deleted(1000).unwrap();
+        // deletion must not unsave
+        assert!(store.saved_media(1000).unwrap().is_none());
+        // playback must survive
+        assert_eq!(
+            store.playback_state(1000).unwrap().unwrap().position_ms,
+            30_000
+        );
+    }
+
+    #[test]
+    fn download_state_protects_old_articles_but_failed_does_not() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let category = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 10,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        let (article, enclosure) = media_article_enclosure_pair();
+        store
+            .reconcile_with_enclosures(
+                &category,
+                &feeds,
+                std::slice::from_ref(&article),
+                std::slice::from_ref(&enclosure),
+            )
+            .unwrap();
+
+        store
+            .request_download(1000, DownloadOrigin::Manual)
+            .unwrap();
+        assert_eq!(
+            store
+                .cleanup_expired_read_articles("2030-01-01T00:00:00Z")
+                .unwrap(),
+            0
+        );
+
+        store
+            .download_failed(1000, DownloadFailureKind::Network)
+            .unwrap();
+        assert_eq!(
+            store
+                .cleanup_expired_read_articles("2030-01-01T00:00:00Z")
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn download_state_is_enclosure_scoped_across_the_same_article() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let category = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 10,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        let article = Article {
+            id: 200,
+            feed_id: 10,
+            title: "Article".into(),
+            url: "https://example.test/200".into(),
+            comments_url: String::new(),
+            published_at: "2020-01-01T00:00:00Z".into(),
+            is_read: true,
+            is_starred: false,
+            raw_html_content: String::new(),
+            preview: String::new(),
+            image_url: None,
+        };
+        let enclosures = [
+            Enclosure {
+                id: 2000,
+                article_id: 200,
+                url: "https://cdn.test/a.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+            Enclosure {
+                id: 2001,
+                article_id: 200,
+                url: "https://cdn.test/b.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+        ];
+        store
+            .reconcile_with_enclosures(
+                &category,
+                &feeds,
+                std::slice::from_ref(&article),
+                &enclosures,
+            )
+            .unwrap();
+
+        store
+            .request_download(2000, DownloadOrigin::Manual)
+            .unwrap();
+        assert!(store.media_download(2000).unwrap().is_some());
+        assert!(store.media_download(2001).unwrap().is_none());
+        // failure on 2001 must not affect 2000
+        store
+            .request_download(2001, DownloadOrigin::Automatic)
+            .unwrap();
+        store
+            .download_failed(2001, DownloadFailureKind::Storage)
+            .unwrap();
+        let first = store.media_download(2000).unwrap().unwrap();
+        assert_eq!(first.state, DownloadState::Requested);
+        let second = store.media_download(2001).unwrap().unwrap();
+        assert_eq!(second.state, DownloadState::Failed);
+    }
+
+    #[test]
+    fn download_origin_is_persisted_for_manual_and_automatic() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let category = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 10,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        let (article, enclosure) = media_article_enclosure_pair();
+        store
+            .reconcile_with_enclosures(
+                &category,
+                &feeds,
+                std::slice::from_ref(&article),
+                std::slice::from_ref(&enclosure),
+            )
+            .unwrap();
+
+        store
+            .request_download(1000, DownloadOrigin::Manual)
+            .unwrap();
+        assert_eq!(
+            store.media_download(1000).unwrap().unwrap().origin,
+            Some(DownloadOrigin::Manual)
+        );
+
+        store.cancel_download(1000).unwrap();
+        store
+            .request_download(1000, DownloadOrigin::Automatic)
+            .unwrap();
+        assert_eq!(
+            store.media_download(1000).unwrap().unwrap().origin,
+            Some(DownloadOrigin::Automatic)
         );
     }
 }

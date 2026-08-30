@@ -26,11 +26,12 @@ use domain::{
     ArticleQuery, ArticleSummary, ArticleThumbnailResult, CoreError, CoreErrorKind, CoreEvent,
     CoreSettings, CreateCategoryResult, CreateFeedRequest, CreateFeedResult, DeliveryDisposition,
     DeliveryMode, DetailRenderingMode, DiscoverSubscriptionsRequest, DiscoveredSubscription,
-    FeedIcon, FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, MutationField,
-    MutationResult, NavigationCatalog, PlaybackState, ReadArticleRetention, ReaderDocument,
-    RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult, SavedMediaSyncConfiguration,
-    SavedMediaSyncSetupInfo, SavedPlayableMediaItem, SearchArticlesRequest, SearchArticlesResult,
-    SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason, WidgetData,
+    DownloadFailureKind, DownloadOrigin, FeedIcon, FeedIconVariant, FeedPreferences,
+    FeedSystemNotificationSetting, MediaDownload, MutationField, MutationResult, NavigationCatalog,
+    PlaybackState, ReadArticleRetention, ReaderDocument, RuntimeHealth, RuntimeHealthStatus,
+    SaveToServiceResult, SavedMediaSyncConfiguration, SavedMediaSyncSetupInfo,
+    SavedPlayableMediaItem, SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition,
+    SyncCompleted, SyncFailure, SyncReason, WidgetData,
 };
 use miniflux::{
     AccountValidationError, AccountValidationResult, HttpHeader, MinifluxClient, RemoteSource,
@@ -587,6 +588,75 @@ impl FluxCore {
     ) -> Result<(), CoreError> {
         self.store
             .observe_media_duration(enclosure_id, duration_ms, &Utc::now().to_rfc3339())
+    }
+    pub fn media_download(&self, enclosure_id: i64) -> Result<Option<MediaDownload>, CoreError> {
+        self.store.media_download(enclosure_id)
+    }
+    pub fn downloads_requiring_transfer(&self) -> Result<Vec<i64>, CoreError> {
+        self.store.downloads_requiring_transfer()
+    }
+    pub fn request_download(
+        &self,
+        enclosure_id: i64,
+        origin: DownloadOrigin,
+    ) -> Result<(), CoreError> {
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.store.request_download(enclosure_id, origin)
+    }
+    pub fn cancel_download(&self, enclosure_id: i64) -> Result<(), CoreError> {
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.store.cancel_download(enclosure_id)
+    }
+    pub fn retry_download(&self, enclosure_id: i64) -> Result<(), CoreError> {
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.store.retry_download(enclosure_id)
+    }
+    pub fn download_finished(
+        &self,
+        enclosure_id: i64,
+        local_file: &str,
+        file_size_bytes: u64,
+    ) -> Result<(), CoreError> {
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.store
+            .download_finished(enclosure_id, local_file, file_size_bytes)
+    }
+    pub fn download_failed(
+        &self,
+        enclosure_id: i64,
+        failure_kind: DownloadFailureKind,
+    ) -> Result<(), CoreError> {
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.store.download_failed(enclosure_id, failure_kind)
+    }
+    pub fn request_download_deletion(&self, enclosure_id: i64) -> Result<(), CoreError> {
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.store.request_download_deletion(enclosure_id)
+    }
+    pub fn download_deleted(&self, enclosure_id: i64) -> Result<(), CoreError> {
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.store.download_deleted(enclosure_id)
     }
     pub fn search_articles(
         &self,
@@ -1386,7 +1456,7 @@ mod tests {
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            12
+            13
         );
         let bytes = std::fs::read(core.database_path()).unwrap();
         assert!(
