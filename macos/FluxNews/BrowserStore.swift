@@ -42,6 +42,8 @@ private enum ConfigurationBackupPresentationError: LocalizedError {
 
 @MainActor
 final class BrowserStore: ObservableObject {
+    nonisolated static var mediaRootURL: URL { MediaPlaybackPaths.mediaRootURL }
+    var onCoreConfigured: ((Flux) -> Void)?
     @Published var articles: [ArticleSummary] = []
     @Published var catalog = NavigationCatalog(categories: [], feeds: [])
     @Published var unreadTotal: UInt64 = 0
@@ -148,12 +150,13 @@ final class BrowserStore: ObservableObject {
         let fm = FileManager.default
         let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("FluxNews", isDirectory: true)
         let cache = fm.urls(for: .cachesDirectory, in: .userDomainMask).first!.appendingPathComponent("FluxNews", isDirectory: true)
-        let media = fm.urls(for: .moviesDirectory, in: .userDomainMask).first!.appendingPathComponent("FluxNews", isDirectory: true)
+        let media = Self.mediaRootURL
         do {
             let configuredCore = try Flux.initializeWithDiagnostics(config: InitializationConfig(persistentData: support.path, cache: cache.path, media: media.path, baseUrl: server, apiKey: apiKey, customHeaders: customHeaders.map { HttpHeader(name: $0.name, value: $0.value) }), listener: CoreDiagnosticLogger())
             let settings = try configuredCore.coreSettings()
             let subscription = try configuredCore.subscribeEvents(listener: BrowserEventListener(store: self))
             core = configuredCore
+            onCoreConfigured?(configuredCore)
             configuredServer = server
             coreSettings = settings
             eventSubscription = subscription

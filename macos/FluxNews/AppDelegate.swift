@@ -12,16 +12,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var catalogObservation: AnyCancellable?
     private var shortcutObservation: AnyCancellable?
     private let spotlightIndexer = SpotlightIndexer()
+    private var playbackCoordinator: MediaPlaybackCoordinator?
+    private var transferCoordinator: MediaTransferCoordinator?
     private lazy var shortcutRegistrar = GlobalShortcutRegistrar { [weak self] in self?.show() }
     private var sidebarVisible = false
     private var fallbackPanel: NSPanel?
     private lazy var readerWindow = ReaderWindowController(store: store)
 
     func applicationDidResignActive(_ notification: Notification) {
+        playbackCoordinator?.pause()
         readerWindow.hide()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        store.onCoreConfigured = { [weak self] core in
+            guard let self else { return }
+            self.transferCoordinator = MediaTransferCoordinator(core: core, isMediaInUse: { [weak self] enclosureID in
+                self?.playbackCoordinator?.isUsing(enclosureID: enclosureID) ?? false
+            })
+            self.playbackCoordinator = MediaPlaybackCoordinator(core: core)
+            self.transferCoordinator?.reconcile()
+        }
         SystemNotificationManager.shared.configure()
         SystemNotificationManager.shared.onFeedSelected = { [weak self] feedID in
             guard let self else { return }
@@ -67,7 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
         store.start()
     }
-    func applicationDidBecomeActive(_ notification: Notification) { store.resume() }
+    func applicationDidBecomeActive(_ notification: Notification) { store.resume(); transferCoordinator?.reconcile() }
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls { _ = AppRouter.shared.handle(url: url) }
     }
