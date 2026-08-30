@@ -105,19 +105,33 @@ fn parse_id3_chapters(bytes: &[u8]) -> Vec<MediaChapterInput> {
     while offset.saturating_add(10) <= end {
         let header = &bytes[offset..offset + 10];
         if header.iter().all(|byte| *byte == 0) {
-            break;
+            let Some(next) = resynchronize_frame(bytes, offset + 1, end, bytes[3]) else {
+                break;
+            };
+            offset = next;
+            continue;
         }
         let frame_size = if bytes[3] == 4 {
             syncsafe(&header[4..8])
         } else {
             Some(u32::from_be_bytes([header[4], header[5], header[6], header[7]]) as usize)
         };
-        let Some(frame_size) = frame_size else { break };
+        let Some(frame_size) = frame_size else {
+            let Some(next) = resynchronize_frame(bytes, offset + 1, end, bytes[3]) else {
+                break;
+            };
+            offset = next;
+            continue;
+        };
         let frame_end = offset
             .checked_add(10)
             .and_then(|value| value.checked_add(frame_size));
         let Some(frame_end) = frame_end.filter(|value| *value <= end) else {
-            break;
+            let Some(next) = resynchronize_frame(bytes, offset + 1, end, bytes[3]) else {
+                break;
+            };
+            offset = next;
+            continue;
         };
         if &header[0..4] == b"CHAP"
             && let Some(chapter) = parse_chap(&bytes[offset + 10..frame_end], bytes[3])
@@ -135,12 +149,40 @@ fn parse_chap(payload: &[u8], version: u8) -> Option<MediaChapterInput> {
     let start_ms = u64::from(u32::from_be_bytes(timing[0..4].try_into().ok()?));
     let end_raw = u32::from_be_bytes(timing[4..8].try_into().ok()?);
     let end_ms = (end_raw != u32::MAX).then_some(u64::from(end_raw));
-    let title = parse_id3_title_frames(&payload[id_end + 17..], version)?;
+    let title = parse_id3_title_frames(&payload[id_end + 17..], version)
+        .or_else(|| String::from_utf8(payload[..id_end].to_vec()).ok())?;
     Some(MediaChapterInput {
         title,
         start_ms,
         end_ms,
     })
+}
+
+fn resynchronize_frame(bytes: &[u8], start: usize, end: usize, version: u8) -> Option<usize> {
+    let last = end.checked_sub(10)?;
+    for offset in start..=last {
+        let header = bytes.get(offset..offset + 10)?;
+        if !header[0].is_ascii_uppercase()
+            || !header[1..4]
+                .iter()
+                .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+        {
+            continue;
+        }
+        let size = if version == 4 {
+            syncsafe(&header[4..8])
+        } else {
+            Some(u32::from_be_bytes(header[4..8].try_into().ok()?) as usize)
+        }?;
+        if offset
+            .checked_add(10)
+            .and_then(|value| value.checked_add(size))
+            .is_some_and(|frame_end| frame_end <= end)
+        {
+            return Some(offset);
+        }
+    }
+    None
 }
 
 fn parse_id3_title_frames(mut bytes: &[u8], version: u8) -> Option<String> {
@@ -204,15 +246,23 @@ fn finalize_chapters(
     chapters.sort_by_key(|chapter| chapter.start_ms);
     chapters.dedup_by_key(|chapter| chapter.start_ms);
     chapters.retain(|chapter| {
-        !chapter.title.is_empty()
-            && duration_ms.is_none_or(|duration| chapter.start_ms <= duration)
-            && chapter.end_ms.is_none_or(|end| end > chapter.start_ms)
+        !chapter.title.is_empty() && duration_ms.is_none_or(|duration| chapter.start_ms <= duration)
     });
+    for chapter in &mut chapters {
+        if chapter.end_ms.is_some_and(|end| {
+            end <= chapter.start_ms || duration_ms.is_some_and(|duration| end > duration)
+        }) {
+            chapter.end_ms = None;
+        }
+    }
     for index in 0..chapters.len().saturating_sub(1) {
-        chapters[index].end_ms = Some(chapters[index + 1].start_ms);
+        if chapters[index].end_ms.is_none() {
+            chapters[index].end_ms = Some(chapters[index + 1].start_ms);
+        }
     }
     if let (Some(duration), Some(last)) = (duration_ms, chapters.last_mut())
         && duration > last.start_ms
+        && last.end_ms.is_none()
     {
         last.end_ms = Some(duration);
     }
@@ -355,16 +405,40 @@ mod tests {
 
     #[test]
     fn id3_chap_frames_are_structured_and_malformed_frames_fail_softly() {
-        let mut frames = chapter_frame("one", 0, 30_000, Some(30_000), "Intro");
+        let mut frames = chapter_frame("one", 0, 30_000, Some(25_000), "Intro");
+        frames.extend_from_slice(&malformed_oversized_frame());
         frames.extend(chapter_frame("two", 30_000, 90_000, None, "Topic"));
-        frames.extend_from_slice(b"CHAP\0\0\0\0\0\0\0\0");
         let fixture = id3_fixture(&frames);
         let chapters = parse_id3_chapters(&fixture);
         assert_eq!(chapters.len(), 2);
         assert_eq!(chapters[0].title, "Intro");
-        assert_eq!(chapters[0].end_ms, Some(30_000));
+        assert_eq!(chapters[0].end_ms, Some(25_000));
         assert_eq!(chapters[1].start_ms, 30_000);
         assert_eq!(chapters[1].title, "Topic");
+    }
+
+    #[test]
+    fn missing_chap_end_is_derived_and_oversized_frames_terminate_safely() {
+        let mut frames = chapter_frame("one", 0, 30_000, None, "Intro");
+        frames.extend(chapter_frame("two", 30_000, 60_000, Some(60_000), "Topic"));
+        let chapters = parse_id3_chapters(&id3_fixture(&frames));
+        assert_eq!(chapters[0].end_ms, Some(30_000));
+        let malformed_end = [
+            chapter_frame("bad", 30_000, 0, Some(20_000), "Bad boundary"),
+            chapter_frame("good", 40_000, 0, Some(60_000), "Good"),
+        ]
+        .concat();
+        let chapters = parse_id3_chapters(&id3_fixture(&malformed_end));
+        assert_eq!(chapters[0].title, "Bad boundary");
+        assert_eq!(chapters[0].end_ms, Some(40_000));
+        assert!(parse_id3_chapters(&id3_fixture(&malformed_oversized_frame())).is_empty());
+    }
+
+    fn malformed_oversized_frame() -> Vec<u8> {
+        let mut frame = b"JUNK".to_vec();
+        frame.extend_from_slice(&u32::MAX.to_be_bytes());
+        frame.extend_from_slice(&[0, 0]);
+        frame
     }
 
     fn chapter_frame(
