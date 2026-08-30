@@ -116,6 +116,27 @@ pub struct SavedPlayableMediaItem {
     pub remote_present: bool,
 }
 
+/// Optional replication configuration. Local SavedMedia remains available in every state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SavedMediaSyncConfiguration {
+    pub enabled: bool,
+    pub sync_feed_id: Option<i64>,
+    pub requires_repair: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SavedMediaSyncSetupInfo {
+    pub bootstrap_url: String,
+    pub technical_feed_title: String,
+    pub explanation: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SavedMediaMarkerState {
+    Saved,
+    Unsaved,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArticleSummary {
     pub id: i64,

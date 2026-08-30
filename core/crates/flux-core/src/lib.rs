@@ -10,6 +10,7 @@ mod feed_icon;
 pub mod miniflux;
 pub mod mutations;
 pub mod queries;
+pub mod saved_media_sync;
 pub mod storage;
 pub mod sync;
 
@@ -27,9 +28,9 @@ use domain::{
     DeliveryMode, DetailRenderingMode, DiscoverSubscriptionsRequest, DiscoveredSubscription,
     FeedIcon, FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, MutationField,
     MutationResult, NavigationCatalog, ReadArticleRetention, ReaderDocument, RuntimeHealth,
-    RuntimeHealthStatus, SaveToServiceResult, SavedPlayableMediaItem, SearchArticlesRequest,
-    SearchArticlesResult, SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason,
-    WidgetData,
+    RuntimeHealthStatus, SaveToServiceResult, SavedMediaSyncConfiguration, SavedMediaSyncSetupInfo,
+    SavedPlayableMediaItem, SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition,
+    SyncCompleted, SyncFailure, SyncReason, WidgetData,
 };
 use miniflux::{
     AccountValidationError, AccountValidationResult, HttpHeader, MinifluxClient, RemoteSource,
@@ -446,6 +447,29 @@ impl FluxCore {
         });
         self.diagnostics.flush();
         result.map(|_| ())
+    }
+    pub fn saved_media_sync_configuration(&self) -> Result<SavedMediaSyncConfiguration, CoreError> {
+        self.store.saved_media_sync_configuration()
+    }
+    pub fn saved_media_sync_setup_info(&self) -> SavedMediaSyncSetupInfo {
+        saved_media_sync::setup_info()
+    }
+    pub fn setup_saved_media_sync_automatic(&self) -> Result<(), CoreError> {
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        saved_media_sync::setup_automatic(self.remote.as_ref(), self.store.as_ref())
+    }
+    pub fn setup_saved_media_sync_manual(&self) -> Result<(), CoreError> {
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        saved_media_sync::setup_manual(self.remote.as_ref(), self.store.as_ref())
+    }
+    pub fn disable_saved_media_sync(&self) -> Result<(), CoreError> {
+        self.store.disable_saved_media_sync()
     }
     pub fn saved_playable_media(&self) -> Result<Vec<SavedPlayableMediaItem>, CoreError> {
         self.store.saved_playable_media()
@@ -1255,7 +1279,7 @@ mod tests {
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            9
+            10
         );
         let bytes = std::fs::read(core.database_path()).unwrap();
         assert!(

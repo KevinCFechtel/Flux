@@ -43,6 +43,7 @@ pub struct AccountValidationResult {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MinifluxCapability {
     MediaProgressSync,
+    SavedMediaSync,
 }
 
 impl AccountValidationResult {
@@ -54,10 +55,14 @@ impl AccountValidationResult {
 
 impl MinifluxCapability {
     pub fn all_supported_by(version: &str) -> Vec<Self> {
-        Self::media_progress_sync_supported(version)
-            .then_some(Self::MediaProgressSync)
-            .into_iter()
-            .collect()
+        let mut capabilities = Vec::new();
+        if Self::media_progress_sync_supported(version) {
+            capabilities.push(Self::MediaProgressSync);
+        }
+        if Self::saved_media_sync_supported(version) {
+            capabilities.push(Self::SavedMediaSync);
+        }
+        capabilities
     }
 
     fn media_progress_sync_supported(version: &str) -> bool {
@@ -75,6 +80,28 @@ impl MinifluxCapability {
             return false;
         };
         (major, minor) >= (2, 2)
+    }
+    fn saved_media_sync_supported(version: &str) -> bool {
+        let mut components = version.trim().trim_start_matches('v').split('.');
+        let Some(major) = components
+            .next()
+            .and_then(|value| value.parse::<u64>().ok())
+        else {
+            return false;
+        };
+        let Some(minor) = components
+            .next()
+            .and_then(|value| value.parse::<u64>().ok())
+        else {
+            return false;
+        };
+        let Some(patch) = components
+            .next()
+            .and_then(|value| value.parse::<u64>().ok())
+        else {
+            return false;
+        };
+        (major, minor, patch) >= (2, 2, 16)
     }
 }
 
@@ -182,6 +209,27 @@ pub struct RemoteImage {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoteFeedInfo {
+    pub id: i64,
+    pub title: String,
+    pub feed_url: String,
+    pub disabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoteSavedMediaMarker {
+    pub entry_id: i64,
+    pub external_id: String,
+    pub status: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoteSavedMediaArticle {
+    pub article: Article,
+    pub enclosures: Vec<Enclosure>,
+}
+
 /// Parses a configured installation URL. Query strings, fragments, and userinfo are rejected
 /// because they cannot identify a stable Miniflux installation base.
 pub fn normalize_installation_base(input: &str) -> Result<String, AccountValidationError> {
@@ -243,6 +291,47 @@ pub trait RemoteSource: Send + Sync {
     fn fetch_article_image(&self, _url: &str, _max_bytes: usize) -> Result<RemoteImage, CoreError> {
         Err(CoreError::data(
             "article thumbnail acquisition is unavailable",
+        ))
+    }
+    fn miniflux_capabilities(&self) -> Result<Vec<MinifluxCapability>, CoreError> {
+        Err(CoreError::data("Miniflux capabilities are unavailable"))
+    }
+    fn saved_media_sync_feeds(&self) -> Result<Vec<RemoteFeedInfo>, CoreError> {
+        Err(CoreError::data(
+            "SavedMedia sync feed discovery is unavailable",
+        ))
+    }
+    fn update_saved_media_sync_feed(
+        &self,
+        _feed_id: i64,
+        _title: Option<&str>,
+        _disabled: bool,
+    ) -> Result<(), CoreError> {
+        Err(CoreError::data(
+            "SavedMedia sync feed updates are unavailable",
+        ))
+    }
+    fn saved_media_markers(&self, _feed_id: i64) -> Result<Vec<RemoteSavedMediaMarker>, CoreError> {
+        Err(CoreError::data("SavedMedia marker fetch is unavailable"))
+    }
+    fn import_saved_media_marker(
+        &self,
+        _feed_id: i64,
+        _external_id: &str,
+        _article_id: i64,
+        _enclosure_id: i64,
+    ) -> Result<(), CoreError> {
+        Err(CoreError::data("SavedMedia marker import is unavailable"))
+    }
+    fn set_saved_media_marker_state(&self, _entry_id: i64, _saved: bool) -> Result<(), CoreError> {
+        Err(CoreError::data("SavedMedia marker updates are unavailable"))
+    }
+    fn fetch_saved_media_article(
+        &self,
+        _article_id: i64,
+    ) -> Result<RemoteSavedMediaArticle, CoreError> {
+        Err(CoreError::data(
+            "SavedMedia source article fetch is unavailable",
         ))
     }
 }
@@ -374,6 +463,32 @@ impl MinifluxClient {
                 tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
                 Err(error)
             }
+        }
+    }
+    fn post_json_status(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+        expected: &[u16],
+    ) -> Result<(), CoreError> {
+        let _request = self
+            .request_lock
+            .lock()
+            .map_err(|_| CoreError::internal("HTTP client lock poisoned"))?;
+        let body = serde_json::to_string(&body)
+            .map_err(|error| CoreError::internal(format!("encode Miniflux request: {error}")))?;
+        let response = self
+            .authenticated_request(self.agent.post(&self.api_url(path)))
+            .set("Content-Type", "application/json")
+            .send_string(&body)
+            .map_err(map_http_error)?;
+        if expected.contains(&response.status()) {
+            Ok(())
+        } else {
+            Err(CoreError::data(format!(
+                "Miniflux returned unexpected HTTP {}",
+                response.status()
+            )))
         }
     }
     fn save_to_service(&self, article_id: i64) -> Result<SaveToServiceResult, CoreError> {
@@ -540,6 +655,34 @@ impl MinifluxClient {
         }
         tracing::info!(target: "miniflux", "entry fetch completed set={} entries={} elapsed_ms={}", set, all.len(), started.elapsed().as_millis());
         Ok(all)
+    }
+    fn saved_media_markers(&self, feed_id: i64) -> Result<Vec<RemoteSavedMediaMarker>, CoreError> {
+        let mut entries = Vec::new();
+        for status in ["unread", "read", "removed"] {
+            let page: EntriesDto = self.get(
+                "/v1/entries",
+                &[
+                    ("feed_id", feed_id.to_string()),
+                    ("status", status.to_string()),
+                    ("limit", PAGE_SIZE.to_string()),
+                ],
+            )?;
+            entries.extend(page.entries);
+        }
+        Ok(entries
+            .into_iter()
+            .filter_map(|entry| {
+                entry.external_id.map(|external_id| RemoteSavedMediaMarker {
+                    entry_id: entry.id,
+                    external_id,
+                    status: entry.status,
+                })
+            })
+            .collect())
+    }
+    fn saved_media_article(&self, article_id: i64) -> Result<RemoteSavedMediaArticle, CoreError> {
+        let entry: EntryDto = self.get(&format!("/v1/entries/{article_id}"), &[])?;
+        entry_to_saved_media_article(entry)
     }
     fn search_articles(
         &self,
@@ -754,6 +897,64 @@ impl RemoteSource for MinifluxClient {
     fn fetch_article_image(&self, url: &str, max_bytes: usize) -> Result<RemoteImage, CoreError> {
         self.download_image(url, max_bytes)
     }
+    fn miniflux_capabilities(&self) -> Result<Vec<MinifluxCapability>, CoreError> {
+        let version: VersionDto = self.get("/v1/version", &[])?;
+        Ok(MinifluxCapability::all_supported_by(&version.version))
+    }
+    fn saved_media_sync_feeds(&self) -> Result<Vec<RemoteFeedInfo>, CoreError> {
+        let feeds: Vec<FeedDto> = self.get("/v1/feeds", &[])?;
+        Ok(feeds
+            .into_iter()
+            .map(|feed| RemoteFeedInfo {
+                id: feed.id,
+                title: feed.title,
+                feed_url: feed.feed_url,
+                disabled: feed.disabled,
+            })
+            .collect())
+    }
+    fn update_saved_media_sync_feed(
+        &self,
+        feed_id: i64,
+        title: Option<&str>,
+        disabled: bool,
+    ) -> Result<(), CoreError> {
+        let mut body = serde_json::Map::new();
+        body.insert("disabled".into(), disabled.into());
+        if let Some(title) = title {
+            body.insert("title".into(), title.into());
+        }
+        self.put(
+            &format!("/v1/feeds/{feed_id}"),
+            serde_json::Value::Object(body).to_string(),
+        )
+    }
+    fn saved_media_markers(&self, feed_id: i64) -> Result<Vec<RemoteSavedMediaMarker>, CoreError> {
+        MinifluxClient::saved_media_markers(self, feed_id)
+    }
+    fn import_saved_media_marker(
+        &self,
+        feed_id: i64,
+        external_id: &str,
+        article_id: i64,
+        enclosure_id: i64,
+    ) -> Result<(), CoreError> {
+        self.post_json_status(&format!("/v1/feeds/{feed_id}/entries/import"), serde_json::json!({
+            "title": "Flux Saved Media marker",
+            "url": format!("https://flux.invalid/saved-media/{article_id}/{enclosure_id}"),
+            "content": format!("flux:saved-media:v1 article_id={article_id} enclosure_id={enclosure_id}"),
+            "external_id": external_id,
+        }), &[200, 201])
+    }
+    fn set_saved_media_marker_state(&self, entry_id: i64, saved: bool) -> Result<(), CoreError> {
+        self.put("/v1/entries", serde_json::json!({ "entry_ids": [entry_id], "status": if saved { "unread" } else { "removed" } }).to_string())
+    }
+    fn fetch_saved_media_article(
+        &self,
+        article_id: i64,
+    ) -> Result<RemoteSavedMediaArticle, CoreError> {
+        MinifluxClient::saved_media_article(self, article_id)
+    }
 }
 
 fn map_http_error(error: ureq::Error) -> CoreError {
@@ -825,6 +1026,8 @@ struct EntryDto {
     #[serde(default)]
     content: String,
     #[serde(default)]
+    external_id: Option<String>,
+    #[serde(default)]
     enclosures: Vec<EnclosureDto>,
     feed: Option<FeedDto>,
 }
@@ -852,6 +1055,10 @@ struct FeedDto {
     id: i64,
     #[serde(default)]
     title: String,
+    #[serde(default)]
+    feed_url: String,
+    #[serde(default)]
+    disabled: bool,
     category: Option<CategoryRefDto>,
 }
 
@@ -919,6 +1126,38 @@ fn map_enclosures(
             })
         })
         .collect()
+}
+fn entry_to_saved_media_article(entry: EntryDto) -> Result<RemoteSavedMediaArticle, CoreError> {
+    let published = DateTime::parse_from_rfc3339(&entry.published_at).map_err(|_| {
+        CoreError::data(format!("article {} has invalid publication time", entry.id))
+    })?;
+    let enclosures = map_enclosures(entry.id, entry.enclosures)?;
+    let enclosure_inputs = enclosures
+        .iter()
+        .map(|item| crate::article::EnclosureInput {
+            url: item.url.clone(),
+            mime_type: item.mime_type.clone(),
+        })
+        .collect::<Vec<_>>();
+    let processed = crate::article::process(&entry.content, &entry.url, &enclosure_inputs);
+    Ok(RemoteSavedMediaArticle {
+        article: Article {
+            id: entry.id,
+            feed_id: entry.feed_id,
+            title: entry.title,
+            url: entry.url,
+            comments_url: entry.comments_url,
+            published_at: published
+                .to_utc()
+                .to_rfc3339_opts(SecondsFormat::Secs, true),
+            is_read: entry.status == "read",
+            is_starred: entry.starred,
+            raw_html_content: entry.content,
+            preview: processed.preview,
+            image_url: processed.image_url,
+        },
+        enclosures,
+    })
 }
 #[derive(Deserialize)]
 struct CategoryRefDto {
@@ -1198,14 +1437,28 @@ mod tests {
     }
 
     #[test]
-    fn derives_media_progress_capability_from_supported_versions() {
+    fn derives_media_sync_capabilities_from_supported_versions() {
         assert_eq!(
             MinifluxCapability::all_supported_by("2.2.0"),
             vec![MinifluxCapability::MediaProgressSync]
         );
         assert_eq!(
-            MinifluxCapability::all_supported_by("v2.3.1"),
+            MinifluxCapability::all_supported_by("2.2.15"),
             vec![MinifluxCapability::MediaProgressSync]
+        );
+        assert_eq!(
+            MinifluxCapability::all_supported_by("2.2.16"),
+            vec![
+                MinifluxCapability::MediaProgressSync,
+                MinifluxCapability::SavedMediaSync
+            ]
+        );
+        assert_eq!(
+            MinifluxCapability::all_supported_by("v2.3.1"),
+            vec![
+                MinifluxCapability::MediaProgressSync,
+                MinifluxCapability::SavedMediaSync
+            ]
         );
         assert!(MinifluxCapability::all_supported_by("2.1.9").is_empty());
         assert!(MinifluxCapability::all_supported_by("invalid").is_empty());

@@ -9,13 +9,29 @@ use crate::domain::{
     Article, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary, Category, CoreError,
     CoreSettings, DeliveryMode, DetailRenderingMode, Enclosure, Feed, FeedPreferences,
     FeedSystemNotificationSetting, MutationField, NavigationCatalog, ReadArticleRetention,
-    ReadFilter, SavedMedia, SavedPlayableMediaItem, StarredFilter, SystemNotificationCandidate,
-    WidgetArticle, WidgetCounts, WidgetData, WidgetScopedCount,
+    ReadFilter, SavedMedia, SavedMediaMarkerState, SavedMediaSyncConfiguration,
+    SavedPlayableMediaItem, StarredFilter, SystemNotificationCandidate, WidgetArticle,
+    WidgetCounts, WidgetData, WidgetScopedCount,
 };
 use crate::miniflux::normalize_installation_base;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 10;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingSavedMediaReplication {
+    pub enclosure_id: i64,
+    pub article_id: i64,
+    pub desired: SavedMediaMarkerState,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SavedMediaRemoteState {
+    pub enclosure_id: i64,
+    pub article_id: i64,
+    pub marker_entry_id: i64,
+    pub state: SavedMediaMarkerState,
+}
 
 #[derive(Clone, Debug)]
 pub struct PendingMutation {
@@ -517,6 +533,9 @@ impl Store {
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let tx = connection.transaction().map_err(sql_error)?;
         let inserted = save_media(&tx, enclosure_id, added_at)?;
+        if inserted {
+            queue_saved_media_replication(&tx, enclosure_id, SavedMediaMarkerState::Saved)?;
+        }
         tx.commit().map_err(sql_error)?;
         Ok(inserted)
     }
@@ -545,17 +564,160 @@ impl Store {
     }
 
     pub fn unsave_media(&self, enclosure_id: i64) -> Result<bool, CoreError> {
-        let connection = self
+        let mut connection = self
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
-        Ok(connection
+        let tx = connection.transaction().map_err(sql_error)?;
+        let removed = tx
             .execute(
                 "DELETE FROM saved_media WHERE enclosure_id=?1",
                 [enclosure_id],
             )
             .map_err(sql_error)?
-            > 0)
+            > 0;
+        if removed {
+            queue_saved_media_replication(&tx, enclosure_id, SavedMediaMarkerState::Unsaved)?;
+        }
+        tx.commit().map_err(sql_error)?;
+        Ok(removed)
+    }
+
+    pub fn saved_media_sync_configuration(&self) -> Result<SavedMediaSyncConfiguration, CoreError> {
+        self.connection.lock().map_err(|_| CoreError::internal("database lock poisoned"))?
+            .query_row("SELECT enabled,sync_feed_id,requires_repair FROM saved_media_sync_config WHERE id=1", [], |row| Ok(SavedMediaSyncConfiguration { enabled: row.get(0)?, sync_feed_id: row.get(1)?, requires_repair: row.get(2)? })).map_err(sql_error)
+    }
+
+    pub fn enable_saved_media_sync(&self, feed_id: i64) -> Result<(), CoreError> {
+        if feed_id <= 0 {
+            return Err(CoreError::data("SavedMedia sync feed ID must be positive"));
+        }
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute("UPDATE saved_media_sync_config SET enabled=1,sync_feed_id=?1,requires_repair=0 WHERE id=1", [feed_id]).map_err(sql_error)?;
+        tx.execute("INSERT INTO pending_saved_media_replication(enclosure_id,article_id,desired) SELECT s.enclosure_id,e.article_id,'saved' FROM saved_media s JOIN enclosures e ON e.id=s.enclosure_id ON CONFLICT(enclosure_id) DO UPDATE SET article_id=excluded.article_id,desired=excluded.desired", []).map_err(sql_error)?;
+        tx.execute("INSERT INTO pending_saved_media_replication(enclosure_id,article_id,desired) SELECT r.enclosure_id,r.article_id,'unsaved' FROM saved_media_remote_state r WHERE NOT EXISTS(SELECT 1 FROM saved_media s WHERE s.enclosure_id=r.enclosure_id) ON CONFLICT(enclosure_id) DO UPDATE SET article_id=excluded.article_id,desired=excluded.desired", []).map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+        Ok(())
+    }
+
+    pub fn disable_saved_media_sync(&self) -> Result<(), CoreError> {
+        self.connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .execute(
+                "UPDATE saved_media_sync_config SET enabled=0 WHERE id=1",
+                [],
+            )
+            .map_err(sql_error)?;
+        Ok(())
+    }
+
+    pub fn mark_saved_media_sync_repair_required(&self) -> Result<(), CoreError> {
+        self.connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .execute(
+                "UPDATE saved_media_sync_config SET requires_repair=1 WHERE id=1",
+                [],
+            )
+            .map_err(sql_error)?;
+        Ok(())
+    }
+
+    pub fn pending_saved_media_replication(
+        &self,
+    ) -> Result<Vec<PendingSavedMediaReplication>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut statement = connection.prepare("SELECT enclosure_id,article_id,desired FROM pending_saved_media_replication ORDER BY enclosure_id").map_err(sql_error)?;
+        statement
+            .query_map([], |row| {
+                Ok(PendingSavedMediaReplication {
+                    enclosure_id: row.get(0)?,
+                    article_id: row.get(1)?,
+                    desired: marker_state_from_db(&row.get::<_, String>(2)?)?,
+                })
+            })
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)
+    }
+
+    pub fn acknowledge_saved_media_replication(
+        &self,
+        enclosure_id: i64,
+        desired: SavedMediaMarkerState,
+    ) -> Result<(), CoreError> {
+        self.connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .execute(
+                "DELETE FROM pending_saved_media_replication WHERE enclosure_id=?1 AND desired=?2",
+                params![enclosure_id, marker_state_db(desired)],
+            )
+            .map_err(sql_error)?;
+        Ok(())
+    }
+
+    pub fn saved_media_replication_pending(&self, enclosure_id: i64) -> Result<bool, CoreError> {
+        self.connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pending_saved_media_replication WHERE enclosure_id=?1)",
+                [enclosure_id],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)
+    }
+
+    pub fn saved_media_remote_state(
+        &self,
+        enclosure_id: i64,
+    ) -> Result<Option<SavedMediaRemoteState>, CoreError> {
+        self.connection.lock().map_err(|_| CoreError::internal("database lock poisoned"))?
+            .query_row("SELECT enclosure_id,article_id,marker_entry_id,state FROM saved_media_remote_state WHERE enclosure_id=?1", [enclosure_id], |row| Ok(SavedMediaRemoteState { enclosure_id: row.get(0)?, article_id: row.get(1)?, marker_entry_id: row.get(2)?, state: marker_state_from_db(&row.get::<_, String>(3)?)? })).optional().map_err(sql_error)
+    }
+
+    pub fn record_saved_media_remote_state(
+        &self,
+        state: &SavedMediaRemoteState,
+    ) -> Result<(), CoreError> {
+        self.connection.lock().map_err(|_| CoreError::internal("database lock poisoned"))?
+            .execute("INSERT INTO saved_media_remote_state(enclosure_id,article_id,marker_entry_id,state) VALUES(?1,?2,?3,?4) ON CONFLICT(enclosure_id) DO UPDATE SET article_id=excluded.article_id,marker_entry_id=excluded.marker_entry_id,state=excluded.state", params![state.enclosure_id,state.article_id,state.marker_entry_id,marker_state_db(state.state)]).map_err(sql_error)?;
+        Ok(())
+    }
+
+    pub fn apply_remote_saved_media_state(
+        &self,
+        enclosure_id: i64,
+        state: SavedMediaMarkerState,
+        added_at: &str,
+    ) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        match state {
+            SavedMediaMarkerState::Saved => {
+                save_media(&tx, enclosure_id, added_at)?;
+            }
+            SavedMediaMarkerState::Unsaved => {
+                tx.execute(
+                    "DELETE FROM saved_media WHERE enclosure_id=?1",
+                    [enclosure_id],
+                )
+                .map_err(sql_error)?;
+            }
+        }
+        tx.commit().map_err(sql_error)
     }
 
     pub fn saved_media(&self, enclosure_id: i64) -> Result<Option<SavedMedia>, CoreError> {
@@ -1321,6 +1483,11 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
         tx.execute_batch("CREATE TABLE saved_media (enclosure_id INTEGER PRIMARY KEY REFERENCES enclosures(id) ON DELETE CASCADE, added_at TEXT NOT NULL); CREATE INDEX saved_media_added_at ON saved_media(added_at DESC,enclosure_id DESC); PRAGMA user_version=9;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
+    if current < 10 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute_batch("CREATE TABLE saved_media_sync_config (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN(0,1)), sync_feed_id INTEGER, requires_repair INTEGER NOT NULL DEFAULT 0 CHECK(requires_repair IN(0,1))); INSERT INTO saved_media_sync_config(id) VALUES(1); CREATE TABLE pending_saved_media_replication (enclosure_id INTEGER PRIMARY KEY, article_id INTEGER NOT NULL, desired TEXT NOT NULL CHECK(desired IN ('saved','unsaved'))); CREATE TABLE saved_media_remote_state (enclosure_id INTEGER PRIMARY KEY, article_id INTEGER NOT NULL, marker_entry_id INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('saved','unsaved'))); PRAGMA user_version=10;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
     Ok(())
 }
 fn initialize_core_settings(connection: &Connection) -> Result<(), CoreError> {
@@ -1364,6 +1531,8 @@ fn clear_synchronized_state(
     if remove_feed_preferences {
         tx.execute("DELETE FROM feed_preferences", [])
             .map_err(sql_error)?;
+        // Technical feed IDs and remote baselines are scoped to the previous account.
+        tx.execute_batch("DELETE FROM pending_saved_media_replication; DELETE FROM saved_media_remote_state; UPDATE saved_media_sync_config SET enabled=0,sync_feed_id=NULL,requires_repair=0 WHERE id=1;").map_err(sql_error)?;
     }
     tx.execute_batch("DELETE FROM feeds; DELETE FROM categories; DELETE FROM core_settings WHERE key='last_successful_sync_at';").map_err(sql_error)
 }
@@ -1413,6 +1582,47 @@ fn save_media(tx: &Transaction<'_>, enclosure_id: i64, added_at: &str) -> Result
         )
         .map_err(sql_error)?
         > 0)
+}
+fn queue_saved_media_replication(
+    tx: &Transaction<'_>,
+    enclosure_id: i64,
+    desired: SavedMediaMarkerState,
+) -> Result<(), CoreError> {
+    let enabled: bool = tx
+        .query_row(
+            "SELECT enabled FROM saved_media_sync_config WHERE id=1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sql_error)?;
+    if !enabled {
+        return Ok(());
+    }
+    let article_id: i64 = tx
+        .query_row(
+            "SELECT article_id FROM enclosures WHERE id=?1",
+            [enclosure_id],
+            |row| row.get(0),
+        )
+        .map_err(sql_error)?;
+    tx.execute(
+        "INSERT INTO pending_saved_media_replication(enclosure_id,article_id,desired) VALUES(?1,?2,?3) ON CONFLICT(enclosure_id) DO UPDATE SET article_id=excluded.article_id,desired=excluded.desired",
+        params![enclosure_id, article_id, marker_state_db(desired)],
+    ).map_err(sql_error)?;
+    Ok(())
+}
+fn marker_state_db(state: SavedMediaMarkerState) -> &'static str {
+    match state {
+        SavedMediaMarkerState::Saved => "saved",
+        SavedMediaMarkerState::Unsaved => "unsaved",
+    }
+}
+fn marker_state_from_db(value: &str) -> rusqlite::Result<SavedMediaMarkerState> {
+    match value {
+        "saved" => Ok(SavedMediaMarkerState::Saved),
+        "unsaved" => Ok(SavedMediaMarkerState::Unsaved),
+        _ => Err(rusqlite::Error::InvalidQuery),
+    }
 }
 fn reconcile_remote_enclosures(
     tx: &Transaction<'_>,
@@ -1618,7 +1828,7 @@ mod tests {
         let connection = store.connection.lock().unwrap();
         let row: (i64, String, Option<String>, String, bool, bool, i64, i64) = connection.query_row("SELECT content_processing_version,preview,image_url,raw_html_content,is_read,is_starred,feed_id,(SELECT COUNT(*) FROM pending_mutations) FROM articles WHERE id=3", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).unwrap();
         drop(connection);
-        assert_eq!(store.schema_version().unwrap(), 9);
+        assert_eq!(store.schema_version().unwrap(), 10);
         assert_eq!(row.0, crate::article::PROCESSING_VERSION);
         assert_eq!(row.1, "Hello world");
         assert_eq!(row.2.as_deref(), Some("https://example.test/cover.jpg"));
@@ -1642,7 +1852,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 9);
+        assert_eq!(store.schema_version().unwrap(), 10);
         assert_eq!(
             store.feed_preferences(2).unwrap(),
             FeedPreferences {
@@ -1731,7 +1941,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 9);
+        assert_eq!(store.schema_version().unwrap(), 10);
         assert_eq!(
             store.feed_preferences(123).unwrap(),
             FeedPreferences {
@@ -1780,7 +1990,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 9);
+        assert_eq!(store.schema_version().unwrap(), 10);
         let connection = store.connection.lock().unwrap();
         assert_eq!(
             connection
@@ -2046,7 +2256,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 9);
+        assert_eq!(store.schema_version().unwrap(), 10);
         assert!(!store.enclosure(10).unwrap().unwrap().remote_present);
         assert_eq!(
             store
@@ -2305,7 +2515,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 9);
+        assert_eq!(store.schema_version().unwrap(), 10);
         let connection = store.connection.lock().unwrap();
         let foreign_key_count: i64 = connection
             .query_row(
