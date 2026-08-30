@@ -2,6 +2,7 @@
 //! deletes only the exact sent revision so later local intent always survives.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -9,16 +10,21 @@ use crate::domain::{
     Article, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary, Category, CoreError,
     CoreSettings, DeliveryMode, DetailRenderingMode, DiscoveryMode, DownloadFailureKind,
     DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, DownloadState, Enclosure, Feed,
-    FeedPreferences, FeedSystemNotificationSetting, MediaDownload, MutationField,
-    NavigationCatalog, PlaybackState, PlaybackStatus, ReadArticleRetention, ReadFilter, SavedMedia,
-    SavedMediaMarkerState, SavedMediaSyncConfiguration, SavedPlayableMediaItem, StarredFilter,
+    FeedPreferences, FeedSystemNotificationSetting, MediaChapter, MediaChapterSource,
+    MediaDownload, MediaMetadata, MutationField, NavigationCatalog, PlaybackState, PlaybackStatus,
+    ReadArticleRetention, ReadFilter, SavedMedia, SavedMediaMarkerState,
+    SavedMediaSyncConfiguration, SavedPlayableMediaItem, StarredFilter,
     SystemNotificationCandidate, WidgetArticle, WidgetCounts, WidgetData, WidgetScopedCount,
+};
+use crate::media_metadata::{
+    AnalyzedMedia, analyze_file, article_chapters, resolve_media_reference, to_domain_chapters,
 };
 use crate::miniflux::normalize_installation_base;
 use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use sha2::{Digest, Sha256};
 
-const SCHEMA_VERSION: i64 = 15;
+const SCHEMA_VERSION: i64 = 16;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingSavedMediaReplication {
@@ -80,10 +86,11 @@ pub struct ReconciliationStats {
 pub struct Store {
     connection: Mutex<Connection>,
     database_path: PathBuf,
+    media_root: PathBuf,
 }
 
 impl Store {
-    pub fn open(persistent_data: &Path, _cache: &Path, _media: &Path) -> Result<Self, CoreError> {
+    pub fn open(persistent_data: &Path, _cache: &Path, media: &Path) -> Result<Self, CoreError> {
         let database_path = persistent_data.join("flux.sqlite3");
         let mut connection = Connection::open(&database_path).map_err(sql_error)?;
         connection
@@ -101,6 +108,7 @@ impl Store {
         Ok(Self {
             connection: Mutex::new(connection),
             database_path,
+            media_root: media.to_path_buf(),
         })
     }
     pub fn database_path(&self) -> PathBuf {
@@ -968,7 +976,7 @@ impl Store {
                     "enclosure {enclosure_id} does not exist"
                 )));
             }
-            return Ok(());
+            return self.observe_media_metadata_duration(enclosure_id, duration_ms);
         };
         let (position, status) = (state.position_ms.min(duration_ms), state.status);
         let mut connection = self
@@ -985,7 +993,8 @@ impl Store {
             status,
             updated_at,
         )?;
-        tx.commit().map_err(sql_error)
+        tx.commit().map_err(sql_error)?;
+        self.observe_media_metadata_duration(enclosure_id, duration_ms)
     }
 
     pub fn media_download(&self, enclosure_id: i64) -> Result<Option<MediaDownload>, CoreError> {
@@ -1001,6 +1010,155 @@ impl Store {
             )
             .optional()
             .map_err(sql_error)
+    }
+
+    pub fn media_metadata(&self, enclosure_id: i64) -> Result<Option<MediaMetadata>, CoreError> {
+        self.connection.lock().map_err(|_| CoreError::internal("database lock poisoned"))?.query_row("SELECT enclosure_id,duration_ms,embedded_artwork_reference FROM media_metadata WHERE enclosure_id=?1", [enclosure_id], |row| Ok(MediaMetadata { enclosure_id: row.get(0)?, duration_ms: row.get::<_, Option<i64>>(1)?.map(|value| u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery)).transpose()?, embedded_artwork_reference: row.get(2)? })).optional().map_err(sql_error)
+    }
+
+    pub fn media_chapters(&self, enclosure_id: i64) -> Result<Vec<MediaChapter>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut statement = connection.prepare("SELECT title,start_ms,end_ms,source FROM media_chapters WHERE enclosure_id=?1 ORDER BY sequence").map_err(sql_error)?;
+        statement
+            .query_map([enclosure_id], |row| {
+                Ok(MediaChapter {
+                    enclosure_id,
+                    title: row.get(0)?,
+                    start_ms: u64::try_from(row.get::<_, i64>(1)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    end_ms: row
+                        .get::<_, Option<i64>>(2)?
+                        .map(|value| {
+                            u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery)
+                        })
+                        .transpose()?,
+                    source: match row.get::<_, String>(3)?.as_str() {
+                        "embedded" => MediaChapterSource::Embedded,
+                        "article_content" => MediaChapterSource::ArticleContent,
+                        _ => return Err(rusqlite::Error::InvalidQuery),
+                    },
+                })
+            })
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)
+    }
+
+    pub fn replace_media_metadata(
+        &self,
+        enclosure_id: i64,
+        metadata: &MediaMetadata,
+        chapters: &[MediaChapter],
+    ) -> Result<(), CoreError> {
+        if metadata.enclosure_id != enclosure_id
+            || chapters
+                .iter()
+                .any(|chapter| chapter.enclosure_id != enclosure_id)
+        {
+            return Err(CoreError::data("media metadata enclosure IDs do not match"));
+        }
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        ensure_enclosure(&tx, enclosure_id)?;
+        tx.execute("INSERT INTO media_metadata(enclosure_id,duration_ms,duration_source,embedded_artwork_reference) VALUES(?1,?2,'local',?3) ON CONFLICT(enclosure_id) DO UPDATE SET duration_ms=excluded.duration_ms,duration_source=CASE WHEN excluded.duration_ms IS NOT NULL THEN 'local' ELSE media_metadata.duration_source END,embedded_artwork_reference=excluded.embedded_artwork_reference", params![enclosure_id, metadata.duration_ms.map(i64::try_from).transpose().map_err(|_| CoreError::data("media duration exceeds SQLite integer range"))?, metadata.embedded_artwork_reference]).map_err(sql_error)?;
+        tx.execute(
+            "DELETE FROM media_chapters WHERE enclosure_id=?1",
+            [enclosure_id],
+        )
+        .map_err(sql_error)?;
+        for (sequence, chapter) in chapters.iter().enumerate() {
+            if chapter.end_ms.is_some_and(|end| end <= chapter.start_ms) {
+                continue;
+            }
+            tx.execute("INSERT INTO media_chapters(enclosure_id,sequence,title,start_ms,end_ms,source) VALUES(?1,?2,?3,?4,?5,?6)", params![enclosure_id, sequence as i64, chapter.title, i64::try_from(chapter.start_ms).map_err(|_| CoreError::data("chapter start exceeds SQLite integer range"))?, chapter.end_ms.map(i64::try_from).transpose().map_err(|_| CoreError::data("chapter end exceeds SQLite integer range"))?, match chapter.source { MediaChapterSource::Embedded => "embedded", MediaChapterSource::ArticleContent => "article_content" }]).map_err(sql_error)?;
+        }
+        tx.commit().map_err(sql_error)
+    }
+
+    pub fn analyze_downloaded_media(&self, enclosure_id: i64) -> Result<(), CoreError> {
+        let (local_file, article_html): (String, String) = self.connection.lock().map_err(|_| CoreError::internal("database lock poisoned"))?.query_row("SELECT d.local_file,a.raw_html_content FROM media_downloads d JOIN enclosures e ON e.id=d.enclosure_id JOIN articles a ON a.id=e.article_id WHERE d.enclosure_id=?1 AND d.state='downloaded'", [enclosure_id], |row| Ok((row.get(0)?, row.get(1)?))).map_err(sql_error)?;
+        let analyzed = resolve_media_reference(&self.media_root, &local_file)
+            .map(|path| analyze_file(&path))
+            .unwrap_or_default();
+        let artwork_reference = self.persist_artwork(&analyzed.artwork)?;
+        let chapters = if analyzed.embedded_chapters.is_empty() {
+            article_chapters(&article_html, analyzed.duration_ms)
+        } else {
+            analyzed.embedded_chapters.clone()
+        };
+        let source = if analyzed.embedded_chapters.is_empty() {
+            MediaChapterSource::ArticleContent
+        } else {
+            MediaChapterSource::Embedded
+        };
+        self.replace_media_metadata(
+            enclosure_id,
+            &MediaMetadata {
+                enclosure_id,
+                duration_ms: analyzed.duration_ms,
+                embedded_artwork_reference: artwork_reference,
+            },
+            &to_domain_chapters(enclosure_id, source, &chapters),
+        )
+    }
+
+    fn persist_artwork(&self, data: &Option<Vec<u8>>) -> Result<Option<String>, CoreError> {
+        let Some(data) = data else { return Ok(None) };
+        let Ok(image) = image::load_from_memory(data) else {
+            return Ok(None);
+        };
+        let mut png = Cursor::new(Vec::new());
+        if image.write_to(&mut png, image::ImageFormat::Png).is_err() {
+            return Ok(None);
+        }
+        let png = png.into_inner();
+        let digest = Sha256::digest(&png);
+        let relative = format!("metadata/artwork-{}.png", hex_digest(&digest));
+        let path = self.media_root.join(&relative);
+        if std::fs::create_dir_all(path.parent().expect("artwork path has parent")).is_err() {
+            return Ok(None);
+        }
+        if !path.exists() && std::fs::write(&path, png).is_err() {
+            return Ok(None);
+        }
+        Ok(Some(relative))
+    }
+
+    pub fn observe_media_metadata_duration(
+        &self,
+        enclosure_id: i64,
+        duration_ms: u64,
+    ) -> Result<(), CoreError> {
+        let duration = i64::try_from(duration_ms)
+            .map_err(|_| CoreError::data("media duration exceeds SQLite integer range"))?;
+        if duration == 0 {
+            return Err(CoreError::data("media duration must be positive"));
+        }
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        ensure_enclosure(&tx, enclosure_id)?;
+        let duration_source: Option<String> = tx
+            .query_row(
+                "SELECT duration_source FROM media_metadata WHERE enclosure_id=?1",
+                [enclosure_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(sql_error)?
+            .flatten();
+        if duration_source.as_deref() != Some("local") {
+            tx.execute("INSERT INTO media_metadata(enclosure_id,duration_ms,duration_source) VALUES(?1,?2,'native') ON CONFLICT(enclosure_id) DO UPDATE SET duration_ms=excluded.duration_ms,duration_source='native'", params![enclosure_id, duration]).map_err(sql_error)?;
+        }
+        tx.commit().map_err(sql_error)
     }
 
     pub fn request_download(
@@ -1113,6 +1271,21 @@ impl Store {
         }
         let size = i64::try_from(file_size_bytes)
             .map_err(|_| CoreError::data("download_finished file size exceeds SQLite range"))?;
+        let analyzed = resolve_media_reference(&self.media_root, local_file)
+            .map(|path| analyze_file(&path))
+            .unwrap_or_default();
+        let article_html = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .query_row(
+                "SELECT a.raw_html_content FROM articles a JOIN enclosures e ON e.article_id=a.id WHERE e.id=?1",
+                [enclosure_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(sql_error)?
+            .unwrap_or_default();
         let mut connection = self
             .connection
             .lock()
@@ -1125,6 +1298,14 @@ impl Store {
                     params![local_file, size, Utc::now().to_rfc3339(), enclosure_id],
                 )
                 .map_err(sql_error)?;
+                let artwork_reference = self.persist_artwork(&analyzed.artwork)?;
+                persist_media_metadata(
+                    &tx,
+                    enclosure_id,
+                    &article_html,
+                    &analyzed,
+                    artwork_reference.as_deref(),
+                )?;
             }
             _ => {
                 return Err(CoreError::data(
@@ -1466,9 +1647,9 @@ impl Store {
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let sql = if feed_id.is_some() {
-            "SELECT s.enclosure_id,e.article_id,a.feed_id,a.title,f.title,a.published_at,s.added_at,e.url,e.mime_type,e.remote_present FROM saved_media s JOIN enclosures e ON e.id=s.enclosure_id JOIN articles a ON a.id=e.article_id JOIN feeds f ON f.id=a.feed_id WHERE a.feed_id=?1 ORDER BY a.published_at DESC,a.id DESC,e.id DESC"
+            "SELECT s.enclosure_id,e.article_id,a.feed_id,a.title,f.title,a.published_at,s.added_at,e.url,e.mime_type,e.remote_present,(SELECT duration_ms FROM media_metadata m WHERE m.enclosure_id=e.id),COALESCE((SELECT e2.url FROM enclosures e2 WHERE e2.article_id=e.article_id AND lower(e2.mime_type) LIKE 'image/%' ORDER BY e2.id LIMIT 1),(SELECT m.embedded_artwork_reference FROM media_metadata m WHERE m.enclosure_id=e.id),a.image_url) FROM saved_media s JOIN enclosures e ON e.id=s.enclosure_id JOIN articles a ON a.id=e.article_id JOIN feeds f ON f.id=a.feed_id WHERE a.feed_id=?1 ORDER BY a.published_at DESC,a.id DESC,e.id DESC"
         } else {
-            "SELECT s.enclosure_id,e.article_id,a.feed_id,a.title,f.title,a.published_at,s.added_at,e.url,e.mime_type,e.remote_present FROM saved_media s JOIN enclosures e ON e.id=s.enclosure_id JOIN articles a ON a.id=e.article_id JOIN feeds f ON f.id=a.feed_id ORDER BY s.added_at DESC,s.enclosure_id DESC"
+            "SELECT s.enclosure_id,e.article_id,a.feed_id,a.title,f.title,a.published_at,s.added_at,e.url,e.mime_type,e.remote_present,(SELECT duration_ms FROM media_metadata m WHERE m.enclosure_id=e.id),COALESCE((SELECT e2.url FROM enclosures e2 WHERE e2.article_id=e.article_id AND lower(e2.mime_type) LIKE 'image/%' ORDER BY e2.id LIMIT 1),(SELECT m.embedded_artwork_reference FROM media_metadata m WHERE m.enclosure_id=e.id),a.image_url) FROM saved_media s JOIN enclosures e ON e.id=s.enclosure_id JOIN articles a ON a.id=e.article_id JOIN feeds f ON f.id=a.feed_id ORDER BY s.added_at DESC,s.enclosure_id DESC"
         };
         let mut statement = connection.prepare(sql).map_err(sql_error)?;
         let rows = if let Some(feed_id) = feed_id {
@@ -2276,6 +2457,11 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
         tx.execute_batch("CREATE TABLE IF NOT EXISTS feed_preferences (feed_id INTEGER PRIMARY KEY, system_notifications_enabled INTEGER NOT NULL DEFAULT 0 CHECK(system_notifications_enabled IN(0,1)), detail_rendering TEXT NOT NULL DEFAULT 'rendered' CHECK(detail_rendering IN('rendered','text_only')), truncate_detail INTEGER NOT NULL DEFAULT 0 CHECK(truncate_detail IN(0,1)), open_in_miniflux INTEGER NOT NULL DEFAULT 0 CHECK(open_in_miniflux IN(0,1))); ALTER TABLE feed_preferences ADD COLUMN auto_download_audio INTEGER NOT NULL DEFAULT 0 CHECK(auto_download_audio IN(0,1)); CREATE TABLE auto_download_suppressions (enclosure_id INTEGER PRIMARY KEY REFERENCES enclosures(id) ON DELETE CASCADE); PRAGMA user_version=15;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
+    if current < 16 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute_batch("CREATE TABLE media_metadata (enclosure_id INTEGER PRIMARY KEY REFERENCES enclosures(id) ON DELETE CASCADE, duration_ms INTEGER CHECK(duration_ms IS NULL OR duration_ms > 0), duration_source TEXT NOT NULL DEFAULT 'native' CHECK(duration_source IN ('native','local')), embedded_artwork_reference TEXT); CREATE TABLE media_chapters (enclosure_id INTEGER NOT NULL REFERENCES enclosures(id) ON DELETE CASCADE, sequence INTEGER NOT NULL CHECK(sequence >= 0), title TEXT NOT NULL, start_ms INTEGER NOT NULL CHECK(start_ms >= 0), end_ms INTEGER CHECK(end_ms IS NULL OR end_ms > start_ms), source TEXT NOT NULL CHECK(source IN ('embedded','article_content')), PRIMARY KEY(enclosure_id,sequence)); PRAGMA user_version=16;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
     Ok(())
 }
 fn initialize_core_settings(connection: &Connection) -> Result<(), CoreError> {
@@ -2382,6 +2568,45 @@ fn upsert_remote_enclosures(
         .map_err(sql_error)?;
     }
     Ok(())
+}
+
+fn persist_media_metadata(
+    tx: &Transaction<'_>,
+    enclosure_id: i64,
+    article_html: &str,
+    analyzed: &AnalyzedMedia,
+    artwork_reference: Option<&str>,
+) -> Result<(), CoreError> {
+    let duration_ms = analyzed
+        .duration_ms
+        .map(i64::try_from)
+        .transpose()
+        .map_err(|_| CoreError::data("media duration exceeds SQLite integer range"))?;
+    tx.execute("INSERT INTO media_metadata(enclosure_id,duration_ms,duration_source,embedded_artwork_reference) VALUES(?1,?2,'local',?3) ON CONFLICT(enclosure_id) DO UPDATE SET duration_ms=COALESCE(excluded.duration_ms,media_metadata.duration_ms),duration_source=CASE WHEN excluded.duration_ms IS NOT NULL THEN 'local' ELSE media_metadata.duration_source END,embedded_artwork_reference=excluded.embedded_artwork_reference", params![enclosure_id, duration_ms, artwork_reference]).map_err(sql_error)?;
+    tx.execute(
+        "DELETE FROM media_chapters WHERE enclosure_id=?1",
+        [enclosure_id],
+    )
+    .map_err(sql_error)?;
+    let chapters = if analyzed.embedded_chapters.is_empty() {
+        article_chapters(article_html, analyzed.duration_ms)
+    } else {
+        analyzed.embedded_chapters.clone()
+    };
+    let source = if analyzed.embedded_chapters.is_empty() {
+        MediaChapterSource::ArticleContent
+    } else {
+        MediaChapterSource::Embedded
+    };
+    let chapters = to_domain_chapters(enclosure_id, source, &chapters);
+    for (sequence, chapter) in chapters.iter().enumerate() {
+        tx.execute("INSERT INTO media_chapters(enclosure_id,sequence,title,start_ms,end_ms,source) VALUES(?1,?2,?3,?4,?5,?6)", params![enclosure_id, sequence as i64, chapter.title, i64::try_from(chapter.start_ms).map_err(|_| CoreError::data("chapter start exceeds SQLite integer range"))?, chapter.end_ms.map(i64::try_from).transpose().map_err(|_| CoreError::data("chapter end exceeds SQLite integer range"))?, match chapter.source { MediaChapterSource::Embedded => "embedded", MediaChapterSource::ArticleContent => "article_content" }]).map_err(sql_error)?;
+    }
+    Ok(())
+}
+
+fn hex_digest(digest: &[u8]) -> String {
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 fn save_media(tx: &Transaction<'_>, enclosure_id: i64, added_at: &str) -> Result<bool, CoreError> {
     let enclosure = tx
@@ -2740,6 +2965,11 @@ fn saved_playable_media_from_row(
         media_kind: crate::domain::MediaKind::from_mime_type(&mime_type),
         mime_type,
         remote_present: row.get(9)?,
+        duration_ms: row
+            .get::<_, Option<i64>>(10)?
+            .map(|value| u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery))
+            .transpose()?,
+        artwork_reference: row.get(11)?,
     })
 }
 fn setting_value(connection: &Connection, key: &str) -> Result<String, CoreError> {
@@ -2883,7 +3113,7 @@ mod tests {
         let connection = store.connection.lock().unwrap();
         let row: (i64, String, Option<String>, String, bool, bool, i64, i64) = connection.query_row("SELECT content_processing_version,preview,image_url,raw_html_content,is_read,is_starred,feed_id,(SELECT COUNT(*) FROM pending_mutations) FROM articles WHERE id=3", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).unwrap();
         drop(connection);
-        assert_eq!(store.schema_version().unwrap(), 15);
+        assert_eq!(store.schema_version().unwrap(), 16);
         assert_eq!(row.0, crate::article::PROCESSING_VERSION);
         assert_eq!(row.1, "Hello world");
         assert_eq!(row.2.as_deref(), Some("https://example.test/cover.jpg"));
@@ -2907,7 +3137,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 15);
+        assert_eq!(store.schema_version().unwrap(), 16);
         assert_eq!(
             store.feed_preferences(2).unwrap(),
             FeedPreferences {
@@ -2999,7 +3229,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 15);
+        assert_eq!(store.schema_version().unwrap(), 16);
         assert_eq!(
             store.feed_preferences(123).unwrap(),
             FeedPreferences {
@@ -3050,7 +3280,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 15);
+        assert_eq!(store.schema_version().unwrap(), 16);
         let connection = store.connection.lock().unwrap();
         assert_eq!(
             connection
@@ -3316,7 +3546,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 15);
+        assert_eq!(store.schema_version().unwrap(), 16);
         assert!(!store.enclosure(10).unwrap().unwrap().remote_present);
         assert_eq!(
             store
@@ -3357,7 +3587,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 15);
+        assert_eq!(store.schema_version().unwrap(), 16);
         // existing B1/B2/B3 data survives
         assert!(store.saved_media(10).unwrap().is_some());
         assert_eq!(store.playback_state(10).unwrap().unwrap().position_ms, 5000);
@@ -3396,7 +3626,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 15);
+        assert_eq!(store.schema_version().unwrap(), 16);
         // Existing valid v13 rows survive intact.
         let requested = store.media_download(10).unwrap().unwrap();
         assert_eq!(requested.state, DownloadState::Requested);
@@ -3651,7 +3881,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 15);
+        assert_eq!(store.schema_version().unwrap(), 16);
         let connection = store.connection.lock().unwrap();
         let foreign_key_count: i64 = connection
             .query_row(
@@ -5097,6 +5327,68 @@ mod tests {
         assert!(
             matches!(result, Err(rusqlite::Error::SqliteFailure(_, _))),
             "expected origin NOT NULL CHECK violation, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn media_metadata_is_enclosure_scoped_ordered_and_idempotently_replaced() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let (article, enclosure) = media_article_enclosure_pair();
+        store
+            .reconcile_with_enclosures(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 10,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                &[article],
+                &[enclosure],
+            )
+            .unwrap();
+        let metadata = MediaMetadata {
+            enclosure_id: 1000,
+            duration_ms: Some(90_000),
+            embedded_artwork_reference: None,
+        };
+        let chapters = vec![
+            MediaChapter {
+                enclosure_id: 1000,
+                title: "Intro".into(),
+                start_ms: 0,
+                end_ms: Some(30_000),
+                source: MediaChapterSource::ArticleContent,
+            },
+            MediaChapter {
+                enclosure_id: 1000,
+                title: "Topic".into(),
+                start_ms: 30_000,
+                end_ms: None,
+                source: MediaChapterSource::ArticleContent,
+            },
+        ];
+        store
+            .observe_media_metadata_duration(1000, 120_000)
+            .unwrap();
+        store
+            .replace_media_metadata(1000, &metadata, &chapters)
+            .unwrap();
+        store
+            .replace_media_metadata(1000, &metadata, &chapters)
+            .unwrap();
+        assert_eq!(store.media_metadata(1000).unwrap(), Some(metadata));
+        assert_eq!(store.media_chapters(1000).unwrap(), chapters);
+        store
+            .observe_media_metadata_duration(1000, 120_000)
+            .unwrap();
+        assert_eq!(
+            store.media_metadata(1000).unwrap().unwrap().duration_ms,
+            Some(90_000)
         );
     }
 }

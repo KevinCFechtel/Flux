@@ -114,6 +114,30 @@ pub struct SavedPlayableMediaItem {
     pub mime_type: String,
     pub media_kind: MediaKind,
     pub remote_present: bool,
+    pub duration_ms: Option<u64>,
+    pub artwork_reference: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MediaChapterSource {
+    Embedded,
+    ArticleContent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MediaMetadata {
+    pub enclosure_id: i64,
+    pub duration_ms: Option<u64>,
+    pub embedded_artwork_reference: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MediaChapter {
+    pub enclosure_id: i64,
+    pub title: String,
+    pub start_ms: u64,
+    pub end_ms: Option<u64>,
+    pub source: MediaChapterSource,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

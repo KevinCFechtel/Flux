@@ -14,6 +14,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 base64 = "0.22"
 html5ever = "0.39"
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "ico", "jpeg", "png", "webp"] }
+lofty = "0.22"
 markup5ever_rcdom = "0.39"
 resvg = { version = "0.45.1", default-features = false }
 rusqlite = { version = "0.37", features = ["bundled"] }

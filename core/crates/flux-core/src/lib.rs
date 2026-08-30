@@ -7,6 +7,7 @@ pub mod config_backup;
 pub mod diagnostics;
 pub mod domain;
 mod feed_icon;
+mod media_metadata;
 pub mod miniflux;
 pub mod mutations;
 pub mod queries;
@@ -27,11 +28,12 @@ use domain::{
     CoreSettings, CreateCategoryResult, CreateFeedRequest, CreateFeedResult, DeliveryDisposition,
     DeliveryMode, DetailRenderingMode, DiscoverSubscriptionsRequest, DiscoveredSubscription,
     DownloadFailureKind, DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, FeedIcon,
-    FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, MediaDownload, MutationField,
-    MutationResult, NavigationCatalog, PlaybackState, ReadArticleRetention, ReaderDocument,
-    RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult, SavedMediaSyncConfiguration,
-    SavedMediaSyncSetupInfo, SavedPlayableMediaItem, SearchArticlesRequest, SearchArticlesResult,
-    SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason, WidgetData,
+    FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, MediaChapter, MediaDownload,
+    MediaMetadata, MutationField, MutationResult, NavigationCatalog, PlaybackState,
+    ReadArticleRetention, ReaderDocument, RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult,
+    SavedMediaSyncConfiguration, SavedMediaSyncSetupInfo, SavedPlayableMediaItem,
+    SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition, SyncCompleted,
+    SyncFailure, SyncReason, WidgetData,
 };
 use miniflux::{
     AccountValidationError, AccountValidationResult, HttpHeader, MinifluxClient, RemoteSource,
@@ -591,6 +593,12 @@ impl FluxCore {
     }
     pub fn media_download(&self, enclosure_id: i64) -> Result<Option<MediaDownload>, CoreError> {
         self.store.media_download(enclosure_id)
+    }
+    pub fn media_metadata(&self, enclosure_id: i64) -> Result<Option<MediaMetadata>, CoreError> {
+        self.store.media_metadata(enclosure_id)
+    }
+    pub fn media_chapters(&self, enclosure_id: i64) -> Result<Vec<MediaChapter>, CoreError> {
+        self.store.media_chapters(enclosure_id)
     }
     pub fn downloads_requiring_transfer(&self) -> Result<Vec<i64>, CoreError> {
         self.store.downloads_requiring_transfer()
@@ -1482,7 +1490,7 @@ mod tests {
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            15
+            16
         );
         let bytes = std::fs::read(core.database_path()).unwrap();
         assert!(
