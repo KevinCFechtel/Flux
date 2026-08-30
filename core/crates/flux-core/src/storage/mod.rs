@@ -7,10 +7,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::domain::{
-    Article, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary, Category, CoreError,
-    CoreSettings, DeliveryMode, DetailRenderingMode, DiscoveryMode, DownloadFailureKind,
-    DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, DownloadState, Enclosure, Feed,
-    FeedPreferences, FeedSystemNotificationSetting, MediaChapter, MediaChapterSource,
+    Article, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary, Category,
+    ContinueListeningItem, CoreError, CoreSettings, DeliveryMode, DetailRenderingMode,
+    DiscoveryMode, DownloadFailureKind, DownloadNetworkPolicy, DownloadOrigin, DownloadRetention,
+    DownloadState, Enclosure, Feed, FeedPreferences, FeedSystemNotificationSetting,
+    LegacyPlaybackImport, LegacyPlaybackImportResult, MediaChapter, MediaChapterSource,
     MediaDownload, MediaMetadata, MediaTransferWork, MutationField, NavigationCatalog,
     PlaybackState, PlaybackStatus, ReadArticleRetention, ReadFilter, SavedMedia,
     SavedMediaMarkerState, SavedMediaSyncConfiguration, SavedPlayableMediaItem, StarredFilter,
@@ -1679,6 +1680,124 @@ impl Store {
         feed_id: i64,
     ) -> Result<Vec<SavedPlayableMediaItem>, CoreError> {
         self.saved_playable_media_query(Some(feed_id))
+    }
+
+    pub fn continue_listening(&self) -> Result<Vec<ContinueListeningItem>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut statement = connection
+            .prepare("SELECT p.enclosure_id,e.article_id,a.feed_id,a.title,f.title,a.published_at,e.url,e.mime_type,p.position_ms,p.duration_ms,p.updated_at,d.local_file FROM playback_states p JOIN enclosures e ON e.id=p.enclosure_id JOIN articles a ON a.id=e.article_id JOIN feeds f ON f.id=a.feed_id LEFT JOIN media_downloads d ON d.enclosure_id=e.id AND d.state IN ('downloaded','delete_requested') WHERE p.status='in_progress' ORDER BY p.updated_at DESC,p.enclosure_id DESC")
+            .map_err(sql_error)?;
+        statement
+            .query_map([], |row| {
+                Ok(ContinueListeningItem {
+                    enclosure_id: row.get(0)?,
+                    article_id: row.get(1)?,
+                    feed_id: row.get(2)?,
+                    title: row.get(3)?,
+                    feed_title: row.get(4)?,
+                    published_at: row.get(5)?,
+                    url: row.get(6)?,
+                    mime_type: row.get(7)?,
+                    position_ms: u64::try_from(row.get::<_, i64>(8)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    duration_ms: row
+                        .get::<_, Option<i64>>(9)?
+                        .map(|value| {
+                            u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery)
+                        })
+                        .transpose()?,
+                    updated_at: row.get(10)?,
+                    local_file: row.get(11)?,
+                })
+            })
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)
+    }
+
+    /// Imports article-keyed legacy progress without guessing an enclosure.
+    /// The marker makes retries after a successful batch harmless.
+    pub fn import_legacy_playback(
+        &self,
+        records: &[LegacyPlaybackImport],
+    ) -> Result<LegacyPlaybackImportResult, CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let already_imported: Option<String> = connection
+            .query_row(
+                "SELECT value FROM core_settings WHERE key='legacy_media_migration_v1'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(sql_error)?;
+        if already_imported.is_some_and(|value| value == "completed") {
+            return Ok(LegacyPlaybackImportResult::default());
+        }
+        let tx = connection.transaction().map_err(sql_error)?;
+        let mut result = LegacyPlaybackImportResult::default();
+        for record in records {
+            let article_exists: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM articles WHERE id=?1)",
+                    [record.article_id],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            if !article_exists {
+                result.skipped_missing += 1;
+                continue;
+            }
+            let mut statement = tx
+                .prepare("SELECT id FROM enclosures WHERE article_id=?1 AND lower(mime_type) LIKE 'audio/%' ORDER BY id")
+                .map_err(sql_error)?;
+            let enclosure_ids: Vec<i64> = statement
+                .query_map([record.article_id], |row| row.get(0))
+                .map_err(sql_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(sql_error)?;
+            let Some(enclosure_id) = enclosure_ids.first().copied() else {
+                result.skipped_missing += 1;
+                continue;
+            };
+            if enclosure_ids.len() != 1 {
+                result.skipped_ambiguous += 1;
+                continue;
+            }
+            let exists: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM playback_states WHERE enclosure_id=?1)",
+                    [enclosure_id],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            if exists {
+                result.already_present += 1;
+                continue;
+            }
+            upsert_playback_state(
+                &tx,
+                enclosure_id,
+                record.position_ms,
+                None,
+                PlaybackStatus::InProgress,
+                &record.updated_at,
+            )?;
+            queue_media_progress(&tx, enclosure_id, record.position_ms / 1_000)?;
+            result.imported += 1;
+        }
+        tx.execute(
+            "INSERT INTO core_settings(key,value) VALUES('legacy_media_migration_v1','completed') ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [],
+        )
+        .map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+        Ok(result)
     }
 
     fn saved_playable_media_query(
@@ -4532,6 +4651,155 @@ mod tests {
         assert_eq!(
             store.pending_media_progress_mutations().unwrap()[0].progression_seconds,
             0
+        );
+    }
+
+    #[test]
+    fn continue_listening_returns_only_in_progress_items_newest_first() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let category = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 2,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        let article = |id: i64, title: &str, published_at: &str| Article {
+            id,
+            feed_id: 2,
+            title: title.into(),
+            url: format!("https://example.test/{id}"),
+            comments_url: String::new(),
+            published_at: published_at.into(),
+            is_read: false,
+            is_starred: false,
+            raw_html_content: String::new(),
+            preview: String::new(),
+            image_url: None,
+        };
+        let articles = [
+            article(1, "Older", "2026-01-01T00:00:00Z"),
+            article(2, "Newer", "2026-01-02T00:00:00Z"),
+        ];
+        let enclosure = |id, article_id| Enclosure {
+            id,
+            article_id,
+            url: format!("https://cdn.test/{id}.mp3"),
+            mime_type: "audio/mpeg".into(),
+            size_bytes: None,
+            remote_media_progression_seconds: 0,
+        };
+        store
+            .reconcile_with_enclosures(
+                &category,
+                &feeds,
+                &articles,
+                &[enclosure(10, 1), enclosure(20, 2)],
+            )
+            .unwrap();
+        store
+            .checkpoint_playback(10, 10_000, None, "2026-01-01T00:01:00Z", false)
+            .unwrap();
+        store
+            .checkpoint_playback(20, 20_000, None, "2026-01-01T00:02:00Z", false)
+            .unwrap();
+        store
+            .complete_playback(10, None, "2026-01-01T00:03:00Z", false)
+            .unwrap();
+
+        let items = store.continue_listening().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].enclosure_id, 20);
+        assert_eq!(items[0].position_ms, 20_000);
+    }
+
+    #[test]
+    fn legacy_playback_import_is_conservative_and_idempotent() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let category = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 2,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        let articles = (1..=2)
+            .map(|id| Article {
+                id,
+                feed_id: 2,
+                title: format!("Article {id}"),
+                url: format!("https://example.test/{id}"),
+                comments_url: String::new(),
+                published_at: "2026-01-01T00:00:00Z".into(),
+                is_read: false,
+                is_starred: false,
+                raw_html_content: String::new(),
+                preview: String::new(),
+                image_url: None,
+            })
+            .collect::<Vec<_>>();
+        let enclosures = [
+            Enclosure {
+                id: 10,
+                article_id: 1,
+                url: "https://cdn.test/1.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+            Enclosure {
+                id: 20,
+                article_id: 2,
+                url: "https://cdn.test/2a.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+            Enclosure {
+                id: 21,
+                article_id: 2,
+                url: "https://cdn.test/2b.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+        ];
+        store
+            .reconcile_with_enclosures(&category, &feeds, &articles, &enclosures)
+            .unwrap();
+        let records = [
+            LegacyPlaybackImport {
+                article_id: 1,
+                position_ms: 0,
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            },
+            LegacyPlaybackImport {
+                article_id: 2,
+                position_ms: 2_000,
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            },
+            LegacyPlaybackImport {
+                article_id: 99,
+                position_ms: 3_000,
+                updated_at: "2026-01-01T00:00:00Z".into(),
+            },
+        ];
+        let result = store.import_legacy_playback(&records).unwrap();
+        assert_eq!(result.imported, 1);
+        assert_eq!(result.skipped_ambiguous, 1);
+        assert_eq!(result.skipped_missing, 1);
+        assert_eq!(store.playback_state(10).unwrap().unwrap().position_ms, 0);
+        assert_eq!(
+            store.import_legacy_playback(&records).unwrap(),
+            LegacyPlaybackImportResult::default()
         );
     }
 

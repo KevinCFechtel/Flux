@@ -155,6 +155,38 @@ pub struct PlaybackState {
     pub updated_at: String,
 }
 
+/// In-progress media ordered for the native Continue Listening surface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContinueListeningItem {
+    pub enclosure_id: i64,
+    pub article_id: i64,
+    pub feed_id: i64,
+    pub title: String,
+    pub feed_title: String,
+    pub published_at: String,
+    pub url: String,
+    pub mime_type: String,
+    pub position_ms: u64,
+    pub duration_ms: Option<u64>,
+    pub updated_at: String,
+    pub local_file: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LegacyPlaybackImport {
+    pub article_id: i64,
+    pub position_ms: u64,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LegacyPlaybackImportResult {
+    pub imported: u32,
+    pub skipped_missing: u32,
+    pub skipped_ambiguous: u32,
+    pub already_present: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlaybackPreparation {
     pub enclosure: Enclosure,

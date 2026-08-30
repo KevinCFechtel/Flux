@@ -385,6 +385,34 @@ pub struct PlaybackState {
     pub updated_at: Option<String>,
 }
 #[derive(uniffi::Record)]
+pub struct ContinueListeningItem {
+    pub enclosure_id: i64,
+    pub article_id: i64,
+    pub feed_id: i64,
+    pub title: String,
+    pub feed_title: String,
+    pub published_at: String,
+    pub url: String,
+    pub mime_type: String,
+    pub position_ms: u64,
+    pub duration_ms: Option<u64>,
+    pub updated_at: String,
+    pub local_file: Option<String>,
+}
+#[derive(uniffi::Record)]
+pub struct LegacyPlaybackImport {
+    pub article_id: i64,
+    pub position_ms: u64,
+    pub updated_at: String,
+}
+#[derive(uniffi::Record)]
+pub struct LegacyPlaybackImportResult {
+    pub imported: u32,
+    pub skipped_missing: u32,
+    pub skipped_ambiguous: u32,
+    pub already_present: u32,
+}
+#[derive(uniffi::Record)]
 pub struct PlaybackPreparation {
     pub enclosure: Enclosure,
     pub playback_state: PlaybackState,
@@ -824,6 +852,26 @@ impl Flux {
         self.core
             .saved_media_by_feed(feed_id)
             .map(|rows| rows.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn continue_listening(&self) -> Result<Vec<ContinueListeningItem>, FluxError> {
+        self.core
+            .continue_listening()
+            .map(|rows| rows.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn import_legacy_playback(
+        &self,
+        records: Vec<LegacyPlaybackImport>,
+    ) -> Result<LegacyPlaybackImportResult, FluxError> {
+        self.core
+            .import_legacy_playback(
+                &records
+                    .into_iter()
+                    .map(|record| record.into())
+                    .collect::<Vec<_>>(),
+            )
+            .map(Into::into)
             .map_err(map_error)
     }
     pub fn save_media(&self, enclosure_id: i64) -> Result<(), FluxError> {
@@ -1990,6 +2038,44 @@ impl From<domain::PlaybackState> for PlaybackState {
             duration_ms: value.duration_ms,
             status: value.status.into(),
             updated_at: Some(value.updated_at),
+        }
+    }
+}
+
+impl From<domain::ContinueListeningItem> for ContinueListeningItem {
+    fn from(value: domain::ContinueListeningItem) -> Self {
+        Self {
+            enclosure_id: value.enclosure_id,
+            article_id: value.article_id,
+            feed_id: value.feed_id,
+            title: value.title,
+            feed_title: value.feed_title,
+            published_at: value.published_at,
+            url: value.url,
+            mime_type: value.mime_type,
+            position_ms: value.position_ms,
+            duration_ms: value.duration_ms,
+            updated_at: value.updated_at,
+            local_file: value.local_file,
+        }
+    }
+}
+impl From<LegacyPlaybackImport> for domain::LegacyPlaybackImport {
+    fn from(value: LegacyPlaybackImport) -> Self {
+        Self {
+            article_id: value.article_id,
+            position_ms: value.position_ms,
+            updated_at: value.updated_at,
+        }
+    }
+}
+impl From<domain::LegacyPlaybackImportResult> for LegacyPlaybackImportResult {
+    fn from(value: domain::LegacyPlaybackImportResult) -> Self {
+        Self {
+            imported: value.imported,
+            skipped_missing: value.skipped_missing,
+            skipped_ambiguous: value.skipped_ambiguous,
+            already_present: value.already_present,
         }
     }
 }

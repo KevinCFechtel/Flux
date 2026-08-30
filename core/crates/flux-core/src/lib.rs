@@ -24,16 +24,18 @@ use chrono::{DateTime, Utc};
 
 use diagnostics::{CoreDiagnosticListener, Diagnostics};
 use domain::{
-    ArticleQuery, ArticleSummary, ArticleThumbnailResult, CoreError, CoreErrorKind, CoreEvent,
-    CoreSettings, CreateCategoryResult, CreateFeedRequest, CreateFeedResult, DeliveryDisposition,
-    DeliveryMode, DetailRenderingMode, DiscoverSubscriptionsRequest, DiscoveredSubscription,
-    DownloadFailureKind, DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, DownloadState,
-    Enclosure, FeedIcon, FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting,
-    MediaChapter, MediaDownload, MediaMetadata, MediaTransferWork, MutationField, MutationResult,
-    NavigationCatalog, PlaybackPreparation, PlaybackState, ReadArticleRetention, ReaderDocument,
-    RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult, SavedMediaSyncConfiguration,
-    SavedMediaSyncSetupInfo, SavedPlayableMediaItem, SearchArticlesRequest, SearchArticlesResult,
-    SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason, WidgetData,
+    ArticleQuery, ArticleSummary, ArticleThumbnailResult, ContinueListeningItem, CoreError,
+    CoreErrorKind, CoreEvent, CoreSettings, CreateCategoryResult, CreateFeedRequest,
+    CreateFeedResult, DeliveryDisposition, DeliveryMode, DetailRenderingMode,
+    DiscoverSubscriptionsRequest, DiscoveredSubscription, DownloadFailureKind,
+    DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, DownloadState, Enclosure, FeedIcon,
+    FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, LegacyPlaybackImport,
+    LegacyPlaybackImportResult, MediaChapter, MediaDownload, MediaMetadata, MediaTransferWork,
+    MutationField, MutationResult, NavigationCatalog, PlaybackPreparation, PlaybackState,
+    ReadArticleRetention, ReaderDocument, RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult,
+    SavedMediaSyncConfiguration, SavedMediaSyncSetupInfo, SavedPlayableMediaItem,
+    SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition, SyncCompleted,
+    SyncFailure, SyncReason, WidgetData,
 };
 use miniflux::{
     AccountValidationError, AccountValidationResult, HttpHeader, MinifluxClient, RemoteSource,
@@ -505,6 +507,15 @@ impl FluxCore {
         feed_id: i64,
     ) -> Result<Vec<SavedPlayableMediaItem>, CoreError> {
         self.store.saved_media_by_feed(feed_id)
+    }
+    pub fn continue_listening(&self) -> Result<Vec<ContinueListeningItem>, CoreError> {
+        self.store.continue_listening()
+    }
+    pub fn import_legacy_playback(
+        &self,
+        records: &[LegacyPlaybackImport],
+    ) -> Result<LegacyPlaybackImportResult, CoreError> {
+        self.store.import_legacy_playback(records)
     }
     /// Refreshes Core-owned, non-persistent Miniflux capability state after validation/connectivity.
     pub fn update_miniflux_capabilities(&self) -> Result<(), CoreError> {
