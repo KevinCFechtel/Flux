@@ -28,7 +28,12 @@ pub fn run(
     let snapshot = remote.fetch_initial_articles()?;
     tracing::info!(target: "sync", "remote fetch completed articles={} elapsed_ms={}", snapshot.articles.len(), fetch_started.elapsed().as_millis());
     let reconcile_started = Instant::now();
-    let stats = store.reconcile(&snapshot.categories, &snapshot.feeds, &snapshot.articles)?;
+    let stats = store.reconcile_with_enclosures(
+        &snapshot.categories,
+        &snapshot.feeds,
+        &snapshot.articles,
+        &snapshot.enclosures,
+    )?;
     tracing::info!(target: "storage", "reconciliation completed new={} updated={} elapsed_ms={}", stats.new_articles, stats.updated_articles, reconcile_started.elapsed().as_millis());
     let cutoff = Utc::now() - Duration::days(retention.days());
     let cleanup_started = Instant::now();

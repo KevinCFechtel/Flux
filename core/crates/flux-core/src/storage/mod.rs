@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use crate::domain::{
     Article, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary, Category, CoreError,
-    CoreSettings, DeliveryMode, DetailRenderingMode, Feed, FeedPreferences,
+    CoreSettings, DeliveryMode, DetailRenderingMode, Enclosure, Feed, FeedPreferences,
     FeedSystemNotificationSetting, MutationField, NavigationCatalog, ReadArticleRetention,
     ReadFilter, StarredFilter, SystemNotificationCandidate, WidgetArticle, WidgetCounts,
     WidgetData, WidgetScopedCount,
@@ -15,7 +15,7 @@ use crate::domain::{
 use crate::miniflux::normalize_installation_base;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 #[derive(Clone, Debug)]
 pub struct PendingMutation {
@@ -29,6 +29,12 @@ pub struct PendingMutation {
 pub struct LocalArticleState {
     pub is_read: bool,
     pub is_starred: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredEnclosure {
+    pub enclosure: Enclosure,
+    pub remote_present: bool,
 }
 
 pub(crate) struct ReaderArticle {
@@ -274,6 +280,15 @@ impl Store {
         feeds: &[Feed],
         articles: &[Article],
     ) -> Result<ReconciliationStats, CoreError> {
+        self.reconcile_with_enclosures(categories, feeds, articles, &[])
+    }
+    pub fn reconcile_with_enclosures(
+        &self,
+        categories: &[Category],
+        feeds: &[Feed],
+        articles: &[Article],
+        enclosures: &[Enclosure],
+    ) -> Result<ReconciliationStats, CoreError> {
         let mut connection = self
             .connection
             .lock()
@@ -404,6 +419,7 @@ impl Store {
             }
             tx.execute("INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11,?12) ON CONFLICT(id) DO UPDATE SET feed_id=excluded.feed_id,title=excluded.title,url=excluded.url,comments_url=excluded.comments_url,published_at=excluded.published_at,remote_is_read=excluded.remote_is_read,remote_is_starred=excluded.remote_is_starred,is_read=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='read') THEN articles.is_read ELSE excluded.is_read END,is_starred=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='starred') THEN articles.is_starred ELSE excluded.is_starred END,raw_html_content=excluded.raw_html_content,preview=excluded.preview,image_url=excluded.image_url,content_processing_version=excluded.content_processing_version", params![a.id,a.feed_id,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.raw_html_content,a.preview,a.image_url,crate::article::PROCESSING_VERSION]).map_err(sql_error)?;
         }
+        upsert_remote_enclosures(&tx, enclosures)?;
         let remote_category_ids: HashSet<i64> =
             categories.iter().map(|category| category.id).collect();
         let stale_category_ids = {
@@ -424,6 +440,74 @@ impl Store {
         stats.navigation_changed |= !stale_category_ids.is_empty();
         tx.commit().map_err(sql_error)?;
         Ok(stats)
+    }
+
+    /// Stores remotely observed enclosures without deciding remote-removal state.
+    pub fn upsert_remote_enclosures(&self, enclosures: &[Enclosure]) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        upsert_remote_enclosures(&tx, enclosures)?;
+        tx.commit().map_err(sql_error)
+    }
+
+    pub fn enclosure(&self, enclosure_id: i64) -> Result<Option<StoredEnclosure>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        connection
+            .query_row(
+                "SELECT id,article_id,url,mime_type,size_bytes,remote_media_progression_seconds,remote_present FROM enclosures WHERE id=?1",
+                [enclosure_id],
+                stored_enclosure_from_row,
+            )
+            .optional()
+            .map_err(sql_error)
+    }
+
+    pub fn enclosures_for_article(
+        &self,
+        article_id: i64,
+    ) -> Result<Vec<StoredEnclosure>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut statement = connection
+            .prepare("SELECT id,article_id,url,mime_type,size_bytes,remote_media_progression_seconds,remote_present FROM enclosures WHERE article_id=?1 ORDER BY id")
+            .map_err(sql_error)?;
+        statement
+            .query_map([article_id], stored_enclosure_from_row)
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)
+    }
+
+    pub fn set_enclosure_remote_present(
+        &self,
+        enclosure_id: i64,
+        remote_present: bool,
+    ) -> Result<(), CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        if connection
+            .execute(
+                "UPDATE enclosures SET remote_present=?2 WHERE id=?1",
+                params![enclosure_id, remote_present],
+            )
+            .map_err(sql_error)?
+            == 0
+        {
+            return Err(CoreError::data(format!(
+                "enclosure {enclosure_id} does not exist"
+            )));
+        }
+        Ok(())
     }
 
     pub fn feed_system_notification_settings(
@@ -1095,7 +1179,7 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
             let processed = crate::article::process(html, url, &[]);
             tx.execute("UPDATE articles SET preview=?1,image_url=?2,content_processing_version=?3 WHERE id=?4", params![processed.preview, processed.image_url, crate::article::PROCESSING_VERSION, id]).map_err(sql_error)?;
         }
-        tx.pragma_update(None, "user_version", SCHEMA_VERSION)
+        tx.pragma_update(None, "user_version", 4)
             .map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
         tracing::info!(target: "storage", "article content reprocessing completed processed={}", rows.len());
@@ -1113,6 +1197,11 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
     if current == 6 {
         let tx = connection.transaction().map_err(sql_error)?;
         tx.execute_batch("CREATE TABLE feed_preferences_replacement (feed_id INTEGER PRIMARY KEY, system_notifications_enabled INTEGER NOT NULL DEFAULT 0 CHECK(system_notifications_enabled IN(0,1)), detail_rendering TEXT NOT NULL DEFAULT 'rendered' CHECK(detail_rendering IN('rendered','text_only')), truncate_detail INTEGER NOT NULL DEFAULT 0 CHECK(truncate_detail IN(0,1)), open_in_miniflux INTEGER NOT NULL DEFAULT 0 CHECK(open_in_miniflux IN(0,1))); INSERT INTO feed_preferences_replacement (feed_id,system_notifications_enabled,detail_rendering,truncate_detail,open_in_miniflux) SELECT feed_id,system_notifications_enabled,detail_rendering,truncate_detail,open_in_miniflux FROM feed_preferences; DROP TABLE feed_preferences; ALTER TABLE feed_preferences_replacement RENAME TO feed_preferences; PRAGMA user_version=7;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
+    if current < 8 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute_batch("CREATE TABLE enclosures (id INTEGER PRIMARY KEY, article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE, url TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER, remote_media_progression_seconds INTEGER NOT NULL CHECK(remote_media_progression_seconds >= 0), remote_present INTEGER NOT NULL DEFAULT 1 CHECK(remote_present IN(0,1)), CHECK(size_bytes IS NULL OR size_bytes > 0)); CREATE INDEX enclosures_article ON enclosures(article_id,id); PRAGMA user_version=8;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
     Ok(())
@@ -1160,6 +1249,46 @@ fn clear_synchronized_state(
             .map_err(sql_error)?;
     }
     tx.execute_batch("DELETE FROM feeds; DELETE FROM categories; DELETE FROM core_settings WHERE key='last_successful_sync_at';").map_err(sql_error)
+}
+fn upsert_remote_enclosures(
+    tx: &Transaction<'_>,
+    enclosures: &[Enclosure],
+) -> Result<(), CoreError> {
+    for enclosure in enclosures {
+        let size_bytes = enclosure
+            .size_bytes
+            .map(i64::try_from)
+            .transpose()
+            .map_err(|_| CoreError::data("enclosure size exceeds SQLite integer range"))?;
+        let remote_media_progression_seconds =
+            i64::try_from(enclosure.remote_media_progression_seconds)
+                .map_err(|_| CoreError::data("media progression exceeds SQLite integer range"))?;
+        tx.execute(
+            "INSERT INTO enclosures (id,article_id,url,mime_type,size_bytes,remote_media_progression_seconds,remote_present) VALUES (?1,?2,?3,?4,?5,?6,1) ON CONFLICT(id) DO UPDATE SET article_id=excluded.article_id,url=excluded.url,mime_type=excluded.mime_type,size_bytes=excluded.size_bytes,remote_media_progression_seconds=excluded.remote_media_progression_seconds,remote_present=1",
+            params![enclosure.id, enclosure.article_id, enclosure.url, enclosure.mime_type, size_bytes, remote_media_progression_seconds],
+        )
+        .map_err(sql_error)?;
+    }
+    Ok(())
+}
+fn stored_enclosure_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredEnclosure> {
+    let size_bytes = row
+        .get::<_, Option<i64>>(4)?
+        .map(|size| u64::try_from(size).map_err(|_| rusqlite::Error::InvalidQuery))
+        .transpose()?;
+    let remote_media_progression_seconds =
+        u64::try_from(row.get::<_, i64>(5)?).map_err(|_| rusqlite::Error::InvalidQuery)?;
+    Ok(StoredEnclosure {
+        enclosure: Enclosure {
+            id: row.get(0)?,
+            article_id: row.get(1)?,
+            url: row.get(2)?,
+            mime_type: row.get(3)?,
+            size_bytes,
+            remote_media_progression_seconds,
+        },
+        remote_present: row.get(6)?,
+    })
 }
 fn setting_value(connection: &Connection, key: &str) -> Result<String, CoreError> {
     connection
@@ -1298,7 +1427,7 @@ mod tests {
         let connection = store.connection.lock().unwrap();
         let row: (i64, String, Option<String>, String, bool, bool, i64, i64) = connection.query_row("SELECT content_processing_version,preview,image_url,raw_html_content,is_read,is_starred,feed_id,(SELECT COUNT(*) FROM pending_mutations) FROM articles WHERE id=3", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).unwrap();
         drop(connection);
-        assert_eq!(store.schema_version().unwrap(), 7);
+        assert_eq!(store.schema_version().unwrap(), 8);
         assert_eq!(row.0, crate::article::PROCESSING_VERSION);
         assert_eq!(row.1, "Hello world");
         assert_eq!(row.2.as_deref(), Some("https://example.test/cover.jpg"));
@@ -1322,7 +1451,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 7);
+        assert_eq!(store.schema_version().unwrap(), 8);
         assert_eq!(
             store.feed_preferences(2).unwrap(),
             FeedPreferences {
@@ -1411,7 +1540,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 7);
+        assert_eq!(store.schema_version().unwrap(), 8);
         assert_eq!(
             store.feed_preferences(123).unwrap(),
             FeedPreferences {
@@ -1451,10 +1580,149 @@ mod tests {
     }
 
     #[test]
+    fn v8_migration_preserves_phase_a_data_and_creates_enclosures() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let path = data.join("flux.sqlite3");
+        let connection = Connection::open(&path).unwrap();
+        connection.execute_batch("CREATE TABLE core_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE categories (id INTEGER PRIMARY KEY, title TEXT NOT NULL); CREATE TABLE feeds (id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL REFERENCES categories(id), title TEXT NOT NULL); CREATE TABLE articles (id INTEGER PRIMARY KEY, feed_id INTEGER NOT NULL REFERENCES feeds(id), title TEXT NOT NULL, url TEXT NOT NULL, comments_url TEXT NOT NULL DEFAULT '', published_at TEXT NOT NULL, is_read INTEGER NOT NULL, is_starred INTEGER NOT NULL, raw_html_content TEXT NOT NULL, remote_is_read INTEGER, remote_is_starred INTEGER, preview TEXT NOT NULL DEFAULT '', image_url TEXT, content_processing_version INTEGER NOT NULL DEFAULT 0); INSERT INTO core_settings VALUES ('base_url','https://miniflux.example'); INSERT INTO categories VALUES (1,'Category'); INSERT INTO feeds VALUES (2,1,'Feed'); INSERT INTO articles VALUES (3,2,'Title','https://example.test/post','', '2024-01-01T00:00:00Z',1,0,'<p>Saved</p>',1,0,'Saved',NULL,1); PRAGMA user_version=7;").unwrap();
+        drop(connection);
+
+        let store = Store::open(&data, &cache, &media).unwrap();
+        assert_eq!(store.schema_version().unwrap(), 8);
+        let connection = store.connection.lock().unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT title FROM articles WHERE id=3", [], |row| row
+                    .get::<_, String>(0))
+                .unwrap(),
+            "Title"
+        );
+        let columns = connection
+            .prepare("SELECT name FROM pragma_table_info('enclosures') ORDER BY cid")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            columns,
+            vec![
+                "id",
+                "article_id",
+                "url",
+                "mime_type",
+                "size_bytes",
+                "remote_media_progression_seconds",
+                "remote_present",
+            ]
+        );
+    }
+
+    #[test]
+    fn enclosure_storage_round_trips_updates_and_cascades_from_articles() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 2,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        let articles = [Article {
+            id: 3,
+            feed_id: 2,
+            title: "Article".into(),
+            url: "https://example.test/article".into(),
+            comments_url: String::new(),
+            published_at: "2024-01-01T00:00:00Z".into(),
+            is_read: false,
+            is_starred: false,
+            raw_html_content: String::new(),
+            preview: String::new(),
+            image_url: None,
+        }];
+        let enclosures = [
+            Enclosure {
+                id: 11,
+                article_id: 3,
+                url: "https://cdn.test/episode.mp3?token=raw".into(),
+                mime_type: "audio/mpeg; codecs=mp3".into(),
+                size_bytes: Some(123_456),
+                remote_media_progression_seconds: 42,
+            },
+            Enclosure {
+                id: 12,
+                article_id: 3,
+                url: "https://cdn.test/cover.custom".into(),
+                mime_type: "application/x-cover".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+        ];
+
+        store
+            .reconcile_with_enclosures(&categories, &feeds, &articles, &enclosures)
+            .unwrap();
+        assert_eq!(
+            store.enclosures_for_article(3).unwrap(),
+            enclosures
+                .iter()
+                .cloned()
+                .map(|enclosure| StoredEnclosure {
+                    enclosure,
+                    remote_present: true,
+                })
+                .collect::<Vec<_>>()
+        );
+
+        store
+            .reconcile_with_enclosures(&categories, &feeds, &articles, &[])
+            .unwrap();
+        assert_eq!(store.enclosures_for_article(3).unwrap().len(), 2);
+
+        store.set_enclosure_remote_present(11, false).unwrap();
+        assert!(!store.enclosure(11).unwrap().unwrap().remote_present);
+        let updated = Enclosure {
+            id: 11,
+            article_id: 3,
+            url: "https://cdn.test/episode-updated.mp3".into(),
+            mime_type: "audio/ogg".into(),
+            size_bytes: None,
+            remote_media_progression_seconds: 99,
+        };
+        store
+            .upsert_remote_enclosures(std::slice::from_ref(&updated))
+            .unwrap();
+        assert_eq!(
+            store.enclosure(11).unwrap(),
+            Some(StoredEnclosure {
+                enclosure: updated,
+                remote_present: true,
+            })
+        );
+        assert_eq!(store.enclosures_for_article(3).unwrap().len(), 2);
+
+        store
+            .connection
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM articles WHERE id=3", [])
+            .unwrap();
+        assert!(store.enclosure(11).unwrap().is_none());
+        assert!(store.enclosures_for_article(3).unwrap().is_empty());
+    }
+
+    #[test]
     fn fresh_schema_permits_orphan_preferences_without_cascade() {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
+        assert_eq!(store.schema_version().unwrap(), 8);
         let connection = store.connection.lock().unwrap();
         let foreign_key_count: i64 = connection
             .query_row(
