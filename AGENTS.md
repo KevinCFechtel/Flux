@@ -53,6 +53,29 @@ For macOS, the established build/release path is under `macos/Build/`: `build-un
 
 If a requested change requires a product/architecture decision not already covered by `ARCHITECTURE_DECISIONS.md`, stop and surface that decision instead of guessing.
 
+## Phase B — Shared Podcast / Media Core
+
+For all Phase B media, podcast, enclosure, playback, download, SavedMedia, media metadata, automotive media, and related synchronization work, `docs/PHASE_B_MEDIA_CORE.md` is the authoritative implementation contract.
+
+Agents must:
+
+* follow `docs/PHASE_B_MEDIA_CORE.md` as frozen architecture;
+* implement only the requested Phase B step or sub-step;
+* reuse existing Flux architecture, storage, sync, mutation, retention, and UniFFI patterns where applicable;
+* not redesign or re-open frozen Phase B decisions during implementation;
+* not copy the legacy Flutter FluxNews media architecture as a technical template; it may only be used as a behavioral reference;
+* preserve local-first behavior: playback, downloads, and SavedMedia must remain functional without optional Saved Media Sync;
+* treat the optional Miniflux Saved Media Sync as a replication adapter above the local `SavedMedia` domain, never as its definition.
+
+If the current implementation appears to contradict the Phase B contract, do not silently invent a new architecture. Identify the concrete conflict with:
+
+1. the relevant contract requirement;
+2. the current implementation behavior or constraint;
+3. why both cannot be satisfied as written.
+
+Only escalate genuine contract contradictions. Normal implementation details explicitly left open by the contract should be resolved consistently with the existing Flux codebase.
+
+
 ## Validation
 
 Run validation appropriate to the changed Rust/native target. Never claim a build, test, migration, or command succeeded unless it was actually executed successfully.
