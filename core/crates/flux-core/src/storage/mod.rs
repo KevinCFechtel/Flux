@@ -1171,14 +1171,6 @@ impl Store {
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let tx = connection.transaction().map_err(sql_error)?;
-        let origin: Option<String> = tx
-            .query_row(
-                "SELECT origin FROM media_downloads WHERE enclosure_id=?1",
-                [enclosure_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(sql_error)?;
         match read_download_state(&tx, enclosure_id)? {
             Some(DownloadState::Downloaded) => {
                 tx.execute(
@@ -1186,7 +1178,7 @@ impl Store {
                     [enclosure_id],
                 )
                 .map_err(sql_error)?;
-                if origin.as_deref() == Some("automatic") && tx.query_row("SELECT EXISTS(SELECT 1 FROM articles a JOIN enclosures e ON e.article_id=a.id JOIN feed_preferences p ON p.feed_id=a.feed_id WHERE e.id=?1 AND p.auto_download_audio=1)", [enclosure_id], |row| row.get::<_, bool>(0)).map_err(sql_error)? {
+                if tx.query_row("SELECT EXISTS(SELECT 1 FROM articles a JOIN enclosures e ON e.article_id=a.id JOIN feed_preferences p ON p.feed_id=a.feed_id WHERE e.id=?1 AND p.auto_download_audio=1)", [enclosure_id], |row| row.get::<_, bool>(0)).map_err(sql_error)? {
                     tx.execute("INSERT OR IGNORE INTO auto_download_suppressions(enclosure_id) VALUES(?1)", [enclosure_id]).map_err(sql_error)?;
                 }
             }
@@ -4453,12 +4445,23 @@ mod tests {
         assert_eq!(finished.origin, Some(DownloadOrigin::Manual));
 
         // deletion flow
+        store.set_feed_auto_download_audio(10, true).unwrap();
         store.request_download_deletion(1000).unwrap();
         let deleting = store.media_download(1000).unwrap().unwrap();
         assert_eq!(deleting.state, DownloadState::DeleteRequested);
         assert_eq!(deleting.local_file.as_deref(), Some("enclosure/1000.mp3"));
+        assert!(store.auto_download_suppressed(1000).unwrap());
         store.download_deleted(1000).unwrap();
         assert!(store.media_download(1000).unwrap().is_none());
+
+        store
+            .request_download(1000, DownloadOrigin::Automatic)
+            .unwrap();
+        store
+            .download_finished(1000, "enclosure/1000.mp3", 4096)
+            .unwrap();
+        store.request_download_deletion(1000).unwrap();
+        assert!(store.auto_download_suppressed(1000).unwrap());
     }
 
     #[test]
@@ -4650,6 +4653,7 @@ mod tests {
         assert_eq!(after_unsave.state, DownloadState::Downloaded);
 
         store.request_download_deletion(1000).unwrap();
+        assert!(!store.auto_download_suppressed(1000).unwrap());
         store.download_deleted(1000).unwrap();
         // deletion must not unsave
         assert!(store.saved_media(1000).unwrap().is_none());
