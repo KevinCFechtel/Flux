@@ -665,6 +665,26 @@ impl Store {
         Ok(())
     }
 
+    /// Records the remote write before conditionally clearing the matching local intent.
+    pub fn acknowledge_saved_media_replication_with_remote_state(
+        &self,
+        state: &SavedMediaRemoteState,
+        desired: SavedMediaMarkerState,
+    ) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute("INSERT INTO saved_media_remote_state(enclosure_id,article_id,marker_entry_id,state) VALUES(?1,?2,?3,?4) ON CONFLICT(enclosure_id) DO UPDATE SET article_id=excluded.article_id,marker_entry_id=excluded.marker_entry_id,state=excluded.state", params![state.enclosure_id,state.article_id,state.marker_entry_id,marker_state_db(state.state)]).map_err(sql_error)?;
+        tx.execute(
+            "DELETE FROM pending_saved_media_replication WHERE enclosure_id=?1 AND desired=?2",
+            params![state.enclosure_id, marker_state_db(desired)],
+        )
+        .map_err(sql_error)?;
+        tx.commit().map_err(sql_error)
+    }
+
     pub fn saved_media_replication_pending(&self, enclosure_id: i64) -> Result<bool, CoreError> {
         self.connection
             .lock()

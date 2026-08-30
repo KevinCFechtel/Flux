@@ -1,6 +1,7 @@
 //! Optional Miniflux transport for the local SavedMedia domain.
 
 use chrono::Utc;
+use std::collections::HashMap;
 
 use crate::domain::{
     CoreError, CreateFeedRequest, SavedMediaMarkerState, SavedMediaSyncConfiguration,
@@ -95,6 +96,7 @@ pub fn run(remote: &dyn RemoteSource, store: &Store) -> Result<bool, CoreError> 
         return Ok(false);
     }
     let feed_id = configured_feed(remote, store, &configuration)?;
+    let mut successfully_written = HashMap::new();
     for pending in store.pending_saved_media_replication()? {
         let external_id = marker_external_id(pending.article_id, pending.enclosure_id);
         let mut markers = remote.saved_media_markers(feed_id)?;
@@ -124,7 +126,17 @@ pub fn run(remote: &dyn RemoteSource, store: &Store) -> Result<bool, CoreError> 
             marker_id,
             pending.desired == SavedMediaMarkerState::Saved,
         )?;
-        store.acknowledge_saved_media_replication(pending.enclosure_id, pending.desired)?;
+        let state = pending.desired;
+        store.acknowledge_saved_media_replication_with_remote_state(
+            &SavedMediaRemoteState {
+                enclosure_id: pending.enclosure_id,
+                article_id: pending.article_id,
+                marker_entry_id: marker_id,
+                state,
+            },
+            pending.desired,
+        )?;
+        successfully_written.insert(pending.enclosure_id, state);
     }
 
     let mut changed = false;
@@ -143,6 +155,10 @@ pub fn run(remote: &dyn RemoteSource, store: &Store) -> Result<bool, CoreError> 
         } else {
             SavedMediaMarkerState::Saved
         };
+        if same_run_snapshot_is_stale(successfully_written.get(&enclosure_id), state) {
+            tracing::debug!(target: "saved_media_sync", "ignoring contradictory same-run SavedMedia marker snapshot enclosure_id={enclosure_id}");
+            continue;
+        }
         let previous = store.saved_media_remote_state(enclosure_id)?;
         if previous.as_ref().is_none_or(|previous| {
             previous.state != state || previous.marker_entry_id != marker.entry_id
@@ -196,6 +212,13 @@ fn parse_marker_external_id(value: &str) -> Option<(i64, i64)> {
     (article_id > 0 && enclosure_id > 0).then_some((article_id, enclosure_id))
 }
 
+fn same_run_snapshot_is_stale(
+    successfully_written: Option<&SavedMediaMarkerState>,
+    observed: SavedMediaMarkerState,
+) -> bool {
+    successfully_written.is_some_and(|written| *written != observed)
+}
+
 fn require_capability(remote: &dyn RemoteSource) -> Result<(), CoreError> {
     remote
         .miniflux_capabilities()?
@@ -247,5 +270,26 @@ mod tests {
         );
         assert_eq!(parse_marker_external_id("flux:saved-media:v2:3:4"), None);
         assert_eq!(parse_marker_external_id("flux:saved-media:v1:3:4:5"), None);
+    }
+
+    #[test]
+    fn same_run_stale_snapshot_protection_is_directional_and_temporary() {
+        assert!(same_run_snapshot_is_stale(
+            Some(&SavedMediaMarkerState::Saved),
+            SavedMediaMarkerState::Unsaved
+        ));
+        assert!(same_run_snapshot_is_stale(
+            Some(&SavedMediaMarkerState::Unsaved),
+            SavedMediaMarkerState::Saved
+        ));
+        assert!(!same_run_snapshot_is_stale(
+            Some(&SavedMediaMarkerState::Saved),
+            SavedMediaMarkerState::Saved
+        ));
+        // A later run has no transient write record, so a genuine remote change can apply.
+        assert!(!same_run_snapshot_is_stale(
+            None,
+            SavedMediaMarkerState::Unsaved
+        ));
     }
 }

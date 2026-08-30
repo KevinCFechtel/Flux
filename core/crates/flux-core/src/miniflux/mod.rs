@@ -659,15 +659,7 @@ impl MinifluxClient {
     fn saved_media_markers(&self, feed_id: i64) -> Result<Vec<RemoteSavedMediaMarker>, CoreError> {
         let mut entries = Vec::new();
         for status in ["unread", "read", "removed"] {
-            let page: EntriesDto = self.get(
-                "/v1/entries",
-                &[
-                    ("feed_id", feed_id.to_string()),
-                    ("status", status.to_string()),
-                    ("limit", PAGE_SIZE.to_string()),
-                ],
-            )?;
-            entries.extend(page.entries);
+            entries.extend(self.entries_for_feed_status(feed_id, status)?);
         }
         Ok(entries
             .into_iter()
@@ -679,6 +671,42 @@ impl MinifluxClient {
                 })
             })
             .collect())
+    }
+    fn entries_for_feed_status(
+        &self,
+        feed_id: i64,
+        status: &str,
+    ) -> Result<Vec<EntryDto>, CoreError> {
+        let mut all = Vec::new();
+        let mut after_id = 0;
+        loop {
+            let mut query = vec![
+                ("feed_id", feed_id.to_string()),
+                ("status", status.to_string()),
+                ("limit", PAGE_SIZE.to_string()),
+                ("order", "id".to_string()),
+                ("direction", "asc".to_string()),
+            ];
+            if after_id > 0 {
+                query.push(("after_entry_id", after_id.to_string()));
+            }
+            let page: EntriesDto = self.get("/v1/entries", &query)?;
+            if page.entries.is_empty() {
+                break;
+            }
+            let mut previous = after_id;
+            for entry in &page.entries {
+                if entry.id <= previous {
+                    return Err(CoreError::data(
+                        "Miniflux returned unstable entry pagination",
+                    ));
+                }
+                previous = entry.id;
+            }
+            after_id = previous;
+            all.extend(page.entries);
+        }
+        Ok(all)
     }
     fn saved_media_article(&self, article_id: i64) -> Result<RemoteSavedMediaArticle, CoreError> {
         let entry: EntryDto = self.get(&format!("/v1/entries/{article_id}"), &[])?;
@@ -1711,6 +1739,19 @@ mod tests {
         targets
     }
 
+    fn marker_page(status: &str, ids: impl IntoIterator<Item = i64>) -> String {
+        serde_json::json!({
+            "entries": ids.into_iter().map(|id| serde_json::json!({
+                "id": id,
+                "feed_id": 77,
+                "status": status,
+                "external_id": format!("flux:saved-media:v1:{}:{}", id, id),
+                "published_at": "2026-01-02T03:04:05Z",
+            })).collect::<Vec<_>>(),
+        })
+        .to_string()
+    }
+
     #[test]
     fn entries_continue_after_decreasing_totals_until_empty_page() {
         let (address, worker) = entry_server(vec![
@@ -1748,6 +1789,41 @@ mod tests {
 
         assert_eq!(entries.len(), 100);
         assert_eq!(worker.join().unwrap(), unread_entry_targets(&[100]));
+    }
+
+    #[test]
+    fn saved_media_markers_paginate_every_status() {
+        let (address, worker) = entry_server(vec![
+            (200, marker_page("unread", 1..=100)),
+            (200, marker_page("unread", [101])),
+            (200, marker_page("unread", [])),
+            (200, marker_page("read", [102])),
+            (200, marker_page("read", [])),
+            (200, marker_page("removed", 103..=202)),
+            (200, marker_page("removed", [203])),
+            (200, marker_page("removed", [])),
+        ]);
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        let markers = client.saved_media_markers(77).unwrap();
+
+        assert_eq!(markers.len(), 203);
+        assert!(markers.iter().any(|marker| marker.entry_id == 101));
+        assert!(markers.iter().any(|marker| marker.entry_id == 102));
+        assert!(markers.iter().any(|marker| marker.entry_id == 203));
+        assert_eq!(
+            worker.join().unwrap(),
+            vec![
+                "/v1/entries?feed_id=77&status=unread&limit=100&order=id&direction=asc",
+                "/v1/entries?feed_id=77&status=unread&limit=100&order=id&direction=asc&after_entry_id=100",
+                "/v1/entries?feed_id=77&status=unread&limit=100&order=id&direction=asc&after_entry_id=101",
+                "/v1/entries?feed_id=77&status=read&limit=100&order=id&direction=asc",
+                "/v1/entries?feed_id=77&status=read&limit=100&order=id&direction=asc&after_entry_id=102",
+                "/v1/entries?feed_id=77&status=removed&limit=100&order=id&direction=asc",
+                "/v1/entries?feed_id=77&status=removed&limit=100&order=id&direction=asc&after_entry_id=202",
+                "/v1/entries?feed_id=77&status=removed&limit=100&order=id&direction=asc&after_entry_id=203",
+            ]
+        );
     }
 
     #[test]
