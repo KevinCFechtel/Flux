@@ -317,20 +317,145 @@ The enclosure ID is the stable identity.
 
 Do not create article-keyed, URL-keyed, synthetic, or download-derived saved-media identities.
 
-### Local-only Phase B V1
+### Local-first with optional Miniflux replication
 
-For Phase B V1, `SavedMedia` is intentionally **local-only**.
+`SavedMedia` remains a normal durable local Core domain concept. Playback, downloads, retention protection, and the episode library must work completely without remote Saved Media synchronization.
+
+Phase B additionally supports an **explicitly opt-in Saved Media Sync** that replicates saved/unsaved state through the user's existing Miniflux server.
+
+This replication is an adapter above `SavedMedia`; it does not change the meaning or ownership of the local domain state.
 
 Do not:
 
-- map it to Miniflux starred state
+- map `SavedMedia` to Miniflux starred state
 - encode it in `media_progression`
-- introduce a Flux-specific remote synchronization service
-- create synthetic Miniflux state to imitate episode-library synchronization
+- make Saved Media Sync mandatory for the media core
+- introduce a Flux-specific user-data synchronization service
 
-The absence of cross-device synchronization is an accepted V1 limitation.
+#### Miniflux capability requirement
 
-The domain model must remain replication-ready so that synchronization can be added later without changing what `SavedMedia` means.
+The optional replication requires a Miniflux version that supports importing entries into an existing feed.
+
+Flux must expose this as a capability and keep Saved Media fully local when the server does not support it.
+
+#### Dedicated technical sync feed
+
+Saved Media replication uses one dedicated technical Miniflux feed as a container for Flux-managed marker entries.
+
+The feed is not the episode library itself. It is only a replication transport.
+
+Flux identifies the technical feed by its canonical bootstrap `feed_url`, not by its display title.
+
+The canonical bootstrap feed is a minimal valid RSS/Atom XML file stored publicly in the Flux source repository (for example `init.xml`). Its source and contents must be inspectable by users.
+
+The bootstrap feed contains no user data and no synthetic podcast episodes.
+
+After successful creation, the technical feed should be disabled so Miniflux does not continue polling the bootstrap XML. Entry import remains the mechanism used for replication.
+
+The concrete canonical repository URL is an implementation/release detail, but it must be stable for a released Flux version.
+
+#### Explicit user consent
+
+Saved Media Sync is disabled by default.
+
+Before setup, Flux must briefly and clearly explain that:
+
+- Flux will use a dedicated technical feed in the user's Miniflux account;
+- automatic setup causes the user's Miniflux server to fetch the public Flux `init.xml` once during feed creation;
+- the feed is then disabled and used as a container for Saved Media synchronization;
+- saved-media state remains on the user's Miniflux server; the bootstrap XML contains no user data;
+- the feature is optional and the local episode library works without it.
+
+Setup must only begin after explicit user approval.
+
+#### Setup modes
+
+Flux offers two equivalent setup paths:
+
+```text
+Automatic setup
+Manual setup
+```
+
+These are setup methods, not different long-term synchronization modes.
+
+##### Automatic setup
+
+After explicit approval, Flux:
+
+1. searches for an already existing technical feed whose `feed_url` matches the canonical bootstrap URL;
+2. reuses it when exactly one valid matching feed exists;
+3. otherwise creates the feed through the Miniflux API using the canonical bootstrap URL;
+4. gives it a recognizable title such as `Flux Saved Media`;
+5. disables the feed after successful creation;
+6. verifies the resulting feed;
+7. stores the resolved Miniflux `feed_id` as the replication container.
+
+Flux must not create a second technical feed merely because the feature is activated from another device.
+
+##### Manual setup
+
+Flux shows:
+
+- the canonical bootstrap URL;
+- a concise explanation of the required Miniflux feed;
+- instructions to create it in Miniflux manually.
+
+The user creates the feed on their own server.
+
+Flux then discovers and verifies the feed by canonical `feed_url`.
+
+The manual path is intentionally available for users who want full control over server-side changes.
+
+Flux must not silently modify a manually created feed. If the feed is still enabled, Flux should explain that disabling it avoids unnecessary polling and offer either:
+
+- an explicit action allowing Flux to disable it; or
+- instructions for the user to disable it in Miniflux.
+
+After verification, both setup paths produce the same configured synchronization state.
+
+#### Durable configuration
+
+Do not persist `Automatic` or `Manual` as behavioral modes.
+
+Conceptually, only the resulting configuration matters:
+
+```text
+SavedMediaSync
+  enabled
+  sync_feed_id
+```
+
+The setup path has no effect on later replication semantics.
+
+If the configured feed disappears, Flux must report that setup is required again rather than silently creating a replacement without user approval.
+
+#### Marker identity and semantics
+
+Each replicated enclosure uses a stable marker identity derived from the original Miniflux entities, conceptually:
+
+```text
+external_id =
+  flux:saved-media:v1:<entry-id>:<enclosure-id>
+```
+
+Exact serialization is an implementation detail, but it must be deterministic and versioned.
+
+Marker entries are metadata used for replication. They must not be treated as copied podcast episodes and must not replace the original article or enclosure.
+
+The receiving Flux client resolves the marker back to the original Miniflux entry/enclosure and materializes the normal local `SavedMedia` state.
+
+Save and unsave must both be representable. Unsaving must not rely on physical deletion of the marker because other devices need a durable indication that the state was intentionally removed. The marker protocol therefore needs an explicit active/removed state using supported Miniflux entry state semantics.
+
+The detailed conflict-resolution algorithm is an implementation detail to specify before the replication adapter is implemented, but it must preserve the local-first `SavedMedia` domain and must not reuse article starring or media progression.
+
+#### Failure behavior
+
+Failure to create, discover, verify, or access the technical feed must never break the local media library.
+
+The result is a Saved Media Sync setup/error state while local `SavedMedia` continues to operate normally.
+
+Temporary unavailability of the public bootstrap XML only affects first-time automatic feed creation. Once the technical feed exists and is disabled, normal Saved Media replication must not depend on fetching the bootstrap XML.
 
 ### Relationship to article starred state
 
@@ -1169,7 +1294,14 @@ Every migration must be:
 - playback completion does not unsave
 - saved state protects enclosure/article retention
 - feed-scoped deterministic ordering
-- local-only saved state creates no remote mutation
+- SavedMedia works fully with synchronization disabled
+- automatic setup requires explicit approval
+- automatic setup reuses an existing canonical sync feed
+- manual setup discovers and verifies a user-created canonical sync feed
+- setup path does not change later replication semantics
+- missing configured sync feed returns to setup-required state
+- bootstrap XML contains no user data and is not required after setup
+- Saved Media replication does not use article starring or media progression
 
 ### Playback reconciliation
 
@@ -1259,11 +1391,25 @@ Implement:
 - episode-library read model including playback/download projections
 - deterministic ordering suitable for native next/previous queue construction
 
-Keep the feature local-only in Phase B V1.
+Keep the local episode library independent of synchronization.
 
-Do not introduce Miniflux synchronization, article-star coupling, or a Flux-specific remote synchronization mechanism.
+Also implement the optional, explicitly enabled Miniflux Saved Media replication adapter:
 
-**Exit condition:** Flux has a durable local episode library independent of downloads, and native clients can use it as the basis for episode browsing and temporary feed-scoped playback queues.
+- canonical repository-hosted bootstrap `init.xml`
+- capability gating for supported Miniflux versions
+- automatic setup after explicit approval
+- manual setup with user-created feed
+- canonical `feed_url` discovery and verification
+- reuse of an existing sync feed across devices
+- disabled technical feed after bootstrap
+- durable `sync_feed_id`
+- versioned Saved Media marker identity
+- save/unsave marker semantics
+- failure isolation so local SavedMedia remains usable
+
+Do not couple Saved Media to article starring or media progression, and do not introduce a Flux-hosted user-data sync service.
+
+**Exit condition:** Flux has a durable local episode library independent of downloads, native clients can use it as the basis for episode browsing and temporary feed-scoped playback queues, and supported Miniflux accounts can optionally replicate Saved Media through a user-approved technical sync feed.
 
 ---
 
@@ -1416,7 +1562,17 @@ The following topics are considered decided for Phase B and must not be routinel
 - media-kind classification
 - `SavedMedia` as the durable local episode-library layer
 - `SavedMedia` independent from download, playback, and article-starred state
-- `SavedMedia` local-only in Phase B V1
+- `SavedMedia` is local-first and fully functional without synchronization
+- optional Saved Media Sync replicates through a dedicated Miniflux technical feed
+- Saved Media Sync is disabled by default and requires explicit user approval
+- the technical feed is identified by the canonical repository-hosted bootstrap `feed_url`
+- automatic and manual setup are equivalent setup paths
+- automatic setup must reuse an existing canonical sync feed before creating one
+- manual setup must not silently modify the user's feed
+- the technical feed is disabled after bootstrap and later replication uses imported marker entries
+- the bootstrap XML contains no user data and is not a Flux-hosted user-data sync service
+- Saved Media marker identity is enclosure-specific, deterministic, and versioned
+- Saved Media Sync must not use article starring or media progression
 - saved-media retention protection
 - saved-media/feed queries as the basis for temporary native next/previous queues
 - local playback persistence
