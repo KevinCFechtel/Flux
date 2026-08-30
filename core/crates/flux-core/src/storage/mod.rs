@@ -419,7 +419,7 @@ impl Store {
             }
             tx.execute("INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11,?12) ON CONFLICT(id) DO UPDATE SET feed_id=excluded.feed_id,title=excluded.title,url=excluded.url,comments_url=excluded.comments_url,published_at=excluded.published_at,remote_is_read=excluded.remote_is_read,remote_is_starred=excluded.remote_is_starred,is_read=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='read') THEN articles.is_read ELSE excluded.is_read END,is_starred=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='starred') THEN articles.is_starred ELSE excluded.is_starred END,raw_html_content=excluded.raw_html_content,preview=excluded.preview,image_url=excluded.image_url,content_processing_version=excluded.content_processing_version", params![a.id,a.feed_id,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.raw_html_content,a.preview,a.image_url,crate::article::PROCESSING_VERSION]).map_err(sql_error)?;
         }
-        upsert_remote_enclosures(&tx, enclosures)?;
+        reconcile_remote_enclosures(&tx, articles, enclosures)?;
         let remote_category_ids: HashSet<i64> =
             categories.iter().map(|category| category.id).collect();
         let stale_category_ids = {
@@ -1271,6 +1271,36 @@ fn upsert_remote_enclosures(
     }
     Ok(())
 }
+fn reconcile_remote_enclosures(
+    tx: &Transaction<'_>,
+    articles: &[Article],
+    enclosures: &[Enclosure],
+) -> Result<(), CoreError> {
+    let fetched_article_ids: HashSet<i64> = articles.iter().map(|article| article.id).collect();
+    let mut enclosure_ids = HashSet::with_capacity(enclosures.len());
+    for enclosure in enclosures {
+        if !fetched_article_ids.contains(&enclosure.article_id) {
+            return Err(CoreError::data(format!(
+                "enclosure {} references article {} absent from the remote snapshot",
+                enclosure.id, enclosure.article_id
+            )));
+        }
+        if !enclosure_ids.insert(enclosure.id) {
+            return Err(CoreError::data(format!(
+                "remote snapshot contains duplicate enclosure {}",
+                enclosure.id
+            )));
+        }
+    }
+    for article_id in fetched_article_ids {
+        tx.execute(
+            "UPDATE enclosures SET remote_present=0 WHERE article_id=?1",
+            [article_id],
+        )
+        .map_err(sql_error)?;
+    }
+    upsert_remote_enclosures(tx, enclosures)
+}
 fn stored_enclosure_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredEnclosure> {
     let size_bytes = row
         .get::<_, Option<i64>>(4)?
@@ -1683,7 +1713,15 @@ mod tests {
         store
             .reconcile_with_enclosures(&categories, &feeds, &articles, &[])
             .unwrap();
-        assert_eq!(store.enclosures_for_article(3).unwrap().len(), 2);
+        assert_eq!(
+            store
+                .enclosures_for_article(3)
+                .unwrap()
+                .iter()
+                .map(|enclosure| enclosure.remote_present)
+                .collect::<Vec<_>>(),
+            vec![false, false]
+        );
 
         store.set_enclosure_remote_present(11, false).unwrap();
         assert!(!store.enclosure(11).unwrap().unwrap().remote_present);
@@ -1715,6 +1753,127 @@ mod tests {
             .unwrap();
         assert!(store.enclosure(11).unwrap().is_none());
         assert!(store.enclosures_for_article(3).unwrap().is_empty());
+    }
+
+    #[test]
+    fn reconciliation_marks_missing_enclosures_only_for_fetched_articles() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 2,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        let article = |id| Article {
+            id,
+            feed_id: 2,
+            title: format!("Article {id}"),
+            url: format!("https://example.test/{id}"),
+            comments_url: String::new(),
+            published_at: "2024-01-01T00:00:00Z".into(),
+            is_read: false,
+            is_starred: false,
+            raw_html_content: String::new(),
+            preview: String::new(),
+            image_url: None,
+        };
+        let articles = [article(1), article(2)];
+        store
+            .reconcile_with_enclosures(
+                &categories,
+                &feeds,
+                &articles,
+                &[
+                    Enclosure {
+                        id: 10,
+                        article_id: 1,
+                        url: "https://cdn.test/10.mp3".into(),
+                        mime_type: "audio/mpeg".into(),
+                        size_bytes: Some(10),
+                        remote_media_progression_seconds: 1,
+                    },
+                    Enclosure {
+                        id: 11,
+                        article_id: 1,
+                        url: "https://cdn.test/11.mp3".into(),
+                        mime_type: "audio/mpeg".into(),
+                        size_bytes: Some(11),
+                        remote_media_progression_seconds: 2,
+                    },
+                    Enclosure {
+                        id: 20,
+                        article_id: 2,
+                        url: "https://cdn.test/20.mp3".into(),
+                        mime_type: "audio/mpeg".into(),
+                        size_bytes: Some(20),
+                        remote_media_progression_seconds: 3,
+                    },
+                ],
+            )
+            .unwrap();
+
+        let reappearing = Enclosure {
+            id: 10,
+            article_id: 1,
+            url: "https://cdn.test/10-new.mp3".into(),
+            mime_type: "audio/ogg".into(),
+            size_bytes: None,
+            remote_media_progression_seconds: 99,
+        };
+        let inserted = Enclosure {
+            id: 12,
+            article_id: 1,
+            url: "https://cdn.test/12.mp3".into(),
+            mime_type: "video/mp4".into(),
+            size_bytes: Some(12),
+            remote_media_progression_seconds: 4,
+        };
+        store
+            .reconcile_with_enclosures(
+                &categories,
+                &feeds,
+                &[article(1)],
+                &[reappearing.clone(), inserted],
+            )
+            .unwrap();
+        assert_eq!(
+            store.enclosure(10).unwrap(),
+            Some(StoredEnclosure {
+                enclosure: reappearing.clone(),
+                remote_present: true,
+            })
+        );
+        assert!(!store.enclosure(11).unwrap().unwrap().remote_present);
+        assert!(store.enclosure(12).unwrap().unwrap().remote_present);
+        assert!(store.enclosure(20).unwrap().unwrap().remote_present);
+
+        store
+            .reconcile_with_enclosures(&categories, &feeds, &[article(1)], &[])
+            .unwrap();
+        assert!(!store.enclosure(10).unwrap().unwrap().remote_present);
+        assert!(!store.enclosure(12).unwrap().unwrap().remote_present);
+        assert!(store.enclosure(20).unwrap().unwrap().remote_present);
+
+        store
+            .reconcile_with_enclosures(
+                &categories,
+                &feeds,
+                &[article(1)],
+                std::slice::from_ref(&reappearing),
+            )
+            .unwrap();
+        assert_eq!(
+            store.enclosure(10).unwrap(),
+            Some(StoredEnclosure {
+                enclosure: reappearing,
+                remote_present: true,
+            })
+        );
     }
 
     #[test]

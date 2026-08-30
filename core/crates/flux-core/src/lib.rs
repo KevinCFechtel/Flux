@@ -1589,6 +1589,41 @@ mod tests {
         );
     }
     #[test]
+    fn sync_does_not_mark_enclosures_absent_for_articles_outside_the_remote_snapshot() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = mutation_core(&temp);
+        core.store
+            .upsert_remote_enclosures(&[
+                Enclosure {
+                    id: 101,
+                    article_id: 1,
+                    url: "https://cdn.test/101.mp3".into(),
+                    mime_type: "audio/mpeg".into(),
+                    size_bytes: None,
+                    remote_media_progression_seconds: 0,
+                },
+                Enclosure {
+                    id: 201,
+                    article_id: 2,
+                    url: "https://cdn.test/201.mp3".into(),
+                    mime_type: "audio/mpeg".into(),
+                    size_bytes: None,
+                    remote_media_progression_seconds: 0,
+                },
+            ])
+            .unwrap();
+        {
+            let mut snapshot = source.snapshot.lock().unwrap();
+            snapshot.articles.retain(|article| article.id == 1);
+            snapshot.enclosures.clear();
+        }
+
+        core.sync(SyncReason::Manual).unwrap();
+
+        assert!(!core.store.enclosure(101).unwrap().unwrap().remote_present);
+        assert!(core.store.enclosure(201).unwrap().unwrap().remote_present);
+    }
+    #[test]
     fn sync_retention_preserves_old_unread_and_starred_local_articles() {
         let temp = TempDir::new().unwrap();
         let mut remote = snapshot();
