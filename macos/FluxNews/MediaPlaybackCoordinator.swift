@@ -164,7 +164,7 @@ final class MediaPlaybackCoordinator {
     }
 
     func artwork(reference: String) throws -> Data? { try core.mediaArtwork(reference: reference) }
-    func isUsing(enclosureID: Int64) -> Bool { activeEnclosureID == enclosureID && engine.isPlaying }
+    func isUsing(enclosureID: Int64) -> Bool { activeEnclosureID == enclosureID }
 
     private func stopCurrentIfNeeded() throws {
         guard activeEnclosureID != nil else { return }

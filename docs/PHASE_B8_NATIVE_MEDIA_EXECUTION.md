@@ -26,24 +26,55 @@ the configured media root, and reports finished or failed work back to Core.
 Temporary files are moved into deterministic Core-provided destinations only
 after a successful transfer. Deletion work is completed only after the local
 file is absent. Duplicate active tasks are suppressed and cancellation is
-best-effort through URLSession.
+best-effort through URLSession. When Core no longer returns requested work,
+the coordinator cancels the matching native task where possible. A late native
+completion or failure is still sent through the existing Core callback path;
+Core's stale-callback rules decide whether it changes durable state. Native
+cancellation is not reported as a transfer failure.
 
-Automatic scheduling, background transfer policy, and optional Saved Media
-Sync remain outside this coordinator. The local playback and transfer paths
-do not depend on Saved Media Sync.
+`DeleteRequested` work is reconstructed and processed on reconciliation. A
+missing local file is idempotently treated as deleted. Physical deletion is
+deferred while the playback coordinator is actively using the enclosure; the
+Core deletion intent remains unchanged and is retried on the next
+reconciliation after playback stops.
+
+`AnyNetwork` permits expensive and constrained URLSession access. `UnmeteredOnly`
+sets `allowsExpensiveNetworkAccess` and `allowsConstrainedNetworkAccess` to
+false. This is macOS's closest available approximation; it does not promise a
+perfect carrier-metering distinction. Downloads waiting for that constraint
+remain Core `Requested` rather than becoming `Failed`.
+
+Successful completion is reported to Core only after the temporary URL has
+been safely finalized beneath the media root and its size has been read.
+Transport errors map to `Network`; finalization and filesystem errors map to
+`Storage`. A rejected Core completion callback is logged as a stale/domain
+callback result and is not converted into a second failure callback.
+
+Core durable `Requested` and `DeleteRequested` intent survives process death.
+On startup/resume, a fresh coordinator reconstructs execution by querying Core
+and restarting valid requested transfers or processing pending deletions. The
+current implementation uses foreground URLSession downloads, so an in-flight
+foreground task itself is not guaranteed to survive process termination. True
+OS-persistent background URLSession execution remains deferred.
+
+Optional Saved Media Sync remains outside this coordinator. Local playback and
+transfers do not depend on it.
 
 ## Integration And Tests
 
 Both coordinators are application-scoped and configured from the existing
 `BrowserStore` Core instance. `MediaCoordinatorTests` covers Core-authoritative
 resume, explicit restart, natural completion idempotence, checkpoint behavior,
-and media-root path containment.
+media-root path containment, duplicate suppression, cancellation and stale
+callbacks, relaunch reconstruction, finalization ordering, failure mapping,
+deletion idempotence/playback protection, and network policy mapping.
 
 Generated UniFFI bindings remain build artifacts. The macOS test target hosts
 the app so it can test app-internal coordinator types.
 
 ## Deferred
 
-User-facing media controls, richer queue UX, OS background scheduling,
-download progress presentation, and Phase B9 reconciliation/retention work are
-deferred. No iOS or Android client is introduced in this step.
+User-facing player UX remains Phase C. True OS-persistent background transfer
+execution, richer queue UX, download progress presentation, and automotive or
+legacy integration remain deferred to the appropriate later phase. No iOS or
+Android client is introduced in this step.

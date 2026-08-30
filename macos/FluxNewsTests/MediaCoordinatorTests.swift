@@ -48,19 +48,94 @@ private final class FakePlaybackEngine: NativePlaybackEngine {
 }
 
 @MainActor
+private final class FakeTransferCore: MediaTransferCore {
+    var policy: DownloadNetworkPolicy = .anyNetwork
+    var transfers: [MediaTransferWork] = []
+    var deletions: [MediaTransferWork] = []
+    var states = [Int64: DownloadState]()
+    var finished = [(Int64, String, UInt64)]()
+    var failures = [(Int64, DownloadFailureKind)]()
+    var deleted = [Int64]()
+    var onFinished: (() -> Void)?
+    var onFailure: (() -> Void)?
+
+    func coreSettings() throws -> CoreSettings {
+        CoreSettings(retention: .days30, deliveryMode: .live, backgroundSyncEnabled: false, detailCharacterLimit: 10_000, downloadNetworkPolicy: policy, downloadRetention: .forever, deleteAfterPlayback: false)
+    }
+    func downloadsRequiringTransfer() throws -> [MediaTransferWork] { transfers }
+    func downloadsRequiringDeletion() throws -> [MediaTransferWork] { deletions }
+    func downloadFinished(enclosureId: Int64, localFile: String, fileSizeBytes: UInt64) throws {
+        finished.append((enclosureId, localFile, fileSizeBytes))
+        if states[enclosureId] == .requested { states[enclosureId] = .downloaded }
+        onFinished?()
+    }
+    func downloadFailed(enclosureId: Int64, failureKind: DownloadFailureKind) throws {
+        failures.append((enclosureId, failureKind))
+        if states[enclosureId] == .requested { states[enclosureId] = .failed }
+        onFailure?()
+    }
+    func downloadDeleted(enclosureId: Int64) throws {
+        deleted.append(enclosureId)
+        if states[enclosureId] == .deleteRequested { states[enclosureId] = .notDownloaded }
+    }
+}
+
+private actor FakeTransferEngine: MediaTransferEngine {
+    enum Result {
+        case immediate(NativeTransferResult)
+        case failure(Error)
+        case pending
+    }
+
+    var result: Result
+    private(set) var callCount = 0
+    private var continuations = [CheckedContinuation<NativeTransferResult, Error>]()
+
+    init(result: Result) { self.result = result }
+
+    func download(from url: URL) async throws -> NativeTransferResult {
+        callCount += 1
+        switch result {
+        case let .immediate(value): return value
+        case let .failure(error): throw error
+        case .pending:
+            return try await withCheckedThrowingContinuation { continuations.append($0) }
+        }
+    }
+
+    func resolveAll(_ result: Result) {
+        let pending = continuations
+        continuations = []
+        for continuation in pending {
+            switch result {
+            case let .immediate(value): continuation.resume(returning: value)
+            case let .failure(error): continuation.resume(throwing: error)
+            case .pending: break
+            }
+        }
+    }
+}
+
+private func transferWork(_ id: Int64 = 7, localFile: String? = nil) -> MediaTransferWork {
+    MediaTransferWork(enclosureId: id, url: "https://example.test/episode.mp3", origin: .manual, localFile: localFile)
+}
+
+@MainActor
 final class MediaCoordinatorTests: XCTestCase {
     func testInProgressStartsAtCorePositionAndPauseCheckpoints() throws {
         let core = FakePlaybackCore(status: .inProgress, positionMs: 35_000)
         let engine = FakePlaybackEngine()
         let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
 
-        try coordinator.prepare(enclosureID: 7)
+        _ = try coordinator.prepare(enclosureID: 7)
         XCTAssertEqual(engine.loadedStartMs, 35_000)
+        XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
         try coordinator.play(enclosureID: 7)
         engine.currentPositionMs = 36_000
         coordinator.pause()
 
         XCTAssertEqual(core.checkpoints.map(\.1), [36_000])
+        XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
     }
 
     func testCompletedDoesNotImplicitlyRestartAndExplicitRestartUsesCore() throws {
@@ -68,7 +143,7 @@ final class MediaCoordinatorTests: XCTestCase {
         let engine = FakePlaybackEngine()
         let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
 
-        try coordinator.prepare(enclosureID: 7)
+        _ = try coordinator.prepare(enclosureID: 7)
         try coordinator.play(enclosureID: 7)
         XCTAssertEqual(engine.playCount, 0)
 
@@ -98,5 +173,170 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(try MediaTransferFileLayout.destination(reference: "downloads/enclosure-7.media", under: root).path, "/tmp/flux-media/downloads/enclosure-7.media")
         XCTAssertThrowsError(try MediaTransferFileLayout.destination(reference: "../outside", under: root))
         XCTAssertThrowsError(try MediaTransferFileLayout.destination(reference: "/tmp/outside", under: root))
+    }
+
+    func testReconcileStartsOneTransferForOneRequestedEnclosure() async throws {
+        let core = FakeTransferCore()
+        core.transfers = [transferWork()]
+        core.states[7] = .requested
+        let engine = FakeTransferEngine(result: .pending)
+        let coordinator = MediaTransferCoordinator(core: core, mediaRoot: temporaryMediaRoot(), engine: engine)
+
+        coordinator.reconcile()
+        coordinator.reconcile()
+        await settle()
+
+        let calls = await engine.callCount
+        XCTAssertEqual(calls, 1)
+    }
+
+    func testCancellationReconciliationCancelsWithoutFailureAndLateCompletionStaysStale() async throws {
+        let core = FakeTransferCore()
+        core.transfers = [transferWork()]
+        core.states[7] = .requested
+        let engine = FakeTransferEngine(result: .pending)
+        let root = temporaryMediaRoot()
+        let coordinator = MediaTransferCoordinator(core: core, mediaRoot: root, engine: engine)
+
+        coordinator.reconcile()
+        await Task.yield()
+        core.transfers = []
+        core.states[7] = .notDownloaded
+        coordinator.reconcile()
+
+        let temporary = root.appendingPathComponent("late.media")
+        try Data("late".utf8).write(to: temporary)
+        await engine.resolveAll(.immediate(NativeTransferResult(temporaryURL: temporary)))
+        await settle()
+
+        XCTAssertTrue(core.failures.isEmpty)
+        XCTAssertEqual(core.states[7], .notDownloaded)
+        XCTAssertEqual(core.finished.count, 1)
+    }
+
+    func testFreshCoordinatorReconstructsRequestedAndDeleteRequestedWork() async throws {
+        let core = FakeTransferCore()
+        core.transfers = [transferWork()]
+        core.states[7] = .requested
+        let engine = FakeTransferEngine(result: .pending)
+        let root = temporaryMediaRoot()
+        let coordinator = MediaTransferCoordinator(core: core, mediaRoot: root, engine: engine)
+
+        coordinator.reconcile()
+        await settle()
+        let calls = await engine.callCount
+        XCTAssertEqual(calls, 1)
+
+        let local = root.appendingPathComponent("downloads/enclosure-7.media")
+        try FileManager.default.createDirectory(at: local.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("media".utf8).write(to: local)
+        core.transfers = []
+        core.deletions = [transferWork(localFile: "downloads/enclosure-7.media")]
+        core.states[7] = .deleteRequested
+        let fresh = MediaTransferCoordinator(core: core, mediaRoot: root, engine: engine)
+        fresh.reconcile()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: local.path))
+        XCTAssertEqual(core.deleted, [7])
+        let late = root.appendingPathComponent("late.media")
+        try Data("late".utf8).write(to: late)
+        await engine.resolveAll(.immediate(NativeTransferResult(temporaryURL: late)))
+        await settle()
+    }
+
+    func testSuccessfulTransferPlacesFileBeforeFinishedCallback() async throws {
+        let root = temporaryMediaRoot()
+        let temporary = root.appendingPathComponent("temporary.media")
+        try Data("media".utf8).write(to: temporary)
+        let core = FakeTransferCore()
+        core.transfers = [transferWork()]
+        core.states[7] = .requested
+        let engine = FakeTransferEngine(result: .immediate(NativeTransferResult(temporaryURL: temporary)))
+        let coordinator = MediaTransferCoordinator(core: core, mediaRoot: root, engine: engine)
+        let finished = expectation(description: "download finished")
+        core.onFinished = { finished.fulfill() }
+
+        coordinator.reconcile()
+        await fulfillment(of: [finished], timeout: 2)
+
+        let destination = root.appendingPathComponent("downloads/enclosure-7.media")
+        XCTAssertEqual(core.finished.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertEqual(core.finished[0].1, "downloads/enclosure-7.media")
+        XCTAssertEqual(core.states[7], .downloaded)
+    }
+
+    func testNetworkAndStorageFailuresUseNarrowFailureKinds() async throws {
+        let networkCore = FakeTransferCore()
+        networkCore.transfers = [transferWork()]
+        networkCore.states[7] = .requested
+        let network = MediaTransferCoordinator(core: networkCore, mediaRoot: temporaryMediaRoot(), engine: FakeTransferEngine(result: .failure(MediaTransferError.network)))
+        let networkFailure = expectation(description: "network failure")
+        networkCore.onFailure = { networkFailure.fulfill() }
+        network.reconcile()
+        await fulfillment(of: [networkFailure], timeout: 2)
+
+        let storageCore = FakeTransferCore()
+        storageCore.transfers = [transferWork()]
+        storageCore.states[7] = .requested
+        let root = temporaryMediaRoot()
+        let invalidRoot = root.appendingPathComponent("not-a-directory")
+        try Data("not a directory".utf8).write(to: invalidRoot)
+        let temporary = root.appendingPathComponent("storage-temporary.media")
+        try Data("media".utf8).write(to: temporary)
+        let storage = MediaTransferCoordinator(core: storageCore, mediaRoot: invalidRoot, engine: FakeTransferEngine(result: .immediate(NativeTransferResult(temporaryURL: temporary))))
+        let storageFailure = expectation(description: "storage failure")
+        storageCore.onFailure = { storageFailure.fulfill() }
+        storage.reconcile()
+        await fulfillment(of: [storageFailure], timeout: 2)
+
+        XCTAssertEqual(networkCore.failures.map { $0.1 }, [.network])
+        XCTAssertEqual(storageCore.failures.map { $0.1 }, [.storage])
+    }
+
+    func testDeletionIsIdempotentAndDeferredWhilePlaying() throws {
+        let root = temporaryMediaRoot()
+        let local = root.appendingPathComponent("downloads/enclosure-7.media")
+        try FileManager.default.createDirectory(at: local.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("media".utf8).write(to: local)
+        let core = FakeTransferCore()
+        core.deletions = [transferWork(localFile: "downloads/enclosure-7.media")]
+        core.states[7] = .deleteRequested
+        var inUse = true
+        let coordinator = MediaTransferCoordinator(core: core, mediaRoot: root, isMediaInUse: { _ in inUse })
+
+        coordinator.reconcile()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: local.path))
+        XCTAssertTrue(core.deleted.isEmpty)
+
+        inUse = false
+        coordinator.reconcile()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: local.path))
+        XCTAssertEqual(core.deleted, [7])
+
+        core.deletions = [transferWork(localFile: "downloads/enclosure-7.media")]
+        coordinator.reconcile()
+        XCTAssertEqual(core.deleted, [7, 7])
+    }
+
+    func testNetworkPolicyMapsAnyNetworkAndUnmeteredOnly() {
+        let any = MediaTransferNetworkConfiguration.configuration(for: .anyNetwork)
+        XCTAssertTrue(any.allowsExpensiveNetworkAccess)
+        XCTAssertTrue(any.allowsConstrainedNetworkAccess)
+
+        let unmetered = MediaTransferNetworkConfiguration.configuration(for: .unmeteredOnly)
+        XCTAssertFalse(unmetered.allowsExpensiveNetworkAccess)
+        XCTAssertFalse(unmetered.allowsConstrainedNetworkAccess)
+    }
+
+    private func temporaryMediaRoot() -> URL {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("FluxNewsMedia-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        return root
+    }
+
+    private func settle() async {
+        for _ in 0..<10 { await Task.yield() }
     }
 }
