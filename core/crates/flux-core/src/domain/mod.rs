@@ -155,6 +155,15 @@ pub struct PlaybackState {
     pub updated_at: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlaybackPreparation {
+    pub enclosure: Enclosure,
+    pub playback_state: Option<PlaybackState>,
+    pub local_file: Option<String>,
+    pub duration_ms: Option<u64>,
+    pub artwork_reference: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DownloadState {
     NotDownloaded,
@@ -189,6 +198,14 @@ pub struct MediaDownload {
     pub file_size_bytes: Option<u64>,
     pub downloaded_at: Option<String>,
     pub failure_kind: Option<DownloadFailureKind>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MediaTransferWork {
+    pub enclosure_id: i64,
+    pub url: String,
+    pub origin: DownloadOrigin,
+    pub local_file: Option<String>,
 }
 
 /// Optional replication configuration. Local SavedMedia remains available in every state.

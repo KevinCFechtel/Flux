@@ -311,6 +311,7 @@ pub struct FeedPreferences {
     pub detail_rendering: DetailRenderingMode,
     pub truncate_detail: bool,
     pub open_in_miniflux: bool,
+    pub auto_download_audio: bool,
 }
 #[derive(uniffi::Record)]
 pub struct SystemNotificationCandidate {
@@ -347,6 +348,149 @@ pub struct CoreSettings {
     pub delivery_mode: DeliveryMode,
     pub background_sync_enabled: bool,
     pub detail_character_limit: u32,
+    pub download_network_policy: DownloadNetworkPolicy,
+    pub download_retention: DownloadRetention,
+    pub delete_after_playback: bool,
+}
+
+#[derive(uniffi::Enum)]
+pub enum MediaKind {
+    Audio,
+    Video,
+    Image,
+    Other,
+}
+#[derive(uniffi::Record)]
+pub struct Enclosure {
+    pub id: i64,
+    pub article_id: i64,
+    pub url: String,
+    pub mime_type: String,
+    pub size_bytes: Option<u64>,
+    pub remote_media_progression_seconds: u64,
+    pub media_kind: MediaKind,
+}
+#[derive(uniffi::Enum)]
+pub enum PlaybackStatus {
+    NotStarted,
+    InProgress,
+    Completed,
+}
+#[derive(uniffi::Record)]
+pub struct PlaybackState {
+    pub enclosure_id: i64,
+    pub position_ms: u64,
+    pub duration_ms: Option<u64>,
+    pub status: PlaybackStatus,
+    pub updated_at: Option<String>,
+}
+#[derive(uniffi::Record)]
+pub struct PlaybackPreparation {
+    pub enclosure: Enclosure,
+    pub playback_state: PlaybackState,
+    pub local_file: Option<String>,
+    pub duration_ms: Option<u64>,
+    pub artwork_reference: Option<String>,
+}
+#[derive(uniffi::Enum)]
+pub enum MediaProgressCapability {
+    Unknown,
+    Supported,
+    Unsupported,
+}
+#[derive(uniffi::Enum)]
+pub enum DownloadState {
+    NotDownloaded,
+    Requested,
+    Downloaded,
+    Failed,
+    DeleteRequested,
+}
+#[derive(uniffi::Enum)]
+pub enum DownloadOrigin {
+    Manual,
+    Automatic,
+}
+#[derive(uniffi::Enum)]
+pub enum DownloadFailureKind {
+    Network,
+    Storage,
+    InvalidMedia,
+    Unknown,
+}
+#[derive(uniffi::Record)]
+pub struct MediaDownload {
+    pub enclosure_id: i64,
+    pub state: DownloadState,
+    pub origin: Option<DownloadOrigin>,
+    pub local_file: Option<String>,
+    pub file_size_bytes: Option<u64>,
+    pub downloaded_at: Option<String>,
+    pub failure_kind: Option<DownloadFailureKind>,
+}
+#[derive(uniffi::Record)]
+pub struct MediaTransferWork {
+    pub enclosure_id: i64,
+    pub url: String,
+    pub origin: DownloadOrigin,
+    pub local_file: Option<String>,
+}
+#[derive(uniffi::Enum)]
+pub enum DownloadNetworkPolicy {
+    AnyNetwork,
+    UnmeteredOnly,
+}
+#[derive(uniffi::Enum)]
+pub enum DownloadRetention {
+    Forever,
+    Days { days: u32 },
+}
+#[derive(uniffi::Enum)]
+pub enum MediaChapterSource {
+    Embedded,
+    ArticleContent,
+}
+#[derive(uniffi::Record)]
+pub struct MediaMetadata {
+    pub enclosure_id: i64,
+    pub duration_ms: Option<u64>,
+    pub embedded_artwork_reference: Option<String>,
+}
+#[derive(uniffi::Record)]
+pub struct MediaChapter {
+    pub enclosure_id: i64,
+    pub title: String,
+    pub start_ms: u64,
+    pub end_ms: Option<u64>,
+    pub source: MediaChapterSource,
+}
+#[derive(uniffi::Record)]
+pub struct SavedPlayableMediaItem {
+    pub enclosure_id: i64,
+    pub article_id: i64,
+    pub feed_id: i64,
+    pub title: String,
+    pub feed_title: String,
+    pub published_at: String,
+    pub added_at: String,
+    pub url: String,
+    pub mime_type: String,
+    pub media_kind: MediaKind,
+    pub remote_present: bool,
+    pub duration_ms: Option<u64>,
+    pub artwork_reference: Option<String>,
+}
+#[derive(uniffi::Record)]
+pub struct SavedMediaSyncConfiguration {
+    pub enabled: bool,
+    pub sync_feed_id: Option<i64>,
+    pub requires_repair: bool,
+}
+#[derive(uniffi::Record)]
+pub struct SavedMediaSyncSetupInfo {
+    pub bootstrap_url: String,
+    pub technical_feed_title: String,
+    pub explanation: String,
 }
 #[derive(uniffi::Enum)]
 pub enum DeliveryDisposition {
@@ -660,6 +804,225 @@ impl Flux {
     }
     pub fn count_articles(&self, query: ArticleQuery) -> Result<u64, FluxError> {
         self.core.count_articles(query.into()).map_err(map_error)
+    }
+    pub fn enclosure(&self, enclosure_id: i64) -> Result<Option<Enclosure>, FluxError> {
+        self.core
+            .enclosure(enclosure_id)
+            .map(|value| value.map(Into::into))
+            .map_err(map_error)
+    }
+    pub fn saved_media(&self) -> Result<Vec<SavedPlayableMediaItem>, FluxError> {
+        self.core
+            .saved_playable_media()
+            .map(|rows| rows.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn saved_media_by_feed(
+        &self,
+        feed_id: i64,
+    ) -> Result<Vec<SavedPlayableMediaItem>, FluxError> {
+        self.core
+            .saved_media_by_feed(feed_id)
+            .map(|rows| rows.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn save_media(&self, enclosure_id: i64) -> Result<(), FluxError> {
+        self.core.save_media(enclosure_id).map_err(map_error)
+    }
+    pub fn unsave_media(&self, enclosure_id: i64) -> Result<(), FluxError> {
+        self.core.unsave_media(enclosure_id).map_err(map_error)
+    }
+    pub fn is_media_saved(&self, enclosure_id: i64) -> Result<bool, FluxError> {
+        self.core.is_media_saved(enclosure_id).map_err(map_error)
+    }
+    pub fn saved_media_sync_configuration(&self) -> Result<SavedMediaSyncConfiguration, FluxError> {
+        self.core
+            .saved_media_sync_configuration()
+            .map(Into::into)
+            .map_err(map_error)
+    }
+    pub fn saved_media_sync_setup_info(&self) -> SavedMediaSyncSetupInfo {
+        self.core.saved_media_sync_setup_info().into()
+    }
+    pub fn setup_saved_media_sync_automatic(&self) -> Result<(), FluxError> {
+        self.core
+            .setup_saved_media_sync_automatic()
+            .map_err(map_error)
+    }
+    pub fn setup_saved_media_sync_manual(&self) -> Result<(), FluxError> {
+        self.core.setup_saved_media_sync_manual().map_err(map_error)
+    }
+    pub fn disable_saved_media_sync(&self) -> Result<(), FluxError> {
+        self.core.disable_saved_media_sync().map_err(map_error)
+    }
+    pub fn prepare_playback(&self, enclosure_id: i64) -> Result<PlaybackPreparation, FluxError> {
+        self.core
+            .prepare_playback(enclosure_id)
+            .map(Into::into)
+            .map_err(map_error)
+    }
+    pub fn playback_state(&self, enclosure_id: i64) -> Result<PlaybackState, FluxError> {
+        self.core
+            .playback_state(enclosure_id)
+            .map(|state| {
+                state.map(Into::into).unwrap_or_else(|| PlaybackState {
+                    enclosure_id,
+                    position_ms: 0,
+                    duration_ms: None,
+                    status: PlaybackStatus::NotStarted,
+                    updated_at: None,
+                })
+            })
+            .map_err(map_error)
+    }
+    pub fn checkpoint_playback(
+        &self,
+        enclosure_id: i64,
+        position_ms: u64,
+        duration_ms: Option<u64>,
+    ) -> Result<(), FluxError> {
+        self.core
+            .checkpoint_playback(enclosure_id, position_ms, duration_ms)
+            .map_err(map_error)
+    }
+    pub fn playback_completed(
+        &self,
+        enclosure_id: i64,
+        duration_ms: Option<u64>,
+    ) -> Result<(), FluxError> {
+        self.core
+            .playback_completed(enclosure_id, duration_ms)
+            .map_err(map_error)
+    }
+    pub fn restart_playback(&self, enclosure_id: i64) -> Result<(), FluxError> {
+        self.core.restart_playback(enclosure_id).map_err(map_error)
+    }
+    pub fn observe_media_duration(
+        &self,
+        enclosure_id: i64,
+        duration_ms: u64,
+    ) -> Result<(), FluxError> {
+        self.core
+            .observe_media_duration(enclosure_id, duration_ms)
+            .map_err(map_error)
+    }
+    pub fn media_progress_capability(&self) -> MediaProgressCapability {
+        self.core.media_progress_capability().into()
+    }
+    pub fn media_download(&self, enclosure_id: i64) -> Result<MediaDownload, FluxError> {
+        self.core
+            .media_download(enclosure_id)
+            .map(|download| {
+                download.map(Into::into).unwrap_or(MediaDownload {
+                    enclosure_id,
+                    state: DownloadState::NotDownloaded,
+                    origin: None,
+                    local_file: None,
+                    file_size_bytes: None,
+                    downloaded_at: None,
+                    failure_kind: None,
+                })
+            })
+            .map_err(map_error)
+    }
+    pub fn request_download(
+        &self,
+        enclosure_id: i64,
+        origin: DownloadOrigin,
+    ) -> Result<(), FluxError> {
+        self.core
+            .request_download(enclosure_id, origin.into())
+            .map_err(map_error)
+    }
+    pub fn cancel_download(&self, enclosure_id: i64) -> Result<(), FluxError> {
+        self.core.cancel_download(enclosure_id).map_err(map_error)
+    }
+    pub fn retry_download(&self, enclosure_id: i64) -> Result<(), FluxError> {
+        self.core.retry_download(enclosure_id).map_err(map_error)
+    }
+    pub fn download_finished(
+        &self,
+        enclosure_id: i64,
+        local_file: String,
+        file_size_bytes: u64,
+    ) -> Result<(), FluxError> {
+        self.core
+            .download_finished(enclosure_id, &local_file, file_size_bytes)
+            .map_err(map_error)
+    }
+    pub fn download_failed(
+        &self,
+        enclosure_id: i64,
+        failure_kind: DownloadFailureKind,
+    ) -> Result<(), FluxError> {
+        self.core
+            .download_failed(enclosure_id, failure_kind.into())
+            .map_err(map_error)
+    }
+    pub fn request_download_deletion(&self, enclosure_id: i64) -> Result<(), FluxError> {
+        self.core
+            .request_download_deletion(enclosure_id)
+            .map_err(map_error)
+    }
+    pub fn download_deleted(&self, enclosure_id: i64) -> Result<(), FluxError> {
+        self.core.download_deleted(enclosure_id).map_err(map_error)
+    }
+    pub fn downloads_requiring_transfer(&self) -> Result<Vec<MediaTransferWork>, FluxError> {
+        self.core
+            .downloads_requiring_transfer()
+            .map(|work| work.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn downloads_requiring_deletion(&self) -> Result<Vec<MediaTransferWork>, FluxError> {
+        self.core
+            .downloads_requiring_deletion()
+            .map(|work| work.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn media_metadata(&self, enclosure_id: i64) -> Result<Option<MediaMetadata>, FluxError> {
+        self.core
+            .media_metadata(enclosure_id)
+            .map(|value| value.map(Into::into))
+            .map_err(map_error)
+    }
+    pub fn media_artwork(&self, reference: String) -> Result<Option<Vec<u8>>, FluxError> {
+        self.core.media_artwork(&reference).map_err(map_error)
+    }
+    pub fn media_chapters(&self, enclosure_id: i64) -> Result<Vec<MediaChapter>, FluxError> {
+        self.core
+            .media_chapters(enclosure_id)
+            .map(|rows| rows.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn evaluate_media_cleanup(&self) -> Result<Vec<i64>, FluxError> {
+        self.core.evaluate_media_cleanup_now().map_err(map_error)
+    }
+    pub fn set_download_network_policy(
+        &self,
+        policy: DownloadNetworkPolicy,
+    ) -> Result<(), FluxError> {
+        self.core
+            .set_download_network_policy(policy.into())
+            .map_err(map_error)
+    }
+    pub fn set_download_retention(&self, retention: DownloadRetention) -> Result<(), FluxError> {
+        self.core
+            .set_download_retention(retention.into())
+            .map_err(map_error)
+    }
+    pub fn set_delete_after_playback(&self, enabled: bool) -> Result<(), FluxError> {
+        self.core
+            .set_delete_after_playback(enabled)
+            .map_err(map_error)
+    }
+    pub fn set_feed_auto_download_audio(
+        &self,
+        feed_id: i64,
+        enabled: bool,
+    ) -> Result<(), FluxError> {
+        self.core
+            .set_feed_auto_download_audio(feed_id, enabled)
+            .map_err(map_error)
     }
     pub fn search_articles(
         &self,
@@ -993,9 +1356,9 @@ impl From<CoreSettings> for domain::CoreSettings {
             delivery_mode: value.delivery_mode.into(),
             background_sync_enabled: value.background_sync_enabled,
             detail_character_limit: value.detail_character_limit,
-            download_network_policy: flux_core::domain::DownloadNetworkPolicy::AnyNetwork,
-            download_retention: flux_core::domain::DownloadRetention::Forever,
-            delete_after_playback: false,
+            download_network_policy: value.download_network_policy.into(),
+            download_retention: value.download_retention.into(),
+            delete_after_playback: value.delete_after_playback,
         }
     }
 }
@@ -1007,7 +1370,7 @@ impl From<FeedPreferences> for domain::FeedPreferences {
             detail_rendering: value.detail_rendering.into(),
             truncate_detail: value.truncate_detail,
             open_in_miniflux: value.open_in_miniflux,
-            auto_download_audio: false,
+            auto_download_audio: value.auto_download_audio,
         }
     }
 }
@@ -1112,6 +1475,9 @@ impl From<domain::CoreSettings> for CoreSettings {
             },
             background_sync_enabled: value.background_sync_enabled,
             detail_character_limit: value.detail_character_limit,
+            download_network_policy: value.download_network_policy.into(),
+            download_retention: value.download_retention.into(),
+            delete_after_playback: value.delete_after_playback,
         }
     }
 }
@@ -1580,6 +1946,251 @@ impl From<domain::FeedPreferences> for FeedPreferences {
             },
             truncate_detail: value.truncate_detail,
             open_in_miniflux: value.open_in_miniflux,
+            auto_download_audio: value.auto_download_audio,
+        }
+    }
+}
+impl From<domain::Enclosure> for Enclosure {
+    fn from(value: domain::Enclosure) -> Self {
+        let media_kind = value.media_kind().into();
+        Self {
+            id: value.id,
+            article_id: value.article_id,
+            url: value.url,
+            mime_type: value.mime_type,
+            size_bytes: value.size_bytes,
+            remote_media_progression_seconds: value.remote_media_progression_seconds,
+            media_kind,
+        }
+    }
+}
+impl From<domain::MediaKind> for MediaKind {
+    fn from(value: domain::MediaKind) -> Self {
+        match value {
+            domain::MediaKind::Audio => Self::Audio,
+            domain::MediaKind::Video => Self::Video,
+            domain::MediaKind::Image => Self::Image,
+            domain::MediaKind::Other => Self::Other,
+        }
+    }
+}
+impl From<domain::PlaybackStatus> for PlaybackStatus {
+    fn from(value: domain::PlaybackStatus) -> Self {
+        match value {
+            domain::PlaybackStatus::InProgress => Self::InProgress,
+            domain::PlaybackStatus::Completed => Self::Completed,
+        }
+    }
+}
+impl From<domain::PlaybackState> for PlaybackState {
+    fn from(value: domain::PlaybackState) -> Self {
+        Self {
+            enclosure_id: value.enclosure_id,
+            position_ms: value.position_ms,
+            duration_ms: value.duration_ms,
+            status: value.status.into(),
+            updated_at: Some(value.updated_at),
+        }
+    }
+}
+impl From<domain::PlaybackPreparation> for PlaybackPreparation {
+    fn from(value: domain::PlaybackPreparation) -> Self {
+        let domain::PlaybackPreparation {
+            enclosure,
+            playback_state,
+            local_file,
+            duration_ms,
+            artwork_reference,
+        } = value;
+        let enclosure_id = enclosure.id;
+        Self {
+            enclosure: enclosure.into(),
+            playback_state: playback_state.map(Into::into).unwrap_or(PlaybackState {
+                enclosure_id,
+                position_ms: 0,
+                duration_ms: None,
+                status: PlaybackStatus::NotStarted,
+                updated_at: None,
+            }),
+            local_file,
+            duration_ms,
+            artwork_reference,
+        }
+    }
+}
+impl From<flux_core::MediaProgressCapability> for MediaProgressCapability {
+    fn from(value: flux_core::MediaProgressCapability) -> Self {
+        match value {
+            flux_core::MediaProgressCapability::Unknown => Self::Unknown,
+            flux_core::MediaProgressCapability::Supported => Self::Supported,
+            flux_core::MediaProgressCapability::Unsupported => Self::Unsupported,
+        }
+    }
+}
+impl From<DownloadOrigin> for domain::DownloadOrigin {
+    fn from(value: DownloadOrigin) -> Self {
+        match value {
+            DownloadOrigin::Manual => Self::Manual,
+            DownloadOrigin::Automatic => Self::Automatic,
+        }
+    }
+}
+impl From<domain::DownloadOrigin> for DownloadOrigin {
+    fn from(value: domain::DownloadOrigin) -> Self {
+        match value {
+            domain::DownloadOrigin::Manual => Self::Manual,
+            domain::DownloadOrigin::Automatic => Self::Automatic,
+        }
+    }
+}
+impl From<domain::DownloadFailureKind> for DownloadFailureKind {
+    fn from(value: domain::DownloadFailureKind) -> Self {
+        match value {
+            domain::DownloadFailureKind::Network => Self::Network,
+            domain::DownloadFailureKind::Storage => Self::Storage,
+            domain::DownloadFailureKind::InvalidMedia => Self::InvalidMedia,
+            domain::DownloadFailureKind::Unknown => Self::Unknown,
+        }
+    }
+}
+impl From<DownloadFailureKind> for domain::DownloadFailureKind {
+    fn from(value: DownloadFailureKind) -> Self {
+        match value {
+            DownloadFailureKind::Network => Self::Network,
+            DownloadFailureKind::Storage => Self::Storage,
+            DownloadFailureKind::InvalidMedia => Self::InvalidMedia,
+            DownloadFailureKind::Unknown => Self::Unknown,
+        }
+    }
+}
+impl From<domain::DownloadState> for DownloadState {
+    fn from(value: domain::DownloadState) -> Self {
+        match value {
+            domain::DownloadState::NotDownloaded => Self::NotDownloaded,
+            domain::DownloadState::Requested => Self::Requested,
+            domain::DownloadState::Downloaded => Self::Downloaded,
+            domain::DownloadState::Failed => Self::Failed,
+            domain::DownloadState::DeleteRequested => Self::DeleteRequested,
+        }
+    }
+}
+impl From<domain::MediaDownload> for MediaDownload {
+    fn from(value: domain::MediaDownload) -> Self {
+        Self {
+            enclosure_id: value.enclosure_id,
+            state: value.state.into(),
+            origin: value.origin.map(Into::into),
+            local_file: value.local_file,
+            file_size_bytes: value.file_size_bytes,
+            downloaded_at: value.downloaded_at,
+            failure_kind: value.failure_kind.map(Into::into),
+        }
+    }
+}
+impl From<DownloadNetworkPolicy> for domain::DownloadNetworkPolicy {
+    fn from(value: DownloadNetworkPolicy) -> Self {
+        match value {
+            DownloadNetworkPolicy::AnyNetwork => Self::AnyNetwork,
+            DownloadNetworkPolicy::UnmeteredOnly => Self::UnmeteredOnly,
+        }
+    }
+}
+impl From<domain::DownloadNetworkPolicy> for DownloadNetworkPolicy {
+    fn from(value: domain::DownloadNetworkPolicy) -> Self {
+        match value {
+            domain::DownloadNetworkPolicy::AnyNetwork => Self::AnyNetwork,
+            domain::DownloadNetworkPolicy::UnmeteredOnly => Self::UnmeteredOnly,
+        }
+    }
+}
+impl From<DownloadRetention> for domain::DownloadRetention {
+    fn from(value: DownloadRetention) -> Self {
+        match value {
+            DownloadRetention::Forever => Self::Forever,
+            DownloadRetention::Days { days } => Self::Days(days),
+        }
+    }
+}
+impl From<domain::DownloadRetention> for DownloadRetention {
+    fn from(value: domain::DownloadRetention) -> Self {
+        match value {
+            domain::DownloadRetention::Forever => Self::Forever,
+            domain::DownloadRetention::Days(days) => Self::Days { days },
+        }
+    }
+}
+impl From<domain::MediaTransferWork> for MediaTransferWork {
+    fn from(value: domain::MediaTransferWork) -> Self {
+        Self {
+            enclosure_id: value.enclosure_id,
+            url: value.url,
+            origin: value.origin.into(),
+            local_file: value.local_file,
+        }
+    }
+}
+impl From<domain::MediaMetadata> for MediaMetadata {
+    fn from(value: domain::MediaMetadata) -> Self {
+        Self {
+            enclosure_id: value.enclosure_id,
+            duration_ms: value.duration_ms,
+            embedded_artwork_reference: value.embedded_artwork_reference,
+        }
+    }
+}
+impl From<domain::MediaChapterSource> for MediaChapterSource {
+    fn from(value: domain::MediaChapterSource) -> Self {
+        match value {
+            domain::MediaChapterSource::Embedded => Self::Embedded,
+            domain::MediaChapterSource::ArticleContent => Self::ArticleContent,
+        }
+    }
+}
+impl From<domain::MediaChapter> for MediaChapter {
+    fn from(value: domain::MediaChapter) -> Self {
+        Self {
+            enclosure_id: value.enclosure_id,
+            title: value.title,
+            start_ms: value.start_ms,
+            end_ms: value.end_ms,
+            source: value.source.into(),
+        }
+    }
+}
+impl From<domain::SavedPlayableMediaItem> for SavedPlayableMediaItem {
+    fn from(value: domain::SavedPlayableMediaItem) -> Self {
+        Self {
+            enclosure_id: value.enclosure_id,
+            article_id: value.article_id,
+            feed_id: value.feed_id,
+            title: value.title,
+            feed_title: value.feed_title,
+            published_at: value.published_at,
+            added_at: value.added_at,
+            url: value.url,
+            mime_type: value.mime_type,
+            media_kind: value.media_kind.into(),
+            remote_present: value.remote_present,
+            duration_ms: value.duration_ms,
+            artwork_reference: value.artwork_reference,
+        }
+    }
+}
+impl From<domain::SavedMediaSyncConfiguration> for SavedMediaSyncConfiguration {
+    fn from(value: domain::SavedMediaSyncConfiguration) -> Self {
+        Self {
+            enabled: value.enabled,
+            sync_feed_id: value.sync_feed_id,
+            requires_repair: value.requires_repair,
+        }
+    }
+}
+impl From<domain::SavedMediaSyncSetupInfo> for SavedMediaSyncSetupInfo {
+    fn from(value: domain::SavedMediaSyncSetupInfo) -> Self {
+        Self {
+            bootstrap_url: value.bootstrap_url,
+            technical_feed_title: value.technical_feed_title,
+            explanation: value.explanation,
         }
     }
 }
@@ -1650,5 +2261,54 @@ fn map_account_validation_error(
         flux_core::miniflux::AccountValidationError::InvalidCustomHeader => {
             AccountValidationError::InvalidCustomHeader
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn media_state_mappings_are_explicit_and_not_stringly_typed() {
+        assert!(matches!(
+            domain::DownloadState::DeleteRequested.into(),
+            DownloadState::DeleteRequested
+        ));
+        assert!(matches!(
+            domain::PlaybackStatus::Completed.into(),
+            PlaybackStatus::Completed
+        ));
+        assert!(matches!(
+            flux_core::MediaProgressCapability::Unknown.into(),
+            MediaProgressCapability::Unknown
+        ));
+    }
+
+    #[test]
+    fn media_read_models_preserve_identity_and_order_fields() {
+        let enclosure = domain::Enclosure {
+            id: 42,
+            article_id: 7,
+            url: "https://example.test/audio.mp3".to_string(),
+            mime_type: "audio/mpeg".to_string(),
+            size_bytes: Some(123),
+            remote_media_progression_seconds: 9,
+        };
+        let mapped: Enclosure = enclosure.into();
+        assert_eq!(mapped.id, 42);
+        assert_eq!(mapped.article_id, 7);
+        assert!(matches!(mapped.media_kind, MediaKind::Audio));
+
+        let chapter = domain::MediaChapter {
+            enclosure_id: 42,
+            title: "Intro".to_string(),
+            start_ms: 1_000,
+            end_ms: Some(2_000),
+            source: domain::MediaChapterSource::Embedded,
+        };
+        let mapped: MediaChapter = chapter.into();
+        assert_eq!(mapped.start_ms, 1_000);
+        assert_eq!(mapped.end_ms, Some(2_000));
+        assert!(matches!(mapped.source, MediaChapterSource::Embedded));
     }
 }

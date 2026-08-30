@@ -11,9 +11,9 @@ use crate::domain::{
     CoreSettings, DeliveryMode, DetailRenderingMode, DiscoveryMode, DownloadFailureKind,
     DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, DownloadState, Enclosure, Feed,
     FeedPreferences, FeedSystemNotificationSetting, MediaChapter, MediaChapterSource,
-    MediaDownload, MediaMetadata, MutationField, NavigationCatalog, PlaybackState, PlaybackStatus,
-    ReadArticleRetention, ReadFilter, SavedMedia, SavedMediaMarkerState,
-    SavedMediaSyncConfiguration, SavedPlayableMediaItem, StarredFilter,
+    MediaDownload, MediaMetadata, MediaTransferWork, MutationField, NavigationCatalog,
+    PlaybackState, PlaybackStatus, ReadArticleRetention, ReadFilter, SavedMedia,
+    SavedMediaMarkerState, SavedMediaSyncConfiguration, SavedPlayableMediaItem, StarredFilter,
     SystemNotificationCandidate, WidgetArticle, WidgetCounts, WidgetData, WidgetScopedCount,
 };
 use crate::media_metadata::{
@@ -601,6 +601,36 @@ impl Store {
             .map_err(sql_error)
     }
 
+    pub fn media_transfer_work(
+        &self,
+        state: DownloadState,
+    ) -> Result<Vec<MediaTransferWork>, CoreError> {
+        let state = match state {
+            DownloadState::Requested => "requested",
+            DownloadState::DeleteRequested => "delete_requested",
+            _ => return Ok(Vec::new()),
+        };
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut statement = connection
+            .prepare("SELECT d.enclosure_id,e.url,d.origin,d.local_file FROM media_downloads d JOIN enclosures e ON e.id=d.enclosure_id WHERE d.state=?1 ORDER BY d.enclosure_id")
+            .map_err(sql_error)?;
+        statement
+            .query_map([state], |row| {
+                Ok(MediaTransferWork {
+                    enclosure_id: row.get(0)?,
+                    url: row.get(1)?,
+                    origin: origin_from_db(&row.get::<_, String>(2)?)?,
+                    local_file: row.get(3)?,
+                })
+            })
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)
+    }
+
     pub fn enclosures_for_article(
         &self,
         article_id: i64,
@@ -1014,6 +1044,19 @@ impl Store {
 
     pub fn media_metadata(&self, enclosure_id: i64) -> Result<Option<MediaMetadata>, CoreError> {
         self.connection.lock().map_err(|_| CoreError::internal("database lock poisoned"))?.query_row("SELECT enclosure_id,duration_ms,embedded_artwork_reference FROM media_metadata WHERE enclosure_id=?1", [enclosure_id], |row| Ok(MediaMetadata { enclosure_id: row.get(0)?, duration_ms: row.get::<_, Option<i64>>(1)?.map(|value| u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery)).transpose()?, embedded_artwork_reference: row.get(2)? })).optional().map_err(sql_error)
+    }
+
+    pub fn media_artwork(&self, reference: &str) -> Result<Option<Vec<u8>>, CoreError> {
+        let Some(path) = resolve_media_reference(&self.media_root, reference) else {
+            return Ok(None);
+        };
+        match std::fs::read(path) {
+            Ok(data) => Ok(Some(data)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(CoreError::persistence(format!(
+                "unable to read media artwork: {error}"
+            ))),
+        }
     }
 
     pub fn media_chapters(&self, enclosure_id: i64) -> Result<Vec<MediaChapter>, CoreError> {

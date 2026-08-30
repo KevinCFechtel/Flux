@@ -27,13 +27,13 @@ use domain::{
     ArticleQuery, ArticleSummary, ArticleThumbnailResult, CoreError, CoreErrorKind, CoreEvent,
     CoreSettings, CreateCategoryResult, CreateFeedRequest, CreateFeedResult, DeliveryDisposition,
     DeliveryMode, DetailRenderingMode, DiscoverSubscriptionsRequest, DiscoveredSubscription,
-    DownloadFailureKind, DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, FeedIcon,
-    FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, MediaChapter, MediaDownload,
-    MediaMetadata, MutationField, MutationResult, NavigationCatalog, PlaybackState,
-    ReadArticleRetention, ReaderDocument, RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult,
-    SavedMediaSyncConfiguration, SavedMediaSyncSetupInfo, SavedPlayableMediaItem,
-    SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition, SyncCompleted,
-    SyncFailure, SyncReason, WidgetData,
+    DownloadFailureKind, DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, DownloadState,
+    Enclosure, FeedIcon, FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting,
+    MediaChapter, MediaDownload, MediaMetadata, MediaTransferWork, MutationField, MutationResult,
+    NavigationCatalog, PlaybackPreparation, PlaybackState, ReadArticleRetention, ReaderDocument,
+    RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult, SavedMediaSyncConfiguration,
+    SavedMediaSyncSetupInfo, SavedPlayableMediaItem, SearchArticlesRequest, SearchArticlesResult,
+    SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason, WidgetData,
 };
 use miniflux::{
     AccountValidationError, AccountValidationResult, HttpHeader, MinifluxClient, RemoteSource,
@@ -60,7 +60,7 @@ pub struct ConfigurationSnapshot {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum MediaProgressCapability {
+pub enum MediaProgressCapability {
     Unknown,
     Supported,
     Unsupported,
@@ -471,6 +471,9 @@ impl FluxCore {
         self.diagnostics.flush();
         result.map(|_| ())
     }
+    pub fn is_media_saved(&self, enclosure_id: i64) -> Result<bool, CoreError> {
+        Ok(self.store.saved_media(enclosure_id)?.is_some())
+    }
     pub fn saved_media_sync_configuration(&self) -> Result<SavedMediaSyncConfiguration, CoreError> {
         self.store.saved_media_sync_configuration()
     }
@@ -522,6 +525,32 @@ impl FluxCore {
             self.store.promote_playback_progress()?;
         }
         Ok(())
+    }
+    pub fn enclosure(&self, enclosure_id: i64) -> Result<Option<Enclosure>, CoreError> {
+        Ok(self
+            .store
+            .enclosure(enclosure_id)?
+            .map(|stored| stored.enclosure))
+    }
+    pub fn prepare_playback(&self, enclosure_id: i64) -> Result<PlaybackPreparation, CoreError> {
+        let enclosure = self
+            .store
+            .enclosure(enclosure_id)?
+            .ok_or_else(|| CoreError::data(format!("enclosure {enclosure_id} does not exist")))?;
+        let playback_state = self.store.playback_state(enclosure_id)?;
+        let download = self.store.media_download(enclosure_id)?;
+        let metadata = self.store.media_metadata(enclosure_id)?;
+        let duration_ms = metadata
+            .as_ref()
+            .and_then(|metadata| metadata.duration_ms)
+            .or_else(|| playback_state.as_ref().and_then(|state| state.duration_ms));
+        Ok(PlaybackPreparation {
+            enclosure: enclosure.enclosure,
+            playback_state,
+            local_file: download.and_then(|download| download.local_file),
+            duration_ms,
+            artwork_reference: metadata.and_then(|metadata| metadata.embedded_artwork_reference),
+        })
     }
     pub fn playback_state(&self, enclosure_id: i64) -> Result<Option<PlaybackState>, CoreError> {
         self.store.playback_state(enclosure_id)
@@ -597,11 +626,24 @@ impl FluxCore {
     pub fn media_metadata(&self, enclosure_id: i64) -> Result<Option<MediaMetadata>, CoreError> {
         self.store.media_metadata(enclosure_id)
     }
+    pub fn media_artwork(&self, reference: &str) -> Result<Option<Vec<u8>>, CoreError> {
+        self.store.media_artwork(reference)
+    }
     pub fn media_chapters(&self, enclosure_id: i64) -> Result<Vec<MediaChapter>, CoreError> {
         self.store.media_chapters(enclosure_id)
     }
-    pub fn downloads_requiring_transfer(&self) -> Result<Vec<i64>, CoreError> {
-        self.store.downloads_requiring_transfer()
+    pub fn media_progress_capability(&self) -> MediaProgressCapability {
+        self.media_progress_supported
+            .lock()
+            .map(|capability| *capability)
+            .unwrap_or(MediaProgressCapability::Unknown)
+    }
+    pub fn downloads_requiring_transfer(&self) -> Result<Vec<MediaTransferWork>, CoreError> {
+        self.store.media_transfer_work(DownloadState::Requested)
+    }
+    pub fn downloads_requiring_deletion(&self) -> Result<Vec<MediaTransferWork>, CoreError> {
+        self.store
+            .media_transfer_work(DownloadState::DeleteRequested)
     }
     pub fn request_download(
         &self,
@@ -665,6 +707,9 @@ impl FluxCore {
             .lock()
             .map_err(|_| CoreError::internal("sync gate poisoned"))?;
         self.store.evaluate_media_cleanup(now)
+    }
+    pub fn evaluate_media_cleanup_now(&self) -> Result<Vec<i64>, CoreError> {
+        self.evaluate_media_cleanup(Utc::now())
     }
     pub fn download_deleted(&self, enclosure_id: i64) -> Result<(), CoreError> {
         let _sync = self
