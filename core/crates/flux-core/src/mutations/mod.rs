@@ -1,47 +1,48 @@
+use std::collections::HashMap;
+
 use crate::domain::{CoreError, CoreEvent, MutationField};
 use crate::miniflux::RemoteSource;
 use crate::storage::Store;
 
-/// Sends a durable snapshot. Conditional acknowledgement protects newer local intent.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct DeliveryResult {
+    pub count: u32,
+    pub media_progress: HashMap<i64, u64>,
+}
+
+/// Sends article and enclosure mutations using their typed durable stores.
 pub(crate) fn deliver_pending(
     remote: &dyn RemoteSource,
     store: &Store,
     emit: &dyn Fn(CoreEvent),
-) -> Result<u32, CoreError> {
-    let pending = store.pending_mutations()?;
-    tracing::info!(target: "mutation", "pending mutation delivery started pending={}", pending.len());
-    let mut delivered = 0;
-    for pending in pending {
-        let result = match pending.field {
+) -> Result<DeliveryResult, CoreError> {
+    let mut result = DeliveryResult::default();
+    for pending in store.pending_mutations()? {
+        match pending.field {
             MutationField::Read => remote.set_read_state(&[pending.article_id], pending.desired),
             MutationField::Starred => remote.set_starred_state(pending.article_id, pending.desired),
-            MutationField::MediaProgress => remote.set_media_progression(
-                pending.article_id,
-                pending.progression_seconds.ok_or_else(|| {
-                    CoreError::internal("media progress mutation has no progression")
-                })?,
-            ),
-        };
-        match result {
-            Ok(()) => {
-                store.acknowledge(&pending)?;
-                delivered += 1;
-                emit(CoreEvent::MutationDeliverySucceeded {
-                    article_id: pending.article_id,
-                    field: pending.field,
-                });
+            MutationField::MediaProgress => {
+                Err(CoreError::internal("media progress is not article-scoped"))
             }
-            Err(error) => {
-                tracing::warn!(target: "mutation", "pending mutation delivery failed delivered={} kind={:?}", delivered, error.kind);
-                emit(CoreEvent::MutationDeliveryFailed {
-                    article_id: pending.article_id,
-                    field: pending.field,
-                    error_kind: error.kind.clone(),
-                });
-                return Err(error);
-            }
-        }
+        }?;
+        store.acknowledge(&pending)?;
+        result.count += 1;
+        emit(CoreEvent::MutationDeliverySucceeded {
+            article_id: pending.article_id,
+            field: pending.field,
+        });
     }
-    tracing::debug!(target: "mutation", "pending mutation delivery acknowledged delivered={delivered}");
-    Ok(delivered)
+    for pending in store.pending_media_progress_mutations()? {
+        remote.set_media_progression(pending.enclosure_id, pending.progression_seconds)?;
+        store.acknowledge_media_progress(&pending)?;
+        result.count += 1;
+        result
+            .media_progress
+            .insert(pending.enclosure_id, pending.progression_seconds);
+        emit(CoreEvent::MutationDeliverySucceeded {
+            article_id: pending.enclosure_id,
+            field: MutationField::MediaProgress,
+        });
+    }
+    Ok(result)
 }

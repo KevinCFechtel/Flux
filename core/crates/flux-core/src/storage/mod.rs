@@ -1,7 +1,7 @@
 //! SQLite persistence. Pending rows coalesce by article/field; acknowledgement
 //! deletes only the exact sent revision so later local intent always survives.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -16,7 +16,7 @@ use crate::domain::{
 use crate::miniflux::normalize_installation_base;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-const SCHEMA_VERSION: i64 = 11;
+const SCHEMA_VERSION: i64 = 12;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingSavedMediaReplication {
@@ -40,6 +40,13 @@ pub struct PendingMutation {
     pub desired: bool,
     pub revision: i64,
     pub progression_seconds: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingMediaProgressMutation {
+    pub enclosure_id: i64,
+    pub progression_seconds: u64,
+    pub revision: i64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -306,6 +313,22 @@ impl Store {
         articles: &[Article],
         enclosures: &[Enclosure],
     ) -> Result<ReconciliationStats, CoreError> {
+        self.reconcile_with_enclosures_and_progress(
+            categories,
+            feeds,
+            articles,
+            enclosures,
+            &HashMap::new(),
+        )
+    }
+    pub fn reconcile_with_enclosures_and_progress(
+        &self,
+        categories: &[Category],
+        feeds: &[Feed],
+        articles: &[Article],
+        enclosures: &[Enclosure],
+        media_progress_writes: &HashMap<i64, u64>,
+    ) -> Result<ReconciliationStats, CoreError> {
         let mut connection = self
             .connection
             .lock()
@@ -436,7 +459,7 @@ impl Store {
             }
             tx.execute("INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11,?12) ON CONFLICT(id) DO UPDATE SET feed_id=excluded.feed_id,title=excluded.title,url=excluded.url,comments_url=excluded.comments_url,published_at=excluded.published_at,remote_is_read=excluded.remote_is_read,remote_is_starred=excluded.remote_is_starred,is_read=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='read') THEN articles.is_read ELSE excluded.is_read END,is_starred=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='starred') THEN articles.is_starred ELSE excluded.is_starred END,raw_html_content=excluded.raw_html_content,preview=excluded.preview,image_url=excluded.image_url,content_processing_version=excluded.content_processing_version", params![a.id,a.feed_id,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.raw_html_content,a.preview,a.image_url,crate::article::PROCESSING_VERSION]).map_err(sql_error)?;
         }
-        reconcile_remote_enclosures(&tx, articles, enclosures)?;
+        reconcile_remote_enclosures(&tx, articles, enclosures, media_progress_writes)?;
         let remote_category_ids: HashSet<i64> =
             categories.iter().map(|category| category.id).collect();
         let stale_category_ids = {
@@ -766,6 +789,19 @@ impl Store {
             .query_row("SELECT enclosure_id,position_ms,duration_ms,status,updated_at FROM playback_states WHERE enclosure_id=?1", [enclosure_id], playback_state_from_row).optional().map_err(sql_error)
     }
 
+    pub fn protected_playback_article_ids(&self) -> Result<Vec<i64>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut statement = connection.prepare("SELECT DISTINCT e.article_id FROM enclosures e LEFT JOIN playback_states p ON p.enclosure_id=e.id AND p.status='in_progress' LEFT JOIN pending_media_progress_mutations m ON m.enclosure_id=e.id WHERE p.enclosure_id IS NOT NULL OR m.enclosure_id IS NOT NULL ORDER BY e.article_id").map_err(sql_error)?;
+        statement
+            .query_map([], |row| row.get(0))
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)
+    }
+
     pub fn checkpoint_playback(
         &self,
         enclosure_id: i64,
@@ -797,6 +833,50 @@ impl Store {
         tx.commit().map_err(sql_error)
     }
 
+    pub fn observe_media_duration(
+        &self,
+        enclosure_id: i64,
+        duration_ms: u64,
+        updated_at: &str,
+    ) -> Result<(), CoreError> {
+        let state = self.playback_state(enclosure_id)?;
+        let Some(state) = state else {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| CoreError::internal("database lock poisoned"))?;
+            let exists: bool = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM enclosures WHERE id=?1)",
+                    [enclosure_id],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            if !exists {
+                return Err(CoreError::data(format!(
+                    "enclosure {enclosure_id} does not exist"
+                )));
+            }
+            return Ok(());
+        };
+        let (position, status) = (state.position_ms.min(duration_ms), state.status);
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        ensure_enclosure(&tx, enclosure_id)?;
+        upsert_playback_state(
+            &tx,
+            enclosure_id,
+            position,
+            Some(duration_ms),
+            status,
+            updated_at,
+        )?;
+        tx.commit().map_err(sql_error)
+    }
+
     pub fn complete_playback(
         &self,
         enclosure_id: i64,
@@ -810,17 +890,24 @@ impl Store {
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let tx = connection.transaction().map_err(sql_error)?;
         ensure_enclosure(&tx, enclosure_id)?;
-        let duration_ms = duration_ms.or_else(|| {
-            tx.query_row(
-                "SELECT duration_ms FROM playback_states WHERE enclosure_id=?1",
+        let existing: Option<(i64, Option<i64>)> = tx
+            .query_row(
+                "SELECT position_ms,duration_ms FROM playback_states WHERE enclosure_id=?1",
                 [enclosure_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
-            .ok()
-            .flatten()
+            .map_err(sql_error)?;
+        let duration_ms = duration_ms.or_else(|| {
+            existing.and_then(|(_, duration)| duration.and_then(|value| u64::try_from(value).ok()))
         });
-        let position_ms = duration_ms.unwrap_or(0);
+        let position_ms = duration_ms
+            .or_else(|| existing.and_then(|(position, _)| u64::try_from(position).ok()))
+            .ok_or_else(|| {
+                CoreError::data(
+                    "playback completion requires a duration or prior playback position",
+                )
+            })?;
         upsert_playback_state(
             &tx,
             enclosure_id,
@@ -829,10 +916,8 @@ impl Store {
             PlaybackStatus::Completed,
             updated_at,
         )?;
-        if queue_progress {
-            if let Some(duration) = duration_ms {
-                queue_media_progress(&tx, enclosure_id, milliseconds_to_seconds(duration)?)?;
-            }
+        if queue_progress && let Some(duration) = duration_ms {
+            queue_media_progress(&tx, enclosure_id, milliseconds_to_seconds(duration)?)?;
         }
         tx.commit().map_err(sql_error)
     }
@@ -1231,7 +1316,7 @@ impl Store {
             {
                 return Err(CoreError::data(format!("article {id} does not exist")));
             }
-            tx.execute("INSERT INTO pending_mutations(article_id,field,desired,progression_seconds,revision) VALUES(?1,?2,?3,NULL,1) ON CONFLICT(article_id,field) DO UPDATE SET desired=excluded.desired,revision=pending_mutations.revision+1",params![id,field_name,desired]).map_err(sql_error)?;
+            tx.execute("INSERT INTO pending_mutations(article_id,field,desired,revision) VALUES(?1,?2,?3,1) ON CONFLICT(article_id,field) DO UPDATE SET desired=excluded.desired,revision=pending_mutations.revision+1",params![id,field_name,desired]).map_err(sql_error)?;
             let revision = tx
                 .query_row(
                     "SELECT revision FROM pending_mutations WHERE article_id=?1 AND field=?2",
@@ -1255,7 +1340,7 @@ impl Store {
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
-        let mut statement=connection.prepare("SELECT article_id,field,desired,progression_seconds,revision FROM pending_mutations ORDER BY article_id,field").map_err(sql_error)?;
+        let mut statement=connection.prepare("SELECT article_id,field,desired,NULL,revision FROM pending_mutations ORDER BY article_id,field").map_err(sql_error)?;
         statement
             .query_map([], |r| {
                 Ok(PendingMutation {
@@ -1274,6 +1359,47 @@ impl Store {
             .map_err(sql_error)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(sql_error)
+    }
+
+    pub fn pending_media_progress_mutations(
+        &self,
+    ) -> Result<Vec<PendingMediaProgressMutation>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut statement = connection.prepare("SELECT enclosure_id,progression_seconds,revision FROM pending_media_progress_mutations ORDER BY enclosure_id").map_err(sql_error)?;
+        statement
+            .query_map([], |row| {
+                Ok(PendingMediaProgressMutation {
+                    enclosure_id: row.get(0)?,
+                    progression_seconds: u64::try_from(row.get::<_, i64>(1)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    revision: row.get(2)?,
+                })
+            })
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)
+    }
+
+    pub fn acknowledge_media_progress(
+        &self,
+        pending: &PendingMediaProgressMutation,
+    ) -> Result<bool, CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute(
+            "UPDATE enclosures SET remote_media_progression_seconds=?1 WHERE id=?2",
+            params![pending.progression_seconds, pending.enclosure_id],
+        )
+        .map_err(sql_error)?;
+        let deleted = tx.execute("DELETE FROM pending_media_progress_mutations WHERE enclosure_id=?1 AND progression_seconds=?2 AND revision=?3", params![pending.enclosure_id, pending.progression_seconds, pending.revision]).map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+        Ok(deleted == 1)
     }
     pub fn acknowledge(&self, pending: &PendingMutation) -> Result<bool, CoreError> {
         let mut connection = self
@@ -1670,6 +1796,11 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
         tx.execute_batch("CREATE TABLE IF NOT EXISTS pending_mutations (article_id INTEGER NOT NULL, field TEXT NOT NULL CHECK(field IN ('read','starred')), desired INTEGER NOT NULL CHECK(desired IN(0,1)), revision INTEGER NOT NULL, PRIMARY KEY(article_id,field)); CREATE TABLE pending_mutations_replacement (article_id INTEGER NOT NULL, field TEXT NOT NULL CHECK(field IN ('read','starred','media_progress')), desired INTEGER NOT NULL CHECK(desired IN(0,1)), progression_seconds INTEGER, revision INTEGER NOT NULL, PRIMARY KEY(article_id,field), CHECK((field IN ('read','starred') AND progression_seconds IS NULL) OR (field='media_progress' AND progression_seconds >= 0))); INSERT INTO pending_mutations_replacement(article_id,field,desired,progression_seconds,revision) SELECT article_id,field,desired,NULL,revision FROM pending_mutations; DROP TABLE pending_mutations; ALTER TABLE pending_mutations_replacement RENAME TO pending_mutations; CREATE TABLE playback_states (enclosure_id INTEGER PRIMARY KEY REFERENCES enclosures(id) ON DELETE CASCADE, position_ms INTEGER NOT NULL CHECK(position_ms >= 0), duration_ms INTEGER CHECK(duration_ms >= 0), status TEXT NOT NULL CHECK(status IN ('in_progress','completed')), updated_at TEXT NOT NULL, CHECK(duration_ms IS NULL OR position_ms <= duration_ms)); PRAGMA user_version=11;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
+    if current < 12 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute_batch("CREATE TABLE pending_media_progress_mutations (enclosure_id INTEGER PRIMARY KEY REFERENCES enclosures(id) ON DELETE CASCADE, progression_seconds INTEGER NOT NULL CHECK(progression_seconds >= 0), revision INTEGER NOT NULL); INSERT INTO pending_media_progress_mutations(enclosure_id,progression_seconds,revision) SELECT article_id,progression_seconds,revision FROM pending_mutations WHERE field='media_progress'; CREATE TABLE pending_mutations_repaired (article_id INTEGER NOT NULL REFERENCES articles(id), field TEXT NOT NULL CHECK(field IN ('read','starred')), desired INTEGER NOT NULL CHECK(desired IN(0,1)), revision INTEGER NOT NULL, PRIMARY KEY(article_id,field)); INSERT INTO pending_mutations_repaired(article_id,field,desired,revision) SELECT article_id,field,desired,revision FROM pending_mutations WHERE field IN ('read','starred'); DROP TABLE pending_mutations; ALTER TABLE pending_mutations_repaired RENAME TO pending_mutations; PRAGMA user_version=12;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
     Ok(())
 }
 fn initialize_core_settings(connection: &Connection) -> Result<(), CoreError> {
@@ -1821,7 +1952,7 @@ fn queue_media_progress(
 ) -> Result<(), CoreError> {
     let seconds = i64::try_from(seconds)
         .map_err(|_| CoreError::data("media progression exceeds SQLite range"))?;
-    tx.execute("INSERT INTO pending_mutations(article_id,field,desired,progression_seconds,revision) VALUES(?1,'media_progress',0,?2,1) ON CONFLICT(article_id,field) DO UPDATE SET progression_seconds=excluded.progression_seconds,revision=pending_mutations.revision+1", params![enclosure_id,seconds]).map_err(sql_error)?;
+    tx.execute("INSERT INTO pending_media_progress_mutations(enclosure_id,progression_seconds,revision) VALUES(?1,?2,1) ON CONFLICT(enclosure_id) DO UPDATE SET progression_seconds=excluded.progression_seconds,revision=pending_media_progress_mutations.revision+1 WHERE pending_media_progress_mutations.progression_seconds != excluded.progression_seconds", params![enclosure_id,seconds]).map_err(sql_error)?;
     Ok(())
 }
 fn queue_saved_media_replication(
@@ -1869,6 +2000,7 @@ fn reconcile_remote_enclosures(
     tx: &Transaction<'_>,
     articles: &[Article],
     enclosures: &[Enclosure],
+    media_progress_writes: &HashMap<i64, u64>,
 ) -> Result<(), CoreError> {
     let fetched_article_ids: HashSet<i64> = articles.iter().map(|article| article.id).collect();
     let mut enclosure_ids = HashSet::with_capacity(enclosures.len());
@@ -1893,7 +2025,89 @@ fn reconcile_remote_enclosures(
         )
         .map_err(sql_error)?;
     }
-    upsert_remote_enclosures(tx, enclosures)
+    let old_progressions = enclosures
+        .iter()
+        .map(|enclosure| {
+            let old = tx
+                .query_row(
+                    "SELECT remote_media_progression_seconds FROM enclosures WHERE id=?1",
+                    [enclosure.id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(sql_error)?
+                .map(|value| {
+                    u64::try_from(value)
+                        .map_err(|_| CoreError::persistence("invalid stored media progression"))
+                })
+                .transpose()?;
+            Ok::<_, CoreError>((enclosure.id, old))
+        })
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    upsert_remote_enclosures(tx, enclosures)?;
+    for enclosure in enclosures {
+        let old = old_progressions.get(&enclosure.id).copied().flatten();
+        let pending: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM pending_media_progress_mutations WHERE enclosure_id=?1)", [enclosure.id], |row| row.get(0)).map_err(sql_error)?;
+        let written = media_progress_writes.get(&enclosure.id).copied();
+        let stale_write =
+            written.is_some_and(|value| value != enclosure.remote_media_progression_seconds);
+        let should_adopt =
+            !pending && !stale_write && old != Some(enclosure.remote_media_progression_seconds);
+        if should_adopt {
+            reconcile_playback_progress(tx, enclosure, old)?;
+        }
+        if stale_write && let Some(old) = old {
+            tx.execute(
+                "UPDATE enclosures SET remote_media_progression_seconds=?1 WHERE id=?2",
+                params![old, enclosure.id],
+            )
+            .map_err(sql_error)?;
+        }
+    }
+    Ok(())
+}
+
+const COMPLETION_TOLERANCE_SECONDS: u64 = 3;
+
+fn reconcile_playback_progress(
+    tx: &Transaction<'_>,
+    enclosure: &Enclosure,
+    old: Option<u64>,
+) -> Result<(), CoreError> {
+    let local = tx.query_row("SELECT position_ms,duration_ms,status,updated_at FROM playback_states WHERE enclosure_id=?1", [enclosure.id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<i64>>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))).optional().map_err(sql_error)?;
+    let progression = enclosure.remote_media_progression_seconds;
+    if local.is_none() && progression == 0 {
+        return Ok(());
+    }
+    let duration = local
+        .as_ref()
+        .and_then(|(_, duration, _, _)| duration.and_then(|value| u64::try_from(value).ok()));
+    let status = if progression == 0 {
+        "in_progress"
+    } else if duration.is_some_and(|duration| {
+        duration.abs_diff(progression.saturating_mul(1000)) <= COMPLETION_TOLERANCE_SECONDS * 1000
+    }) {
+        "completed"
+    } else {
+        "in_progress"
+    };
+    let position_ms =
+        if status == "completed" {
+            duration.unwrap_or(progression.checked_mul(1000).ok_or_else(|| {
+                CoreError::data("remote media progression exceeds playback range")
+            })?)
+        } else {
+            progression
+                .checked_mul(1000)
+                .ok_or_else(|| CoreError::data("remote media progression exceeds playback range"))?
+        };
+    let position = i64::try_from(position_ms)
+        .map_err(|_| CoreError::data("remote media progression exceeds playback range"))?;
+    if local.is_some() && old == Some(progression) {
+        return Ok(());
+    }
+    tx.execute("INSERT INTO playback_states(enclosure_id,position_ms,duration_ms,status,updated_at) VALUES(?1,?2,?3,?4,datetime('now')) ON CONFLICT(enclosure_id) DO UPDATE SET position_ms=excluded.position_ms,duration_ms=COALESCE(excluded.duration_ms,playback_states.duration_ms),status=excluded.status,updated_at=excluded.updated_at", params![enclosure.id,position,duration, status]).map_err(sql_error)?;
+    Ok(())
 }
 fn stored_enclosure_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredEnclosure> {
     let size_bytes = row
@@ -2016,7 +2230,7 @@ mod tests {
             .connection
             .lock()
             .unwrap()
-            .execute_batch("INSERT INTO categories VALUES(1, 'Old'); INSERT INTO feeds VALUES(2, 1, 'Old Feed'); INSERT INTO articles(id,feed_id,title,url,published_at,is_read,is_starred,raw_html_content,preview) VALUES(3,2,'Old','https://old.example/post','2024-01-01T00:00:00Z',0,0,'',''); INSERT INTO pending_mutations(article_id,field,desired,progression_seconds,revision) VALUES(3,'read',1,NULL,1);")
+            .execute_batch("INSERT INTO categories VALUES(1, 'Old'); INSERT INTO feeds VALUES(2, 1, 'Old Feed'); INSERT INTO articles(id,feed_id,title,url,published_at,is_read,is_starred,raw_html_content,preview) VALUES(3,2,'Old','https://old.example/post','2024-01-01T00:00:00Z',0,0,'',''); INSERT INTO pending_mutations VALUES(3,'read',1,1);")
             .unwrap();
         store.set_feed_open_in_miniflux(2, true).unwrap();
 
@@ -2071,7 +2285,7 @@ mod tests {
         let connection = store.connection.lock().unwrap();
         let row: (i64, String, Option<String>, String, bool, bool, i64, i64) = connection.query_row("SELECT content_processing_version,preview,image_url,raw_html_content,is_read,is_starred,feed_id,(SELECT COUNT(*) FROM pending_mutations) FROM articles WHERE id=3", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).unwrap();
         drop(connection);
-        assert_eq!(store.schema_version().unwrap(), 11);
+        assert_eq!(store.schema_version().unwrap(), 12);
         assert_eq!(row.0, crate::article::PROCESSING_VERSION);
         assert_eq!(row.1, "Hello world");
         assert_eq!(row.2.as_deref(), Some("https://example.test/cover.jpg"));
@@ -2095,7 +2309,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 11);
+        assert_eq!(store.schema_version().unwrap(), 12);
         assert_eq!(
             store.feed_preferences(2).unwrap(),
             FeedPreferences {
@@ -2184,7 +2398,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 11);
+        assert_eq!(store.schema_version().unwrap(), 12);
         assert_eq!(
             store.feed_preferences(123).unwrap(),
             FeedPreferences {
@@ -2233,7 +2447,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 11);
+        assert_eq!(store.schema_version().unwrap(), 12);
         let connection = store.connection.lock().unwrap();
         assert_eq!(
             connection
@@ -2499,7 +2713,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 11);
+        assert_eq!(store.schema_version().unwrap(), 12);
         assert!(!store.enclosure(10).unwrap().unwrap().remote_present);
         assert_eq!(
             store
@@ -2640,7 +2854,7 @@ mod tests {
                     url: "https://cdn.test/100-reappeared.mp3".into(),
                     mime_type: "audio/mpeg".into(),
                     size_bytes: Some(101),
-                    remote_media_progression_seconds: 5,
+                    remote_media_progression_seconds: 0,
                 }],
             )
             .unwrap();
@@ -2758,7 +2972,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 11);
+        assert_eq!(store.schema_version().unwrap(), 12);
         let connection = store.connection.lock().unwrap();
         let foreign_key_count: i64 = connection
             .query_row(
@@ -3268,6 +3482,188 @@ mod tests {
                 .reconcile(&[categories[0].clone(), categories[2].clone()], &feeds, &[])
                 .unwrap()
                 .navigation_changed
+        );
+    }
+
+    #[test]
+    fn playback_state_is_enclosure_scoped_and_progress_coalesces() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 2,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        let articles = [Article {
+            id: 1,
+            feed_id: 2,
+            title: "Article".into(),
+            url: "https://example.test/1".into(),
+            comments_url: String::new(),
+            published_at: "2026-01-01T00:00:00Z".into(),
+            is_read: false,
+            is_starred: false,
+            raw_html_content: String::new(),
+            preview: String::new(),
+            image_url: None,
+        }];
+        let enclosures = [
+            Enclosure {
+                id: 10,
+                article_id: 1,
+                url: "https://cdn.test/a.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+            Enclosure {
+                id: 11,
+                article_id: 1,
+                url: "https://cdn.test/b.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+        ];
+        store
+            .reconcile_with_enclosures(&categories, &feeds, &articles, &enclosures)
+            .unwrap();
+        store
+            .checkpoint_playback(10, 120_000, None, "2026-01-01T00:00:00Z", true)
+            .unwrap();
+        store
+            .checkpoint_playback(10, 60_000, None, "2026-01-01T00:01:00Z", true)
+            .unwrap();
+        assert_eq!(
+            store.playback_state(10).unwrap().unwrap().position_ms,
+            60_000
+        );
+        assert!(store.playback_state(11).unwrap().is_none());
+        let pending = store.pending_media_progress_mutations().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].progression_seconds, 60);
+        store
+            .complete_playback(10, None, "2026-01-01T00:02:00Z", true)
+            .unwrap();
+        assert_eq!(
+            store.playback_state(10).unwrap().unwrap().status,
+            PlaybackStatus::Completed
+        );
+        assert_eq!(
+            store.pending_media_progress_mutations().unwrap()[0].progression_seconds,
+            60
+        );
+        store
+            .complete_playback(10, Some(180_000), "2026-01-01T00:03:00Z", true)
+            .unwrap();
+        let completed = store.playback_state(10).unwrap().unwrap();
+        assert_eq!(completed.position_ms, 180_000);
+        assert_eq!(completed.duration_ms, Some(180_000));
+        assert_eq!(
+            store.pending_media_progress_mutations().unwrap()[0].progression_seconds,
+            180
+        );
+        store
+            .restart_playback(10, "2026-01-01T00:04:00Z", true)
+            .unwrap();
+        let restarted = store.playback_state(10).unwrap().unwrap();
+        assert_eq!(restarted.status, PlaybackStatus::InProgress);
+        assert_eq!(restarted.position_ms, 0);
+        assert_eq!(
+            store.pending_media_progress_mutations().unwrap()[0].progression_seconds,
+            0
+        );
+    }
+
+    #[test]
+    fn playback_reconciliation_preserves_local_and_handles_remote_changes() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let category = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 2,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        let article = [Article {
+            id: 1,
+            feed_id: 2,
+            title: "Article".into(),
+            url: "https://example.test/1".into(),
+            comments_url: String::new(),
+            published_at: "2026-01-01T00:00:00Z".into(),
+            is_read: false,
+            is_starred: false,
+            raw_html_content: String::new(),
+            preview: String::new(),
+            image_url: None,
+        }];
+        let enclosure = |progression| Enclosure {
+            id: 10,
+            article_id: 1,
+            url: "https://cdn.test/a.mp3".into(),
+            mime_type: "audio/mpeg".into(),
+            size_bytes: None,
+            remote_media_progression_seconds: progression,
+        };
+        store
+            .reconcile_with_enclosures(&category, &feeds, &article, &[enclosure(100)])
+            .unwrap();
+        assert_eq!(
+            store.playback_state(10).unwrap().unwrap().position_ms,
+            100_000
+        );
+        store
+            .checkpoint_playback(10, 150_000, None, "2026-01-01T00:01:00Z", false)
+            .unwrap();
+        store
+            .reconcile_with_enclosures(&category, &feeds, &article, &[enclosure(100)])
+            .unwrap();
+        assert_eq!(
+            store.playback_state(10).unwrap().unwrap().position_ms,
+            150_000
+        );
+        store
+            .reconcile_with_enclosures(&category, &feeds, &article, &[enclosure(50)])
+            .unwrap();
+        assert_eq!(
+            store.playback_state(10).unwrap().unwrap().position_ms,
+            50_000
+        );
+        store
+            .checkpoint_playback(10, 120_000, None, "2026-01-01T00:02:00Z", false)
+            .unwrap();
+        store.upsert_remote_enclosures(&[enclosure(120)]).unwrap();
+        store
+            .reconcile_with_enclosures_and_progress(
+                &category,
+                &feeds,
+                &article,
+                &[enclosure(50)],
+                &[(10, 120)].into_iter().collect(),
+            )
+            .unwrap();
+        assert_eq!(
+            store.playback_state(10).unwrap().unwrap().position_ms,
+            120_000
+        );
+        assert_eq!(
+            store
+                .enclosure(10)
+                .unwrap()
+                .unwrap()
+                .enclosure
+                .remote_media_progression_seconds,
+            120
         );
     }
 }

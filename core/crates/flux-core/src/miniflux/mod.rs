@@ -296,6 +296,9 @@ pub trait RemoteSource: Send + Sync {
             "article thumbnail acquisition is unavailable",
         ))
     }
+    fn fetch_article_by_id(&self, _article_id: i64) -> Result<RemoteSavedMediaArticle, CoreError> {
+        Err(CoreError::data("article lookup is unavailable"))
+    }
     fn miniflux_capabilities(&self) -> Result<Vec<MinifluxCapability>, CoreError> {
         Err(CoreError::data("Miniflux capabilities are unavailable"))
     }
@@ -990,6 +993,9 @@ impl RemoteSource for MinifluxClient {
         &self,
         article_id: i64,
     ) -> Result<RemoteSavedMediaArticle, CoreError> {
+        MinifluxClient::saved_media_article(self, article_id)
+    }
+    fn fetch_article_by_id(&self, article_id: i64) -> Result<RemoteSavedMediaArticle, CoreError> {
         MinifluxClient::saved_media_article(self, article_id)
     }
 }

@@ -4,6 +4,7 @@ use crate::domain::{
 use crate::miniflux::RemoteSource;
 use crate::storage::Store;
 use chrono::{Duration, Utc};
+use std::collections::HashMap;
 use std::time::Instant;
 
 /// Normal-sync orchestration after pending mutation delivery.
@@ -22,6 +23,7 @@ pub fn run(
     store: &Store,
     retention: ReadArticleRetention,
     reason: SyncReason,
+    media_progress_writes: HashMap<i64, u64>,
 ) -> Result<SyncData, CoreError> {
     let fetch_started = Instant::now();
     tracing::info!(target: "sync", "remote fetch started");
@@ -29,6 +31,19 @@ pub fn run(
     tracing::info!(target: "sync", "remote fetch completed articles={} elapsed_ms={}", snapshot.articles.len(), fetch_started.elapsed().as_millis());
     // Marker entries are transport metadata, never user-visible articles or feeds.
     let saved_media_sync = store.saved_media_sync_configuration()?;
+    let known_articles = snapshot
+        .articles
+        .iter()
+        .map(|article| article.id)
+        .collect::<std::collections::HashSet<_>>();
+    for article_id in store.protected_playback_article_ids()? {
+        if !known_articles.contains(&article_id)
+            && let Ok(protected) = remote.fetch_article_by_id(article_id)
+        {
+            snapshot.articles.push(protected.article);
+            snapshot.enclosures.extend(protected.enclosures);
+        }
+    }
     if saved_media_sync.enabled {
         let Some(feed_id) = saved_media_sync.sync_feed_id else {
             return Err(CoreError::data("SavedMedia Sync setup requires repair"));
@@ -48,11 +63,12 @@ pub fn run(
             .retain(|enclosure| !technical_article_ids.contains(&enclosure.article_id));
     }
     let reconcile_started = Instant::now();
-    let stats = store.reconcile_with_enclosures(
+    let stats = store.reconcile_with_enclosures_and_progress(
         &snapshot.categories,
         &snapshot.feeds,
         &snapshot.articles,
         &snapshot.enclosures,
+        &media_progress_writes,
     )?;
     let saved_media_changed = crate::saved_media_sync::run(remote, store)?;
     tracing::info!(target: "storage", "reconciliation completed new={} updated={} elapsed_ms={}", stats.new_articles, stats.updated_articles, reconcile_started.elapsed().as_millis());

@@ -56,6 +56,13 @@ pub struct ConfigurationSnapshot {
     pub feed_preferences: Vec<FeedPreferences>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MediaProgressCapability {
+    Unknown,
+    Supported,
+    Unsupported,
+}
+
 /// Long-lived, thread-safe shared core. No API key is written to disk.
 pub struct FluxCore {
     store: Arc<Store>,
@@ -65,7 +72,7 @@ pub struct FluxCore {
     article_thumbnails: article_thumbnail::ArticleThumbnailService,
     sync_gate: Mutex<()>,
     delivery_mode: Mutex<DeliveryMode>,
-    media_progress_supported: Mutex<Option<bool>>,
+    media_progress_supported: Mutex<MediaProgressCapability>,
     runtime: Mutex<DeliveryRuntime>,
     listeners: Mutex<HashMap<u64, Arc<dyn CoreEventListener>>>,
     next_listener_id: std::sync::atomic::AtomicU64,
@@ -160,7 +167,7 @@ impl FluxCore {
             article_thumbnails,
             sync_gate: Mutex::new(()),
             delivery_mode: Mutex::new(settings.delivery_mode),
-            media_progress_supported: Mutex::new(None),
+            media_progress_supported: Mutex::new(MediaProgressCapability::Unknown),
             runtime: Mutex::new(DeliveryRuntime {
                 health: RuntimeHealth::Healthy,
                 next_retry_at: None,
@@ -224,7 +231,7 @@ impl FluxCore {
             article_thumbnails,
             sync_gate: Mutex::new(()),
             delivery_mode: Mutex::new(settings.delivery_mode),
-            media_progress_supported: Mutex::new(None),
+            media_progress_supported: Mutex::new(MediaProgressCapability::Unknown),
             runtime: Mutex::new(DeliveryRuntime {
                 health: RuntimeHealth::Healthy,
                 next_retry_at: None,
@@ -275,18 +282,12 @@ impl FluxCore {
             return Ok(completed);
         }
         // Capability discovery is advisory: an unreachable version endpoint must not block local sync.
-        if self
-            .media_progress_supported
-            .lock()
-            .map_err(|_| CoreError::internal("media progression capability lock poisoned"))?
-            .is_none()
-        {
-            let _ = self.update_miniflux_capabilities();
-        }
-        let mutations_delivered = match self.deliver_for_sync(reason) {
-            Ok(count) => {
-                tracing::info!(target: "mutation", "pending mutation delivery completed delivered={count}");
-                count
+        // Best-effort refresh also detects an upgrade from an unsupported server.
+        let _ = self.update_miniflux_capabilities();
+        let delivery = match self.deliver_for_sync(reason) {
+            Ok(result) => {
+                tracing::info!(target: "mutation", "pending mutation delivery completed delivered={}", result.count);
+                result
             }
             Err(error) => {
                 tracing::warn!(target: "sync", "sync stopped during pending delivery kind={:?}", error.kind);
@@ -302,14 +303,21 @@ impl FluxCore {
             }
         };
         let retention = self.store.core_settings()?.retention;
-        match sync::run(self.remote.as_ref(), self.store.as_ref(), retention, reason) {
+        let media_progress_writes = delivery.media_progress.clone();
+        match sync::run(
+            self.remote.as_ref(),
+            self.store.as_ref(),
+            retention,
+            reason,
+            media_progress_writes,
+        ) {
             Ok(data) => {
-                tracing::info!(target: "sync", "sync completed new={} updated={} delivered={} elapsed_ms={}", data.new_articles, data.updated_articles, mutations_delivered, started.elapsed().as_millis());
+                tracing::info!(target: "sync", "sync completed new={} updated={} delivered={} elapsed_ms={}", data.new_articles, data.updated_articles, delivery.count, started.elapsed().as_millis());
                 let completed = SyncCompleted {
                     reason,
                     new_articles: data.new_articles,
                     updated_articles: data.updated_articles,
-                    mutations_delivered,
+                    mutations_delivered: delivery.count,
                     data_changed: data.data_changed,
                     navigation_changed: data.navigation_changed,
                     new_articles_by_feed: data.new_articles_by_feed,
@@ -326,7 +334,7 @@ impl FluxCore {
                     mutation_delivery_completed: true,
                     remote_fetch_started: true,
                     remote_fetch_completed: false,
-                    mutations_delivered,
+                    mutations_delivered: delivery.count,
                 }));
                 Err(error)
             }
@@ -502,7 +510,11 @@ impl FluxCore {
             .media_progress_supported
             .lock()
             .map_err(|_| CoreError::internal("media progression capability lock poisoned"))? =
-            Some(supported);
+            if supported {
+                MediaProgressCapability::Supported
+            } else {
+                MediaProgressCapability::Unsupported
+            };
         if supported {
             self.store.promote_playback_progress()?;
         }
@@ -525,7 +537,7 @@ impl FluxCore {
             .media_progress_supported
             .lock()
             .map_err(|_| CoreError::internal("media progression capability lock poisoned"))?
-            == Some(true);
+            == MediaProgressCapability::Supported;
         self.store.checkpoint_playback(
             enclosure_id,
             position_ms,
@@ -547,7 +559,7 @@ impl FluxCore {
             .media_progress_supported
             .lock()
             .map_err(|_| CoreError::internal("media progression capability lock poisoned"))?
-            == Some(true);
+            == MediaProgressCapability::Supported;
         self.store.complete_playback(
             enclosure_id,
             duration_ms,
@@ -564,9 +576,17 @@ impl FluxCore {
             .media_progress_supported
             .lock()
             .map_err(|_| CoreError::internal("media progression capability lock poisoned"))?
-            == Some(true);
+            == MediaProgressCapability::Supported;
         self.store
             .restart_playback(enclosure_id, &Utc::now().to_rfc3339(), supported)
+    }
+    pub fn observe_media_duration(
+        &self,
+        enclosure_id: i64,
+        duration_ms: u64,
+    ) -> Result<(), CoreError> {
+        self.store
+            .observe_media_duration(enclosure_id, duration_ms, &Utc::now().to_rfc3339())
     }
     pub fn search_articles(
         &self,
@@ -901,12 +921,12 @@ impl FluxCore {
             }),
         }
     }
-    fn deliver_for_sync(&self, reason: SyncReason) -> Result<u32, CoreError> {
+    fn deliver_for_sync(&self, reason: SyncReason) -> Result<mutations::DeliveryResult, CoreError> {
         if reason != SyncReason::Manual && self.in_backoff()? {
-            return Ok(0);
+            return Ok(mutations::DeliveryResult::default());
         }
         match self.deliver_pending() {
-            Ok(count) => Ok(count),
+            Ok(result) => Ok(result),
             Err(error) if retryable(&error) => {
                 self.record_failure(&error)?;
                 Err(error)
@@ -914,13 +934,12 @@ impl FluxCore {
             Err(error) => Err(error),
         }
     }
-    fn deliver_pending(&self) -> Result<u32, CoreError> {
+    fn deliver_pending(&self) -> Result<mutations::DeliveryResult, CoreError> {
         mutations::deliver_pending(self.remote.as_ref(), self.store.as_ref(), &|event| {
             self.emit(event)
         })
-        .map(|count| {
+        .inspect(|_| {
             self.clear_backoff().ok();
-            count
         })
     }
     fn in_backoff(&self) -> Result<bool, CoreError> {
@@ -1372,7 +1391,7 @@ mod tests {
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            11
+            12
         );
         let bytes = std::fs::read(core.database_path()).unwrap();
         assert!(
