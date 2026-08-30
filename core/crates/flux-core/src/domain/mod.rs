@@ -95,6 +95,28 @@ impl MediaKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SavedMedia {
+    pub enclosure_id: i64,
+    pub added_at: String,
+}
+
+/// Denormalized local episode-library item backed only by currently implemented domains.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SavedPlayableMediaItem {
+    pub enclosure_id: i64,
+    pub article_id: i64,
+    pub feed_id: i64,
+    pub title: String,
+    pub feed_title: String,
+    pub published_at: String,
+    pub added_at: String,
+    pub url: String,
+    pub mime_type: String,
+    pub media_kind: MediaKind,
+    pub remote_present: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArticleSummary {
     pub id: i64,
     pub feed_id: i64,

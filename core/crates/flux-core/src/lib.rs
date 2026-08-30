@@ -27,8 +27,9 @@ use domain::{
     DeliveryMode, DetailRenderingMode, DiscoverSubscriptionsRequest, DiscoveredSubscription,
     FeedIcon, FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, MutationField,
     MutationResult, NavigationCatalog, ReadArticleRetention, ReaderDocument, RuntimeHealth,
-    RuntimeHealthStatus, SaveToServiceResult, SearchArticlesRequest, SearchArticlesResult,
-    SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason, WidgetData,
+    RuntimeHealthStatus, SaveToServiceResult, SavedPlayableMediaItem, SearchArticlesRequest,
+    SearchArticlesResult, SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason,
+    WidgetData,
 };
 use miniflux::{
     AccountValidationError, AccountValidationResult, HttpHeader, MinifluxClient, RemoteSource,
@@ -416,6 +417,44 @@ impl FluxCore {
     }
     pub fn count_articles(&self, query: ArticleQuery) -> Result<u64, CoreError> {
         self.store.count_articles(&query)
+    }
+    pub fn save_media(&self, enclosure_id: i64) -> Result<(), CoreError> {
+        if enclosure_id <= 0 {
+            return Err(CoreError::data("enclosure ID must be positive"));
+        }
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            let _sync = self
+                .sync_gate
+                .lock()
+                .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+            self.store
+                .save_media(enclosure_id, &Utc::now().to_rfc3339())
+        });
+        self.diagnostics.flush();
+        result.map(|_| ())
+    }
+    pub fn unsave_media(&self, enclosure_id: i64) -> Result<(), CoreError> {
+        if enclosure_id <= 0 {
+            return Err(CoreError::data("enclosure ID must be positive"));
+        }
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            let _sync = self
+                .sync_gate
+                .lock()
+                .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+            self.store.unsave_media(enclosure_id)
+        });
+        self.diagnostics.flush();
+        result.map(|_| ())
+    }
+    pub fn saved_playable_media(&self) -> Result<Vec<SavedPlayableMediaItem>, CoreError> {
+        self.store.saved_playable_media()
+    }
+    pub fn saved_media_by_feed(
+        &self,
+        feed_id: i64,
+    ) -> Result<Vec<SavedPlayableMediaItem>, CoreError> {
+        self.store.saved_media_by_feed(feed_id)
     }
     pub fn search_articles(
         &self,
@@ -1216,7 +1255,7 @@ mod tests {
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            8
+            9
         );
         let bytes = std::fs::read(core.database_path()).unwrap();
         assert!(
