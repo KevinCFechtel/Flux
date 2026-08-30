@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use crate::domain::{
     Article, ArticleSummary, Category, CoreError, CreateCategoryResult, CreateFeedRequest,
-    CreateFeedResult, DiscoverSubscriptionsRequest, DiscoveredSubscription, Feed,
+    CreateFeedResult, DiscoverSubscriptionsRequest, DiscoveredSubscription, Enclosure, Feed,
     SaveToServiceResult, SearchArticlesRequest, SearchArticlesResult,
 };
 use chrono::{DateTime, SecondsFormat};
@@ -38,6 +38,44 @@ impl std::fmt::Debug for HttpHeader {
 pub struct AccountValidationResult {
     pub installation_base: String,
     pub version: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MinifluxCapability {
+    MediaProgressSync,
+}
+
+impl AccountValidationResult {
+    /// Runtime-only capabilities derived from the validated server version.
+    pub fn capabilities(&self) -> Vec<MinifluxCapability> {
+        MinifluxCapability::all_supported_by(&self.version)
+    }
+}
+
+impl MinifluxCapability {
+    pub fn all_supported_by(version: &str) -> Vec<Self> {
+        Self::media_progress_sync_supported(version)
+            .then_some(Self::MediaProgressSync)
+            .into_iter()
+            .collect()
+    }
+
+    fn media_progress_sync_supported(version: &str) -> bool {
+        let mut components = version.trim().trim_start_matches('v').split('.');
+        let Some(major) = components
+            .next()
+            .and_then(|value| value.parse::<u64>().ok())
+        else {
+            return false;
+        };
+        let Some(minor) = components
+            .next()
+            .and_then(|value| value.parse::<u64>().ok())
+        else {
+            return false;
+        };
+        (major, minor) >= (2, 2)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -136,6 +174,7 @@ pub struct RemoteSnapshot {
     pub categories: Vec<Category>,
     pub feeds: Vec<Feed>,
     pub articles: Vec<Article>,
+    pub enclosures: Vec<Enclosure>,
 }
 
 pub struct RemoteImage {
@@ -619,6 +658,7 @@ impl RemoteSource for MinifluxClient {
             entries.insert(entry.id, entry);
         }
         let mut articles = Vec::with_capacity(entries.len());
+        let mut enclosures = Vec::new();
         for entry in entries.into_values() {
             if !feed_ids.contains_key(&entry.feed_id) {
                 return Err(CoreError::data(format!(
@@ -629,15 +669,16 @@ impl RemoteSource for MinifluxClient {
             let published = DateTime::parse_from_rfc3339(&entry.published_at).map_err(|_| {
                 CoreError::data(format!("article {} has invalid publication time", entry.id))
             })?;
-            let enclosures = entry
-                .enclosures
+            let entry_enclosures = map_enclosures(entry.id, entry.enclosures)?;
+            let enclosure_inputs = entry_enclosures
                 .iter()
                 .map(|item| crate::article::EnclosureInput {
                     url: item.url.clone(),
                     mime_type: item.mime_type.clone(),
                 })
                 .collect::<Vec<_>>();
-            let processed = crate::article::process(&entry.content, &entry.url, &enclosures);
+            let processed = crate::article::process(&entry.content, &entry.url, &enclosure_inputs);
+            enclosures.extend(entry_enclosures);
             articles.push(Article {
                 id: entry.id,
                 feed_id: entry.feed_id,
@@ -658,6 +699,7 @@ impl RemoteSource for MinifluxClient {
             categories,
             feeds,
             articles,
+            enclosures,
         })
     }
     fn set_read_state(&self, article_ids: &[i64], read: bool) -> Result<(), CoreError> {
@@ -788,10 +830,16 @@ struct EntryDto {
 }
 #[derive(Deserialize)]
 struct EnclosureDto {
+    id: i64,
+    entry_id: i64,
     #[serde(default)]
     url: String,
     #[serde(default)]
     mime_type: String,
+    #[serde(default)]
+    size: i64,
+    #[serde(default)]
+    media_progression: u64,
 }
 #[derive(Deserialize)]
 struct CategoryDto {
@@ -846,6 +894,31 @@ fn search_article_summary(entry: EntryDto) -> Result<ArticleSummary, CoreError> 
         preview: processed.preview,
         image_url: processed.image_url,
     })
+}
+
+fn map_enclosures(
+    article_id: i64,
+    enclosures: Vec<EnclosureDto>,
+) -> Result<Vec<Enclosure>, CoreError> {
+    enclosures
+        .into_iter()
+        .map(|enclosure| {
+            if enclosure.entry_id != article_id {
+                return Err(CoreError::data(format!(
+                    "enclosure {} references article {} instead of {}",
+                    enclosure.id, enclosure.entry_id, article_id
+                )));
+            }
+            Ok(Enclosure {
+                id: enclosure.id,
+                article_id,
+                url: enclosure.url,
+                mime_type: enclosure.mime_type,
+                size_bytes: (enclosure.size > 0).then_some(enclosure.size as u64),
+                remote_media_progression_seconds: enclosure.media_progression,
+            })
+        })
+        .collect()
 }
 #[derive(Deserialize)]
 struct CategoryRefDto {
@@ -1105,6 +1178,7 @@ mod tests {
         assert_eq!(result.installation_base, format!("http://{address}"));
         assert_eq!(result.version, "2.0.49");
         assert_eq!(worker.join().unwrap(), ("/v1/version".into(), true));
+        assert_eq!(result.capabilities(), Vec::<MinifluxCapability>::new());
 
         let (address, worker) = version_server(200, r#"{"version":"2.0.50"}"#);
         let result = MinifluxClient::validate_account(
@@ -1121,6 +1195,20 @@ mod tests {
             worker.join().unwrap(),
             ("/miniflux/v1/version".into(), true)
         );
+    }
+
+    #[test]
+    fn derives_media_progress_capability_from_supported_versions() {
+        assert_eq!(
+            MinifluxCapability::all_supported_by("2.2.0"),
+            vec![MinifluxCapability::MediaProgressSync]
+        );
+        assert_eq!(
+            MinifluxCapability::all_supported_by("v2.3.1"),
+            vec![MinifluxCapability::MediaProgressSync]
+        );
+        assert!(MinifluxCapability::all_supported_by("2.1.9").is_empty());
+        assert!(MinifluxCapability::all_supported_by("invalid").is_empty());
     }
 
     #[test]
@@ -1832,9 +1920,9 @@ mod tests {
         let responses = vec![
             r#"[{"id":1,"title":"Category"}]"#,
             r#"[{"id":9,"title":"Feed","category":{"id":1}}]"#,
-            r#"{"total":1,"entries":[{"id":4,"feed_id":9,"title":"Unread and starred","url":"https://entry/post","status":"unread","starred":true,"published_at":"2026-01-02T03:04:05Z","content":"<p>source &amp; preview</p>","enclosures":[{"url":"audio.mp3","mime_type":"audio/mpeg"},{"url":"/cover.jpg","mime_type":"image/jpeg"}]}]}"#,
+            r#"{"total":1,"entries":[{"id":4,"feed_id":9,"title":"Unread and starred","url":"https://entry/post","status":"unread","starred":true,"published_at":"2026-01-02T03:04:05Z","content":"<p>source &amp; preview</p>","enclosures":[{"id":40,"entry_id":4,"url":"audio.mp3","mime_type":"audio/mpeg"},{"id":41,"entry_id":4,"url":"/cover.jpg","mime_type":"image/jpeg"}]}]}"#,
             r#"{"total":0,"entries":[]}"#,
-            r#"{"total":1,"entries":[{"id":4,"feed_id":9,"title":"Unread and starred","url":"https://entry/post","status":"unread","starred":true,"published_at":"2026-01-02T03:04:05Z","content":"<p>source &amp; preview</p>","enclosures":[{"url":"audio.mp3","mime_type":"audio/mpeg"},{"url":"/cover.jpg","mime_type":"image/jpeg"}]}]}"#,
+            r#"{"total":1,"entries":[{"id":4,"feed_id":9,"title":"Unread and starred","url":"https://entry/post","status":"unread","starred":true,"published_at":"2026-01-02T03:04:05Z","content":"<p>source &amp; preview</p>","enclosures":[{"id":40,"entry_id":4,"url":"audio.mp3","mime_type":"audio/mpeg"},{"id":41,"entry_id":4,"url":"/cover.jpg","mime_type":"image/jpeg"}]}]}"#,
             r#"{"total":0,"entries":[]}"#,
         ];
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1886,6 +1974,27 @@ mod tests {
         );
         assert_eq!(snapshot.articles.len(), 1);
         assert_eq!(
+            snapshot.enclosures,
+            vec![
+                Enclosure {
+                    id: 40,
+                    article_id: 4,
+                    url: "audio.mp3".into(),
+                    mime_type: "audio/mpeg".into(),
+                    size_bytes: None,
+                    remote_media_progression_seconds: 0,
+                },
+                Enclosure {
+                    id: 41,
+                    article_id: 4,
+                    url: "/cover.jpg".into(),
+                    mime_type: "image/jpeg".into(),
+                    size_bytes: None,
+                    remote_media_progression_seconds: 0,
+                },
+            ]
+        );
+        assert_eq!(
             snapshot.articles[0].raw_html_content,
             "<p>source &amp; preview</p>"
         );
@@ -1903,6 +2012,34 @@ mod tests {
         );
         assert!(targets.iter().any(|target| target.contains("starred=1")));
         assert!(!targets.iter().any(|target| target.contains("status=read")));
+    }
+
+    #[test]
+    fn maps_complete_multiple_enclosures_and_normalizes_sizes() {
+        let enclosures: Vec<EnclosureDto> = serde_json::from_str(
+            r#"[
+                {"id":101,"entry_id":7,"url":"https://cdn.test/one.mp3","mime_type":"audio/mpeg","size":42,"media_progression":17},
+                {"id":102,"entry_id":7,"url":"https://cdn.test/two.ogg","mime_type":"audio/ogg","size":0,"media_progression":0},
+                {"id":103,"entry_id":7,"url":"https://cdn.test/cover","mime_type":"application/x-cover","size":-1,"media_progression":9},
+                {"id":104,"entry_id":7,"url":"https://cdn.test/video.mp4","mime_type":"video/mp4"}
+            ]"#,
+        )
+        .unwrap();
+
+        let mapped = map_enclosures(7, enclosures).unwrap();
+
+        assert_eq!(mapped.len(), 4);
+        assert_eq!(mapped[0].id, 101);
+        assert_eq!(mapped[0].article_id, 7);
+        assert_eq!(mapped[1].article_id, 7);
+        assert_eq!(mapped[0].size_bytes, Some(42));
+        assert_eq!(mapped[0].remote_media_progression_seconds, 17);
+        assert_eq!(mapped[1].size_bytes, None);
+        assert_eq!(mapped[2].size_bytes, None);
+        assert_eq!(mapped[2].mime_type, "application/x-cover");
+        assert_eq!(mapped[3].size_bytes, None);
+        assert_eq!(mapped[3].remote_media_progression_seconds, 0);
+        assert!(map_enclosures(7, vec![]).unwrap().is_empty());
     }
     #[test]
     fn fetches_feed_icon_data_url() {

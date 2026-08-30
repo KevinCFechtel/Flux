@@ -51,6 +51,50 @@ pub struct Article {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Enclosure {
+    pub id: i64,
+    pub article_id: i64,
+    pub url: String,
+    pub mime_type: String,
+    pub size_bytes: Option<u64>,
+    pub remote_media_progression_seconds: u64,
+}
+
+impl Enclosure {
+    pub fn media_kind(&self) -> MediaKind {
+        MediaKind::from_mime_type(&self.mime_type)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MediaKind {
+    Audio,
+    Video,
+    Image,
+    Other,
+}
+
+impl MediaKind {
+    pub fn from_mime_type(mime_type: &str) -> Self {
+        let mime_type = mime_type
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        if mime_type.starts_with("audio/") {
+            Self::Audio
+        } else if mime_type.starts_with("video/") {
+            Self::Video
+        } else if mime_type.starts_with("image/") {
+            Self::Image
+        } else {
+            Self::Other
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArticleSummary {
     pub id: i64,
     pub feed_id: i64,
@@ -560,3 +604,22 @@ impl fmt::Display for CoreError {
     }
 }
 impl std::error::Error for CoreError {}
+
+#[cfg(test)]
+mod tests {
+    use super::MediaKind;
+
+    #[test]
+    fn classifies_raw_mime_types_without_normalizing_them() {
+        assert_eq!(MediaKind::from_mime_type("audio/mpeg"), MediaKind::Audio);
+        assert_eq!(
+            MediaKind::from_mime_type("VIDEO/MP4; codecs=avc1"),
+            MediaKind::Video
+        );
+        assert_eq!(MediaKind::from_mime_type("image/jpeg"), MediaKind::Image);
+        assert_eq!(
+            MediaKind::from_mime_type("application/x-custom"),
+            MediaKind::Other
+        );
+    }
+}

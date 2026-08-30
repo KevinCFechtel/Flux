@@ -972,6 +972,7 @@ mod tests {
                 categories: vec![],
                 feeds: vec![],
                 articles: vec![],
+                enclosures: vec![],
             })
         }
         fn set_read_state(&self, _: &[i64], _: bool) -> Result<(), CoreError> {
@@ -1136,6 +1137,7 @@ mod tests {
                     false,
                 ),
             ],
+            enclosures: vec![],
         }
     }
     fn config(temp: &TempDir) -> CoreConfig {
@@ -2224,7 +2226,10 @@ mod tests {
             })
             .unwrap();
         assert_eq!(first.total, 10);
-        assert_eq!(first.articles.iter().map(|a| a.id).collect::<Vec<_>>(), vec![1, 2, 3, 4, 5]);
+        assert_eq!(
+            first.articles.iter().map(|a| a.id).collect::<Vec<_>>(),
+            vec![1, 2, 3, 4, 5]
+        );
         source.search_result.lock().unwrap().articles = page_two;
         let second = core
             .search_articles(SearchArticlesRequest {
@@ -2233,11 +2238,17 @@ mod tests {
                 limit: 5,
             })
             .unwrap();
-        assert_eq!(second.articles.iter().map(|a| a.id).collect::<Vec<_>>(), vec![6, 7, 8, 9, 10]);
+        assert_eq!(
+            second.articles.iter().map(|a| a.id).collect::<Vec<_>>(),
+            vec![6, 7, 8, 9, 10]
+        );
         let requests = source.captured_requests.lock().unwrap();
         assert_eq!(requests.len(), 2);
         assert_eq!(
-            requests.iter().map(|r| (r.offset, r.limit)).collect::<Vec<_>>(),
+            requests
+                .iter()
+                .map(|r| (r.offset, r.limit))
+                .collect::<Vec<_>>(),
             vec![(0, 5), (5, 5)]
         );
         assert!(
