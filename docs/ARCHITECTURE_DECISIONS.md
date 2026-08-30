@@ -998,3 +998,106 @@ Prefer durable implementation over possibility analysis.
 Before commissioning a PoC, compatibility study, or broad audit,
 identify the concrete decision it will unblock. If no current
 implementation decision depends on the answer, defer the analysis.
+
+# Architecture Decisions — Phase C Media Addition
+
+> **Target file:** `docs/ARCHITECTURE_DECISIONS.md`
+>
+> Add the following authoritative section to the repository architecture
+> decisions. It records durable Phase-C decisions; detailed UX and implementation
+> sequencing remain in `docs/PHASE_C_NATIVE_MACOS_AUDIO.md`.
+
+## Phase C — macOS audio and Listening List
+
+Phase B media ownership remains unchanged: Core owns durable media/domain state,
+playback progress, download intent/state, policies, metadata, chapters,
+persistence and Miniflux reconciliation. Native clients own playback engines,
+runtime transfer execution/progress, filesystem operations, sleep-timer runtime,
+Now Playing/media-key integration and presentation.
+
+The macOS Phase-C media experience is audio-only. Generic shared-Core media
+support may remain broader; native clients are not required to expose every
+`MediaKind`.
+
+### Listening List identity and ownership
+
+The Listening List is **News/article-centered**. Saving to the Listening List
+means saving the News, not an individual enclosure.
+
+Playback and download state remain **enclosure-centered**. A News may contain
+multiple audio enclosures while appearing exactly once in the Listening List.
+
+The public Core/UniFFI read model must provide a News-centered Listening List
+projection containing enough enclosure playback/download state for native
+clients to render rows without N+1 state stitching.
+
+The normal Reader contract remains separate. Article-to-media discovery is
+exposed through a generic Core/UniFFI `article_enclosures(article_id)` relation
+query rather than embedding media state into `ReaderDocument`.
+
+### Listening List and download invariants
+
+Starting a manual download implicitly adds the containing News to the Listening
+List if it is not already present.
+
+Per-feed automatic audio download also adds every qualifying News with audio to
+the Listening List and requests all of its audio enclosures.
+
+A global policy may automatically download all audio enclosures when a News is
+added to the Listening List. This and feed auto-download are different triggers
+for the same normal download machinery, not separate transfer systems.
+
+Deleting an individual local download does not remove the News from the
+Listening List.
+
+Removing a News from the Listening List requests deletion of all local audio
+downloads belonging to that News. Physical file deletion remains native
+execution of Core-owned deletion intent.
+
+The existing `delete_download_after_playback` behavior remains independent from
+Listening List membership. A separate policy controls automatic removal of
+completed News from the Listening List. Such removal also deletes associated
+downloads according to the normal Listening List removal invariant. For News
+with multiple audio enclosures, automatic removal occurs only after all relevant
+audio enclosures are completed.
+
+### Listening List presentation semantics
+
+The macOS client exposes one **Listening List** destination rather than separate
+Saved Media and Downloads destinations. Downloads are a property/action of a
+Listening List News item, not a separate library dimension.
+
+The initial list is flat, filterable by represented feed, and sortable by
+Recently Added (default) or Publication Date.
+
+A row represents one News and may show the playback progress of its most
+recently played/relevant enclosure plus an aggregate downloaded-enclosure marker
+such as `1/2`. Playback progress is shown as a bar with elapsed/total minutes,
+not a percentage.
+
+A separate Continue Listening section is not required because playback progress
+is directly visible in the Listening List.
+
+### macOS Player semantics
+
+The macOS Player is a dedicated popover presentation mode, not a separate
+window and not an in-app mini-player. Native macOS Now Playing/Control Center
+provides remote playback presence while the popover is elsewhere.
+
+The Player remains available while a medium is loaded, including paused or
+stopped state.
+
+The primary controls are:
+
+**−30s · Play/Pause · Stop · +30s · Restart**
+
+Pause preserves loaded media and position. Stop checkpoints progress and keeps
+the medium loaded. Restart resets progress to `0:00` while keeping the medium
+loaded; it does not mean Eject/Unload. There is no user-facing Eject control.
+
+The Player also renders full Show Notes through the existing `ReaderDocument`
+pipeline and exposes Core-owned chapters. Visible Player artwork is not
+required; artwork is used for native Now Playing where available.
+
+For complete Phase-C UX, contract, sequencing and acceptance criteria, see
+`docs/PHASE_C_NATIVE_MACOS_AUDIO.md`.
