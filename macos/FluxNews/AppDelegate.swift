@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private let playbackPresentationState = MediaPlaybackPresentationState()
     private let transferPresentationState = MediaTransferPresentationState()
     private(set) var playbackCoordinator: MediaPlaybackCoordinator?
+    private var mediaRemoteControlCoordinator: MediaRemoteControlCoordinator?
     private var transferCoordinator: MediaTransferCoordinator?
     private lazy var shortcutRegistrar = GlobalShortcutRegistrar { [weak self] in self?.show() }
     private var sidebarVisible = false
@@ -27,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        mediaRemoteControlCoordinator?.cleanup()
         playbackCoordinator?.applicationWillTerminate()
     }
 
@@ -43,6 +45,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             }
             self.playbackCoordinator = MediaPlaybackCoordinator(core: core, presentationState: self.playbackPresentationState)
             self.playbackCoordinator?.onPlaybackUseChanged = { [weak self] in self?.transferCoordinator?.reconcile() }
+            if let playbackCoordinator = self.playbackCoordinator {
+                self.mediaRemoteControlCoordinator = MediaRemoteControlCoordinator(playbackCoordinator: playbackCoordinator, presentationState: self.playbackPresentationState)
+            }
             self.popover.contentViewController = self.host()
             self.fallbackPanel?.contentViewController = self.host()
             self.transferCoordinator?.reconcile()

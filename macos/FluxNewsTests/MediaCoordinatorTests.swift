@@ -374,6 +374,51 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.presentationState.status, .paused)
     }
 
+    func testNowPlayingProjectionSanitizesMetadataAndPlaybackValues() {
+        let projection = NowPlayingProjection.make(
+            title: "",
+            sourceTitle: "",
+            enclosureURL: "file:///not-published",
+            durationMs: 0,
+            positionMs: 90_000,
+            status: .playing,
+            playbackRate: .infinity,
+            errorMessage: "network error"
+        )
+
+        XCTAssertEqual(projection.title, "FluxNews Audio")
+        XCTAssertEqual(projection.sourceTitle, "FluxNews")
+        XCTAssertNil(projection.durationSeconds)
+        XCTAssertEqual(projection.elapsedSeconds, 90)
+        XCTAssertEqual(projection.effectivePlaybackRate, 0)
+        XCTAssertEqual(projection.defaultPlaybackRate, 1)
+        XCTAssertEqual(projection.playbackState, .playing)
+        XCTAssertNil(projection.assetURL)
+    }
+
+    func testRemoteCommandsDelegateToPlaybackCoordinatorAndRegistrationIsIdempotent() throws {
+        let core = FakePlaybackCore()
+        let engine = FakePlaybackEngine()
+        let playback = MediaPlaybackCoordinator(core: core, engine: engine)
+        _ = try playback.prepare(enclosureID: 7)
+        let remote = MediaRemoteControlCoordinator(playbackCoordinator: playback, presentationState: playback.presentationState)
+        defer { remote.cleanup() }
+
+        XCTAssertEqual(remote.registrationCount, 1)
+        remote.start()
+        XCTAssertEqual(remote.registrationCount, 1)
+        XCTAssertEqual(remote.dispatch(.play), .success)
+        XCTAssertTrue(engine.isPlaying)
+        XCTAssertEqual(remote.dispatch(.pause), .success)
+        XCTAssertFalse(engine.isPlaying)
+        XCTAssertEqual(remote.dispatch(.seek(seconds: 45)), .success)
+        XCTAssertEqual(engine.currentPositionMs, 45_000)
+        XCTAssertEqual(remote.dispatch(.skipForward), .success)
+        XCTAssertEqual(engine.currentPositionMs, 75_000)
+        XCTAssertEqual(remote.dispatch(.skipBackward), .success)
+        XCTAssertEqual(engine.currentPositionMs, 45_000)
+    }
+
     func testSleepTimerIntervalChangeRestartsAndDisableClearsState() {
         let timer = MediaSleepTimer()
         timer.setEnabled(true)

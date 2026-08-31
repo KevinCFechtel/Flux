@@ -1,6 +1,5 @@
 import AVFoundation
 import Foundation
-import MediaPlayer
 import OSLog
 import Combine
 
@@ -199,7 +198,6 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
 final class MediaPlaybackCoordinator {
     private let core: MediaPlaybackCore
     private let engine: NativePlaybackEngine
-    private let nowPlaying = MPNowPlayingInfoCenter.default()
     private let checkpointInterval: TimeInterval
     private var checkpointTimer: Timer?
     private var activeEnclosureID: Int64?
@@ -240,6 +238,7 @@ final class MediaPlaybackCoordinator {
         presentationState.loadedEnclosure = preparation.enclosure
         presentationState.feedTitle = metadata?.feedTitle ?? ""
         presentationState.mediaTitle = metadata?.title ?? ""
+        presentationState.artworkReference = preparation.artworkReference
         presentationState.positionMs = preparation.playbackState.positionMs
         presentationState.durationMs = preparedDurationMs
         presentationState.chapters = (try? core.mediaChapters(enclosureId: enclosureID)) ?? []
@@ -258,7 +257,6 @@ final class MediaPlaybackCoordinator {
         let startAt = preparation.playbackState.status == .inProgress ? preparation.playbackState.positionMs : 0
         engine.load(url: source, startAtMs: startAt)
         engine.rate = presentationState.playbackRate
-        updateNowPlaying(preparation: preparation)
         return preparation
     }
 
@@ -269,11 +267,10 @@ final class MediaPlaybackCoordinator {
         engine.play()
         presentationState.status = .playing
         startCheckpointTimer()
-        updateNowPlayingPlaybackState()
     }
 
-    func pause() { engine.pause(); checkpoint(); stopCheckpointTimer(); presentationState.positionMs = engine.currentPositionMs; presentationState.status = .paused; updateNowPlayingPlaybackState() }
-    func stop() { engine.pause(); checkpoint(); stopCheckpointTimer(); presentationState.positionMs = engine.currentPositionMs; presentationState.status = .stopped; nowPlaying.playbackState = .stopped }
+    func pause() { engine.pause(); checkpoint(); stopCheckpointTimer(); presentationState.positionMs = engine.currentPositionMs; presentationState.status = .paused }
+    func stop() { engine.pause(); checkpoint(); stopCheckpointTimer(); presentationState.positionMs = engine.currentPositionMs; presentationState.status = .stopped }
     func applicationDidResignActive() { checkpoint() }
     func applicationDidBecomeActive() { sleepTimer.evaluate() }
     func applicationWillTerminate() { checkpoint(); stopCheckpointTimer(); engine.unload() }
@@ -282,7 +279,14 @@ final class MediaPlaybackCoordinator {
         engine.seek(toMs: toMs)
         presentationState.positionMs = toMs
         checkpoint()
-        updateNowPlayingPlaybackState()
+    }
+
+    func skip(bySeconds seconds: Double) {
+        guard seconds.isFinite else { return }
+        let current = Double(engine.currentPositionMs) / 1_000
+        let target = max(0, current + seconds)
+        let bounded = presentationState.durationMs.map { min(target, Double($0) / 1_000) } ?? target
+        seek(toMs: UInt64(max(0, bounded * 1_000).rounded()))
     }
 
     func restart(enclosureID: Int64) throws {
@@ -313,7 +317,6 @@ final class MediaPlaybackCoordinator {
         let clamped = min(3.0, max(0.5, rate))
         presentationState.playbackRate = (clamped * 10).rounded() / 10
         engine.rate = presentationState.playbackRate
-        updateNowPlayingPlaybackState()
     }
 
     private func stopCurrentIfNeeded() throws {
@@ -342,7 +345,6 @@ final class MediaPlaybackCoordinator {
         do { try core.playbackCompleted(enclosureId: activeEnclosureID, durationMs: engine.durationMs ?? preparedDurationMs) }
         catch { Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media completion failed: \(error.localizedDescription, privacy: .public)") }
         onPlaybackUseChanged?()
-        updateNowPlayingPlaybackState()
     }
 
     private func handleDuration(_ duration: UInt64) {
@@ -353,7 +355,6 @@ final class MediaPlaybackCoordinator {
         guard let activeEnclosureID else { return }
         do { try core.observeMediaDuration(enclosureId: activeEnclosureID, durationMs: duration) }
         catch { Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media duration observation failed: \(error.localizedDescription, privacy: .public)") }
-        updateNowPlayingPlaybackState()
     }
 
     private func startCheckpointTimer() {
@@ -362,28 +363,11 @@ final class MediaPlaybackCoordinator {
             Task { @MainActor [weak self] in
                 guard let self, self.engine.isPlaying else { return }
                 self.checkpoint()
-                self.updateNowPlayingPlaybackState()
             }
         }
     }
 
     private func stopCheckpointTimer() { checkpointTimer?.invalidate(); checkpointTimer = nil }
-
-    private func updateNowPlaying(preparation: PlaybackPreparation) {
-        var info = [String: Any]()
-        info[MPMediaItemPropertyPlaybackDuration] = (preparation.durationMs ?? preparation.playbackState.durationMs).map { Double($0) / 1_000 }
-        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(preparation.playbackState.positionMs) / 1_000
-        info[MPNowPlayingInfoPropertyAssetURL] = URL(string: preparation.enclosure.url)
-        nowPlaying.nowPlayingInfo = info
-        nowPlaying.playbackState = .paused
-    }
-
-    private func updateNowPlayingPlaybackState() {
-        nowPlaying.playbackState = engine.isPlaying ? .playing : .paused
-        guard var info = nowPlaying.nowPlayingInfo else { return }
-        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(engine.currentPositionMs) / 1_000
-        nowPlaying.nowPlayingInfo = info
-    }
 
     private func sleepTimerFired() {
         pause()
@@ -407,6 +391,7 @@ final class MediaPlaybackPresentationState: ObservableObject {
     @Published fileprivate(set) var loadedEnclosure: Enclosure?
     @Published fileprivate(set) var feedTitle = ""
     @Published fileprivate(set) var mediaTitle = ""
+    @Published fileprivate(set) var artworkReference: String?
     @Published fileprivate(set) var chapters: [MediaChapter] = []
     @Published fileprivate(set) var status: MediaPlaybackPresentationStatus = .stopped
     @Published fileprivate(set) var positionMs: UInt64 = 0
