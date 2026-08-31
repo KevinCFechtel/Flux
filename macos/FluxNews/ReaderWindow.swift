@@ -299,15 +299,27 @@ private struct ReaderDocumentView: View {
     let openOriginal: () -> Void
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                ReaderBlocksView(blocks: document.blocks)
-                if document.hasSimplifiedContent || document.wasTruncated {
-                    HStack(spacing: 4) { Text(readerNotice); Text("·").foregroundStyle(.tertiary); Button("Open Original", action: openOriginal).buttonStyle(.link) }
-                        .font(.footnote).foregroundStyle(.secondary).padding(.top, 8)
-                }
-            }.frame(maxWidth: 680, alignment: .leading).padding(24).frame(maxWidth: .infinity, alignment: .center)
+            ReaderDocumentContent(document: document, openOriginal: openOriginal)
         }.textSelection(.enabled)
     }
+}
+
+struct ReaderDocumentContent: View {
+    let document: ReaderDocument
+    let openOriginal: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ReaderBlocksView(blocks: document.blocks)
+            if document.hasSimplifiedContent || document.wasTruncated {
+                HStack(spacing: 4) { Text(readerNotice); Text("·").foregroundStyle(.tertiary); Button("Open Original", action: openOriginal).buttonStyle(.link) }
+                    .font(.footnote).foregroundStyle(.secondary).padding(.top, 8)
+            }
+        }
+        .frame(maxWidth: 680, alignment: .leading)
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
     private var readerNotice: String {
         switch (document.hasSimplifiedContent, document.wasTruncated) {
         case (true, true): String(localized: "Some content was simplified and truncated")

@@ -10,6 +10,7 @@ private final class FakePlaybackCore: MediaPlaybackCore {
     var completions = [(Int64, UInt64?)]()
     var restartCount = 0
     var observedDurations = [(Int64, UInt64)]()
+    var chapters = [MediaChapter]()
 
     init(status: PlaybackStatus = .notStarted, positionMs: UInt64 = 0) {
         let enclosure = Enclosure(id: 7, articleId: 11, url: "https://example.test/audio.mp3", mimeType: "audio/mpeg", sizeBytes: nil, remoteMediaProgressionSeconds: 0, mediaKind: .audio)
@@ -28,7 +29,7 @@ private final class FakePlaybackCore: MediaPlaybackCore {
     func playbackCompleted(enclosureId: Int64, durationMs: UInt64?) throws { completions.append((enclosureId, durationMs)) }
     func restartPlayback(enclosureId: Int64) throws { restartCount += 1; preparation.playbackState = PlaybackState(enclosureId: 7, positionMs: 0, durationMs: 120_000, status: .inProgress, updatedAt: nil) }
     func observeMediaDuration(enclosureId: Int64, durationMs: UInt64) throws { observedDurations.append((enclosureId, durationMs)) }
-    func mediaChapters(enclosureId: Int64) throws -> [MediaChapter] { [] }
+    func mediaChapters(enclosureId: Int64) throws -> [MediaChapter] { chapters }
     func mediaArtwork(reference: String) throws -> Data? { nil }
 }
 
@@ -192,10 +193,15 @@ final class MediaCoordinatorTests: XCTestCase {
         let engine = FakePlaybackEngine()
         let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
 
-        try coordinator.play(enclosureID: 7)
+        _ = try coordinator.prepare(enclosureID: 7)
+        for rate in [0.5, 1.0, 1.7, 3.0] {
+            coordinator.setPlaybackRate(rate)
+            XCTAssertEqual(engine.rate, rate)
+            XCTAssertEqual(coordinator.presentationState.playbackRate, rate)
+            XCTAssertFalse(engine.isPlaying)
+        }
         coordinator.setPlaybackRate(3.7)
         XCTAssertEqual(engine.rate, 3.0)
-        XCTAssertEqual(coordinator.presentationState.playbackRate, 3.0)
         coordinator.setPlaybackRate(0.44)
         XCTAssertEqual(engine.rate, 0.5)
     }
@@ -248,6 +254,63 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(PlayerPresentation.seekTarget(positionMs: 10_000, deltaMs: -30_000, durationMs: 120_000), 0)
         XCTAssertEqual(PlayerPresentation.seekTarget(positionMs: 110_000, deltaMs: 30_000, durationMs: 120_000), 120_000)
         XCTAssertEqual(PlayerPresentation.seekTarget(positionMs: 10_000, deltaMs: 30_000, durationMs: nil), 40_000)
+    }
+
+    func testChaptersLoadAndActiveChapterUsesNextStartWhenEndIsMissing() throws {
+        let core = FakePlaybackCore()
+        core.chapters = [
+            MediaChapter(enclosureId: 7, title: "Intro", startMs: 0, endMs: nil, source: .articleContent),
+            MediaChapter(enclosureId: 7, title: "Interview", startMs: 60_000, endMs: nil, source: .articleContent)
+        ]
+        let coordinator = MediaPlaybackCoordinator(core: core, engine: FakePlaybackEngine())
+
+        _ = try coordinator.prepare(enclosureID: 7)
+
+        XCTAssertEqual(coordinator.presentationState.chapters.map(\.title), ["Intro", "Interview"])
+        XCTAssertEqual(PlayerPresentation.activeChapterIndex(positionMs: 30_000, chapters: core.chapters), 0)
+        XCTAssertEqual(PlayerPresentation.activeChapterIndex(positionMs: 60_000, chapters: core.chapters), 1)
+        XCTAssertEqual(PlayerPresentation.activeChapterIndex(positionMs: 120_000, chapters: core.chapters), 1)
+    }
+
+    func testChapterEndBoundsActiveChapter() {
+        let chapters = [
+            MediaChapter(enclosureId: 7, title: "Intro", startMs: 0, endMs: 30_000, source: .embedded),
+            MediaChapter(enclosureId: 7, title: "Main", startMs: 30_000, endMs: 90_000, source: .embedded)
+        ]
+
+        XCTAssertEqual(PlayerPresentation.activeChapterIndex(positionMs: 29_999, chapters: chapters), 0)
+        XCTAssertEqual(PlayerPresentation.activeChapterIndex(positionMs: 30_000, chapters: chapters), 1)
+        XCTAssertNil(PlayerPresentation.activeChapterIndex(positionMs: 90_000, chapters: chapters))
+    }
+
+    func testSleepTimerFiringPausesAndCheckpointsWithoutUnloading() throws {
+        let core = FakePlaybackCore(status: .inProgress, positionMs: 12_000)
+        let engine = FakePlaybackEngine()
+        let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
+        try coordinator.play(enclosureID: 7)
+        engine.currentPositionMs = 24_000
+
+        XCTAssertFalse(coordinator.sleepTimer.isEnabled)
+        coordinator.sleepTimer.setEnabled(true)
+        coordinator.sleepTimer.evaluate(at: Date().addingTimeInterval(31 * 60))
+
+        XCTAssertFalse(coordinator.sleepTimer.isEnabled)
+        XCTAssertFalse(engine.isPlaying)
+        XCTAssertEqual(core.checkpoints.last?.1, 24_000)
+        XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
+        XCTAssertEqual(coordinator.presentationState.status, .paused)
+    }
+
+    func testSleepTimerIntervalChangeRestartsAndDisableClearsState() {
+        let timer = MediaSleepTimer()
+        timer.setEnabled(true)
+        timer.setInterval(90)
+        XCTAssertEqual(timer.intervalMinutes, 90)
+        XCTAssertTrue(timer.isEnabled)
+        XCTAssertEqual(timer.remainingSeconds, 90 * 60)
+        timer.setEnabled(false)
+        XCTAssertFalse(timer.isEnabled)
+        XCTAssertNil(timer.remainingSeconds)
     }
 
     func testRestartPreservesPausedAndStoppedState() throws {

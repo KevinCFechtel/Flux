@@ -85,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
         store.start()
     }
-    func applicationDidBecomeActive(_ notification: Notification) { store.resume(); transferCoordinator?.reconcile() }
+    func applicationDidBecomeActive(_ notification: Notification) { playbackCoordinator?.applicationDidBecomeActive(); store.resume(); transferCoordinator?.reconcile() }
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls { _ = AppRouter.shared.handle(url: url) }
     }

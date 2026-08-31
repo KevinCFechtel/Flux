@@ -101,7 +101,7 @@ private struct ArticlePane: View {
             header
             Divider()
             if showingPlayer {
-                PlayerView(state: playbackState, coordinator: playbackCoordinator)
+                PlayerView(store: store, state: playbackState, coordinator: playbackCoordinator)
             } else {
                 content
             }

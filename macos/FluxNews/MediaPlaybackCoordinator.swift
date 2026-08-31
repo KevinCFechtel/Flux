@@ -208,11 +208,13 @@ final class MediaPlaybackCoordinator {
     private var lastObservedDurationMs: UInt64?
     private var preparedStatus: PlaybackStatus = .notStarted
     let presentationState: MediaPlaybackPresentationState
+    let sleepTimer: MediaSleepTimer
 
     init(core: MediaPlaybackCore, engine: NativePlaybackEngine? = nil, checkpointInterval: TimeInterval = 20, presentationState: MediaPlaybackPresentationState? = nil) {
         self.core = core
         self.checkpointInterval = checkpointInterval
         self.presentationState = presentationState ?? MediaPlaybackPresentationState()
+        self.sleepTimer = MediaSleepTimer()
         let engine = engine ?? AVFoundationPlaybackEngine()
         self.engine = engine
         engine.onEnded = { @MainActor [weak self] in self?.handleNaturalEnd() }
@@ -221,6 +223,7 @@ final class MediaPlaybackCoordinator {
         engine.onLoadingChanged = { @MainActor [weak self] loading in self?.presentationState.isLoading = loading }
         engine.onBufferingChanged = { @MainActor [weak self] buffering in self?.presentationState.isBuffering = buffering }
         engine.onError = { @MainActor [weak self] message in self?.presentationState.errorMessage = message }
+        sleepTimer.onFire = { @MainActor [weak self] in self?.sleepTimerFired() }
     }
 
     func prepare(enclosureID: Int64) throws -> PlaybackPreparation {
@@ -237,6 +240,7 @@ final class MediaPlaybackCoordinator {
         presentationState.mediaTitle = metadata?.title ?? ""
         presentationState.positionMs = preparation.playbackState.positionMs
         presentationState.durationMs = preparedDurationMs
+        presentationState.chapters = (try? core.mediaChapters(enclosureId: enclosureID)) ?? []
         presentationState.status = .paused
         presentationState.errorMessage = nil
         let source: URL
@@ -269,6 +273,7 @@ final class MediaPlaybackCoordinator {
     func pause() { engine.pause(); checkpoint(); stopCheckpointTimer(); presentationState.positionMs = engine.currentPositionMs; presentationState.status = .paused; updateNowPlayingPlaybackState() }
     func stop() { engine.pause(); checkpoint(); stopCheckpointTimer(); presentationState.positionMs = engine.currentPositionMs; presentationState.status = .stopped; nowPlaying.playbackState = .stopped }
     func applicationDidResignActive() { checkpoint() }
+    func applicationDidBecomeActive() { sleepTimer.evaluate() }
     func applicationWillTerminate() { checkpoint(); stopCheckpointTimer(); engine.unload() }
 
     func seek(toMs: UInt64) {
@@ -293,7 +298,9 @@ final class MediaPlaybackCoordinator {
 
     func chapters() throws -> [MediaChapter] {
         guard let activeEnclosureID else { return [] }
-        return try core.mediaChapters(enclosureId: activeEnclosureID)
+        let chapters = try core.mediaChapters(enclosureId: activeEnclosureID)
+        presentationState.chapters = chapters
+        return chapters
     }
 
     func artwork(reference: String) throws -> Data? { try core.mediaArtwork(reference: reference) }
@@ -374,6 +381,10 @@ final class MediaPlaybackCoordinator {
         nowPlaying.nowPlayingInfo = info
     }
 
+    private func sleepTimerFired() {
+        pause()
+    }
+
     private static func safeLocalURL(_ reference: String, under root: URL) -> URL? {
         guard !reference.hasPrefix("/"), !reference.contains("..") else { return nil }
         let url = root.appendingPathComponent(reference).standardizedFileURL
@@ -392,6 +403,7 @@ final class MediaPlaybackPresentationState: ObservableObject {
     @Published fileprivate(set) var loadedEnclosure: Enclosure?
     @Published fileprivate(set) var feedTitle = ""
     @Published fileprivate(set) var mediaTitle = ""
+    @Published fileprivate(set) var chapters: [MediaChapter] = []
     @Published fileprivate(set) var status: MediaPlaybackPresentationStatus = .stopped
     @Published fileprivate(set) var positionMs: UInt64 = 0
     @Published fileprivate(set) var durationMs: UInt64?
@@ -399,6 +411,70 @@ final class MediaPlaybackPresentationState: ObservableObject {
     @Published fileprivate(set) var isBuffering = false
     @Published fileprivate(set) var errorMessage: String?
     @Published fileprivate(set) var playbackRate = 1.0
+}
+
+@MainActor
+final class MediaSleepTimer: ObservableObject {
+    static let intervalsMinutes = Array(stride(from: 30, through: 180, by: 15))
+
+    @Published private(set) var isEnabled = false
+    @Published private(set) var intervalMinutes = 30
+    @Published private(set) var remainingSeconds: Int?
+
+    private var deadline: Date?
+    private var timer: Timer?
+    private let now: () -> Date
+    var onFire: (() -> Void)?
+
+    init(now: @escaping () -> Date = { Date() }) {
+        self.now = now
+    }
+
+    deinit { timer?.invalidate() }
+
+    func setEnabled(_ enabled: Bool) {
+        if enabled { start(intervalMinutes: intervalMinutes) } else { disable() }
+    }
+
+    func setInterval(_ minutes: Int) {
+        guard Self.intervalsMinutes.contains(minutes) else { return }
+        intervalMinutes = minutes
+        if isEnabled { start(intervalMinutes: minutes) }
+    }
+
+    func evaluate(at date: Date? = nil) {
+        guard isEnabled, let deadline else { return }
+        let current = date ?? now()
+        if current >= deadline {
+            timer?.invalidate()
+            timer = nil
+            self.deadline = nil
+            isEnabled = false
+            remainingSeconds = nil
+            onFire?()
+        } else {
+            remainingSeconds = max(1, Int(ceil(deadline.timeIntervalSince(current))))
+        }
+    }
+
+    private func start(intervalMinutes: Int) {
+        timer?.invalidate()
+        let deadline = now().addingTimeInterval(TimeInterval(intervalMinutes * 60))
+        self.deadline = deadline
+        isEnabled = true
+        remainingSeconds = intervalMinutes * 60
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.evaluate() }
+        }
+    }
+
+    private func disable() {
+        timer?.invalidate()
+        timer = nil
+        deadline = nil
+        isEnabled = false
+        remainingSeconds = nil
+    }
 }
 
 enum MediaPlaybackError: LocalizedError {

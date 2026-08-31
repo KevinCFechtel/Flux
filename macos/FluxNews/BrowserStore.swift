@@ -671,6 +671,9 @@ final class BrowserStore: ObservableObject {
         do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadSelectionTotal(); reloadCounts(); completion?(true) } catch { errorMessage = NativeErrorPresentation.message(for: error); completion?(false) }
     }
     func loadReaderDocument(_ article: ArticleSummary, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
+        loadReaderDocument(articleID: article.id, completion: completion)
+    }
+    func loadReaderDocument(articleID: Int64, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
         guard let core else {
             completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
             return
@@ -679,7 +682,7 @@ final class BrowserStore: ObservableObject {
         let request = readerDocumentRequest
         let store = WeakBrowserStore(self)
         Task.detached {
-            let result = Result { try core.readerDocument(articleId: article.id) }
+            let result = Result { try core.readerDocument(articleId: articleID) }
             await MainActor.run {
                 guard let store = store.value, store.readerDocumentRequest == request else { return }
                 completion(result)
