@@ -204,6 +204,9 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(engine.rate, 3.0)
         coordinator.setPlaybackRate(0.44)
         XCTAssertEqual(engine.rate, 0.5)
+        coordinator.setPlaybackRate(.nan)
+        XCTAssertEqual(engine.rate, 0.5)
+        XCTAssertEqual(coordinator.presentationState.playbackRate, 0.5)
     }
 
     func testAsynchronousDurationIsObservedOnlyWhenItChanges() throws {

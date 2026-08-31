@@ -307,6 +307,7 @@ final class MediaPlaybackCoordinator {
     func isUsing(enclosureID: Int64) -> Bool { activeEnclosureID == enclosureID }
 
     func setPlaybackRate(_ rate: Double) {
+        guard rate.isFinite else { return }
         let clamped = min(3.0, max(0.5, rate))
         presentationState.playbackRate = (clamped * 10).rounded() / 10
         engine.rate = presentationState.playbackRate
