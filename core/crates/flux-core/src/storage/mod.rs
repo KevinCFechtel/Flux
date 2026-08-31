@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::domain::{
-    Article, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary, Category,
-    ContinueListeningItem, CoreError, CoreSettings, DeliveryMode, DetailRenderingMode,
+    Article, ArticleAudioActionProjection, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary,
+    Category, ContinueListeningItem, CoreError, CoreSettings, DeliveryMode, DetailRenderingMode,
     DiscoveryMode, DownloadFailureKind, DownloadNetworkPolicy, DownloadOrigin, DownloadRetention,
     DownloadState, Enclosure, Feed, FeedPreferences, FeedSystemNotificationSetting,
     LegacyPlaybackImport, LegacyPlaybackImportResult, ListeningListEnclosure, ListeningListFeed,
@@ -705,6 +705,104 @@ impl Store {
             .map_err(sql_error)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(sql_error)
+    }
+
+    pub fn article_presentation(&self, article_id: i64) -> Result<(String, String), CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        connection
+            .query_row(
+                "SELECT a.title,f.title FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE a.id=?1",
+                [article_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(sql_error)
+    }
+
+    pub fn article_audio_action_states(
+        &self,
+        article_ids: &[i64],
+    ) -> Result<Vec<ArticleAudioActionProjection>, CoreError> {
+        if article_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = std::iter::repeat_n("?", article_ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut statement = connection
+            .prepare(&format!(
+                "SELECT e.article_id,e.id,e.url,e.mime_type,e.size_bytes,e.remote_media_progression_seconds,EXISTS(SELECT 1 FROM listening_list l WHERE l.article_id=e.article_id),d.enclosure_id,d.state,d.origin,d.local_file,d.file_size_bytes,d.downloaded_at,d.failure_kind FROM enclosures e LEFT JOIN media_downloads d ON d.enclosure_id=e.id WHERE e.article_id IN ({placeholders}) AND lower(e.mime_type) LIKE 'audio/%' ORDER BY e.article_id,e.id"
+            ))
+            .map_err(sql_error)?;
+        let mut states = HashMap::new();
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(article_ids.iter()), |row| {
+                let article_id: i64 = row.get(0)?;
+                let enclosure = Enclosure {
+                    id: row.get(1)?,
+                    article_id,
+                    url: row.get(2)?,
+                    mime_type: row.get(3)?,
+                    size_bytes: row
+                        .get::<_, Option<i64>>(4)?
+                        .map(|value| {
+                            u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery)
+                        })
+                        .transpose()?,
+                    remote_media_progression_seconds: u64::try_from(row.get::<_, i64>(5)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                };
+                let state =
+                    states
+                        .entry(article_id)
+                        .or_insert_with(|| ArticleAudioActionProjection {
+                            article_id,
+                            enclosures: Vec::new(),
+                            is_in_listening_list: row.get(6).unwrap_or(false),
+                            downloads: Vec::new(),
+                        });
+                state.enclosures.push(enclosure);
+                if let Some(enclosure_id) = row.get::<_, Option<i64>>(7)? {
+                    let download_state = download_state_from_db(&row.get::<_, String>(8)?)?;
+                    let origin = row
+                        .get::<_, Option<String>>(9)?
+                        .map(|value| origin_from_db(&value))
+                        .transpose()?;
+                    let failure_kind = row
+                        .get::<_, Option<String>>(13)?
+                        .map(|value| failure_kind_from_db(&value))
+                        .transpose()?;
+                    state.downloads.push(MediaDownload {
+                        enclosure_id,
+                        state: download_state,
+                        origin,
+                        local_file: row.get(10)?,
+                        file_size_bytes: row
+                            .get::<_, Option<i64>>(11)?
+                            .map(|value| {
+                                u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery)
+                            })
+                            .transpose()?,
+                        downloaded_at: row.get(12)?,
+                        failure_kind,
+                    });
+                }
+                Ok(())
+            })
+            .map_err(sql_error)?;
+        for row in rows {
+            row.map_err(sql_error)?;
+        }
+        Ok(article_ids
+            .iter()
+            .filter_map(|article_id| states.remove(article_id))
+            .collect())
     }
 
     pub fn add_to_listening_list(
@@ -5362,6 +5460,19 @@ mod tests {
         );
         assert!(store.is_in_listening_list(10).unwrap());
         assert!(!store.is_in_listening_list(999).unwrap());
+
+        let action_states = store.article_audio_action_states(&[20, 10, 30]).unwrap();
+        assert_eq!(
+            action_states
+                .iter()
+                .map(|state| state.article_id)
+                .collect::<Vec<_>>(),
+            vec![20, 10, 30]
+        );
+        assert!(action_states[0].is_in_listening_list);
+        assert!(action_states[1].is_in_listening_list);
+        assert_eq!(action_states[1].enclosures.len(), 2);
+        assert_eq!(action_states[1].downloads.len(), 1);
     }
 
     #[test]

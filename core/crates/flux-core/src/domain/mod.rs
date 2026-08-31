@@ -225,6 +225,8 @@ pub struct LegacyPlaybackImportResult {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlaybackPreparation {
     pub enclosure: Enclosure,
+    pub article_title: String,
+    pub feed_title: String,
     pub playback_state: Option<PlaybackState>,
     pub local_file: Option<String>,
     pub duration_ms: Option<u64>,
@@ -310,6 +312,14 @@ pub struct ArticleSummary {
     pub is_starred: bool,
     pub preview: String,
     pub image_url: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArticleAudioActionProjection {
+    pub article_id: i64,
+    pub enclosures: Vec<Enclosure>,
+    pub is_in_listening_list: bool,
+    pub downloads: Vec<MediaDownload>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

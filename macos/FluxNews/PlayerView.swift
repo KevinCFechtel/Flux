@@ -77,10 +77,10 @@ struct PlayerView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     timeline
                     controls
-                    runtimeStatus
-                    chapters
-                    showNotes
-                    advancedSettings
+                     runtimeStatus
+                     chapters
+                     advancedSettings
+                     showNotes
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)

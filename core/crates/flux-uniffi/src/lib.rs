@@ -95,6 +95,13 @@ pub struct ArticleSummary {
     pub image_url: Option<String>,
 }
 #[derive(uniffi::Record)]
+pub struct ArticleAudioActionProjection {
+    pub article_id: i64,
+    pub enclosures: Vec<Enclosure>,
+    pub is_in_listening_list: bool,
+    pub downloads: Vec<MediaDownload>,
+}
+#[derive(uniffi::Record)]
 pub struct ReaderDocument {
     pub blocks: Vec<ReaderBlock>,
     pub has_simplified_content: bool,
@@ -448,6 +455,8 @@ pub struct LegacyPlaybackImportResult {
 #[derive(uniffi::Record)]
 pub struct PlaybackPreparation {
     pub enclosure: Enclosure,
+    pub article_title: String,
+    pub feed_title: String,
     pub playback_state: PlaybackState,
     pub local_file: Option<String>,
     pub duration_ms: Option<u64>,
@@ -851,6 +860,15 @@ impl Flux {
     pub fn query_articles(&self, query: ArticleQuery) -> Result<Vec<ArticleSummary>, FluxError> {
         self.core
             .query_articles(query.into())
+            .map(|rows| rows.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn article_audio_action_states(
+        &self,
+        article_ids: Vec<i64>,
+    ) -> Result<Vec<ArticleAudioActionProjection>, FluxError> {
+        self.core
+            .article_audio_action_states(&article_ids)
             .map(|rows| rows.into_iter().map(Into::into).collect())
             .map_err(map_error)
     }
@@ -1843,6 +1861,16 @@ impl From<domain::ArticleSummary> for ArticleSummary {
         }
     }
 }
+impl From<domain::ArticleAudioActionProjection> for ArticleAudioActionProjection {
+    fn from(value: domain::ArticleAudioActionProjection) -> Self {
+        Self {
+            article_id: value.article_id,
+            enclosures: value.enclosures.into_iter().map(Into::into).collect(),
+            is_in_listening_list: value.is_in_listening_list,
+            downloads: value.downloads.into_iter().map(Into::into).collect(),
+        }
+    }
+}
 impl From<domain::ReaderDocument> for ReaderDocument {
     fn from(value: domain::ReaderDocument) -> Self {
         Self {
@@ -2210,6 +2238,8 @@ impl From<domain::PlaybackPreparation> for PlaybackPreparation {
     fn from(value: domain::PlaybackPreparation) -> Self {
         let domain::PlaybackPreparation {
             enclosure,
+            article_title,
+            feed_title,
             playback_state,
             local_file,
             duration_ms,
@@ -2218,6 +2248,8 @@ impl From<domain::PlaybackPreparation> for PlaybackPreparation {
         let enclosure_id = enclosure.id;
         Self {
             enclosure: enclosure.into(),
+            article_title,
+            feed_title,
             playback_state: playback_state.map(Into::into).unwrap_or(PlaybackState {
                 enclosure_id,
                 position_ms: 0,

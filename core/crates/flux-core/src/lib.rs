@@ -24,9 +24,9 @@ use chrono::{DateTime, Utc};
 
 use diagnostics::{CoreDiagnosticListener, Diagnostics};
 use domain::{
-    ArticleQuery, ArticleSummary, ArticleThumbnailResult, ContinueListeningItem, CoreError,
-    CoreErrorKind, CoreEvent, CoreSettings, CreateCategoryResult, CreateFeedRequest,
-    CreateFeedResult, DeliveryDisposition, DeliveryMode, DetailRenderingMode,
+    ArticleAudioActionProjection, ArticleQuery, ArticleSummary, ArticleThumbnailResult,
+    ContinueListeningItem, CoreError, CoreErrorKind, CoreEvent, CoreSettings, CreateCategoryResult,
+    CreateFeedRequest, CreateFeedResult, DeliveryDisposition, DeliveryMode, DetailRenderingMode,
     DiscoverSubscriptionsRequest, DiscoveredSubscription, DownloadFailureKind,
     DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, DownloadState, Enclosure, FeedIcon,
     FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, LegacyPlaybackImport,
@@ -423,6 +423,12 @@ impl FluxCore {
     pub fn query_articles(&self, query: ArticleQuery) -> Result<Vec<ArticleSummary>, CoreError> {
         self.store.query_articles(&query)
     }
+    pub fn article_audio_action_states(
+        &self,
+        article_ids: &[i64],
+    ) -> Result<Vec<ArticleAudioActionProjection>, CoreError> {
+        self.store.article_audio_action_states(article_ids)
+    }
     pub fn reader_document(&self, article_id: i64) -> Result<ReaderDocument, CoreError> {
         let article = self.store.reader_article(article_id)?;
         let preferences = self.store.feed_preferences(article.feed_id)?;
@@ -598,6 +604,9 @@ impl FluxCore {
             .store
             .enclosure(enclosure_id)?
             .ok_or_else(|| CoreError::data(format!("enclosure {enclosure_id} does not exist")))?;
+        let (article_title, feed_title) = self
+            .store
+            .article_presentation(enclosure.enclosure.article_id)?;
         let playback_state = self.store.playback_state(enclosure_id)?;
         let download = self.store.media_download(enclosure_id)?;
         let metadata = self.store.media_metadata(enclosure_id)?;
@@ -607,6 +616,8 @@ impl FluxCore {
             .or_else(|| playback_state.as_ref().and_then(|state| state.duration_ms));
         Ok(PlaybackPreparation {
             enclosure: enclosure.enclosure,
+            article_title,
+            feed_title,
             playback_state,
             local_file: download.and_then(|download| download.local_file),
             duration_ms,

@@ -13,7 +13,6 @@ enum MediaPlaybackPaths {
 @MainActor
 protocol MediaPlaybackCore: AnyObject {
     func preparePlayback(enclosureId: Int64) throws -> PlaybackPreparation
-    func savedMedia() throws -> [SavedPlayableMediaItem]
     func checkpointPlayback(enclosureId: Int64, positionMs: UInt64, durationMs: UInt64?) throws
     func playbackCompleted(enclosureId: Int64, durationMs: UInt64?) throws
     func restartPlayback(enclosureId: Int64) throws
@@ -238,10 +237,9 @@ final class MediaPlaybackCoordinator {
         preparedDurationMs = preparation.durationMs ?? preparation.playbackState.durationMs
         lastObservedDurationMs = preparedDurationMs
         preparedStatus = preparation.playbackState.status
-        let metadata = (try? core.savedMedia())?.first { $0.enclosureId == enclosureID }
         presentationState.loadedEnclosure = preparation.enclosure
-        presentationState.feedTitle = metadata?.feedTitle ?? ""
-        presentationState.mediaTitle = metadata?.title ?? ""
+        presentationState.feedTitle = preparation.feedTitle
+        presentationState.mediaTitle = preparation.articleTitle
         presentationState.artworkReference = preparation.artworkReference
         presentationState.positionMs = preparation.playbackState.positionMs
         presentationState.durationMs = preparedDurationMs

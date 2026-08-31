@@ -17,6 +17,8 @@ private final class FakePlaybackCore: MediaPlaybackCore {
         let enclosure = Enclosure(id: 7, articleId: 11, url: "https://example.test/audio.mp3", mimeType: "audio/mpeg", sizeBytes: nil, remoteMediaProgressionSeconds: 0, mediaKind: .audio)
         preparation = PlaybackPreparation(
             enclosure: enclosure,
+            articleTitle: "Episode",
+            feedTitle: "Feed",
             playbackState: PlaybackState(enclosureId: 7, positionMs: positionMs, durationMs: durationMs, status: status, updatedAt: nil),
             localFile: nil,
             durationMs: durationMs,
@@ -25,7 +27,6 @@ private final class FakePlaybackCore: MediaPlaybackCore {
     }
 
     func preparePlayback(enclosureId: Int64) throws -> PlaybackPreparation { preparation }
-    func savedMedia() throws -> [SavedPlayableMediaItem] { [] }
     func checkpointPlayback(enclosureId: Int64, positionMs: UInt64, durationMs: UInt64?) throws { checkpoints.append((enclosureId, positionMs, durationMs)) }
     func playbackCompleted(enclosureId: Int64, durationMs: UInt64?) throws {
         if completionShouldFail { throw NSError(domain: "test", code: 1) }
@@ -222,6 +223,18 @@ final class MediaCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(core.checkpoints.map(\.1), [36_000])
         XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
+    }
+
+    func testPrepareUsesNewsMetadataFromPlaybackPreparation() throws {
+        let core = FakePlaybackCore()
+        core.preparation.articleTitle = "Actual News Title"
+        core.preparation.feedTitle = "Actual Feed"
+        let coordinator = MediaPlaybackCoordinator(core: core, engine: FakePlaybackEngine())
+
+        _ = try coordinator.prepare(enclosureID: 7)
+
+        XCTAssertEqual(coordinator.presentationState.mediaTitle, "Actual News Title")
+        XCTAssertEqual(coordinator.presentationState.feedTitle, "Actual Feed")
     }
 
     func testPeriodicCheckpointUsesPositionWhilePlaybackRuns() async throws {

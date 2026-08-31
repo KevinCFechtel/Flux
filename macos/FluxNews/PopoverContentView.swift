@@ -143,7 +143,7 @@ private struct ArticlePane: View {
         }
         .onChange(of: store.scope) { _, _ in showingPlayer = false }
         .onChange(of: selectedID) { _, articleID in
-            if let articleID { store.loadArticleAudioActions(for: articleID) }
+            store.selectArticleAudioActions(for: articleID)
         }
         .onChange(of: store.popoverVisible) { _, _ in tracker.reset() }
         .onChange(of: store.articles.map(\.id)) { _, ids in
@@ -184,12 +184,15 @@ private struct ArticlePane: View {
             .disabled(PlayerPresentation.navigationDisabled(showingPlayer: showingPlayer, hasLoadedMedia: playbackState.loadedEnclosure != nil))
             .help(showingPlayer ? "Show News List" : "Show Player")
             .accessibilityLabel(showingPlayer ? "Show News List" : "Show Player")
+            Button { store.settingsVisible = true } label: { Image(systemName: "gearshape") }
+                .buttonStyle(.borderless)
+                .help("Settings...")
+                .accessibilityLabel("Settings...")
             if store.isListeningList {
                 Menu {
                     Button { store.setListeningListSort(.recentlyAdded) } label: { Label("Recently Added", systemImage: store.listeningListSort == .recentlyAdded ? "checkmark" : "clock") }
                     Button { store.setListeningListSort(.publicationDate) } label: { Label("Publication Date", systemImage: store.listeningListSort == .publicationDate ? "checkmark" : "calendar") }
                     Divider()
-                    Button { store.settingsVisible = true } label: { Label("Settings...", systemImage: "gearshape") }
                     Button { NSApplication.shared.terminate(nil) } label: { Label("Quit FluxNews", systemImage: "power") }
                 } label: { Image(systemName: "arrow.up.arrow.down") }
                     .menuStyle(.borderlessButton)
@@ -219,15 +222,13 @@ private struct ArticlePane: View {
                         Button { setArticleListStyle(.row) } label: { Label("Rows", systemImage: store.articleListStyle == .row ? "checkmark" : "list.bullet") }
                         Button { setArticleListStyle(.card) } label: { Label("Cards", systemImage: store.articleListStyle == .card ? "checkmark" : "rectangle.grid.1x2") }
                     } label: { Label("Layout", systemImage: "rectangle.3.group") }
-                    Button { store.settingsVisible = true } label: { Label("Settings...", systemImage: "gearshape") }
                     Divider()
                     Button { NSApplication.shared.terminate(nil) } label: { Label("Quit FluxNews", systemImage: "power") }
-                } label: { Image(systemName: "gearshape") }
+                } label: { Image(systemName: "ellipsis") }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
-                    .frame(width: 24)
-                    .help("Settings...")
-                    .accessibilityLabel("Settings...")
+                    .help("More")
+                    .accessibilityLabel("More")
             }
         }
         .padding(.horizontal, 12)
@@ -261,7 +262,7 @@ private struct ArticlePane: View {
                     ScrollView {
                         LazyVStack(spacing: store.articleListStyle == .row ? 0 : 4) {
                             ForEach(store.articles, id: \.id) { article in
-                                ArticleItem(article: article, style: store.articleListStyle, selected: selectedID == article.id, audioState: selectedID == article.id ? store.articleAudioActionState : nil, transferState: transferState, store: store, onSelect: { selectedID = article.id }, onPlayAudio: playAudio, onDownloadAudio: { enclosure in store.requestManualDownload(articleID: article.id, enclosureID: enclosure.id) }, onDeleteDownload: { enclosure in store.deleteDownload(articleID: article.id, enclosureID: enclosure.id) }, onAddToListeningList: { store.addToListeningList(articleID: article.id) }, onHoverChanged: { hovering in
+                                 ArticleItem(article: article, style: store.articleListStyle, selected: selectedID == article.id, audioState: store.articleAudioActionStates[article.id], transferState: transferState, store: store, onSelect: { selectedID = article.id }, onPlayAudio: playAudio, onDownloadAudio: { enclosure in store.requestManualDownload(articleID: article.id, enclosureID: enclosure.id) }, onDeleteDownload: { enclosure in store.deleteDownload(articleID: article.id, enclosureID: enclosure.id) }, onAddToListeningList: { store.addToListeningList(articleID: article.id) }, onHoverChanged: { hovering in
                                     if hovering { hoveredID = article.id }
                                     else if hoveredID == article.id { hoveredID = nil }
                                 })

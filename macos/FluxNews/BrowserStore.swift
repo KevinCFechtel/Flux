@@ -215,6 +215,7 @@ final class BrowserStore: ObservableObject {
     @Published private(set) var isSavingAccount = false
     @Published var feedSettingsTarget: FeedSettingsTarget?
     @Published private(set) var articleAudioActionState: ArticleAudioActionState?
+    @Published private(set) var articleAudioActionStates: [Int64: ArticleAudioActionState] = [:]
 
     private var core: Flux?
     private var eventSubscription: EventSubscription?
@@ -388,6 +389,7 @@ final class BrowserStore: ObservableObject {
         guard let core else { return }
         do {
             articles = try core.queryArticles(query: query())
+            loadArticleAudioActions(for: articles.map(\.id))
             selectionTotal = try core.countArticles(query: query())
             errorMessage = nil
             if acknowledgingPendingNewData { acknowledgePendingNewDataForCurrentScope() }
@@ -841,6 +843,9 @@ final class BrowserStore: ObservableObject {
         }
     }
     func loadArticleAudioActions(for articleID: Int64) {
+        loadArticleAudioActions(for: [articleID], selectedArticleID: articleID)
+    }
+    func loadArticleAudioActions(for articleIDs: [Int64], selectedArticleID: Int64? = nil) {
         articleAudioRequestGeneration &+= 1
         let generation = articleAudioRequestGeneration
         articleAudioActionState = nil
@@ -848,16 +853,16 @@ final class BrowserStore: ObservableObject {
         let store = WeakBrowserStore(self)
         Task.detached {
             let result = Result {
-                let enclosures = ArticleAudioActions.audioEnclosures(try core.articleEnclosures(articleId: articleID))
-                let membership = try core.isInListeningList(articleId: articleID)
-                var downloads: [Int64: MediaDownload] = [:]
-                for enclosure in enclosures { downloads[enclosure.id] = try core.mediaDownload(enclosureId: enclosure.id) }
-                return ArticleAudioActionState(articleID: articleID, enclosures: enclosures, isInListeningList: membership, downloads: downloads)
+                try core.articleAudioActionStates(articleIds: articleIDs).reduce(into: [Int64: ArticleAudioActionState]()) { result, state in
+                    result[state.articleId] = ArticleAudioActionState(articleID: state.articleId, enclosures: ArticleAudioActions.audioEnclosures(state.enclosures), isInListeningList: state.isInListeningList, downloads: Dictionary(uniqueKeysWithValues: state.downloads.map { ($0.enclosureId, $0) }))
+                }
             }
             await MainActor.run {
                 guard let store = store.value, store.articleAudioRequestGeneration == generation else { return }
                 switch result {
-                case let .success(state): store.articleAudioActionState = state
+                case let .success(states):
+                    store.articleAudioActionStates.merge(states) { _, new in new }
+                    if let selectedArticleID { store.articleAudioActionState = states[selectedArticleID] }
                 case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
                 }
             }
@@ -866,6 +871,9 @@ final class BrowserStore: ObservableObject {
     func refreshArticleAudioActions() {
         guard let articleID = articleAudioActionState?.articleID else { return }
         loadArticleAudioActions(for: articleID)
+    }
+    func selectArticleAudioActions(for articleID: Int64?) {
+        articleAudioActionState = articleID.flatMap { articleAudioActionStates[$0] }
     }
     func addToListeningList(articleID: Int64) {
         guard let core else { return }
