@@ -576,6 +576,7 @@ impl Store {
             Vec::new()
         };
         reconcile_remote_enclosures(&tx, articles, enclosures, media_progress_writes)?;
+        let mut auto_download_articles = HashSet::new();
         for enclosure_id in new_live_enclosures {
             let article_id: i64 = tx
                 .query_row(
@@ -592,8 +593,22 @@ impl Store {
                 )
                 .map_err(sql_error)?;
             if enabled && is_audio_enclosure(&tx, enclosure_id)? {
-                ensure_listening_membership(&tx, article_id, &Utc::now().to_rfc3339())?;
-                request_download_in_transaction(&tx, enclosure_id, DownloadOrigin::Automatic)?;
+                auto_download_articles.insert(article_id);
+            }
+        }
+        for article_id in auto_download_articles {
+            ensure_listening_membership(&tx, article_id, &Utc::now().to_rfc3339())?;
+            for enclosure_id in audio_enclosure_ids_for_article(&tx, article_id)? {
+                let suppressed: bool = tx
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM auto_download_suppressions WHERE enclosure_id=?1)",
+                        [enclosure_id],
+                        |row| row.get(0),
+                    )
+                    .map_err(sql_error)?;
+                if !suppressed {
+                    request_download_in_transaction(&tx, enclosure_id, DownloadOrigin::Automatic)?;
+                }
             }
         }
         let remote_category_ids: HashSet<i64> =
@@ -758,8 +773,10 @@ impl Store {
             )
             .map_err(sql_error)?
             > 0;
-        for enclosure_id in audio_enclosure_ids_for_article(&tx, article_id)? {
-            request_download_deletion_in_transaction(&tx, enclosure_id)?;
+        if removed {
+            for enclosure_id in audio_enclosure_ids_for_article(&tx, article_id)? {
+                request_download_deletion_in_transaction(&tx, enclosure_id)?;
+            }
         }
         tx.commit().map_err(sql_error)?;
         Ok(removed)
@@ -1859,13 +1876,16 @@ impl Store {
                 )
                 .map_err(sql_error)?;
             if all_completed {
-                tx.execute(
-                    "DELETE FROM listening_list WHERE article_id=?1",
-                    [article_id],
-                )
-                .map_err(sql_error)?;
-                for audio_id in audio_enclosure_ids_for_article(&tx, article_id)? {
-                    request_download_deletion_in_transaction(&tx, audio_id)?;
+                let removed = tx
+                    .execute(
+                        "DELETE FROM listening_list WHERE article_id=?1",
+                        [article_id],
+                    )
+                    .map_err(sql_error)?;
+                if removed > 0 {
+                    for audio_id in audio_enclosure_ids_for_article(&tx, article_id)? {
+                        request_download_deletion_in_transaction(&tx, audio_id)?;
+                    }
                 }
             }
         }
@@ -5830,6 +5850,20 @@ mod tests {
         assert!(!store.is_in_listening_list(200).unwrap());
         assert!(store.media_download(2000).unwrap().is_none());
         assert!(store.media_download(2001).unwrap().is_none());
+        store
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO media_downloads(enclosure_id,state,origin,local_file,file_size_bytes,downloaded_at) VALUES(2000,'downloaded','manual','legacy.mp3',10,'2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        assert!(!store.remove_from_listening_list(200).unwrap());
+        assert_eq!(
+            store.media_download(2000).unwrap().unwrap().state,
+            DownloadState::Downloaded
+        );
     }
 
     #[test]
@@ -5877,8 +5911,8 @@ mod tests {
             .reconcile_with_enclosures_and_progress_mode(
                 &categories,
                 &feeds,
-                &[new_article],
-                &[audio, video],
+                &[new_article.clone()],
+                &[audio.clone(), video],
                 &HashMap::new(),
                 DiscoveryMode::LiveDiscovery,
             )
@@ -5888,6 +5922,27 @@ mod tests {
             Some(DownloadOrigin::Automatic)
         );
         assert!(store.media_download(1002).unwrap().is_none());
+        let later_audio = Enclosure {
+            id: 1003,
+            article_id: 101,
+            url: "https://cdn.test/1003.mp3".into(),
+            mime_type: "audio/mpeg".into(),
+            ..audio
+        };
+        store
+            .reconcile_with_enclosures_and_progress_mode(
+                &categories,
+                &feeds,
+                &[new_article],
+                &[audio, later_audio],
+                &HashMap::new(),
+                DiscoveryMode::LiveDiscovery,
+            )
+            .unwrap();
+        assert_eq!(
+            store.media_download(1003).unwrap().unwrap().state,
+            DownloadState::Requested
+        );
     }
 
     #[test]
