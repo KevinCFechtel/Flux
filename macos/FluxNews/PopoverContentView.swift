@@ -596,11 +596,11 @@ private struct ListeningListRow: View {
     private func downloadActionTitle(_ audio: ListeningListEnclosure, index: Int) -> String {
         let label = ArticleAudioActions.enclosureLabel(audio.enclosure, index: index)
         switch ArticleAudioActions.downloadAction(audio.download) {
-        case .delete: return "Delete Download: \(label)"
-        case .downloading: return "Downloading: \(label)"
-        case .pendingDeletion: return "Pending deletion: \(label)"
-        case .retry: return "Retry Download: \(label)"
-        case .download: return "Download: \(label)"
+        case .delete: return String(localized: "Delete Download: \(label)")
+        case .downloading: return String(localized: "Downloading: \(label)")
+        case .pendingDeletion: return String(localized: "Pending deletion: \(label)")
+        case .retry: return String(localized: "Retry Download: \(label)")
+        case .download: return String(localized: "Download: \(label)")
         }
     }
 }

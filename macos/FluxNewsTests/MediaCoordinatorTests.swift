@@ -139,7 +139,9 @@ final class MediaCoordinatorTests: XCTestCase {
         let video = Enclosure(id: 2, articleId: 11, url: "https://example.test/video.mp4", mimeType: "video/mp4", sizeBytes: nil, remoteMediaProgressionSeconds: 0, mediaKind: .video)
 
         XCTAssertEqual(ArticleAudioActions.audioEnclosures([audio, video]), [audio])
-        XCTAssertEqual(ArticleAudioActions.enclosureLabel(audio, index: 0), "Episode 1.mp3 (audio/mpeg)")
+        let label = ArticleAudioActions.enclosureLabel(audio, index: 0)
+        XCTAssertTrue(label.hasPrefix("Episode 1.mp3 (audio/mpeg"))
+        XCTAssertTrue(label.contains("100"))
         XCTAssertEqual(ArticleAudioActions.audioEnclosures([video]), [])
     }
 
@@ -168,6 +170,20 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(ArticleAudioActions.downloadAction(MediaDownload(enclosureId: 1, state: .requested, origin: .manual, localFile: nil, fileSizeBytes: nil, downloadedAt: nil, failureKind: nil)), .downloading)
         XCTAssertEqual(ArticleAudioActions.downloadAction(MediaDownload(enclosureId: 1, state: .downloaded, origin: .manual, localFile: "/tmp/episode.mp3", fileSizeBytes: 10, downloadedAt: nil, failureKind: nil)), .delete)
         XCTAssertEqual(ArticleAudioActions.downloadAction(MediaDownload(enclosureId: 1, state: .deleteRequested, origin: .manual, localFile: "/tmp/episode.mp3", fileSizeBytes: 10, downloadedAt: nil, failureKind: nil)), .pendingDeletion)
+    }
+
+    func testPlaybackUseChangesReconcileDeferredCoreWork() throws {
+        let core = FakePlaybackCore()
+        let engine = FakePlaybackEngine()
+        let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
+        var callbackCount = 0
+        coordinator.onPlaybackUseChanged = { callbackCount += 1 }
+
+        _ = try coordinator.prepare(enclosureID: 7)
+        XCTAssertEqual(callbackCount, 1)
+        try coordinator.play(enclosureID: 7)
+        engine.finish()
+        XCTAssertEqual(callbackCount, 2)
     }
 
     func testInProgressStartsAtCorePositionAndPauseCheckpoints() throws {

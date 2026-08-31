@@ -40,6 +40,13 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(BrowserScope.listeningList, .listeningList)
     }
 
+    func testListeningListFeedSelectionFallsBackWhenFeedIsNoLongerRepresented() {
+        let feeds = [ListeningListFeed(feedId: 11, feedTitle: "News", itemCount: 1)]
+        XCTAssertEqual(ListeningListPresentation.validatedFeedID(11, feeds: feeds), 11)
+        XCTAssertNil(ListeningListPresentation.validatedFeedID(12, feeds: feeds))
+        XCTAssertNil(ListeningListPresentation.validatedFeedID(nil, feeds: feeds))
+    }
+
     func testListeningListUsesOneNewsRowAndActiveEnclosureForPlayback() {
         let first = listeningEnclosure(id: 1, positionMs: 12_000, durationMs: 45_000, status: .inProgress)
         let second = listeningEnclosure(id: 2, positionMs: 3_000, durationMs: 8_000, status: .inProgress)

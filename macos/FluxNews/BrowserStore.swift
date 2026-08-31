@@ -22,6 +22,11 @@ struct ListeningListProgress: Equatable {
 }
 
 enum ListeningListPresentation {
+    static func validatedFeedID(_ feedID: Int64?, feeds: [ListeningListFeed]) -> Int64? {
+        guard let feedID else { return nil }
+        return feeds.contains(where: { $0.feedId == feedID }) ? feedID : nil
+    }
+
     static func preferredEnclosure(_ item: ListeningListItem) -> Enclosure? {
         if let activeID = item.activeEnclosureId,
            let active = item.audioEnclosures.first(where: { $0.enclosure.id == activeID }) {
@@ -105,7 +110,9 @@ enum ArticleAudioActions {
         }
         let name = filename ?? String(localized: "Audio \(index + 1)")
         let format = enclosure.mimeType.split(separator: ";", maxSplits: 1).first.map(String.init) ?? ""
-        return format.isEmpty ? name : "\(name) (\(format))"
+        let size = enclosure.sizeBytes.map { ByteCountFormatter.string(fromByteCount: Int64(min($0, UInt64(Int64.max))), countStyle: .file) }
+        let details = [format, size].compactMap { $0 }.filter { !$0.isEmpty }
+        return details.isEmpty ? name : "\(name) (\(details.joined(separator: ", ")))"
     }
 }
 
@@ -490,6 +497,7 @@ final class BrowserStore: ObservableObject {
         guard let core else { return }
         do {
             listeningListFeeds = try core.listeningListFeeds()
+            listeningListFeedID = ListeningListPresentation.validatedFeedID(listeningListFeedID, feeds: listeningListFeeds)
             listeningListItems = try core.listeningList(feedId: listeningListFeedID, sort: listeningListSort)
             selectionTotal = UInt64(listeningListItems.count)
             errorMessage = nil
@@ -872,8 +880,7 @@ final class BrowserStore: ObservableObject {
     }
     func requestManualDownload(articleID: Int64, enclosureID: Int64) {
         guard let core else { return }
-        guard articleAudioActionState?.articleID == articleID,
-              ArticleAudioActions.canRequestDownload(articleAudioActionState?.downloads[enclosureID]) else { return }
+        let refreshArticleActions = articleAudioActionState?.articleID == articleID
         let generation = articleAudioRequestGeneration
         let store = WeakBrowserStore(self)
         Task.detached {
@@ -885,8 +892,9 @@ final class BrowserStore: ObservableObject {
                     store.showActionConfirmation(String(localized: "Download requested"))
                     store.onMediaTransferRequested?()
                     store.refreshListeningListIfVisible()
-                    guard store.articleAudioRequestGeneration == generation else { return }
-                    store.loadArticleAudioActions(for: articleID)
+                    if refreshArticleActions, store.articleAudioRequestGeneration == generation {
+                        store.loadArticleAudioActions(for: articleID)
+                    }
                 case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
                 }
             }
@@ -894,6 +902,7 @@ final class BrowserStore: ObservableObject {
     }
     func removeFromListeningList(articleID: Int64) {
         guard let core else { return }
+        let refreshArticleActions = articleAudioActionState?.articleID == articleID
         let store = WeakBrowserStore(self)
         Task.detached {
             let result = Result { try core.removeFromListeningList(articleId: articleID) }
@@ -904,7 +913,7 @@ final class BrowserStore: ObservableObject {
                     store.showActionConfirmation(String(localized: "Removed from Listening List"))
                     store.onMediaTransferRequested?()
                     store.refreshListeningListIfVisible()
-                    store.refreshArticleAudioActions()
+                    if refreshArticleActions { store.refreshArticleAudioActions() }
                 case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
                 }
             }
@@ -912,8 +921,7 @@ final class BrowserStore: ObservableObject {
     }
     func deleteDownload(articleID: Int64, enclosureID: Int64) {
         guard let core else { return }
-        let download = articleAudioActionState?.articleID == articleID ? articleAudioActionState?.downloads[enclosureID] : nil
-        guard ArticleAudioActions.canDeleteDownload(download) else { return }
+        let refreshArticleActions = articleAudioActionState?.articleID == articleID
         let store = WeakBrowserStore(self)
         Task.detached {
             let result = Result { try core.requestDownloadDeletion(enclosureId: enclosureID) }
@@ -924,7 +932,7 @@ final class BrowserStore: ObservableObject {
                     store.showActionConfirmation(String(localized: "Download deletion requested"))
                     store.onMediaTransferRequested?()
                     store.refreshListeningListIfVisible()
-                    store.refreshArticleAudioActions()
+                    if refreshArticleActions { store.refreshArticleAudioActions() }
                 case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
                 }
             }

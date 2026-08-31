@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 store?.refreshListeningListIfVisible()
             }
             self.playbackCoordinator = MediaPlaybackCoordinator(core: core, presentationState: self.playbackPresentationState)
+            self.playbackCoordinator?.onPlaybackUseChanged = { [weak self] in self?.transferCoordinator?.reconcile() }
             self.popover.contentViewController = self.host()
             self.fallbackPanel?.contentViewController = self.host()
             self.transferCoordinator?.reconcile()

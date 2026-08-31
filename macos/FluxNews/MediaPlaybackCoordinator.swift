@@ -209,6 +209,7 @@ final class MediaPlaybackCoordinator {
     private var preparedStatus: PlaybackStatus = .notStarted
     let presentationState: MediaPlaybackPresentationState
     let sleepTimer: MediaSleepTimer
+    var onPlaybackUseChanged: (() -> Void)?
 
     init(core: MediaPlaybackCore, engine: NativePlaybackEngine? = nil, checkpointInterval: TimeInterval = 20, presentationState: MediaPlaybackPresentationState? = nil) {
         self.core = core
@@ -230,6 +231,7 @@ final class MediaPlaybackCoordinator {
         try stopCurrentIfNeeded()
         let preparation = try core.preparePlayback(enclosureId: enclosureID)
         activeEnclosureID = enclosureID
+        onPlaybackUseChanged?()
         completionSent = false
         preparedDurationMs = preparation.durationMs ?? preparation.playbackState.durationMs
         lastObservedDurationMs = preparedDurationMs
@@ -339,6 +341,7 @@ final class MediaPlaybackCoordinator {
         stopCheckpointTimer()
         do { try core.playbackCompleted(enclosureId: activeEnclosureID, durationMs: engine.durationMs ?? preparedDurationMs) }
         catch { Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media completion failed: \(error.localizedDescription, privacy: .public)") }
+        onPlaybackUseChanged?()
         updateNowPlayingPlaybackState()
     }
 
