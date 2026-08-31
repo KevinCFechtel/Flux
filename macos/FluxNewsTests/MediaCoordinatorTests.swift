@@ -36,17 +36,22 @@ private final class FakePlaybackEngine: NativePlaybackEngine {
     var currentPositionMs: UInt64 = 0
     var durationMs: UInt64? = nil
     var isPlaying = false
+    var rate = 1.0
     var onEnded: (@MainActor () -> Void)?
     var onDuration: (@MainActor (UInt64) -> Void)?
+    var onPosition: (@MainActor (UInt64) -> Void)?
+    var onLoadingChanged: (@MainActor (Bool) -> Void)?
+    var onBufferingChanged: (@MainActor (Bool) -> Void)?
+    var onError: (@MainActor (String) -> Void)?
     var loadedStartMs: UInt64?
     var playCount = 0
     var unloadCount = 0
 
-    func load(url: URL, startAtMs: UInt64) { loadedStartMs = startAtMs; durationMs = 120_000; onDuration?(120_000) }
+    func load(url: URL, startAtMs: UInt64) { loadedStartMs = startAtMs; currentPositionMs = startAtMs; durationMs = 120_000; onDuration?(120_000); onPosition?(startAtMs) }
     func play() { isPlaying = true; playCount += 1 }
     func pause() { isPlaying = false }
     func unload() { unloadCount += 1; isPlaying = false; currentPositionMs = 0; durationMs = nil }
-    func seek(toMs: UInt64) { currentPositionMs = toMs }
+    func seek(toMs: UInt64) { currentPositionMs = toMs; onPosition?(toMs) }
     func finish() { isPlaying = false; onEnded?() }
     func emitDuration(_ duration: UInt64) { onDuration?(duration) }
 }
@@ -64,7 +69,7 @@ private final class FakeTransferCore: MediaTransferCore {
     var onFailure: (() -> Void)?
 
     func coreSettings() throws -> CoreSettings {
-        CoreSettings(retention: .days30, deliveryMode: .live, backgroundSyncEnabled: false, detailCharacterLimit: 10_000, downloadNetworkPolicy: policy, downloadRetention: .forever, deleteAfterPlayback: false)
+        CoreSettings(retention: .days30, deliveryMode: .live, backgroundSyncEnabled: false, detailCharacterLimit: 10_000, downloadNetworkPolicy: policy, downloadRetention: .forever, deleteAfterPlayback: false, autoDownloadListeningList: false, removeCompletedListeningList: false)
     }
     func downloadsRequiringTransfer() throws -> [MediaTransferWork] { transfers }
     func downloadsRequiringDeletion() throws -> [MediaTransferWork] { deletions }
@@ -167,7 +172,7 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(core.checkpoints.last?.1, 18_000)
     }
 
-    func testStopUnloadsNativePlaybackItem() throws {
+    func testStopKeepsNativePlaybackItemLoaded() throws {
         let core = FakePlaybackCore(status: .inProgress)
         let engine = FakePlaybackEngine()
         let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
@@ -175,8 +180,22 @@ final class MediaCoordinatorTests: XCTestCase {
 
         coordinator.stop()
 
-        XCTAssertEqual(engine.unloadCount, 1)
-        XCTAssertFalse(coordinator.isUsing(enclosureID: 7))
+        XCTAssertEqual(engine.unloadCount, 0)
+        XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
+        XCTAssertEqual(coordinator.presentationState.status, .stopped)
+    }
+
+    func testPlaybackRateIsClampedToContractAndAppliedToEngine() throws {
+        let core = FakePlaybackCore()
+        let engine = FakePlaybackEngine()
+        let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
+
+        try coordinator.play(enclosureID: 7)
+        coordinator.setPlaybackRate(3.7)
+        XCTAssertEqual(engine.rate, 3.0)
+        XCTAssertEqual(coordinator.presentationState.playbackRate, 3.0)
+        coordinator.setPlaybackRate(0.44)
+        XCTAssertEqual(engine.rate, 0.5)
     }
 
     func testAsynchronousDurationIsObservedOnlyWhenItChanges() throws {

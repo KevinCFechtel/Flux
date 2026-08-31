@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 import MediaPlayer
 import OSLog
+import Combine
 
 enum MediaPlaybackPaths {
     static var mediaRootURL: URL {
@@ -26,8 +27,13 @@ protocol NativePlaybackEngine: AnyObject {
     var currentPositionMs: UInt64 { get }
     var durationMs: UInt64? { get }
     var isPlaying: Bool { get }
+    var rate: Double { get set }
     var onEnded: (@MainActor () -> Void)? { get set }
     var onDuration: (@MainActor (UInt64) -> Void)? { get set }
+    var onPosition: (@MainActor (UInt64) -> Void)? { get set }
+    var onLoadingChanged: (@MainActor (Bool) -> Void)? { get set }
+    var onBufferingChanged: (@MainActor (Bool) -> Void)? { get set }
+    var onError: (@MainActor (String) -> Void)? { get set }
     func load(url: URL, startAtMs: UInt64)
     func play()
     func pause()
@@ -41,12 +47,29 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
     private var endObserver: NSObjectProtocol?
     private var timeObserver: Any?
     private var durationObservation: NSKeyValueObservation?
+    private var readinessObservation: NSKeyValueObservation?
+    private var timeControlObservation: NSKeyValueObservation?
     private weak var observedItem: AVPlayerItem?
     private(set) var currentPositionMs: UInt64 = 0
     private(set) var durationMs: UInt64?
     private(set) var isPlaying = false
+    var rate: Double = 1.0 {
+        didSet { if isPlaying { player.rate = Float(rate) } }
+    }
     var onEnded: (@MainActor () -> Void)?
     var onDuration: (@MainActor (UInt64) -> Void)?
+    var onPosition: (@MainActor (UInt64) -> Void)?
+    var onLoadingChanged: (@MainActor (Bool) -> Void)?
+    var onBufferingChanged: (@MainActor (Bool) -> Void)?
+    var onError: (@MainActor (String) -> Void)?
+
+    init() {
+        timeControlObservation = player.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
+            Task { @MainActor [weak self] in
+                self?.onBufferingChanged?(player.timeControlStatus == .waitingToPlayAtSpecifiedRate)
+            }
+        }
+    }
 
     func load(url: URL, startAtMs: UInt64) {
         let item = AVPlayerItem(url: url)
@@ -55,6 +78,16 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
         currentPositionMs = 0
         durationMs = nil
         isPlaying = false
+        onLoadingChanged?(true)
+        readinessObservation = item.observe(\.status, options: [.initial, .new]) { [weak self, weak observedItem = item] item, _ in
+            Task { @MainActor [weak self, weak observedItem] in
+                guard let self, let observedItem, self.observedItem === observedItem else { return }
+                if item.status == .failed {
+                    self.onLoadingChanged?(false)
+                    self.onError?(item.error?.localizedDescription ?? "Media playback failed.")
+                }
+            }
+        }
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
@@ -81,7 +114,7 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
         seek(toMs: startAtMs)
     }
 
-    func play() { player.play(); isPlaying = true }
+    func play() { player.playImmediately(atRate: Float(rate)); isPlaying = true; onLoadingChanged?(false) }
     func pause() { player.pause(); updatePosition(); isPlaying = false }
     func unload() {
         player.pause()
@@ -113,6 +146,7 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
     private func updateDuration(_ time: CMTime) {
         guard let duration = Self.milliseconds(time, requiresPositive: true), durationMs != duration else { return }
         durationMs = duration
+        onLoadingChanged?(false)
         onDuration?(duration)
     }
 
@@ -121,6 +155,7 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
     private func updatePosition(_ time: CMTime) {
         guard let position = Self.milliseconds(time, requiresPositive: false) else { return }
         currentPositionMs = position
+        onPosition?(position)
     }
 
     static func milliseconds(_ time: CMTime, requiresPositive: Bool) -> UInt64? {
@@ -138,6 +173,7 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
             self.timeObserver = nil
         }
         durationObservation = nil
+        readinessObservation = nil
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
             self.endObserver = nil
@@ -152,6 +188,7 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
         }
+        timeControlObservation = nil
     }
 }
 
@@ -167,6 +204,7 @@ final class MediaPlaybackCoordinator {
     private var preparedDurationMs: UInt64?
     private var lastObservedDurationMs: UInt64?
     private var preparedStatus: PlaybackStatus = .notStarted
+    let presentationState = MediaPlaybackPresentationState()
 
     init(core: MediaPlaybackCore, engine: NativePlaybackEngine? = nil, checkpointInterval: TimeInterval = 20) {
         self.core = core
@@ -175,6 +213,10 @@ final class MediaPlaybackCoordinator {
         self.engine = engine
         engine.onEnded = { @MainActor [weak self] in self?.handleNaturalEnd() }
         engine.onDuration = { @MainActor [weak self] duration in self?.handleDuration(duration) }
+        engine.onPosition = { @MainActor [weak self] position in self?.presentationState.positionMs = position }
+        engine.onLoadingChanged = { @MainActor [weak self] loading in self?.presentationState.isLoading = loading }
+        engine.onBufferingChanged = { @MainActor [weak self] buffering in self?.presentationState.isBuffering = buffering }
+        engine.onError = { @MainActor [weak self] message in self?.presentationState.errorMessage = message }
     }
 
     func prepare(enclosureID: Int64) throws -> PlaybackPreparation {
@@ -185,6 +227,11 @@ final class MediaPlaybackCoordinator {
         preparedDurationMs = preparation.durationMs ?? preparation.playbackState.durationMs
         lastObservedDurationMs = preparedDurationMs
         preparedStatus = preparation.playbackState.status
+        presentationState.loadedEnclosure = preparation.enclosure
+        presentationState.positionMs = preparation.playbackState.positionMs
+        presentationState.durationMs = preparedDurationMs
+        presentationState.status = .paused
+        presentationState.errorMessage = nil
         let source: URL
         if let localFile = preparation.localFile,
            let localURL = Self.safeLocalURL(localFile, under: MediaPlaybackPaths.mediaRootURL),
@@ -197,6 +244,7 @@ final class MediaPlaybackCoordinator {
         }
         let startAt = preparation.playbackState.status == .inProgress ? preparation.playbackState.positionMs : 0
         engine.load(url: source, startAtMs: startAt)
+        engine.rate = presentationState.playbackRate
         updateNowPlaying(preparation: preparation)
         return preparation
     }
@@ -206,17 +254,19 @@ final class MediaPlaybackCoordinator {
         guard activeEnclosureID == enclosureID else { return }
         guard preparedStatus != .completed else { return }
         engine.play()
+        presentationState.status = .playing
         startCheckpointTimer()
         updateNowPlayingPlaybackState()
     }
 
-    func pause() { engine.pause(); checkpoint(); stopCheckpointTimer(); updateNowPlayingPlaybackState() }
-    func stop() { engine.pause(); checkpoint(); stopCheckpointTimer(); engine.unload(); activeEnclosureID = nil; nowPlaying.playbackState = .stopped }
+    func pause() { engine.pause(); checkpoint(); stopCheckpointTimer(); presentationState.positionMs = engine.currentPositionMs; presentationState.status = .paused; updateNowPlayingPlaybackState() }
+    func stop() { engine.pause(); checkpoint(); stopCheckpointTimer(); presentationState.positionMs = engine.currentPositionMs; presentationState.status = .stopped; nowPlaying.playbackState = .stopped }
     func applicationDidResignActive() { checkpoint() }
     func applicationWillTerminate() { checkpoint(); stopCheckpointTimer(); engine.unload() }
 
     func seek(toMs: UInt64) {
         engine.seek(toMs: toMs)
+        presentationState.positionMs = toMs
         checkpoint()
         updateNowPlayingPlaybackState()
     }
@@ -234,6 +284,13 @@ final class MediaPlaybackCoordinator {
 
     func artwork(reference: String) throws -> Data? { try core.mediaArtwork(reference: reference) }
     func isUsing(enclosureID: Int64) -> Bool { activeEnclosureID == enclosureID }
+
+    func setPlaybackRate(_ rate: Double) {
+        let clamped = min(3.0, max(0.5, rate))
+        presentationState.playbackRate = (clamped * 10).rounded() / 10
+        engine.rate = presentationState.playbackRate
+        updateNowPlayingPlaybackState()
+    }
 
     private func stopCurrentIfNeeded() throws {
         guard activeEnclosureID != nil else { return }
@@ -255,6 +312,8 @@ final class MediaPlaybackCoordinator {
         guard let activeEnclosureID, !completionSent else { return }
         completionSent = true
         preparedStatus = .completed
+        presentationState.status = .paused
+        presentationState.positionMs = engine.currentPositionMs
         stopCheckpointTimer()
         do { try core.playbackCompleted(enclosureId: activeEnclosureID, durationMs: engine.durationMs ?? preparedDurationMs) }
         catch { Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media completion failed: \(error.localizedDescription, privacy: .public)") }
@@ -265,6 +324,7 @@ final class MediaPlaybackCoordinator {
         guard lastObservedDurationMs != duration else { return }
         lastObservedDurationMs = duration
         preparedDurationMs = duration
+        presentationState.durationMs = duration
         guard let activeEnclosureID else { return }
         do { try core.observeMediaDuration(enclosureId: activeEnclosureID, durationMs: duration) }
         catch { Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media duration observation failed: \(error.localizedDescription, privacy: .public)") }
@@ -305,6 +365,24 @@ final class MediaPlaybackCoordinator {
         let url = root.appendingPathComponent(reference).standardizedFileURL
         return url.path == root.standardizedFileURL.path || url.path.hasPrefix(root.standardizedFileURL.path + "/") ? url : nil
     }
+}
+
+enum MediaPlaybackPresentationStatus: Equatable {
+    case stopped
+    case paused
+    case playing
+}
+
+@MainActor
+final class MediaPlaybackPresentationState: ObservableObject {
+    @Published internal(set) var loadedEnclosure: Enclosure?
+    @Published internal(set) var status: MediaPlaybackPresentationStatus = .stopped
+    @Published internal(set) var positionMs: UInt64 = 0
+    @Published internal(set) var durationMs: UInt64?
+    @Published internal(set) var isLoading = false
+    @Published internal(set) var isBuffering = false
+    @Published internal(set) var errorMessage: String?
+    @Published internal(set) var playbackRate = 1.0
 }
 
 enum MediaPlaybackError: LocalizedError {

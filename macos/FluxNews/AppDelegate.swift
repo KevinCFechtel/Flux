@@ -12,7 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var catalogObservation: AnyCancellable?
     private var shortcutObservation: AnyCancellable?
     private let spotlightIndexer = SpotlightIndexer()
-    private var playbackCoordinator: MediaPlaybackCoordinator?
+    private(set) var playbackCoordinator: MediaPlaybackCoordinator?
     private var transferCoordinator: MediaTransferCoordinator?
     private lazy var shortcutRegistrar = GlobalShortcutRegistrar { [weak self] in self?.show() }
     private var sidebarVisible = false
