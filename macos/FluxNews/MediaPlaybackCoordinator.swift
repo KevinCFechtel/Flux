@@ -226,7 +226,11 @@ final class MediaPlaybackCoordinator {
     }
 
     func prepare(enclosureID: Int64) throws -> PlaybackPreparation {
-        try stopCurrentIfNeeded()
+        try prepare(enclosureID: enclosureID, checkpointCurrent: true)
+    }
+
+    private func prepare(enclosureID: Int64, checkpointCurrent: Bool) throws -> PlaybackPreparation {
+        try stopCurrentIfNeeded(checkpoint: checkpointCurrent)
         let preparation = try core.preparePlayback(enclosureId: enclosureID)
         activeEnclosureID = enclosureID
         onPlaybackUseChanged?()
@@ -294,7 +298,7 @@ final class MediaPlaybackCoordinator {
         let wasStopped = presentationState.status == .stopped
         let wasCompleted = preparedStatus == .completed
         try core.restartPlayback(enclosureId: enclosureID)
-        _ = try prepare(enclosureID: enclosureID)
+        _ = try prepare(enclosureID: enclosureID, checkpointCurrent: false)
         if wasPlaying || wasCompleted {
             try play(enclosureID: enclosureID)
         } else if wasStopped {
@@ -319,9 +323,9 @@ final class MediaPlaybackCoordinator {
         engine.rate = presentationState.playbackRate
     }
 
-    private func stopCurrentIfNeeded() throws {
+    private func stopCurrentIfNeeded(checkpoint: Bool = true) throws {
         guard activeEnclosureID != nil else { return }
-        checkpoint()
+        if checkpoint { self.checkpoint() }
         engine.pause()
         stopCheckpointTimer()
     }
@@ -337,13 +341,18 @@ final class MediaPlaybackCoordinator {
 
     private func handleNaturalEnd() {
         guard let activeEnclosureID, !completionSent else { return }
+        do {
+            try core.playbackCompleted(enclosureId: activeEnclosureID, durationMs: engine.durationMs ?? preparedDurationMs)
+        } catch {
+            presentationState.status = .paused
+            Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media completion failed: \(error.localizedDescription, privacy: .public)")
+            return
+        }
         completionSent = true
         preparedStatus = .completed
         presentationState.status = .paused
         presentationState.positionMs = engine.currentPositionMs
         stopCheckpointTimer()
-        do { try core.playbackCompleted(enclosureId: activeEnclosureID, durationMs: engine.durationMs ?? preparedDurationMs) }
-        catch { Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media completion failed: \(error.localizedDescription, privacy: .public)") }
         onPlaybackUseChanged?()
     }
 

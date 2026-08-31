@@ -11,6 +11,7 @@ private final class FakePlaybackCore: MediaPlaybackCore {
     var restartCount = 0
     var observedDurations = [(Int64, UInt64)]()
     var chapters = [MediaChapter]()
+    var completionShouldFail = false
 
     init(status: PlaybackStatus = .notStarted, positionMs: UInt64 = 0, durationMs: UInt64? = 120_000) {
         let enclosure = Enclosure(id: 7, articleId: 11, url: "https://example.test/audio.mp3", mimeType: "audio/mpeg", sizeBytes: nil, remoteMediaProgressionSeconds: 0, mediaKind: .audio)
@@ -26,7 +27,10 @@ private final class FakePlaybackCore: MediaPlaybackCore {
     func preparePlayback(enclosureId: Int64) throws -> PlaybackPreparation { preparation }
     func savedMedia() throws -> [SavedPlayableMediaItem] { [] }
     func checkpointPlayback(enclosureId: Int64, positionMs: UInt64, durationMs: UInt64?) throws { checkpoints.append((enclosureId, positionMs, durationMs)) }
-    func playbackCompleted(enclosureId: Int64, durationMs: UInt64?) throws { completions.append((enclosureId, durationMs)) }
+    func playbackCompleted(enclosureId: Int64, durationMs: UInt64?) throws {
+        if completionShouldFail { throw NSError(domain: "test", code: 1) }
+        completions.append((enclosureId, durationMs))
+    }
     func restartPlayback(enclosureId: Int64) throws { restartCount += 1; preparation.playbackState = PlaybackState(enclosureId: 7, positionMs: 0, durationMs: 120_000, status: .inProgress, updatedAt: nil) }
     func observeMediaDuration(enclosureId: Int64, durationMs: UInt64) throws { observedDurations.append((enclosureId, durationMs)) }
     func mediaChapters(enclosureId: Int64) throws -> [MediaChapter] { chapters }
@@ -324,6 +328,7 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(PlayerPresentation.formatDuration(0), "0:00")
         XCTAssertEqual(PlayerPresentation.formatDuration(65_000), "1:05")
         XCTAssertEqual(PlayerPresentation.formatDuration(3_725_000), "1:02:05")
+        XCTAssertEqual(PlayerPresentation.timelineAccessibilityValue(positionMs: 90_000, durationMs: 60_000), "Playback position 1:00 of 1:00")
         XCTAssertEqual(PlayerPresentation.seekTarget(positionMs: 10_000, deltaMs: -30_000, durationMs: 120_000), 0)
         XCTAssertEqual(PlayerPresentation.seekTarget(positionMs: 110_000, deltaMs: 30_000, durationMs: 120_000), 120_000)
         XCTAssertEqual(PlayerPresentation.seekTarget(positionMs: 10_000, deltaMs: 30_000, durationMs: nil), 40_000)
@@ -487,6 +492,33 @@ final class MediaCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(core.completions.count, 1)
         XCTAssertEqual(core.completions[0].1, 120_000)
+    }
+
+    func testNaturalEndDoesNotClaimCompletionWhenCoreRejectsIt() throws {
+        let core = FakePlaybackCore(durationMs: nil)
+        core.completionShouldFail = true
+        let engine = FakePlaybackEngine()
+        engine.durationMs = nil
+        let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
+
+        try coordinator.play(enclosureID: 7)
+        engine.finish()
+
+        XCTAssertTrue(core.completions.isEmpty)
+        XCTAssertEqual(coordinator.presentationState.status, .paused)
+    }
+
+    func testRestartDoesNotCheckpointThePreRestartPositionAfterCoreReset() throws {
+        let core = FakePlaybackCore(status: .inProgress, positionMs: 20_000)
+        let engine = FakePlaybackEngine()
+        let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
+        _ = try coordinator.prepare(enclosureID: 7)
+        engine.currentPositionMs = 18_000
+
+        try coordinator.restart(enclosureID: 7)
+
+        XCTAssertFalse(core.checkpoints.contains { $0.1 == 18_000 })
+        XCTAssertEqual(engine.currentPositionMs, 0)
     }
 
     func testTransferReferencesStayInsideMediaRoot() throws {

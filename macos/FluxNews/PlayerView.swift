@@ -2,6 +2,10 @@ import AppKit
 import SwiftUI
 
 enum PlayerPresentation {
+    static func textOrFallback(_ value: String, fallback: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? fallback : value
+    }
+
     static func navigationSymbol(showingPlayer: Bool) -> String {
         showingPlayer ? "list.bullet" : "waveform"
     }
@@ -30,6 +34,11 @@ enum PlayerPresentation {
             return String(format: "%d:%02d:%02d", minutes / 60, minutes % 60, seconds)
         }
         return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    static func timelineAccessibilityValue(positionMs: UInt64, durationMs: UInt64) -> String {
+        let position = min(positionMs, durationMs)
+        return String(localized: "Playback position \(formatDuration(position)) of \(formatDuration(durationMs))")
     }
 
     static func activeChapterIndex(positionMs: UInt64, chapters: [MediaChapter]) -> Int? {
@@ -86,11 +95,11 @@ struct PlayerView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(state.feedTitle.isEmpty ? String(localized: "Unknown Feed") : state.feedTitle)
+            Text(PlayerPresentation.textOrFallback(state.feedTitle, fallback: String(localized: "Unknown Feed")))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            Text(state.mediaTitle.isEmpty ? String(localized: "Untitled Media") : state.mediaTitle)
+            Text(PlayerPresentation.textOrFallback(state.mediaTitle, fallback: String(localized: "Untitled Media")))
                 .font(.headline)
                 .lineLimit(2)
         }
@@ -101,9 +110,9 @@ struct PlayerView: View {
     private var timeline: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let duration = state.durationMs, duration > 0 {
-                Slider(value: sliderBinding, in: 0...Double(duration), onEditingChanged: finishScrubbing)
-                    .accessibilityLabel("Playback timeline")
-                    .accessibilityValue("")
+                    Slider(value: sliderBinding, in: 0...Double(duration), onEditingChanged: finishScrubbing)
+                        .accessibilityLabel("Playback timeline")
+                        .accessibilityValue(PlayerPresentation.timelineAccessibilityValue(positionMs: currentPositionMs, durationMs: duration))
                 HStack {
                     Text(PlayerPresentation.formatDuration(currentPositionMs))
                     Spacer()
@@ -248,7 +257,8 @@ struct PlayerView: View {
     }
 
     private var currentPositionMs: UInt64 {
-        isScrubbing ? UInt64(max(0, scrubPositionMs)) : state.positionMs
+        let position = isScrubbing ? UInt64(max(0, scrubPositionMs)) : state.positionMs
+        return state.durationMs.map { min(position, $0) } ?? position
     }
 
     private var sliderBinding: Binding<Double> {

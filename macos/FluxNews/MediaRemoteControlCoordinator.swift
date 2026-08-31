@@ -35,8 +35,8 @@ struct NowPlayingProjection: Equatable {
             url.scheme == "http" || url.scheme == "https" ? url : nil
         }
         return NowPlayingProjection(
-            title: title.isEmpty ? "FluxNews Audio" : title,
-            sourceTitle: sourceTitle.isEmpty ? "FluxNews" : sourceTitle,
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "FluxNews Audio" : title,
+            sourceTitle: sourceTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "FluxNews" : sourceTitle,
             durationSeconds: duration,
             elapsedSeconds: elapsed,
             effectivePlaybackRate: isPlaying ? configuredRate : 0,

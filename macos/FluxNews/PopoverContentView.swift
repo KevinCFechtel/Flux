@@ -496,11 +496,11 @@ private struct ListeningListRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.title)
+                Text(ListeningListPresentation.textOrFallback(item.title, fallback: String(localized: "Untitled News")))
                     .font(.system(size: 14, weight: .semibold))
                     .lineLimit(3)
                 HStack(spacing: 5) {
-                    Text(item.feedTitle).foregroundStyle(.secondary)
+                    Text(ListeningListPresentation.textOrFallback(item.feedTitle, fallback: String(localized: "Unknown Feed"))).foregroundStyle(.secondary)
                     if let date = Self.isoFormatter.date(from: item.publishedAt) {
                         Text("·").foregroundStyle(.tertiary)
                         Text(date.formatted(date: .abbreviated, time: .shortened)).foregroundStyle(.tertiary)
@@ -821,7 +821,7 @@ private struct ArticleItem: View {
     private var textComposition: some View {
         VStack(alignment: .leading, spacing: 5) {
             metadata
-            Text(article.title).font(.system(size: 14, weight: article.isRead ? .regular : .semibold))
+            Text(ListeningListPresentation.textOrFallback(article.title, fallback: String(localized: "Untitled News"))).font(.system(size: 14, weight: article.isRead ? .regular : .semibold))
                 .foregroundStyle(article.isRead ? .secondary : .primary).lineLimit(3).multilineTextAlignment(.leading)
             if !article.preview.isEmpty { Text(article.preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(store.articlePreviewLines.rawValue).multilineTextAlignment(.leading) }
             if selected, let audioState, let transferState, !audioState.enclosures.isEmpty { AudioActionsView(state: audioState, transferState: transferState, onPlay: onPlayAudio, onDownload: onDownloadAudio, onDelete: onDeleteDownload, onAdd: onAddToListeningList) }

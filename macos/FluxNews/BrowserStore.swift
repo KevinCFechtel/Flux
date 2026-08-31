@@ -22,6 +22,10 @@ struct ListeningListProgress: Equatable {
 }
 
 enum ListeningListPresentation {
+    static func textOrFallback(_ value: String, fallback: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? fallback : value
+    }
+
     static func validatedFeedID(_ feedID: Int64?, feeds: [ListeningListFeed]) -> Int64? {
         guard let feedID else { return nil }
         return feeds.contains(where: { $0.feedId == feedID }) ? feedID : nil
@@ -50,8 +54,10 @@ enum ListeningListPresentation {
         } else {
             status = playback?.status ?? .notStarted
         }
-        let position = isRuntimeItem ? runtime?.positionMs ?? playback?.positionMs ?? 0 : playback?.positionMs ?? 0
-        let duration = isRuntimeItem ? runtime?.durationMs ?? selected.durationMs ?? playback?.durationMs : selected.durationMs ?? playback?.durationMs
+        let rawPosition = isRuntimeItem ? runtime?.positionMs ?? playback?.positionMs ?? 0 : playback?.positionMs ?? 0
+        let rawDuration = isRuntimeItem ? runtime?.durationMs ?? selected.durationMs ?? playback?.durationMs : selected.durationMs ?? playback?.durationMs
+        let duration = rawDuration.flatMap { $0 > 0 ? $0 : nil }
+        let position = duration.map { min(rawPosition, $0) } ?? rawPosition
         guard status != .notStarted || position > 0 else { return nil }
         return ListeningListProgress(positionMs: position, durationMs: duration, status: status)
     }

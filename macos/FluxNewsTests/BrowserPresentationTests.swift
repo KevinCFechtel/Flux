@@ -71,6 +71,19 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(ListeningListPresentation.progress(completed)?.status, .completed)
     }
 
+    func testListeningListProgressClampsInconsistentPositionAndIgnoresZeroDuration() {
+        let inconsistent = listeningItem(enclosures: [listeningEnclosure(id: 1, positionMs: 90_000, durationMs: 42_000, status: .inProgress)], activeID: 1)
+        XCTAssertEqual(ListeningListPresentation.progress(inconsistent)?.positionMs, 42_000)
+
+        let zeroDuration = listeningItem(enclosures: [listeningEnclosure(id: 1, positionMs: 12_000, durationMs: 0, status: .inProgress)], activeID: 1)
+        XCTAssertNil(ListeningListPresentation.progress(zeroDuration)?.durationMs)
+    }
+
+    func testMediaTextFallbackTreatsWhitespaceAsMissing() {
+        XCTAssertEqual(ListeningListPresentation.textOrFallback("  \n", fallback: "Untitled News"), "Untitled News")
+        XCTAssertEqual(ListeningListPresentation.textOrFallback("Episode", fallback: "Untitled News"), "Episode")
+    }
+
     func testListeningListDownloadSummarySupportsSingleAndMultipleEnclosures() {
         let downloaded = listeningEnclosure(id: 1, positionMs: 0, durationMs: nil, status: .notStarted, downloadState: .downloaded)
         let pending = listeningEnclosure(id: 2, positionMs: 0, durationMs: nil, status: .notStarted, downloadState: .requested)
