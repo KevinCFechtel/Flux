@@ -83,6 +83,7 @@ private struct ArticlePane: View {
     @State private var scrollPhase = ScrollPhase.idle
     @State private var suppressUntil: TimeInterval = 0
     @State private var scrollPosition = ScrollPosition()
+    @State private var pendingAudioReplacement: Enclosure?
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
     init(store: BrowserStore, playbackState: MediaPlaybackPresentationState, playbackCoordinator: MediaPlaybackCoordinator?, sidebarVisible: Binding<Bool>, showingPlayer: Binding<Bool>, layoutChanged: @escaping (Bool) -> Void, dismiss: @escaping () -> Void) {
@@ -137,11 +138,22 @@ private struct ArticlePane: View {
             suppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
         }
         .onChange(of: store.scope) { _, _ in showingPlayer = false }
+        .onChange(of: selectedID) { _, articleID in
+            if let articleID { store.loadArticleAudioActions(for: articleID) }
+        }
         .onChange(of: store.popoverVisible) { _, _ in tracker.reset() }
         .onChange(of: store.articles.map(\.id)) { _, ids in
             if let selectedID, !ids.contains(selectedID) { self.selectedID = nil }
         }
         .onReceive(timer) { _ in observe() }
+        .alert("Replace Playing Audio?", isPresented: Binding(get: { pendingAudioReplacement != nil }, set: { if !$0 { pendingAudioReplacement = nil } })) {
+            Button("Cancel", role: .cancel) { pendingAudioReplacement = nil }
+            Button("Replace", role: .destructive) {
+                if let enclosure = pendingAudioReplacement { pendingAudioReplacement = nil; startAudio(enclosure) }
+            }
+        } message: {
+            Text("The currently playing audio will be replaced.")
+        }
     }
 
     private var header: some View {
@@ -219,7 +231,7 @@ private struct ArticlePane: View {
                     ScrollView {
                         LazyVStack(spacing: store.articleListStyle == .row ? 0 : 4) {
                             ForEach(store.articles, id: \.id) { article in
-                                ArticleItem(article: article, style: store.articleListStyle, selected: selectedID == article.id, store: store, onSelect: { selectedID = article.id }, onHoverChanged: { hovering in
+                                ArticleItem(article: article, style: store.articleListStyle, selected: selectedID == article.id, audioState: selectedID == article.id ? store.articleAudioActionState : nil, store: store, onSelect: { selectedID = article.id }, onPlayAudio: playAudio, onDownloadAudio: { enclosure in store.requestManualDownload(articleID: article.id, enclosureID: enclosure.id) }, onAddToListeningList: { store.addToListeningList(articleID: article.id) }, onHoverChanged: { hovering in
                                     if hovering { hoveredID = article.id }
                                     else if hoveredID == article.id { hoveredID = nil }
                                 })
@@ -325,6 +337,27 @@ private struct ArticlePane: View {
         let id = ArticleReaderTarget.articleID(hoveredID: hoveredID, selectedID: selectedID, availableIDs: Set(store.articles.map(\.id)))
         return id.flatMap { targetID in store.articles.first { $0.id == targetID } }
     }
+    private func playAudio(_ enclosure: Enclosure) {
+        guard playbackCoordinator != nil else { return }
+        if ArticleAudioActions.requiresReplacement(currentID: playbackState.loadedEnclosure?.id, currentStatus: playbackState.status, selectedID: enclosure.id) {
+            pendingAudioReplacement = enclosure
+            return
+        }
+        startAudio(enclosure)
+    }
+    private func startAudio(_ enclosure: Enclosure) {
+        guard let coordinator = playbackCoordinator else { return }
+        do {
+            if playbackState.loadedEnclosure?.id == enclosure.id, playbackState.status == .playing {
+                showingPlayer = true
+                return
+            }
+            try coordinator.play(enclosureID: enclosure.id)
+            showingPlayer = true
+        } catch {
+            store.errorMessage = NativeErrorPresentation.message(for: error)
+        }
+    }
     private func move(_ delta: Int, _ proxy: ScrollViewProxy) {
         guard !store.articles.isEmpty else { return }
         let current = selectedID.flatMap { id in store.articles.firstIndex { $0.id == id } }
@@ -372,7 +405,7 @@ private struct SearchResultsView: View {
                     ScrollView {
                         LazyVStack(spacing: store.articleListStyle == .row ? 0 : 4) {
                             ForEach(store.articles, id: \.id) { article in
-                                ArticleItem(article: article, style: store.articleListStyle, selected: false, store: store, onSelect: {}, onHoverChanged: { _ in })
+                                ArticleItem(article: article, style: store.articleListStyle, selected: false, audioState: nil, store: store, onSelect: {}, onPlayAudio: { _ in }, onDownloadAudio: { _ in }, onAddToListeningList: {}, onHoverChanged: { _ in })
                                     .onAppear { if article.id == store.articles.last?.id { store.loadMoreSearchResults() } }
                                 if store.articleListStyle == .row { Divider().padding(.leading, 264) }
                             }
@@ -528,8 +561,12 @@ private struct ArticleItem: View {
     let article: ArticleSummary
     let style: ArticleListStyle
     let selected: Bool
+    let audioState: ArticleAudioActionState?
     @ObservedObject var store: BrowserStore
     let onSelect: () -> Void
+    let onPlayAudio: (Enclosure) -> Void
+    let onDownloadAudio: (Enclosure) -> Void
+    let onAddToListeningList: () -> Void
     let onHoverChanged: (Bool) -> Void
     @State private var hovered = false
 
@@ -577,6 +614,7 @@ private struct ArticleItem: View {
             Text(article.title).font(.system(size: 14, weight: article.isRead ? .regular : .semibold))
                 .foregroundStyle(article.isRead ? .secondary : .primary).lineLimit(3).multilineTextAlignment(.leading)
             if !article.preview.isEmpty { Text(article.preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(store.articlePreviewLines.rawValue).multilineTextAlignment(.leading) }
+            if selected, let audioState, !audioState.enclosures.isEmpty { AudioActionsView(state: audioState, onPlay: onPlayAudio, onDownload: onDownloadAudio, onAdd: onAddToListeningList) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -625,6 +663,62 @@ private struct ArticleItem: View {
     private var relativeDate: String {
         guard let date = Self.isoFormatter.date(from: article.publishedAt) else { return "" }
         return Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+private struct AudioActionsView: View {
+    let state: ArticleAudioActionState
+    let onPlay: (Enclosure) -> Void
+    let onDownload: (Enclosure) -> Void
+    let onAdd: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            enclosureAction(title: "Play", symbol: "play.fill", action: onPlay)
+            enclosureAction(title: "Download", symbol: "arrow.down.circle", action: onDownload)
+            Button(action: onAdd) {
+                Label(state.isInListeningList ? "In Listening List" : "Add to Listening List", systemImage: state.isInListeningList ? "checkmark.circle" : "text.badge.plus")
+            }
+            .buttonStyle(.borderless)
+            .disabled(state.isInListeningList)
+            .help(state.isInListeningList ? "In Listening List" : "Add to Listening List")
+        }
+        .font(.caption)
+        .padding(.top, 3)
+    }
+
+    @ViewBuilder private func enclosureAction(title: String, symbol: String, action: @escaping (Enclosure) -> Void) -> some View {
+        if state.enclosures.count == 1, let enclosure = state.enclosures.first {
+            Button { action(enclosure) } label: { Label(actionTitle(title, enclosure: enclosure), systemImage: symbol) }
+                .buttonStyle(.borderless)
+                .disabled(title == "Download" && !ArticleAudioActions.canRequestDownload(state.downloads[enclosure.id]))
+        } else {
+            Menu {
+                ForEach(state.enclosures.indices, id: \.self) { index in
+                    let enclosure = state.enclosures[index]
+                    Button {
+                        action(enclosure)
+                    } label: {
+                        Label(actionTitle(title, enclosure: enclosure, index: index), systemImage: symbol)
+                    }
+                    .disabled(title == "Download" && !ArticleAudioActions.canRequestDownload(state.downloads[enclosure.id]))
+                }
+            } label: {
+                Label(title, systemImage: symbol)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+        }
+    }
+
+    private func actionTitle(_ title: String, enclosure: Enclosure, index: Int = 0) -> String {
+        guard title == "Download", let download = state.downloads[enclosure.id] else { return title }
+        switch download.state {
+        case .downloaded: return String(localized: "Downloaded")
+        case .requested: return String(localized: "Downloading...")
+        case .deleteRequested: return String(localized: "Pending deletion")
+        case .notDownloaded, .failed: return index == 0 ? title : ArticleAudioActions.enclosureLabel(enclosure, index: index)
+        }
     }
 }
 

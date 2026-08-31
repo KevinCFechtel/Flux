@@ -134,6 +134,33 @@ private func transferWork(_ id: Int64 = 7, localFile: String? = nil) -> MediaTra
 
 @MainActor
 final class MediaCoordinatorTests: XCTestCase {
+    func testArticleAudioActionsOnlyExposeCoreAudioEnclosures() {
+        let audio = Enclosure(id: 1, articleId: 11, url: "https://example.test/Episode%201.mp3", mimeType: "audio/mpeg", sizeBytes: 100, remoteMediaProgressionSeconds: 0, mediaKind: .audio)
+        let video = Enclosure(id: 2, articleId: 11, url: "https://example.test/video.mp4", mimeType: "video/mp4", sizeBytes: nil, remoteMediaProgressionSeconds: 0, mediaKind: .video)
+
+        XCTAssertEqual(ArticleAudioActions.audioEnclosures([audio, video]), [audio])
+        XCTAssertEqual(ArticleAudioActions.enclosureLabel(audio, index: 0), "Episode 1.mp3 (audio/mpeg)")
+        XCTAssertEqual(ArticleAudioActions.audioEnclosures([video]), [])
+    }
+
+    func testArticleAudioActionsReplacementOnlyAppliesToDifferentPlayingEnclosure() {
+        XCTAssertTrue(ArticleAudioActions.requiresReplacement(currentID: 1, currentStatus: .playing, selectedID: 2))
+        XCTAssertFalse(ArticleAudioActions.requiresReplacement(currentID: 1, currentStatus: .paused, selectedID: 2))
+        XCTAssertFalse(ArticleAudioActions.requiresReplacement(currentID: 1, currentStatus: .stopped, selectedID: 2))
+        XCTAssertFalse(ArticleAudioActions.requiresReplacement(currentID: 1, currentStatus: .playing, selectedID: 1))
+    }
+
+    func testArticleAudioActionsAvoidDuplicateDownloadRequests() {
+        let enclosure = Enclosure(id: 1, articleId: 11, url: "https://example.test/audio.mp3", mimeType: "audio/mpeg", sizeBytes: nil, remoteMediaProgressionSeconds: 0, mediaKind: .audio)
+        let state = ArticleAudioActionState(articleID: 11, enclosures: [enclosure], isInListeningList: true, downloads: [:])
+        XCTAssertTrue(ArticleAudioActions.canRequestDownload(state.downloads[1]))
+        for downloadState in [DownloadState.requested, .downloaded, .deleteRequested] {
+            let download = MediaDownload(enclosureId: 1, state: downloadState, origin: .manual, localFile: nil, fileSizeBytes: nil, downloadedAt: nil, failureKind: nil)
+            XCTAssertFalse(ArticleAudioActions.canRequestDownload(download))
+        }
+        XCTAssertTrue(ArticleAudioActions.canRequestDownload(MediaDownload(enclosureId: 1, state: .failed, origin: .manual, localFile: nil, fileSizeBytes: nil, downloadedAt: nil, failureKind: .network)))
+    }
+
     func testInProgressStartsAtCorePositionAndPauseCheckpoints() throws {
         let core = FakePlaybackCore(status: .inProgress, positionMs: 35_000)
         let engine = FakePlaybackEngine()

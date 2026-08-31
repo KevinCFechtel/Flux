@@ -32,9 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     func applicationDidFinishLaunching(_ notification: Notification) {
         store.onCoreConfigured = { [weak self] core in
             guard let self else { return }
+            store.onMediaTransferRequested = { [weak self] in self?.transferCoordinator?.reconcile() }
             self.transferCoordinator = MediaTransferCoordinator(core: core, isMediaInUse: { [weak self] enclosureID in
                 self?.playbackCoordinator?.isUsing(enclosureID: enclosureID) ?? false
             })
+            self.transferCoordinator?.onWorkChanged = { [weak store] in store?.refreshArticleAudioActions() }
             self.playbackCoordinator = MediaPlaybackCoordinator(core: core, presentationState: self.playbackPresentationState)
             self.popover.contentViewController = self.host()
             self.fallbackPanel?.contentViewController = self.host()

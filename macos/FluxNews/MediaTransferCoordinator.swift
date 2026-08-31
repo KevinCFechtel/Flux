@@ -52,6 +52,7 @@ final class MediaTransferCoordinator {
     private var engine: MediaTransferEngine
     private var networkPolicy: DownloadNetworkPolicy
     private let isMediaInUse: (Int64) -> Bool
+    var onWorkChanged: (() -> Void)?
     private var activeTasks = [Int64: Task<Void, Never>]()
     private var activeTaskTokens = [Int64: UUID]()
 
@@ -137,6 +138,7 @@ final class MediaTransferCoordinator {
             do {
                 try core.downloadFinished(enclosureId: work.enclosureId, localFile: reference, fileSizeBytes: size)
                 Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").info("media transfer completed enclosure=\(work.enclosureId, privacy: .public)")
+                onWorkChanged?()
             } catch {
                 // Core owns stale-callback handling; a callback rejection is not a transfer failure.
                 Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media completion callback rejected enclosure=\(work.enclosureId, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -161,6 +163,7 @@ final class MediaTransferCoordinator {
                 if FileManager.default.fileExists(atPath: path.path) { try FileManager.default.removeItem(at: path) }
                 try core.downloadDeleted(enclosureId: work.enclosureId)
                 Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").info("media deletion completed enclosure=\(work.enclosureId, privacy: .public)")
+                onWorkChanged?()
             } catch {
                 Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media deletion failed enclosure=\(work.enclosureId, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
@@ -172,8 +175,12 @@ final class MediaTransferCoordinator {
     }
 
     private func reportFailure(enclosureID: Int64, kind: DownloadFailureKind) {
-        do { try core.downloadFailed(enclosureId: enclosureID, failureKind: kind) }
-        catch { Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media failure callback failed enclosure=\(enclosureID, privacy: .public): \(error.localizedDescription, privacy: .public)") }
+        do {
+            try core.downloadFailed(enclosureId: enclosureID, failureKind: kind)
+            onWorkChanged?()
+        } catch {
+            Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("media failure callback failed enclosure=\(enclosureID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     static func failureKind(for error: Error) -> DownloadFailureKind {

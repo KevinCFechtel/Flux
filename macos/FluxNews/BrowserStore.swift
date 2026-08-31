@@ -8,6 +8,44 @@ import UserNotifications
 enum ArticleListStyle: String { case row, card }
 struct FeedSettingsTarget: Identifiable { let id: Int64; let title: String }
 
+struct ArticleAudioActionState: Equatable {
+    let articleID: Int64
+    let enclosures: [Enclosure]
+    let isInListeningList: Bool
+    let downloads: [Int64: MediaDownload]
+}
+
+enum ArticleAudioActions {
+    static func audioEnclosures(_ enclosures: [Enclosure]) -> [Enclosure] {
+        enclosures.filter { $0.mediaKind == .audio }
+    }
+
+    static func requiresReplacement(currentID: Int64?, currentStatus: MediaPlaybackPresentationStatus, selectedID: Int64) -> Bool {
+        currentID != selectedID && currentStatus == .playing
+    }
+
+    static func canRequestDownload(_ download: MediaDownload?) -> Bool {
+        guard let download else { return true }
+        switch download.state {
+        case .requested, .downloaded, .deleteRequested: return false
+        case .notDownloaded, .failed: return true
+        }
+    }
+
+    static func enclosureLabel(_ enclosure: Enclosure, index: Int) -> String {
+        let filename: String?
+        if let url = URL(string: enclosure.url), let decoded = url.lastPathComponent.removingPercentEncoding {
+            let trimmed = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
+            filename = trimmed.isEmpty || trimmed == "/" ? nil : trimmed
+        } else {
+            filename = nil
+        }
+        let name = filename ?? String(localized: "Audio \(index + 1)")
+        let format = enclosure.mimeType.split(separator: ";", maxSplits: 1).first.map(String.init) ?? ""
+        return format.isEmpty ? name : "\(name) (\(format))"
+    }
+}
+
 private struct MacOSBackupSettingsV1: Codable {
     static let version: UInt32 = 1
     let version: UInt32
@@ -96,6 +134,7 @@ final class BrowserStore: ObservableObject {
     @Published private(set) var accountValidationError: String?
     @Published private(set) var isSavingAccount = false
     @Published var feedSettingsTarget: FeedSettingsTarget?
+    @Published private(set) var articleAudioActionState: ArticleAudioActionState?
 
     private var core: Flux?
     private var eventSubscription: EventSubscription?
@@ -118,6 +157,8 @@ final class BrowserStore: ObservableObject {
     private var hasAppliedStartupScope = false
     private var scrolloverRemovedArticles: [Int64: ArticleSummary] = [:]
     private var scrolloverOriginalOrder: [Int64: Int] = [:]
+    private var articleAudioRequestGeneration: UInt64 = 0
+    var onMediaTransferRequested: (() -> Void)?
 
     init() {
         markReadOnScrolloverEnabled = UserDefaults.standard.object(forKey: "FluxNews.markReadOnScrollover") as? Bool ?? true
@@ -686,6 +727,73 @@ final class BrowserStore: ObservableObject {
             await MainActor.run {
                 guard let store = store.value, store.readerDocumentRequest == request else { return }
                 completion(result)
+            }
+        }
+    }
+    func loadArticleAudioActions(for articleID: Int64) {
+        articleAudioRequestGeneration &+= 1
+        let generation = articleAudioRequestGeneration
+        articleAudioActionState = nil
+        guard let core else { return }
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result {
+                let enclosures = ArticleAudioActions.audioEnclosures(try core.articleEnclosures(articleId: articleID))
+                let membership = try core.isInListeningList(articleId: articleID)
+                var downloads: [Int64: MediaDownload] = [:]
+                for enclosure in enclosures { downloads[enclosure.id] = try core.mediaDownload(enclosureId: enclosure.id) }
+                return ArticleAudioActionState(articleID: articleID, enclosures: enclosures, isInListeningList: membership, downloads: downloads)
+            }
+            await MainActor.run {
+                guard let store = store.value, store.articleAudioRequestGeneration == generation else { return }
+                switch result {
+                case let .success(state): store.articleAudioActionState = state
+                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
+                }
+            }
+        }
+    }
+    func refreshArticleAudioActions() {
+        guard let articleID = articleAudioActionState?.articleID else { return }
+        loadArticleAudioActions(for: articleID)
+    }
+    func addToListeningList(articleID: Int64) {
+        guard let core else { return }
+        let generation = articleAudioRequestGeneration
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result { try core.addToListeningList(articleId: articleID) }
+            await MainActor.run {
+                guard let store = store.value else { return }
+                switch result {
+                case .success:
+                    store.showActionConfirmation(String(localized: "Added to Listening List"))
+                    store.onMediaTransferRequested?()
+                    guard store.articleAudioRequestGeneration == generation else { return }
+                    store.loadArticleAudioActions(for: articleID)
+                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
+                }
+            }
+        }
+    }
+    func requestManualDownload(articleID: Int64, enclosureID: Int64) {
+        guard let core else { return }
+        guard articleAudioActionState?.articleID == articleID,
+              ArticleAudioActions.canRequestDownload(articleAudioActionState?.downloads[enclosureID]) else { return }
+        let generation = articleAudioRequestGeneration
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result { try core.requestDownload(enclosureId: enclosureID, origin: .manual) }
+            await MainActor.run {
+                guard let store = store.value else { return }
+                switch result {
+                case .success:
+                    store.showActionConfirmation(String(localized: "Download requested"))
+                    store.onMediaTransferRequested?()
+                    guard store.articleAudioRequestGeneration == generation else { return }
+                    store.loadArticleAudioActions(for: articleID)
+                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
+                }
             }
         }
     }
