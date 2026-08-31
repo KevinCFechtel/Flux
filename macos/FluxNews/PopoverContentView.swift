@@ -30,9 +30,12 @@ private struct ArticleFrameKey: PreferenceKey {
 
 struct PopoverContentView: View {
     @ObservedObject var store: BrowserStore
+    @ObservedObject var playbackState: MediaPlaybackPresentationState
+    let playbackCoordinator: MediaPlaybackCoordinator?
     let layoutChanged: (Bool) -> Void
     let dismiss: () -> Void
     @State private var sidebarVisible = false
+    @State private var showingPlayer = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -44,7 +47,10 @@ struct PopoverContentView: View {
             }
             ArticlePane(
                 store: store,
+                playbackState: playbackState,
+                playbackCoordinator: playbackCoordinator,
                 sidebarVisible: $sidebarVisible,
+                showingPlayer: $showingPlayer,
                 layoutChanged: layoutChanged,
                 dismiss: dismiss
             )
@@ -62,7 +68,10 @@ struct PopoverContentView: View {
 private struct ArticlePane: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var store: BrowserStore
+    @ObservedObject var playbackState: MediaPlaybackPresentationState
+    let playbackCoordinator: MediaPlaybackCoordinator?
     @Binding var sidebarVisible: Bool
+    @Binding var showingPlayer: Bool
     let layoutChanged: (Bool) -> Void
     let dismiss: () -> Void
     @State private var tracker = ScrolloverExposureTracker()
@@ -76,9 +85,12 @@ private struct ArticlePane: View {
     @State private var scrollPosition = ScrollPosition()
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
-    init(store: BrowserStore, sidebarVisible: Binding<Bool>, layoutChanged: @escaping (Bool) -> Void, dismiss: @escaping () -> Void) {
+    init(store: BrowserStore, playbackState: MediaPlaybackPresentationState, playbackCoordinator: MediaPlaybackCoordinator?, sidebarVisible: Binding<Bool>, showingPlayer: Binding<Bool>, layoutChanged: @escaping (Bool) -> Void, dismiss: @escaping () -> Void) {
         self.store = store
+        self.playbackState = playbackState
+        self.playbackCoordinator = playbackCoordinator
         _sidebarVisible = sidebarVisible
+        _showingPlayer = showingPlayer
         self.layoutChanged = layoutChanged
         self.dismiss = dismiss
         _trackerRevision = State(initialValue: store.listPresentationRevision)
@@ -88,7 +100,11 @@ private struct ArticlePane: View {
         VStack(spacing: 0) {
             header
             Divider()
-            content
+            if showingPlayer {
+                PlayerView(state: playbackState, coordinator: playbackCoordinator)
+            } else {
+                content
+            }
         }
         .background {
             if store.articles.isEmpty {
@@ -120,6 +136,7 @@ private struct ArticlePane: View {
             selectedID = nil
             suppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
         }
+        .onChange(of: store.scope) { _, _ in showingPlayer = false }
         .onChange(of: store.popoverVisible) { _, _ in tracker.reset() }
         .onChange(of: store.articles.map(\.id)) { _, ids in
             if let selectedID, !ids.contains(selectedID) { self.selectedID = nil }
@@ -144,6 +161,13 @@ private struct ArticlePane: View {
             .disabled(store.isLoading)
             .help("Refresh Miniflux now")
             .accessibilityLabel("Refresh")
+            Button { showingPlayer.toggle() } label: {
+                Image(systemName: PlayerPresentation.navigationSymbol(showingPlayer: showingPlayer))
+            }
+            .buttonStyle(.borderless)
+            .disabled(PlayerPresentation.navigationDisabled(showingPlayer: showingPlayer, hasLoadedMedia: playbackState.loadedEnclosure != nil))
+            .help(showingPlayer ? "Show News List" : "Show Player")
+            .accessibilityLabel(showingPlayer ? "Show News List" : "Show Player")
             Menu {
                 Button { store.setUnreadOnly(true) } label: { Label("Show Unread News Only", systemImage: store.unreadOnly ? "checkmark.circle.fill" : "circle") }
                 Button { store.setUnreadOnly(false) } label: { Label("Show All News", systemImage: store.unreadOnly ? "circle" : "checkmark.circle.fill") }

@@ -23,6 +23,7 @@ private final class FakePlaybackCore: MediaPlaybackCore {
     }
 
     func preparePlayback(enclosureId: Int64) throws -> PlaybackPreparation { preparation }
+    func savedMedia() throws -> [SavedPlayableMediaItem] { [] }
     func checkpointPlayback(enclosureId: Int64, positionMs: UInt64, durationMs: UInt64?) throws { checkpoints.append((enclosureId, positionMs, durationMs)) }
     func playbackCompleted(enclosureId: Int64, durationMs: UInt64?) throws { completions.append((enclosureId, durationMs)) }
     func restartPlayback(enclosureId: Int64) throws { restartCount += 1; preparation.playbackState = PlaybackState(enclosureId: 7, positionMs: 0, durationMs: 120_000, status: .inProgress, updatedAt: nil) }
@@ -47,13 +48,14 @@ private final class FakePlaybackEngine: NativePlaybackEngine {
     var playCount = 0
     var unloadCount = 0
 
-    func load(url: URL, startAtMs: UInt64) { loadedStartMs = startAtMs; currentPositionMs = startAtMs; durationMs = 120_000; onDuration?(120_000); onPosition?(startAtMs) }
+    func load(url: URL, startAtMs: UInt64) { loadedStartMs = startAtMs; currentPositionMs = startAtMs; durationMs = 120_000; onLoadingChanged?(true); onPosition?(startAtMs) }
     func play() { isPlaying = true; playCount += 1 }
     func pause() { isPlaying = false }
     func unload() { unloadCount += 1; isPlaying = false; currentPositionMs = 0; durationMs = nil }
     func seek(toMs: UInt64) { currentPositionMs = toMs; onPosition?(toMs) }
     func finish() { isPlaying = false; onEnded?() }
     func emitDuration(_ duration: UInt64) { onDuration?(duration) }
+    func emitReady() { onLoadingChanged?(false) }
 }
 
 @MainActor
@@ -232,6 +234,47 @@ final class MediaCoordinatorTests: XCTestCase {
         try coordinator.restart(enclosureID: 7)
         XCTAssertEqual(core.restartCount, 1)
         XCTAssertEqual(engine.playCount, 1)
+    }
+
+    func testPlayerTimelineFormattingAndSeekBounds() {
+        XCTAssertEqual(PlayerPresentation.navigationSymbol(showingPlayer: false), "waveform")
+        XCTAssertEqual(PlayerPresentation.navigationSymbol(showingPlayer: true), "list.bullet")
+        XCTAssertTrue(PlayerPresentation.navigationDisabled(showingPlayer: false, hasLoadedMedia: false))
+        XCTAssertFalse(PlayerPresentation.navigationDisabled(showingPlayer: false, hasLoadedMedia: true))
+        XCTAssertFalse(PlayerPresentation.navigationDisabled(showingPlayer: true, hasLoadedMedia: false))
+        XCTAssertEqual(PlayerPresentation.formatDuration(0), "0:00")
+        XCTAssertEqual(PlayerPresentation.formatDuration(65_000), "1:05")
+        XCTAssertEqual(PlayerPresentation.formatDuration(3_725_000), "1:02:05")
+        XCTAssertEqual(PlayerPresentation.seekTarget(positionMs: 10_000, deltaMs: -30_000, durationMs: 120_000), 0)
+        XCTAssertEqual(PlayerPresentation.seekTarget(positionMs: 110_000, deltaMs: 30_000, durationMs: 120_000), 120_000)
+        XCTAssertEqual(PlayerPresentation.seekTarget(positionMs: 10_000, deltaMs: 30_000, durationMs: nil), 40_000)
+    }
+
+    func testRestartPreservesPausedAndStoppedState() throws {
+        for expectedStatus in [MediaPlaybackPresentationStatus.paused, .stopped] {
+            let core = FakePlaybackCore(status: .inProgress, positionMs: 20_000)
+            let engine = FakePlaybackEngine()
+            let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
+            _ = try coordinator.prepare(enclosureID: 7)
+            if expectedStatus == .stopped { coordinator.stop() } else { coordinator.pause() }
+
+            try coordinator.restart(enclosureID: 7)
+
+            XCTAssertEqual(coordinator.presentationState.status, expectedStatus)
+            XCTAssertEqual(engine.playCount, 0)
+            XCTAssertEqual(engine.currentPositionMs, 0)
+        }
+    }
+
+    func testReadyPlaybackItemClearsLoadingState() throws {
+        let core = FakePlaybackCore()
+        let engine = FakePlaybackEngine()
+        let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
+
+        _ = try coordinator.prepare(enclosureID: 7)
+        XCTAssertTrue(coordinator.presentationState.isLoading)
+        engine.emitReady()
+        XCTAssertFalse(coordinator.presentationState.isLoading)
     }
 
     func testNaturalEndCompletesOnceAndCheckpointDoesNotComplete() throws {

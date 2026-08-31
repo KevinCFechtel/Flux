@@ -14,6 +14,7 @@ enum MediaPlaybackPaths {
 @MainActor
 protocol MediaPlaybackCore: AnyObject {
     func preparePlayback(enclosureId: Int64) throws -> PlaybackPreparation
+    func savedMedia() throws -> [SavedPlayableMediaItem]
     func checkpointPlayback(enclosureId: Int64, positionMs: UInt64, durationMs: UInt64?) throws
     func playbackCompleted(enclosureId: Int64, durationMs: UInt64?) throws
     func restartPlayback(enclosureId: Int64) throws
@@ -82,7 +83,9 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
         readinessObservation = item.observe(\.status, options: [.initial, .new]) { [weak self, weak observedItem = item] item, _ in
             Task { @MainActor [weak self, weak observedItem] in
                 guard let self, let observedItem, self.observedItem === observedItem else { return }
-                if item.status == .failed {
+                if item.status == .readyToPlay {
+                    self.onLoadingChanged?(false)
+                } else if item.status == .failed {
                     self.onLoadingChanged?(false)
                     self.onError?(item.error?.localizedDescription ?? "Media playback failed.")
                 }
@@ -204,11 +207,12 @@ final class MediaPlaybackCoordinator {
     private var preparedDurationMs: UInt64?
     private var lastObservedDurationMs: UInt64?
     private var preparedStatus: PlaybackStatus = .notStarted
-    let presentationState = MediaPlaybackPresentationState()
+    let presentationState: MediaPlaybackPresentationState
 
-    init(core: MediaPlaybackCore, engine: NativePlaybackEngine? = nil, checkpointInterval: TimeInterval = 20) {
+    init(core: MediaPlaybackCore, engine: NativePlaybackEngine? = nil, checkpointInterval: TimeInterval = 20, presentationState: MediaPlaybackPresentationState? = nil) {
         self.core = core
         self.checkpointInterval = checkpointInterval
+        self.presentationState = presentationState ?? MediaPlaybackPresentationState()
         let engine = engine ?? AVFoundationPlaybackEngine()
         self.engine = engine
         engine.onEnded = { @MainActor [weak self] in self?.handleNaturalEnd() }
@@ -227,7 +231,10 @@ final class MediaPlaybackCoordinator {
         preparedDurationMs = preparation.durationMs ?? preparation.playbackState.durationMs
         lastObservedDurationMs = preparedDurationMs
         preparedStatus = preparation.playbackState.status
+        let metadata = (try? core.savedMedia())?.first { $0.enclosureId == enclosureID }
         presentationState.loadedEnclosure = preparation.enclosure
+        presentationState.feedTitle = metadata?.feedTitle ?? ""
+        presentationState.mediaTitle = metadata?.title ?? ""
         presentationState.positionMs = preparation.playbackState.positionMs
         presentationState.durationMs = preparedDurationMs
         presentationState.status = .paused
@@ -272,9 +279,16 @@ final class MediaPlaybackCoordinator {
     }
 
     func restart(enclosureID: Int64) throws {
+        let wasPlaying = engine.isPlaying
+        let wasStopped = presentationState.status == .stopped
+        let wasCompleted = preparedStatus == .completed
         try core.restartPlayback(enclosureId: enclosureID)
         _ = try prepare(enclosureID: enclosureID)
-        try play(enclosureID: enclosureID)
+        if wasPlaying || wasCompleted {
+            try play(enclosureID: enclosureID)
+        } else if wasStopped {
+            presentationState.status = .stopped
+        }
     }
 
     func chapters() throws -> [MediaChapter] {
@@ -375,14 +389,16 @@ enum MediaPlaybackPresentationStatus: Equatable {
 
 @MainActor
 final class MediaPlaybackPresentationState: ObservableObject {
-    @Published internal(set) var loadedEnclosure: Enclosure?
-    @Published internal(set) var status: MediaPlaybackPresentationStatus = .stopped
-    @Published internal(set) var positionMs: UInt64 = 0
-    @Published internal(set) var durationMs: UInt64?
-    @Published internal(set) var isLoading = false
-    @Published internal(set) var isBuffering = false
-    @Published internal(set) var errorMessage: String?
-    @Published internal(set) var playbackRate = 1.0
+    @Published fileprivate(set) var loadedEnclosure: Enclosure?
+    @Published fileprivate(set) var feedTitle = ""
+    @Published fileprivate(set) var mediaTitle = ""
+    @Published fileprivate(set) var status: MediaPlaybackPresentationStatus = .stopped
+    @Published fileprivate(set) var positionMs: UInt64 = 0
+    @Published fileprivate(set) var durationMs: UInt64?
+    @Published fileprivate(set) var isLoading = false
+    @Published fileprivate(set) var isBuffering = false
+    @Published fileprivate(set) var errorMessage: String?
+    @Published fileprivate(set) var playbackRate = 1.0
 }
 
 enum MediaPlaybackError: LocalizedError {
