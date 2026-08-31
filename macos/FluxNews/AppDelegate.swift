@@ -35,6 +35,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     func applicationDidFinishLaunching(_ notification: Notification) {
         store.onCoreConfigured = { [weak self] core in
             guard let self else { return }
+            mediaRemoteControlCoordinator?.cleanup()
+            playbackCoordinator?.applicationWillTerminate()
+            playbackCoordinator?.onPlaybackUseChanged = nil
+            transferCoordinator?.shutdown()
+            transferCoordinator?.onWorkChanged = nil
             store.onMediaTransferRequested = { [weak self] in self?.transferCoordinator?.reconcile() }
             self.transferCoordinator = MediaTransferCoordinator(core: core, isMediaInUse: { [weak self] enclosureID in
                 self?.playbackCoordinator?.isUsing(enclosureID: enclosureID) ?? false

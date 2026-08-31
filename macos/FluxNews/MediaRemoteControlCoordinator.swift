@@ -80,6 +80,8 @@ final class MediaRemoteControlCoordinator {
 
     func cleanup() {
         removeCommandTargets()
+        cancellables.removeAll()
+        artworkGeneration += 1
         nowPlaying.nowPlayingInfo = nil
         nowPlaying.playbackState = .unknown
     }

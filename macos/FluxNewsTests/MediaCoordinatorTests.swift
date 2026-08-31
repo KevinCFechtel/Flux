@@ -556,7 +556,30 @@ final class MediaCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(core.failures.isEmpty)
         XCTAssertEqual(core.states[7], .notDownloaded)
-        XCTAssertEqual(core.finished.count, 1)
+        XCTAssertTrue(core.finished.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("downloads/enclosure-7.media").path))
+    }
+
+    func testShutdownInvalidatesTransferBeforeLateCompletion() async throws {
+        let core = FakeTransferCore()
+        core.transfers = [transferWork()]
+        core.states[7] = .requested
+        let engine = FakeTransferEngine(result: .pending)
+        let root = temporaryMediaRoot()
+        let coordinator = MediaTransferCoordinator(core: core, mediaRoot: root, engine: engine)
+
+        coordinator.reconcile()
+        await settle()
+        coordinator.shutdown()
+
+        let temporary = root.appendingPathComponent("shutdown-late.media")
+        try Data("late".utf8).write(to: temporary)
+        await engine.resolveAll(.immediate(NativeTransferResult(temporaryURL: temporary)))
+        await settle()
+
+        XCTAssertTrue(core.failures.isEmpty)
+        XCTAssertTrue(core.finished.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("downloads/enclosure-7.media").path))
     }
 
     func testFreshCoordinatorReconstructsRequestedAndDeleteRequestedWork() async throws {

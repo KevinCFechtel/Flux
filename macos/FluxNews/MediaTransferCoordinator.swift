@@ -204,6 +204,16 @@ final class MediaTransferCoordinator {
         presentationState.remove(enclosureID: enclosureID)
     }
 
+    func shutdown() {
+        for id in activeTasks.keys {
+            activeTaskTokens[id] = nil
+            activeTasks[id]?.cancel()
+            presentationState.remove(enclosureID: id)
+        }
+        activeTasks.removeAll()
+        activeTaskTokens.removeAll()
+    }
+
     private func start(_ work: MediaTransferWork) {
         guard let url = URL(string: work.url), url.scheme == "http" || url.scheme == "https" else {
             reportFailure(enclosureID: work.enclosureId, kind: .invalidMedia)
@@ -231,6 +241,10 @@ final class MediaTransferCoordinator {
                 return
             }
 
+            guard activeTaskTokens[work.enclosureId] == token else {
+                try? FileManager.default.removeItem(at: result.temporaryURL)
+                return
+            }
             let reference = "downloads/enclosure-\(work.enclosureId).media"
             let destination: URL
             do {
