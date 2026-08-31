@@ -236,7 +236,7 @@ private struct ArticlePane: View {
 
     @ViewBuilder private var content: some View {
         if store.isListeningList {
-            ListeningListView(store: store, playbackState: playbackState, onPlay: playAudio)
+            ListeningListView(store: store, playbackState: playbackState, onPlay: playAudio, onDownload: { articleID, enclosureID in store.requestManualDownload(articleID: articleID, enclosureID: enclosureID) }, onDelete: { articleID, enclosureID in store.deleteDownload(articleID: articleID, enclosureID: enclosureID) }, onRemove: { articleID in store.removeFromListeningList(articleID: articleID) })
         } else if store.isSearchActive {
             SearchResultsView(store: store)
         } else if let error = store.errorMessage, store.articles.isEmpty {
@@ -257,7 +257,7 @@ private struct ArticlePane: View {
                     ScrollView {
                         LazyVStack(spacing: store.articleListStyle == .row ? 0 : 4) {
                             ForEach(store.articles, id: \.id) { article in
-                                ArticleItem(article: article, style: store.articleListStyle, selected: selectedID == article.id, audioState: selectedID == article.id ? store.articleAudioActionState : nil, store: store, onSelect: { selectedID = article.id }, onPlayAudio: playAudio, onDownloadAudio: { enclosure in store.requestManualDownload(articleID: article.id, enclosureID: enclosure.id) }, onAddToListeningList: { store.addToListeningList(articleID: article.id) }, onHoverChanged: { hovering in
+                                ArticleItem(article: article, style: store.articleListStyle, selected: selectedID == article.id, audioState: selectedID == article.id ? store.articleAudioActionState : nil, store: store, onSelect: { selectedID = article.id }, onPlayAudio: playAudio, onDownloadAudio: { enclosure in store.requestManualDownload(articleID: article.id, enclosureID: enclosure.id) }, onDeleteDownload: { enclosure in store.deleteDownload(articleID: article.id, enclosureID: enclosure.id) }, onAddToListeningList: { store.addToListeningList(articleID: article.id) }, onHoverChanged: { hovering in
                                     if hovering { hoveredID = article.id }
                                     else if hoveredID == article.id { hoveredID = nil }
                                 })
@@ -432,7 +432,7 @@ private struct SearchResultsView: View {
                     ScrollView {
                         LazyVStack(spacing: store.articleListStyle == .row ? 0 : 4) {
                             ForEach(store.articles, id: \.id) { article in
-                                ArticleItem(article: article, style: store.articleListStyle, selected: false, audioState: nil, store: store, onSelect: {}, onPlayAudio: { _ in }, onDownloadAudio: { _ in }, onAddToListeningList: {}, onHoverChanged: { _ in })
+                                ArticleItem(article: article, style: store.articleListStyle, selected: false, audioState: nil, store: store, onSelect: {}, onPlayAudio: { _ in }, onDownloadAudio: { _ in }, onDeleteDownload: { _ in }, onAddToListeningList: {}, onHoverChanged: { _ in })
                                     .onAppear { if article.id == store.articles.last?.id { store.loadMoreSearchResults() } }
                                 if store.articleListStyle == .row { Divider().padding(.leading, 264) }
                             }
@@ -449,6 +449,9 @@ private struct ListeningListView: View {
     @ObservedObject var store: BrowserStore
     @ObservedObject var playbackState: MediaPlaybackPresentationState
     let onPlay: (Enclosure) -> Void
+    let onDownload: (Int64, Int64) -> Void
+    let onDelete: (Int64, Int64) -> Void
+    let onRemove: (Int64) -> Void
 
     var body: some View {
         if let error = store.errorMessage, store.listeningListItems.isEmpty {
@@ -461,7 +464,7 @@ private struct ListeningListView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(store.listeningListItems, id: \.articleId) { item in
-                        ListeningListRow(item: item, playbackState: playbackState, onPlay: onPlay)
+                        ListeningListRow(item: item, playbackState: playbackState, onPlay: onPlay, onDownload: onDownload, onDelete: onDelete, onRemove: onRemove)
                         Divider().padding(.leading, 12)
                     }
                 }
@@ -474,6 +477,11 @@ private struct ListeningListRow: View {
     let item: ListeningListItem
     @ObservedObject var playbackState: MediaPlaybackPresentationState
     let onPlay: (Enclosure) -> Void
+    let onDownload: (Int64, Int64) -> Void
+    let onDelete: (Int64, Int64) -> Void
+    let onRemove: (Int64) -> Void
+    @State private var confirmingRemoval = false
+    @State private var pendingDeletion: ListeningListEnclosure?
     private static let isoFormatter = ISO8601DateFormatter()
 
     var body: some View {
@@ -503,11 +511,40 @@ private struct ListeningListRow: View {
         .contentShape(Rectangle())
         .onTapGesture { if let enclosure = ListeningListPresentation.preferredEnclosure(item) { onPlay(enclosure) } }
         .contextMenu {
+            Button("Remove from Listening List", role: .destructive) {
+                if ArticleAudioActions.hasLocalDownload(item) { confirmingRemoval = true }
+                else { onRemove(item.articleId) }
+            }
+            Divider()
+            Menu("Downloads") {
+                ForEach(item.audioEnclosures.indices, id: \.self) { index in
+                    let audio = item.audioEnclosures[index]
+                    Button(downloadActionTitle(audio, index: index)) {
+                        if ArticleAudioActions.canDeleteDownload(audio.download) { pendingDeletion = audio }
+                        else { onDownload(item.articleId, audio.enclosure.id) }
+                    }
+                    .disabled(!ArticleAudioActions.canRequestDownload(audio.download) && !ArticleAudioActions.canDeleteDownload(audio.download))
+                }
+            }
             if item.audioEnclosures.count > 1 && item.activeEnclosureId == nil {
                 ForEach(item.audioEnclosures, id: \.enclosure.id) { audio in
                     Button("Play \(ArticleAudioActions.enclosureLabel(audio.enclosure, index: item.audioEnclosures.firstIndex(where: { $0.enclosure.id == audio.enclosure.id }) ?? 0))") { onPlay(audio.enclosure) }
                 }
             }
+        }
+        .alert("Remove from Listening List?", isPresented: $confirmingRemoval) {
+            Button("Cancel", role: .cancel) { confirmingRemoval = false }
+            Button("Remove", role: .destructive) { confirmingRemoval = false; onRemove(item.articleId) }
+        } message: {
+            Text("Downloaded audio for this item will also be deleted.")
+        }
+        .alert("Delete Download?", isPresented: Binding(get: { pendingDeletion != nil }, set: { if !$0 { pendingDeletion = nil } })) {
+            Button("Cancel", role: .cancel) { pendingDeletion = nil }
+            Button("Delete", role: .destructive) {
+                if let audio = pendingDeletion { pendingDeletion = nil; onDelete(item.articleId, audio.enclosure.id) }
+            }
+        } message: {
+            Text("The downloaded audio file will be deleted.")
         }
     }
 
@@ -554,6 +591,17 @@ private struct ListeningListRow: View {
 
     private static func minutes(_ milliseconds: UInt64) -> String {
         String(max(0, Int(milliseconds / 60_000)))
+    }
+
+    private func downloadActionTitle(_ audio: ListeningListEnclosure, index: Int) -> String {
+        let label = ArticleAudioActions.enclosureLabel(audio.enclosure, index: index)
+        switch ArticleAudioActions.downloadAction(audio.download) {
+        case .delete: return "Delete Download: \(label)"
+        case .downloading: return "Downloading: \(label)"
+        case .pendingDeletion: return "Pending deletion: \(label)"
+        case .retry: return "Retry Download: \(label)"
+        case .download: return "Download: \(label)"
+        }
     }
 }
 
@@ -706,6 +754,7 @@ private struct ArticleItem: View {
     let onSelect: () -> Void
     let onPlayAudio: (Enclosure) -> Void
     let onDownloadAudio: (Enclosure) -> Void
+    let onDeleteDownload: (Enclosure) -> Void
     let onAddToListeningList: () -> Void
     let onHoverChanged: (Bool) -> Void
     @State private var hovered = false
@@ -754,7 +803,7 @@ private struct ArticleItem: View {
             Text(article.title).font(.system(size: 14, weight: article.isRead ? .regular : .semibold))
                 .foregroundStyle(article.isRead ? .secondary : .primary).lineLimit(3).multilineTextAlignment(.leading)
             if !article.preview.isEmpty { Text(article.preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(store.articlePreviewLines.rawValue).multilineTextAlignment(.leading) }
-            if selected, let audioState, !audioState.enclosures.isEmpty { AudioActionsView(state: audioState, onPlay: onPlayAudio, onDownload: onDownloadAudio, onAdd: onAddToListeningList) }
+            if selected, let audioState, !audioState.enclosures.isEmpty { AudioActionsView(state: audioState, onPlay: onPlayAudio, onDownload: onDownloadAudio, onDelete: onDeleteDownload, onAdd: onAddToListeningList) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -810,7 +859,9 @@ private struct AudioActionsView: View {
     let state: ArticleAudioActionState
     let onPlay: (Enclosure) -> Void
     let onDownload: (Enclosure) -> Void
+    let onDelete: (Enclosure) -> Void
     let onAdd: () -> Void
+    @State private var pendingDeletion: Enclosure?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -825,23 +876,31 @@ private struct AudioActionsView: View {
         }
         .font(.caption)
         .padding(.top, 3)
+        .alert("Delete Download?", isPresented: Binding(get: { pendingDeletion != nil }, set: { if !$0 { pendingDeletion = nil } })) {
+            Button("Cancel", role: .cancel) { pendingDeletion = nil }
+            Button("Delete", role: .destructive) {
+                if let enclosure = pendingDeletion { pendingDeletion = nil; onDelete(enclosure) }
+            }
+        } message: {
+            Text("The downloaded audio file will be deleted.")
+        }
     }
 
     @ViewBuilder private func enclosureAction(title: String, symbol: String, action: @escaping (Enclosure) -> Void) -> some View {
         if state.enclosures.count == 1, let enclosure = state.enclosures.first {
-            Button { action(enclosure) } label: { Label(actionTitle(title, enclosure: enclosure), systemImage: symbol) }
+            Button { perform(title: title, enclosure: enclosure, action: action) } label: { Label(actionTitle(title, enclosure: enclosure), systemImage: symbol) }
                 .buttonStyle(.borderless)
-                .disabled(title == "Download" && !ArticleAudioActions.canRequestDownload(state.downloads[enclosure.id]))
+                .disabled(title == "Download" && !ArticleAudioActions.canRequestDownload(state.downloads[enclosure.id]) && !ArticleAudioActions.canDeleteDownload(state.downloads[enclosure.id]))
         } else {
             Menu {
                 ForEach(state.enclosures.indices, id: \.self) { index in
                     let enclosure = state.enclosures[index]
                     Button {
-                        action(enclosure)
+                        perform(title: title, enclosure: enclosure, action: action)
                     } label: {
                         Label(actionTitle(title, enclosure: enclosure, index: index), systemImage: symbol)
                     }
-                    .disabled(title == "Download" && !ArticleAudioActions.canRequestDownload(state.downloads[enclosure.id]))
+                    .disabled(title == "Download" && !ArticleAudioActions.canRequestDownload(state.downloads[enclosure.id]) && !ArticleAudioActions.canDeleteDownload(state.downloads[enclosure.id]))
                 }
             } label: {
                 Label(title, systemImage: symbol)
@@ -852,13 +911,19 @@ private struct AudioActionsView: View {
     }
 
     private func actionTitle(_ title: String, enclosure: Enclosure, index: Int = 0) -> String {
-        guard title == "Download", let download = state.downloads[enclosure.id] else { return title }
-        switch download.state {
-        case .downloaded: return String(localized: "Downloaded")
-        case .requested: return String(localized: "Downloading...")
-        case .deleteRequested: return String(localized: "Pending deletion")
-        case .notDownloaded, .failed: return index == 0 ? title : ArticleAudioActions.enclosureLabel(enclosure, index: index)
+        guard title == "Download" else { return title }
+        switch ArticleAudioActions.downloadAction(state.downloads[enclosure.id]) {
+        case .delete: return String(localized: "Delete Download")
+        case .downloading: return String(localized: "Downloading...")
+        case .pendingDeletion: return String(localized: "Pending deletion")
+        case .retry: return String(localized: "Retry Download")
+        case .download: return index == 0 ? title : ArticleAudioActions.enclosureLabel(enclosure, index: index)
         }
+    }
+
+    private func perform(title: String, enclosure: Enclosure, action: @escaping (Enclosure) -> Void) {
+        if title == "Download", ArticleAudioActions.canDeleteDownload(state.downloads[enclosure.id]) { pendingDeletion = enclosure }
+        else { action(enclosure) }
     }
 }
 

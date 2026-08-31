@@ -161,6 +161,15 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertTrue(ArticleAudioActions.canRequestDownload(MediaDownload(enclosureId: 1, state: .failed, origin: .manual, localFile: nil, fileSizeBytes: nil, downloadedAt: nil, failureKind: .network)))
     }
 
+    func testArticleAudioActionsExposeCoherentDownloadManagementStates() {
+        XCTAssertEqual(ArticleAudioActions.downloadAction(nil), .download)
+        XCTAssertEqual(ArticleAudioActions.downloadAction(MediaDownload(enclosureId: 1, state: .notDownloaded, origin: .manual, localFile: nil, fileSizeBytes: nil, downloadedAt: nil, failureKind: nil)), .download)
+        XCTAssertEqual(ArticleAudioActions.downloadAction(MediaDownload(enclosureId: 1, state: .failed, origin: .manual, localFile: nil, fileSizeBytes: nil, downloadedAt: nil, failureKind: .network)), .retry)
+        XCTAssertEqual(ArticleAudioActions.downloadAction(MediaDownload(enclosureId: 1, state: .requested, origin: .manual, localFile: nil, fileSizeBytes: nil, downloadedAt: nil, failureKind: nil)), .downloading)
+        XCTAssertEqual(ArticleAudioActions.downloadAction(MediaDownload(enclosureId: 1, state: .downloaded, origin: .manual, localFile: "/tmp/episode.mp3", fileSizeBytes: 10, downloadedAt: nil, failureKind: nil)), .delete)
+        XCTAssertEqual(ArticleAudioActions.downloadAction(MediaDownload(enclosureId: 1, state: .deleteRequested, origin: .manual, localFile: "/tmp/episode.mp3", fileSizeBytes: 10, downloadedAt: nil, failureKind: nil)), .pendingDeletion)
+    }
+
     func testInProgressStartsAtCorePositionAndPauseCheckpoints() throws {
         let core = FakePlaybackCore(status: .inProgress, positionMs: 35_000)
         let engine = FakePlaybackEngine()

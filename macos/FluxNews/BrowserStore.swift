@@ -60,6 +60,8 @@ enum ListeningListPresentation {
 }
 
 enum ArticleAudioActions {
+    enum DownloadAction: Equatable { case download, delete, downloading, pendingDeletion, retry }
+
     static func audioEnclosures(_ enclosures: [Enclosure]) -> [Enclosure] {
         enclosures.filter { $0.mediaKind == .audio }
     }
@@ -69,10 +71,27 @@ enum ArticleAudioActions {
     }
 
     static func canRequestDownload(_ download: MediaDownload?) -> Bool {
-        guard let download else { return true }
-        switch download.state {
-        case .requested, .downloaded, .deleteRequested: return false
-        case .notDownloaded, .failed: return true
+        switch downloadAction(download) {
+        case .download, .retry: return true
+        case .delete, .downloading, .pendingDeletion: return false
+        }
+    }
+
+    static func canDeleteDownload(_ download: MediaDownload?) -> Bool {
+        downloadAction(download) == .delete
+    }
+
+    static func hasLocalDownload(_ item: ListeningListItem) -> Bool {
+        item.audioEnclosures.contains { $0.download?.state == .downloaded }
+    }
+
+    static func downloadAction(_ download: MediaDownload?) -> DownloadAction {
+        switch download?.state {
+        case .downloaded: return .delete
+        case .requested: return .downloading
+        case .deleteRequested: return .pendingDeletion
+        case .failed: return .retry
+        case .notDownloaded, nil: return .download
         }
     }
 
@@ -868,6 +887,44 @@ final class BrowserStore: ObservableObject {
                     store.refreshListeningListIfVisible()
                     guard store.articleAudioRequestGeneration == generation else { return }
                     store.loadArticleAudioActions(for: articleID)
+                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
+                }
+            }
+        }
+    }
+    func removeFromListeningList(articleID: Int64) {
+        guard let core else { return }
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result { try core.removeFromListeningList(articleId: articleID) }
+            await MainActor.run {
+                guard let store = store.value else { return }
+                switch result {
+                case .success:
+                    store.showActionConfirmation(String(localized: "Removed from Listening List"))
+                    store.onMediaTransferRequested?()
+                    store.refreshListeningListIfVisible()
+                    store.refreshArticleAudioActions()
+                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
+                }
+            }
+        }
+    }
+    func deleteDownload(articleID: Int64, enclosureID: Int64) {
+        guard let core else { return }
+        let download = articleAudioActionState?.articleID == articleID ? articleAudioActionState?.downloads[enclosureID] : nil
+        guard ArticleAudioActions.canDeleteDownload(download) else { return }
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result { try core.requestDownloadDeletion(enclosureId: enclosureID) }
+            await MainActor.run {
+                guard let store = store.value else { return }
+                switch result {
+                case .success:
+                    store.showActionConfirmation(String(localized: "Download deletion requested"))
+                    store.onMediaTransferRequested?()
+                    store.refreshListeningListIfVisible()
+                    store.refreshArticleAudioActions()
                 case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
                 }
             }
