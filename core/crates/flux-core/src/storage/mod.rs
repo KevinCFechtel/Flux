@@ -202,6 +202,10 @@ impl Store {
         let download_network_policy = setting_value(&connection, "download_network_policy")?;
         let download_retention = setting_value(&connection, "download_retention")?;
         let delete_after_playback = setting_value(&connection, "delete_after_playback")?;
+        let auto_download_listening_list =
+            setting_value(&connection, "auto_download_listening_list")?;
+        let remove_completed_listening_list =
+            setting_value(&connection, "remove_completed_listening_list")?;
         Ok(CoreSettings {
             retention: ReadArticleRetention::from_days(&retention)?,
             delivery_mode: match delivery_mode.as_str() {
@@ -236,6 +240,14 @@ impl Store {
                     ));
                 }
             },
+            auto_download_listening_list: parse_bool_setting(
+                &auto_download_listening_list,
+                "invalid auto-download Listening List setting",
+            )?,
+            remove_completed_listening_list: parse_bool_setting(
+                &remove_completed_listening_list,
+                "invalid remove-completed Listening List setting",
+            )?,
         })
     }
     pub fn all_feed_preferences(&self) -> Result<Vec<FeedPreferences>, CoreError> {
@@ -333,6 +345,18 @@ impl Store {
     }
     pub fn set_delete_after_playback(&self, enabled: bool) -> Result<(), CoreError> {
         self.set_setting("delete_after_playback", if enabled { "1" } else { "0" })
+    }
+    pub fn set_auto_download_listening_list(&self, enabled: bool) -> Result<(), CoreError> {
+        self.set_setting(
+            "auto_download_listening_list",
+            if enabled { "1" } else { "0" },
+        )
+    }
+    pub fn set_remove_completed_listening_list(&self, enabled: bool) -> Result<(), CoreError> {
+        self.set_setting(
+            "remove_completed_listening_list",
+            if enabled { "1" } else { "0" },
+        )
     }
     pub fn set_background_sync_enabled(&self, enabled: bool) -> Result<(), CoreError> {
         self.set_setting("background_sync_enabled", if enabled { "1" } else { "0" })
@@ -553,7 +577,24 @@ impl Store {
         };
         reconcile_remote_enclosures(&tx, articles, enclosures, media_progress_writes)?;
         for enclosure_id in new_live_enclosures {
-            tx.execute("INSERT INTO media_downloads(enclosure_id,state,origin) SELECT e.id,'requested','automatic' FROM enclosures e JOIN articles a ON a.id=e.article_id JOIN feed_preferences p ON p.feed_id=a.feed_id WHERE e.id=?1 AND e.mime_type LIKE 'audio/%' AND p.auto_download_audio=1 AND NOT EXISTS(SELECT 1 FROM auto_download_suppressions s WHERE s.enclosure_id=e.id) AND NOT EXISTS(SELECT 1 FROM media_downloads d WHERE d.enclosure_id=e.id)", [enclosure_id]).map_err(sql_error)?;
+            let article_id: i64 = tx
+                .query_row(
+                    "SELECT article_id FROM enclosures WHERE id=?1",
+                    [enclosure_id],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            let enabled: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM articles a JOIN feed_preferences p ON p.feed_id=a.feed_id WHERE a.id=?1 AND p.auto_download_audio=1)",
+                    [article_id],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            if enabled && is_audio_enclosure(&tx, enclosure_id)? {
+                ensure_listening_membership(&tx, article_id, &Utc::now().to_rfc3339())?;
+                request_download_in_transaction(&tx, enclosure_id, DownloadOrigin::Automatic)?;
+            }
         }
         let remote_category_ids: HashSet<i64> =
             categories.iter().map(|category| category.id).collect();
@@ -656,18 +697,72 @@ impl Store {
         article_id: i64,
         added_at: &str,
     ) -> Result<bool, CoreError> {
-        let connection = self
+        self.add_to_listening_list_with_policy(article_id, added_at, false)
+    }
+
+    pub fn add_to_listening_list_with_policy(
+        &self,
+        article_id: i64,
+        added_at: &str,
+        auto_download: bool,
+    ) -> Result<bool, CoreError> {
+        let mut connection = self
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
-        let inserted = connection
+        let tx = connection.transaction().map_err(sql_error)?;
+        let article_exists: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM articles WHERE id=?1)",
+                [article_id],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)?;
+        if !article_exists {
+            return Err(CoreError::data(format!(
+                "article {article_id} does not exist"
+            )));
+        }
+        let audio_ids = audio_enclosure_ids_for_article(&tx, article_id)?;
+        if audio_ids.is_empty() {
+            return Err(CoreError::data(
+                "article must have at least one audio enclosure",
+            ));
+        }
+        let inserted = tx
             .execute(
                 "INSERT INTO listening_list(article_id,added_at) VALUES(?1,?2) ON CONFLICT(article_id) DO NOTHING",
                 params![article_id, added_at],
             )
             .map_err(sql_error)?
             > 0;
+        if auto_download && inserted {
+            for enclosure_id in audio_ids {
+                request_download_in_transaction(&tx, enclosure_id, DownloadOrigin::Automatic)?;
+            }
+        }
+        tx.commit().map_err(sql_error)?;
         Ok(inserted)
+    }
+
+    pub fn remove_from_listening_list(&self, article_id: i64) -> Result<bool, CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        let removed = tx
+            .execute(
+                "DELETE FROM listening_list WHERE article_id=?1",
+                [article_id],
+            )
+            .map_err(sql_error)?
+            > 0;
+        for enclosure_id in audio_enclosure_ids_for_article(&tx, article_id)? {
+            request_download_deletion_in_transaction(&tx, enclosure_id)?;
+        }
+        tx.commit().map_err(sql_error)?;
+        Ok(removed)
     }
 
     pub fn is_in_listening_list(&self, article_id: i64) -> Result<bool, CoreError> {
@@ -1356,28 +1451,17 @@ impl Store {
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let tx = connection.transaction().map_err(sql_error)?;
         ensure_enclosure(&tx, enclosure_id)?;
-        let existing = read_download_state(&tx, enclosure_id)?;
-        match existing {
-            None | Some(DownloadState::Failed) => {
-                if matches!(origin, DownloadOrigin::Manual) {
-                    tx.execute(
-                        "DELETE FROM auto_download_suppressions WHERE enclosure_id=?1",
-                        [enclosure_id],
-                    )
-                    .map_err(sql_error)?;
-                }
-                tx.execute(
-                    "INSERT INTO media_downloads(enclosure_id,state,origin,local_file,file_size_bytes,downloaded_at,failure_kind) VALUES(?1,'requested',?2,NULL,NULL,NULL,NULL) ON CONFLICT(enclosure_id) DO UPDATE SET state='requested',origin=excluded.origin,local_file=NULL,file_size_bytes=NULL,downloaded_at=NULL,failure_kind=NULL",
-                    params![enclosure_id, origin_db(origin)],
+        if is_audio_enclosure(&tx, enclosure_id)? {
+            let article_id: i64 = tx
+                .query_row(
+                    "SELECT article_id FROM enclosures WHERE id=?1",
+                    [enclosure_id],
+                    |row| row.get(0),
                 )
                 .map_err(sql_error)?;
-            }
-            Some(other) => {
-                return Err(CoreError::data(format!(
-                    "cannot request download from {other:?}"
-                )));
-            }
+            ensure_listening_membership(&tx, article_id, &Utc::now().to_rfc3339())?;
         }
+        request_download_in_transaction(&tx, enclosure_id, origin)?;
         tx.commit().map_err(sql_error)
     }
 
@@ -1674,6 +1758,9 @@ impl Store {
         )
         .map_err(sql_error)?;
         upsert_remote_enclosures(&tx, std::slice::from_ref(enclosure))?;
+        if is_audio_enclosure(&tx, enclosure.id)? {
+            ensure_listening_membership(&tx, article.id, &Utc::now().to_rfc3339())?;
+        }
         tx.execute(
             "INSERT INTO media_downloads(enclosure_id,state,origin,local_file,file_size_bytes,downloaded_at,failure_kind) VALUES(?1,'requested',?2,NULL,NULL,NULL,NULL) ON CONFLICT(enclosure_id) DO UPDATE SET state='requested',origin=excluded.origin,local_file=NULL,file_size_bytes=NULL,downloaded_at=NULL,failure_kind=NULL",
             params![enclosure.id, origin_db(origin)],
@@ -1748,6 +1835,39 @@ impl Store {
             .map_err(sql_error)?;
         if delete_after_playback {
             tx.execute("UPDATE media_downloads SET state='delete_requested' WHERE enclosure_id=?1 AND state='downloaded'", [enclosure_id]).map_err(sql_error)?;
+        }
+        let remove_completed: bool = tx
+            .query_row(
+                "SELECT value='1' FROM core_settings WHERE key='remove_completed_listening_list'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)?;
+        if remove_completed {
+            let article_id: i64 = tx
+                .query_row(
+                    "SELECT article_id FROM enclosures WHERE id=?1",
+                    [enclosure_id],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            let all_completed: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM enclosures WHERE article_id=?1 AND lower(mime_type) LIKE 'audio/%') AND NOT EXISTS(SELECT 1 FROM enclosures e LEFT JOIN playback_states p ON p.enclosure_id=e.id WHERE e.article_id=?1 AND lower(e.mime_type) LIKE 'audio/%' AND (p.status IS NULL OR p.status != 'completed'))",
+                    [article_id],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            if all_completed {
+                tx.execute(
+                    "DELETE FROM listening_list WHERE article_id=?1",
+                    [article_id],
+                )
+                .map_err(sql_error)?;
+                for audio_id in audio_enclosure_ids_for_article(&tx, article_id)? {
+                    request_download_deletion_in_transaction(&tx, audio_id)?;
+                }
+            }
         }
         tx.commit().map_err(sql_error)
     }
@@ -2803,7 +2923,17 @@ fn core_setting_defaults() -> Vec<(&'static str, String)> {
             }
             .to_string(),
         ),
+        ("auto_download_listening_list", "0".to_string()),
+        ("remove_completed_listening_list", "0".to_string()),
     ]
+}
+
+fn parse_bool_setting(value: &str, message: &'static str) -> Result<bool, CoreError> {
+    match value {
+        "0" => Ok(false),
+        "1" => Ok(true),
+        _ => Err(CoreError::persistence(message)),
+    }
 }
 
 fn download_retention_db(retention: DownloadRetention) -> String {
@@ -2830,6 +2960,8 @@ fn write_media_settings(tx: &Transaction<'_>, settings: &CoreSettings) -> Result
     tx.execute("INSERT INTO core_settings(key,value) VALUES('download_network_policy',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [match settings.download_network_policy { DownloadNetworkPolicy::AnyNetwork => "any_network", DownloadNetworkPolicy::UnmeteredOnly => "unmetered_only" }]).map_err(sql_error)?;
     tx.execute("INSERT INTO core_settings(key,value) VALUES('download_retention',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [download_retention_db(settings.download_retention)]).map_err(sql_error)?;
     tx.execute("INSERT INTO core_settings(key,value) VALUES('delete_after_playback',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [if settings.delete_after_playback { "1" } else { "0" }]).map_err(sql_error)?;
+    tx.execute("INSERT INTO core_settings(key,value) VALUES('auto_download_listening_list',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [if settings.auto_download_listening_list { "1" } else { "0" }]).map_err(sql_error)?;
+    tx.execute("INSERT INTO core_settings(key,value) VALUES('remove_completed_listening_list',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [if settings.remove_completed_listening_list { "1" } else { "0" }]).map_err(sql_error)?;
     Ok(())
 }
 fn clear_synchronized_state(
@@ -3247,6 +3379,111 @@ fn stored_enclosure_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stored
     })
 }
 
+fn audio_enclosure_ids_for_article(
+    tx: &Transaction<'_>,
+    article_id: i64,
+) -> Result<Vec<i64>, CoreError> {
+    tx.prepare("SELECT id FROM enclosures WHERE article_id=?1 AND lower(mime_type) LIKE 'audio/%' ORDER BY id")
+        .map_err(sql_error)?
+        .query_map([article_id], |row| row.get(0))
+        .map_err(sql_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sql_error)
+}
+
+fn is_audio_enclosure(tx: &Transaction<'_>, enclosure_id: i64) -> Result<bool, CoreError> {
+    tx.query_row(
+        "SELECT lower(mime_type) LIKE 'audio/%' FROM enclosures WHERE id=?1",
+        [enclosure_id],
+        |row| row.get(0),
+    )
+    .map_err(sql_error)
+}
+
+fn ensure_listening_membership(
+    tx: &Transaction<'_>,
+    article_id: i64,
+    added_at: &str,
+) -> Result<(), CoreError> {
+    tx.execute(
+        "INSERT INTO listening_list(article_id,added_at) VALUES(?1,?2) ON CONFLICT(article_id) DO NOTHING",
+        params![article_id, added_at],
+    )
+    .map_err(sql_error)?;
+    Ok(())
+}
+
+fn request_download_in_transaction(
+    tx: &Transaction<'_>,
+    enclosure_id: i64,
+    origin: DownloadOrigin,
+) -> Result<(), CoreError> {
+    ensure_enclosure(tx, enclosure_id)?;
+    match read_download_state(tx, enclosure_id)? {
+        None | Some(DownloadState::Failed) => {
+            if matches!(origin, DownloadOrigin::Manual) {
+                tx.execute(
+                    "DELETE FROM auto_download_suppressions WHERE enclosure_id=?1",
+                    [enclosure_id],
+                )
+                .map_err(sql_error)?;
+            }
+            tx.execute(
+                "INSERT INTO media_downloads(enclosure_id,state,origin,local_file,file_size_bytes,downloaded_at,failure_kind) VALUES(?1,'requested',?2,NULL,NULL,NULL,NULL) ON CONFLICT(enclosure_id) DO UPDATE SET state='requested',origin=excluded.origin,local_file=NULL,file_size_bytes=NULL,downloaded_at=NULL,failure_kind=NULL",
+                params![enclosure_id, origin_db(origin)],
+            )
+            .map_err(sql_error)?;
+            Ok(())
+        }
+        Some(DownloadState::Requested | DownloadState::Downloaded) => Ok(()),
+        Some(other) => Err(CoreError::data(format!(
+            "cannot request download from {other:?}"
+        ))),
+    }
+}
+
+fn request_download_deletion_in_transaction(
+    tx: &Transaction<'_>,
+    enclosure_id: i64,
+) -> Result<(), CoreError> {
+    let Some(state) = read_download_state(tx, enclosure_id)? else {
+        return Ok(());
+    };
+    let automatic: bool = tx
+        .query_row(
+            "SELECT origin='automatic' FROM media_downloads WHERE enclosure_id=?1",
+            [enclosure_id],
+            |row| row.get(0),
+        )
+        .map_err(sql_error)?;
+    match state {
+        DownloadState::Downloaded => {
+            tx.execute(
+                "UPDATE media_downloads SET state='delete_requested' WHERE enclosure_id=?1",
+                [enclosure_id],
+            )
+            .map_err(sql_error)?;
+        }
+        DownloadState::DeleteRequested => {}
+        DownloadState::Requested | DownloadState::Failed => {
+            tx.execute(
+                "DELETE FROM media_downloads WHERE enclosure_id=?1",
+                [enclosure_id],
+            )
+            .map_err(sql_error)?;
+        }
+        DownloadState::NotDownloaded => {}
+    }
+    if automatic {
+        tx.execute(
+            "INSERT OR IGNORE INTO auto_download_suppressions(enclosure_id) VALUES(?1)",
+            [enclosure_id],
+        )
+        .map_err(sql_error)?;
+    }
+    Ok(())
+}
+
 fn listening_list_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<(
@@ -3461,6 +3698,8 @@ mod tests {
             download_network_policy: DownloadNetworkPolicy::AnyNetwork,
             download_retention: DownloadRetention::Forever,
             delete_after_playback: false,
+            auto_download_listening_list: false,
+            remove_completed_listening_list: false,
         };
         let preferences = vec![FeedPreferences {
             feed_id: 999,
@@ -5461,6 +5700,7 @@ mod tests {
         assert_eq!(requested.origin, Some(DownloadOrigin::Manual));
         assert!(requested.local_file.is_none());
         assert!(requested.failure_kind.is_none());
+        assert!(store.is_in_listening_list(100).unwrap());
 
         // stale completion after cancel must not resurrect into Downloaded
         store.cancel_download(1000).unwrap();
@@ -5514,6 +5754,82 @@ mod tests {
             .unwrap();
         store.request_download_deletion(1000).unwrap();
         assert!(store.auto_download_suppressed(1000).unwrap());
+    }
+
+    #[test]
+    fn listening_list_mutations_and_completion_policy_are_article_centered() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let article = Article {
+            id: 200,
+            feed_id: 10,
+            title: "Article".into(),
+            url: "https://example.test/200".into(),
+            comments_url: String::new(),
+            published_at: "2026-01-01T00:00:00Z".into(),
+            is_read: false,
+            is_starred: false,
+            raw_html_content: String::new(),
+            preview: String::new(),
+            image_url: None,
+        };
+        let enclosures = [
+            Enclosure {
+                id: 2000,
+                article_id: 200,
+                url: "https://cdn.test/2000.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+            Enclosure {
+                id: 2001,
+                article_id: 200,
+                url: "https://cdn.test/2001.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+        ];
+        store
+            .reconcile_with_enclosures(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 10,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                std::slice::from_ref(&article),
+                &enclosures,
+            )
+            .unwrap();
+        store.set_auto_download_listening_list(true).unwrap();
+        store
+            .add_to_listening_list_with_policy(200, "2026-01-02T00:00:00Z", true)
+            .unwrap();
+        assert_eq!(
+            store.media_download(2000).unwrap().unwrap().state,
+            DownloadState::Requested
+        );
+        assert_eq!(
+            store.media_download(2001).unwrap().unwrap().state,
+            DownloadState::Requested
+        );
+        store.set_remove_completed_listening_list(true).unwrap();
+        store
+            .complete_playback(2000, Some(60_000), "2026-01-03T00:00:00Z", false)
+            .unwrap();
+        assert!(store.is_in_listening_list(200).unwrap());
+        store
+            .complete_playback(2001, Some(60_000), "2026-01-03T00:01:00Z", false)
+            .unwrap();
+        assert!(!store.is_in_listening_list(200).unwrap());
+        assert!(store.media_download(2000).unwrap().is_none());
+        assert!(store.media_download(2001).unwrap().is_none());
     }
 
     #[test]

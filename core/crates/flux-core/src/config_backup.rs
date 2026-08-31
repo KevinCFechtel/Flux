@@ -176,6 +176,10 @@ struct CoreSettingsV1 {
     download_retention_days: Option<u32>,
     #[serde(default)]
     delete_after_playback: Option<bool>,
+    #[serde(default)]
+    auto_download_listening_list: Option<bool>,
+    #[serde(default)]
+    remove_completed_listening_list: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -342,6 +346,10 @@ fn to_payload(input: ConfigBackupInput) -> Result<PayloadV1, ConfigBackupError> 
                 DownloadRetention::Days(days) => Some(days),
             },
             delete_after_playback: Some(input.core_settings.delete_after_playback),
+            auto_download_listening_list: Some(input.core_settings.auto_download_listening_list),
+            remove_completed_listening_list: Some(
+                input.core_settings.remove_completed_listening_list,
+            ),
         },
         feed_preferences: input
             .feed_preferences
@@ -405,6 +413,14 @@ fn from_payload(
             Some(_) => return Err(ConfigBackupError::InvalidContents),
         },
         delete_after_playback: payload.core_settings.delete_after_playback.unwrap_or(false),
+        auto_download_listening_list: payload
+            .core_settings
+            .auto_download_listening_list
+            .unwrap_or(false),
+        remove_completed_listening_list: payload
+            .core_settings
+            .remove_completed_listening_list
+            .unwrap_or(false),
     };
     validate_settings(&settings)?;
     let preferences = payload

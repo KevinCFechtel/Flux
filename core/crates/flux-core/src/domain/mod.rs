@@ -508,6 +508,8 @@ pub struct CoreSettings {
     pub download_network_policy: DownloadNetworkPolicy,
     pub download_retention: DownloadRetention,
     pub delete_after_playback: bool,
+    pub auto_download_listening_list: bool,
+    pub remove_completed_listening_list: bool,
 }
 
 impl Default for CoreSettings {
@@ -520,6 +522,8 @@ impl Default for CoreSettings {
             download_network_policy: DownloadNetworkPolicy::AnyNetwork,
             download_retention: DownloadRetention::Forever,
             delete_after_playback: false,
+            auto_download_listening_list: false,
+            remove_completed_listening_list: false,
         }
     }
 }

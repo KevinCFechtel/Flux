@@ -465,6 +465,35 @@ impl FluxCore {
     pub fn is_in_listening_list(&self, article_id: i64) -> Result<bool, CoreError> {
         self.store.is_in_listening_list(article_id)
     }
+    pub fn add_to_listening_list(&self, article_id: i64) -> Result<(), CoreError> {
+        if article_id <= 0 {
+            return Err(CoreError::data("article ID must be positive"));
+        }
+        let settings = self.store.core_settings()?;
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.store
+            .add_to_listening_list_with_policy(
+                article_id,
+                &Utc::now().to_rfc3339(),
+                settings.auto_download_listening_list,
+            )
+            .map(|_| ())
+    }
+    pub fn remove_from_listening_list(&self, article_id: i64) -> Result<(), CoreError> {
+        if article_id <= 0 {
+            return Err(CoreError::data("article ID must be positive"));
+        }
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.store
+            .remove_from_listening_list(article_id)
+            .map(|_| ())
+    }
     pub fn save_media(&self, enclosure_id: i64) -> Result<(), CoreError> {
         if enclosure_id <= 0 {
             return Err(CoreError::data("enclosure ID must be positive"));
@@ -896,6 +925,12 @@ impl FluxCore {
     }
     pub fn set_delete_after_playback(&self, enabled: bool) -> Result<(), CoreError> {
         self.store.set_delete_after_playback(enabled)
+    }
+    pub fn set_auto_download_listening_list(&self, enabled: bool) -> Result<(), CoreError> {
+        self.store.set_auto_download_listening_list(enabled)
+    }
+    pub fn set_remove_completed_listening_list(&self, enabled: bool) -> Result<(), CoreError> {
+        self.store.set_remove_completed_listening_list(enabled)
     }
     pub fn runtime_health(&self) -> Result<RuntimeHealthStatus, CoreError> {
         let state = self

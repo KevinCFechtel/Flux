@@ -351,6 +351,8 @@ pub struct CoreSettings {
     pub download_network_policy: DownloadNetworkPolicy,
     pub download_retention: DownloadRetention,
     pub delete_after_playback: bool,
+    pub auto_download_listening_list: bool,
+    pub remove_completed_listening_list: bool,
 }
 
 #[derive(uniffi::Enum)]
@@ -897,6 +899,16 @@ impl Flux {
             .is_in_listening_list(article_id)
             .map_err(map_error)
     }
+    pub fn add_to_listening_list(&self, article_id: i64) -> Result<(), FluxError> {
+        self.core
+            .add_to_listening_list(article_id)
+            .map_err(map_error)
+    }
+    pub fn remove_from_listening_list(&self, article_id: i64) -> Result<(), FluxError> {
+        self.core
+            .remove_from_listening_list(article_id)
+            .map_err(map_error)
+    }
     pub fn saved_media(&self) -> Result<Vec<SavedPlayableMediaItem>, FluxError> {
         self.core
             .saved_playable_media()
@@ -1119,6 +1131,16 @@ impl Flux {
     pub fn set_delete_after_playback(&self, enabled: bool) -> Result<(), FluxError> {
         self.core
             .set_delete_after_playback(enabled)
+            .map_err(map_error)
+    }
+    pub fn set_auto_download_listening_list(&self, enabled: bool) -> Result<(), FluxError> {
+        self.core
+            .set_auto_download_listening_list(enabled)
+            .map_err(map_error)
+    }
+    pub fn set_remove_completed_listening_list(&self, enabled: bool) -> Result<(), FluxError> {
+        self.core
+            .set_remove_completed_listening_list(enabled)
             .map_err(map_error)
     }
     pub fn set_feed_auto_download_audio(
@@ -1465,6 +1487,8 @@ impl From<CoreSettings> for domain::CoreSettings {
             download_network_policy: value.download_network_policy.into(),
             download_retention: value.download_retention.into(),
             delete_after_playback: value.delete_after_playback,
+            auto_download_listening_list: value.auto_download_listening_list,
+            remove_completed_listening_list: value.remove_completed_listening_list,
         }
     }
 }
@@ -1584,6 +1608,8 @@ impl From<domain::CoreSettings> for CoreSettings {
             download_network_policy: value.download_network_policy.into(),
             download_retention: value.download_retention.into(),
             delete_after_playback: value.delete_after_playback,
+            auto_download_listening_list: value.auto_download_listening_list,
+            remove_completed_listening_list: value.remove_completed_listening_list,
         }
     }
 }
