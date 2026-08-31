@@ -1243,17 +1243,19 @@ impl Store {
     ) -> Result<(), CoreError> {
         let state = self.playback_state(enclosure_id)?;
         let Some(state) = state else {
-            let connection = self
-                .connection
-                .lock()
-                .map_err(|_| CoreError::internal("database lock poisoned"))?;
-            let exists: bool = connection
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM enclosures WHERE id=?1)",
-                    [enclosure_id],
-                    |row| row.get(0),
-                )
-                .map_err(sql_error)?;
+            let exists: bool = {
+                let connection = self
+                    .connection
+                    .lock()
+                    .map_err(|_| CoreError::internal("database lock poisoned"))?;
+                connection
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM enclosures WHERE id=?1)",
+                        [enclosure_id],
+                        |row| row.get(0),
+                    )
+                    .map_err(sql_error)?
+            };
             if !exists {
                 return Err(CoreError::data(format!(
                     "enclosure {enclosure_id} does not exist"
@@ -1262,21 +1264,23 @@ impl Store {
             return self.observe_media_metadata_duration(enclosure_id, duration_ms);
         };
         let (position, status) = (state.position_ms.min(duration_ms), state.status);
-        let mut connection = self
-            .connection
-            .lock()
-            .map_err(|_| CoreError::internal("database lock poisoned"))?;
-        let tx = connection.transaction().map_err(sql_error)?;
-        ensure_enclosure(&tx, enclosure_id)?;
-        upsert_playback_state(
-            &tx,
-            enclosure_id,
-            position,
-            Some(duration_ms),
-            status,
-            updated_at,
-        )?;
-        tx.commit().map_err(sql_error)?;
+        {
+            let mut connection = self
+                .connection
+                .lock()
+                .map_err(|_| CoreError::internal("database lock poisoned"))?;
+            let tx = connection.transaction().map_err(sql_error)?;
+            ensure_enclosure(&tx, enclosure_id)?;
+            upsert_playback_state(
+                &tx,
+                enclosure_id,
+                position,
+                Some(duration_ms),
+                status,
+                updated_at,
+            )?;
+            tx.commit().map_err(sql_error)?;
+        }
         self.observe_media_metadata_duration(enclosure_id, duration_ms)
     }
 
@@ -6603,6 +6607,52 @@ mod tests {
         assert_eq!(
             store.media_metadata(1000).unwrap().unwrap().duration_ms,
             Some(90_000)
+        );
+    }
+
+    #[test]
+    fn observe_media_duration_updates_playback_and_metadata_without_nested_locking() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let (article, enclosure) = media_article_enclosure_pair();
+        store
+            .reconcile_with_enclosures(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 10,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                &[article],
+                &[enclosure],
+            )
+            .unwrap();
+
+        store
+            .observe_media_duration(1000, 120_000, "2026-01-01T00:00:00Z")
+            .unwrap();
+        assert_eq!(
+            store.media_metadata(1000).unwrap().unwrap().duration_ms,
+            Some(120_000)
+        );
+
+        store
+            .checkpoint_playback(1000, 30_000, None, "2026-01-01T00:00:01Z", false)
+            .unwrap();
+        store
+            .observe_media_duration(1000, 60_000, "2026-01-01T00:00:02Z")
+            .unwrap();
+
+        let playback = store.playback_state(1000).unwrap().unwrap();
+        assert_eq!(playback.position_ms, 30_000);
+        assert_eq!(playback.duration_ms, Some(60_000));
+        assert_eq!(
+            store.media_metadata(1000).unwrap().unwrap().duration_ms,
+            Some(60_000)
         );
     }
 }
