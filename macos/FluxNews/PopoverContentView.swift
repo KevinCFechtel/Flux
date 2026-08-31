@@ -32,6 +32,7 @@ struct PopoverContentView: View {
     @ObservedObject var store: BrowserStore
     @ObservedObject var playbackState: MediaPlaybackPresentationState
     let playbackCoordinator: MediaPlaybackCoordinator?
+    @ObservedObject var transferState: MediaTransferPresentationState
     let layoutChanged: (Bool) -> Void
     let dismiss: () -> Void
     @State private var sidebarVisible = false
@@ -49,6 +50,7 @@ struct PopoverContentView: View {
                 store: store,
                 playbackState: playbackState,
                 playbackCoordinator: playbackCoordinator,
+                transferState: transferState,
                 sidebarVisible: $sidebarVisible,
                 showingPlayer: $showingPlayer,
                 layoutChanged: layoutChanged,
@@ -70,6 +72,7 @@ private struct ArticlePane: View {
     @ObservedObject var store: BrowserStore
     @ObservedObject var playbackState: MediaPlaybackPresentationState
     let playbackCoordinator: MediaPlaybackCoordinator?
+    @ObservedObject var transferState: MediaTransferPresentationState
     @Binding var sidebarVisible: Bool
     @Binding var showingPlayer: Bool
     let layoutChanged: (Bool) -> Void
@@ -86,10 +89,11 @@ private struct ArticlePane: View {
     @State private var pendingAudioReplacement: Enclosure?
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
-    init(store: BrowserStore, playbackState: MediaPlaybackPresentationState, playbackCoordinator: MediaPlaybackCoordinator?, sidebarVisible: Binding<Bool>, showingPlayer: Binding<Bool>, layoutChanged: @escaping (Bool) -> Void, dismiss: @escaping () -> Void) {
+    init(store: BrowserStore, playbackState: MediaPlaybackPresentationState, playbackCoordinator: MediaPlaybackCoordinator?, transferState: MediaTransferPresentationState, sidebarVisible: Binding<Bool>, showingPlayer: Binding<Bool>, layoutChanged: @escaping (Bool) -> Void, dismiss: @escaping () -> Void) {
         self.store = store
         self.playbackState = playbackState
         self.playbackCoordinator = playbackCoordinator
+        self.transferState = transferState
         _sidebarVisible = sidebarVisible
         _showingPlayer = showingPlayer
         self.layoutChanged = layoutChanged
@@ -236,7 +240,7 @@ private struct ArticlePane: View {
 
     @ViewBuilder private var content: some View {
         if store.isListeningList {
-            ListeningListView(store: store, playbackState: playbackState, onPlay: playAudio, onDownload: { articleID, enclosureID in store.requestManualDownload(articleID: articleID, enclosureID: enclosureID) }, onDelete: { articleID, enclosureID in store.deleteDownload(articleID: articleID, enclosureID: enclosureID) }, onRemove: { articleID in store.removeFromListeningList(articleID: articleID) })
+            ListeningListView(store: store, playbackState: playbackState, transferState: transferState, onPlay: playAudio, onDownload: { articleID, enclosureID in store.requestManualDownload(articleID: articleID, enclosureID: enclosureID) }, onDelete: { articleID, enclosureID in store.deleteDownload(articleID: articleID, enclosureID: enclosureID) }, onRemove: { articleID in store.removeFromListeningList(articleID: articleID) })
         } else if store.isSearchActive {
             SearchResultsView(store: store)
         } else if let error = store.errorMessage, store.articles.isEmpty {
@@ -257,7 +261,7 @@ private struct ArticlePane: View {
                     ScrollView {
                         LazyVStack(spacing: store.articleListStyle == .row ? 0 : 4) {
                             ForEach(store.articles, id: \.id) { article in
-                                ArticleItem(article: article, style: store.articleListStyle, selected: selectedID == article.id, audioState: selectedID == article.id ? store.articleAudioActionState : nil, store: store, onSelect: { selectedID = article.id }, onPlayAudio: playAudio, onDownloadAudio: { enclosure in store.requestManualDownload(articleID: article.id, enclosureID: enclosure.id) }, onDeleteDownload: { enclosure in store.deleteDownload(articleID: article.id, enclosureID: enclosure.id) }, onAddToListeningList: { store.addToListeningList(articleID: article.id) }, onHoverChanged: { hovering in
+                                ArticleItem(article: article, style: store.articleListStyle, selected: selectedID == article.id, audioState: selectedID == article.id ? store.articleAudioActionState : nil, transferState: transferState, store: store, onSelect: { selectedID = article.id }, onPlayAudio: playAudio, onDownloadAudio: { enclosure in store.requestManualDownload(articleID: article.id, enclosureID: enclosure.id) }, onDeleteDownload: { enclosure in store.deleteDownload(articleID: article.id, enclosureID: enclosure.id) }, onAddToListeningList: { store.addToListeningList(articleID: article.id) }, onHoverChanged: { hovering in
                                     if hovering { hoveredID = article.id }
                                     else if hoveredID == article.id { hoveredID = nil }
                                 })
@@ -432,7 +436,7 @@ private struct SearchResultsView: View {
                     ScrollView {
                         LazyVStack(spacing: store.articleListStyle == .row ? 0 : 4) {
                             ForEach(store.articles, id: \.id) { article in
-                                ArticleItem(article: article, style: store.articleListStyle, selected: false, audioState: nil, store: store, onSelect: {}, onPlayAudio: { _ in }, onDownloadAudio: { _ in }, onDeleteDownload: { _ in }, onAddToListeningList: {}, onHoverChanged: { _ in })
+                                ArticleItem(article: article, style: store.articleListStyle, selected: false, audioState: nil, transferState: nil, store: store, onSelect: {}, onPlayAudio: { _ in }, onDownloadAudio: { _ in }, onDeleteDownload: { _ in }, onAddToListeningList: {}, onHoverChanged: { _ in })
                                     .onAppear { if article.id == store.articles.last?.id { store.loadMoreSearchResults() } }
                                 if store.articleListStyle == .row { Divider().padding(.leading, 264) }
                             }
@@ -448,6 +452,7 @@ private struct SearchResultsView: View {
 private struct ListeningListView: View {
     @ObservedObject var store: BrowserStore
     @ObservedObject var playbackState: MediaPlaybackPresentationState
+    @ObservedObject var transferState: MediaTransferPresentationState
     let onPlay: (Enclosure) -> Void
     let onDownload: (Int64, Int64) -> Void
     let onDelete: (Int64, Int64) -> Void
@@ -464,7 +469,7 @@ private struct ListeningListView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(store.listeningListItems, id: \.articleId) { item in
-                        ListeningListRow(item: item, playbackState: playbackState, onPlay: onPlay, onDownload: onDownload, onDelete: onDelete, onRemove: onRemove)
+                        ListeningListRow(item: item, playbackState: playbackState, transferState: transferState, onPlay: onPlay, onDownload: onDownload, onDelete: onDelete, onRemove: onRemove)
                         Divider().padding(.leading, 12)
                     }
                 }
@@ -476,6 +481,7 @@ private struct ListeningListView: View {
 private struct ListeningListRow: View {
     let item: ListeningListItem
     @ObservedObject var playbackState: MediaPlaybackPresentationState
+    @ObservedObject var transferState: MediaTransferPresentationState
     let onPlay: (Enclosure) -> Void
     let onDownload: (Int64, Int64) -> Void
     let onDelete: (Int64, Int64) -> Void
@@ -586,6 +592,19 @@ private struct ListeningListRow: View {
                     .foregroundStyle(count.downloaded == count.total ? .green : .secondary)
                 if count.total > 1 || count.downloaded > 0 { Text("\(count.downloaded) / \(count.total)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }
             }
+            if let transfer = item.audioEnclosures.compactMap({ transferState.runtime(for: $0.enclosure.id) }).first {
+                if let fraction = transfer.fraction {
+                    ProgressView(value: fraction)
+                        .progressViewStyle(.linear)
+                        .frame(width: 48)
+                        .accessibilityLabel(String(localized: "Download progress"))
+                        .accessibilityValue(String(localized: "\(Int((fraction * 100).rounded())) percent"))
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel(String(localized: "Downloading"))
+                }
+            }
         }
     }
 
@@ -595,9 +614,10 @@ private struct ListeningListRow: View {
 
     private func downloadActionTitle(_ audio: ListeningListEnclosure, index: Int) -> String {
         let label = ArticleAudioActions.enclosureLabel(audio.enclosure, index: index)
-        switch ArticleAudioActions.downloadAction(audio.download) {
+        switch ArticleAudioActions.downloadAction(audio.download, runtime: transferState.runtime(for: audio.enclosure.id)) {
         case .delete: return String(localized: "Delete Download: \(label)")
-        case .downloading: return String(localized: "Downloading: \(label)")
+        case .pending: return String(localized: "Pending: \(label)")
+        case .downloading: return String(localized: "Downloading\(transferState.runtime(for: audio.enclosure.id)?.fraction.map { " \(Int(($0 * 100).rounded()))%" } ?? ""): \(label)")
         case .pendingDeletion: return String(localized: "Pending deletion: \(label)")
         case .retry: return String(localized: "Retry Download: \(label)")
         case .download: return String(localized: "Download: \(label)")
@@ -750,6 +770,7 @@ private struct ArticleItem: View {
     let style: ArticleListStyle
     let selected: Bool
     let audioState: ArticleAudioActionState?
+    let transferState: MediaTransferPresentationState?
     @ObservedObject var store: BrowserStore
     let onSelect: () -> Void
     let onPlayAudio: (Enclosure) -> Void
@@ -803,7 +824,7 @@ private struct ArticleItem: View {
             Text(article.title).font(.system(size: 14, weight: article.isRead ? .regular : .semibold))
                 .foregroundStyle(article.isRead ? .secondary : .primary).lineLimit(3).multilineTextAlignment(.leading)
             if !article.preview.isEmpty { Text(article.preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(store.articlePreviewLines.rawValue).multilineTextAlignment(.leading) }
-            if selected, let audioState, !audioState.enclosures.isEmpty { AudioActionsView(state: audioState, onPlay: onPlayAudio, onDownload: onDownloadAudio, onDelete: onDeleteDownload, onAdd: onAddToListeningList) }
+            if selected, let audioState, let transferState, !audioState.enclosures.isEmpty { AudioActionsView(state: audioState, transferState: transferState, onPlay: onPlayAudio, onDownload: onDownloadAudio, onDelete: onDeleteDownload, onAdd: onAddToListeningList) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -857,6 +878,7 @@ private struct ArticleItem: View {
 
 private struct AudioActionsView: View {
     let state: ArticleAudioActionState
+    @ObservedObject var transferState: MediaTransferPresentationState
     let onPlay: (Enclosure) -> Void
     let onDownload: (Enclosure) -> Void
     let onDelete: (Enclosure) -> Void
@@ -912,9 +934,12 @@ private struct AudioActionsView: View {
 
     private func actionTitle(_ title: String, enclosure: Enclosure, index: Int = 0) -> String {
         guard title == "Download" else { return title }
-        switch ArticleAudioActions.downloadAction(state.downloads[enclosure.id]) {
+        switch ArticleAudioActions.downloadAction(state.downloads[enclosure.id], runtime: transferState.runtime(for: enclosure.id)) {
         case .delete: return String(localized: "Delete Download")
-        case .downloading: return String(localized: "Downloading...")
+        case .pending: return String(localized: "Pending")
+        case .downloading:
+            if let fraction = transferState.runtime(for: enclosure.id)?.fraction { return String(localized: "Downloading \(Int((fraction * 100).rounded()))%") }
+            return String(localized: "Downloading...")
         case .pendingDeletion: return String(localized: "Pending deletion")
         case .retry: return String(localized: "Retry Download")
         case .download: return index == 0 ? title : ArticleAudioActions.enclosureLabel(enclosure, index: index)

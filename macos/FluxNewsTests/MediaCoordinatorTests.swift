@@ -101,18 +101,24 @@ private actor FakeTransferEngine: MediaTransferEngine {
 
     var result: Result
     private(set) var callCount = 0
+    private var progressCallbacks: [@Sendable (Int64, Int64?) -> Void] = []
     private var continuations = [CheckedContinuation<NativeTransferResult, Error>]()
 
     init(result: Result) { self.result = result }
 
-    func download(from url: URL) async throws -> NativeTransferResult {
+    func download(from url: URL, progress: @escaping @Sendable (Int64, Int64?) -> Void) async throws -> NativeTransferResult {
         callCount += 1
+        progressCallbacks.append(progress)
         switch result {
         case let .immediate(value): return value
         case let .failure(error): throw error
         case .pending:
             return try await withCheckedThrowingContinuation { continuations.append($0) }
         }
+    }
+
+    func emitProgress(index: Int, bytesReceived: Int64, expectedBytes: Int64?) {
+        progressCallbacks[index](bytesReceived, expectedBytes)
     }
 
     func resolveAll(_ result: Result) {
@@ -167,9 +173,21 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(ArticleAudioActions.downloadAction(nil), .download)
         XCTAssertEqual(ArticleAudioActions.downloadAction(MediaDownload(enclosureId: 1, state: .notDownloaded, origin: .manual, localFile: nil, fileSizeBytes: nil, downloadedAt: nil, failureKind: nil)), .download)
         XCTAssertEqual(ArticleAudioActions.downloadAction(MediaDownload(enclosureId: 1, state: .failed, origin: .manual, localFile: nil, fileSizeBytes: nil, downloadedAt: nil, failureKind: .network)), .retry)
-        XCTAssertEqual(ArticleAudioActions.downloadAction(MediaDownload(enclosureId: 1, state: .requested, origin: .manual, localFile: nil, fileSizeBytes: nil, downloadedAt: nil, failureKind: nil)), .downloading)
+        XCTAssertEqual(ArticleAudioActions.downloadAction(MediaDownload(enclosureId: 1, state: .requested, origin: .manual, localFile: nil, fileSizeBytes: nil, downloadedAt: nil, failureKind: nil)), .pending)
         XCTAssertEqual(ArticleAudioActions.downloadAction(MediaDownload(enclosureId: 1, state: .downloaded, origin: .manual, localFile: "/tmp/episode.mp3", fileSizeBytes: 10, downloadedAt: nil, failureKind: nil)), .delete)
         XCTAssertEqual(ArticleAudioActions.downloadAction(MediaDownload(enclosureId: 1, state: .deleteRequested, origin: .manual, localFile: "/tmp/episode.mp3", fileSizeBytes: 10, downloadedAt: nil, failureKind: nil)), .pendingDeletion)
+        let requested = MediaDownload(enclosureId: 1, state: .requested, origin: .manual, localFile: nil, fileSizeBytes: nil, downloadedAt: nil, failureKind: nil)
+        XCTAssertEqual(ArticleAudioActions.downloadAction(requested), .pending)
+        XCTAssertEqual(ArticleAudioActions.downloadAction(requested, runtime: MediaTransferRuntime(enclosureID: 1, bytesReceived: 42, expectedBytes: 100, phase: .transferring)), .downloading)
+        XCTAssertEqual(ArticleAudioActions.downloadAction(MediaDownload(enclosureId: 1, state: .downloaded, origin: .manual, localFile: nil, fileSizeBytes: nil, downloadedAt: nil, failureKind: nil), runtime: MediaTransferRuntime(enclosureID: 1, bytesReceived: 100, expectedBytes: 100, phase: .transferring)), .delete)
+    }
+
+    func testTransferRuntimeProgressValidatesAndClampsFractions() {
+        XCTAssertEqual(MediaTransferRuntime(enclosureID: 1, bytesReceived: 42, expectedBytes: 100, phase: .transferring).fraction, 0.42)
+        XCTAssertEqual(MediaTransferRuntime(enclosureID: 1, bytesReceived: 120, expectedBytes: 100, phase: .transferring).fraction, 1)
+        XCTAssertNil(MediaTransferRuntime(enclosureID: 1, bytesReceived: 42, expectedBytes: nil, phase: .transferring).fraction)
+        XCTAssertNil(MediaTransferRuntime(enclosureID: 1, bytesReceived: 42, expectedBytes: 0, phase: .transferring).fraction)
+        XCTAssertNil(MediaTransferRuntime(enclosureID: 1, bytesReceived: -1, expectedBytes: 100, phase: .transferring).fraction)
     }
 
     func testPlaybackUseChangesReconcileDeferredCoreWork() throws {
@@ -433,6 +451,30 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(calls, 1)
     }
 
+    func testStaleTransferProgressCannotOverwriteReplacementTask() async throws {
+        let core = FakeTransferCore()
+        core.transfers = [transferWork()]
+        let engine = FakeTransferEngine(result: .pending)
+        let coordinator = MediaTransferCoordinator(core: core, mediaRoot: temporaryMediaRoot(), engine: engine)
+
+        coordinator.reconcile()
+        await settle()
+        await engine.emitProgress(index: 0, bytesReceived: 10, expectedBytes: 100)
+        await settle()
+        XCTAssertEqual(coordinator.presentationState.runtime(for: 7)?.bytesReceived, 10)
+
+        core.transfers = []
+        coordinator.reconcile()
+        core.transfers = [transferWork()]
+        coordinator.reconcile()
+        await settle()
+        await engine.emitProgress(index: 0, bytesReceived: 90, expectedBytes: 100)
+        await engine.emitProgress(index: 1, bytesReceived: 20, expectedBytes: 100)
+        await settle()
+
+        XCTAssertEqual(coordinator.presentationState.runtime(for: 7)?.bytesReceived, 20)
+    }
+
     func testCancellationReconciliationCancelsWithoutFailureAndLateCompletionStaysStale() async throws {
         let core = FakeTransferCore()
         core.transfers = [transferWork()]
@@ -507,6 +549,7 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
         XCTAssertEqual(core.finished[0].1, "downloads/enclosure-7.media")
         XCTAssertEqual(core.states[7], .downloaded)
+        XCTAssertNil(coordinator.presentationState.runtime(for: 7))
     }
 
     func testNetworkAndStorageFailuresUseNarrowFailureKinds() async throws {

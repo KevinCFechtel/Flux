@@ -65,7 +65,7 @@ enum ListeningListPresentation {
 }
 
 enum ArticleAudioActions {
-    enum DownloadAction: Equatable { case download, delete, downloading, pendingDeletion, retry }
+    enum DownloadAction: Equatable { case download, pending, delete, downloading, pendingDeletion, retry }
 
     static func audioEnclosures(_ enclosures: [Enclosure]) -> [Enclosure] {
         enclosures.filter { $0.mediaKind == .audio }
@@ -78,7 +78,7 @@ enum ArticleAudioActions {
     static func canRequestDownload(_ download: MediaDownload?) -> Bool {
         switch downloadAction(download) {
         case .download, .retry: return true
-        case .delete, .downloading, .pendingDeletion: return false
+        case .pending, .delete, .downloading, .pendingDeletion: return false
         }
     }
 
@@ -90,10 +90,10 @@ enum ArticleAudioActions {
         item.audioEnclosures.contains { $0.download?.state == .downloaded }
     }
 
-    static func downloadAction(_ download: MediaDownload?) -> DownloadAction {
+    static func downloadAction(_ download: MediaDownload?, runtime: MediaTransferRuntime? = nil) -> DownloadAction {
         switch download?.state {
         case .downloaded: return .delete
-        case .requested: return .downloading
+        case .requested: return runtime?.phase == .transferring ? .downloading : .pending
         case .deleteRequested: return .pendingDeletion
         case .failed: return .retry
         case .notDownloaded, nil: return .download

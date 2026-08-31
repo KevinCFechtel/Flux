@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var shortcutObservation: AnyCancellable?
     private let spotlightIndexer = SpotlightIndexer()
     private let playbackPresentationState = MediaPlaybackPresentationState()
+    private let transferPresentationState = MediaTransferPresentationState()
     private(set) var playbackCoordinator: MediaPlaybackCoordinator?
     private var transferCoordinator: MediaTransferCoordinator?
     private lazy var shortcutRegistrar = GlobalShortcutRegistrar { [weak self] in self?.show() }
@@ -35,7 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             store.onMediaTransferRequested = { [weak self] in self?.transferCoordinator?.reconcile() }
             self.transferCoordinator = MediaTransferCoordinator(core: core, isMediaInUse: { [weak self] enclosureID in
                 self?.playbackCoordinator?.isUsing(enclosureID: enclosureID) ?? false
-            })
+            }, presentationState: self.transferPresentationState)
             self.transferCoordinator?.onWorkChanged = { [weak store] in
                 store?.refreshArticleAudioActions()
                 store?.refreshListeningListIfVisible()
@@ -106,7 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         AppRouter.shared.open(route)
         return true
     }
-    private func host() -> NSHostingController<PopoverContentView> { NSHostingController(rootView: PopoverContentView(store: store, playbackState: playbackPresentationState, playbackCoordinator: playbackCoordinator, layoutChanged: { [weak self] visible in self?.resize(sidebarVisible: visible) }, dismiss: { [weak self] in self?.dismiss() })) }
+    private func host() -> NSHostingController<PopoverContentView> { NSHostingController(rootView: PopoverContentView(store: store, playbackState: playbackPresentationState, playbackCoordinator: playbackCoordinator, transferState: transferPresentationState, layoutChanged: { [weak self] visible in self?.resize(sidebarVisible: visible) }, dismiss: { [weak self] in self?.dismiss() })) }
     private func show() { NSApplication.shared.activate(ignoringOtherApps: true); if let button = usableButton() { popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY); popover.contentViewController?.view.window?.makeKey() } else { showFallback() } }
     private func detailScreen() -> NSScreen? { popover.contentViewController?.view.window?.screen ?? fallbackPanel?.screen ?? statusItem.button?.window?.screen }
     private func usableButton() -> NSStatusBarButton? { guard let button = statusItem.button, let window = button.window, let screen = window.screen else { return nil }; return screen.frame.intersects(window.convertToScreen(button.convert(button.bounds, to: nil))) ? button : nil }

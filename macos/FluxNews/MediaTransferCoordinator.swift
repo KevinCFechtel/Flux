@@ -5,8 +5,36 @@ struct NativeTransferResult {
     let temporaryURL: URL
 }
 
+enum MediaTransferRuntimePhase: Equatable {
+    case starting
+    case transferring
+    case cancelling
+}
+
+struct MediaTransferRuntime: Equatable {
+    let enclosureID: Int64
+    let bytesReceived: Int64
+    let expectedBytes: Int64?
+    let phase: MediaTransferRuntimePhase
+
+    var fraction: Double? {
+        guard bytesReceived >= 0, let expectedBytes, expectedBytes > 0 else { return nil }
+        return min(max(Double(bytesReceived) / Double(expectedBytes), 0), 1)
+    }
+}
+
+@MainActor
+final class MediaTransferPresentationState: ObservableObject {
+    @Published private(set) var transfers: [Int64: MediaTransferRuntime] = [:]
+
+    func runtime(for enclosureID: Int64) -> MediaTransferRuntime? { transfers[enclosureID] }
+
+    fileprivate func set(_ runtime: MediaTransferRuntime) { transfers[runtime.enclosureID] = runtime }
+    fileprivate func remove(enclosureID: Int64) { transfers[enclosureID] = nil }
+}
+
 protocol MediaTransferEngine: Sendable {
-    func download(from url: URL) async throws -> NativeTransferResult
+    func download(from url: URL, progress: @escaping @Sendable (Int64, Int64?) -> Void) async throws -> NativeTransferResult
 }
 
 @MainActor
@@ -35,13 +63,91 @@ struct URLSessionMediaTransferEngine: MediaTransferEngine {
         self.networkPolicy = networkPolicy
     }
 
-    func download(from url: URL) async throws -> NativeTransferResult {
-        let session = URLSession(configuration: MediaTransferNetworkConfiguration.configuration(for: networkPolicy))
-        let (temporaryURL, response) = try await session.download(from: url)
-        guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
-            throw MediaTransferError.network
+    func download(from url: URL, progress: @escaping @Sendable (Int64, Int64?) -> Void) async throws -> NativeTransferResult {
+        let handle = URLSessionDownloadHandle()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let delegate = FluxURLSessionDownloadDelegate(progress: progress, continuation: continuation, handle: handle)
+                let session = URLSession(configuration: MediaTransferNetworkConfiguration.configuration(for: networkPolicy), delegate: delegate, delegateQueue: nil)
+                delegate.session = session
+                handle.set(delegate: delegate)
+                session.downloadTask(with: url).resume()
+            }
+        } onCancel: {
+            handle.cancel()
         }
-        return NativeTransferResult(temporaryURL: temporaryURL)
+    }
+}
+
+private final class URLSessionDownloadHandle: @unchecked Sendable {
+    private let lock = NSLock()
+    private var delegate: FluxURLSessionDownloadDelegate?
+    private var cancelled = false
+
+    func set(delegate: FluxURLSessionDownloadDelegate) {
+        lock.lock(); defer { lock.unlock() }
+        self.delegate = delegate
+        if cancelled { delegate.cancel() }
+    }
+
+    func cancel() {
+        lock.lock(); defer { lock.unlock() }
+        cancelled = true
+        delegate?.cancel()
+    }
+}
+
+private final class FluxURLSessionDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    private let progress: @Sendable (Int64, Int64?) -> Void
+    private var continuation: CheckedContinuation<NativeTransferResult, Error>?
+    private let handle: URLSessionDownloadHandle
+    private var temporaryURL: URL?
+    private var finished = false
+    var session: URLSession?
+
+    init(progress: @escaping @Sendable (Int64, Int64?) -> Void, continuation: CheckedContinuation<NativeTransferResult, Error>, handle: URLSessionDownloadHandle) {
+        self.progress = progress
+        self.continuation = continuation
+        self.handle = handle
+    }
+
+    func cancel() { session?.invalidateAndCancel() }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        progress(totalBytesWritten, totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : nil)
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        guard let response = downloadTask.response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
+            complete(.failure(MediaTransferError.network))
+            return
+        }
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent("flux-download-").appendingPathExtension(UUID().uuidString)
+        do {
+            try FileManager.default.copyItem(at: location, to: destination)
+            temporaryURL = destination
+        } catch {
+            complete(.failure(MediaTransferError.storage))
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error {
+            if (error as NSError).code == NSURLErrorCancelled { complete(.failure(CancellationError())) }
+            else { complete(.failure(error)) }
+        } else if let temporaryURL {
+            complete(.success(NativeTransferResult(temporaryURL: temporaryURL)))
+        } else {
+            complete(.failure(MediaTransferError.network))
+        }
+    }
+
+    private func complete(_ result: Result<NativeTransferResult, Error>) {
+        guard !finished else { return }
+        finished = true
+        session?.finishTasksAndInvalidate()
+        continuation?.resume(with: result)
+        continuation = nil
     }
 }
 
@@ -52,16 +158,18 @@ final class MediaTransferCoordinator {
     private var engine: MediaTransferEngine
     private var networkPolicy: DownloadNetworkPolicy
     private let isMediaInUse: (Int64) -> Bool
+    let presentationState: MediaTransferPresentationState
     var onWorkChanged: (() -> Void)?
     private var activeTasks = [Int64: Task<Void, Never>]()
     private var activeTaskTokens = [Int64: UUID]()
 
-    init(core: MediaTransferCore, mediaRoot: URL = MediaPlaybackPaths.mediaRootURL, networkPolicy: DownloadNetworkPolicy = .anyNetwork, engine: MediaTransferEngine? = nil, isMediaInUse: @escaping (Int64) -> Bool = { _ in false }) {
+    init(core: MediaTransferCore, mediaRoot: URL = MediaPlaybackPaths.mediaRootURL, networkPolicy: DownloadNetworkPolicy = .anyNetwork, engine: MediaTransferEngine? = nil, isMediaInUse: @escaping (Int64) -> Bool = { _ in false }, presentationState: MediaTransferPresentationState? = nil) {
         self.core = core
         self.mediaRoot = mediaRoot
         self.networkPolicy = networkPolicy
         self.engine = engine ?? URLSessionMediaTransferEngine(networkPolicy: networkPolicy)
         self.isMediaInUse = isMediaInUse
+        self.presentationState = presentationState ?? MediaTransferPresentationState()
     }
 
     func reconcile() {
@@ -78,6 +186,7 @@ final class MediaTransferCoordinator {
                 activeTasks[id]?.cancel()
                 activeTasks[id] = nil
                 activeTaskTokens[id] = nil
+                presentationState.remove(enclosureID: id)
             }
             executeDeletions(try core.downloadsRequiringDeletion())
         } catch {
@@ -86,9 +195,13 @@ final class MediaTransferCoordinator {
     }
 
     func cancel(enclosureID: Int64) {
+        if activeTasks[enclosureID] != nil {
+            presentationState.set(MediaTransferRuntime(enclosureID: enclosureID, bytesReceived: 0, expectedBytes: nil, phase: .cancelling))
+        }
         activeTasks[enclosureID]?.cancel()
         activeTasks[enclosureID] = nil
         activeTaskTokens[enclosureID] = nil
+        presentationState.remove(enclosureID: enclosureID)
     }
 
     private func start(_ work: MediaTransferWork) {
@@ -97,12 +210,18 @@ final class MediaTransferCoordinator {
             return
         }
         let token = UUID()
+        presentationState.set(MediaTransferRuntime(enclosureID: work.enclosureId, bytesReceived: 0, expectedBytes: nil, phase: .starting))
         let task = Task { [weak self] in
             guard let self else { return }
             Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").info("media transfer started enclosure=\(work.enclosureId, privacy: .public)")
             let result: NativeTransferResult
             do {
-                result = try await engine.download(from: url)
+                result = try await engine.download(from: url) { [weak self] bytesReceived, expectedBytes in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.activeTaskTokens[work.enclosureId] == token else { return }
+                        self.presentationState.set(MediaTransferRuntime(enclosureID: work.enclosureId, bytesReceived: bytesReceived, expectedBytes: expectedBytes, phase: .transferring))
+                    }
+                }
             } catch is CancellationError {
                 finish(enclosureID: work.enclosureId, token: token)
                 return
@@ -136,6 +255,8 @@ final class MediaTransferCoordinator {
             }
 
             do {
+                finish(enclosureID: work.enclosureId, token: token)
+                presentationState.remove(enclosureID: work.enclosureId)
                 try core.downloadFinished(enclosureId: work.enclosureId, localFile: reference, fileSizeBytes: size)
                 Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").info("media transfer completed enclosure=\(work.enclosureId, privacy: .public)")
                 onWorkChanged?()
@@ -153,6 +274,7 @@ final class MediaTransferCoordinator {
         guard activeTaskTokens[enclosureID] == token else { return }
         activeTaskTokens[enclosureID] = nil
         activeTasks[enclosureID] = nil
+        presentationState.remove(enclosureID: enclosureID)
     }
 
     private func executeDeletions(_ workItems: [MediaTransferWork]) {
