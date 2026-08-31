@@ -2239,6 +2239,46 @@
         "de": { "stringUnit": { "state": "translated", "value": "Navigation einblenden" } }
       }
     },
+    "Media / Listening List": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Medien / Hörliste" } }
+      }
+    },
+    "Automatically download items added to Listening List": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Zur Hörliste hinzugefügte Elemente automatisch herunterladen" } }
+      }
+    },
+    "Downloads audio automatically when an item is added to Listening List.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Lädt Audio automatisch herunter, wenn ein Element zur Hörliste hinzugefügt wird." } }
+      }
+    },
+    "Delete download after playback": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Download nach der Wiedergabe löschen" } }
+      }
+    },
+    "Removes the local download after playback is completed. The item remains in Listening List.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Löscht den lokalen Download nach Abschluss der Wiedergabe. Das Element bleibt in der Hörliste." } }
+      }
+    },
+    "Remove completed items from Listening List": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Abgeschlossene Elemente aus der Hörliste entfernen" } }
+      }
+    },
+    "Removes the item from Listening List after all of its audio has been completed.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Entfernt das Element aus der Hörliste, nachdem alle Audios abgeschlossen wurden." } }
+      }
+    },
+    "Automatically download audio from this feed": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Audio aus diesem Feed automatisch herunterladen" } }
+      }
+    },
     "·": {}
   },
   "version": "1.0"

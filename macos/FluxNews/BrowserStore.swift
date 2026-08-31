@@ -655,6 +655,9 @@ final class BrowserStore: ObservableObject {
         )
     }
     func setDetailCharacterLimit(_ limit: UInt32) { updateCoreSettings { try $0.setDetailCharacterLimit(limit: limit) } }
+    func setDeleteAfterPlayback(_ enabled: Bool) { updateCoreSettings { try $0.setDeleteAfterPlayback(enabled: enabled) } }
+    func setAutoDownloadListeningList(_ enabled: Bool) { updateCoreSettings { try $0.setAutoDownloadListeningList(enabled: enabled) } }
+    func setRemoveCompletedListeningList(_ enabled: Bool) { updateCoreSettings { try $0.setRemoveCompletedListeningList(enabled: enabled) } }
     func reloadSystemNotificationSettings() {
         guard let core else { return }
         do {
@@ -1286,6 +1289,7 @@ final class BrowserStore: ObservableObject {
     func setFeedDetailRendering(feedID: Int64, mode: DetailRenderingMode) throws { try core?.setFeedDetailRendering(feedId: feedID, mode: mode) }
     func setFeedTruncateDetail(feedID: Int64, enabled: Bool) throws { try core?.setFeedTruncateDetail(feedId: feedID, enabled: enabled) }
     func setFeedOpenInMiniflux(feedID: Int64, enabled: Bool) throws { try core?.setFeedOpenInMiniflux(feedId: feedID, enabled: enabled) }
+    func setFeedAutoDownloadAudio(feedID: Int64, enabled: Bool) throws { try core?.setFeedAutoDownloadAudio(feedId: feedID, enabled: enabled) }
     func share(_ article: ArticleSummary) { guard let url = URL(string: article.url) else { return }; DispatchQueue.main.async { [weak self] in guard let self, let view = NSApplication.shared.keyWindow?.contentView else { return }; let picker = NSSharingServicePicker(items: [article.title, url]); self.sharingPicker = picker; let point = view.convert(view.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil); picker.show(relativeTo: NSRect(origin: point, size: NSSize(width: 1, height: 1)), of: view, preferredEdge: .minY) } }
     func showActionConfirmation(_ message: String) {
         actionConfirmation = message

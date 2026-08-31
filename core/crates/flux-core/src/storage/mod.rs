@@ -3840,6 +3840,7 @@ mod tests {
             .unwrap();
         store.set_feed_truncate_detail(2, true).unwrap();
         store.set_feed_open_in_miniflux(2, true).unwrap();
+        store.set_feed_auto_download_audio(2, true).unwrap();
         assert_eq!(
             store.feed_preferences(2).unwrap(),
             FeedPreferences {
@@ -3848,7 +3849,7 @@ mod tests {
                 detail_rendering: DetailRenderingMode::TextOnly,
                 truncate_detail: true,
                 open_in_miniflux: true,
-                auto_download_audio: false
+                auto_download_audio: true
             }
         );
         drop(store);
@@ -3861,7 +3862,7 @@ mod tests {
                 detail_rendering: DetailRenderingMode::TextOnly,
                 truncate_detail: true,
                 open_in_miniflux: true,
-                auto_download_audio: false
+                auto_download_audio: true
             }
         );
         store.reconcile(&categories, &[], &[]).unwrap();
@@ -3871,6 +3872,26 @@ mod tests {
             store.feed_preferences(2).unwrap(),
             FeedPreferences::defaults(2)
         );
+    }
+
+    #[test]
+    fn media_policy_settings_persist_independently() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+
+        store.set_auto_download_listening_list(true).unwrap();
+        store.set_delete_after_playback(false).unwrap();
+        store.set_remove_completed_listening_list(true).unwrap();
+
+        let settings = store.core_settings().unwrap();
+        assert!(settings.auto_download_listening_list);
+        assert!(!settings.delete_after_playback);
+        assert!(settings.remove_completed_listening_list);
+
+        drop(store);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        assert_eq!(store.core_settings().unwrap(), settings);
     }
 
     #[test]

@@ -999,6 +999,7 @@ private struct FeedIconSlot: View {
 private enum SettingsSection: String, CaseIterable, Identifiable {
     case account
     case syncStorage
+    case media
     case reading
     case systemNotifications
     case general
@@ -1010,6 +1011,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .account: "Account"
         case .syncStorage: "Sync & Storage"
+        case .media: "Media / Listening List"
         case .reading: "Reading"
         case .systemNotifications: "System Notifications"
         case .general: "General"
@@ -1114,6 +1116,8 @@ private struct SettingsView: View {
             AccountSettingsView(server: $server, key: $key, customHeaders: $customHeaders, configuredServer: store.configuredServer, version: store.minifluxVersion, validationError: store.accountValidationError)
         case .syncStorage:
             SyncStorageSettingsView(store: store, syncOnStart: $syncOnStart, retention: retention, deliveryMode: deliveryMode, backgroundSyncEnabled: backgroundSyncEnabled)
+        case .media:
+            MediaSettingsView(store: store, autoDownloadListeningList: autoDownloadListeningList, deleteAfterPlayback: deleteAfterPlayback, removeCompletedListeningList: removeCompletedListeningList)
         case .reading:
             ReadingSettingsView(store: store, scrollover: $scrollover, detailCharacterLimit: detailCharacterLimit)
         case .systemNotifications:
@@ -1140,6 +1144,24 @@ private struct SettingsView: View {
         Binding(
             get: { store.coreSettings?.backgroundSyncEnabled ?? false },
             set: { store.setBackgroundSyncEnabled($0) }
+        )
+    }
+    private var autoDownloadListeningList: Binding<Bool> {
+        Binding(
+            get: { store.coreSettings?.autoDownloadListeningList ?? false },
+            set: { store.setAutoDownloadListeningList($0) }
+        )
+    }
+    private var deleteAfterPlayback: Binding<Bool> {
+        Binding(
+            get: { store.coreSettings?.deleteAfterPlayback ?? false },
+            set: { store.setDeleteAfterPlayback($0) }
+        )
+    }
+    private var removeCompletedListeningList: Binding<Bool> {
+        Binding(
+            get: { store.coreSettings?.removeCompletedListeningList ?? false },
+            set: { store.setRemoveCompletedListeningList($0) }
         )
     }
     private var detailCharacterLimit: Binding<UInt32> {
@@ -1549,6 +1571,36 @@ private struct ReadingSettingsView: View {
     }
 }
 
+private struct MediaSettingsView: View {
+    @ObservedObject var store: BrowserStore
+    let autoDownloadListeningList: Binding<Bool>
+    let deleteAfterPlayback: Binding<Bool>
+    let removeCompletedListeningList: Binding<Bool>
+
+    var body: some View {
+        Form {
+            Section("Media / Listening List") {
+                Toggle("Automatically download items added to Listening List", isOn: autoDownloadListeningList)
+                Text("Downloads audio automatically when an item is added to Listening List.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Delete download after playback", isOn: deleteAfterPlayback)
+                Text("Removes the local download after playback is completed. The item remains in Listening List.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Remove completed items from Listening List", isOn: removeCompletedListeningList)
+                Text("Removes the item from Listening List after all of its audio has been completed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .disabled(store.coreSettings == nil)
+        }
+        .formStyle(.grouped)
+    }
+}
+
 private struct FeedSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: BrowserStore
@@ -1566,9 +1618,10 @@ private struct FeedSettingsView: View {
                         Text("Rendered").tag(DetailRenderingMode.rendered)
                         Text("Text Only").tag(DetailRenderingMode.textOnly)
                     }
-                    Toggle("Truncate Detail", isOn: Binding(get: { preferences.truncateDetail }, set: updateTruncateDetail))
-                    Toggle("Open in Miniflux", isOn: Binding(get: { preferences.openInMiniflux }, set: updateOpenInMiniflux))
-                }
+                     Toggle("Truncate Detail", isOn: Binding(get: { preferences.truncateDetail }, set: updateTruncateDetail))
+                     Toggle("Open in Miniflux", isOn: Binding(get: { preferences.openInMiniflux }, set: updateOpenInMiniflux))
+                     Toggle("Automatically download audio from this feed", isOn: Binding(get: { preferences.autoDownloadAudio }, set: updateAutoDownloadAudio))
+                 }
                 .formStyle(.grouped)
             } else {
                 ProgressView()
@@ -1583,19 +1636,28 @@ private struct FeedSettingsView: View {
     }
 
     private func load() {
+        guard store.catalog.feeds.contains(where: { $0.id == target.id }) else { dismiss(); return }
         do { preferences = try store.feedPreferences(feedID: target.id); error = nil }
         catch { self.error = NativeErrorPresentation.message(for: error) }
     }
     private func updateDetailRendering(_ mode: DetailRenderingMode) {
+        guard store.catalog.feeds.contains(where: { $0.id == target.id }) else { dismiss(); return }
         do { try store.setFeedDetailRendering(feedID: target.id, mode: mode); preferences = try store.feedPreferences(feedID: target.id) }
         catch { self.error = NativeErrorPresentation.message(for: error) }
     }
     private func updateTruncateDetail(_ enabled: Bool) {
+        guard store.catalog.feeds.contains(where: { $0.id == target.id }) else { dismiss(); return }
         do { try store.setFeedTruncateDetail(feedID: target.id, enabled: enabled); preferences = try store.feedPreferences(feedID: target.id) }
         catch { self.error = NativeErrorPresentation.message(for: error) }
     }
     private func updateOpenInMiniflux(_ enabled: Bool) {
+        guard store.catalog.feeds.contains(where: { $0.id == target.id }) else { dismiss(); return }
         do { try store.setFeedOpenInMiniflux(feedID: target.id, enabled: enabled); preferences = try store.feedPreferences(feedID: target.id) }
+        catch { self.error = NativeErrorPresentation.message(for: error) }
+    }
+    private func updateAutoDownloadAudio(_ enabled: Bool) {
+        guard store.catalog.feeds.contains(where: { $0.id == target.id }) else { dismiss(); return }
+        do { try store.setFeedAutoDownloadAudio(feedID: target.id, enabled: enabled); preferences = try store.feedPreferences(feedID: target.id) }
         catch { self.error = NativeErrorPresentation.message(for: error) }
     }
 }
