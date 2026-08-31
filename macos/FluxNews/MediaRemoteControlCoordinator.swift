@@ -181,7 +181,7 @@ final class MediaRemoteControlCoordinator {
     private func handleSeek(seconds: Double) -> MPRemoteCommandHandlerStatus {
         guard seconds.isFinite, seconds >= 0, presentationState.loadedEnclosure != nil else { return .commandFailed }
         let bounded = presentationState.durationMs.map { min(seconds, Double($0) / 1_000) } ?? seconds
-        guard bounded.isFinite else { return .commandFailed }
+        guard bounded.isFinite, bounded <= Double(UInt64.max) / 1_000 else { return .commandFailed }
         playbackCoordinator.seek(toMs: UInt64(bounded * 1_000))
         return .success
     }

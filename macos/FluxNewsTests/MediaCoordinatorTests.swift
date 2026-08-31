@@ -12,13 +12,13 @@ private final class FakePlaybackCore: MediaPlaybackCore {
     var observedDurations = [(Int64, UInt64)]()
     var chapters = [MediaChapter]()
 
-    init(status: PlaybackStatus = .notStarted, positionMs: UInt64 = 0) {
+    init(status: PlaybackStatus = .notStarted, positionMs: UInt64 = 0, durationMs: UInt64? = 120_000) {
         let enclosure = Enclosure(id: 7, articleId: 11, url: "https://example.test/audio.mp3", mimeType: "audio/mpeg", sizeBytes: nil, remoteMediaProgressionSeconds: 0, mediaKind: .audio)
         preparation = PlaybackPreparation(
             enclosure: enclosure,
-            playbackState: PlaybackState(enclosureId: 7, positionMs: positionMs, durationMs: 120_000, status: status, updatedAt: nil),
+            playbackState: PlaybackState(enclosureId: 7, positionMs: positionMs, durationMs: durationMs, status: status, updatedAt: nil),
             localFile: nil,
-            durationMs: 120_000,
+            durationMs: durationMs,
             artworkReference: nil
         )
     }
@@ -413,10 +413,25 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertFalse(engine.isPlaying)
         XCTAssertEqual(remote.dispatch(.seek(seconds: 45)), .success)
         XCTAssertEqual(engine.currentPositionMs, 45_000)
+        XCTAssertEqual(remote.dispatch(.seek(seconds: Double.greatestFiniteMagnitude)), .success)
+        XCTAssertEqual(engine.currentPositionMs, 120_000)
+        XCTAssertEqual(remote.dispatch(.seek(seconds: 45)), .success)
         XCTAssertEqual(remote.dispatch(.skipForward), .success)
         XCTAssertEqual(engine.currentPositionMs, 75_000)
         XCTAssertEqual(remote.dispatch(.skipBackward), .success)
         XCTAssertEqual(engine.currentPositionMs, 45_000)
+    }
+
+    func testRemoteSeekRejectsOversizedFinitePositionWhenDurationIsUnknown() throws {
+        let core = FakePlaybackCore(durationMs: nil)
+        let engine = FakePlaybackEngine()
+        let playback = MediaPlaybackCoordinator(core: core, engine: engine)
+        _ = try playback.prepare(enclosureID: 7)
+        let remote = MediaRemoteControlCoordinator(playbackCoordinator: playback, presentationState: playback.presentationState)
+        defer { remote.cleanup() }
+
+        XCTAssertEqual(remote.dispatch(.seek(seconds: Double.greatestFiniteMagnitude)), .commandFailed)
+        XCTAssertEqual(engine.currentPositionMs, 0)
     }
 
     func testSleepTimerIntervalChangeRestartsAndDisableClearsState() {
