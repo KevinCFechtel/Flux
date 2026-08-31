@@ -180,27 +180,51 @@ private struct ArticlePane: View {
             .disabled(PlayerPresentation.navigationDisabled(showingPlayer: showingPlayer, hasLoadedMedia: playbackState.loadedEnclosure != nil))
             .help(showingPlayer ? "Show News List" : "Show Player")
             .accessibilityLabel(showingPlayer ? "Show News List" : "Show Player")
-            Menu {
-                Button { store.setUnreadOnly(true) } label: { Label("Show Unread News Only", systemImage: store.unreadOnly ? "checkmark.circle.fill" : "circle") }
-                Button { store.setUnreadOnly(false) } label: { Label("Show All News", systemImage: store.unreadOnly ? "circle" : "checkmark.circle.fill") }
-                Divider()
+            if store.isListeningList {
                 Menu {
-                    Button { store.setNewestFirst(true) } label: { Label("Newest First", systemImage: "arrow.down") }
-                    Button { store.setNewestFirst(false) } label: { Label("Oldest First", systemImage: "arrow.up") }
-                } label: { Label("Sort Order", systemImage: "arrow.up.arrow.down") }
+                    Button { store.setListeningListSort(.recentlyAdded) } label: { Label("Recently Added", systemImage: store.listeningListSort == .recentlyAdded ? "checkmark" : "clock") }
+                    Button { store.setListeningListSort(.publicationDate) } label: { Label("Publication Date", systemImage: store.listeningListSort == .publicationDate ? "checkmark" : "calendar") }
+                    Divider()
+                    Button { store.settingsVisible = true } label: { Label("Settings...", systemImage: "gearshape") }
+                    Button { NSApplication.shared.terminate(nil) } label: { Label("Quit FluxNews", systemImage: "power") }
+                } label: { Image(systemName: "arrow.up.arrow.down") }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .help("Sort Listening List")
+                    .accessibilityLabel("Sort Listening List")
                 Menu {
-                    Button { setArticleListStyle(.row) } label: { Label("Rows", systemImage: store.articleListStyle == .row ? "checkmark" : "list.bullet") }
-                    Button { setArticleListStyle(.card) } label: { Label("Cards", systemImage: store.articleListStyle == .card ? "checkmark" : "rectangle.grid.1x2") }
-                } label: { Label("Layout", systemImage: "rectangle.3.group") }
-                Button { store.settingsVisible = true } label: { Label("Settings...", systemImage: "gearshape") }
-                Divider()
-                Button { NSApplication.shared.terminate(nil) } label: { Label("Quit FluxNews", systemImage: "power") }
-            } label: { Image(systemName: "gearshape") }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 24)
-            .help("Settings...")
-            .accessibilityLabel("Settings...")
+                    Button { store.setListeningListFeed(nil) } label: { Label("All Feeds", systemImage: store.listeningListFeedID == nil ? "checkmark" : "circle") }
+                    ForEach(store.listeningListFeeds, id: \.feedId) { feed in
+                        Button { store.setListeningListFeed(feed.feedId) } label: { Label(feed.feedTitle, systemImage: store.listeningListFeedID == feed.feedId ? "checkmark" : "circle") }
+                    }
+                } label: { Image(systemName: "line.3.horizontal.decrease.circle") }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .help("Filter Listening List")
+                    .accessibilityLabel("Filter Listening List")
+            } else {
+                Menu {
+                    Button { store.setUnreadOnly(true) } label: { Label("Show Unread News Only", systemImage: store.unreadOnly ? "checkmark.circle.fill" : "circle") }
+                    Button { store.setUnreadOnly(false) } label: { Label("Show All News", systemImage: store.unreadOnly ? "circle" : "checkmark.circle.fill") }
+                    Divider()
+                    Menu {
+                        Button { store.setNewestFirst(true) } label: { Label("Newest First", systemImage: "arrow.down") }
+                        Button { store.setNewestFirst(false) } label: { Label("Oldest First", systemImage: "arrow.up") }
+                    } label: { Label("Sort Order", systemImage: "arrow.up.arrow.down") }
+                    Menu {
+                        Button { setArticleListStyle(.row) } label: { Label("Rows", systemImage: store.articleListStyle == .row ? "checkmark" : "list.bullet") }
+                        Button { setArticleListStyle(.card) } label: { Label("Cards", systemImage: store.articleListStyle == .card ? "checkmark" : "rectangle.grid.1x2") }
+                    } label: { Label("Layout", systemImage: "rectangle.3.group") }
+                    Button { store.settingsVisible = true } label: { Label("Settings...", systemImage: "gearshape") }
+                    Divider()
+                    Button { NSApplication.shared.terminate(nil) } label: { Label("Quit FluxNews", systemImage: "power") }
+                } label: { Image(systemName: "gearshape") }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .frame(width: 24)
+                    .help("Settings...")
+                    .accessibilityLabel("Settings...")
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -211,7 +235,9 @@ private struct ArticlePane: View {
     }
 
     @ViewBuilder private var content: some View {
-        if store.isSearchActive {
+        if store.isListeningList {
+            ListeningListView(store: store, playbackState: playbackState, onPlay: playAudio)
+        } else if store.isSearchActive {
             SearchResultsView(store: store)
         } else if let error = store.errorMessage, store.articles.isEmpty {
             ContentUnavailableView("Refresh failed", systemImage: "exclamationmark.triangle", description: Text(error))
@@ -295,6 +321,7 @@ private struct ArticlePane: View {
         case .all: "All News"
         case .starred: "Starred"
         case .search: "Search"
+        case .listeningList: "Listening List"
         case let .category(id): store.catalog.categories.first(where: { $0.id == id })?.title ?? "Category"
         case let .feed(id): store.catalog.feeds.first(where: { $0.id == id })?.title ?? "Feed"
         }
@@ -418,6 +445,118 @@ private struct SearchResultsView: View {
     }
 }
 
+private struct ListeningListView: View {
+    @ObservedObject var store: BrowserStore
+    @ObservedObject var playbackState: MediaPlaybackPresentationState
+    let onPlay: (Enclosure) -> Void
+
+    var body: some View {
+        if let error = store.errorMessage, store.listeningListItems.isEmpty {
+            ContentUnavailableView("Listening List unavailable", systemImage: "exclamationmark.triangle", description: Text(error))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if store.listeningListItems.isEmpty {
+            ContentUnavailableView("Listening List is Empty", systemImage: "headphones", description: Text("Audio News added to the Listening List will appear here."))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(store.listeningListItems, id: \.articleId) { item in
+                        ListeningListRow(item: item, playbackState: playbackState, onPlay: onPlay)
+                        Divider().padding(.leading, 12)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct ListeningListRow: View {
+    let item: ListeningListItem
+    @ObservedObject var playbackState: MediaPlaybackPresentationState
+    let onPlay: (Enclosure) -> Void
+    private static let isoFormatter = ISO8601DateFormatter()
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "headphones")
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(3)
+                HStack(spacing: 5) {
+                    Text(item.feedTitle).foregroundStyle(.secondary)
+                    if let date = Self.isoFormatter.date(from: item.publishedAt) {
+                        Text("·").foregroundStyle(.tertiary)
+                        Text(date.formatted(date: .abbreviated, time: .shortened)).foregroundStyle(.tertiary)
+                    }
+                }
+                .font(.caption)
+                progress
+            }
+            Spacer(minLength: 4)
+            status
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .contentShape(Rectangle())
+        .onTapGesture { if let enclosure = ListeningListPresentation.preferredEnclosure(item) { onPlay(enclosure) } }
+        .contextMenu {
+            if item.audioEnclosures.count > 1 && item.activeEnclosureId == nil {
+                ForEach(item.audioEnclosures, id: \.enclosure.id) { audio in
+                    Button("Play \(ArticleAudioActions.enclosureLabel(audio.enclosure, index: item.audioEnclosures.firstIndex(where: { $0.enclosure.id == audio.enclosure.id }) ?? 0))") { onPlay(audio.enclosure) }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var progress: some View {
+        if let value = ListeningListPresentation.progress(item, runtime: playbackState) {
+            if value.status == .completed {
+                ProgressView(value: 1)
+                    .progressViewStyle(.linear)
+                    .tint(.green)
+                Text("Completed").foregroundStyle(.secondary)
+            } else if let duration = value.durationMs, duration > 0 {
+                ProgressView(value: min(Double(value.positionMs) / Double(duration), 1))
+                    .progressViewStyle(.linear)
+                Text("\(Self.minutes(value.positionMs)) / \(Self.minutes(duration)) min").foregroundStyle(.secondary)
+            } else if value.positionMs > 0 {
+                Text("\(Self.minutes(value.positionMs)) min").foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var status: some View {
+        let count = ListeningListPresentation.downloadedCount(item)
+        VStack(alignment: .trailing, spacing: 4) {
+            if ListeningListPresentation.preferredEnclosure(item) == nil {
+                Menu {
+                    ForEach(item.audioEnclosures.indices, id: \.self) { index in
+                        let audio = item.audioEnclosures[index]
+                        Button(ArticleAudioActions.enclosureLabel(audio.enclosure, index: index)) { onPlay(audio.enclosure) }
+                    }
+                } label: {
+                    Image(systemName: "play.fill")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .help("Choose audio to play")
+            }
+            if count.total > 0 {
+                Image(systemName: count.downloaded == count.total ? "arrow.down.circle.fill" : count.pending > 0 ? "arrow.down.circle" : "arrow.down.circle")
+                    .foregroundStyle(count.downloaded == count.total ? .green : .secondary)
+                if count.total > 1 || count.downloaded > 0 { Text("\(count.downloaded) / \(count.total)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }
+            }
+        }
+    }
+
+    private static func minutes(_ milliseconds: UInt64) -> String {
+        String(max(0, Int(milliseconds / 60_000)))
+    }
+}
+
 private struct NavigationSidebar: View {
     @ObservedObject var store: BrowserStore
 
@@ -427,6 +566,7 @@ private struct NavigationSidebar: View {
                 Section {
                     sidebarRow(SidebarItem(id: "all", scope: .all, title: "All News", count: store.unreadTotal, systemImage: "tray.full", feedID: nil, categoryID: nil, pendingNewCount: 0, children: nil))
                     sidebarRow(SidebarItem(id: "starred", scope: .starred, title: "Starred", count: store.starredTotal, systemImage: "star.fill", feedID: nil, categoryID: nil, pendingNewCount: 0, children: nil))
+                    sidebarRow(SidebarItem(id: "listening-list", scope: .listeningList, title: "Listening List", count: 0, systemImage: "headphones", feedID: nil, categoryID: nil, pendingNewCount: 0, children: nil))
                     sidebarRow(SidebarItem(id: "search", scope: .search, title: "Search", count: 0, systemImage: "magnifyingglass", feedID: nil, categoryID: nil, pendingNewCount: 0, children: nil))
                 }
                 Section("Feeds") {

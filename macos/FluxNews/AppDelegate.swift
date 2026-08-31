@@ -36,7 +36,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             self.transferCoordinator = MediaTransferCoordinator(core: core, isMediaInUse: { [weak self] enclosureID in
                 self?.playbackCoordinator?.isUsing(enclosureID: enclosureID) ?? false
             })
-            self.transferCoordinator?.onWorkChanged = { [weak store] in store?.refreshArticleAudioActions() }
+            self.transferCoordinator?.onWorkChanged = { [weak store] in
+                store?.refreshArticleAudioActions()
+                store?.refreshListeningListIfVisible()
+            }
             self.playbackCoordinator = MediaPlaybackCoordinator(core: core, presentationState: self.playbackPresentationState)
             self.popover.contentViewController = self.host()
             self.fallbackPanel?.contentViewController = self.host()

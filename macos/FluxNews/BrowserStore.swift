@@ -15,6 +15,50 @@ struct ArticleAudioActionState: Equatable {
     let downloads: [Int64: MediaDownload]
 }
 
+struct ListeningListProgress: Equatable {
+    let positionMs: UInt64
+    let durationMs: UInt64?
+    let status: PlaybackStatus
+}
+
+enum ListeningListPresentation {
+    static func preferredEnclosure(_ item: ListeningListItem) -> Enclosure? {
+        if let activeID = item.activeEnclosureId,
+           let active = item.audioEnclosures.first(where: { $0.enclosure.id == activeID }) {
+            return active.enclosure
+        }
+        return item.audioEnclosures.count == 1 ? item.audioEnclosures[0].enclosure : nil
+    }
+
+    @MainActor static func progress(_ item: ListeningListItem, runtime: MediaPlaybackPresentationState? = nil) -> ListeningListProgress? {
+        let selected = item.activeEnclosureId.flatMap { id in item.audioEnclosures.first(where: { $0.enclosure.id == id }) }
+            ?? (item.audioEnclosures.count == 1 ? item.audioEnclosures[0] : nil)
+        guard let selected else { return nil }
+        let isRuntimeItem = runtime?.loadedEnclosure?.id == selected.enclosure.id
+        let playback = selected.playbackState
+        let status: PlaybackStatus
+        if isRuntimeItem {
+            switch runtime?.status {
+            case .playing: status = .inProgress
+            case .paused, .stopped, nil: status = playback?.status ?? .notStarted
+            }
+        } else {
+            status = playback?.status ?? .notStarted
+        }
+        let position = isRuntimeItem ? runtime?.positionMs ?? playback?.positionMs ?? 0 : playback?.positionMs ?? 0
+        let duration = isRuntimeItem ? runtime?.durationMs ?? selected.durationMs ?? playback?.durationMs : selected.durationMs ?? playback?.durationMs
+        guard status != .notStarted || position > 0 else { return nil }
+        return ListeningListProgress(positionMs: position, durationMs: duration, status: status)
+    }
+
+    static func downloadedCount(_ item: ListeningListItem) -> (downloaded: Int, total: Int, pending: Int) {
+        let states = item.audioEnclosures.compactMap(\.download?.state)
+        let downloaded = states.filter { $0 == .downloaded }.count
+        let pending = states.filter { $0 == .requested || $0 == .deleteRequested }.count
+        return (downloaded, item.audioEnclosures.count, pending)
+    }
+}
+
 enum ArticleAudioActions {
     static func audioEnclosures(_ enclosures: [Enclosure]) -> [Enclosure] {
         enclosures.filter { $0.mediaKind == .audio }
@@ -96,6 +140,10 @@ final class BrowserStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var actionConfirmation: String?
     @Published var scope: BrowserScope = .all
+    @Published private(set) var listeningListItems: [ListeningListItem] = []
+    @Published private(set) var listeningListFeeds: [ListeningListFeed] = []
+    @Published var listeningListSort: ListeningListSort = .recentlyAdded
+    @Published var listeningListFeedID: Int64?
     @Published var searchQuery = ""
     @Published private(set) var searchTotal: Int64 = 0
     @Published private(set) var hasSearched = false
@@ -296,12 +344,14 @@ final class BrowserStore: ObservableObject {
         }
     }
 
+    var isListeningList: Bool { scope == .listeningList }
     func query(scope: BrowserScope? = nil) -> ArticleQuery {
         let requestedScope = scope ?? self.scope
-        let coreScope: ArticleScope = switch requestedScope { case .all, .starred: .all; case .search: fatalError("Search has no local article query"); case let .category(id): .category(id: id); case let .feed(id): .feed(id: id) }
+        let coreScope: ArticleScope = switch requestedScope { case .all, .starred: .all; case .search, .listeningList: fatalError("Scope has no article query"); case let .category(id): .category(id: id); case let .feed(id): .feed(id: id) }
         return ArticleQuery(scope: coreScope, readFilter: self.scope == .starred ? .all : (unreadOnly ? .unread : .all), starredFilter: self.scope == .starred ? .starred : .all, sort: newestFirst ? .newestFirst : .oldestFirst, limit: 0, cursor: nil)
     }
     func reloadVisibleArticles(resetPosition: Bool = false, acknowledgingPendingNewData: Bool = false) {
+        if isListeningList { reloadListeningList(); return }
         guard scope != .search else { return }
         guard let core else { return }
         do {
@@ -405,7 +455,30 @@ final class BrowserStore: ObservableObject {
         if scope == .search { selectSearch(); return }
         self.scope = scope
         resetPresentation()
-        reloadVisibleArticles(acknowledgingPendingNewData: true)
+        if scope == .listeningList { reloadListeningList() }
+        else { reloadVisibleArticles(acknowledgingPendingNewData: true) }
+    }
+    func setListeningListSort(_ sort: ListeningListSort) {
+        guard listeningListSort != sort else { return }
+        listeningListSort = sort
+        reloadListeningList()
+    }
+    func setListeningListFeed(_ feedID: Int64?) {
+        listeningListFeedID = feedID
+        reloadListeningList()
+    }
+    func reloadListeningList() {
+        guard let core else { return }
+        do {
+            listeningListFeeds = try core.listeningListFeeds()
+            listeningListItems = try core.listeningList(feedId: listeningListFeedID, sort: listeningListSort)
+            selectionTotal = UInt64(listeningListItems.count)
+            errorMessage = nil
+        } catch { errorMessage = NativeErrorPresentation.message(for: error) }
+    }
+    func refreshListeningListIfVisible() {
+        guard isListeningList else { return }
+        reloadListeningList()
     }
     func selectSearch() {
         guard scope != .search else { return }
@@ -624,6 +697,7 @@ final class BrowserStore: ObservableObject {
     }
     private func handleSyncCompleted(_ metadata: SyncCompleted) {
         isLoading = false
+        refreshListeningListIfVisible()
         reloadLiveUnreadTotal()
         if metadata.reason == .background || metadata.reason == .periodic {
             pendingNewData.accumulate(metadata.newArticlesByFeed.map { (feedID: $0.feedId, count: $0.count) })
@@ -663,7 +737,7 @@ final class BrowserStore: ObservableObject {
             pendingNewData.adoptFeeds(in: Set(catalog.feeds.filter { $0.categoryId == categoryID }.map(\.id)))
         case let .feed(feedID):
             pendingNewData.adoptFeed(feedID)
-        case .starred, .search:
+        case .starred, .search, .listeningList:
             return
         }
         publishPendingNewData()
@@ -769,6 +843,7 @@ final class BrowserStore: ObservableObject {
                 case .success:
                     store.showActionConfirmation(String(localized: "Added to Listening List"))
                     store.onMediaTransferRequested?()
+                    store.refreshListeningListIfVisible()
                     guard store.articleAudioRequestGeneration == generation else { return }
                     store.loadArticleAudioActions(for: articleID)
                 case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
@@ -790,6 +865,7 @@ final class BrowserStore: ObservableObject {
                 case .success:
                     store.showActionConfirmation(String(localized: "Download requested"))
                     store.onMediaTransferRequested?()
+                    store.refreshListeningListIfVisible()
                     guard store.articleAudioRequestGeneration == generation else { return }
                     store.loadArticleAudioActions(for: articleID)
                 case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)

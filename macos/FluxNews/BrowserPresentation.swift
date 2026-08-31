@@ -1,6 +1,6 @@
 import Foundation
 
-enum BrowserScope: Hashable { case all, starred, search, category(Int64), feed(Int64) }
+enum BrowserScope: Hashable { case all, starred, search, listeningList, category(Int64), feed(Int64) }
 
 enum StartupScopePreference: String, CaseIterable {
     case allNews
@@ -44,6 +44,6 @@ enum NavigationVisibility {
 
 enum ArticleListPresentationPolicy {
     static func removesMarkedReadArticle(removeWhenMarkedRead: Bool, unreadOnly: Bool, scope: BrowserScope) -> Bool {
-        removeWhenMarkedRead && unreadOnly && scope != .search
+        removeWhenMarkedRead && unreadOnly && scope != .search && scope != .listeningList
     }
 }
