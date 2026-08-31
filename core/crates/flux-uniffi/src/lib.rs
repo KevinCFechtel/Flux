@@ -370,6 +370,37 @@ pub struct Enclosure {
     pub remote_media_progression_seconds: u64,
     pub media_kind: MediaKind,
 }
+#[derive(uniffi::Record)]
+pub struct ListeningListEnclosure {
+    pub enclosure: Enclosure,
+    pub remote_present: bool,
+    pub playback_state: Option<PlaybackState>,
+    pub download: Option<MediaDownload>,
+    pub duration_ms: Option<u64>,
+}
+#[derive(uniffi::Record)]
+pub struct ListeningListItem {
+    pub article_id: i64,
+    pub feed_id: i64,
+    pub title: String,
+    pub feed_title: String,
+    pub published_at: String,
+    pub added_at: String,
+    pub remote_present: bool,
+    pub audio_enclosures: Vec<ListeningListEnclosure>,
+    pub active_enclosure_id: Option<i64>,
+}
+#[derive(uniffi::Record)]
+pub struct ListeningListFeed {
+    pub feed_id: i64,
+    pub feed_title: String,
+    pub item_count: u64,
+}
+#[derive(uniffi::Enum)]
+pub enum ListeningListSort {
+    RecentlyAdded,
+    PublicationDate,
+}
 #[derive(uniffi::Enum)]
 pub enum PlaybackStatus {
     NotStarted,
@@ -837,6 +868,33 @@ impl Flux {
         self.core
             .enclosure(enclosure_id)
             .map(|value| value.map(Into::into))
+            .map_err(map_error)
+    }
+    pub fn article_enclosures(&self, article_id: i64) -> Result<Vec<Enclosure>, FluxError> {
+        self.core
+            .article_enclosures(article_id)
+            .map(|rows| rows.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn listening_list(
+        &self,
+        feed_id: Option<i64>,
+        sort: ListeningListSort,
+    ) -> Result<Vec<ListeningListItem>, FluxError> {
+        self.core
+            .listening_list(feed_id, sort.into())
+            .map(|rows| rows.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn listening_list_feeds(&self) -> Result<Vec<ListeningListFeed>, FluxError> {
+        self.core
+            .listening_list_feeds()
+            .map(|rows| rows.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn is_in_listening_list(&self, article_id: i64) -> Result<bool, FluxError> {
+        self.core
+            .is_in_listening_list(article_id)
             .map_err(map_error)
     }
     pub fn saved_media(&self) -> Result<Vec<SavedPlayableMediaItem>, FluxError> {
@@ -2012,6 +2070,49 @@ impl From<domain::Enclosure> for Enclosure {
         }
     }
 }
+impl From<ListeningListSort> for domain::ListeningListSort {
+    fn from(value: ListeningListSort) -> Self {
+        match value {
+            ListeningListSort::RecentlyAdded => Self::RecentlyAdded,
+            ListeningListSort::PublicationDate => Self::PublicationDate,
+        }
+    }
+}
+impl From<domain::ListeningListEnclosure> for ListeningListEnclosure {
+    fn from(value: domain::ListeningListEnclosure) -> Self {
+        Self {
+            enclosure: value.enclosure.into(),
+            remote_present: value.remote_present,
+            playback_state: value.playback_state.map(Into::into),
+            download: value.download.map(Into::into),
+            duration_ms: value.duration_ms,
+        }
+    }
+}
+impl From<domain::ListeningListItem> for ListeningListItem {
+    fn from(value: domain::ListeningListItem) -> Self {
+        Self {
+            article_id: value.article_id,
+            feed_id: value.feed_id,
+            title: value.title,
+            feed_title: value.feed_title,
+            published_at: value.published_at,
+            added_at: value.added_at,
+            remote_present: value.remote_present,
+            audio_enclosures: value.audio_enclosures.into_iter().map(Into::into).collect(),
+            active_enclosure_id: value.active_enclosure_id,
+        }
+    }
+}
+impl From<domain::ListeningListFeed> for ListeningListFeed {
+    fn from(value: domain::ListeningListFeed) -> Self {
+        Self {
+            feed_id: value.feed_id,
+            feed_title: value.feed_title,
+            item_count: value.item_count,
+        }
+    }
+}
 impl From<domain::MediaKind> for MediaKind {
     fn from(value: domain::MediaKind) -> Self {
         match value {
@@ -2396,5 +2497,39 @@ mod tests {
         assert_eq!(mapped.start_ms, 1_000);
         assert_eq!(mapped.end_ms, Some(2_000));
         assert!(matches!(mapped.source, MediaChapterSource::Embedded));
+    }
+
+    #[test]
+    fn listening_list_projection_preserves_news_identity_and_nested_media_state() {
+        let projection: ListeningListItem = domain::ListeningListItem {
+            article_id: 7,
+            feed_id: 3,
+            title: "Episode".into(),
+            feed_title: "Feed".into(),
+            published_at: "2026-01-01T00:00:00Z".into(),
+            added_at: "2026-01-02T00:00:00Z".into(),
+            remote_present: true,
+            audio_enclosures: vec![domain::ListeningListEnclosure {
+                enclosure: domain::Enclosure {
+                    id: 42,
+                    article_id: 7,
+                    url: "https://example.test/audio.mp3".into(),
+                    mime_type: "audio/mpeg".into(),
+                    size_bytes: None,
+                    remote_media_progression_seconds: 0,
+                },
+                remote_present: true,
+                playback_state: None,
+                download: None,
+                duration_ms: Some(60_000),
+            }],
+            active_enclosure_id: Some(42),
+        }
+        .into();
+        assert_eq!(projection.article_id, 7);
+        assert_eq!(projection.audio_enclosures.len(), 1);
+        assert_eq!(projection.audio_enclosures[0].enclosure.id, 42);
+        assert_eq!(projection.audio_enclosures[0].duration_ms, Some(60_000));
+        assert_eq!(projection.active_enclosure_id, Some(42));
     }
 }

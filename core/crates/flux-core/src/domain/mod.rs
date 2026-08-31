@@ -60,6 +60,41 @@ pub struct Enclosure {
     pub remote_media_progression_seconds: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListeningListEnclosure {
+    pub enclosure: Enclosure,
+    pub remote_present: bool,
+    pub playback_state: Option<PlaybackState>,
+    pub download: Option<MediaDownload>,
+    pub duration_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListeningListItem {
+    pub article_id: i64,
+    pub feed_id: i64,
+    pub title: String,
+    pub feed_title: String,
+    pub published_at: String,
+    pub added_at: String,
+    pub remote_present: bool,
+    pub audio_enclosures: Vec<ListeningListEnclosure>,
+    pub active_enclosure_id: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListeningListFeed {
+    pub feed_id: i64,
+    pub feed_title: String,
+    pub item_count: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ListeningListSort {
+    RecentlyAdded,
+    PublicationDate,
+}
+
 impl Enclosure {
     pub fn media_kind(&self) -> MediaKind {
         MediaKind::from_mime_type(&self.mime_type)

@@ -30,12 +30,12 @@ use domain::{
     DiscoverSubscriptionsRequest, DiscoveredSubscription, DownloadFailureKind,
     DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, DownloadState, Enclosure, FeedIcon,
     FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, LegacyPlaybackImport,
-    LegacyPlaybackImportResult, MediaChapter, MediaDownload, MediaMetadata, MediaTransferWork,
-    MutationField, MutationResult, NavigationCatalog, PlaybackPreparation, PlaybackState,
-    ReadArticleRetention, ReaderDocument, RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult,
-    SavedMediaSyncConfiguration, SavedMediaSyncSetupInfo, SavedPlayableMediaItem,
-    SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition, SyncCompleted,
-    SyncFailure, SyncReason, WidgetData,
+    LegacyPlaybackImportResult, ListeningListFeed, ListeningListItem, ListeningListSort,
+    MediaChapter, MediaDownload, MediaMetadata, MediaTransferWork, MutationField, MutationResult,
+    NavigationCatalog, PlaybackPreparation, PlaybackState, ReadArticleRetention, ReaderDocument,
+    RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult, SavedMediaSyncConfiguration,
+    SavedMediaSyncSetupInfo, SavedPlayableMediaItem, SearchArticlesRequest, SearchArticlesResult,
+    SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason, WidgetData,
 };
 use miniflux::{
     AccountValidationError, AccountValidationResult, HttpHeader, MinifluxClient, RemoteSource,
@@ -443,6 +443,27 @@ impl FluxCore {
     }
     pub fn count_articles(&self, query: ArticleQuery) -> Result<u64, CoreError> {
         self.store.count_articles(&query)
+    }
+    pub fn article_enclosures(&self, article_id: i64) -> Result<Vec<Enclosure>, CoreError> {
+        Ok(self
+            .store
+            .enclosures_for_article(article_id)?
+            .into_iter()
+            .map(|stored| stored.enclosure)
+            .collect())
+    }
+    pub fn listening_list(
+        &self,
+        feed_id: Option<i64>,
+        sort: ListeningListSort,
+    ) -> Result<Vec<ListeningListItem>, CoreError> {
+        self.store.listening_list(feed_id, sort)
+    }
+    pub fn listening_list_feeds(&self) -> Result<Vec<ListeningListFeed>, CoreError> {
+        self.store.listening_list_feeds()
+    }
+    pub fn is_in_listening_list(&self, article_id: i64) -> Result<bool, CoreError> {
+        self.store.is_in_listening_list(article_id)
     }
     pub fn save_media(&self, enclosure_id: i64) -> Result<(), CoreError> {
         if enclosure_id <= 0 {
@@ -1546,7 +1567,7 @@ mod tests {
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            16
+            17
         );
         let bytes = std::fs::read(core.database_path()).unwrap();
         assert!(

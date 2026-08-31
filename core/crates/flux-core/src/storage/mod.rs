@@ -11,10 +11,11 @@ use crate::domain::{
     ContinueListeningItem, CoreError, CoreSettings, DeliveryMode, DetailRenderingMode,
     DiscoveryMode, DownloadFailureKind, DownloadNetworkPolicy, DownloadOrigin, DownloadRetention,
     DownloadState, Enclosure, Feed, FeedPreferences, FeedSystemNotificationSetting,
-    LegacyPlaybackImport, LegacyPlaybackImportResult, MediaChapter, MediaChapterSource,
-    MediaDownload, MediaMetadata, MediaTransferWork, MutationField, NavigationCatalog,
-    PlaybackState, PlaybackStatus, ReadArticleRetention, ReadFilter, SavedMedia,
-    SavedMediaMarkerState, SavedMediaSyncConfiguration, SavedPlayableMediaItem, StarredFilter,
+    LegacyPlaybackImport, LegacyPlaybackImportResult, ListeningListEnclosure, ListeningListFeed,
+    ListeningListItem, ListeningListSort, MediaChapter, MediaChapterSource, MediaDownload,
+    MediaMetadata, MediaTransferWork, MutationField, NavigationCatalog, PlaybackState,
+    PlaybackStatus, ReadArticleRetention, ReadFilter, SavedMedia, SavedMediaMarkerState,
+    SavedMediaSyncConfiguration, SavedPlayableMediaItem, StarredFilter,
     SystemNotificationCandidate, WidgetArticle, WidgetCounts, WidgetData, WidgetScopedCount,
 };
 use crate::media_metadata::{
@@ -25,7 +26,7 @@ use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
 
-const SCHEMA_VERSION: i64 = 16;
+const SCHEMA_VERSION: i64 = 17;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingSavedMediaReplication {
@@ -645,6 +646,145 @@ impl Store {
             .map_err(sql_error)?;
         statement
             .query_map([article_id], stored_enclosure_from_row)
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)
+    }
+
+    pub fn add_to_listening_list(
+        &self,
+        article_id: i64,
+        added_at: &str,
+    ) -> Result<bool, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let inserted = connection
+            .execute(
+                "INSERT INTO listening_list(article_id,added_at) VALUES(?1,?2) ON CONFLICT(article_id) DO NOTHING",
+                params![article_id, added_at],
+            )
+            .map_err(sql_error)?
+            > 0;
+        Ok(inserted)
+    }
+
+    pub fn is_in_listening_list(&self, article_id: i64) -> Result<bool, CoreError> {
+        self.connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM listening_list WHERE article_id=?1)",
+                [article_id],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)
+    }
+
+    pub fn listening_list(
+        &self,
+        feed_id: Option<i64>,
+        sort: ListeningListSort,
+    ) -> Result<Vec<ListeningListItem>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let order = match sort {
+            ListeningListSort::RecentlyAdded => "l.added_at DESC,l.article_id DESC,e.id ASC",
+            ListeningListSort::PublicationDate => "a.published_at DESC,a.id DESC,e.id ASC",
+        };
+        let sql = format!(
+            "SELECT l.article_id,a.feed_id,a.title,f.title,a.published_at,l.added_at, \
+                    e.id,e.article_id,e.url,e.mime_type,e.size_bytes,e.remote_media_progression_seconds,e.remote_present, \
+                    p.position_ms,p.duration_ms,p.status,p.updated_at, \
+                    d.state,d.origin,d.local_file,d.file_size_bytes,d.downloaded_at,d.failure_kind, \
+                    m.duration_ms \
+             FROM listening_list l \
+             JOIN articles a ON a.id=l.article_id \
+             JOIN feeds f ON f.id=a.feed_id \
+             LEFT JOIN enclosures e ON e.article_id=a.id AND lower(e.mime_type) LIKE 'audio/%' \
+             LEFT JOIN playback_states p ON p.enclosure_id=e.id \
+             LEFT JOIN media_downloads d ON d.enclosure_id=e.id \
+             LEFT JOIN media_metadata m ON m.enclosure_id=e.id \
+             WHERE (?1 IS NULL OR a.feed_id=?1) \
+             ORDER BY {order}"
+        );
+        let mut statement = connection.prepare(&sql).map_err(sql_error)?;
+        let mut items = Vec::new();
+        let mut current: Option<ListeningListItem> = None;
+        let rows = statement
+            .query_map([feed_id], listening_list_row)
+            .map_err(sql_error)?;
+        for row in rows {
+            let (article_id, feed_id, title, feed_title, published_at, added_at, enclosure) =
+                row.map_err(sql_error)?;
+            if current
+                .as_ref()
+                .is_none_or(|item| item.article_id != article_id)
+            {
+                if let Some(item) = current
+                    .take()
+                    .filter(|item| !item.audio_enclosures.is_empty())
+                {
+                    items.push(item);
+                }
+                current = Some(ListeningListItem {
+                    article_id,
+                    feed_id,
+                    title,
+                    feed_title,
+                    published_at,
+                    added_at,
+                    remote_present: true,
+                    audio_enclosures: Vec::new(),
+                    active_enclosure_id: None,
+                });
+            }
+            if let Some(enclosure) = enclosure {
+                let item = current.as_mut().expect("listening list row has an item");
+                item.remote_present &= enclosure.remote_present;
+                if enclosure.playback_state.as_ref().is_some_and(|state| {
+                    item.active_enclosure_id
+                        .and_then(|active| {
+                            item.audio_enclosures
+                                .iter()
+                                .find(|e| e.enclosure.id == active)
+                        })
+                        .and_then(|active| active.playback_state.as_ref())
+                        .is_none_or(|active| state.updated_at > active.updated_at)
+                }) {
+                    item.active_enclosure_id = Some(enclosure.enclosure.id);
+                }
+                item.audio_enclosures.push(enclosure);
+            }
+        }
+        if let Some(item) = current.filter(|item| !item.audio_enclosures.is_empty()) {
+            items.push(item);
+        }
+        Ok(items)
+    }
+
+    pub fn listening_list_feeds(&self) -> Result<Vec<ListeningListFeed>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut statement = connection
+            .prepare("SELECT a.feed_id,f.title,COUNT(*) FROM listening_list l JOIN articles a ON a.id=l.article_id JOIN feeds f ON f.id=a.feed_id WHERE EXISTS(SELECT 1 FROM enclosures e WHERE e.article_id=a.id AND lower(e.mime_type) LIKE 'audio/%') GROUP BY a.feed_id,f.title ORDER BY f.title COLLATE NOCASE,a.feed_id")
+            .map_err(sql_error)?;
+        statement
+            .query_map([], |row| {
+                Ok(ListeningListFeed {
+                    feed_id: row.get(0)?,
+                    feed_title: row.get(1)?,
+                    item_count: row
+                        .get::<_, i64>(2)?
+                        .try_into()
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                })
+            })
             .map_err(sql_error)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(sql_error)
@@ -2614,6 +2754,11 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
         tx.execute_batch("CREATE TABLE media_metadata (enclosure_id INTEGER PRIMARY KEY REFERENCES enclosures(id) ON DELETE CASCADE, duration_ms INTEGER CHECK(duration_ms IS NULL OR duration_ms > 0), duration_source TEXT NOT NULL DEFAULT 'native' CHECK(duration_source IN ('native','local')), embedded_artwork_reference TEXT); CREATE TABLE media_chapters (enclosure_id INTEGER NOT NULL REFERENCES enclosures(id) ON DELETE CASCADE, sequence INTEGER NOT NULL CHECK(sequence >= 0), title TEXT NOT NULL, start_ms INTEGER NOT NULL CHECK(start_ms >= 0), end_ms INTEGER CHECK(end_ms IS NULL OR end_ms > start_ms), source TEXT NOT NULL CHECK(source IN ('embedded','article_content')), PRIMARY KEY(enclosure_id,sequence)); PRAGMA user_version=16;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
+    if current < 17 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute_batch("CREATE TABLE listening_list (article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, added_at TEXT NOT NULL); CREATE INDEX listening_list_added_at ON listening_list(added_at DESC,article_id DESC); PRAGMA user_version=17;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
     Ok(())
 }
 fn initialize_core_settings(connection: &Connection) -> Result<(), CoreError> {
@@ -2908,7 +3053,7 @@ fn media_download_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MediaDow
         .get::<_, Option<i64>>(4)?
         .map(|value| u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery))
         .transpose()?;
-    Ok(MediaDownload {
+    Ok::<MediaDownload, rusqlite::Error>(MediaDownload {
         enclosure_id: row.get(0)?,
         state,
         origin,
@@ -3101,6 +3246,104 @@ fn stored_enclosure_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stored
         remote_present: row.get(6)?,
     })
 }
+
+fn listening_list_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<(
+    i64,
+    i64,
+    String,
+    String,
+    String,
+    String,
+    Option<ListeningListEnclosure>,
+)> {
+    let enclosure_id = row.get::<_, Option<i64>>(6)?;
+    let enclosure = enclosure_id
+        .map(|id| {
+            let mime_type: String = row.get(9)?;
+            let playback_state = if row.get::<_, Option<i64>>(13)?.is_some() {
+                Some(PlaybackState {
+                    enclosure_id: id,
+                    position_ms: u64::try_from(row.get::<_, i64>(13)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    duration_ms: row
+                        .get::<_, Option<i64>>(14)?
+                        .map(|value| {
+                            u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery)
+                        })
+                        .transpose()?,
+                    status: match row.get::<_, String>(15)?.as_str() {
+                        "in_progress" => PlaybackStatus::InProgress,
+                        "completed" => PlaybackStatus::Completed,
+                        _ => return Err(rusqlite::Error::InvalidQuery),
+                    },
+                    updated_at: row.get(16)?,
+                })
+            } else {
+                None
+            };
+            let download = row
+                .get::<_, Option<String>>(17)?
+                .map(|state| {
+                    Ok::<MediaDownload, rusqlite::Error>(MediaDownload {
+                        enclosure_id: id,
+                        state: download_state_from_db(&state)?,
+                        origin: row
+                            .get::<_, Option<String>>(18)?
+                            .map(|value| origin_from_db(&value))
+                            .transpose()?,
+                        local_file: row.get(19)?,
+                        file_size_bytes: row
+                            .get::<_, Option<i64>>(20)?
+                            .map(|value| {
+                                u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery)
+                            })
+                            .transpose()?,
+                        downloaded_at: row.get(21)?,
+                        failure_kind: row
+                            .get::<_, Option<String>>(22)?
+                            .map(|value| failure_kind_from_db(&value))
+                            .transpose()?,
+                    })
+                })
+                .transpose()?;
+            Ok(ListeningListEnclosure {
+                enclosure: Enclosure {
+                    id,
+                    article_id: row.get(7)?,
+                    url: row.get(8)?,
+                    mime_type,
+                    size_bytes: row
+                        .get::<_, Option<i64>>(10)?
+                        .map(|value| {
+                            u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery)
+                        })
+                        .transpose()?,
+                    remote_media_progression_seconds: u64::try_from(row.get::<_, i64>(11)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                },
+                remote_present: row.get(12)?,
+                duration_ms: row
+                    .get::<_, Option<i64>>(23)?
+                    .map(|value| u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery))
+                    .transpose()?
+                    .or_else(|| playback_state.as_ref().and_then(|state| state.duration_ms)),
+                playback_state,
+                download,
+            })
+        })
+        .transpose()?;
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        enclosure,
+    ))
+}
 fn saved_playable_media_from_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<SavedPlayableMediaItem> {
@@ -3265,7 +3508,7 @@ mod tests {
         let connection = store.connection.lock().unwrap();
         let row: (i64, String, Option<String>, String, bool, bool, i64, i64) = connection.query_row("SELECT content_processing_version,preview,image_url,raw_html_content,is_read,is_starred,feed_id,(SELECT COUNT(*) FROM pending_mutations) FROM articles WHERE id=3", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).unwrap();
         drop(connection);
-        assert_eq!(store.schema_version().unwrap(), 16);
+        assert_eq!(store.schema_version().unwrap(), 17);
         assert_eq!(row.0, crate::article::PROCESSING_VERSION);
         assert_eq!(row.1, "Hello world");
         assert_eq!(row.2.as_deref(), Some("https://example.test/cover.jpg"));
@@ -3289,7 +3532,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 16);
+        assert_eq!(store.schema_version().unwrap(), 17);
         assert_eq!(
             store.feed_preferences(2).unwrap(),
             FeedPreferences {
@@ -3381,7 +3624,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 16);
+        assert_eq!(store.schema_version().unwrap(), 17);
         assert_eq!(
             store.feed_preferences(123).unwrap(),
             FeedPreferences {
@@ -3432,7 +3675,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 16);
+        assert_eq!(store.schema_version().unwrap(), 17);
         let connection = store.connection.lock().unwrap();
         assert_eq!(
             connection
@@ -3698,7 +3941,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 16);
+        assert_eq!(store.schema_version().unwrap(), 17);
         assert!(!store.enclosure(10).unwrap().unwrap().remote_present);
         assert_eq!(
             store
@@ -3739,7 +3982,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 16);
+        assert_eq!(store.schema_version().unwrap(), 17);
         // existing B1/B2/B3 data survives
         assert!(store.saved_media(10).unwrap().is_some());
         assert_eq!(store.playback_state(10).unwrap().unwrap().position_ms, 5000);
@@ -3778,7 +4021,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 16);
+        assert_eq!(store.schema_version().unwrap(), 17);
         // Existing valid v13 rows survive intact.
         let requested = store.media_download(10).unwrap().unwrap();
         assert_eq!(requested.state, DownloadState::Requested);
@@ -4033,7 +4276,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 16);
+        assert_eq!(store.schema_version().unwrap(), 17);
         let connection = store.connection.lock().unwrap();
         let foreign_key_count: i64 = connection
             .query_row(
@@ -4705,6 +4948,197 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].enclosure_id, 20);
         assert_eq!(items[0].position_ms, 20_000);
+    }
+
+    #[test]
+    fn listening_list_is_article_centered_and_projects_audio_state() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let category = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [
+            Feed {
+                id: 2,
+                category_id: 1,
+                title: "Feed".into(),
+            },
+            Feed {
+                id: 3,
+                category_id: 1,
+                title: "Other".into(),
+            },
+        ];
+        let article = |id: i64, feed_id: i64, title: &str, published_at: &str| Article {
+            id,
+            feed_id,
+            title: title.into(),
+            url: format!("https://example.test/{id}"),
+            comments_url: String::new(),
+            published_at: published_at.into(),
+            is_read: false,
+            is_starred: false,
+            raw_html_content: String::new(),
+            preview: String::new(),
+            image_url: None,
+        };
+        let enclosure = |id: i64, article_id: i64, mime_type: &str| Enclosure {
+            id,
+            article_id,
+            url: format!("https://cdn.test/{id}"),
+            mime_type: mime_type.into(),
+            size_bytes: Some(100),
+            remote_media_progression_seconds: 0,
+        };
+        let articles = [
+            article(10, 2, "Older", "2026-01-01T00:00:00Z"),
+            article(20, 2, "Newer", "2026-01-02T00:00:00Z"),
+            article(30, 3, "Other feed", "2026-01-03T00:00:00Z"),
+        ];
+        let enclosures = [
+            enclosure(100, 10, "audio/mpeg"),
+            enclosure(101, 10, "audio/ogg"),
+            enclosure(102, 10, "image/jpeg"),
+            enclosure(200, 20, "audio/mpeg"),
+            enclosure(300, 30, "audio/mpeg"),
+        ];
+        store
+            .reconcile_with_enclosures(&category, &feeds, &articles, &enclosures)
+            .unwrap();
+        assert!(
+            store
+                .add_to_listening_list(10, "2026-02-01T00:00:00Z")
+                .unwrap()
+        );
+        assert!(
+            !store
+                .add_to_listening_list(10, "2026-02-02T00:00:00Z")
+                .unwrap()
+        );
+        store
+            .add_to_listening_list(20, "2026-02-03T00:00:00Z")
+            .unwrap();
+        store
+            .add_to_listening_list(30, "2026-02-04T00:00:00Z")
+            .unwrap();
+        store
+            .checkpoint_playback(101, 12_000, Some(60_000), "2026-02-05T00:00:00Z", false)
+            .unwrap();
+        store.request_download(100, DownloadOrigin::Manual).unwrap();
+        store.download_finished(100, "100.mp3", 100).unwrap();
+
+        let recently_added = store
+            .listening_list(None, ListeningListSort::RecentlyAdded)
+            .unwrap();
+        assert_eq!(
+            recently_added
+                .iter()
+                .map(|item| item.article_id)
+                .collect::<Vec<_>>(),
+            vec![30, 20, 10]
+        );
+        let item = &recently_added[2];
+        assert_eq!(item.audio_enclosures.len(), 2);
+        assert_eq!(item.active_enclosure_id, Some(101));
+        assert_eq!(item.audio_enclosures[0].enclosure.id, 100);
+        assert_eq!(
+            item.audio_enclosures[0].download.as_ref().unwrap().state,
+            DownloadState::Downloaded
+        );
+        assert_eq!(
+            item.audio_enclosures[1]
+                .playback_state
+                .as_ref()
+                .unwrap()
+                .position_ms,
+            12_000
+        );
+        assert_eq!(item.audio_enclosures[1].duration_ms, Some(60_000));
+
+        let by_publication = store
+            .listening_list(Some(2), ListeningListSort::PublicationDate)
+            .unwrap();
+        assert_eq!(
+            by_publication
+                .iter()
+                .map(|item| item.article_id)
+                .collect::<Vec<_>>(),
+            vec![20, 10]
+        );
+        assert_eq!(
+            store
+                .listening_list_feeds()
+                .unwrap()
+                .iter()
+                .map(|feed| (feed.feed_id, feed.item_count))
+                .collect::<Vec<_>>(),
+            vec![(2, 2), (3, 1)]
+        );
+        assert!(store.is_in_listening_list(10).unwrap());
+        assert!(!store.is_in_listening_list(999).unwrap());
+    }
+
+    #[test]
+    fn article_enclosures_returns_all_enclosures_in_id_order() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        store
+            .reconcile_with_enclosures(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 2,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                &[Article {
+                    id: 10,
+                    feed_id: 2,
+                    title: "Article".into(),
+                    url: "https://example.test/10".into(),
+                    comments_url: String::new(),
+                    published_at: "2026-01-01T00:00:00Z".into(),
+                    is_read: false,
+                    is_starred: false,
+                    raw_html_content: String::new(),
+                    preview: String::new(),
+                    image_url: None,
+                }],
+                &[
+                    Enclosure {
+                        id: 20,
+                        article_id: 10,
+                        url: "https://cdn.test/20".into(),
+                        mime_type: "audio/mpeg".into(),
+                        size_bytes: None,
+                        remote_media_progression_seconds: 0,
+                    },
+                    Enclosure {
+                        id: 10,
+                        article_id: 10,
+                        url: "https://cdn.test/10".into(),
+                        mime_type: "audio/mpeg".into(),
+                        size_bytes: None,
+                        remote_media_progression_seconds: 0,
+                    },
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .enclosures_for_article(10)
+                .unwrap()
+                .iter()
+                .map(|row| row.enclosure.id)
+                .collect::<Vec<_>>(),
+            vec![10, 20]
+        );
+        assert!(store.enclosures_for_article(999).unwrap().is_empty());
     }
 
     #[test]

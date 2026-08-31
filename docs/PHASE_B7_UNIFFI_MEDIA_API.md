@@ -34,4 +34,5 @@ and chapters. Native clients perform playback, filesystem/network transfers,
 OS scheduling, and media presentation.
 
 No database, SQL, mutation-outbox, playback-engine, or transfer-engine API is
-exported. Schema version remains 16.
+exported. Schema version is 17, including the Phase-C article-centered
+Listening List membership table.
