@@ -6,6 +6,7 @@ REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
 PROJECT="${REPOSITORY_DIR}/apple/ios/FluxNews.xcodeproj"
 DERIVED_DATA="${DERIVED_DATA:-${REPOSITORY_DIR}/.build/DerivedData}"
 ARCHIVE_PATH="${ARCHIVE_PATH:-${REPOSITORY_DIR}/.build/Archives/FluxNews-nativeDev.xcarchive}"
+DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-8X9VDP43J9}"
 EXPECTED_BUNDLE_IDENTIFIER="dev.kevincfechtel.fluxNews.nativeDev"
 BUILD_NUMBER=""
 
