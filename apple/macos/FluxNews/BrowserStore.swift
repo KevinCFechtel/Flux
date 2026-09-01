@@ -5,7 +5,6 @@ import OSLog
 import Security
 import UserNotifications
 
-enum ArticleListStyle: String { case row, card }
 struct FeedSettingsTarget: Identifiable { let id: Int64; let title: String }
 
 struct ArticleAudioActionState: Equatable {
@@ -131,7 +130,7 @@ private struct MacOSBackupSettingsV1: Codable {
     let version: UInt32
     let markReadOnScrollover: Bool
     let syncOnStart: Bool
-    let articleListStyle: String
+    let articlePresentationMode: String
     let previewLines: Int
     let clickOnNews: String
     let globalShortcut: String
@@ -200,7 +199,7 @@ final class BrowserStore: ObservableObject {
     @Published var hideEmptyNavigationEntries: Bool
     @Published var removeArticlesWhenMarkedRead: Bool
     @Published private(set) var syncOnStartEnabled: Bool
-    @Published var articleListStyle: ArticleListStyle
+    @Published var articlePresentationMode: ArticlePresentationMode
     @Published var articlePreviewLines: ArticlePreviewLines
     @Published var clickOnNews: ClickOnNews
     @Published var globalShortcut: GlobalShortcutChoice
@@ -253,7 +252,7 @@ final class BrowserStore: ObservableObject {
         hideEmptyNavigationEntries = UserDefaults.standard.object(forKey: "FluxNews.hideEmptyNavigationEntries") as? Bool ?? false
         removeArticlesWhenMarkedRead = UserDefaults.standard.object(forKey: "FluxNews.removeArticlesWhenMarkedRead") as? Bool ?? false
         syncOnStartEnabled = UserDefaults.standard.object(forKey: "FluxNews.syncOnStart") as? Bool ?? true
-        articleListStyle = UserDefaults.standard.string(forKey: "FluxNews.articleListStyle").flatMap(ArticleListStyle.init(rawValue:)) ?? .row
+        articlePresentationMode = UserDefaults.standard.string(forKey: "FluxNews.articlePresentationMode").flatMap(ArticlePresentationMode.init(rawValue:)) ?? .visual
         articlePreviewLines = ArticlePreviewLines(rawValue: UserDefaults.standard.integer(forKey: "FluxNews.articlePreviewLines")) ?? .standard
         clickOnNews = UserDefaults.standard.string(forKey: "FluxNews.clickOnNews").flatMap(ClickOnNews.init(rawValue:)) ?? .openLink
         globalShortcut = GlobalShortcutChoice.stored()
@@ -621,7 +620,7 @@ final class BrowserStore: ObservableObject {
     func setNewestFirst(_ enabled: Bool) { newestFirst = enabled; resetPresentation(); reloadVisibleArticles(acknowledgingPendingNewData: true) }
     func noteMeaningfulInteraction() { hasMeaningfullyInteracted = true }
     func resetPresentation() { hasMeaningfullyInteracted = false; newDataAvailable = false; listPresentationRevision &+= 1 }
-    func setArticleListStyle(_ style: ArticleListStyle) { guard style != articleListStyle else { return }; articleListStyle = style; UserDefaults.standard.set(style.rawValue, forKey: "FluxNews.articleListStyle"); resetPresentation() }
+    func setArticlePresentationMode(_ mode: ArticlePresentationMode) { guard mode != articlePresentationMode else { return }; articlePresentationMode = mode; UserDefaults.standard.set(mode.rawValue, forKey: "FluxNews.articlePresentationMode"); resetPresentation() }
     func applyNewData() { reloadVisibleArticles(resetPosition: true, acknowledgingPendingNewData: true) }
     func requestMediaTransferReconciliation() { onMediaTransferRequested?() }
     func sync(reason: SyncReason = .manual) {
@@ -1220,7 +1219,7 @@ final class BrowserStore: ObservableObject {
             version: MacOSBackupSettingsV1.version,
             markReadOnScrollover: markReadOnScrolloverEnabled,
             syncOnStart: syncOnStartEnabled,
-            articleListStyle: articleListStyle.rawValue,
+            articlePresentationMode: articlePresentationMode.rawValue,
             previewLines: articlePreviewLines.rawValue,
             clickOnNews: clickOnNews.rawValue,
             globalShortcut: globalShortcut.rawValue,
@@ -1237,7 +1236,7 @@ final class BrowserStore: ObservableObject {
         try CredentialStore.setLaunchAtLogin(settings.launchAtLogin)
         setScrolloverEnabled(settings.markReadOnScrollover)
         setSyncOnStartEnabled(settings.syncOnStart)
-        setArticleListStyle(ArticleListStyle(rawValue: settings.articleListStyle) ?? .row)
+        setArticlePresentationMode(ArticlePresentationMode(rawValue: settings.articlePresentationMode) ?? .visual)
         setArticlePreviewLines(ArticlePreviewLines(rawValue: settings.previewLines) ?? .standard)
         setClickOnNews(ClickOnNews(rawValue: settings.clickOnNews) ?? .openLink)
         setGlobalShortcut(GlobalShortcutChoice(rawValue: settings.globalShortcut) ?? .optionCommandF)
@@ -1251,7 +1250,7 @@ final class BrowserStore: ObservableObject {
         try? CredentialStore.setLaunchAtLogin(false)
         setScrolloverEnabled(true)
         setSyncOnStartEnabled(true)
-        setArticleListStyle(.row)
+        setArticlePresentationMode(.visual)
         setArticlePreviewLines(.standard)
         setClickOnNews(.openLink)
         setGlobalShortcut(.optionCommandF)

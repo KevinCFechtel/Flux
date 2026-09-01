@@ -33,4 +33,7 @@ enum ArticleListPresentationPolicy {
 }
 
 enum ArticlePresentationMode: String, CaseIterable { case visual, compact }
+extension ArticlePresentationMode {
+    var showsArticleImage: Bool { self == .visual }
+}
 enum ArticlePreviewLines: Int, CaseIterable { case compact = 2, standard = 3, extended = 5 }

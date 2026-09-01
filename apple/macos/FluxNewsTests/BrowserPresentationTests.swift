@@ -40,6 +40,30 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(BrowserScope.listeningList, .listeningList)
     }
 
+    func testArticlePresentationModesUseVisualAsDefaultAndCanonicalValues() {
+        XCTAssertEqual(ArticlePresentationMode.allCases, [.visual, .compact])
+        XCTAssertEqual(ArticlePresentationMode(rawValue: "visual"), .visual)
+        XCTAssertEqual(ArticlePresentationMode(rawValue: "compact"), .compact)
+        XCTAssertTrue(ArticlePresentationMode.visual.showsArticleImage)
+        XCTAssertFalse(ArticlePresentationMode.compact.showsArticleImage)
+
+        let defaults = UserDefaults.standard
+        let key = "FluxNews.articlePresentationMode"
+        let previous = defaults.object(forKey: key)
+        defer {
+            if let previous { defaults.set(previous, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
+        defaults.removeObject(forKey: key)
+        XCTAssertEqual(BrowserStore().articlePresentationMode, .visual)
+
+        let store = BrowserStore()
+        store.setArticlePresentationMode(.compact)
+        XCTAssertEqual(defaults.string(forKey: key), "compact")
+        store.setArticlePresentationMode(.visual)
+        XCTAssertEqual(defaults.string(forKey: key), "visual")
+    }
+
     func testMediaTransferReconciliationUsesExistingWakeupCallback() {
         let store = BrowserStore()
         var callbackCount = 0

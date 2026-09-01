@@ -128,10 +128,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private func size(sidebarVisible: Bool) -> NSSize {
         let visibleHeight = statusItem.button?.window?.screen?.visibleFrame.height
             ?? NSScreen.main?.visibleFrame.height
-            ?? PopoverLayout.rowHeight + PopoverLayout.verticalScreenMargin
+            ?? PopoverLayout.visualHeight + PopoverLayout.verticalScreenMargin
         return NSSize(
-            width: PopoverLayout.width(style: store.articleListStyle, sidebarVisible: sidebarVisible),
-            height: min(store.articleListStyle == .row ? PopoverLayout.rowHeight : PopoverLayout.cardHeight, max(320, visibleHeight - PopoverLayout.verticalScreenMargin))
+            width: PopoverLayout.width(mode: store.articlePresentationMode, sidebarVisible: sidebarVisible),
+            height: min(PopoverLayout.height(for: store.articlePresentationMode), max(320, visibleHeight - PopoverLayout.verticalScreenMargin))
         )
     }
 }

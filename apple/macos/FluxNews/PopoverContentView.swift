@@ -3,20 +3,23 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum PopoverLayout {
-    static let rowWidth: CGFloat = 620
-    static let cardWidth: CGFloat = 390
+    static let visualWidth: CGFloat = 620
     static let sidebarWidth: CGFloat = 240
-    static let rowHeight: CGFloat = 620
-    static let cardHeight: CGFloat = 760
+    static let visualHeight: CGFloat = 620
+    static let compactHeight: CGFloat = 520
     static let verticalScreenMargin: CGFloat = 32
     static let animation: TimeInterval = 0.2
 
-    static func contentWidth(for style: ArticleListStyle) -> CGFloat {
-        style == .row ? rowWidth : cardWidth
+    static func contentWidth(for mode: ArticlePresentationMode) -> CGFloat {
+        visualWidth
     }
 
-    static func width(style: ArticleListStyle, sidebarVisible: Bool) -> CGFloat {
-        contentWidth(for: style) + (sidebarVisible ? sidebarWidth : 0)
+    static func width(mode: ArticlePresentationMode, sidebarVisible: Bool) -> CGFloat {
+        contentWidth(for: mode) + (sidebarVisible ? sidebarWidth : 0)
+    }
+
+    static func height(for mode: ArticlePresentationMode) -> CGFloat {
+        mode == .visual ? visualHeight : compactHeight
     }
 }
 
@@ -59,9 +62,9 @@ struct PopoverContentView: View {
                 layoutChanged: layoutChanged,
                 dismiss: dismiss
             )
-            .frame(width: PopoverLayout.contentWidth(for: store.articleListStyle))
+            .frame(width: PopoverLayout.contentWidth(for: store.articlePresentationMode))
         }
-        .frame(width: PopoverLayout.width(style: store.articleListStyle, sidebarVisible: sidebarVisible))
+        .frame(width: PopoverLayout.width(mode: store.articlePresentationMode, sidebarVisible: sidebarVisible))
         .frame(maxHeight: .infinity)
         .sheet(isPresented: $store.settingsVisible) { SettingsView(store: store) }
         .sheet(item: $store.feedSettingsTarget) { target in FeedSettingsView(store: store, target: target) }
@@ -145,6 +148,7 @@ private struct ArticlePane: View {
             suppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
         }
         .onChange(of: store.scope) { _, _ in showingPlayer = false }
+        .onChange(of: store.articlePresentationMode) { _, _ in layoutChanged(sidebarVisible) }
         .onChange(of: selectedID) { _, articleID in
             store.selectArticleAudioActions(for: articleID)
         }
@@ -192,13 +196,11 @@ private struct ArticlePane: View {
             isListeningList: store.isListeningList,
             unreadOnly: store.unreadOnly,
             newestFirst: store.newestFirst,
-            articleListStyle: store.articleListStyle,
             listeningListSort: store.listeningListSort,
             listeningListFeedID: store.listeningListFeedID,
             listeningListFeeds: store.listeningListFeeds,
             setUnreadOnly: store.setUnreadOnly,
             setNewestFirst: store.setNewestFirst,
-            setArticleListStyle: setArticleListStyle,
             setListeningListSort: store.setListeningListSort,
             setListeningListFeed: store.setListeningListFeed,
             showSettings: { store.settingsVisible = true },
@@ -231,9 +233,9 @@ private struct ArticlePane: View {
             GeometryReader { geometry in
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: store.articleListStyle == .row ? 0 : 4) {
+                        LazyVStack(spacing: 0) {
                             ForEach(store.articles, id: \.id) { article in
-                                 ArticleItem(article: article, style: store.articleListStyle, selected: selectedID == article.id, audioState: store.articleAudioActionStates[article.id], transferState: transferState, store: store, onSelect: { selectedID = article.id }, onPlayAudio: playAudio, onDownloadAudio: { enclosure in store.requestManualDownload(articleID: article.id, enclosureID: enclosure.id) }, onDeleteDownload: { enclosure in store.deleteDownload(articleID: article.id, enclosureID: enclosure.id) }, onAddToListeningList: { store.addToListeningList(articleID: article.id) }, onHoverChanged: { hovering in
+                                 ArticleItem(article: article, mode: store.articlePresentationMode, selected: selectedID == article.id, audioState: store.articleAudioActionStates[article.id], transferState: transferState, store: store, onSelect: { selectedID = article.id }, onPlayAudio: playAudio, onDownloadAudio: { enclosure in store.requestManualDownload(articleID: article.id, enclosureID: enclosure.id) }, onDeleteDownload: { enclosure in store.deleteDownload(articleID: article.id, enclosureID: enclosure.id) }, onAddToListeningList: { store.addToListeningList(articleID: article.id) }, onHoverChanged: { hovering in
                                     if hovering { hoveredID = article.id }
                                     else if hoveredID == article.id { hoveredID = nil }
                                 })
@@ -243,7 +245,7 @@ private struct ArticlePane: View {
                                             Color.clear.preference(key: ArticleFrameKey.self, value: [article.id: row.frame(in: .named(ArticleScrollSpace.name))])
                                         }
                                     }
-                                if store.articleListStyle == .row { Divider().padding(.leading, 264) }
+                                 Divider().padding(.leading, store.articlePresentationMode == .visual ? 264 : 12)
                             }
                         }
                     }
@@ -306,7 +308,6 @@ private struct ArticlePane: View {
     private var unreadIDs: Set<Int64> { Set(store.articles.filter { !$0.isRead }.map(\.id)) }
     private var userScrolling: Bool { scrollPhase != .idle && scrollPhase != .animating }
     private func isUserScrollPhase(_ phase: ScrollPhase) -> Bool { phase != .idle && phase != .animating }
-    private func setArticleListStyle(_ style: ArticleListStyle) { store.setArticleListStyle(style); layoutChanged(sidebarVisible) }
     private func toggleSidebar() {
         if reduceMotion { sidebarVisible.toggle() }
         else { withAnimation(.easeInOut(duration: PopoverLayout.animation)) { sidebarVisible.toggle() } }
@@ -411,11 +412,11 @@ private struct SearchResultsView: View {
                     Text("\(store.searchTotal) results").font(.caption).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.bottom, 6)
                     ScrollView {
-                        LazyVStack(spacing: store.articleListStyle == .row ? 0 : 4) {
+                        LazyVStack(spacing: 0) {
                             ForEach(store.articles, id: \.id) { article in
-                                ArticleItem(article: article, style: store.articleListStyle, selected: false, audioState: store.articleAudioActionStates[article.id], transferState: transferState, store: store, onSelect: {}, onPlayAudio: onPlay, onDownloadAudio: onDownload, onDeleteDownload: onDelete, onAddToListeningList: { onAdd(article.id) }, onHoverChanged: { _ in })
+                                ArticleItem(article: article, mode: store.articlePresentationMode, selected: false, audioState: store.articleAudioActionStates[article.id], transferState: transferState, store: store, onSelect: {}, onPlayAudio: onPlay, onDownloadAudio: onDownload, onDeleteDownload: onDelete, onAddToListeningList: { onAdd(article.id) }, onHoverChanged: { _ in })
                                     .onAppear { if article.id == store.articles.last?.id { store.loadMoreSearchResults() } }
-                                if store.articleListStyle == .row { Divider().padding(.leading, 264) }
+                                Divider().padding(.leading, store.articlePresentationMode == .visual ? 264 : 12)
                             }
                             if store.isSearching { ProgressView().padding() }
                         }
@@ -817,13 +818,11 @@ private struct MoreMenu: View {
     let isListeningList: Bool
     let unreadOnly: Bool
     let newestFirst: Bool
-    let articleListStyle: ArticleListStyle
     let listeningListSort: ListeningListSort
     let listeningListFeedID: Int64?
     let listeningListFeeds: [ListeningListFeed]
     let setUnreadOnly: (Bool) -> Void
     let setNewestFirst: (Bool) -> Void
-    let setArticleListStyle: (ArticleListStyle) -> Void
     let setListeningListSort: (ListeningListSort) -> Void
     let setListeningListFeed: (Int64?) -> Void
     let showSettings: () -> Void
@@ -845,10 +844,6 @@ private struct MoreMenu: View {
                     Button { setNewestFirst(true) } label: { Label("Newest First", systemImage: newestFirst ? "checkmark" : "arrow.down") }
                     Button { setNewestFirst(false) } label: { Label("Oldest First", systemImage: newestFirst ? "arrow.up" : "checkmark") }
                 } label: { Label("Sort Order", systemImage: "arrow.up.arrow.down") }
-                Menu {
-                    Button { setArticleListStyle(.row) } label: { Label("Rows", systemImage: articleListStyle == .row ? "checkmark" : "list.bullet") }
-                    Button { setArticleListStyle(.card) } label: { Label("Cards", systemImage: articleListStyle == .card ? "checkmark" : "rectangle.grid.1x2") }
-                } label: { Label("Layout", systemImage: "rectangle.3.group") }
             }
             Divider()
             Button { showSettings() } label: { Label("Settings...", systemImage: "gearshape") }
@@ -879,7 +874,7 @@ private struct ArticleItem: View {
     }()
 
     let article: ArticleSummary
-    let style: ArticleListStyle
+    let mode: ArticlePresentationMode
     let selected: Bool
     let audioState: ArticleAudioActionState?
     let transferState: MediaTransferPresentationState?
@@ -892,12 +887,12 @@ private struct ArticleItem: View {
     let onHoverChanged: (Bool) -> Void
     @State private var hovered = false
 
-    var body: some View { style == .row ? AnyView(row) : AnyView(card) }
-    private var row: some View {
+    var body: some View { mode == .visual ? AnyView(visual) : AnyView(compact) }
+    private var visual: some View {
         HStack(alignment: .top, spacing: 12) {
             Button { onSelect(); store.open(article) } label: {
                 HStack(alignment: .top, spacing: 12) {
-                    if article.imageUrl != nil, !store.unavailableArticleThumbnails.contains(store.articleThumbnailKey(article)) {
+                    if mode.showsArticleImage, article.imageUrl != nil, !store.unavailableArticleThumbnails.contains(store.articleThumbnailKey(article)) {
                         ThumbnailSlot(article: article, store: store, width: 240, height: 168)
                     }
                     textComposition
@@ -913,22 +908,22 @@ private struct ArticleItem: View {
         .onHover { hovering in hovered = hovering; onHoverChanged(hovering) }.contextMenu { actionMenu }
         .onDisappear { store.retryUnavailableArticleThumbnail(article) }
     }
-    private var card: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if article.imageUrl != nil, !store.unavailableArticleThumbnails.contains(store.articleThumbnailKey(article)) {
-                Button { onSelect(); store.open(article) } label: { ThumbnailSlot(article: article, store: store, width: PopoverLayout.cardWidth - 24, height: 206, cornerRadius: 10) }
-                    .buttonStyle(.plain)
+    private var compact: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Button { onSelect(); store.open(article) } label: {
+                HStack(alignment: .top, spacing: 10) {
+                    FeedIconSlot(feedID: article.feedId, store: store)
+                    compactTextComposition
+                }
+                .contentShape(Rectangle())
             }
-            HStack(alignment: .top, spacing: 10) {
-                Button { onSelect(); store.open(article) } label: { textComposition.contentShape(Rectangle()) }.buttonStyle(.plain)
-                quickActions.opacity(hovered ? 1 : 0).allowsHitTesting(hovered)
-            }
-            .padding(12)
+            .buttonStyle(.plain)
+            quickActions.opacity(hovered ? 1 : 0).allowsHitTesting(hovered)
         }
-        .frame(maxWidth: .infinity, alignment: .leading).background(interactionBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 10)).padding(.horizontal, 12).padding(.vertical, 6)
-        .contentShape(Rectangle()).onHover { hovering in hovered = hovering; onHoverChanged(hovering) }.contextMenu { actionMenu }
-        .onDisappear { store.retryUnavailableArticleThumbnail(article) }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        .contentShape(Rectangle()).background(interactionBackground)
+        .onHover { hovering in hovered = hovering; onHoverChanged(hovering) }.contextMenu { actionMenu }
     }
     private var textComposition: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -940,9 +935,29 @@ private struct ArticleItem: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+    private var compactTextComposition: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(ListeningListPresentation.textOrFallback(article.title, fallback: String(localized: "Untitled News"))).font(.system(size: 14, weight: article.isRead ? .regular : .semibold))
+                .foregroundStyle(article.isRead ? .secondary : .primary).lineLimit(2).multilineTextAlignment(.leading)
+            compactMetadata
+            if !article.preview.isEmpty { Text(article.preview).font(.caption).foregroundStyle(.secondary).lineLimit(store.articlePreviewLines.rawValue).multilineTextAlignment(.leading) }
+            if ArticleAudioActions.shouldRender(audioState, transferStateAvailable: transferState != nil), let audioState, let transferState { AudioActionsView(state: audioState, transferState: transferState, onPlay: onPlayAudio, onDownload: onDownloadAudio, onDelete: onDeleteDownload, onAdd: onAddToListeningList) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
     private var metadata: some View {
         HStack(spacing: 5) {
             FeedIconSlot(feedID: article.feedId, store: store)
+            Text(article.feedTitle).lineLimit(1)
+            Text("·")
+            Text(relativeDate)
+            if !article.commentsUrl.isEmpty { Image(systemName: "bubble.left") }
+            if article.isStarred { Image(systemName: "star.fill").foregroundStyle(.yellow).accessibilityLabel("Unstar") }
+        }
+        .font(.caption).foregroundStyle(article.isRead ? .tertiary : .secondary)
+    }
+    private var compactMetadata: some View {
+        HStack(spacing: 5) {
             Text(article.feedTitle).lineLimit(1)
             Text("·")
             Text(relativeDate)
@@ -1671,6 +1686,13 @@ private struct ReadingSettingsView: View {
                 }
                 .disabled(store.catalog.feeds.isEmpty)
             }
+            Picker("Article Presentation", selection: Binding(get: { store.articlePresentationMode }, set: { store.setArticlePresentationMode($0) })) {
+                Text("Visual").tag(ArticlePresentationMode.visual)
+                Text("Compact").tag(ArticlePresentationMode.compact)
+            }
+            Text(store.articlePresentationMode == .visual ? "Image-forward article presentation." : "Text-focused presentation with higher information density.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Picker("Preview Lines", selection: Binding(get: { store.articlePreviewLines }, set: { store.setArticlePreviewLines($0) })) {
                 Text("2 lines").tag(ArticlePreviewLines.compact)
                 Text("3 lines").tag(ArticlePreviewLines.standard)

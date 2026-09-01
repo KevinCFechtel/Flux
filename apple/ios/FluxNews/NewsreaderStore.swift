@@ -10,7 +10,7 @@ final class NewsreaderStore: ObservableObject {
         static let hideEmpty = "FluxNews.iOS.hideEmptyNavigationEntries"
         static let removeWhenRead = "FluxNews.iOS.removeArticlesWhenMarkedRead"
         static let scrollover = "FluxNews.iOS.markReadOnScrollover"
-        static let listStyle = "FluxNews.iOS.articleListStyle"
+        static let presentationMode = "FluxNews.iOS.articlePresentationMode"
         static let previewLines = "FluxNews.iOS.articlePreviewLines"
     }
 
@@ -48,7 +48,7 @@ final class NewsreaderStore: ObservableObject {
         hideEmptyNavigationEntries = defaults.object(forKey: Key.hideEmpty) as? Bool ?? false
         removeArticlesWhenMarkedRead = defaults.object(forKey: Key.removeWhenRead) as? Bool ?? false
         markReadOnScrolloverEnabled = defaults.object(forKey: Key.scrollover) as? Bool ?? true
-        articlePresentationMode = defaults.string(forKey: Key.listStyle).flatMap(ArticlePresentationMode.init(rawValue:)) ?? .visual
+        articlePresentationMode = defaults.string(forKey: Key.presentationMode).flatMap(ArticlePresentationMode.init(rawValue:)) ?? .visual
         articlePreviewLines = ArticlePreviewLines(rawValue: defaults.object(forKey: Key.previewLines) as? Int ?? 3) ?? .standard
     }
 
@@ -107,7 +107,7 @@ final class NewsreaderStore: ObservableObject {
     func setHideEmptyNavigationEntries(_ value: Bool) { hideEmptyNavigationEntries = value; UserDefaults.standard.set(value, forKey: Key.hideEmpty) }
     func setRemoveArticlesWhenMarkedRead(_ value: Bool) { removeArticlesWhenMarkedRead = value; UserDefaults.standard.set(value, forKey: Key.removeWhenRead) }
     func setMarkReadOnScrolloverEnabled(_ value: Bool) { markReadOnScrolloverEnabled = value; UserDefaults.standard.set(value, forKey: Key.scrollover) }
-    func setArticlePresentationMode(_ value: ArticlePresentationMode) { articlePresentationMode = value; UserDefaults.standard.set(value.rawValue, forKey: Key.listStyle) }
+    func setArticlePresentationMode(_ value: ArticlePresentationMode) { articlePresentationMode = value; UserDefaults.standard.set(value.rawValue, forKey: Key.presentationMode) }
     func setArticlePreviewLines(_ value: ArticlePreviewLines) { articlePreviewLines = value; UserDefaults.standard.set(value.rawValue, forKey: Key.previewLines) }
 
     func accumulateNewData(_ additions: [(feedID: Int64, count: UInt32)]) { pending.accumulate(additions); publishPending() }

@@ -442,16 +442,6 @@
         }
       }
     },
-    "Cards": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Karten"
-          }
-        }
-      }
-    },
     "Category": {
       "localizations": {
         "de": {
@@ -1460,16 +1450,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Umschreibregeln"
-          }
-        }
-      }
-    },
-    "Rows": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Zeilen"
           }
         }
       }
