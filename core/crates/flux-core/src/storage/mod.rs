@@ -12,10 +12,10 @@ use crate::domain::{
     DiscoveryMode, DownloadFailureKind, DownloadNetworkPolicy, DownloadOrigin, DownloadRetention,
     DownloadState, Enclosure, Feed, FeedPreferences, FeedSystemNotificationSetting,
     LegacyPlaybackImport, LegacyPlaybackImportResult, ListeningListEnclosure, ListeningListFeed,
-    ListeningListItem, ListeningListSort, MediaChapter, MediaChapterSource, MediaDownload,
-    MediaMetadata, MediaTransferWork, MutationField, NavigationCatalog, PlaybackState,
-    PlaybackStatus, ReadArticleRetention, ReadFilter, SavedMedia, SavedMediaMarkerState,
-    SavedMediaSyncConfiguration, SavedPlayableMediaItem, StarredFilter,
+    ListeningListItem, ListeningListSort, MediaArtworkSource, MediaChapter, MediaChapterSource,
+    MediaDownload, MediaMetadata, MediaTransferWork, MutationField, NavigationCatalog,
+    PlaybackState, PlaybackStatus, ReadArticleRetention, ReadFilter, SavedMedia,
+    SavedMediaMarkerState, SavedMediaSyncConfiguration, SavedPlayableMediaItem, StarredFilter,
     SystemNotificationCandidate, WidgetArticle, WidgetCounts, WidgetData, WidgetScopedCount,
 };
 use crate::media_metadata::{
@@ -1402,6 +1402,34 @@ impl Store {
         self.connection.lock().map_err(|_| CoreError::internal("database lock poisoned"))?.query_row("SELECT enclosure_id,duration_ms,embedded_artwork_reference FROM media_metadata WHERE enclosure_id=?1", [enclosure_id], |row| Ok(MediaMetadata { enclosure_id: row.get(0)?, duration_ms: row.get::<_, Option<i64>>(1)?.map(|value| u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery)).transpose()?, embedded_artwork_reference: row.get(2)? })).optional().map_err(sql_error)
     }
 
+    pub fn media_artwork_source(
+        &self,
+        enclosure_id: i64,
+    ) -> Result<Option<MediaArtworkSource>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        connection
+            .query_row(
+                "SELECT (SELECT e2.url FROM enclosures e2 WHERE e2.article_id=e.article_id AND lower(e2.mime_type) LIKE 'image/%' ORDER BY e2.id LIMIT 1),m.embedded_artwork_reference,a.image_url FROM enclosures e JOIN articles a ON a.id=e.article_id LEFT JOIN media_metadata m ON m.enclosure_id=e.id WHERE e.id=?1",
+                [enclosure_id],
+                |row| {
+                    let image_enclosure_url: Option<String> = row.get(0)?;
+                    let embedded_artwork_reference: Option<String> = row.get(1)?;
+                    let article_image_url: Option<String> = row.get(2)?;
+                    Ok(crate::domain::select_media_artwork(
+                        image_enclosure_url.as_deref(),
+                        embedded_artwork_reference.as_deref(),
+                        article_image_url.as_deref(),
+                    ))
+                },
+            )
+            .optional()
+            .map(|value| value.flatten())
+            .map_err(sql_error)
+    }
+
     pub fn media_artwork(&self, reference: &str) -> Result<Option<Vec<u8>>, CoreError> {
         let Some(path) = resolve_media_reference(&self.media_root, reference) else {
             return Ok(None);
@@ -2182,9 +2210,9 @@ impl Store {
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let sql = if feed_id.is_some() {
-            "SELECT s.enclosure_id,e.article_id,a.feed_id,a.title,f.title,a.published_at,s.added_at,e.url,e.mime_type,e.remote_present,(SELECT duration_ms FROM media_metadata m WHERE m.enclosure_id=e.id),COALESCE((SELECT e2.url FROM enclosures e2 WHERE e2.article_id=e.article_id AND lower(e2.mime_type) LIKE 'image/%' ORDER BY e2.id LIMIT 1),(SELECT m.embedded_artwork_reference FROM media_metadata m WHERE m.enclosure_id=e.id),a.image_url) FROM saved_media s JOIN enclosures e ON e.id=s.enclosure_id JOIN articles a ON a.id=e.article_id JOIN feeds f ON f.id=a.feed_id WHERE a.feed_id=?1 ORDER BY a.published_at DESC,a.id DESC,e.id DESC"
+            "SELECT s.enclosure_id,e.article_id,a.feed_id,a.title,f.title,a.published_at,s.added_at,e.url,e.mime_type,e.remote_present,(SELECT duration_ms FROM media_metadata m WHERE m.enclosure_id=e.id),(SELECT e2.url FROM enclosures e2 WHERE e2.article_id=e.article_id AND lower(e2.mime_type) LIKE 'image/%' ORDER BY e2.id LIMIT 1),(SELECT m.embedded_artwork_reference FROM media_metadata m WHERE m.enclosure_id=e.id),a.image_url FROM saved_media s JOIN enclosures e ON e.id=s.enclosure_id JOIN articles a ON a.id=e.article_id JOIN feeds f ON f.id=a.feed_id WHERE a.feed_id=?1 ORDER BY a.published_at DESC,a.id DESC,e.id DESC"
         } else {
-            "SELECT s.enclosure_id,e.article_id,a.feed_id,a.title,f.title,a.published_at,s.added_at,e.url,e.mime_type,e.remote_present,(SELECT duration_ms FROM media_metadata m WHERE m.enclosure_id=e.id),COALESCE((SELECT e2.url FROM enclosures e2 WHERE e2.article_id=e.article_id AND lower(e2.mime_type) LIKE 'image/%' ORDER BY e2.id LIMIT 1),(SELECT m.embedded_artwork_reference FROM media_metadata m WHERE m.enclosure_id=e.id),a.image_url) FROM saved_media s JOIN enclosures e ON e.id=s.enclosure_id JOIN articles a ON a.id=e.article_id JOIN feeds f ON f.id=a.feed_id ORDER BY s.added_at DESC,s.enclosure_id DESC"
+            "SELECT s.enclosure_id,e.article_id,a.feed_id,a.title,f.title,a.published_at,s.added_at,e.url,e.mime_type,e.remote_present,(SELECT duration_ms FROM media_metadata m WHERE m.enclosure_id=e.id),(SELECT e2.url FROM enclosures e2 WHERE e2.article_id=e.article_id AND lower(e2.mime_type) LIKE 'image/%' ORDER BY e2.id LIMIT 1),(SELECT m.embedded_artwork_reference FROM media_metadata m WHERE m.enclosure_id=e.id),a.image_url FROM saved_media s JOIN enclosures e ON e.id=s.enclosure_id JOIN articles a ON a.id=e.article_id JOIN feeds f ON f.id=a.feed_id ORDER BY s.added_at DESC,s.enclosure_id DESC"
         };
         let mut statement = connection.prepare(sql).map_err(sql_error)?;
         let rows = if let Some(feed_id) = feed_id {
@@ -3724,7 +3752,16 @@ fn saved_playable_media_from_row(
             .get::<_, Option<i64>>(10)?
             .map(|value| u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery))
             .transpose()?,
-        artwork_reference: row.get(11)?,
+        artwork_source: {
+            let image_enclosure_url: Option<String> = row.get(11)?;
+            let embedded_artwork_reference: Option<String> = row.get(12)?;
+            let article_image_url: Option<String> = row.get(13)?;
+            crate::domain::select_media_artwork(
+                image_enclosure_url.as_deref(),
+                embedded_artwork_reference.as_deref(),
+                article_image_url.as_deref(),
+            )
+        },
     })
 }
 fn setting_value(connection: &Connection, key: &str) -> Result<String, CoreError> {
@@ -3764,6 +3801,88 @@ mod tests {
         let media = temp.path().join("media");
         std::fs::create_dir_all(&data).unwrap();
         (data, cache, media)
+    }
+
+    #[test]
+    fn media_artwork_source_is_shared_by_playback_and_saved_media_projection() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let article = Article {
+            id: 10,
+            feed_id: 2,
+            title: "Episode".into(),
+            url: "https://example.test/episode".into(),
+            comments_url: String::new(),
+            published_at: "2026-01-01T00:00:00Z".into(),
+            is_read: false,
+            is_starred: false,
+            raw_html_content: String::new(),
+            preview: String::new(),
+            image_url: Some("https://example.test/article.jpg".into()),
+        };
+        let enclosures = [
+            Enclosure {
+                id: 100,
+                article_id: 10,
+                url: "https://example.test/episode.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+            Enclosure {
+                id: 200,
+                article_id: 10,
+                url: "https://example.test/cover-a.jpg".into(),
+                mime_type: "image/jpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+            Enclosure {
+                id: 201,
+                article_id: 10,
+                url: "https://example.test/cover-b.jpg".into(),
+                mime_type: "image/jpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+        ];
+        store
+            .reconcile_with_enclosures(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 2,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                &[article],
+                &enclosures,
+            )
+            .unwrap();
+        store
+            .replace_media_metadata(
+                100,
+                &MediaMetadata {
+                    enclosure_id: 100,
+                    duration_ms: None,
+                    embedded_artwork_reference: Some("metadata/artwork.png".into()),
+                },
+                &[],
+            )
+            .unwrap();
+
+        let expected = Some(MediaArtworkSource::RemoteUrl(
+            "https://example.test/cover-a.jpg".into(),
+        ));
+        assert_eq!(store.media_artwork_source(100).unwrap(), expected);
+        store.save_media(100, "2026-01-02T00:00:00Z").unwrap();
+        assert_eq!(
+            store.saved_playable_media().unwrap()[0].artwork_source,
+            expected
+        );
     }
 
     #[test]

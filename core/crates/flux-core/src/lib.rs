@@ -621,7 +621,7 @@ impl FluxCore {
             playback_state,
             local_file: download.and_then(|download| download.local_file),
             duration_ms,
-            artwork_reference: metadata.and_then(|metadata| metadata.embedded_artwork_reference),
+            artwork_source: self.store.media_artwork_source(enclosure_id)?,
         })
     }
     pub fn playback_state(&self, enclosure_id: i64) -> Result<Option<PlaybackState>, CoreError> {

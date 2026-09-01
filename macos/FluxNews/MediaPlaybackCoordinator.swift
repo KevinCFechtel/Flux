@@ -1,4 +1,5 @@
 import AVFoundation
+import AppKit
 import Foundation
 import OSLog
 import Combine
@@ -254,7 +255,7 @@ final class MediaPlaybackCoordinator {
         presentationState.loadedEnclosure = preparation.enclosure
         presentationState.feedTitle = preparation.feedTitle
         presentationState.mediaTitle = preparation.articleTitle
-        presentationState.artworkReference = preparation.artworkReference
+        presentationState.artworkSource = preparation.artworkSource
         presentationState.positionMs = preparation.playbackState.positionMs
         presentationState.durationMs = preparedDurationMs
         presentationState.chapters = (try? core.mediaChapters(enclosureId: enclosureID)) ?? []
@@ -327,7 +328,33 @@ final class MediaPlaybackCoordinator {
         return chapters
     }
 
-    func artwork(reference: String) throws -> Data? { try core.mediaArtwork(reference: reference) }
+    func artwork(source: MediaArtworkSource) async -> Data? {
+        switch source {
+        case let .localReference(reference):
+            do {
+                guard let data = try core.mediaArtwork(reference: reference), NSImage(data: data) != nil else {
+                    return nil
+                }
+                return data
+            } catch {
+                return nil
+            }
+        case let .remoteUrl(urlString):
+            guard let url = URL(string: urlString),
+                  url.scheme == "http" || url.scheme == "https"
+            else { return nil }
+            do {
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard let response = response as? HTTPURLResponse,
+                      (200..<300).contains(response.statusCode),
+                      NSImage(data: data) != nil
+                else { return nil }
+                return data
+            } catch {
+                return nil
+            }
+        }
+    }
     func isUsing(enclosureID: Int64) -> Bool { activeEnclosureID == enclosureID }
 
     func setPlaybackRate(_ rate: Double) {
@@ -414,7 +441,7 @@ final class MediaPlaybackPresentationState: ObservableObject {
     @Published fileprivate(set) var loadedEnclosure: Enclosure?
     @Published fileprivate(set) var feedTitle = ""
     @Published fileprivate(set) var mediaTitle = ""
-    @Published fileprivate(set) var artworkReference: String?
+    @Published fileprivate(set) var artworkSource: MediaArtworkSource?
     @Published fileprivate(set) var chapters: [MediaChapter] = []
     @Published fileprivate(set) var status: MediaPlaybackPresentationStatus = .stopped
     @Published fileprivate(set) var positionMs: UInt64 = 0

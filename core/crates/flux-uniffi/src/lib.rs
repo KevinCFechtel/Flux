@@ -460,7 +460,12 @@ pub struct PlaybackPreparation {
     pub playback_state: PlaybackState,
     pub local_file: Option<String>,
     pub duration_ms: Option<u64>,
-    pub artwork_reference: Option<String>,
+    pub artwork_source: Option<MediaArtworkSource>,
+}
+#[derive(uniffi::Enum)]
+pub enum MediaArtworkSource {
+    LocalReference { reference: String },
+    RemoteUrl { url: String },
 }
 #[derive(uniffi::Enum)]
 pub enum MediaProgressCapability {
@@ -549,7 +554,7 @@ pub struct SavedPlayableMediaItem {
     pub media_kind: MediaKind,
     pub remote_present: bool,
     pub duration_ms: Option<u64>,
-    pub artwork_reference: Option<String>,
+    pub artwork_source: Option<MediaArtworkSource>,
 }
 #[derive(uniffi::Record)]
 pub struct SavedMediaSyncConfiguration {
@@ -2235,6 +2240,16 @@ impl From<domain::LegacyPlaybackImportResult> for LegacyPlaybackImportResult {
         }
     }
 }
+impl From<domain::MediaArtworkSource> for MediaArtworkSource {
+    fn from(value: domain::MediaArtworkSource) -> Self {
+        match value {
+            domain::MediaArtworkSource::LocalReference(reference) => {
+                Self::LocalReference { reference }
+            }
+            domain::MediaArtworkSource::RemoteUrl(url) => Self::RemoteUrl { url },
+        }
+    }
+}
 impl From<domain::PlaybackPreparation> for PlaybackPreparation {
     fn from(value: domain::PlaybackPreparation) -> Self {
         let domain::PlaybackPreparation {
@@ -2244,7 +2259,7 @@ impl From<domain::PlaybackPreparation> for PlaybackPreparation {
             playback_state,
             local_file,
             duration_ms,
-            artwork_reference,
+            artwork_source,
         } = value;
         let enclosure_id = enclosure.id;
         Self {
@@ -2260,7 +2275,7 @@ impl From<domain::PlaybackPreparation> for PlaybackPreparation {
             }),
             local_file,
             duration_ms,
-            artwork_reference,
+            artwork_source: artwork_source.map(Into::into),
         }
     }
 }
@@ -2419,7 +2434,7 @@ impl From<domain::SavedPlayableMediaItem> for SavedPlayableMediaItem {
             media_kind: value.media_kind.into(),
             remote_present: value.remote_present,
             duration_ms: value.duration_ms,
-            artwork_reference: value.artwork_reference,
+            artwork_source: value.artwork_source.map(Into::into),
         }
     }
 }

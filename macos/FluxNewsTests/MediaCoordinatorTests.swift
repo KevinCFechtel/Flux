@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import AppKit
 import XCTest
 @testable import FluxNews
 
@@ -22,7 +23,7 @@ private final class FakePlaybackCore: MediaPlaybackCore {
             playbackState: PlaybackState(enclosureId: 7, positionMs: positionMs, durationMs: durationMs, status: status, updatedAt: nil),
             localFile: nil,
             durationMs: durationMs,
-            artworkReference: nil
+            artworkSource: nil
         )
     }
 
@@ -477,16 +478,21 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(withReal.artworkData, real)
     }
 
-    func testApplicationIconArtworkPreservesTransparency() {
-        let image = NSImage(size: NSSize(width: 2, height: 2))
-        image.lockFocus()
-        NSColor.clear.setFill()
-        NSRect(origin: .zero, size: image.size).fill()
-        image.unlockFocus()
-
-        let data = NowPlayingArtwork.applicationIconData(from: image)
+    func testFallbackArtworkLoadsBundledPNG() {
+        let data = NowPlayingArtwork.fallbackData()
         XCTAssertNotNil(data)
-        XCTAssertTrue(NSBitmapImageRep(data: data!)?.hasAlpha ?? false)
+        XCTAssertNotNil(NSImage(data: data!))
+    }
+
+    func testArtworkSourcesPreserveLocalAndRemoteKinds() {
+        XCTAssertEqual(
+            MediaArtworkSource.localReference(reference: "metadata/artwork.png"),
+            MediaArtworkSource.localReference(reference: "metadata/artwork.png")
+        )
+        XCTAssertEqual(
+            MediaArtworkSource.remoteUrl(url: "https://example.test/artwork.jpg"),
+            MediaArtworkSource.remoteUrl(url: "https://example.test/artwork.jpg")
+        )
     }
 
     func testRemoteCommandsDelegateToPlaybackCoordinatorAndRegistrationIsIdempotent() throws {

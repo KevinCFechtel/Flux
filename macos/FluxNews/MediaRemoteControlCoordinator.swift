@@ -49,11 +49,9 @@ struct NowPlayingProjection: Equatable {
 }
 
 enum NowPlayingArtwork {
-    static func applicationIconData(from image: NSImage?) -> Data? {
-        guard let image, let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff) else {
-            return image?.tiffRepresentation
-        }
-        return bitmap.representation(using: .png, properties: [:]) ?? tiff
+    static func fallbackData(bundle: Bundle = .main) -> Data? {
+        guard let url = bundle.url(forResource: "FallbackArtwork", withExtension: "png") else { return nil }
+        return try? Data(contentsOf: url)
     }
 }
 
@@ -74,19 +72,19 @@ final class MediaRemoteControlCoordinator {
     private var cancellables = Set<AnyCancellable>()
     private var registrations: [(MPRemoteCommand, Any)] = []
     private var artworkGeneration = 0
-    private var artworkReference: String?
+    private var artworkSource: MediaArtworkSource?
     private var artworkData: Data?
     private var publishedArtworkData: Data?
     private var publishedArtwork: MPMediaItemArtwork?
     private var hasPublishedArtwork = false
-    private let applicationArtworkData: Data?
+    private let fallbackArtworkData: Data?
 
     private(set) var registrationCount = 0
 
     init(playbackCoordinator: MediaPlaybackCoordinator, presentationState: MediaPlaybackPresentationState) {
         self.playbackCoordinator = playbackCoordinator
         self.presentationState = presentationState
-        applicationArtworkData = NowPlayingArtwork.applicationIconData(from: NSApp.applicationIconImage)
+        fallbackArtworkData = NowPlayingArtwork.fallbackData()
         observePresentationState()
         start()
         publish()
@@ -116,7 +114,7 @@ final class MediaRemoteControlCoordinator {
             presentationState.$loadedEnclosure.map { _ in () }.eraseToAnyPublisher(),
             presentationState.$feedTitle.map { _ in () }.eraseToAnyPublisher(),
             presentationState.$mediaTitle.map { _ in () }.eraseToAnyPublisher(),
-            presentationState.$artworkReference.map { _ in () }.eraseToAnyPublisher(),
+            presentationState.$artworkSource.map { _ in () }.eraseToAnyPublisher(),
             presentationState.$status.map { _ in () }.eraseToAnyPublisher(),
             presentationState.$durationMs.map { _ in () }.eraseToAnyPublisher(),
             presentationState.$playbackRate.map { _ in () }.eraseToAnyPublisher(),
@@ -207,7 +205,7 @@ final class MediaRemoteControlCoordinator {
 
     private func publish() {
         requestArtworkIfNeeded()
-        guard let projection = NowPlayingProjection.make(state: presentationState, artworkData: artworkData, fallbackArtworkData: applicationArtworkData) else {
+        guard let projection = NowPlayingProjection.make(state: presentationState, artworkData: artworkData, fallbackArtworkData: fallbackArtworkData) else {
             nowPlaying.nowPlayingInfo = nil
             nowPlaying.playbackState = .unknown
             return
@@ -236,7 +234,7 @@ final class MediaRemoteControlCoordinator {
     }
 
     private func publishElapsed() {
-        guard let projection = NowPlayingProjection.make(state: presentationState, artworkData: artworkData, fallbackArtworkData: applicationArtworkData), var info = nowPlaying.nowPlayingInfo else {
+        guard let projection = NowPlayingProjection.make(state: presentationState, artworkData: artworkData, fallbackArtworkData: fallbackArtworkData), var info = nowPlaying.nowPlayingInfo else {
             publish()
             return
         }
@@ -247,18 +245,18 @@ final class MediaRemoteControlCoordinator {
     }
 
     private func requestArtworkIfNeeded() {
-        let reference = presentationState.artworkReference
-        guard reference != artworkReference else { return }
-        artworkReference = reference
+        let source = presentationState.artworkSource
+        guard source != artworkSource else { return }
+        artworkSource = source
         artworkData = nil
         artworkGeneration += 1
         let generation = artworkGeneration
-        guard let reference else { return }
+        guard let source else { return }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let data = try? self.playbackCoordinator.artwork(reference: reference)
-            guard self.artworkGeneration == generation, self.presentationState.artworkReference == reference else { return }
-            self.artworkData = data ?? nil
+            let data = await self.playbackCoordinator.artwork(source: source)
+            guard self.artworkGeneration == generation, self.presentationState.artworkSource == source else { return }
+            self.artworkData = data
             self.publish()
         }
     }

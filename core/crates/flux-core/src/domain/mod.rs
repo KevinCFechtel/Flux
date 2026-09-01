@@ -135,6 +135,34 @@ pub struct SavedMedia {
     pub added_at: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MediaArtworkSource {
+    LocalReference(String),
+    RemoteUrl(String),
+}
+
+/// Selects available artwork in the Phase-B priority order.
+/// Remote embedded artwork is not represented by the current metadata model.
+pub fn select_media_artwork(
+    image_enclosure_url: Option<&str>,
+    embedded_artwork_reference: Option<&str>,
+    article_image_url: Option<&str>,
+) -> Option<MediaArtworkSource> {
+    image_enclosure_url
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| MediaArtworkSource::RemoteUrl(value.to_string()))
+        .or_else(|| {
+            embedded_artwork_reference
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| MediaArtworkSource::LocalReference(value.to_string()))
+        })
+        .or_else(|| {
+            article_image_url
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| MediaArtworkSource::RemoteUrl(value.to_string()))
+        })
+}
+
 /// Denormalized local episode-library item backed only by currently implemented domains.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SavedPlayableMediaItem {
@@ -150,7 +178,7 @@ pub struct SavedPlayableMediaItem {
     pub media_kind: MediaKind,
     pub remote_present: bool,
     pub duration_ms: Option<u64>,
-    pub artwork_reference: Option<String>,
+    pub artwork_source: Option<MediaArtworkSource>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -230,7 +258,7 @@ pub struct PlaybackPreparation {
     pub playback_state: Option<PlaybackState>,
     pub local_file: Option<String>,
     pub duration_ms: Option<u64>,
-    pub artwork_reference: Option<String>,
+    pub artwork_source: Option<MediaArtworkSource>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -850,7 +878,7 @@ impl std::error::Error for CoreError {}
 
 #[cfg(test)]
 mod tests {
-    use super::MediaKind;
+    use super::{MediaArtworkSource, MediaKind, select_media_artwork};
 
     #[test]
     fn classifies_raw_mime_types_without_normalizing_them() {
@@ -863,6 +891,61 @@ mod tests {
         assert_eq!(
             MediaKind::from_mime_type("application/x-custom"),
             MediaKind::Other
+        );
+    }
+
+    #[test]
+    fn media_artwork_selection_uses_canonical_priority() {
+        assert_eq!(
+            select_media_artwork(
+                Some("https://example.test/enclosure.jpg"),
+                Some("metadata/artwork.png"),
+                Some("https://example.test/article.jpg"),
+            ),
+            Some(MediaArtworkSource::RemoteUrl(
+                "https://example.test/enclosure.jpg".into()
+            ))
+        );
+        assert_eq!(
+            select_media_artwork(
+                None,
+                Some("metadata/artwork.png"),
+                Some("https://example.test/article.jpg")
+            ),
+            Some(MediaArtworkSource::LocalReference(
+                "metadata/artwork.png".into()
+            ))
+        );
+        assert_eq!(
+            select_media_artwork(None, None, Some("https://example.test/article.jpg")),
+            Some(MediaArtworkSource::RemoteUrl(
+                "https://example.test/article.jpg".into()
+            ))
+        );
+        assert_eq!(select_media_artwork(None, None, None), None);
+    }
+
+    #[test]
+    fn media_artwork_selection_ignores_blank_sources_and_preserves_deterministic_input() {
+        assert_eq!(
+            select_media_artwork(
+                Some(" https://example.test/first.jpg "),
+                Some("metadata/artwork.png"),
+                None,
+            ),
+            Some(MediaArtworkSource::RemoteUrl(
+                " https://example.test/first.jpg ".into()
+            ))
+        );
+        assert_eq!(
+            select_media_artwork(
+                Some("  "),
+                Some("  "),
+                Some("https://example.test/article.jpg")
+            ),
+            Some(MediaArtworkSource::RemoteUrl(
+                "https://example.test/article.jpg".into()
+            ))
         );
     }
 }

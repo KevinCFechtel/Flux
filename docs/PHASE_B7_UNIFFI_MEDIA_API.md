@@ -20,8 +20,11 @@ moving playback or transfer execution into the core.
   delete-after-playback through `CoreSettings` and dedicated setters.
 - Metadata: `media_metadata` and ordered `media_chapters` with explicit chapter
   source values.
-- Artwork: `media_artwork` resolves only Core-owned opaque references and
-  returns the stored bytes.
+- Artwork: playback and saved-media projections expose the canonical Core
+  `MediaArtworkSource` (`LocalReference` or `RemoteUrl`). `media_artwork`
+  resolves only Core-owned local references and returns the stored bytes;
+  native clients load remote URLs. Remote embedded artwork is not currently
+  represented by the Phase-B metadata model.
 - Cleanup: `evaluate_media_cleanup` asks Core to evaluate durable cleanup at
   the current time.
 
