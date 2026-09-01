@@ -22,7 +22,7 @@ final class CoreBootstrapper: ObservableObject {
 
     @Published private(set) var state: State = .starting
     @Published private(set) var legacyResult = LegacyStateDiscovery.probe()
-    private var core: Flux?
+    private(set) var core: Flux?
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "core")
 
     func start() async {

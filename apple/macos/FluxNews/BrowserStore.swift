@@ -5,7 +5,6 @@ import OSLog
 import Security
 import UserNotifications
 
-enum ArticleListStyle: String { case row, card }
 struct FeedSettingsTarget: Identifiable { let id: Int64; let title: String }
 
 struct ArticleAudioActionState: Equatable {
@@ -763,7 +762,7 @@ final class BrowserStore: ObservableObject {
         let action: SnapshotRefreshPolicy.Action = if metadata.reason == .background || metadata.reason == .periodic {
             metadata.dataChanged ? .signalNewData : .preserve
         } else {
-            SnapshotRefreshPolicy.action(manual: metadata.reason == .manual, dataChanged: metadata.dataChanged, popoverVisible: popoverVisible, hasMeaningfullyInteracted: hasMeaningfullyInteracted)
+            SnapshotRefreshPolicy.action(manual: metadata.reason == .manual, dataChanged: metadata.dataChanged, hasMeaningfullyInteracted: hasMeaningfullyInteracted)
         }
         switch action {
         case .replace:

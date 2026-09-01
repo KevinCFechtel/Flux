@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var bootstrapper: CoreBootstrapper
+    @ObservedObject var newsreaderStore: NewsreaderStore
 
     var body: some View {
         NavigationStack {

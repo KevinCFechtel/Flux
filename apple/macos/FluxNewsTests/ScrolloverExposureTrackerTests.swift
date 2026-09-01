@@ -101,21 +101,21 @@ final class ScrolloverExposureTrackerTests: XCTestCase {
     }
 
     func testManualSyncAlwaysReplacesAndResetsSnapshot() {
-        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: true, dataChanged: false, popoverVisible: true, hasMeaningfullyInteracted: true), .replace)
-        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: true, dataChanged: true, popoverVisible: true, hasMeaningfullyInteracted: true), .replace)
+        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: true, dataChanged: false, hasMeaningfullyInteracted: true), .replace)
+        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: true, dataChanged: true, hasMeaningfullyInteracted: true), .replace)
     }
 
     func testAutomaticUntouchedSnapshotReplacesWhenDataChanges() {
-        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: false, dataChanged: true, popoverVisible: true, hasMeaningfullyInteracted: false), .replace)
-        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: false, dataChanged: true, popoverVisible: false, hasMeaningfullyInteracted: true), .replace)
+        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: false, dataChanged: true, hasMeaningfullyInteracted: false), .replace)
+        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: false, dataChanged: true, hasMeaningfullyInteracted: true), .signalNewData)
     }
 
     func testAutomaticInteractedSnapshotSignalsNewDataWithoutReplacement() {
-        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: false, dataChanged: true, popoverVisible: true, hasMeaningfullyInteracted: true), .signalNewData)
+        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: false, dataChanged: true, hasMeaningfullyInteracted: true), .signalNewData)
     }
 
     func testUnchangedAutomaticSyncAndLocalMutationDoNotReplaceSnapshot() {
-        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: false, dataChanged: false, popoverVisible: true, hasMeaningfullyInteracted: false), .preserve)
+        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: false, dataChanged: false, hasMeaningfullyInteracted: false), .preserve)
         XCTAssertNotEqual(SnapshotRefreshPolicy.Action.preserve, .replace)
     }
 

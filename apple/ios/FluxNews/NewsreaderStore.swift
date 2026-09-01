@@ -1,0 +1,127 @@
+import Combine
+import Foundation
+
+@MainActor
+final class NewsreaderStore: ObservableObject {
+    private enum Key {
+        static let startupScope = "FluxNews.iOS.startupScope"
+        static let startupCategoryID = "FluxNews.iOS.startupCategoryID"
+        static let startupFeedID = "FluxNews.iOS.startupFeedID"
+        static let hideEmpty = "FluxNews.iOS.hideEmptyNavigationEntries"
+        static let removeWhenRead = "FluxNews.iOS.removeArticlesWhenMarkedRead"
+        static let scrollover = "FluxNews.iOS.markReadOnScrollover"
+        static let listStyle = "FluxNews.iOS.articleListStyle"
+        static let previewLines = "FluxNews.iOS.articlePreviewLines"
+    }
+
+    @Published private(set) var articles: [ArticleSummary] = []
+    @Published private(set) var catalog = NavigationCatalog(categories: [], feeds: [])
+    @Published private(set) var unreadTotal: UInt64 = 0
+    @Published private(set) var starredTotal: UInt64 = 0
+    @Published private(set) var selectionTotal: UInt64 = 0
+    @Published private(set) var categoryCounts: [Int64: UInt64] = [:]
+    @Published private(set) var feedCounts: [Int64: UInt64] = [:]
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var pendingNewByFeed: [Int64: Int] = [:]
+    @Published private(set) var hasPendingNewData = false
+    @Published private(set) var snapshotRevision: UInt64 = 0
+    @Published var scope: BrowserScope = .all
+    @Published var unreadOnly = true
+    @Published var newestFirst = false
+    @Published var startupScope: StartupScopePreference
+    @Published var startupCategoryID: Int64?
+    @Published var startupFeedID: Int64?
+    @Published var hideEmptyNavigationEntries: Bool
+    @Published var removeArticlesWhenMarkedRead: Bool
+    @Published var markReadOnScrolloverEnabled: Bool
+    @Published var articleListStyle: ArticleListStyle
+    @Published var articlePreviewLines: ArticlePreviewLines
+
+    private(set) var core: Flux?
+    private var pending = PendingNewData()
+
+    init(defaults: UserDefaults = .standard) {
+        startupScope = defaults.string(forKey: Key.startupScope).flatMap(StartupScopePreference.init(rawValue:)) ?? .allNews
+        startupCategoryID = defaults.object(forKey: Key.startupCategoryID) as? Int64
+        startupFeedID = defaults.object(forKey: Key.startupFeedID) as? Int64
+        hideEmptyNavigationEntries = defaults.object(forKey: Key.hideEmpty) as? Bool ?? false
+        removeArticlesWhenMarkedRead = defaults.object(forKey: Key.removeWhenRead) as? Bool ?? false
+        markReadOnScrolloverEnabled = defaults.object(forKey: Key.scrollover) as? Bool ?? true
+        articleListStyle = defaults.string(forKey: Key.listStyle).flatMap(ArticleListStyle.init(rawValue:)) ?? .row
+        articlePreviewLines = ArticlePreviewLines(rawValue: defaults.object(forKey: Key.previewLines) as? Int ?? 3) ?? .standard
+    }
+
+    func attach(to configuredCore: Flux) {
+        core = configuredCore
+        loadNavigationAndCounts()
+        scope = StartupScopeResolver.resolve(startupScope, categoryID: startupCategoryID, feedID: startupFeedID, categoryIDs: Set(catalog.categories.map(\.id)), feedIDs: Set(catalog.feeds.map(\.id)) )
+        loadVisibleArticles()
+    }
+
+    func query(scope requestedScope: BrowserScope? = nil) -> ArticleQuery {
+        let selected = requestedScope ?? scope
+        let coreScope: ArticleScope = switch selected {
+        case .all, .starred: .all
+        case let .category(id): .category(id: id)
+        case let .feed(id): .feed(id: id)
+        case .search, .listeningList: .all
+        }
+        return ArticleQuery(scope: coreScope, readFilter: selected == .starred ? .all : (unreadOnly ? .unread : .all), starredFilter: selected == .starred ? .starred : .all, sort: newestFirst ? .newestFirst : .oldestFirst, limit: 0, cursor: nil)
+    }
+
+    func loadNavigationAndCounts() {
+        guard let core else { return }
+        do {
+            catalog = try core.navigationCatalog()
+            unreadTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil))
+            starredTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .all, starredFilter: .starred, sort: .newestFirst, limit: 0, cursor: nil))
+            categoryCounts = try catalog.categories.reduce(into: [:]) { $0[$1.id] = try core.countArticles(query: query(scope: .category($1.id))) }
+            feedCounts = try catalog.feeds.reduce(into: [:]) { $0[$1.id] = try core.countArticles(query: query(scope: .feed($1.id))) }
+            pending.removeAbsentFeeds(Set(catalog.feeds.map(\.id)))
+            publishPending()
+            errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func loadVisibleArticles(acknowledgePending: Bool = false, resetSnapshot: Bool = false) {
+        guard let core else { return }
+        isLoading = true
+        do {
+            articles = try core.queryArticles(query: query())
+            selectionTotal = try core.countArticles(query: query())
+            if acknowledgePending { acknowledgePendingForCurrentScope() }
+            if resetSnapshot { snapshotRevision &+= 1 }
+            errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
+        isLoading = false
+    }
+
+    func select(_ newScope: BrowserScope) { scope = newScope; loadVisibleArticles(acknowledgePending: true, resetSnapshot: true) }
+
+    func setUnreadOnly(_ value: Bool) { unreadOnly = value; loadVisibleArticles(resetSnapshot: true) }
+    func setNewestFirst(_ value: Bool) { newestFirst = value; loadVisibleArticles(resetSnapshot: true) }
+    func setStartupScope(_ value: StartupScopePreference) { startupScope = value; UserDefaults.standard.set(value.rawValue, forKey: Key.startupScope) }
+    func setStartupCategoryID(_ value: Int64?) { startupCategoryID = value; UserDefaults.standard.set(value, forKey: Key.startupCategoryID) }
+    func setStartupFeedID(_ value: Int64?) { startupFeedID = value; UserDefaults.standard.set(value, forKey: Key.startupFeedID) }
+    func setHideEmptyNavigationEntries(_ value: Bool) { hideEmptyNavigationEntries = value; UserDefaults.standard.set(value, forKey: Key.hideEmpty) }
+    func setRemoveArticlesWhenMarkedRead(_ value: Bool) { removeArticlesWhenMarkedRead = value; UserDefaults.standard.set(value, forKey: Key.removeWhenRead) }
+    func setMarkReadOnScrolloverEnabled(_ value: Bool) { markReadOnScrolloverEnabled = value; UserDefaults.standard.set(value, forKey: Key.scrollover) }
+    func setArticleListStyle(_ value: ArticleListStyle) { articleListStyle = value; UserDefaults.standard.set(value.rawValue, forKey: Key.listStyle) }
+    func setArticlePreviewLines(_ value: ArticlePreviewLines) { articlePreviewLines = value; UserDefaults.standard.set(value.rawValue, forKey: Key.previewLines) }
+
+    func accumulateNewData(_ additions: [(feedID: Int64, count: UInt32)]) { pending.accumulate(additions); publishPending() }
+    func adoptVisibleSnapshot() { acknowledgePendingForCurrentScope(); loadVisibleArticles(resetSnapshot: true) }
+    func resetVisibleSnapshot() { articles = []; selectionTotal = 0; snapshotRevision &+= 1 }
+
+    private func acknowledgePendingForCurrentScope() {
+        switch scope {
+        case .all, .starred: pending.adoptAll()
+        case let .category(id): pending.adoptFeeds(in: Set(catalog.feeds.filter { $0.categoryId == id }.map(\.id)))
+        case let .feed(id): pending.adoptFeed(id)
+        case .search, .listeningList: break
+        }
+        publishPending()
+    }
+    private func publishPending() { pendingNewByFeed = pending.byFeed; hasPendingNewData = pending.hasPending }
+}

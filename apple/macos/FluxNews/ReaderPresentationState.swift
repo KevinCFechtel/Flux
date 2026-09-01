@@ -1,6 +1,5 @@
 import AppKit
 
-enum ArticlePreviewLines: Int, CaseIterable { case compact = 2, standard = 3, extended = 5 }
 enum ClickOnNews: String, CaseIterable { case openLink, openDetailView }
 enum NormalOpenAction: Equatable { case original, miniflux, detail }
 
