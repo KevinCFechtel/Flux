@@ -467,6 +467,16 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertNil(projection.assetURL)
     }
 
+    func testNowPlayingArtworkPrefersRealArtworkAndUsesFallbackWhenAbsent() {
+        let fallback = Data([1, 2, 3])
+        let real = Data([4, 5, 6])
+        let withoutReal = NowPlayingProjection.make(title: "Episode", sourceTitle: "Feed", enclosureURL: "https://example.test/audio.mp3", durationMs: 1_000, positionMs: 0, status: .paused, playbackRate: 1, errorMessage: nil, fallbackArtworkData: fallback)
+        let withReal = NowPlayingProjection.make(title: "Episode", sourceTitle: "Feed", enclosureURL: "https://example.test/audio.mp3", durationMs: 1_000, positionMs: 0, status: .paused, playbackRate: 1, errorMessage: nil, artworkData: real, fallbackArtworkData: fallback)
+
+        XCTAssertEqual(withoutReal.artworkData, fallback)
+        XCTAssertEqual(withReal.artworkData, real)
+    }
+
     func testRemoteCommandsDelegateToPlaybackCoordinatorAndRegistrationIsIdempotent() throws {
         let core = FakePlaybackCore()
         let engine = FakePlaybackEngine()

@@ -73,14 +73,13 @@ struct PlayerView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
+            fixedPlayback
+            Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    timeline
-                    controls
-                     runtimeStatus
-                     chapters
-                     advancedSettings
-                     showNotes
+                    chapters
+                    advancedSettings
+                    showNotes
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -91,6 +90,15 @@ struct PlayerView: View {
         }
         .onAppear { loadReaderDocument() }
         .onChange(of: state.loadedEnclosure?.articleId) { _, _ in loadReaderDocument() }
+    }
+
+    private var fixedPlayback: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            timeline
+            controls
+            runtimeStatus
+        }
+        .padding(16)
     }
 
     private var header: some View {

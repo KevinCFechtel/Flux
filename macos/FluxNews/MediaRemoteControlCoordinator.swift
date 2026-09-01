@@ -15,12 +15,12 @@ struct NowPlayingProjection: Equatable {
     let artworkData: Data?
 
     @MainActor
-    static func make(state: MediaPlaybackPresentationState, artworkData: Data? = nil) -> NowPlayingProjection? {
+    static func make(state: MediaPlaybackPresentationState, artworkData: Data? = nil, fallbackArtworkData: Data? = nil) -> NowPlayingProjection? {
         guard let enclosure = state.loadedEnclosure else { return nil }
-        return make(title: state.mediaTitle, sourceTitle: state.feedTitle, enclosureURL: enclosure.url, durationMs: state.durationMs, positionMs: state.positionMs, status: state.status, playbackRate: state.playbackRate, errorMessage: state.errorMessage, artworkData: artworkData)
+        return make(title: state.mediaTitle, sourceTitle: state.feedTitle, enclosureURL: enclosure.url, durationMs: state.durationMs, positionMs: state.positionMs, status: state.status, playbackRate: state.playbackRate, errorMessage: state.errorMessage, artworkData: artworkData ?? fallbackArtworkData)
     }
 
-    static func make(title: String, sourceTitle: String, enclosureURL: String, durationMs: UInt64?, positionMs: UInt64, status: MediaPlaybackPresentationStatus, playbackRate: Double, errorMessage: String?, artworkData: Data? = nil) -> NowPlayingProjection {
+    static func make(title: String, sourceTitle: String, enclosureURL: String, durationMs: UInt64?, positionMs: UInt64, status: MediaPlaybackPresentationStatus, playbackRate: Double, errorMessage: String?, artworkData: Data? = nil, fallbackArtworkData: Data? = nil) -> NowPlayingProjection {
         let duration = durationMs.flatMap { milliseconds in
             let seconds = Double(milliseconds) / 1_000
             return seconds.isFinite && seconds > 0 ? seconds : nil
@@ -43,7 +43,7 @@ struct NowPlayingProjection: Equatable {
             defaultPlaybackRate: configuredRate,
             playbackState: isPlaying ? .playing : status,
             assetURL: assetURL,
-            artworkData: artworkData
+            artworkData: artworkData ?? fallbackArtworkData
         )
     }
 }
@@ -67,12 +67,17 @@ final class MediaRemoteControlCoordinator {
     private var artworkGeneration = 0
     private var artworkReference: String?
     private var artworkData: Data?
+    private var publishedArtworkData: Data?
+    private var publishedArtwork: MPMediaItemArtwork?
+    private var hasPublishedArtwork = false
+    private let applicationArtworkData: Data?
 
     private(set) var registrationCount = 0
 
     init(playbackCoordinator: MediaPlaybackCoordinator, presentationState: MediaPlaybackPresentationState) {
         self.playbackCoordinator = playbackCoordinator
         self.presentationState = presentationState
+        applicationArtworkData = NSApp.applicationIconImage?.tiffRepresentation
         observePresentationState()
         start()
         publish()
@@ -82,6 +87,9 @@ final class MediaRemoteControlCoordinator {
         removeCommandTargets()
         cancellables.removeAll()
         artworkGeneration += 1
+        publishedArtworkData = nil
+        publishedArtwork = nil
+        hasPublishedArtwork = false
         nowPlaying.nowPlayingInfo = nil
         nowPlaying.playbackState = .unknown
     }
@@ -189,7 +197,8 @@ final class MediaRemoteControlCoordinator {
     }
 
     private func publish() {
-        guard let projection = NowPlayingProjection.make(state: presentationState, artworkData: artworkData) else {
+        requestArtworkIfNeeded()
+        guard let projection = NowPlayingProjection.make(state: presentationState, artworkData: artworkData, fallbackArtworkData: applicationArtworkData) else {
             nowPlaying.nowPlayingInfo = nil
             nowPlaying.playbackState = .unknown
             return
@@ -203,16 +212,22 @@ final class MediaRemoteControlCoordinator {
             MPNowPlayingInfoPropertyAssetURL: projection.assetURL as Any
         ]
         if let duration = projection.durationSeconds { info[MPMediaItemPropertyPlaybackDuration] = duration }
-        if let artworkData = projection.artworkData, let image = NSImage(data: artworkData) {
-            info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        if !hasPublishedArtwork || publishedArtworkData != projection.artworkData {
+            publishedArtworkData = projection.artworkData
+            hasPublishedArtwork = true
+            if let artworkData = projection.artworkData, let image = NSImage(data: artworkData) {
+                publishedArtwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            } else {
+                publishedArtwork = nil
+            }
         }
+        if let publishedArtwork { info[MPMediaItemPropertyArtwork] = publishedArtwork }
         nowPlaying.nowPlayingInfo = info
         nowPlaying.playbackState = projection.playbackState == .playing ? .playing : .paused
-        requestArtworkIfNeeded()
     }
 
     private func publishElapsed() {
-        guard let projection = NowPlayingProjection.make(state: presentationState, artworkData: artworkData), var info = nowPlaying.nowPlayingInfo else {
+        guard let projection = NowPlayingProjection.make(state: presentationState, artworkData: artworkData, fallbackArtworkData: applicationArtworkData), var info = nowPlaying.nowPlayingInfo else {
             publish()
             return
         }

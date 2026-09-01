@@ -77,6 +77,10 @@ enum ArticleAudioActions {
         enclosures.filter { $0.mediaKind == .audio }
     }
 
+    static func shouldRender(_ state: ArticleAudioActionState?, transferStateAvailable: Bool) -> Bool {
+        state != nil && transferStateAvailable && !(state?.enclosures.isEmpty ?? true)
+    }
+
     static func requiresReplacement(currentID: Int64?, currentStatus: MediaPlaybackPresentationStatus, selectedID: Int64) -> Bool {
         currentID != selectedID && currentStatus == .playing
     }
@@ -550,6 +554,7 @@ final class BrowserStore: ObservableObject {
                 case let .success(page):
                     store.articles = page.articles
                     store.searchTotal = page.total
+                    store.loadArticleAudioActions(for: page.articles.map(\.id))
                 case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
                 }
             }

@@ -20,6 +20,12 @@ enum PopoverLayout {
     }
 }
 
+enum ToolbarPresentation {
+    static func showsListeningListFeedFilter(isListeningList: Bool, showingPlayer: Bool) -> Bool {
+        isListeningList && !showingPlayer
+    }
+}
+
 private enum ArticleScrollSpace { static let name = "FluxNews.ArticleScroll" }
 private struct ArticleFrameKey: PreferenceKey {
     static var defaultValue: [Int64: CGRect] = [:]
@@ -41,7 +47,10 @@ struct PopoverContentView: View {
     var body: some View {
         HStack(spacing: 0) {
             if sidebarVisible {
-                NavigationSidebar(store: store)
+                NavigationSidebar(store: store, onNavigate: { scope in
+                    showingPlayer = false
+                    store.select(scope)
+                })
                     .frame(width: PopoverLayout.sidebarWidth)
                     .overlay(alignment: .trailing) { Divider() }
                     .transition(.move(edge: .leading).combined(with: .opacity))
@@ -184,55 +193,54 @@ private struct ArticlePane: View {
             .disabled(PlayerPresentation.navigationDisabled(showingPlayer: showingPlayer, hasLoadedMedia: playbackState.loadedEnclosure != nil))
             .help(showingPlayer ? "Show News List" : "Show Player")
             .accessibilityLabel(showingPlayer ? "Show News List" : "Show Player")
-            Button { store.settingsVisible = true } label: { Image(systemName: "gearshape") }
-                .buttonStyle(.borderless)
-                .help("Settings...")
-                .accessibilityLabel("Settings...")
+            if ToolbarPresentation.showsListeningListFeedFilter(isListeningList: store.isListeningList, showingPlayer: showingPlayer) { listeningListFeedFilter }
+            moreMenu
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+    }
+
+    private var moreMenu: some View {
+        Menu {
             if store.isListeningList {
                 Menu {
                     Button { store.setListeningListSort(.recentlyAdded) } label: { Label("Recently Added", systemImage: store.listeningListSort == .recentlyAdded ? "checkmark" : "clock") }
                     Button { store.setListeningListSort(.publicationDate) } label: { Label("Publication Date", systemImage: store.listeningListSort == .publicationDate ? "checkmark" : "calendar") }
-                    Divider()
-                    Button { NSApplication.shared.terminate(nil) } label: { Label("Quit FluxNews", systemImage: "power") }
-                } label: { Image(systemName: "arrow.up.arrow.down") }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .help("Sort Listening List")
-                    .accessibilityLabel("Sort Listening List")
-                Menu {
-                    Button { store.setListeningListFeed(nil) } label: { Label("All Feeds", systemImage: store.listeningListFeedID == nil ? "checkmark" : "circle") }
-                    ForEach(store.listeningListFeeds, id: \.feedId) { feed in
-                        Button { store.setListeningListFeed(feed.feedId) } label: { Label(feed.feedTitle, systemImage: store.listeningListFeedID == feed.feedId ? "checkmark" : "circle") }
-                    }
-                } label: { Image(systemName: "line.3.horizontal.decrease.circle") }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .help("Filter Listening List")
-                    .accessibilityLabel("Filter Listening List")
+                } label: { Label("Sort", systemImage: "arrow.up.arrow.down") }
             } else {
+                Button { store.setUnreadOnly(true) } label: { Label("Show Unread News Only", systemImage: store.unreadOnly ? "checkmark.circle.fill" : "circle") }
+                Button { store.setUnreadOnly(false) } label: { Label("Show All News", systemImage: store.unreadOnly ? "circle" : "checkmark.circle.fill") }
+                Divider()
                 Menu {
-                    Button { store.setUnreadOnly(true) } label: { Label("Show Unread News Only", systemImage: store.unreadOnly ? "checkmark.circle.fill" : "circle") }
-                    Button { store.setUnreadOnly(false) } label: { Label("Show All News", systemImage: store.unreadOnly ? "circle" : "checkmark.circle.fill") }
-                    Divider()
-                    Menu {
-                        Button { store.setNewestFirst(true) } label: { Label("Newest First", systemImage: "arrow.down") }
-                        Button { store.setNewestFirst(false) } label: { Label("Oldest First", systemImage: "arrow.up") }
-                    } label: { Label("Sort Order", systemImage: "arrow.up.arrow.down") }
-                    Menu {
-                        Button { setArticleListStyle(.row) } label: { Label("Rows", systemImage: store.articleListStyle == .row ? "checkmark" : "list.bullet") }
-                        Button { setArticleListStyle(.card) } label: { Label("Cards", systemImage: store.articleListStyle == .card ? "checkmark" : "rectangle.grid.1x2") }
-                    } label: { Label("Layout", systemImage: "rectangle.3.group") }
-                    Divider()
-                    Button { NSApplication.shared.terminate(nil) } label: { Label("Quit FluxNews", systemImage: "power") }
-                } label: { Image(systemName: "ellipsis") }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .help("More")
-                    .accessibilityLabel("More")
+                    Button { store.setNewestFirst(true) } label: { Label("Newest First", systemImage: store.newestFirst ? "checkmark" : "arrow.down") }
+                    Button { store.setNewestFirst(false) } label: { Label("Oldest First", systemImage: store.newestFirst ? "arrow.up" : "checkmark") }
+                } label: { Label("Sort Order", systemImage: "arrow.up.arrow.down") }
+                Menu {
+                    Button { setArticleListStyle(.row) } label: { Label("Rows", systemImage: store.articleListStyle == .row ? "checkmark" : "list.bullet") }
+                    Button { setArticleListStyle(.card) } label: { Label("Cards", systemImage: store.articleListStyle == .card ? "checkmark" : "rectangle.grid.1x2") }
+                } label: { Label("Layout", systemImage: "rectangle.3.group") }
             }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
+            Divider()
+            Button { store.settingsVisible = true } label: { Label("Settings...", systemImage: "gearshape") }
+            Button { NSApplication.shared.terminate(nil) } label: { Label("Quit FluxNews", systemImage: "power") }
+        } label: { Image(systemName: "ellipsis") }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .help("More")
+            .accessibilityLabel("More")
+    }
+
+    private var listeningListFeedFilter: some View {
+        Menu {
+            Button { store.setListeningListFeed(nil) } label: { Label("All Feeds", systemImage: store.listeningListFeedID == nil ? "checkmark" : "circle") }
+            ForEach(store.listeningListFeeds, id: \.feedId) { feed in
+                Button { store.setListeningListFeed(feed.feedId) } label: { Label(feed.feedTitle, systemImage: store.listeningListFeedID == feed.feedId ? "checkmark" : "circle") }
+            }
+        } label: { Image(systemName: "line.3.horizontal.decrease.circle") }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .help("Filter Listening List")
+            .accessibilityLabel("Filter Listening List")
     }
 
     private var sidebarToggleLabel: String {
@@ -243,7 +251,7 @@ private struct ArticlePane: View {
         if store.isListeningList {
             ListeningListView(store: store, playbackState: playbackState, transferState: transferState, onPlay: playAudio, onDownload: { articleID, enclosureID in store.requestManualDownload(articleID: articleID, enclosureID: enclosureID) }, onDelete: { articleID, enclosureID in store.deleteDownload(articleID: articleID, enclosureID: enclosureID) }, onRemove: { articleID in store.removeFromListeningList(articleID: articleID) })
         } else if store.isSearchActive {
-            SearchResultsView(store: store)
+             SearchResultsView(store: store, transferState: transferState, onPlay: playAudio, onDownload: { enclosure in store.requestManualDownload(articleID: enclosure.articleId, enclosureID: enclosure.id) }, onDelete: { enclosure in store.deleteDownload(articleID: enclosure.articleId, enclosureID: enclosure.id) }, onAdd: { articleID in store.addToListeningList(articleID: articleID) })
         } else if let error = store.errorMessage, store.articles.isEmpty {
             ContentUnavailableView("Refresh failed", systemImage: "exclamationmark.triangle", description: Text(error))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -403,6 +411,11 @@ private struct ArticlePane: View {
 
 private struct SearchResultsView: View {
     @ObservedObject var store: BrowserStore
+    @ObservedObject var transferState: MediaTransferPresentationState
+    let onPlay: (Enclosure) -> Void
+    let onDownload: (Enclosure) -> Void
+    let onDelete: (Enclosure) -> Void
+    let onAdd: (Int64) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -437,7 +450,7 @@ private struct SearchResultsView: View {
                     ScrollView {
                         LazyVStack(spacing: store.articleListStyle == .row ? 0 : 4) {
                             ForEach(store.articles, id: \.id) { article in
-                                ArticleItem(article: article, style: store.articleListStyle, selected: false, audioState: nil, transferState: nil, store: store, onSelect: {}, onPlayAudio: { _ in }, onDownloadAudio: { _ in }, onDeleteDownload: { _ in }, onAddToListeningList: {}, onHoverChanged: { _ in })
+                                ArticleItem(article: article, style: store.articleListStyle, selected: false, audioState: store.articleAudioActionStates[article.id], transferState: transferState, store: store, onSelect: {}, onPlayAudio: onPlay, onDownloadAudio: onDownload, onDeleteDownload: onDelete, onAddToListeningList: { onAdd(article.id) }, onHoverChanged: { _ in })
                                     .onAppear { if article.id == store.articles.last?.id { store.loadMoreSearchResults() } }
                                 if store.articleListStyle == .row { Divider().padding(.leading, 264) }
                             }
@@ -628,6 +641,7 @@ private struct ListeningListRow: View {
 
 private struct NavigationSidebar: View {
     @ObservedObject var store: BrowserStore
+    let onNavigate: (BrowserScope) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -658,7 +672,7 @@ private struct NavigationSidebar: View {
     }
 
     private var selectedScope: Binding<BrowserScope?> {
-        Binding { store.scope } set: { scope in if let scope { store.select(scope) } }
+        Binding { store.scope } set: { scope in if let scope { onNavigate(scope) } }
     }
     private var categoryItems: [SidebarItem] {
         let visibleFeeds = NavigationVisibility.visibleFeeds(
@@ -688,7 +702,7 @@ private struct NavigationSidebar: View {
         }
     }
     private func sidebarLabel(_ item: SidebarItem, showUnreadText: Bool) -> some View {
-        Button { store.select(item.scope) } label: {
+        Button { onNavigate(item.scope) } label: {
             HStack(spacing: 8) {
                 if let image = item.systemImage { Image(systemName: image).frame(width: 16) }
                 else if let feedID = item.feedID { FeedIconSlot(feedID: feedID, store: store) }
@@ -825,7 +839,7 @@ private struct ArticleItem: View {
             Text(ListeningListPresentation.textOrFallback(article.title, fallback: String(localized: "Untitled News"))).font(.system(size: 14, weight: article.isRead ? .regular : .semibold))
                 .foregroundStyle(article.isRead ? .secondary : .primary).lineLimit(3).multilineTextAlignment(.leading)
             if !article.preview.isEmpty { Text(article.preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(store.articlePreviewLines.rawValue).multilineTextAlignment(.leading) }
-            if selected, let audioState, let transferState, !audioState.enclosures.isEmpty { AudioActionsView(state: audioState, transferState: transferState, onPlay: onPlayAudio, onDownload: onDownloadAudio, onDelete: onDeleteDownload, onAdd: onAddToListeningList) }
+            if ArticleAudioActions.shouldRender(audioState, transferStateAvailable: transferState != nil), let audioState, let transferState { AudioActionsView(state: audioState, transferState: transferState, onPlay: onPlayAudio, onDownload: onDownloadAudio, onDelete: onDeleteDownload, onAdd: onAddToListeningList) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
