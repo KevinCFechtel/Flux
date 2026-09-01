@@ -6,8 +6,9 @@
     {
       "layers" : [
         {
-          "image-name" : "01_Book.svg",
-          "name" : "01_Book"
+          "hidden" : false,
+          "image-name" : "Flux_News 2.svg",
+          "name" : "Flux_News 2"
         }
       ],
       "shadow" : {
