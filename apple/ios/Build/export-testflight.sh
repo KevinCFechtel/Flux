@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
 ARCHIVE_PATH="${ARCHIVE_PATH:-${REPOSITORY_DIR}/.build/Archives/FluxNews-nativeDev.xcarchive}"
-EXPORT_PATH="${EXPORT_PATH:-${REPOSITORY_DIR}/.build/TestFlightExport}"
+EXPORT_PATH="${EXPORT_PATH:-${REPOSITORY_DIR}/dist/TestFlightExport}"
 EXPECTED_BUNDLE_IDENTIFIER="dev.kevincfechtel.fluxNews.nativeDev"
 EXPECTED_DISPLAY_NAME="FluxNews Dev"
 

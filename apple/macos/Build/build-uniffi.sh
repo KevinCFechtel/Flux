@@ -6,7 +6,7 @@ REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
 GENERATED_DIR="${REPOSITORY_DIR}/apple/macos/FluxNews/Generated"
 PACKAGE_DIR="${REPOSITORY_DIR}/apple/Build/Products/FluxUniFFI"
 XCFRAMEWORK="${PACKAGE_DIR}/FluxUniFFI.xcframework"
-MACOS_LIBRARY="${XCFRAMEWORK}/macos-arm64_x86_64/libflux_uniffi.dylib"
+MACOS_LIBRARY="${PACKAGE_DIR}/MacOS/libflux_uniffi.dylib"
 
 if [[ "${FLUX_UNIFFI_PREPARED:-0}" != "1" ]]; then
   "${REPOSITORY_DIR}/apple/Build/build-uniffi.sh"
@@ -15,16 +15,16 @@ fi
 for required in \
   "${MACOS_LIBRARY}" \
   "${PACKAGE_DIR}/Sources/flux_uniffi.swift" \
-  "${XCFRAMEWORK}/macos-arm64_x86_64/Headers/flux_uniffiFFI.h" \
-  "${XCFRAMEWORK}/macos-arm64_x86_64/Headers/module.modulemap"; do
+  "${PACKAGE_DIR}/Headers/flux_uniffiFFI.h" \
+  "${PACKAGE_DIR}/Headers/module.modulemap"; do
   [[ -f "${required}" ]] || { echo "Missing packaged UniFFI artifact: ${required}" >&2; exit 1; }
 done
 
 rm -rf -- "${GENERATED_DIR}"
 mkdir -p "${GENERATED_DIR}"
 cp "${PACKAGE_DIR}/Sources/flux_uniffi.swift" "${GENERATED_DIR}/flux_uniffi.swift"
-cp "${XCFRAMEWORK}/macos-arm64_x86_64/Headers/flux_uniffiFFI.h" "${GENERATED_DIR}/flux_uniffiFFI.h"
-cp "${XCFRAMEWORK}/macos-arm64_x86_64/Headers/module.modulemap" "${GENERATED_DIR}/module.modulemap"
+cp "${PACKAGE_DIR}/Headers/flux_uniffiFFI.h" "${GENERATED_DIR}/flux_uniffiFFI.h"
+cp "${PACKAGE_DIR}/Headers/module.modulemap" "${GENERATED_DIR}/module.modulemap"
 
 if [[ -n "${TARGET_BUILD_DIR:-}" ]]; then
   embedded_library="${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/libflux_uniffi.dylib"
