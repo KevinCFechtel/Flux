@@ -3,49 +3,74 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var bootstrapper: CoreBootstrapper
     @ObservedObject var newsreaderStore: NewsreaderStore
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var navigationPresented = false
+    @State private var diagnosticsPresented = false
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Application") {
-                    LabeledContent("Name", value: "FluxNews")
-                    LabeledContent("Build", value: "Native iOS development")
-                }
+        Group {
+            if case .ready = bootstrapper.state, newsreaderStore.core != nil {
+                newsreader
+            } else {
+                DeveloperDiagnosticsView(bootstrapper: bootstrapper)
+            }
+        }
+        .sheet(isPresented: $diagnosticsPresented) { DeveloperDiagnosticsView(bootstrapper: bootstrapper) }
+    }
 
-                Section("Rust Core") {
-                    LabeledContent("Status", value: bootstrapper.state.title)
-                    if case let .ready(health) = bootstrapper.state {
-                        LabeledContent("Smoke test", value: "runtimeHealth: \(health)")
+    @ViewBuilder
+    private var newsreader: some View {
+        if horizontalSizeClass == .regular {
+            NavigationSplitView {
+                NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented)
+            } detail: {
+                articleList
+            }
+        } else {
+            NavigationStack {
+                articleList
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button { navigationPresented = true } label: { Image(systemName: "sidebar.leading") }
+                                .accessibilityLabel("Choose news scope")
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button { diagnosticsPresented = true } label: { Image(systemName: "info.circle") }
+                                .accessibilityLabel("Developer diagnostics")
+                        }
                     }
-                    if case let .error(message) = bootstrapper.state {
-                        Text(message)
-                            .foregroundStyle(.red)
+                    .sheet(isPresented: $navigationPresented) {
+                        NavigationStack {
+                            NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented)
+                                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { navigationPresented = false } } }
+                        }
                     }
-                }
+            }
+        }
+    }
 
-                Section("Sandbox paths") {
-                    Text(bootstrapper.pathsDescription)
-                        .font(.footnote.monospaced())
-                        .textSelection(.enabled)
-                }
-
-                Section("Legacy migration feasibility") {
-                    ForEach(LegacyStateDiscovery.redactedSummary(bootstrapper.legacyResult).sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
-                        LabeledContent(key, value: value)
-                    }
-                    Text("This is read-only discovery only. No legacy data is imported or modified.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                if bootstrapper.state == .unconfigured {
-                    Section {
-                        Text("Set FLUX_DEV_BASE_URL and FLUX_DEV_API_KEY in the Xcode scheme to initialize the development Core.")
-                            .foregroundStyle(.secondary)
+    private var articleList: some View {
+        ArticleListView(store: newsreaderStore)
+            .navigationTitle(scopeTitle)
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                if horizontalSizeClass == .regular {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { diagnosticsPresented = true } label: { Image(systemName: "info.circle") }
+                            .accessibilityLabel("Developer diagnostics")
                     }
                 }
             }
-            .navigationTitle("FluxNews")
+    }
+
+    private var scopeTitle: String {
+        switch newsreaderStore.scope {
+        case .all: "All News"
+        case .starred: "Starred"
+        case .category(let id): newsreaderStore.catalog.categories.first { $0.id == id }?.title ?? "Category"
+        case .feed(let id): newsreaderStore.catalog.feeds.first { $0.id == id }?.title ?? "Feed"
+        case .search: "Search"
+        case .listeningList: "Listening List"
         }
     }
 }

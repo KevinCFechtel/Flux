@@ -32,5 +32,5 @@ enum ArticleListPresentationPolicy {
     }
 }
 
-enum ArticleListStyle: String { case row, card }
+enum ArticlePresentationMode: String, CaseIterable { case visual, compact }
 enum ArticlePreviewLines: Int, CaseIterable { case compact = 2, standard = 3, extended = 5 }

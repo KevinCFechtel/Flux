@@ -5,6 +5,7 @@ import OSLog
 import Security
 import UserNotifications
 
+enum ArticleListStyle: String { case row, card }
 struct FeedSettingsTarget: Identifiable { let id: Int64; let title: String }
 
 struct ArticleAudioActionState: Equatable {
