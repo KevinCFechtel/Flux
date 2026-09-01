@@ -94,5 +94,9 @@ app_path="${target_build_dir}/FluxNews.app"
 bundle_identifier="$(plutil -extract CFBundleIdentifier raw "${app_path}/Info.plist")"
 
 xcrun simctl install "${simulator_udid}" "${app_path}"
+
+SIMCTL_CHILD_FLUX_DEV_BASE_URL="${FLUX_DEV_BASE_URL:-}" \
+SIMCTL_CHILD_FLUX_DEV_API_KEY="${FLUX_DEV_API_KEY:-}" \
 xcrun simctl launch "${simulator_udid}" "${bundle_identifier}"
+
 echo "Launched ${bundle_identifier} on ${simulator_name} (${simulator_udid})"
