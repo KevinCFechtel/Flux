@@ -502,6 +502,7 @@ pub struct MediaDownload {
 pub struct MediaTransferWork {
     pub enclosure_id: i64,
     pub url: String,
+    pub mime_type: String,
     pub origin: DownloadOrigin,
     pub local_file: Option<String>,
 }
@@ -2369,6 +2370,7 @@ impl From<domain::MediaTransferWork> for MediaTransferWork {
         Self {
             enclosure_id: value.enclosure_id,
             url: value.url,
+            mime_type: value.mime_type,
             origin: value.origin.into(),
             local_file: value.local_file,
         }

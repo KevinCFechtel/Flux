@@ -245,7 +245,7 @@ final class MediaTransferCoordinator {
                 try? FileManager.default.removeItem(at: result.temporaryURL)
                 return
             }
-            let reference = "downloads/enclosure-\(work.enclosureId).media"
+            let reference = MediaTransferFileLayout.reference(enclosureID: work.enclosureId, url: work.url, mimeType: work.mimeType)
             let destination: URL
             do {
                 destination = try safeDestination(reference)
@@ -272,7 +272,7 @@ final class MediaTransferCoordinator {
                 finish(enclosureID: work.enclosureId, token: token)
                 presentationState.remove(enclosureID: work.enclosureId)
                 try core.downloadFinished(enclosureId: work.enclosureId, localFile: reference, fileSizeBytes: size)
-                Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").info("media transfer completed enclosure=\(work.enclosureId, privacy: .public)")
+                Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").info("media transfer completed enclosure=\(work.enclosureId, privacy: .public) reference=\(reference, privacy: .public) path=\(destination.path, privacy: .public) readable=\(FileManager.default.isReadableFile(atPath: destination.path), privacy: .public)")
                 onWorkChanged?()
             } catch {
                 // Core owns stale-callback handling; a callback rejection is not a transfer failure.
@@ -331,6 +331,30 @@ final class MediaTransferCoordinator {
 enum MediaTransferError: Error, Equatable { case network, storage, invalidMedia }
 
 enum MediaTransferFileLayout {
+    static func reference(enclosureID: Int64, url: String, mimeType: String) -> String {
+        "downloads/enclosure-\(enclosureID).\(audioExtension(url: url, mimeType: mimeType))"
+    }
+
+    static func audioExtension(url: String, mimeType: String) -> String {
+        let urlExtension = URL(string: url)?.pathExtension.lowercased()
+        if let urlExtension, isSafeAudioExtension(urlExtension) { return urlExtension }
+        let normalizedMimeType = mimeType.split(separator: ";", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() } ?? ""
+        switch normalizedMimeType {
+        case "audio/mpeg", "audio/mp3": return "mp3"
+        case "audio/mp4", "audio/x-m4a", "audio/m4a": return "m4a"
+        case "audio/aac", "audio/x-aac": return "aac"
+        case "audio/ogg", "application/ogg": return "ogg"
+        case "audio/wav", "audio/x-wav": return "wav"
+        case "audio/flac", "audio/x-flac": return "flac"
+        case "audio/webm": return "webm"
+        default: return "audio"
+        }
+    }
+
+    private static func isSafeAudioExtension(_ value: String) -> Bool {
+        ["aac", "aiff", "alac", "flac", "m4a", "mp3", "oga", "ogg", "wav", "webm"].contains(value)
+    }
+
     static func destination(reference: String, under root: URL) throws -> URL {
         guard !reference.hasPrefix("/"), !reference.contains("..") else { throw MediaTransferError.storage }
         let destination = root.appendingPathComponent(reference).standardizedFileURL

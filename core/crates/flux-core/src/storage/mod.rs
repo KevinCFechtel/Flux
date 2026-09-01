@@ -673,15 +673,16 @@ impl Store {
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let mut statement = connection
-            .prepare("SELECT d.enclosure_id,e.url,d.origin,d.local_file FROM media_downloads d JOIN enclosures e ON e.id=d.enclosure_id WHERE d.state=?1 ORDER BY d.enclosure_id")
+            .prepare("SELECT d.enclosure_id,e.url,e.mime_type,d.origin,d.local_file FROM media_downloads d JOIN enclosures e ON e.id=d.enclosure_id WHERE d.state=?1 ORDER BY d.enclosure_id")
             .map_err(sql_error)?;
         statement
             .query_map([state], |row| {
                 Ok(MediaTransferWork {
                     enclosure_id: row.get(0)?,
                     url: row.get(1)?,
-                    origin: origin_from_db(&row.get::<_, String>(2)?)?,
-                    local_file: row.get(3)?,
+                    mime_type: row.get(2)?,
+                    origin: origin_from_db(&row.get::<_, String>(3)?)?,
+                    local_file: row.get(4)?,
                 })
             })
             .map_err(sql_error)?

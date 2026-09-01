@@ -47,15 +47,17 @@ private final class FakePlaybackEngine: NativePlaybackEngine {
     var onEnded: (@MainActor () -> Void)?
     var onDuration: (@MainActor (UInt64) -> Void)?
     var onPosition: (@MainActor (UInt64) -> Void)?
+    var onPlaybackStateChanged: (@MainActor (Bool) -> Void)?
     var onLoadingChanged: (@MainActor (Bool) -> Void)?
     var onBufferingChanged: (@MainActor (Bool) -> Void)?
     var onError: (@MainActor (String) -> Void)?
     var loadedStartMs: UInt64?
     var playCount = 0
+    var playShouldSucceed = true
     var unloadCount = 0
 
     func load(url: URL, startAtMs: UInt64) { loadedStartMs = startAtMs; currentPositionMs = startAtMs; durationMs = 120_000; onLoadingChanged?(true); onPosition?(startAtMs) }
-    func play() { isPlaying = true; playCount += 1 }
+    func play() { isPlaying = playShouldSucceed; playCount += 1; onPlaybackStateChanged?(isPlaying) }
     func pause() { isPlaying = false }
     func unload() { unloadCount += 1; isPlaying = false; currentPositionMs = 0; durationMs = nil }
     func seek(toMs: UInt64) { currentPositionMs = toMs; onPosition?(toMs) }
@@ -140,7 +142,7 @@ private actor FakeTransferEngine: MediaTransferEngine {
 }
 
 private func transferWork(_ id: Int64 = 7, localFile: String? = nil) -> MediaTransferWork {
-    MediaTransferWork(enclosureId: id, url: "https://example.test/episode.mp3", origin: .manual, localFile: localFile)
+    MediaTransferWork(enclosureId: id, url: "https://example.test/episode.mp3", mimeType: "audio/mpeg", origin: .manual, localFile: localFile)
 }
 
 @MainActor
@@ -223,6 +225,18 @@ final class MediaCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(core.checkpoints.map(\.1), [36_000])
         XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
+    }
+
+    func testPlayDoesNotClaimPlayingWhenNativeRequestCannotStart() throws {
+        let core = FakePlaybackCore()
+        let engine = FakePlaybackEngine()
+        engine.playShouldSucceed = false
+        let coordinator = MediaPlaybackCoordinator(core: core, engine: engine)
+
+        try coordinator.play(enclosureID: 7)
+
+        XCTAssertFalse(engine.isPlaying)
+        XCTAssertEqual(coordinator.presentationState.status, .paused)
     }
 
     func testPrepareUsesNewsMetadataFromPlaybackPreparation() throws {
@@ -316,6 +330,45 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertNil(AVFoundationPlaybackEngine.milliseconds(CMTime.zero, requiresPositive: true))
         XCTAssertNil(AVFoundationPlaybackEngine.milliseconds(CMTime(seconds: -1, preferredTimescale: 1_000), requiresPositive: true))
         XCTAssertEqual(AVFoundationPlaybackEngine.milliseconds(CMTime(seconds: 12.5, preferredTimescale: 1_000), requiresPositive: true), 12_500)
+    }
+
+    func testLocalAVPlayerItemReportsReadinessAndGenericExtensionFailure() async throws {
+        let root = temporaryMediaRoot()
+        let source = URL(fileURLWithPath: "/System/Library/Sounds/Ping.aiff")
+        let audioURL = root.appendingPathComponent("ping.aiff")
+        let genericURL = root.appendingPathComponent("ping.media")
+        try FileManager.default.copyItem(at: source, to: audioURL)
+        try FileManager.default.copyItem(at: source, to: genericURL)
+
+        let audioItem = AVPlayerItem(url: audioURL)
+        let genericItem = AVPlayerItem(url: genericURL)
+        let audioPlayer = AVPlayer(playerItem: audioItem)
+        let genericPlayer = AVPlayer(playerItem: genericItem)
+        _ = (audioPlayer, genericPlayer)
+        var audioStatus: AVPlayerItem.Status?
+        var audioError: Error?
+        var genericStatus: AVPlayerItem.Status?
+        var genericError: Error?
+        let audioExpectation = expectation(description: "audio item status")
+        let genericExpectation = expectation(description: "generic item status")
+        var observations = [NSKeyValueObservation]()
+        observations.append(audioItem.observe(\AVPlayerItem.status, options: [.initial, .new]) { item, _ in
+            guard item.status == .readyToPlay || item.status == .failed else { return }
+            audioStatus = item.status
+            audioError = item.error
+            audioExpectation.fulfill()
+        })
+        observations.append(genericItem.observe(\AVPlayerItem.status, options: [.initial, .new]) { item, _ in
+            guard item.status == .readyToPlay || item.status == .failed else { return }
+            genericStatus = item.status
+            genericError = item.error
+            genericExpectation.fulfill()
+        })
+        await fulfillment(of: [audioExpectation, genericExpectation], timeout: 5, enforceOrder: false)
+        _ = observations
+
+        XCTAssertEqual(audioStatus, .readyToPlay, "real extension error: \(String(describing: audioError))")
+        XCTAssertEqual(genericStatus, .failed, "generic extension did not reach a usable terminal state: \(String(describing: genericError))")
     }
 
     func testCompletedDoesNotImplicitlyRestartAndExplicitRestartUsesCore() throws {
@@ -541,6 +594,28 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertThrowsError(try MediaTransferFileLayout.destination(reference: "/tmp/outside", under: root))
     }
 
+    func testTransferFilenamePreservesSafeURLAudioExtension() {
+        XCTAssertEqual(MediaTransferFileLayout.reference(enclosureID: 123, url: "https://example.test/episode.mp3", mimeType: "audio/mpeg"), "downloads/enclosure-123.mp3")
+        XCTAssertEqual(MediaTransferFileLayout.reference(enclosureID: 124, url: "https://example.test/episode.m4a", mimeType: "audio/mp4"), "downloads/enclosure-124.m4a")
+    }
+
+    func testTransferFilenameUsesMIMEFallbackForSupportedAudio() {
+        XCTAssertEqual(MediaTransferFileLayout.audioExtension(url: "https://example.test/episode", mimeType: "audio/aac; charset=binary"), "aac")
+        XCTAssertEqual(MediaTransferFileLayout.audioExtension(url: "https://example.test/episode", mimeType: "audio/x-m4a"), "m4a")
+        XCTAssertEqual(MediaTransferFileLayout.audioExtension(url: "https://example.test/episode", mimeType: "audio/ogg"), "ogg")
+    }
+
+    func testTransferFilenameIgnoresUnsafeOrUnsupportedURLSuffixes() throws {
+        let reference = MediaTransferFileLayout.reference(enclosureID: 125, url: "https://example.test/../../escape.exe", mimeType: "audio/mpeg")
+        XCTAssertEqual(reference, "downloads/enclosure-125.mp3")
+        XCTAssertEqual(try MediaTransferFileLayout.destination(reference: reference, under: URL(fileURLWithPath: "/tmp/flux-media")).lastPathComponent, "enclosure-125.mp3")
+    }
+
+    func testExistingGenericMediaReferencesRemainResolvable() throws {
+        let root = URL(fileURLWithPath: "/tmp/flux-media")
+        XCTAssertEqual(try MediaTransferFileLayout.destination(reference: "downloads/enclosure-126.media", under: root).path, "/tmp/flux-media/downloads/enclosure-126.media")
+    }
+
     func testReconcileStartsOneTransferForOneRequestedEnclosure() async throws {
         let core = FakeTransferCore()
         core.transfers = [transferWork()]
@@ -672,10 +747,10 @@ final class MediaCoordinatorTests: XCTestCase {
         coordinator.reconcile()
         await fulfillment(of: [finished], timeout: 2)
 
-        let destination = root.appendingPathComponent("downloads/enclosure-7.media")
+        let destination = root.appendingPathComponent("downloads/enclosure-7.mp3")
         XCTAssertEqual(core.finished.count, 1)
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
-        XCTAssertEqual(core.finished[0].1, "downloads/enclosure-7.media")
+        XCTAssertEqual(core.finished[0].1, "downloads/enclosure-7.mp3")
         XCTAssertEqual(core.states[7], .downloaded)
         XCTAssertNil(coordinator.presentationState.runtime(for: 7))
     }

@@ -30,6 +30,7 @@ protocol NativePlaybackEngine: AnyObject {
     var onEnded: (@MainActor () -> Void)? { get set }
     var onDuration: (@MainActor (UInt64) -> Void)? { get set }
     var onPosition: (@MainActor (UInt64) -> Void)? { get set }
+    var onPlaybackStateChanged: (@MainActor (Bool) -> Void)? { get set }
     var onLoadingChanged: (@MainActor (Bool) -> Void)? { get set }
     var onBufferingChanged: (@MainActor (Bool) -> Void)? { get set }
     var onError: (@MainActor (String) -> Void)? { get set }
@@ -58,6 +59,7 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
     var onEnded: (@MainActor () -> Void)?
     var onDuration: (@MainActor (UInt64) -> Void)?
     var onPosition: (@MainActor (UInt64) -> Void)?
+    var onPlaybackStateChanged: (@MainActor (Bool) -> Void)?
     var onLoadingChanged: (@MainActor (Bool) -> Void)?
     var onBufferingChanged: (@MainActor (Bool) -> Void)?
     var onError: (@MainActor (String) -> Void)?
@@ -65,7 +67,11 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
     init() {
         timeControlObservation = player.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
             Task { @MainActor [weak self] in
-                self?.onBufferingChanged?(player.timeControlStatus == .waitingToPlayAtSpecifiedRate)
+                guard let self else { return }
+                let isPlaying = player.timeControlStatus == .playing
+                self.isPlaying = isPlaying
+                self.onPlaybackStateChanged?(isPlaying)
+                self.onBufferingChanged?(player.timeControlStatus == .waitingToPlayAtSpecifiedRate)
             }
         }
     }
@@ -85,7 +91,10 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
                     self.onLoadingChanged?(false)
                 } else if item.status == .failed {
                     self.onLoadingChanged?(false)
-                    self.onError?(item.error?.localizedDescription ?? "Media playback failed.")
+                    let error = item.error
+                    let url = (item.asset as? AVURLAsset)?.url.absoluteString ?? "unknown"
+                    Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "media").error("AVPlayerItem failed url=\(url, privacy: .public) error=\(String(describing: error), privacy: .public) underlying=\(String(describing: error as NSError?), privacy: .public)")
+                    self.onError?(error?.localizedDescription ?? "Media playback failed.")
                 }
             }
         }
@@ -115,7 +124,7 @@ final class AVFoundationPlaybackEngine: NativePlaybackEngine {
         seek(toMs: startAtMs)
     }
 
-    func play() { player.playImmediately(atRate: Float(rate)); isPlaying = true; onLoadingChanged?(false) }
+    func play() { player.playImmediately(atRate: Float(rate)) }
     func pause() { player.pause(); updatePosition(); isPlaying = false }
     func unload() {
         player.pause()
@@ -218,6 +227,11 @@ final class MediaPlaybackCoordinator {
         engine.onEnded = { @MainActor [weak self] in self?.handleNaturalEnd() }
         engine.onDuration = { @MainActor [weak self] duration in self?.handleDuration(duration) }
         engine.onPosition = { @MainActor [weak self] position in self?.presentationState.positionMs = position }
+        engine.onPlaybackStateChanged = { @MainActor [weak self] isPlaying in
+            guard let self, isPlaying else { return }
+            self.presentationState.status = .playing
+            self.startCheckpointTimer()
+        }
         engine.onLoadingChanged = { @MainActor [weak self] loading in self?.presentationState.isLoading = loading }
         engine.onBufferingChanged = { @MainActor [weak self] buffering in self?.presentationState.isBuffering = buffering }
         engine.onError = { @MainActor [weak self] message in self?.presentationState.errorMessage = message }
@@ -267,8 +281,10 @@ final class MediaPlaybackCoordinator {
         guard activeEnclosureID == enclosureID else { return }
         guard preparedStatus != .completed else { return }
         engine.play()
-        presentationState.status = .playing
-        startCheckpointTimer()
+        if engine.isPlaying {
+            presentationState.status = .playing
+            startCheckpointTimer()
+        }
     }
 
     func pause() { engine.pause(); checkpoint(); stopCheckpointTimer(); presentationState.positionMs = engine.currentPositionMs; presentationState.status = .paused }
