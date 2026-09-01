@@ -477,6 +477,18 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(withReal.artworkData, real)
     }
 
+    func testApplicationIconArtworkPreservesTransparency() {
+        let image = NSImage(size: NSSize(width: 2, height: 2))
+        image.lockFocus()
+        NSColor.clear.setFill()
+        NSRect(origin: .zero, size: image.size).fill()
+        image.unlockFocus()
+
+        let data = NowPlayingArtwork.applicationIconData(from: image)
+        XCTAssertNotNil(data)
+        XCTAssertTrue(NSBitmapImageRep(data: data!)?.hasAlpha ?? false)
+    }
+
     func testRemoteCommandsDelegateToPlaybackCoordinatorAndRegistrationIsIdempotent() throws {
         let core = FakePlaybackCore()
         let engine = FakePlaybackEngine()

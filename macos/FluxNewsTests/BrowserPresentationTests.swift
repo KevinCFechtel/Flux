@@ -40,12 +40,6 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(BrowserScope.listeningList, .listeningList)
     }
 
-    func testToolbarContextHidesListeningListFilterInPlayer() {
-        XCTAssertTrue(ToolbarPresentation.showsListeningListFeedFilter(isListeningList: true, showingPlayer: false))
-        XCTAssertFalse(ToolbarPresentation.showsListeningListFeedFilter(isListeningList: true, showingPlayer: true))
-        XCTAssertFalse(ToolbarPresentation.showsListeningListFeedFilter(isListeningList: false, showingPlayer: false))
-    }
-
     func testArticleAudioActionsUseBatchStateWithoutSelection() {
         let enclosure = Enclosure(id: 1, articleId: 7, url: "https://example.test/audio.mp3", mimeType: "audio/mpeg", sizeBytes: nil, remoteMediaProgressionSeconds: 0, mediaKind: .audio)
         let state = ArticleAudioActionState(articleID: 7, enclosures: [enclosure], isInListeningList: false, downloads: [:])

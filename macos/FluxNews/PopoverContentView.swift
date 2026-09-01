@@ -20,12 +20,6 @@ enum PopoverLayout {
     }
 }
 
-enum ToolbarPresentation {
-    static func showsListeningListFeedFilter(isListeningList: Bool, showingPlayer: Bool) -> Bool {
-        isListeningList && !showingPlayer
-    }
-}
-
 private enum ArticleScrollSpace { static let name = "FluxNews.ArticleScroll" }
 private struct ArticleFrameKey: PreferenceKey {
     static var defaultValue: [Int64: CGRect] = [:]
@@ -193,7 +187,6 @@ private struct ArticlePane: View {
             .disabled(PlayerPresentation.navigationDisabled(showingPlayer: showingPlayer, hasLoadedMedia: playbackState.loadedEnclosure != nil))
             .help(showingPlayer ? "Show News List" : "Show Player")
             .accessibilityLabel(showingPlayer ? "Show News List" : "Show Player")
-            if ToolbarPresentation.showsListeningListFeedFilter(isListeningList: store.isListeningList, showingPlayer: showingPlayer) { listeningListFeedFilter }
             moreMenu
         }
         .padding(.horizontal, 12)
@@ -203,6 +196,7 @@ private struct ArticlePane: View {
     private var moreMenu: some View {
         Menu {
             if store.isListeningList {
+                listeningListFeedFilter
                 Menu {
                     Button { store.setListeningListSort(.recentlyAdded) } label: { Label("Recently Added", systemImage: store.listeningListSort == .recentlyAdded ? "checkmark" : "clock") }
                     Button { store.setListeningListSort(.publicationDate) } label: { Label("Publication Date", systemImage: store.listeningListSort == .publicationDate ? "checkmark" : "calendar") }
@@ -236,11 +230,7 @@ private struct ArticlePane: View {
             ForEach(store.listeningListFeeds, id: \.feedId) { feed in
                 Button { store.setListeningListFeed(feed.feedId) } label: { Label(feed.feedTitle, systemImage: store.listeningListFeedID == feed.feedId ? "checkmark" : "circle") }
             }
-        } label: { Image(systemName: "line.3.horizontal.decrease.circle") }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .help("Filter Listening List")
-            .accessibilityLabel("Filter Listening List")
+        } label: { Label("Filter by Feed", systemImage: "line.3.horizontal.decrease.circle") }
     }
 
     private var sidebarToggleLabel: String {
@@ -483,7 +473,7 @@ private struct ListeningListView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(store.listeningListItems, id: \.articleId) { item in
-                        ListeningListRow(item: item, playbackState: playbackState, transferState: transferState, onPlay: onPlay, onDownload: onDownload, onDelete: onDelete, onRemove: onRemove)
+                        ListeningListRow(item: item, store: store, playbackState: playbackState, transferState: transferState, onPlay: onPlay, onDownload: onDownload, onDelete: onDelete, onRemove: onRemove)
                         Divider().padding(.leading, 12)
                     }
                 }
@@ -494,6 +484,7 @@ private struct ListeningListView: View {
 
 private struct ListeningListRow: View {
     let item: ListeningListItem
+    @ObservedObject var store: BrowserStore
     @ObservedObject var playbackState: MediaPlaybackPresentationState
     @ObservedObject var transferState: MediaTransferPresentationState
     let onPlay: (Enclosure) -> Void
@@ -506,14 +497,12 @@ private struct ListeningListRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "headphones")
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
             VStack(alignment: .leading, spacing: 4) {
                 Text(ListeningListPresentation.textOrFallback(item.title, fallback: String(localized: "Untitled News")))
                     .font(.system(size: 14, weight: .semibold))
                     .lineLimit(3)
                 HStack(spacing: 5) {
+                    FeedIconSlot(feedID: item.feedId, store: store)
                     Text(ListeningListPresentation.textOrFallback(item.feedTitle, fallback: String(localized: "Unknown Feed"))).foregroundStyle(.secondary)
                     if let date = Self.isoFormatter.date(from: item.publishedAt) {
                         Text("·").foregroundStyle(.tertiary)
@@ -530,26 +519,9 @@ private struct ListeningListRow: View {
         .padding(.vertical, 9)
         .contentShape(Rectangle())
         .onTapGesture { if let enclosure = ListeningListPresentation.preferredEnclosure(item) { onPlay(enclosure) } }
-        .contextMenu {
-            Button("Remove from Listening List", role: .destructive) {
-                if ArticleAudioActions.hasLocalDownload(item) { confirmingRemoval = true }
-                else { onRemove(item.articleId) }
-            }
-            Divider()
-            Menu("Downloads") {
-                ForEach(item.audioEnclosures.indices, id: \.self) { index in
-                    let audio = item.audioEnclosures[index]
-                    Button(downloadActionTitle(audio, index: index)) {
-                        if ArticleAudioActions.canDeleteDownload(audio.download) { pendingDeletion = audio }
-                        else { onDownload(item.articleId, audio.enclosure.id) }
-                    }
-                    .disabled(!ArticleAudioActions.canRequestDownload(audio.download) && !ArticleAudioActions.canDeleteDownload(audio.download))
-                }
-            }
-            if item.audioEnclosures.count > 1 && item.activeEnclosureId == nil {
-                ForEach(item.audioEnclosures, id: \.enclosure.id) { audio in
-                    Button("Play \(ArticleAudioActions.enclosureLabel(audio.enclosure, index: item.audioEnclosures.firstIndex(where: { $0.enclosure.id == audio.enclosure.id }) ?? 0))") { onPlay(audio.enclosure) }
-                }
+        .contextMenuIf(item.audioEnclosures.count > 1 && item.activeEnclosureId == nil) {
+            ForEach(item.audioEnclosures, id: \.enclosure.id) { audio in
+                Button("Play \(ArticleAudioActions.enclosureLabel(audio.enclosure, index: item.audioEnclosures.firstIndex(where: { $0.enclosure.id == audio.enclosure.id }) ?? 0))") { onPlay(audio.enclosure) }
             }
         }
         .alert("Remove from Listening List?", isPresented: $confirmingRemoval) {
@@ -586,7 +558,6 @@ private struct ListeningListRow: View {
     }
 
     @ViewBuilder private var status: some View {
-        let count = ListeningListPresentation.downloadedCount(item)
         VStack(alignment: .trailing, spacing: 4) {
             if ListeningListPresentation.preferredEnclosure(item) == nil {
                 Menu {
@@ -601,24 +572,22 @@ private struct ListeningListRow: View {
                 .menuIndicator(.hidden)
                 .help("Choose audio to play")
             }
-            if count.total > 0 {
-                Image(systemName: count.downloaded == count.total ? "arrow.down.circle.fill" : count.pending > 0 ? "arrow.down.circle" : "arrow.down.circle")
-                    .foregroundStyle(count.downloaded == count.total ? .green : .secondary)
-                if count.total > 1 || count.downloaded > 0 { Text("\(count.downloaded) / \(count.total)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }
-            }
-            if let transfer = item.audioEnclosures.compactMap({ transferState.runtime(for: $0.enclosure.id) }).first {
-                if let fraction = transfer.fraction {
-                    ProgressView(value: fraction)
-                        .progressViewStyle(.linear)
-                        .frame(width: 48)
-                        .accessibilityLabel(String(localized: "Download progress"))
-                        .accessibilityValue(String(localized: "\(Int((fraction * 100).rounded())) percent"))
-                } else {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel(String(localized: "Downloading"))
+            let count = ListeningListPresentation.downloadedCount(item)
+            HStack(spacing: 4) {
+                DownloadControl(item: item, transferState: transferState, onDownload: onDownload, onDelete: { pendingDeletion = $0 })
+                if count.total > 1 {
+                    Text("\(count.downloaded)/\(count.total)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
             }
+            Button {
+                if ArticleAudioActions.hasLocalDownload(item) { confirmingRemoval = true }
+                else { onRemove(item.articleId) }
+            } label: { Image(systemName: "minus.circle") }
+                .buttonStyle(.borderless)
+                .help("Remove from Listening List")
+                .accessibilityLabel("Remove from Listening List")
         }
     }
 
@@ -626,13 +595,96 @@ private struct ListeningListRow: View {
         String(max(0, Int(milliseconds / 60_000)))
     }
 
-    private func downloadActionTitle(_ audio: ListeningListEnclosure, index: Int) -> String {
+}
+
+private struct DownloadControl: View {
+    let item: ListeningListItem
+    @ObservedObject var transferState: MediaTransferPresentationState
+    let onDownload: (Int64, Int64) -> Void
+    let onDelete: (ListeningListEnclosure) -> Void
+    @State private var hoveredDownloadedID: Int64?
+
+    var body: some View {
+        if item.audioEnclosures.isEmpty {
+            EmptyView()
+        } else if item.audioEnclosures.count == 1, let audio = item.audioEnclosures.first {
+            control(for: audio)
+        } else {
+            Menu {
+                ForEach(item.audioEnclosures.indices, id: \.self) { index in
+                    let audio = item.audioEnclosures[index]
+                    Button {
+                        activate(audio)
+                    } label: {
+                        Label(actionTitle(audio, index: index), systemImage: symbol(for: audio))
+                    }
+                    .disabled(!isActionable(audio))
+                }
+            } label: {
+                Label("Download", systemImage: "arrow.down.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .help("Download")
+            .accessibilityLabel("Download")
+        }
+    }
+
+    @ViewBuilder private func control(for audio: ListeningListEnclosure) -> some View {
+        let action = ArticleAudioActions.downloadAction(audio.download, runtime: transferState.runtime(for: audio.enclosure.id))
+        switch action {
+        case .downloading:
+            ProgressView(value: transferState.runtime(for: audio.enclosure.id)?.fraction)
+                .progressViewStyle(.circular)
+                .controlSize(.small)
+                .help("Downloading")
+                .accessibilityLabel("Downloading")
+        case .pending, .pendingDeletion:
+            ProgressView()
+                .controlSize(.small)
+                .help(action == .pending ? "Download pending" : "Delete Download pending")
+                .accessibilityLabel(action == .pending ? "Download pending" : "Delete Download pending")
+        default:
+            Button { activate(audio) } label: {
+                Image(systemName: symbol(for: audio))
+                    .foregroundStyle(action == .delete ? .green : .secondary)
+            }
+            .buttonStyle(.borderless)
+            .disabled(!isActionable(audio))
+            .onHover { isHovered in
+                hoveredDownloadedID = isHovered && action == .delete ? audio.enclosure.id : nil
+            }
+            .help(action == .delete && hoveredDownloadedID == audio.enclosure.id ? "Delete Download" : action == .retry ? "Retry Download" : "Download")
+            .accessibilityLabel(action == .delete ? "Downloaded" : action == .retry ? "Retry Download" : "Download")
+        }
+    }
+
+    private func activate(_ audio: ListeningListEnclosure) {
+        if ArticleAudioActions.canDeleteDownload(audio.download) { onDelete(audio) }
+        else if ArticleAudioActions.canRequestDownload(audio.download) { onDownload(item.articleId, audio.enclosure.id) }
+    }
+
+    private func isActionable(_ audio: ListeningListEnclosure) -> Bool {
+        ArticleAudioActions.canRequestDownload(audio.download) || ArticleAudioActions.canDeleteDownload(audio.download)
+    }
+
+    private func symbol(for audio: ListeningListEnclosure) -> String {
+        let action = ArticleAudioActions.downloadAction(audio.download, runtime: transferState.runtime(for: audio.enclosure.id))
+        if action == .delete && hoveredDownloadedID == audio.enclosure.id { return "trash" }
+        switch action {
+        case .delete: return "checkmark.circle.fill"
+        case .retry: return "arrow.clockwise.circle"
+        default: return "arrow.down.circle"
+        }
+    }
+
+    private func actionTitle(_ audio: ListeningListEnclosure, index: Int) -> String {
         let label = ArticleAudioActions.enclosureLabel(audio.enclosure, index: index)
         switch ArticleAudioActions.downloadAction(audio.download, runtime: transferState.runtime(for: audio.enclosure.id)) {
         case .delete: return String(localized: "Delete Download: \(label)")
-        case .pending: return String(localized: "Pending: \(label)")
-        case .downloading: return String(localized: "Downloading\(transferState.runtime(for: audio.enclosure.id)?.fraction.map { " \(Int(($0 * 100).rounded()))%" } ?? ""): \(label)")
-        case .pendingDeletion: return String(localized: "Pending deletion: \(label)")
+        case .pending: return String(localized: "Download pending: \(label)")
+        case .downloading: return String(localized: "Downloading: \(label)")
+        case .pendingDeletion: return String(localized: "Delete Download pending: \(label)")
         case .retry: return String(localized: "Retry Download: \(label)")
         case .download: return String(localized: "Download: \(label)")
         }
@@ -967,6 +1019,17 @@ private struct AudioActionsView: View {
     }
 }
 
+private extension View {
+    @ViewBuilder
+    func contextMenuIf<Content: View>(_ enabled: Bool, @ViewBuilder content: @escaping () -> Content) -> some View {
+        if enabled {
+            contextMenu { content() }
+        } else {
+            self
+        }
+    }
+}
+
 private struct ThumbnailSlot: View {
     let article: ArticleSummary
     @ObservedObject var store: BrowserStore
@@ -988,7 +1051,7 @@ private struct ThumbnailSlot: View {
     }
 }
 
-private struct FeedIconSlot: View {
+struct FeedIconSlot: View {
     @Environment(\.colorScheme) private var colorScheme
     let feedID: Int64
     @ObservedObject var store: BrowserStore

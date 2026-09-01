@@ -102,14 +102,24 @@ struct PlayerView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(PlayerPresentation.textOrFallback(state.feedTitle, fallback: String(localized: "Unknown Feed")))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            Text(PlayerPresentation.textOrFallback(state.mediaTitle, fallback: String(localized: "Untitled Media")))
-                .font(.headline)
-                .lineLimit(2)
+        HStack(alignment: .top, spacing: 8) {
+            if let articleID = state.loadedEnclosure?.articleId,
+               let feedID = store.feedID(forArticleID: articleID) {
+                FeedIconSlot(feedID: feedID, store: store)
+            } else {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 16)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(PlayerPresentation.textOrFallback(state.feedTitle, fallback: String(localized: "Unknown Feed")))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(PlayerPresentation.textOrFallback(state.mediaTitle, fallback: String(localized: "Untitled Media")))
+                    .font(.headline)
+                    .lineLimit(2)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

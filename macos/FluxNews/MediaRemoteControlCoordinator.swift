@@ -48,6 +48,15 @@ struct NowPlayingProjection: Equatable {
     }
 }
 
+enum NowPlayingArtwork {
+    static func applicationIconData(from image: NSImage?) -> Data? {
+        guard let image, let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff) else {
+            return image?.tiffRepresentation
+        }
+        return bitmap.representation(using: .png, properties: [:]) ?? tiff
+    }
+}
+
 enum MediaRemoteCommand: Equatable {
     case play
     case pause
@@ -77,7 +86,7 @@ final class MediaRemoteControlCoordinator {
     init(playbackCoordinator: MediaPlaybackCoordinator, presentationState: MediaPlaybackPresentationState) {
         self.playbackCoordinator = playbackCoordinator
         self.presentationState = presentationState
-        applicationArtworkData = NSApp.applicationIconImage?.tiffRepresentation
+        applicationArtworkData = NowPlayingArtwork.applicationIconData(from: NSApp.applicationIconImage)
         observePresentationState()
         start()
         publish()

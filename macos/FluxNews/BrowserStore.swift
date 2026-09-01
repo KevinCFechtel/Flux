@@ -382,6 +382,10 @@ final class BrowserStore: ObservableObject {
     }
 
     var isListeningList: Bool { scope == .listeningList }
+    func feedID(forArticleID articleID: Int64) -> Int64? {
+        articles.first(where: { $0.id == articleID })?.feedId
+            ?? listeningListItems.first(where: { $0.articleId == articleID })?.feedId
+    }
     func query(scope: BrowserScope? = nil) -> ArticleQuery {
         let requestedScope = scope ?? self.scope
         let coreScope: ArticleScope = switch requestedScope { case .all, .starred: .all; case .search, .listeningList: fatalError("Scope has no article query"); case let .category(id): .category(id: id); case let .feed(id): .feed(id: id) }
