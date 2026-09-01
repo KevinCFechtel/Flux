@@ -51,22 +51,23 @@
 		A47 /* FluxNewsWidgets.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = BW /* FluxNewsWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A48 /* BrowserPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B38 /* BrowserPresentation.swift */; };
 		A49 /* BrowserPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B38 /* BrowserPresentation.swift */; };
+		A5 /* ScrolloverExposureTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5 /* ScrolloverExposureTracker.swift */; };
 		A50 /* BrowserPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B39 /* BrowserPresentationTests.swift */; };
 		A51 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = B14 /* Localizable.xcstrings */; };
 		A53 /* StartupRouteState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B51 /* StartupRouteState.swift */; };
+		A54 /* StartupRouteState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B51 /* StartupRouteState.swift */; };
 		A55 /* MediaPlaybackCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B52 /* MediaPlaybackCoordinator.swift */; };
 		A56 /* MediaTransferCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B53 /* MediaTransferCoordinator.swift */; };
 		A57 /* MediaCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B54 /* MediaCoordinatorTests.swift */; };
 		A58 /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B55 /* PlayerView.swift */; };
 		A59 /* MediaRemoteControlCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B56 /* MediaRemoteControlCoordinator.swift */; };
-		A54 /* StartupRouteState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B51 /* StartupRouteState.swift */; };
-		A5 /* ScrolloverExposureTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5 /* ScrolloverExposureTracker.swift */; };
 		A6 /* Generated/flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6 /* Generated/flux_uniffi.swift */; };
 		A7 /* KeyboardCommandObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7 /* KeyboardCommandObserver.swift */; };
 		A8 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8 /* CredentialStore.swift */; };
 		A9 /* GlobalShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9 /* GlobalShortcut.swift */; };
 		E184D499303DEC29009B16A3 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = E184D498303DEC29009B16A3 /* AppIcon.icon */; };
 		E19B91123042A9B3006481A6 /* FluxNewsTemplate.svg in Resources */ = {isa = PBXBuildFile; fileRef = E1E5DA9E3042A5C1007550DC /* FluxNewsTemplate.svg */; };
+		E1FBEC753046C60B0068E374 /* FallbackArtwork.png in Resources */ = {isa = PBXBuildFile; fileRef = E1FBEC743046C60B0068E374 /* FallbackArtwork.png */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -133,15 +134,15 @@
 		B37 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B38 /* BrowserPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserPresentation.swift; sourceTree = "<group>"; };
 		B39 /* BrowserPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserPresentationTests.swift; sourceTree = "<group>"; };
+		B4 /* PopoverContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverContentView.swift; sourceTree = "<group>"; };
 		B401 /* ExplicitRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplicitRoutingTests.swift; sourceTree = "<group>"; };
+		B5 /* ScrolloverExposureTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrolloverExposureTracker.swift; sourceTree = "<group>"; };
 		B51 /* StartupRouteState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartupRouteState.swift; sourceTree = "<group>"; };
 		B52 /* MediaPlaybackCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPlaybackCoordinator.swift; sourceTree = "<group>"; };
 		B53 /* MediaTransferCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaTransferCoordinator.swift; sourceTree = "<group>"; };
 		B54 /* MediaCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaCoordinatorTests.swift; sourceTree = "<group>"; };
 		B55 /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		B56 /* MediaRemoteControlCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaRemoteControlCoordinator.swift; sourceTree = "<group>"; };
-		B4 /* PopoverContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverContentView.swift; sourceTree = "<group>"; };
-		B5 /* ScrolloverExposureTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrolloverExposureTracker.swift; sourceTree = "<group>"; };
 		B6 /* Generated/flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Generated/flux_uniffi.swift; sourceTree = "<group>"; };
 		B7 /* KeyboardCommandObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardCommandObserver.swift; sourceTree = "<group>"; };
 		B8 /* CredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; };
@@ -151,6 +152,7 @@
 		BW /* FluxNewsWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = FluxNewsWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		E184D498303DEC29009B16A3 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		E1E5DA9E3042A5C1007550DC /* FluxNewsTemplate.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = FluxNewsTemplate.svg; sourceTree = "<group>"; };
+		E1FBEC743046C60B0068E374 /* FallbackArtwork.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = FallbackArtwork.png; sourceTree = "<group>"; };
 		F1 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -195,6 +197,7 @@
 		G1 /* FluxNews */ = {
 			isa = PBXGroup;
 			children = (
+				E1FBEC743046C60B0068E374 /* FallbackArtwork.png */,
 				B1 /* FluxNewsApp.swift */,
 				B2 /* AppDelegate.swift */,
 				B3 /* BrowserStore.swift */,
@@ -368,6 +371,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E1FBEC753046C60B0068E374 /* FallbackArtwork.png in Resources */,
 				A13 /* FluxNewsTemplate.svg in Resources */,
 				A14 /* Localizable.xcstrings in Resources */,
 				A15 /* en.lproj/AppShortcuts.strings in Resources */,
