@@ -194,43 +194,22 @@ private struct ArticlePane: View {
     }
 
     private var moreMenu: some View {
-        Menu {
-            if store.isListeningList {
-                listeningListFeedFilter
-                Menu {
-                    Button { store.setListeningListSort(.recentlyAdded) } label: { Label("Recently Added", systemImage: store.listeningListSort == .recentlyAdded ? "checkmark" : "clock") }
-                    Button { store.setListeningListSort(.publicationDate) } label: { Label("Publication Date", systemImage: store.listeningListSort == .publicationDate ? "checkmark" : "calendar") }
-                } label: { Label("Sort", systemImage: "arrow.up.arrow.down") }
-            } else {
-                Button { store.setUnreadOnly(true) } label: { Label("Show Unread News Only", systemImage: store.unreadOnly ? "checkmark.circle.fill" : "circle") }
-                Button { store.setUnreadOnly(false) } label: { Label("Show All News", systemImage: store.unreadOnly ? "circle" : "checkmark.circle.fill") }
-                Divider()
-                Menu {
-                    Button { store.setNewestFirst(true) } label: { Label("Newest First", systemImage: store.newestFirst ? "checkmark" : "arrow.down") }
-                    Button { store.setNewestFirst(false) } label: { Label("Oldest First", systemImage: store.newestFirst ? "arrow.up" : "checkmark") }
-                } label: { Label("Sort Order", systemImage: "arrow.up.arrow.down") }
-                Menu {
-                    Button { setArticleListStyle(.row) } label: { Label("Rows", systemImage: store.articleListStyle == .row ? "checkmark" : "list.bullet") }
-                    Button { setArticleListStyle(.card) } label: { Label("Cards", systemImage: store.articleListStyle == .card ? "checkmark" : "rectangle.grid.1x2") }
-                } label: { Label("Layout", systemImage: "rectangle.3.group") }
-            }
-            Divider()
-            Button { store.settingsVisible = true } label: { Label("Settings...", systemImage: "gearshape") }
-            Button { NSApplication.shared.terminate(nil) } label: { Label("Quit FluxNews", systemImage: "power") }
-        } label: { Image(systemName: "ellipsis") }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .help("More")
-            .accessibilityLabel("More")
-    }
-
-    private var listeningListFeedFilter: some View {
-        Menu {
-            Button { store.setListeningListFeed(nil) } label: { Label("All Feeds", systemImage: store.listeningListFeedID == nil ? "checkmark" : "circle") }
-            ForEach(store.listeningListFeeds, id: \.feedId) { feed in
-                Button { store.setListeningListFeed(feed.feedId) } label: { Label(feed.feedTitle, systemImage: store.listeningListFeedID == feed.feedId ? "checkmark" : "circle") }
-            }
-        } label: { Label("Filter by Feed", systemImage: "line.3.horizontal.decrease.circle") }
+        MoreMenu(
+            isListeningList: store.isListeningList,
+            unreadOnly: store.unreadOnly,
+            newestFirst: store.newestFirst,
+            articleListStyle: store.articleListStyle,
+            listeningListSort: store.listeningListSort,
+            listeningListFeedID: store.listeningListFeedID,
+            listeningListFeeds: store.listeningListFeeds,
+            setUnreadOnly: store.setUnreadOnly,
+            setNewestFirst: store.setNewestFirst,
+            setArticleListStyle: setArticleListStyle,
+            setListeningListSort: store.setListeningListSort,
+            setListeningListFeed: store.setListeningListFeed,
+            showSettings: { store.settingsVisible = true },
+            quit: { NSApplication.shared.terminate(nil) }
+        )
     }
 
     private var sidebarToggleLabel: String {
@@ -822,6 +801,63 @@ private struct SidebarItem: Identifiable {
     }
     static func feed(_ feed: Feed, count: UInt64, pendingNewCount: Int) -> SidebarItem {
         SidebarItem(id: "feed-\(feed.id)", scope: .feed(feed.id), title: feed.title, count: count, systemImage: nil, feedID: feed.id, categoryID: nil, pendingNewCount: pendingNewCount, children: nil)
+    }
+}
+
+private struct MoreMenu: View {
+    let isListeningList: Bool
+    let unreadOnly: Bool
+    let newestFirst: Bool
+    let articleListStyle: ArticleListStyle
+    let listeningListSort: ListeningListSort
+    let listeningListFeedID: Int64?
+    let listeningListFeeds: [ListeningListFeed]
+    let setUnreadOnly: (Bool) -> Void
+    let setNewestFirst: (Bool) -> Void
+    let setArticleListStyle: (ArticleListStyle) -> Void
+    let setListeningListSort: (ListeningListSort) -> Void
+    let setListeningListFeed: (Int64?) -> Void
+    let showSettings: () -> Void
+    let quit: () -> Void
+
+    var body: some View {
+        Menu {
+            if isListeningList {
+                listeningListFeedFilter
+                Menu {
+                    Button { setListeningListSort(.recentlyAdded) } label: { Label("Recently Added", systemImage: listeningListSort == .recentlyAdded ? "checkmark" : "clock") }
+                    Button { setListeningListSort(.publicationDate) } label: { Label("Publication Date", systemImage: listeningListSort == .publicationDate ? "checkmark" : "calendar") }
+                } label: { Label("Sort", systemImage: "arrow.up.arrow.down") }
+            } else {
+                Button { setUnreadOnly(true) } label: { Label("Show Unread News Only", systemImage: unreadOnly ? "checkmark.circle.fill" : "circle") }
+                Button { setUnreadOnly(false) } label: { Label("Show All News", systemImage: unreadOnly ? "circle" : "checkmark.circle.fill") }
+                Divider()
+                Menu {
+                    Button { setNewestFirst(true) } label: { Label("Newest First", systemImage: newestFirst ? "checkmark" : "arrow.down") }
+                    Button { setNewestFirst(false) } label: { Label("Oldest First", systemImage: newestFirst ? "arrow.up" : "checkmark") }
+                } label: { Label("Sort Order", systemImage: "arrow.up.arrow.down") }
+                Menu {
+                    Button { setArticleListStyle(.row) } label: { Label("Rows", systemImage: articleListStyle == .row ? "checkmark" : "list.bullet") }
+                    Button { setArticleListStyle(.card) } label: { Label("Cards", systemImage: articleListStyle == .card ? "checkmark" : "rectangle.grid.1x2") }
+                } label: { Label("Layout", systemImage: "rectangle.3.group") }
+            }
+            Divider()
+            Button { showSettings() } label: { Label("Settings...", systemImage: "gearshape") }
+            Button { quit() } label: { Label("Quit FluxNews", systemImage: "power") }
+        } label: { Image(systemName: "ellipsis") }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .help("More")
+            .accessibilityLabel("More")
+    }
+
+    private var listeningListFeedFilter: some View {
+        Menu {
+            Button { setListeningListFeed(nil) } label: { Label("All Feeds", systemImage: listeningListFeedID == nil ? "checkmark" : "circle") }
+            ForEach(listeningListFeeds, id: \.feedId) { feed in
+                Button { setListeningListFeed(feed.feedId) } label: { Label(feed.feedTitle, systemImage: listeningListFeedID == feed.feedId ? "checkmark" : "circle") }
+            }
+        } label: { Label("Filter by Feed", systemImage: "line.3.horizontal.decrease.circle") }
     }
 }
 
