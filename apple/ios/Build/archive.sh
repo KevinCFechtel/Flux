@@ -113,7 +113,29 @@ archived_build_number="$(plutil -extract CFBundleVersion raw "${archived_info_pl
   echo "Archived build number mismatch: ${archived_build_number} (expected ${BUILD_NUMBER})." >&2
   exit 1
 }
+archived_package_type="$(plutil -extract CFBundlePackageType raw "${archived_info_plist}")"
+[[ "${archived_package_type}" == "APPL" ]] || {
+  echo "Archived package type mismatch: ${archived_package_type} (expected APPL)." >&2
+  exit 1
+}
+archived_icon_name="$(plutil -extract CFBundleIconName raw "${archived_info_plist}")"
+[[ "${archived_icon_name}" == "AppIcon" ]] || {
+  echo "Archived icon name mismatch: ${archived_icon_name} (expected AppIcon)." >&2
+  exit 1
+}
+for icon_resource in \
+  "${archived_app}/Assets.car" \
+  "${archived_app}/AppIcon60x60@2x.png" \
+  "${archived_app}/AppIcon76x76@2x~ipad.png"; do
+  [[ -f "${icon_resource}" ]] || {
+    echo "Archived app icon resource is missing: ${icon_resource}" >&2
+    exit 1
+  }
+done
 
 echo "NativeDev archive: ${ARCHIVE_PATH}"
 echo "Bundle ID: ${archived_bundle_identifier}"
 echo "Build number: ${archived_build_number}"
+echo "Package type: ${archived_package_type}"
+echo "Icon name: ${archived_icon_name}"
+echo "App icon resources: Assets.car, AppIcon60x60@2x.png, AppIcon76x76@2x~ipad.png"
