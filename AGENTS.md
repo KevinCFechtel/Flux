@@ -36,9 +36,9 @@ A UI interaction may call a core domain operation, but the core API must not be 
 
 ## Repository and Build Layout
 
-The shared Rust workspace lives under `core/`. `core/Cargo.toml` is the authoritative workspace manifest and `core/Cargo.lock` is the single tracked lockfile for that workspace. Platform clients live alongside the shared core, currently `macos/` and later native `ios/` and `android/` clients. Do not move the Rust workspace back to the repository root or introduce duplicate workspace/lockfile layouts without a concrete requirement.
+The shared Rust workspace lives under `core/`. `core/Cargo.toml` is the authoritative workspace manifest and `core/Cargo.lock` is the single tracked lockfile for that workspace. Platform clients live alongside the shared core under `apple/macos/` and later native `apple/ios/` and `android/` clients. Do not move the Rust workspace back to the repository root or introduce duplicate workspace/lockfile layouts without a concrete requirement.
 
-For macOS, the established build/release path is under `macos/Build/`: `build-uniffi.sh` prepares the Rust/UniFFI integration, `build-app.sh` performs composable Debug/Release app builds, and `release.sh` performs the production release flow including signing/notarization/packaging as configured by the repository. Preserve this validated path unless a concrete implementation requirement makes a change necessary; do not replace it with parallel or temporary build/release mechanisms.
+For macOS, the established build/release path is under `apple/macos/Build/`: `build-uniffi.sh` prepares the Rust/UniFFI integration, `build-app.sh` performs composable Debug/Release app builds, and `release.sh` performs the production release flow including signing/notarization/packaging as configured by the repository. Preserve this validated path unless a concrete implementation requirement makes a change necessary; do not replace it with parallel or temporary build/release mechanisms.
 
 ## Implementation Rules
 

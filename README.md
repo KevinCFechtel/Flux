@@ -22,19 +22,19 @@ cargo build --manifest-path core/Cargo.toml --workspace
 Generate the Swift bindings and release dylib required by Xcode:
 
 ```bash
-zsh macos/Build/build-uniffi.sh
+zsh apple/macos/Build/build-uniffi.sh
 ```
 
 Build the macOS app for normal development. The resulting ad-hoc-signed app is at `dist/FluxNews.app`:
 
 ```bash
-bash macos/Build/build-app.sh
+bash apple/macos/Build/build-app.sh
 ```
 
 Install that exact build into `/Applications` and launch it, including its embedded WidgetKit extension:
 
 ```bash
-bash macos/Build/install-local.sh
+bash apple/macos/Build/install-local.sh
 ```
 
 For WidgetKit and App Group testing, use Xcode automatic Apple Development signing rather than ad-hoc signing. This requires a local Apple Development certificate and a signed-in Xcode account that belongs to the supplied team:
@@ -42,9 +42,9 @@ For WidgetKit and App Group testing, use Xcode automatic Apple Development signi
 ```bash
 DEVELOPMENT_SIGNING=1 \
 DEVELOPMENT_TEAM=<TEAM_ID> \
-bash macos/Build/build-app.sh
+bash apple/macos/Build/build-app.sh
 
-bash macos/Build/install-local.sh
+bash apple/macos/Build/install-local.sh
 ```
 
 Set `DEVELOPMENT_SIGNING_IDENTITY` only when Xcode must use a specific Apple Development identity; it defaults to `Apple Development`. The Development build retains Xcode's target-specific signatures and validates Apple Development authority, the supplied team identifier, both App Group entitlements, the widget sandbox, and recursive code signing. The default remains the fast ad-hoc build.
@@ -73,7 +73,7 @@ log stream --style compact --predicate 'process == "FluxNews" AND subsystem == "
 Use the same production configuration without signing or notarization to prepare a release build:
 
 ```bash
-CONFIGURATION=Release bash macos/Build/build-app.sh
+CONFIGURATION=Release bash apple/macos/Build/build-app.sh
 ```
 
 ## Create a Release
@@ -82,11 +82,11 @@ A release uses a Developer ID signing identity and a `notarytool` Keychain profi
 
 ```bash
 xcrun notarytool store-credentials FluxNews-notary
-cp macos/Build/.env.example macos/Build/.env
-bash macos/Build/release.sh
+cp apple/macos/Build/.env.example apple/macos/Build/.env
+bash apple/macos/Build/release.sh
 ```
 
-`macos/Build/.env` is ignored by Git. `release.sh` builds the Rust/UniFFI-backed app, signs it with hardened runtime, notarizes and staples it, then creates and validates `dist/release/FluxNews-<version>-macos-<architecture>.zip`.
+`apple/macos/Build/.env` is ignored by Git. `release.sh` builds the Rust/UniFFI-backed app, signs it with hardened runtime, notarizes and staples it, then creates and validates `dist/release/FluxNews-<version>-macos-<architecture>.zip`.
 
 Changes should be covered by appropriate tests. Pull requests should focus on a clearly described problem or feature.
 

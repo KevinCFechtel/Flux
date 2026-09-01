@@ -1,8 +1,8 @@
 #!/bin/zsh
 set -euo pipefail
 
-root="$(cd "$(dirname "$0")/../.." && pwd)"
-generated="$root/macos/FluxNews/Generated"
+root="$(cd "$(dirname "$0")/../../.." && pwd)"
+generated="$root/apple/macos/FluxNews/Generated"
 workspace="$root/core/Cargo.toml"
 library="$root/core/target/release/libflux_uniffi.dylib"
 arm64_library="$root/core/target/aarch64-apple-darwin/release/libflux_uniffi.dylib"

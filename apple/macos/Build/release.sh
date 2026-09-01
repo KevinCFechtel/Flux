@@ -2,12 +2,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
 APP_DIR="${REPOSITORY_DIR}/dist/FluxNews.app"
 RELEASE_DIR="${REPOSITORY_DIR}/dist/release"
-INFO_PLIST="${REPOSITORY_DIR}/macos/FluxNews/Info.plist"
-APP_ENTITLEMENTS="${REPOSITORY_DIR}/macos/FluxNews/FluxNews.entitlements"
-WIDGET_ENTITLEMENTS="${REPOSITORY_DIR}/macos/FluxNewsWidgets/FluxNewsWidgets.entitlements"
+INFO_PLIST="${REPOSITORY_DIR}/apple/macos/FluxNews/Info.plist"
+APP_ENTITLEMENTS="${REPOSITORY_DIR}/apple/macos/FluxNews/FluxNews.entitlements"
+WIDGET_ENTITLEMENTS="${REPOSITORY_DIR}/apple/macos/FluxNewsWidgets/FluxNewsWidgets.entitlements"
 RELEASE_ENV_FILE="${FLUX_RELEASE_ENV_FILE:-${SCRIPT_DIR}/.env}"
 
 if [[ -f "${RELEASE_ENV_FILE}" ]]; then

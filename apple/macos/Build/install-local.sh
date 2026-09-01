@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
 SOURCE_APP="${REPOSITORY_DIR}/dist/FluxNews.app"
 INSTALLED_APP="/Applications/FluxNews.app"
 WIDGET_EXTENSION="${SOURCE_APP}/Contents/PlugIns/FluxNewsWidgets.appex"

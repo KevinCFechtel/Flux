@@ -2,13 +2,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-Debug}"
 DERIVED_DATA="${DERIVED_DATA:-${REPOSITORY_DIR}/.build/DerivedData}"
 APP_DIR="${APP_DIR:-${REPOSITORY_DIR}/dist/FluxNews.app}"
 BUILT_APP="${DERIVED_DATA}/Build/Products/${CONFIGURATION}/FluxNews.app"
-APP_ENTITLEMENTS="${REPOSITORY_DIR}/macos/FluxNews/FluxNews.entitlements"
-WIDGET_ENTITLEMENTS="${REPOSITORY_DIR}/macos/FluxNewsWidgets/FluxNewsWidgets.entitlements"
+APP_ENTITLEMENTS="${REPOSITORY_DIR}/apple/macos/FluxNews/FluxNews.entitlements"
+WIDGET_ENTITLEMENTS="${REPOSITORY_DIR}/apple/macos/FluxNewsWidgets/FluxNewsWidgets.entitlements"
 HOST_BUNDLE_IDENTIFIER="dev.kevincfechtel.fluxNews"
 WIDGET_BUNDLE_IDENTIFIER="dev.kevincfechtel.fluxNews.FluxNewsWidgets"
 APP_GROUP_IDENTIFIER="group.dev.kevincfechtel.fluxNews"
@@ -37,7 +37,7 @@ esac
 "${SCRIPT_DIR}/build-uniffi.sh"
 
 xcodebuild_args=(
-  -project "${REPOSITORY_DIR}/macos/FluxNews.xcodeproj"
+  -project "${REPOSITORY_DIR}/apple/macos/FluxNews.xcodeproj"
   -scheme FluxNews
   -configuration "${CONFIGURATION}"
   -destination "platform=macOS"

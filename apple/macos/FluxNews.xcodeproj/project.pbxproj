@@ -515,7 +515,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 2.0.0;
 				OTHER_LDFLAGS = (
-					"$(SRCROOT)/../core/target/release/libflux_uniffi.dylib",
+					"$(SRCROOT)/../../core/target/release/libflux_uniffi.dylib",
 					"-rpath",
 					"@executable_path/../Frameworks",
 				);
@@ -550,7 +550,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 2.0.0;
 				OTHER_LDFLAGS = (
-					"$(SRCROOT)/../core/target/release/libflux_uniffi.dylib",
+					"$(SRCROOT)/../../core/target/release/libflux_uniffi.dylib",
 					"-rpath",
 					"@executable_path/../Frameworks",
 				);
