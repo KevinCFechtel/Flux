@@ -77,3 +77,21 @@ tests should preserve a device backup/fixture, explicitly inspect and reset
 Keychain/App Group state, and clear the new `FluxNewsNativeUpgradeTest` Core
 directory between repetitions. No migration marker or reset tool exists in
 D1.3.
+
+## Native iOS developer commands
+
+The iOS developer scripts use the shared Apple UniFFI package and repository-local
+DerivedData under `.build/DerivedData`:
+
+```bash
+apple/ios/Build/build-app.sh
+apple/ios/Build/run-simulator.sh
+apple/ios/Build/test.sh
+```
+
+Use `--configuration "Upgrade Test"` with `build-app.sh` to compile the
+production-identity feasibility build. Installing that build over the Flutter
+application is an explicit migration validation operation, not normal development.
+The macOS scripts under `apple/macos/Build/` and these iOS scripts all ultimately
+use `apple/Build/build-uniffi.sh`; macOS additionally stages its generated Swift
+files and embeds the macOS library for its app target.
