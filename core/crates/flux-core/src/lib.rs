@@ -604,6 +604,7 @@ impl FluxCore {
             .store
             .enclosure(enclosure_id)?
             .ok_or_else(|| CoreError::data(format!("enclosure {enclosure_id} does not exist")))?;
+        self.store.prepare_article_chapters(enclosure_id)?;
         let (article_title, feed_title) = self
             .store
             .article_presentation(enclosure.enclosure.article_id)?;

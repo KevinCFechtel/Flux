@@ -1,6 +1,9 @@
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
+use html5ever::{parse_document, tendril::TendrilSink};
+use markup5ever_rcdom::{Handle, NodeData, RcDom};
+
 use crate::domain::{MediaChapter, MediaChapterSource};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -274,11 +277,11 @@ pub(crate) fn article_chapters(
     article_html: &str,
     duration_ms: Option<u64>,
 ) -> Vec<MediaChapterInput> {
-    let text = strip_tags(article_html);
+    let text = article_chapter_text(article_html);
     let mut chapters = Vec::new();
     for line in text.lines() {
         let line = line.trim();
-        let Some((timestamp, title)) = line.split_once(' ') else {
+        let Some((timestamp, title)) = line.split_once(char::is_whitespace) else {
             continue;
         };
         let Some(start_ms) = parse_timestamp(timestamp) else {
@@ -288,29 +291,13 @@ pub(crate) fn article_chapters(
         if title.is_empty() || duration_ms.is_some_and(|duration| start_ms > duration) {
             continue;
         }
-        if chapters
-            .last()
-            .is_some_and(|chapter: &MediaChapterInput| chapter.start_ms == start_ms)
-        {
-            continue;
-        }
         chapters.push(MediaChapterInput {
             title: title.to_string(),
             start_ms,
             end_ms: None,
         });
     }
-    chapters.sort_by_key(|chapter| chapter.start_ms);
-    for index in 0..chapters.len().saturating_sub(1) {
-        chapters[index].end_ms = Some(chapters[index + 1].start_ms);
-    }
-    if let (Some(duration), Some(last)) = (duration_ms, chapters.last_mut())
-        && duration > last.start_ms
-    {
-        last.end_ms = Some(duration);
-    }
-    chapters.retain(|chapter| chapter.end_ms.is_none_or(|end| end > chapter.start_ms));
-    chapters
+    finalize_chapters(chapters, duration_ms)
 }
 
 pub(crate) fn to_domain_chapters(
@@ -353,18 +340,47 @@ fn parse_timestamp(value: &str) -> Option<u64> {
     seconds.checked_mul(1000)
 }
 
-fn strip_tags(value: &str) -> String {
+fn article_chapter_text(value: &str) -> String {
+    if !value.contains('<') {
+        return value.replace("&nbsp;", " ");
+    }
+    let Ok(dom) = std::panic::catch_unwind(|| {
+        parse_document(RcDom::default(), Default::default())
+            .from_utf8()
+            .one(value.as_bytes())
+    }) else {
+        return value.replace("&nbsp;", " ");
+    };
     let mut output = String::with_capacity(value.len());
-    let mut inside = false;
-    for character in value.chars() {
-        match character {
-            '<' => inside = true,
-            '>' => inside = false,
-            _ if !inside => output.push(character),
-            _ => {}
+    append_chapter_text(&dom.document, &mut output);
+    output
+}
+
+fn append_chapter_text(handle: &Handle, output: &mut String) {
+    match &handle.data {
+        NodeData::Text { contents } => output.push_str(&contents.borrow()),
+        NodeData::Element { name, .. } => {
+            let tag = name.local.as_ref();
+            if tag == "br" {
+                output.push('\n');
+                return;
+            }
+            for child in handle.children.borrow().iter() {
+                append_chapter_text(child, output);
+            }
+            if matches!(
+                tag,
+                "p" | "div" | "li" | "dt" | "dd" | "section" | "article"
+            ) {
+                output.push('\n');
+            }
+        }
+        _ => {
+            for child in handle.children.borrow().iter() {
+                append_chapter_text(child, output);
+            }
         }
     }
-    output.replace("&nbsp;", " ")
 }
 
 #[cfg(test)]
@@ -386,8 +402,36 @@ mod tests {
     #[test]
     fn invalid_timestamps_and_traversal_references_are_ignored() {
         assert!(article_chapters("99:99 Not a chapter\n123 unrelated", None).is_empty());
+        assert!(article_chapters("The meeting starts at 03:42 and ends later.", None).is_empty());
+        assert!(article_chapters("03:42", None).is_empty());
         assert!(resolve_media_reference(Path::new("/media"), "../outside.mp3").is_none());
         assert!(resolve_media_reference(Path::new("/media"), "/tmp/file.mp3").is_none());
+    }
+
+    #[test]
+    fn article_chapters_preserve_common_html_boundaries() {
+        for html in [
+            "<p>00:00 Intro</p><p>03:42 Topic</p>",
+            "<div>00:00 Intro</div><div>03:42 Topic</div>",
+            "00:00 Intro<br>03:42 Topic",
+            "<ul><li>00:00 Intro</li><li>03:42 Topic</li></ul>",
+        ] {
+            let chapters = article_chapters(html, None);
+            assert_eq!(chapters.len(), 2, "{html}");
+            assert_eq!(chapters[0].title, "Intro", "{html}");
+            assert_eq!(chapters[1].title, "Topic", "{html}");
+        }
+    }
+
+    #[test]
+    fn article_chapters_deduplicate_timestamps_deterministically() {
+        let chapters = article_chapters(
+            "<p>03:42 First</p><p>00:00 Intro</p><p>03:42 Duplicate</p>",
+            None,
+        );
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[1].title, "First");
+        assert_eq!(chapters[0].end_ms, Some(222_000));
     }
 
     #[test]

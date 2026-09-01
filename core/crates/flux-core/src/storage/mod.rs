@@ -1474,6 +1474,47 @@ impl Store {
             .map_err(sql_error)
     }
 
+    pub fn prepare_article_chapters(&self, enclosure_id: i64) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let (article_html, duration_ms, has_embedded): (String, Option<i64>, bool) = connection
+            .query_row(
+                "SELECT a.raw_html_content,m.duration_ms,EXISTS(SELECT 1 FROM media_chapters c WHERE c.enclosure_id=e.id AND c.source='embedded') FROM enclosures e JOIN articles a ON a.id=e.article_id LEFT JOIN media_metadata m ON m.enclosure_id=e.id WHERE e.id=?1",
+                [enclosure_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(sql_error)?
+            .ok_or_else(|| CoreError::data(format!("enclosure {enclosure_id} does not exist")))?;
+        if has_embedded {
+            return Ok(());
+        }
+        let duration_ms = duration_ms
+            .map(|value| {
+                u64::try_from(value).map_err(|_| CoreError::data("media duration is invalid"))
+            })
+            .transpose()?;
+        let chapters = to_domain_chapters(
+            enclosure_id,
+            MediaChapterSource::ArticleContent,
+            &article_chapters(&article_html, duration_ms),
+        );
+        let tx = connection.transaction().map_err(sql_error)?;
+        let has_embedded: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM media_chapters WHERE enclosure_id=?1 AND source='embedded')",
+                [enclosure_id],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)?;
+        if !has_embedded {
+            persist_chapters(&tx, enclosure_id, &chapters)?;
+        }
+        tx.commit().map_err(sql_error)
+    }
+
     pub fn replace_media_metadata(
         &self,
         enclosure_id: i64,
@@ -1494,6 +1535,21 @@ impl Store {
         let tx = connection.transaction().map_err(sql_error)?;
         ensure_enclosure(&tx, enclosure_id)?;
         tx.execute("INSERT INTO media_metadata(enclosure_id,duration_ms,duration_source,embedded_artwork_reference) VALUES(?1,?2,'local',?3) ON CONFLICT(enclosure_id) DO UPDATE SET duration_ms=excluded.duration_ms,duration_source=CASE WHEN excluded.duration_ms IS NOT NULL THEN 'local' ELSE media_metadata.duration_source END,embedded_artwork_reference=excluded.embedded_artwork_reference", params![enclosure_id, metadata.duration_ms.map(i64::try_from).transpose().map_err(|_| CoreError::data("media duration exceeds SQLite integer range"))?, metadata.embedded_artwork_reference]).map_err(sql_error)?;
+        let has_embedded: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM media_chapters WHERE enclosure_id=?1 AND source='embedded')",
+                [enclosure_id],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)?;
+        if has_embedded
+            && chapters
+                .iter()
+                .all(|chapter| chapter.source != MediaChapterSource::Embedded)
+        {
+            tx.commit().map_err(sql_error)?;
+            return Ok(());
+        }
         tx.execute(
             "DELETE FROM media_chapters WHERE enclosure_id=?1",
             [enclosure_id],
@@ -3163,6 +3219,16 @@ fn persist_media_metadata(
         .transpose()
         .map_err(|_| CoreError::data("media duration exceeds SQLite integer range"))?;
     tx.execute("INSERT INTO media_metadata(enclosure_id,duration_ms,duration_source,embedded_artwork_reference) VALUES(?1,?2,'local',?3) ON CONFLICT(enclosure_id) DO UPDATE SET duration_ms=COALESCE(excluded.duration_ms,media_metadata.duration_ms),duration_source=CASE WHEN excluded.duration_ms IS NOT NULL THEN 'local' ELSE media_metadata.duration_source END,embedded_artwork_reference=excluded.embedded_artwork_reference", params![enclosure_id, duration_ms, artwork_reference]).map_err(sql_error)?;
+    let has_embedded: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM media_chapters WHERE enclosure_id=?1 AND source='embedded')",
+            [enclosure_id],
+            |row| row.get(0),
+        )
+        .map_err(sql_error)?;
+    if has_embedded && analyzed.embedded_chapters.is_empty() {
+        return Ok(());
+    }
     tx.execute(
         "DELETE FROM media_chapters WHERE enclosure_id=?1",
         [enclosure_id],
@@ -3180,6 +3246,25 @@ fn persist_media_metadata(
     };
     let chapters = to_domain_chapters(enclosure_id, source, &chapters);
     for (sequence, chapter) in chapters.iter().enumerate() {
+        tx.execute("INSERT INTO media_chapters(enclosure_id,sequence,title,start_ms,end_ms,source) VALUES(?1,?2,?3,?4,?5,?6)", params![enclosure_id, sequence as i64, chapter.title, i64::try_from(chapter.start_ms).map_err(|_| CoreError::data("chapter start exceeds SQLite integer range"))?, chapter.end_ms.map(i64::try_from).transpose().map_err(|_| CoreError::data("chapter end exceeds SQLite integer range"))?, match chapter.source { MediaChapterSource::Embedded => "embedded", MediaChapterSource::ArticleContent => "article_content" }]).map_err(sql_error)?;
+    }
+    Ok(())
+}
+
+fn persist_chapters(
+    tx: &Transaction<'_>,
+    enclosure_id: i64,
+    chapters: &[MediaChapter],
+) -> Result<(), CoreError> {
+    tx.execute(
+        "DELETE FROM media_chapters WHERE enclosure_id=?1",
+        [enclosure_id],
+    )
+    .map_err(sql_error)?;
+    for (sequence, chapter) in chapters.iter().enumerate() {
+        if chapter.end_ms.is_some_and(|end| end <= chapter.start_ms) {
+            continue;
+        }
         tx.execute("INSERT INTO media_chapters(enclosure_id,sequence,title,start_ms,end_ms,source) VALUES(?1,?2,?3,?4,?5,?6)", params![enclosure_id, sequence as i64, chapter.title, i64::try_from(chapter.start_ms).map_err(|_| CoreError::data("chapter start exceeds SQLite integer range"))?, chapter.end_ms.map(i64::try_from).transpose().map_err(|_| CoreError::data("chapter end exceeds SQLite integer range"))?, match chapter.source { MediaChapterSource::Embedded => "embedded", MediaChapterSource::ArticleContent => "article_content" }]).map_err(sql_error)?;
     }
     Ok(())
@@ -3801,6 +3886,80 @@ mod tests {
         let media = temp.path().join("media");
         std::fs::create_dir_all(&data).unwrap();
         (data, cache, media)
+    }
+
+    #[test]
+    fn article_chapters_are_prepared_for_streaming_and_embedded_chapters_win_later() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let article = Article {
+            id: 1,
+            feed_id: 2,
+            title: "Episode".into(),
+            url: "https://example.test/episode".into(),
+            comments_url: String::new(),
+            published_at: "2026-01-01T00:00:00Z".into(),
+            is_read: false,
+            is_starred: false,
+            raw_html_content: "<p>00:00 Intro</p><p>03:42 Topic</p>".into(),
+            preview: String::new(),
+            image_url: None,
+        };
+        let enclosure = Enclosure {
+            id: 10,
+            article_id: 1,
+            url: "https://example.test/episode.mp3".into(),
+            mime_type: "audio/mpeg".into(),
+            size_bytes: None,
+            remote_media_progression_seconds: 0,
+        };
+        store
+            .reconcile_with_enclosures(
+                &[Category {
+                    id: 3,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 2,
+                    category_id: 3,
+                    title: "Feed".into(),
+                }],
+                &[article],
+                std::slice::from_ref(&enclosure),
+            )
+            .unwrap();
+
+        assert!(store.media_chapters(10).unwrap().is_empty());
+        store.prepare_article_chapters(10).unwrap();
+        let article_chapters = store.media_chapters(10).unwrap();
+        assert_eq!(article_chapters.len(), 2);
+        assert_eq!(
+            article_chapters[0].source,
+            MediaChapterSource::ArticleContent
+        );
+        assert_eq!(article_chapters[1].start_ms, 222_000);
+
+        let embedded = vec![MediaChapter {
+            enclosure_id: 10,
+            title: "Embedded Intro".into(),
+            start_ms: 0,
+            end_ms: Some(30_000),
+            source: MediaChapterSource::Embedded,
+        }];
+        store
+            .replace_media_metadata(
+                10,
+                &MediaMetadata {
+                    enclosure_id: 10,
+                    duration_ms: Some(60_000),
+                    embedded_artwork_reference: None,
+                },
+                &embedded,
+            )
+            .unwrap();
+        store.prepare_article_chapters(10).unwrap();
+        assert_eq!(store.media_chapters(10).unwrap(), embedded);
     }
 
     #[test]
