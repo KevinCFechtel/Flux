@@ -30,9 +30,9 @@ private struct ArticleFrameKey: PreferenceKey {
 
 struct PopoverContentView: View {
     @ObservedObject var store: BrowserStore
-    @ObservedObject var playbackState: MediaPlaybackPresentationState
+    let playbackState: MediaPlaybackPresentationState
     let playbackCoordinator: MediaPlaybackCoordinator?
-    @ObservedObject var transferState: MediaTransferPresentationState
+    let transferState: MediaTransferPresentationState
     let layoutChanged: (Bool) -> Void
     let dismiss: () -> Void
     @State private var sidebarVisible = false
@@ -73,9 +73,9 @@ struct PopoverContentView: View {
 private struct ArticlePane: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var store: BrowserStore
-    @ObservedObject var playbackState: MediaPlaybackPresentationState
+    let playbackState: MediaPlaybackPresentationState
     let playbackCoordinator: MediaPlaybackCoordinator?
-    @ObservedObject var transferState: MediaTransferPresentationState
+    let transferState: MediaTransferPresentationState
     @Binding var sidebarVisible: Bool
     @Binding var showingPlayer: Bool
     let layoutChanged: (Bool) -> Void
@@ -180,13 +180,7 @@ private struct ArticlePane: View {
             .disabled(store.isLoading)
             .help("Refresh Miniflux now")
             .accessibilityLabel("Refresh")
-            Button { showingPlayer.toggle() } label: {
-                Image(systemName: PlayerPresentation.navigationSymbol(showingPlayer: showingPlayer))
-            }
-            .buttonStyle(.borderless)
-            .disabled(PlayerPresentation.navigationDisabled(showingPlayer: showingPlayer, hasLoadedMedia: playbackState.loadedEnclosure != nil))
-            .help(showingPlayer ? "Show News List" : "Show Player")
-            .accessibilityLabel(showingPlayer ? "Show News List" : "Show Player")
+            PlayerNavigationButton(playbackState: playbackState, showingPlayer: $showingPlayer)
             moreMenu
         }
         .padding(.horizontal, 12)
@@ -801,6 +795,21 @@ private struct SidebarItem: Identifiable {
     }
     static func feed(_ feed: Feed, count: UInt64, pendingNewCount: Int) -> SidebarItem {
         SidebarItem(id: "feed-\(feed.id)", scope: .feed(feed.id), title: feed.title, count: count, systemImage: nil, feedID: feed.id, categoryID: nil, pendingNewCount: pendingNewCount, children: nil)
+    }
+}
+
+private struct PlayerNavigationButton: View {
+    @ObservedObject var playbackState: MediaPlaybackPresentationState
+    @Binding var showingPlayer: Bool
+
+    var body: some View {
+        Button { showingPlayer.toggle() } label: {
+            Image(systemName: PlayerPresentation.navigationSymbol(showingPlayer: showingPlayer))
+        }
+        .buttonStyle(.borderless)
+        .disabled(PlayerPresentation.navigationDisabled(showingPlayer: showingPlayer, hasLoadedMedia: playbackState.loadedEnclosure != nil))
+        .help(showingPlayer ? "Show News List" : "Show Player")
+        .accessibilityLabel(showingPlayer ? "Show News List" : "Show Player")
     }
 }
 
