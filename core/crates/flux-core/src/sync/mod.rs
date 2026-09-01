@@ -5,7 +5,7 @@ use crate::domain::{
 use crate::miniflux::RemoteSource;
 use crate::storage::Store;
 use chrono::{Duration, Utc};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 /// Normal-sync orchestration after pending mutation delivery.
@@ -32,11 +32,17 @@ pub fn run(
     tracing::info!(target: "sync", "remote fetch completed articles={} elapsed_ms={}", snapshot.articles.len(), fetch_started.elapsed().as_millis());
     // Marker entries are transport metadata, never user-visible articles or feeds.
     let saved_media_sync = store.saved_media_sync_configuration()?;
-    let known_articles = snapshot
+    let mut known_articles = snapshot
         .articles
         .iter()
         .map(|article| article.id)
-        .collect::<std::collections::HashSet<_>>();
+        .collect::<HashSet<_>>();
+    let mut known_enclosures = snapshot
+        .enclosures
+        .iter()
+        .map(|enclosure| enclosure.id)
+        .collect::<HashSet<_>>();
+    let mut fetched_protected_articles = HashSet::new();
     let protected_requirements = store.protected_playback_requirements()?;
     for article_id in store.protected_playback_article_ids()? {
         let article_needs_enclosures = protected_requirements
@@ -48,32 +54,40 @@ pub fn run(
                     .iter()
                     .any(|enclosure| enclosure.id == *enclosure_id)
             });
-        if !known_articles.contains(&article_id) || article_needs_enclosures {
-            let protected = remote.fetch_article_by_id(article_id)?;
-            snapshot.articles.push(protected.article);
-            snapshot.enclosures.extend(protected.enclosures);
+        if (!known_articles.contains(&article_id) || article_needs_enclosures)
+            && fetched_protected_articles.insert(article_id)
+        {
+            fetch_protected_article(
+                remote,
+                article_id,
+                "playback",
+                &mut snapshot,
+                &mut known_articles,
+                &mut known_enclosures,
+            )?;
         }
     }
     let download_requirements = store.protected_download_requirements()?;
-    if !download_requirements.is_empty() {
-        let known_enclosures = snapshot
-            .enclosures
-            .iter()
-            .map(|enclosure| enclosure.id)
-            .collect::<std::collections::HashSet<_>>();
-        let mut articles_to_fetch = Vec::new();
-        let mut seen_articles = std::collections::HashSet::new();
-        for (article_id, enclosure_id) in &download_requirements {
-            let article_missing = !known_articles.contains(article_id);
-            let enclosure_missing = !known_enclosures.contains(enclosure_id);
-            if (article_missing || enclosure_missing) && seen_articles.insert(*article_id) {
-                articles_to_fetch.push(*article_id);
+    for (article_id, enclosure_id) in &download_requirements {
+        let article_missing = !known_articles.contains(article_id);
+        let enclosure_missing = !known_enclosures.contains(enclosure_id);
+        if article_missing || enclosure_missing {
+            if fetched_protected_articles.insert(*article_id) {
+                fetch_protected_article(
+                    remote,
+                    *article_id,
+                    "download",
+                    &mut snapshot,
+                    &mut known_articles,
+                    &mut known_enclosures,
+                )?;
+            } else {
+                tracing::debug!(
+                    target: "sync",
+                    "protected fetch skipped article_id={} reason=download already_fetched=true",
+                    article_id
+                );
             }
-        }
-        for article_id in articles_to_fetch {
-            let protected = remote.fetch_article_by_id(article_id)?;
-            snapshot.articles.push(protected.article);
-            snapshot.enclosures.extend(protected.enclosures);
         }
     }
     if saved_media_sync.enabled {
@@ -143,6 +157,28 @@ pub fn run(
         new_articles_by_feed,
         system_notification_candidates,
     })
+}
+
+fn fetch_protected_article(
+    remote: &dyn RemoteSource,
+    article_id: i64,
+    reason: &str,
+    snapshot: &mut crate::miniflux::RemoteSnapshot,
+    known_articles: &mut HashSet<i64>,
+    known_enclosures: &mut HashSet<i64>,
+) -> Result<(), CoreError> {
+    tracing::debug!(
+        target: "sync",
+        "protected fetch planned article_id={} reason={}",
+        article_id,
+        reason
+    );
+    let protected = remote.fetch_article_by_id(article_id)?;
+    known_articles.insert(protected.article.id);
+    known_enclosures.extend(protected.enclosures.iter().map(|enclosure| enclosure.id));
+    snapshot.articles.push(protected.article);
+    snapshot.enclosures.extend(protected.enclosures);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -450,7 +486,7 @@ mod tests {
     }
 
     #[test]
-    fn protected_download_fetch_coalesces_multiple_enclosures_on_same_article() {
+    fn protected_fetch_coalesces_playback_and_download_on_same_article() {
         use std::sync::Mutex;
         use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -556,6 +592,9 @@ mod tests {
         store
             .request_download(11, crate::domain::DownloadOrigin::Manual)
             .unwrap();
+        store
+            .checkpoint_playback(10, 1_000, None, "2026-01-01T00:00:00Z", false)
+            .unwrap();
 
         // The remote snapshot does not contain either Article 9 nor its protected Enclosures.
         let snapshot = RemoteSnapshot {
@@ -577,8 +616,120 @@ mod tests {
             HashMap::new(),
         );
         assert!(result.is_ok());
-        // Two protected enclosures on the same article must produce at most one fetch.
+        // Playback and two protected downloads on the same article must produce one fetch.
         assert_eq!(remote.fetch_calls.load(Ordering::SeqCst), 1);
         assert_eq!(*remote.fetched_articles.lock().unwrap(), vec![9]);
+    }
+
+    #[test]
+    fn protected_fetch_skips_article_and_enclosures_already_in_snapshot() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct NoFetchRemote {
+            snapshot: RemoteSnapshot,
+            fetch_calls: AtomicUsize,
+        }
+        impl crate::miniflux::RemoteSource for NoFetchRemote {
+            fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError> {
+                Ok(self.snapshot.clone())
+            }
+            fn set_read_state(&self, _: &[i64], _: bool) -> Result<(), CoreError> {
+                Ok(())
+            }
+            fn set_starred_state(&self, _: i64, _: bool) -> Result<(), CoreError> {
+                Ok(())
+            }
+            fn fetch_article_by_id(
+                &self,
+                _: i64,
+            ) -> Result<crate::miniflux::RemoteSavedMediaArticle, CoreError> {
+                self.fetch_calls.fetch_add(1, Ordering::SeqCst);
+                Err(CoreError::data("unexpected protected fetch"))
+            }
+        }
+
+        let temp = TempDir::new().unwrap();
+        let data = temp.path().join("data");
+        let cache = temp.path().join("cache");
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::create_dir_all(&media).unwrap();
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let category = Category {
+            id: 1,
+            title: "Category".into(),
+        };
+        let feed = Feed {
+            id: 2,
+            category_id: 1,
+            title: "Feed".into(),
+        };
+        let article = Article {
+            id: 9,
+            feed_id: 2,
+            title: "Article".into(),
+            url: "https://example.test/9".into(),
+            comments_url: String::new(),
+            published_at: "2026-01-01T00:00:00Z".into(),
+            is_read: false,
+            is_starred: false,
+            raw_html_content: String::new(),
+            preview: String::new(),
+            image_url: None,
+        };
+        let enclosures = [
+            Enclosure {
+                id: 10,
+                article_id: 9,
+                url: "https://example.test/10.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+            Enclosure {
+                id: 11,
+                article_id: 9,
+                url: "https://example.test/11.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+        ];
+        store
+            .reconcile_with_enclosures(
+                &[category.clone()],
+                &[feed.clone()],
+                &[article.clone()],
+                &enclosures,
+            )
+            .unwrap();
+        store
+            .request_download(10, crate::domain::DownloadOrigin::Manual)
+            .unwrap();
+        store
+            .checkpoint_playback(11, 1_000, None, "2026-01-01T00:00:00Z", false)
+            .unwrap();
+
+        let remote = NoFetchRemote {
+            snapshot: RemoteSnapshot {
+                categories: vec![category],
+                feeds: vec![feed],
+                articles: vec![article],
+                enclosures: enclosures.to_vec(),
+            },
+            fetch_calls: AtomicUsize::new(0),
+        };
+        assert!(
+            run(
+                &remote,
+                &store,
+                ReadArticleRetention::Days30,
+                SyncReason::Manual,
+                HashMap::new(),
+            )
+            .is_ok()
+        );
+        assert_eq!(remote.fetch_calls.load(Ordering::SeqCst), 0);
     }
 }

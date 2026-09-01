@@ -332,7 +332,7 @@ impl FluxCore {
                 Ok(completed)
             }
             Err(error) => {
-                tracing::warn!(target: "sync", "sync failed kind={:?} elapsed_ms={}", error.kind, started.elapsed().as_millis());
+                tracing::warn!(target: "sync", "sync failed kind={:?} message={:?} elapsed_ms={}", error.kind, error.message, started.elapsed().as_millis());
                 self.emit(CoreEvent::SyncFailed(SyncFailure {
                     reason,
                     error_kind: error.kind.clone(),
