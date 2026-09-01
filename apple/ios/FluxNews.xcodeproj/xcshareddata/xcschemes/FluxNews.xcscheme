@@ -52,7 +52,13 @@
          </BuildableReference>
       </BuildableProductRunnable>
    </RunAction>
-   <TestAction buildConfiguration = "Debug" selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv = "YES" />
+    <TestAction buildConfiguration = "Debug" selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv = "YES">
+       <Testables>
+          <TestableReference skipped = "NO">
+             <BuildableReference BuildableIdentifier = "primary" BlueprintIdentifier = "T2" BuildableName = "FluxNewsTests.xctest" BlueprintName = "FluxNewsTests" ReferencedContainer = "container:FluxNews.xcodeproj" />
+          </TestableReference>
+       </Testables>
+    </TestAction>
    <ProfileAction buildConfiguration = "Release" shouldUseLaunchSchemeArgsEnv = "YES" savedToolIdentifier = "" />
    <AnalyzeAction buildConfiguration = "Debug" />
    <ArchiveAction buildConfiguration = "Release" revealArchiveInOrganizer = "YES" />

@@ -21,12 +21,14 @@ final class CoreBootstrapper: ObservableObject {
     }
 
     @Published private(set) var state: State = .starting
+    @Published private(set) var legacyResult = LegacyStateDiscovery.probe()
     private var core: Flux?
-    private let logger = Logger(subsystem: "dev.kevincfechtel.fluxNews.nativeDev", category: "core")
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "core")
 
     func start() async {
         guard core == nil else { return }
         state = .starting
+        legacyResult = LegacyStateDiscovery.probe()
 
         do {
             let paths = try CorePaths()
@@ -80,9 +82,11 @@ private struct CorePaths {
             throw CocoaError(.fileNoSuchFile)
         }
 
-        persistentData = applicationSupport.appendingPathComponent("FluxNewsNativeDev/Core", isDirectory: true)
-        cache = caches.appendingPathComponent("FluxNewsNativeDev/CoreCache", isDirectory: true)
-        media = applicationSupport.appendingPathComponent("FluxNewsNativeDev/Media", isDirectory: true)
+        let namespace = (Bundle.main.object(forInfoDictionaryKey: "FluxStorageNamespace") as? String)
+            .flatMap { $0.isEmpty ? nil : $0 } ?? "FluxNewsNativeDev"
+        persistentData = applicationSupport.appendingPathComponent("\(namespace)/Core", isDirectory: true)
+        cache = caches.appendingPathComponent("\(namespace)/CoreCache", isDirectory: true)
+        media = applicationSupport.appendingPathComponent("\(namespace)/Media", isDirectory: true)
 
         for directory in [persistentData, cache, media] {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)

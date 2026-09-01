@@ -28,6 +28,15 @@ struct ContentView: View {
                         .textSelection(.enabled)
                 }
 
+                Section("Legacy migration feasibility") {
+                    ForEach(LegacyStateDiscovery.redactedSummary(bootstrapper.legacyResult).sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
+                        LabeledContent(key, value: value)
+                    }
+                    Text("This is read-only discovery only. No legacy data is imported or modified.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 if bootstrapper.state == .unconfigured {
                     Section {
                         Text("Set FLUX_DEV_BASE_URL and FLUX_DEV_API_KEY in the Xcode scheme to initialize the development Core.")

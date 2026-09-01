@@ -11,18 +11,32 @@
 		A2 /* CoreBootstrapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2 /* CoreBootstrapper.swift */; };
 		A3 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3 /* ContentView.swift */; };
 		A4 /* flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4 /* flux_uniffi.swift */; };
+		A5 /* LegacyStateDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5 /* LegacyStateDiscovery.swift */; };
+		A6 /* LegacyStateDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8 /* LegacyStateDiscoveryTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 /* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXContainerItemProxy section */
+		X1 = {isa = PBXContainerItemProxy; containerPortal = PR1; proxyType = 1; remoteGlobalIDString = T1; remoteInfo = FluxNews; };
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		X2 = {isa = PBXTargetDependency; target = T1; targetProxy = X1; };
+/* End PBXTargetDependency section */
 
 /* Begin PBXFileReference section */
 		B1 /* FluxNewsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsApp.swift; sourceTree = "<group>"; };
 		B2 /* CoreBootstrapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreBootstrapper.swift; sourceTree = "<group>"; };
 		B3 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		B4 /* flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = flux_uniffi.swift; path = "../Build/Products/FluxUniFFI/Sources/flux_uniffi.swift"; sourceTree = "<group>"; };
+		B5 /* LegacyStateDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyStateDiscovery.swift; sourceTree = "<group>"; };
 		B6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B7 /* FluxNewsUpgradeTest.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FluxNewsUpgradeTest.entitlements; sourceTree = "<group>"; };
+		B8 /* LegacyStateDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/LegacyStateDiscoveryTests.swift; sourceTree = "<group>"; };
 		P1 /* FluxNews.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FluxNews.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		P2 /* FluxNewsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FluxNewsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -36,9 +50,10 @@
 
 /* Begin PBXGroup section */
 		G1 = {isa = PBXGroup; children = (G2, G3, B4, ); sourceTree = "<group>"; };
-		G2 = {isa = PBXGroup; children = (B1, B2, B3, ); path = FluxNews; sourceTree = "<group>"; };
-		G3 = {isa = PBXGroup; children = (B6, ); path = FluxNews; sourceTree = "<group>"; };
+		G2 = {isa = PBXGroup; children = (B1, B2, B3, B5, ); path = FluxNews; sourceTree = "<group>"; };
+		G3 = {isa = PBXGroup; children = (B6, B7, ); path = FluxNews; sourceTree = "<group>"; };
 		G4 = {isa = PBXGroup; children = (P1, ); name = Products; sourceTree = "<group>"; };
+		G5 = {isa = PBXGroup; children = (B8, ); path = FluxNewsTests; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -52,6 +67,17 @@
 			productName = FluxNews;
 			productReference = P1;
 			productType = "com.apple.product-type.application";
+		};
+		T2 = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = L3;
+			buildPhases = (S2, F2, );
+			buildRules = ();
+			dependencies = (X2, );
+			name = FluxNewsTests;
+			productName = FluxNewsTests;
+			productReference = P2;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
@@ -68,7 +94,7 @@
 			productRefGroup = G4;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (T1, );
+			targets = (T1, T2, );
 		};
 /* End PBXProject section */
 
@@ -89,12 +115,15 @@
 			shellPath = /bin/bash;
 			shellScript = "set -euo pipefail\npackage=\"${SRCROOT}/../Build/Products/FluxUniFFI\"\nif [[ ! -d \"${package}/FluxUniFFI.xcframework\" ]]; then\n  bash \"${SRCROOT}/../Build/build-uniffi.sh\"\nfi\ncase \"${SDK_NAME}\" in\n  iphoneos*) library=\"${package}/FluxUniFFI.xcframework/ios-arm64/libflux_uniffi.dylib\" ;;\n  iphonesimulator*) library=\"${package}/FluxUniFFI.xcframework/ios-arm64-simulator/libflux_uniffi.dylib\" ;;\n  *) echo \"Unsupported iOS SDK: ${SDK_NAME}\" >&2; exit 1 ;;\nesac\nmkdir -p \"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}\"\ncp \"${library}\" \"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/libflux_uniffi.dylib\"\n";
 		};
-		S1 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A1, A2, A3, A4, ); runOnlyForDeploymentPostprocessing = 0; };
+		S1 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A1, A2, A3, A4, A5, ); runOnlyForDeploymentPostprocessing = 0; };
+		S2 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A6, ); runOnlyForDeploymentPostprocessing = 0; };
+		F2 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
 		C1 = {isa = XCBuildConfiguration; buildSettings = {
 			ASSETCATALOG_COMPILER_APPICON_NAME = "";
+			ENABLE_TESTABILITY = YES;
 			CODE_SIGN_STYLE = Automatic;
 			CURRENT_PROJECT_VERSION = 1;
 			DEVELOPMENT_TEAM = "";
@@ -106,6 +135,7 @@
 			"OTHER_LDFLAGS[sdk=iphoneos*]" = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64/libflux_uniffi.dylib";
 			"OTHER_LDFLAGS[sdk=iphonesimulator*]" = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64-simulator/libflux_uniffi.dylib";
 			PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev;
+			FLUX_STORAGE_NAMESPACE = FluxNewsNativeDev;
 			PRODUCT_NAME = FluxNews;
 			SDKROOT = iphoneos;
 			SWIFT_INCLUDE_PATHS = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64/Headers";
@@ -123,18 +153,43 @@
 			"OTHER_LDFLAGS[sdk=iphoneos*]" = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64/libflux_uniffi.dylib";
 			"OTHER_LDFLAGS[sdk=iphonesimulator*]" = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64-simulator/libflux_uniffi.dylib";
 			PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev;
+			FLUX_STORAGE_NAMESPACE = FluxNewsNativeDev;
 			PRODUCT_NAME = FluxNews;
 			SDKROOT = iphoneos;
 			SWIFT_INCLUDE_PATHS = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64/Headers";
 			SWIFT_VERSION = 5.0;
 		}; name = Release; };
+		C5 = {isa = XCBuildConfiguration; buildSettings = {
+			ASSETCATALOG_COMPILER_APPICON_NAME = "";
+			CODE_SIGN_ENTITLEMENTS = FluxNews/FluxNewsUpgradeTest.entitlements;
+			CODE_SIGN_STYLE = Automatic;
+			CURRENT_PROJECT_VERSION = 1;
+			DEVELOPMENT_TEAM = "";
+			ARCHS = arm64;
+			GENERATE_INFOPLIST_FILE = NO;
+			INFOPLIST_FILE = FluxNews/Info.plist;
+			IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+			LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+			"OTHER_LDFLAGS[sdk=iphoneos*]" = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64/libflux_uniffi.dylib";
+			"OTHER_LDFLAGS[sdk=iphonesimulator*]" = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64-simulator/libflux_uniffi.dylib";
+			PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews;
+			PRODUCT_NAME = FluxNews;
+			SDKROOT = iphoneos;
+			SWIFT_INCLUDE_PATHS = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64/Headers";
+			SWIFT_VERSION = 5.0;
+			TARGETED_DEVICE_FAMILY = "1,2";
+			FLUX_STORAGE_NAMESPACE = FluxNewsNativeUpgradeTest;
+		}; name = "Upgrade Test"; };
 		C3 = {isa = XCBuildConfiguration; buildSettings = { SDKROOT = iphoneos; }; name = Debug; };
 		C4 = {isa = XCBuildConfiguration; buildSettings = { SDKROOT = iphoneos; }; name = Release; };
+		C6 = {isa = XCBuildConfiguration; buildSettings = { ARCHS = arm64; BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev.tests; PRODUCT_NAME = FluxNewsTests; SDKROOT = iphoneos; SWIFT_INCLUDE_PATHS = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64/Headers"; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FluxNews.app/FluxNews"; }; name = Debug; };
+		C7 = {isa = XCBuildConfiguration; buildSettings = { ARCHS = arm64; BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev.tests; PRODUCT_NAME = FluxNewsTests; SDKROOT = iphoneos; SWIFT_INCLUDE_PATHS = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64/Headers"; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FluxNews.app/FluxNews"; }; name = "Upgrade Test"; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		L1 = {isa = XCConfigurationList; buildConfigurations = (C1, C2, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		L1 = {isa = XCConfigurationList; buildConfigurations = (C1, C2, C5, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		L2 = {isa = XCConfigurationList; buildConfigurations = (C3, C4, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		L3 = {isa = XCConfigurationList; buildConfigurations = (C6, C7, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
 /* End XCConfigurationList section */
 	};
 	rootObject = PR1;
