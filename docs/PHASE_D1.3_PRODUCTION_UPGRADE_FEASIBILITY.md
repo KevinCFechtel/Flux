@@ -105,6 +105,9 @@ DEVELOPMENT_TEAM=<your-team-id> apple/ios/Build/archive.sh --build-number 3
 apple/ios/Build/upload-testflight.sh
 ```
 
+To export an IPA without uploading it, use `apple/ios/Build/export-testflight.sh`;
+it writes `.build/TestFlightExport/FluxNews.ipa` for manual Transporter upload.
+
 The archive is written to `.build/Archives/FluxNews-nativeDev.xcarchive` and
 export/upload files are written under `.build/Exports/FluxNews-nativeDev`.
 These generated directories are safe to delete. The archive and upload scripts
