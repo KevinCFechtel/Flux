@@ -3,15 +3,16 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum PopoverLayout {
-    static let visualWidth: CGFloat = 620
+    static let visualWidth: CGFloat = 390
+    static let compactWidth: CGFloat = 500
     static let sidebarWidth: CGFloat = 240
-    static let visualHeight: CGFloat = 620
+    static let visualHeight: CGFloat = 760
     static let compactHeight: CGFloat = 520
     static let verticalScreenMargin: CGFloat = 32
     static let animation: TimeInterval = 0.2
 
     static func contentWidth(for mode: ArticlePresentationMode) -> CGFloat {
-        visualWidth
+        mode == .visual ? visualWidth : compactWidth
     }
 
     static func width(mode: ArticlePresentationMode, sidebarVisible: Bool) -> CGFloat {
@@ -233,7 +234,7 @@ private struct ArticlePane: View {
             GeometryReader { geometry in
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: 0) {
+                        LazyVStack(spacing: store.articlePresentationMode == .visual ? 4 : 0) {
                             ForEach(store.articles, id: \.id) { article in
                                  ArticleItem(article: article, mode: store.articlePresentationMode, selected: selectedID == article.id, audioState: store.articleAudioActionStates[article.id], transferState: transferState, store: store, onSelect: { selectedID = article.id }, onPlayAudio: playAudio, onDownloadAudio: { enclosure in store.requestManualDownload(articleID: article.id, enclosureID: enclosure.id) }, onDeleteDownload: { enclosure in store.deleteDownload(articleID: article.id, enclosureID: enclosure.id) }, onAddToListeningList: { store.addToListeningList(articleID: article.id) }, onHoverChanged: { hovering in
                                     if hovering { hoveredID = article.id }
@@ -245,7 +246,9 @@ private struct ArticlePane: View {
                                             Color.clear.preference(key: ArticleFrameKey.self, value: [article.id: row.frame(in: .named(ArticleScrollSpace.name))])
                                         }
                                     }
-                                 Divider().padding(.leading, store.articlePresentationMode == .visual ? 264 : 12)
+                                if store.articlePresentationMode == .compact {
+                                    Divider().padding(.leading, 12)
+                                }
                             }
                         }
                     }
@@ -412,11 +415,13 @@ private struct SearchResultsView: View {
                     Text("\(store.searchTotal) results").font(.caption).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.bottom, 6)
                     ScrollView {
-                        LazyVStack(spacing: 0) {
+                        LazyVStack(spacing: store.articlePresentationMode == .visual ? 4 : 0) {
                             ForEach(store.articles, id: \.id) { article in
                                 ArticleItem(article: article, mode: store.articlePresentationMode, selected: false, audioState: store.articleAudioActionStates[article.id], transferState: transferState, store: store, onSelect: {}, onPlayAudio: onPlay, onDownloadAudio: onDownload, onDeleteDownload: onDelete, onAddToListeningList: { onAdd(article.id) }, onHoverChanged: { _ in })
                                     .onAppear { if article.id == store.articles.last?.id { store.loadMoreSearchResults() } }
-                                Divider().padding(.leading, store.articlePresentationMode == .visual ? 264 : 12)
+                                if store.articlePresentationMode == .compact {
+                                    Divider().padding(.leading, 12)
+                                }
                             }
                             if store.isSearching { ProgressView().padding() }
                         }
@@ -889,22 +894,27 @@ private struct ArticleItem: View {
 
     var body: some View { mode == .visual ? AnyView(visual) : AnyView(compact) }
     private var visual: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Button { onSelect(); store.open(article) } label: {
-                HStack(alignment: .top, spacing: 12) {
-                    if mode.showsArticleImage, article.imageUrl != nil, !store.unavailableArticleThumbnails.contains(store.articleThumbnailKey(article)) {
-                        ThumbnailSlot(article: article, store: store, width: 240, height: 168)
-                    }
-                    textComposition
+        VStack(alignment: .leading, spacing: 0) {
+            if mode.showsArticleImage, article.imageUrl != nil, !store.unavailableArticleThumbnails.contains(store.articleThumbnailKey(article)) {
+                Button { onSelect(); store.open(article) } label: {
+                    ThumbnailSlot(article: article, store: store, width: PopoverLayout.visualWidth - 24, height: 206, cornerRadius: 10)
                 }
-                    .contentShape(Rectangle())
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-            quickActions.opacity(hovered ? 1 : 0).allowsHitTesting(hovered)
+            HStack(alignment: .top, spacing: 10) {
+                Button { onSelect(); store.open(article) } label: {
+                    textComposition.contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                quickActions.opacity(hovered ? 1 : 0).allowsHitTesting(hovered)
+            }
+            .padding(12)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12).padding(.vertical, 10)
-        .contentShape(Rectangle()).background(interactionBackground)
+        .background(interactionBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .contentShape(Rectangle())
         .onHover { hovering in hovered = hovering; onHoverChanged(hovering) }.contextMenu { actionMenu }
         .onDisappear { store.retryUnavailableArticleThumbnail(article) }
     }

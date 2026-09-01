@@ -64,6 +64,18 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: key), "visual")
     }
 
+    func testArticlePresentationLayoutUsesDistinctModeDimensionsAndSidebarWidth() {
+        XCTAssertEqual(PopoverLayout.contentWidth(for: .visual), 390)
+        XCTAssertEqual(PopoverLayout.height(for: .visual), 760)
+        XCTAssertEqual(PopoverLayout.width(mode: .visual, sidebarVisible: false), 390)
+        XCTAssertEqual(PopoverLayout.width(mode: .visual, sidebarVisible: true), 630)
+
+        XCTAssertEqual(PopoverLayout.contentWidth(for: .compact), 500)
+        XCTAssertEqual(PopoverLayout.height(for: .compact), 520)
+        XCTAssertEqual(PopoverLayout.width(mode: .compact, sidebarVisible: false), 500)
+        XCTAssertEqual(PopoverLayout.width(mode: .compact, sidebarVisible: true), 740)
+    }
+
     func testMediaTransferReconciliationUsesExistingWakeupCallback() {
         let store = BrowserStore()
         var callbackCount = 0
