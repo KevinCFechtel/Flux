@@ -40,6 +40,16 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(BrowserScope.listeningList, .listeningList)
     }
 
+    func testMediaTransferReconciliationUsesExistingWakeupCallback() {
+        let store = BrowserStore()
+        var callbackCount = 0
+        store.onMediaTransferRequested = { callbackCount += 1 }
+
+        store.requestMediaTransferReconciliation()
+
+        XCTAssertEqual(callbackCount, 1)
+    }
+
     func testArticleAudioActionsUseBatchStateWithoutSelection() {
         let enclosure = Enclosure(id: 1, articleId: 7, url: "https://example.test/audio.mp3", mimeType: "audio/mpeg", sizeBytes: nil, remoteMediaProgressionSeconds: 0, mediaKind: .audio)
         let state = ArticleAudioActionState(articleID: 7, enclosures: [enclosure], isInListeningList: false, downloads: [:])

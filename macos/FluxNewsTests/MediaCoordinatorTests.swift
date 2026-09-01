@@ -659,6 +659,30 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(calls, 1)
     }
 
+    func testReconcileWithNoNativeMediaWorkIsHarmless() async throws {
+        let engine = FakeTransferEngine(result: .pending)
+        let coordinator = MediaTransferCoordinator(core: FakeTransferCore(), mediaRoot: temporaryMediaRoot(), engine: engine)
+
+        coordinator.reconcile()
+        await settle()
+
+        let calls = await engine.callCount
+        XCTAssertEqual(calls, 0)
+    }
+
+    func testReconcileStartsAllRequestedTransfers() async throws {
+        let core = FakeTransferCore()
+        core.transfers = [transferWork(7), transferWork(8)]
+        let engine = FakeTransferEngine(result: .pending)
+        let coordinator = MediaTransferCoordinator(core: core, mediaRoot: temporaryMediaRoot(), engine: engine)
+
+        coordinator.reconcile()
+        await settle()
+
+        let calls = await engine.callCount
+        XCTAssertEqual(calls, 2)
+    }
+
     func testStaleTransferProgressCannotOverwriteReplacementTask() async throws {
         let core = FakeTransferCore()
         core.transfers = [transferWork()]

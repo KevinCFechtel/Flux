@@ -623,6 +623,7 @@ final class BrowserStore: ObservableObject {
     func resetPresentation() { hasMeaningfullyInteracted = false; newDataAvailable = false; listPresentationRevision &+= 1 }
     func setArticleListStyle(_ style: ArticleListStyle) { guard style != articleListStyle else { return }; articleListStyle = style; UserDefaults.standard.set(style.rawValue, forKey: "FluxNews.articleListStyle"); resetPresentation() }
     func applyNewData() { reloadVisibleArticles(resetPosition: true, acknowledgingPendingNewData: true) }
+    func requestMediaTransferReconciliation() { onMediaTransferRequested?() }
     func sync(reason: SyncReason = .manual) {
         guard let core else { return }
         guard !isLoading else {
@@ -636,6 +637,11 @@ final class BrowserStore: ObservableObject {
         Task.detached { [core, store] in
             do {
                 let result = try core.sync(reason: reason)
+                await MainActor.run {
+                    guard let store = store.value else { return }
+                    NativeLog.sync.debug("sync completed; reconciling native media work")
+                    store.requestMediaTransferReconciliation()
+                }
                 await SystemNotificationManager.shared.deliver(result.systemNotificationCandidates, core: core)
             }
             catch { await MainActor.run { store.value?.isLoading = false; store.value?.errorMessage = NativeErrorPresentation.message(for: error) } }
