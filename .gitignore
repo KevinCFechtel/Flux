@@ -41,3 +41,4 @@ apple/macos/Build/Debug
 apple/macos/Build/EagerLinkingTBDs
 apple/macos/Build/ExplicitPrecompiledModules
 apple/macos/Build/FluxNews.build
+apple/Build/Products/

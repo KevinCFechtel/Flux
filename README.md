@@ -19,10 +19,18 @@ cargo test --manifest-path core/Cargo.toml --workspace
 cargo build --manifest-path core/Cargo.toml --workspace
 ```
 
-Generate the Swift bindings and release dylib required by Xcode:
+Generate the canonical Apple UniFFI package, including macOS and iOS slices:
 
 ```bash
-zsh apple/macos/Build/build-uniffi.sh
+bash apple/Build/build-uniffi.sh
+```
+
+The ignored output package at `apple/Build/Products/FluxUniFFI/` contains
+`FluxUniFFI.xcframework` and the single generated Swift binding source. Verify
+the iOS device and Apple Silicon simulator Swift compile/link integration with:
+
+```bash
+bash apple/Build/verify-ios-uniffi.sh
 ```
 
 Build the macOS app for normal development. The resulting ad-hoc-signed app is at `dist/FluxNews.app`:
