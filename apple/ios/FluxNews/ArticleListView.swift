@@ -19,7 +19,7 @@ struct ArticleListView: View {
                         let articleSpacing: CGFloat =
                           ArticlePresentationLayout.usesLandscapeVisual(
                             mode: store.articlePresentationMode,
-                            availableWidth: proxy.size.width - horizontalInset * 2) ? 14 : 26
+                            availableWidth: proxy.size.width - horizontalInset * 2) ? 20 : 26
                         ScrollView {
                             LazyVStack(spacing: articleSpacing) {
                                 ForEach(store.articles, id: \.id) { article in
@@ -120,8 +120,8 @@ private struct ArticlePresentationView: View {
                 .frame(width: hasImage ? ArticlePresentationLayout.landscapeTextWidth(availableWidth: availableWidth, imageWidth: imageWidth, interColumnSpacing: 14) : contentWidth, alignment: .leading)
         }
         .frame(width: contentWidth, alignment: .leading)
-        .padding(12)
-        .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        //.padding(12)
+        //.background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var compact: some View {
