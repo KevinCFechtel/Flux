@@ -3,6 +3,12 @@ import UIKit
 
 struct ArticleListView: View {
     @ObservedObject var store: NewsreaderStore
+    @State private var tracker = ScrolloverExposureTracker()
+    @State private var frames: [Int64: CGRect] = [:]
+    @State private var viewport = CGRect.zero
+    @State private var offset: CGFloat = 0
+    @State private var userScrolling = false
+    private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
     var body: some View {
         Group {
@@ -23,15 +29,36 @@ struct ArticleListView: View {
                         ScrollView {
                             LazyVStack(spacing: articleSpacing) {
                                 ForEach(store.articles, id: \.id) { article in
-                                ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, store: store)
+                                    ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, store: store)
+                                        .background { GeometryReader { row in Color.clear.preference(key: ArticleFrameKey.self, value: [article.id: row.frame(in: .named("ArticleScrollSpace"))]) } }
                                 }
                             }
-                        .padding(.horizontal, horizontalInset)
-                        .padding(.vertical, 12)
+                            .padding(.horizontal, horizontalInset)
+                            .padding(.vertical, 12)
+                            .background { GeometryReader { content in Color.clear.preference(key: ArticleOffsetKey.self, value: content.frame(in: .named("ArticleScrollSpace")).minY) } }
+                        }
+                        .coordinateSpace(name: "ArticleScrollSpace")
+                        .scrollIndicators(.hidden)
+                        .onAppear { viewport = CGRect(origin: .zero, size: proxy.size) }
+                        .onChange(of: proxy.size) { _, size in viewport = CGRect(origin: .zero, size: size); tracker.reset() }
+                        .onPreferenceChange(ArticleFrameKey.self) { values in
+                            frames = values
+                            if !userScrolling { tracker.rebase(frames: values, unread: unreadIDs) }
+                            observe()
+                        }
+                        .onPreferenceChange(ArticleOffsetKey.self) { newOffset in
+                            let delta = newOffset - offset
+                            offset = newOffset
+                            guard userScrolling else { return }
+                            let ids = tracker.process(frames: frames, viewport: viewport, unread: unreadIDs, now: Date.timeIntervalSinceReferenceDate, offsetDelta: delta, userInitiated: true)
+                            if !ids.isEmpty { store.flushScrollover(ids) }
+                        }
+                        .simultaneousGesture(DragGesture().onChanged { _ in
+                            if !userScrolling { userScrolling = true; store.beginScrolloverUndoBatch() }
+                        }.onEnded { _ in userScrolling = false; store.finishScrolloverUndoBatch() })
+                        .onReceive(timer) { _ in observe() }
                     }
-                    .scrollIndicators(.hidden)
                 }
-            }
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .overlay(alignment: .top) {
@@ -42,6 +69,12 @@ struct ArticleListView: View {
                     .padding(.top, 8)
             }
         }
+    }
+
+    private var unreadIDs: Set<Int64> { Set(store.articles.filter { !$0.isRead }.map(\.id)) }
+    private func observe() {
+        guard !userScrolling, store.markReadOnScrolloverEnabled, !viewport.isEmpty else { return }
+        tracker.observe(frames: frames, viewport: viewport, unread: unreadIDs, now: Date.timeIntervalSinceReferenceDate)
     }
 }
 
@@ -66,6 +99,10 @@ private struct ArticlePresentationView: View {
             .frame(width: articleWidth, alignment: .leading)
         }
         .buttonStyle(.plain)
+        .swipeActions(edge: .trailing) {
+            Button { store.setRead(article, read: !article.isRead) } label: { Label(article.isRead ? "Unread" : "Read", systemImage: article.isRead ? "envelope" : "envelope.open") }
+            Button { store.setStarred(article, starred: !article.isStarred) } label: { Label(article.isStarred ? "Unstar" : "Star", systemImage: article.isStarred ? "star.slash" : "star") }.tint(.yellow)
+        }
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint("Article opening will be added in a later release.")
     }
@@ -207,6 +244,16 @@ private struct ArticlePresentationView: View {
         let star = article.isStarred ? ", starred" : ""
         return "\(article.title), \(article.feedTitle), \(date), \(state)\(star)"
     }
+}
+
+private struct ArticleFrameKey: PreferenceKey {
+    static var defaultValue: [Int64: CGRect] = [:]
+    static func reduce(value: inout [Int64: CGRect], nextValue: () -> [Int64: CGRect]) { value.merge(nextValue(), uniquingKeysWith: { $1 }) }
+}
+
+private struct ArticleOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 private struct FeedIconView: View {

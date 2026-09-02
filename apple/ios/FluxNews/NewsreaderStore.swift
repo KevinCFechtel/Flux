@@ -38,11 +38,18 @@ final class NewsreaderStore: ObservableObject {
     @Published var markReadOnScrolloverEnabled: Bool
     @Published var articlePresentationMode: ArticlePresentationMode
     @Published var articlePreviewLines: ArticlePreviewLines
+    @Published private(set) var scrolloverUndoIDs: [Int64] = []
+    @Published private(set) var scrolloverUndoVisible = false
 
     private(set) var core: Flux?
     private var pending = PendingNewData()
     private var requestedFeedIcons = Set<Int64>()
     private var unavailableFeedIcons = Set<Int64>()
+    private var scrolloverUndoTask: Task<Void, Never>?
+    private var scrolloverRemovedArticles: [Int64: ArticleSummary] = [:]
+    private var scrolloverOriginalOrder: [Int64: Int] = [:]
+    private var scrolloverCountsPending = false
+    private var scrolloverBatchActive = false
 
     init(defaults: UserDefaults = .standard) {
         startupScope = defaults.string(forKey: Key.startupScope).flatMap(StartupScopePreference.init(rawValue:)) ?? .allNews
@@ -143,6 +150,84 @@ final class NewsreaderStore: ObservableObject {
     func setArticlePresentationMode(_ value: ArticlePresentationMode) { articlePresentationMode = value; UserDefaults.standard.set(value.rawValue, forKey: Key.presentationMode) }
     func setArticlePreviewLines(_ value: ArticlePreviewLines) { articlePreviewLines = value; UserDefaults.standard.set(value.rawValue, forKey: Key.previewLines) }
 
+    func setRead(_ article: ArticleSummary, read: Bool) { setRead(articleIDs: [article.id], read: read) }
+    func setStarred(_ article: ArticleSummary, starred: Bool) { setStarred(articleIDs: [article.id], starred: starred) }
+
+    func setRead(articleIDs: [Int64], read: Bool) {
+        guard let core, !articleIDs.isEmpty else { return }
+        Task { [weak self, core] in
+            let result = await Task.detached { Result { try core.setReadStateBulk(articleIds: articleIDs, read: read) } }.value
+            guard let self else { return }
+            switch result {
+            case .success: updateVisibleRead(articleIDs, read: read); reloadCounts()
+            case let .failure(error): errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func setStarred(articleIDs: [Int64], starred: Bool) {
+        guard let core, !articleIDs.isEmpty else { return }
+        Task { [weak self, core] in
+            let result = await Task.detached { Result { try core.setStarredStateBulk(articleIds: articleIDs, starred: starred) } }.value
+            guard let self else { return }
+            switch result {
+            case .success: updateVisible(articleIDs) { $0.isStarred = starred }; reloadCounts()
+            case let .failure(error): errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func beginScrolloverUndoBatch() {
+        scrolloverBatchActive = true
+        scrolloverUndoIDs = []
+        scrolloverRemovedArticles = [:]
+        scrolloverOriginalOrder = Dictionary(uniqueKeysWithValues: articles.enumerated().map { ($0.element.id, $0.offset) })
+    }
+
+    func flushScrollover(_ ids: [Int64]) {
+        guard let core, !ids.isEmpty else { return }
+        Task { [weak self, core] in
+            let result = await Task.detached { Result { try core.setReadStateBulk(articleIds: ids, read: true) } }.value
+            guard let self else { return }
+            switch result {
+            case .success:
+                let unique = ids.filter { !self.scrolloverUndoIDs.contains($0) }
+                scrolloverUndoIDs.append(contentsOf: unique)
+                updateVisibleRead(unique, read: true, retainingForScrolloverUndo: true)
+                scrolloverCountsPending = true
+                if !scrolloverBatchActive { scrolloverCountsPending = false; reloadCounts() }
+                scrolloverUndoVisible = scrolloverUndoIDs.count >= 2
+                scrolloverUndoTask?.cancel()
+                scrolloverUndoTask = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(8))
+                    guard !Task.isCancelled else { return }
+                    self?.scrolloverUndoVisible = false
+                }
+            case let .failure(error): errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func finishScrolloverUndoBatch() {
+        scrolloverBatchActive = false
+        if scrolloverCountsPending { scrolloverCountsPending = false; reloadCounts() }
+    }
+
+    func undoScrollover() {
+        guard let core, !scrolloverUndoIDs.isEmpty else { return }
+        let ids = scrolloverUndoIDs
+        Task { [weak self, core] in
+            let result = await Task.detached { Result { try core.setReadStateBulk(articleIds: ids, read: false) } }.value
+            guard let self else { return }
+            switch result {
+            case .success:
+                updateVisibleRead(ids, read: false); restoreScrolloverRemovedArticles()
+                scrolloverUndoIDs = []; scrolloverUndoVisible = false; scrolloverUndoTask?.cancel(); reloadCounts()
+            case let .failure(error): errorMessage = error.localizedDescription
+            }
+        }
+    }
+
     func accumulateNewData(_ additions: [(feedID: Int64, count: UInt32)]) { pending.accumulate(additions); publishPending() }
     func adoptVisibleSnapshot() { acknowledgePendingForCurrentScope(); loadVisibleArticles(resetSnapshot: true) }
     func resetVisibleSnapshot() { articles = []; selectionTotal = 0; snapshotRevision &+= 1 }
@@ -157,4 +242,40 @@ final class NewsreaderStore: ObservableObject {
         publishPending()
     }
     private func publishPending() { pendingNewByFeed = pending.byFeed; hasPendingNewData = pending.hasPending }
+
+    private func updateVisibleRead(_ ids: [Int64], read: Bool, retainingForScrolloverUndo: Bool = false) {
+        let ids = Set(ids)
+        if read && ArticleListPresentationPolicy.removesMarkedReadArticle(removeWhenMarkedRead: removeArticlesWhenMarkedRead, unreadOnly: unreadOnly, scope: scope) {
+            if retainingForScrolloverUndo { for article in articles where ids.contains(article.id) { scrolloverRemovedArticles[article.id] = article } }
+            articles.removeAll { ids.contains($0.id) }
+        } else { updateVisible(Array(ids)) { $0.isRead = read } }
+    }
+
+    private func restoreScrolloverRemovedArticles() {
+        let visibleIDs = Set(articles.map(\.id))
+        articles.append(contentsOf: scrolloverRemovedArticles.values.filter { !visibleIDs.contains($0.id) })
+        articles.sort { scrolloverOriginalOrder[$0.id, default: .max] < scrolloverOriginalOrder[$1.id, default: .max] }
+        scrolloverRemovedArticles = [:]; scrolloverOriginalOrder = [:]
+    }
+
+    private func updateVisible(_ ids: [Int64], _ change: (inout ArticleSummary) -> Void) {
+        let ids = Set(ids)
+        for index in articles.indices where ids.contains(articles[index].id) { change(&articles[index]) }
+    }
+
+    private func reloadCounts() {
+        guard let core else { return }
+        let selectionQuery = query()
+        Task { [weak self, core] in
+            let result = await Task.detached {
+                Result {
+                    (try core.countArticles(query: selectionQuery),
+                     try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil)),
+                     try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .all, starredFilter: .starred, sort: .newestFirst, limit: 0, cursor: nil)))
+                }
+            }.value
+            guard let self else { return }
+            switch result { case let .success(counts): selectionTotal = counts.0; unreadTotal = counts.1; starredTotal = counts.2; case let .failure(error): errorMessage = error.localizedDescription }
+        }
+    }
 }
