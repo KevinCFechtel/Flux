@@ -62,7 +62,7 @@ extension ArticlePresentationMode {
 }
 enum ArticlePresentationLayout {
     static let portraitImageAspectRatio: CGFloat = 16.0 / 9.0
-    static let landscapeImageAspectRatio: CGFloat = 4.0 / 3.0
+    static let landscapeImageAspectRatio: CGFloat = 16.0 / 9.0
     static let landscapeImageAllocation: CGFloat = 0.48
     static let cardHorizontalPadding: CGFloat = 24
 
@@ -87,7 +87,8 @@ enum ArticlePresentationLayout {
     }
 
     static func landscapeImageWidth(availableWidth: CGFloat) -> CGFloat {
-        min(260, articleContentWidth(availableWidth) * landscapeImageAllocation)
+        articleContentWidth(availableWidth) * landscapeImageAllocation
+        //min(260, articleContentWidth(availableWidth) * landscapeImageAllocation)
     }
 
     static func landscapeTextWidth(availableWidth: CGFloat, imageWidth: CGFloat, interColumnSpacing: CGFloat) -> CGFloat {

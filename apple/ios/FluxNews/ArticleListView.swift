@@ -16,8 +16,12 @@ struct ArticleListView: View {
             } else {
                     GeometryReader { proxy in
                         let horizontalInset: CGFloat = proxy.size.width > 700 ? 28 : 16
+                        let articleSpacing: CGFloat =
+                          ArticlePresentationLayout.usesLandscapeVisual(
+                            mode: store.articlePresentationMode,
+                            availableWidth: proxy.size.width - horizontalInset * 2) ? 14 : 26
                         ScrollView {
-                            LazyVStack(spacing: 26) {
+                            LazyVStack(spacing: articleSpacing) {
                                 ForEach(store.articles, id: \.id) { article in
                                 ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, store: store)
                                 }
