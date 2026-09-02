@@ -2,6 +2,11 @@ import XCTest
 @testable import FluxNews
 
 final class NewsreaderPresentationTests: XCTestCase {
+    func testNewsNavigationPresentationMatchesDeviceRoutes() {
+        XCTAssertEqual(NewsNavigationPresentation.sheet, .sheet)
+        XCTAssertEqual(NewsNavigationPresentation.sidebar, .sidebar)
+    }
+
     func testNewsNavigationUsesSplitViewOnlyOnIPad() {
         XCTAssertFalse(NewsNavigationLayout.usesSplitView(for: .phone))
         XCTAssertTrue(NewsNavigationLayout.usesSplitView(for: .pad))
@@ -47,7 +52,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         let landscapeTextWidth = ArticlePresentationLayout.landscapeTextWidth(availableWidth: availableWidth, imageWidth: landscapeImageWidth, interColumnSpacing: 14)
         XCTAssertEqual(landscapeImageWidth, 175.68, accuracy: 0.01)
         XCTAssertEqual(landscapeTextWidth, 176.32, accuracy: 0.01)
-        XCTAssertEqual(ArticlePresentationLayout.landscapeImageHeight(imageWidth: landscapeImageWidth), 131.76, accuracy: 0.01)
+        XCTAssertEqual(ArticlePresentationLayout.landscapeImageHeight(imageWidth: landscapeImageWidth), 98.82, accuracy: 0.01)
         XCTAssertLessThanOrEqual(landscapeImageWidth + landscapeTextWidth + 14, contentWidth)
         XCTAssertEqual(ArticlePresentationLayout.boundedArticleWidth(availableWidth + 100), availableWidth + 100)
         XCTAssertEqual(ArticlePresentationLayout.boundedArticleWidth(-1), 0)

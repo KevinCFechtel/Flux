@@ -33,11 +33,10 @@ struct ContentView: View {
     private var newsreader: some View {
         if usesSplitNavigation {
             NavigationSplitView(columnVisibility: $iPadColumnVisibility) {
-                NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented)
+                NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented, presentation: .sidebar).toolbar(removing: .sidebarToggle)
             } detail: {
                 articleList
             }
-            .toolbar(removing: .sidebarToggle)
         } else {
             NavigationStack {
                 articleList
@@ -61,7 +60,7 @@ struct ContentView: View {
                     }
                     .sheet(isPresented: $navigationPresented) {
                         NavigationStack {
-                            NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented)
+                            NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented, presentation: .sheet)
                                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { navigationPresented = false } } }
                         }
                     }
