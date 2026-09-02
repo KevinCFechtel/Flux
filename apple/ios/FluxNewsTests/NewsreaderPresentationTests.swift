@@ -36,9 +36,14 @@ final class NewsreaderPresentationTests: XCTestCase {
 
         XCTAssertEqual(ArticlePresentationLayout.boundedArticleWidth(availableWidth), availableWidth)
         XCTAssertEqual(contentWidth, 366)
+        XCTAssertEqual(ArticlePresentationLayout.visualPortraitContentWidth(availableWidth), availableWidth)
         XCTAssertEqual(ArticlePresentationLayout.portraitImageHeight(contentWidth: contentWidth), 205.875, accuracy: 0.01)
-        XCTAssertEqual(ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth), 131.76, accuracy: 0.01)
-        XCTAssertEqual(ArticlePresentationLayout.landscapeImageHeight(imageWidth: 131.76), 98.82, accuracy: 0.01)
+        let landscapeImageWidth = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
+        let landscapeTextWidth = ArticlePresentationLayout.landscapeTextWidth(availableWidth: availableWidth, imageWidth: landscapeImageWidth, interColumnSpacing: 14)
+        XCTAssertEqual(landscapeImageWidth, 175.68, accuracy: 0.01)
+        XCTAssertEqual(landscapeTextWidth, 176.32, accuracy: 0.01)
+        XCTAssertEqual(ArticlePresentationLayout.landscapeImageHeight(imageWidth: landscapeImageWidth), 131.76, accuracy: 0.01)
+        XCTAssertLessThanOrEqual(landscapeImageWidth + landscapeTextWidth + 14, contentWidth)
         XCTAssertEqual(ArticlePresentationLayout.boundedArticleWidth(availableWidth + 100), availableWidth + 100)
         XCTAssertEqual(ArticlePresentationLayout.boundedArticleWidth(-1), 0)
     }

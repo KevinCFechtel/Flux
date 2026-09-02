@@ -17,7 +17,7 @@ struct ArticleListView: View {
                     GeometryReader { proxy in
                         let horizontalInset: CGFloat = proxy.size.width > 700 ? 28 : 16
                         ScrollView {
-                            LazyVStack(spacing: 12) {
+                            LazyVStack(spacing: 26) {
                                 ForEach(store.articles, id: \.id) { article in
                                 ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, store: store)
                                 }
@@ -85,17 +85,15 @@ private struct ArticlePresentationView: View {
                         placeholder
                     }
                 }
-                .frame(width: contentWidth, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: contentWidth))
+                .frame(width: portraitContentWidth, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: portraitContentWidth))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .clipped()
                 .accessibilityHidden(true)
             }
             articleText
-                .frame(width: contentWidth, alignment: .leading)
+                .frame(width: portraitContentWidth, alignment: .leading)
         }
-        .frame(width: contentWidth, alignment: .leading)
-        .padding(12)
-        .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .frame(width: portraitContentWidth, alignment: .leading)
     }
 
     private var landscapeVisual: some View {
@@ -115,7 +113,7 @@ private struct ArticlePresentationView: View {
                 .accessibilityHidden(true)
             }
             articleText
-                .frame(width: hasImage ? max(0, contentWidth - imageWidth - 14) : contentWidth, alignment: .leading)
+                .frame(width: hasImage ? ArticlePresentationLayout.landscapeTextWidth(availableWidth: availableWidth, imageWidth: imageWidth, interColumnSpacing: 14) : contentWidth, alignment: .leading)
         }
         .frame(width: contentWidth, alignment: .leading)
         .padding(12)
@@ -137,6 +135,10 @@ private struct ArticlePresentationView: View {
 
     private var contentWidth: CGFloat {
         ArticlePresentationLayout.articleContentWidth(articleWidth)
+    }
+
+    private var portraitContentWidth: CGFloat {
+        ArticlePresentationLayout.visualPortraitContentWidth(articleWidth)
     }
 
     private var hasImage: Bool {
