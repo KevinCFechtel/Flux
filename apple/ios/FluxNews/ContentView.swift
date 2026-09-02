@@ -37,6 +37,7 @@ struct ContentView: View {
             } detail: {
                 articleList
             }
+            .toolbar(removing: .sidebarToggle)
         } else {
             NavigationStack {
                 articleList
