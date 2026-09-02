@@ -6,9 +6,16 @@ final class NewsreaderD23MutationTests: XCTestCase {
         ArticleSummary(id: id, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article \(id)", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: read, isStarred: starred, preview: "Preview", imageUrl: nil)
     }
 
-    func testContentMinYDeltaIsConvertedToTrackerDownwardDirection() {
-        XCTAssertEqual(IOSScrolloverDirection.offsetDelta(contentMinYDelta: -40), 40)
-        XCTAssertEqual(IOSScrolloverDirection.offsetDelta(contentMinYDelta: 40), -40)
+    func testIOS18ContentOffsetYUsesForwardIncreasingCanonicalPositions() {
+        XCTAssertEqual(IOSScrolloverOffset.forwardDelta(current: IOSScrolloverOffset.canonicalPosition(contentOffsetY: 40), previous: IOSScrolloverOffset.canonicalPosition(contentOffsetY: 0)), 40)
+        XCTAssertEqual(IOSScrolloverOffset.forwardDelta(current: IOSScrolloverOffset.canonicalPosition(contentOffsetY: 80), previous: IOSScrolloverOffset.canonicalPosition(contentOffsetY: 40)), 40)
+        XCTAssertEqual(IOSScrolloverOffset.forwardDelta(current: IOSScrolloverOffset.canonicalPosition(contentOffsetY: 40), previous: IOSScrolloverOffset.canonicalPosition(contentOffsetY: 80)), -40)
+    }
+
+    func testIOS17ContentMinYNormalizesToForwardIncreasingCanonicalPositions() {
+        XCTAssertEqual(IOSScrolloverOffset.forwardDelta(current: IOSScrolloverOffset.canonicalPosition(contentMinY: -40), previous: IOSScrolloverOffset.canonicalPosition(contentMinY: 0)), 40)
+        XCTAssertEqual(IOSScrolloverOffset.forwardDelta(current: IOSScrolloverOffset.canonicalPosition(contentMinY: -80), previous: IOSScrolloverOffset.canonicalPosition(contentMinY: -40)), 40)
+        XCTAssertEqual(IOSScrolloverOffset.forwardDelta(current: IOSScrolloverOffset.canonicalPosition(contentMinY: -40), previous: IOSScrolloverOffset.canonicalPosition(contentMinY: -80)), -40)
     }
 
     func testDisabledScrolloverGateRejectsProcessing() {
@@ -91,21 +98,36 @@ final class NewsreaderD23MutationTests: XCTestCase {
         tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0)
         tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 1)
         var lastOffset: CGFloat = 0
-        let ids = IOSScrolloverFrameProcessor.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100)], viewport: viewport, unread: [1], offset: -50, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: true, userInitiated: true)
+        let ids = IOSScrolloverFrameProcessor.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100)], viewport: viewport, unread: [1], canonicalPosition: 50, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: true, userInitiated: true)
         XCTAssertEqual(ids, [1])
     }
 
     func testRuntimeFrameProcessorRejectsDisabledAndLargeJumpInput() {
         var tracker = ScrolloverExposureTracker()
         var lastOffset: CGFloat = 0
-        let frames: [Int64: CGRect] = [1: CGRect(x: 0, y: -200, width: 100, height: 100)]
         let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        XCTAssertTrue(IOSScrolloverFrameProcessor.process(frames: frames, viewport: viewport, unread: [1], offset: -20, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: false, userInitiated: true).isEmpty)
-        XCTAssertTrue(IOSScrolloverFrameProcessor.process(frames: frames, viewport: viewport, unread: [1], offset: -100, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: true, userInitiated: true).isEmpty)
+        let visible: [Int64: CGRect] = [1: CGRect(x: 0, y: 0, width: 100, height: 100)]
+        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0)
+        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 1)
+
+        XCTAssertTrue(IOSScrolloverFrameProcessor.process(frames: [1: CGRect(x: 0, y: -20, width: 100, height: 100)], viewport: viewport, unread: [1], canonicalPosition: 20, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: false, userInitiated: true).isEmpty)
+        XCTAssertTrue(IOSScrolloverFrameProcessor.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100)], viewport: viewport, unread: [1], canonicalPosition: 100, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: true, userInitiated: true).isEmpty)
     }
 
     @MainActor
-    func testRuntimeAdapterCoalescesSeparateFrameAndOffsetUpdates() async throws {
+    func testRuntimeFrameProcessorRejectsBackwardCanonicalPosition() {
+        var tracker = ScrolloverExposureTracker()
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let visible: [Int64: CGRect] = [1: CGRect(x: 0, y: 0, width: 100, height: 100)]
+        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0)
+        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 1)
+        var lastOffset: CGFloat = 80
+
+        XCTAssertTrue(IOSScrolloverFrameProcessor.process(frames: [1: CGRect(x: 0, y: 100, width: 100, height: 100)], viewport: viewport, unread: [1], canonicalPosition: 40, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: true, userInitiated: true).isEmpty)
+    }
+
+    @MainActor
+    func testRuntimeAdapterProducesCandidateFromIOS18ContentOffsetAfterIdleQualification() async throws {
         let adapter = IOSScrolloverRuntimeAdapter()
         let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
         let unread: Set<Int64> = [1]
@@ -113,10 +135,9 @@ final class NewsreaderD23MutationTests: XCTestCase {
         adapter.onCandidate = { candidates = $0 }
         adapter.updateViewport(viewport)
         adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
-        try await Task.sleep(for: .milliseconds(750))
-        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
+        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
         adapter.beginUserScroll()
-        adapter.receiveOffset(-50, unread: unread)
+        adapter.receiveContentOffsetY(50, unread: unread)
         adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
         try await Task.sleep(for: .milliseconds(50))
         XCTAssertEqual(candidates, [1])

@@ -1,8 +1,11 @@
 import SwiftUI
 import UIKit
 
-enum IOSScrolloverDirection {
-    static func offsetDelta(contentMinYDelta: CGFloat) -> CGFloat { -contentMinYDelta }
+enum IOSScrolloverOffset {
+    // Canonical positions increase as the list moves forward/downward.
+    static func canonicalPosition(contentOffsetY: CGFloat) -> CGFloat { contentOffsetY }
+    static func canonicalPosition(contentMinY: CGFloat) -> CGFloat { -contentMinY }
+    static func forwardDelta(current: CGFloat, previous: CGFloat) -> CGFloat { current - previous }
 }
 
 enum IOSScrolloverProcessingGate {
@@ -14,16 +17,16 @@ enum IOSScrolloverFrameProcessor {
         frames: [Int64: CGRect],
         viewport: CGRect,
         unread: Set<Int64>,
-        offset: CGFloat,
+        canonicalPosition: CGFloat,
         lastProcessedOffset: inout CGFloat,
         tracker: inout ScrolloverExposureTracker,
         enabled: Bool,
         userInitiated: Bool
     ) -> [Int64] {
         guard enabled, userInitiated else { return [] }
-        let delta = IOSScrolloverDirection.offsetDelta(contentMinYDelta: offset - lastProcessedOffset)
+        let delta = IOSScrolloverOffset.forwardDelta(current: canonicalPosition, previous: lastProcessedOffset)
         guard abs(delta) > 0.5 else { return [] }
-        lastProcessedOffset = offset
+        lastProcessedOffset = canonicalPosition
         return tracker.process(frames: frames, viewport: viewport, unread: unread, now: Date.timeIntervalSinceReferenceDate, offsetDelta: delta, userInitiated: true)
     }
 }
@@ -34,7 +37,7 @@ final class IOSScrolloverRuntimeAdapter {
 
     private var frames: [Int64: CGRect] = [:]
     private var viewport = CGRect.zero
-    private var offset: CGFloat = 0
+    private var canonicalPosition: CGFloat = 0
     private var lastProcessedOffset: CGFloat = 0
     private var unread = Set<Int64>()
     private var enabled = true
@@ -56,7 +59,7 @@ final class IOSScrolloverRuntimeAdapter {
     func beginUserScroll() {
         guard !userScrolling else { return }
         userScrolling = true
-        lastProcessedOffset = offset
+        lastProcessedOffset = canonicalPosition
     }
 
     func endUserScroll() {
@@ -80,8 +83,16 @@ final class IOSScrolloverRuntimeAdapter {
         }
     }
 
-    func receiveOffset(_ offset: CGFloat, unread: Set<Int64>) {
-        self.offset = offset
+    func receiveContentOffsetY(_ contentOffsetY: CGFloat, unread: Set<Int64>) {
+        receiveCanonicalPosition(IOSScrolloverOffset.canonicalPosition(contentOffsetY: contentOffsetY), unread: unread)
+    }
+
+    func receiveLegacyContentMinY(_ contentMinY: CGFloat, unread: Set<Int64>) {
+        receiveCanonicalPosition(IOSScrolloverOffset.canonicalPosition(contentMinY: contentMinY), unread: unread)
+    }
+
+    private func receiveCanonicalPosition(_ canonicalPosition: CGFloat, unread: Set<Int64>) {
+        self.canonicalPosition = canonicalPosition
         self.unread = unread
         if userScrolling { scheduleProcessing() }
     }
@@ -99,7 +110,7 @@ final class IOSScrolloverRuntimeAdapter {
             guard let self else { return }
             processingScheduled = false
             guard userScrolling else { return }
-            let ids = IOSScrolloverFrameProcessor.process(frames: frames, viewport: viewport, unread: unread, offset: offset, lastProcessedOffset: &lastProcessedOffset, tracker: &tracker, enabled: enabled, userInitiated: true)
+            let ids = IOSScrolloverFrameProcessor.process(frames: frames, viewport: viewport, unread: unread, canonicalPosition: canonicalPosition, lastProcessedOffset: &lastProcessedOffset, tracker: &tracker, enabled: enabled, userInitiated: true)
             if !ids.isEmpty { onCandidate(ids) }
         }
     }
@@ -108,7 +119,7 @@ final class IOSScrolloverRuntimeAdapter {
 private struct IOSScrolloverInteractionModifier: ViewModifier {
     let onBegin: () -> Void
     let onEnd: () -> Void
-    let onOffset: (CGFloat) -> Void
+    let onContentOffsetY: (CGFloat) -> Void
 
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -124,7 +135,7 @@ private struct IOSScrolloverInteractionModifier: ViewModifier {
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
                     geometry.contentOffset.y
                 } action: { _, newOffset in
-                    onOffset(newOffset)
+                    onContentOffsetY(newOffset)
                 }
         } else {
             content.simultaneousGesture(
@@ -132,6 +143,23 @@ private struct IOSScrolloverInteractionModifier: ViewModifier {
                     .onChanged { _ in onBegin() }
                     .onEnded { _ in onEnd() }
             )
+        }
+    }
+}
+
+private struct IOSLegacyArticleOffsetPreferenceModifier: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content
+        } else {
+            content.background {
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: ArticleOffsetKey.self,
+                        value: geometry.frame(in: .named("ArticleScrollSpace")).minY)
+                }
+            }
         }
     }
 }
@@ -250,10 +278,10 @@ struct ArticleListView: View {
                                     ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, store: store)
                                         .background { GeometryReader { row in Color.clear.preference(key: ArticleFrameKey.self, value: [article.id: row.frame(in: .named("ArticleScrollSpace"))]) } }
                                 }
-                            }
-                            .padding(.horizontal, horizontalInset)
-                            .padding(.vertical, 12)
-                             .background { GeometryReader { content in Color.clear.preference(key: ArticleOffsetKey.self, value: content.frame(in: .named("ArticleScrollSpace")).minY) } }
+                             }
+                             .padding(.horizontal, horizontalInset)
+                             .padding(.vertical, 12)
+                             .modifier(IOSLegacyArticleOffsetPreferenceModifier())
                          }
                          .refreshable { await store.syncManually() }
                         .coordinateSpace(name: "ArticleScrollSpace")
@@ -267,9 +295,13 @@ struct ArticleListView: View {
                                scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
                                scrolloverAdapter.receiveFrames(values, unread: unreadIDs)
                          }
-                           .onPreferenceChange(ArticleOffsetKey.self) { newOffset in
-                               scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
-                               scrolloverAdapter.receiveOffset(newOffset, unread: unreadIDs)
+                            .onPreferenceChange(ArticleOffsetKey.self) { newOffset in
+                                if #available(iOS 18.0, *) {
+                                    // iOS 18 uses onScrollGeometryChange as its only offset source.
+                                } else {
+                                    scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
+                                    scrolloverAdapter.receiveLegacyContentMinY(newOffset, unread: unreadIDs)
+                                }
                          }
                            .modifier(IOSScrolloverInteractionModifier(onBegin: {
                                scrolloverAdapter.beginUserScroll()
@@ -278,9 +310,9 @@ struct ArticleListView: View {
                            }, onEnd: {
                                scrolloverAdapter.endUserScroll()
                                store.finishScrolloverUndoBatch()
-                           }, onOffset: { newOffset in
-                               scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
-                               scrolloverAdapter.receiveOffset(newOffset, unread: unreadIDs)
+                            }, onContentOffsetY: { newOffset in
+                                scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
+                                scrolloverAdapter.receiveContentOffsetY(newOffset, unread: unreadIDs)
                            }))
          .onReceive(timer) { _ in scrolloverAdapter.observeIdle() }
                           .onChange(of: store.markReadOnScrolloverEnabled) { _, enabled in scrolloverAdapter.updateEnabled(enabled) }
