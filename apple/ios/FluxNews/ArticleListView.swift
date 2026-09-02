@@ -93,7 +93,7 @@ struct ArticleListView: View {
                 .padding(.vertical, 10)
                 .background(.regularMaterial, in: Capsule())
                 .padding(.bottom, 12)
-            } else if store.newDataAvailable {
+             } else if store.hasPendingNewData || store.hasUnscopedNewDataSignal {
                 Button("New articles available") { store.adoptVisibleSnapshot() }
                     .buttonStyle(.borderedProminent)
                     .padding(.bottom, 12)

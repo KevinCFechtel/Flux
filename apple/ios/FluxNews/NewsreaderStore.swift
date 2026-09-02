@@ -26,7 +26,7 @@ final class NewsreaderStore: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var pendingNewByFeed: [Int64: Int] = [:]
     @Published private(set) var hasPendingNewData = false
-    @Published private(set) var newDataAvailable = false
+    @Published private(set) var hasUnscopedNewDataSignal = false
     @Published private(set) var snapshotRevision: UInt64 = 0
     @Published var scope: BrowserScope = .all
     @Published var unreadOnly = true
@@ -79,13 +79,7 @@ final class NewsreaderStore: ObservableObject {
         let categoryIDs = Set(catalog.categories.map(\.id))
         let feedIDs = Set(catalog.feeds.map(\.id))
         scope = StartupScopeResolver.resolve(startupScope, categoryID: startupCategoryID, feedID: startupFeedID, categoryIDs: categoryIDs, feedIDs: feedIDs)
-        if startupScope == .category && (startupCategoryID == nil || !categoryIDs.contains(startupCategoryID!)) {
-            setStartupCategoryID(nil)
-            setStartupScope(.allNews)
-        } else if startupScope == .feed && (startupFeedID == nil || !feedIDs.contains(startupFeedID!)) {
-            setStartupFeedID(nil)
-            setStartupScope(.allNews)
-        }
+        normalizeStartupScope(categoryIDs: categoryIDs, feedIDs: feedIDs)
         loadVisibleArticles()
     }
 
@@ -178,7 +172,7 @@ final class NewsreaderStore: ObservableObject {
             let result = await Task.detached { Result { try core.setReadStateBulk(articleIds: articleIDs, read: read) } }.value
             guard let self else { return }
             switch result {
-            case .success: updateVisibleRead(articleIDs, read: read); reloadCounts(includeNavigationCounts: true)
+            case .success: markMeaningfulInteraction(); updateVisibleRead(articleIDs, read: read); reloadCounts(includeNavigationCounts: true)
             case let .failure(error): errorMessage = error.localizedDescription
             }
         }
@@ -191,6 +185,7 @@ final class NewsreaderStore: ObservableObject {
             guard let self else { return }
             switch result {
             case .success:
+                markMeaningfulInteraction()
                 if !starred && scope == .starred { articles.removeAll { articleIDs.contains($0.id) } }
                 else { updateVisible(articleIDs) { $0.isStarred = starred } }
                 reloadCounts(includeNavigationCounts: true)
@@ -216,6 +211,7 @@ final class NewsreaderStore: ObservableObject {
             case .success:
                 var seen = Set(self.scrolloverUndoIDs)
                 let unique = ids.filter { seen.insert($0).inserted }
+                markMeaningfulInteraction()
                 scrolloverUndoIDs.append(contentsOf: unique)
                 updateVisibleRead(unique, read: true, retainingForScrolloverUndo: true)
                 scrolloverCountsPending = true
@@ -256,8 +252,8 @@ final class NewsreaderStore: ObservableObject {
         }
     }
 
-    func accumulateNewData(_ additions: [(feedID: Int64, count: UInt32)]) { pending.accumulate(additions); publishPending(); newDataAvailable = true }
-    func adoptVisibleSnapshot() { acknowledgePendingForCurrentScope(); newDataAvailable = false; resetPresentationState(); loadVisibleArticles(resetSnapshot: true) }
+    func accumulateNewData(_ additions: [(feedID: Int64, count: UInt32)]) { pending.accumulate(additions); publishPending() }
+    func adoptVisibleSnapshot() { acknowledgePendingForCurrentScope(); hasUnscopedNewDataSignal = false; resetPresentationState(); replaceSnapshot() }
     func resetVisibleSnapshot() { articles = []; selectionTotal = 0; snapshotRevision &+= 1 }
 
     private func acknowledgePendingForCurrentScope() {
@@ -271,12 +267,29 @@ final class NewsreaderStore: ObservableObject {
     }
     private func publishPending() { pendingNewByFeed = pending.byFeed; hasPendingNewData = pending.hasPending }
 
+    private func normalizeStartupScope(categoryIDs: Set<Int64>, feedIDs: Set<Int64>) {
+        if startupScope == .category && (startupCategoryID == nil || !categoryIDs.contains(startupCategoryID!)) {
+            setStartupCategoryID(nil)
+            setStartupScope(.allNews)
+        } else if startupScope == .feed && (startupFeedID == nil || !feedIDs.contains(startupFeedID!)) {
+            setStartupFeedID(nil)
+            setStartupScope(.allNews)
+        }
+    }
+
     func markMeaningfulInteraction() { hasMeaningfullyInteracted = true }
 
     private func resetPresentationState() {
         hasMeaningfullyInteracted = false
-        newDataAvailable = false
         snapshotRevision &+= 1
+        scrolloverUndoTask?.cancel()
+        scrolloverUndoTask = nil
+        scrolloverUndoIDs = []
+        scrolloverUndoVisible = false
+        scrolloverRemovedArticles = [:]
+        scrolloverOriginalOrder = [:]
+        scrolloverBatchActive = false
+        scrolloverCountsPending = false
     }
 
     fileprivate func handleSyncCompleted(_ metadata: SyncCompleted) {
@@ -284,24 +297,34 @@ final class NewsreaderStore: ObservableObject {
         if metadata.reason == .background || metadata.reason == .periodic {
             pending.accumulate(metadata.newArticlesByFeed.map { (feedID: $0.feedId, count: $0.count) })
             publishPending()
+            if metadata.dataChanged && metadata.newArticlesByFeed.isEmpty { hasUnscopedNewDataSignal = true }
         }
         if metadata.navigationChanged { loadNavigationAndCounts() }
         else if metadata.dataChanged { reloadCounts(includeNavigationCounts: false) }
-        let action: SnapshotRefreshPolicy.Action
-        if metadata.reason == .background || metadata.reason == .periodic {
-            action = metadata.dataChanged ? .signalNewData : .preserve
-        } else {
-            action = SnapshotRefreshPolicy.action(manual: metadata.reason == .manual, dataChanged: metadata.dataChanged, hasMeaningfullyInteracted: hasMeaningfullyInteracted)
-        }
+        let action = SnapshotRefreshPolicy.action(manual: metadata.reason == .manual, dataChanged: metadata.dataChanged, hasMeaningfullyInteracted: hasMeaningfullyInteracted)
         switch action {
         case .replace:
-            loadVisibleArticles(acknowledgePending: metadata.reason == .manual, resetSnapshot: true)
-            newDataAvailable = false
+            hasUnscopedNewDataSignal = false
+            if metadata.reason == .manual { acknowledgePendingForCurrentScope() }
+            replaceSnapshot()
         case .signalNewData:
-            newDataAvailable = true
+            if metadata.newArticlesByFeed.isEmpty { hasUnscopedNewDataSignal = true }
         case .preserve:
             break
         }
+    }
+
+    private func replaceSnapshot() {
+        scrolloverUndoTask?.cancel()
+        scrolloverUndoTask = nil
+        scrolloverUndoIDs = []
+        scrolloverUndoVisible = false
+        scrolloverRemovedArticles = [:]
+        scrolloverOriginalOrder = [:]
+        scrolloverBatchActive = false
+        scrolloverCountsPending = false
+        resetPresentationState()
+        loadVisibleArticles(resetSnapshot: true)
     }
 
     private func updateVisibleRead(_ ids: [Int64], read: Bool, retainingForScrolloverUndo: Bool = false) {
@@ -328,14 +351,25 @@ final class NewsreaderStore: ObservableObject {
     @MainActor
     func setArticlesForTesting(_ value: [ArticleSummary]) { articles = value }
     @MainActor
-    func applyReadMutationForTesting(_ ids: [Int64], read: Bool, retainingForScrolloverUndo: Bool = false) { updateVisibleRead(ids, read: read, retainingForScrolloverUndo: retainingForScrolloverUndo) }
+    func applyReadMutationForTesting(_ ids: [Int64], read: Bool, retainingForScrolloverUndo: Bool = false) { markMeaningfulInteraction(); updateVisibleRead(ids, read: read, retainingForScrolloverUndo: retainingForScrolloverUndo) }
     @MainActor
     func applyStarredMutationForTesting(_ ids: [Int64], starred: Bool) {
+        markMeaningfulInteraction()
         if !starred && scope == .starred { articles.removeAll { ids.contains($0.id) } }
         else { updateVisible(ids) { $0.isStarred = starred } }
     }
     @MainActor
     func restoreScrolloverRemovedArticlesForTesting() { restoreScrolloverRemovedArticles() }
+    @MainActor
+    func completeSyncForTesting(_ metadata: SyncCompleted) { handleSyncCompleted(metadata) }
+    @MainActor
+    var meaningfullyInteractedForTesting: Bool { hasMeaningfullyInteracted }
+    @MainActor
+    var pendingByFeedForTesting: [Int64: Int] { pendingNewByFeed }
+    @MainActor
+    func normalizeStartupScopeForTesting(categoryIDs: Set<Int64>, feedIDs: Set<Int64>) { normalizeStartupScope(categoryIDs: categoryIDs, feedIDs: feedIDs) }
+    @MainActor
+    func setCatalogForTesting(_ value: NavigationCatalog) { catalog = value }
 
     private func reloadCounts(includeNavigationCounts: Bool = false) {
         guard let core else { return }

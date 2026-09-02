@@ -109,7 +109,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.accumulateNewData([(feedID: 10, count: 3)])
         XCTAssertTrue(store.hasPendingNewData)
-        XCTAssertTrue(store.newDataAvailable)
+        XCTAssertFalse(store.hasUnscopedNewDataSignal)
         store.resetVisibleSnapshot()
         XCTAssertEqual(store.articles.count, 0)
     }
@@ -117,5 +117,100 @@ final class NewsreaderD23MutationTests: XCTestCase {
     func testInvalidStartupTargetsFallBackToAllNews() {
         XCTAssertEqual(StartupScopeResolver.resolve(.category, categoryID: 99, feedID: nil, categoryIDs: [1], feedIDs: []), .all)
         XCTAssertEqual(StartupScopeResolver.resolve(.feed, categoryID: nil, feedID: 99, categoryIDs: [], feedIDs: [1]), .all)
+    }
+
+    @MainActor
+    func testAutomaticSyncBeforeInteractionUsesReplaceSemantics() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let revision = store.snapshotRevision
+        store.completeSyncForTesting(syncMetadata(reason: .background, dataChanged: true))
+        XCTAssertGreaterThan(store.snapshotRevision, revision)
+        XCTAssertFalse(store.hasUnscopedNewDataSignal)
+    }
+
+    @MainActor
+    func testAutomaticSyncAfterInteractionPreservesAndSignalsSnapshot() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.markMeaningfulInteraction()
+        let revision = store.snapshotRevision
+        store.completeSyncForTesting(syncMetadata(reason: .background, dataChanged: true))
+        XCTAssertEqual(store.snapshotRevision, revision)
+        XCTAssertTrue(store.hasUnscopedNewDataSignal)
+    }
+
+    @MainActor
+    func testSuccessfulMutationSeamMarksMeaningfulInteraction() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1)])
+        store.applyReadMutationForTesting([1], read: true)
+        XCTAssertTrue(store.meaningfullyInteractedForTesting)
+    }
+
+    @MainActor
+    func testPendingDataSurvivesPresentationOptionChanges() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.accumulateNewData([(feedID: 10, count: 2)])
+        store.setArticlePresentationMode(.compact)
+        store.setArticlePreviewLines(.extended)
+        XCTAssertEqual(store.pendingByFeedForTesting, [10: 2])
+        XCTAssertTrue(store.hasPendingNewData)
+    }
+
+    @MainActor
+    func testCurrentFeedAdoptionLeavesUnrelatedPendingFeed() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.scope = .feed(10)
+        store.accumulateNewData([(feedID: 10, count: 2), (feedID: 20, count: 3)])
+        store.adoptVisibleSnapshot()
+        XCTAssertEqual(store.pendingByFeedForTesting, [20: 3])
+        XCTAssertTrue(store.hasPendingNewData)
+    }
+
+    @MainActor
+    func testCategoryAdoptionLeavesUnrelatedPendingFeed() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.scope = .category(1)
+        store.setCatalogForTesting(NavigationCatalog(categories: [Category(id: 1, title: "Category")], feeds: [Feed(id: 10, categoryId: 1, title: "Included"), Feed(id: 20, categoryId: 2, title: "Unrelated")]))
+        store.accumulateNewData([(feedID: 10, count: 2), (feedID: 20, count: 3)])
+        store.adoptVisibleSnapshot()
+        XCTAssertEqual(store.pendingByFeedForTesting, [20: 3])
+    }
+
+    @MainActor
+    func testManualAdoptionClearsCurrentScopeSignal() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.scope = .feed(10)
+        store.accumulateNewData([(feedID: 10, count: 2), (feedID: 20, count: 3)])
+        store.adoptVisibleSnapshot()
+        XCTAssertEqual(store.pendingByFeedForTesting, [20: 3])
+        XCTAssertTrue(store.hasPendingNewData)
+    }
+
+    @MainActor
+    func testStaleStartupCategoryNormalizationPersistsAllNews() {
+        let defaults = UserDefaults(suiteName: "FluxNews.D24.category.\(UUID().uuidString)")!
+        let store = NewsreaderStore(defaults: defaults)
+        store.setStartupScope(.category)
+        store.setStartupCategoryID(99)
+        store.normalizeStartupScopeForTesting(categoryIDs: [1], feedIDs: [10])
+        XCTAssertEqual(store.startupScope, .allNews)
+        XCTAssertNil(store.startupCategoryID)
+        XCTAssertEqual(defaults.string(forKey: "FluxNews.iOS.startupScope"), StartupScopePreference.allNews.rawValue)
+    }
+
+    @MainActor
+    func testStaleStartupFeedNormalizationPersistsAllNews() {
+        let defaults = UserDefaults(suiteName: "FluxNews.D24.feed.\(UUID().uuidString)")!
+        let store = NewsreaderStore(defaults: defaults)
+        store.setStartupScope(.feed)
+        store.setStartupFeedID(99)
+        store.normalizeStartupScopeForTesting(categoryIDs: [1], feedIDs: [10])
+        XCTAssertEqual(store.startupScope, .allNews)
+        XCTAssertNil(store.startupFeedID)
+        XCTAssertEqual(defaults.string(forKey: "FluxNews.iOS.startupScope"), StartupScopePreference.allNews.rawValue)
+    }
+
+    private func syncMetadata(reason: SyncReason, dataChanged: Bool) -> SyncCompleted {
+        SyncCompleted(reason: reason, newArticles: 0, updatedArticles: 0, mutationsDelivered: 0, dataChanged: dataChanged, navigationChanged: false, newArticlesByFeed: [], systemNotificationCandidates: [])
     }
 }
