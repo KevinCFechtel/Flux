@@ -10,18 +10,17 @@ struct NewsNavigationView: View {
                 scopeRow("All News", systemImage: "newspaper", scope: .all, count: store.unreadTotal)
                 scopeRow("Starred", systemImage: "star", scope: .starred, count: store.starredTotal)
             }
-            if !store.catalog.categories.isEmpty {
-                Section("Categories") {
-                    ForEach(visibleCategories, id: \.id) { category in
-                        scopeRow(category.title, systemImage: "folder", scope: .category(category.id), count: store.categoryCounts[category.id] ?? 0)
+            ForEach(groups) { group in
+                Section {
+                    if let categoryID = group.categoryID {
+                        scopeRow(group.title, systemImage: "folder", scope: .category(categoryID), count: store.categoryCounts[categoryID] ?? 0)
                     }
-                }
-            }
-            if !visibleFeeds.isEmpty {
-                Section("Feeds") {
-                    ForEach(visibleFeeds, id: \.id) { feed in
-                        scopeRow(feed.title, systemImage: "dot.radiowaves.left.and.right", scope: .feed(feed.id), count: store.feedCounts[feed.id] ?? 0)
+                    ForEach(group.feeds, id: \.id) { feed in
+                        scopeRow(feedTitle(feed.id), systemImage: "dot.radiowaves.left.and.right", scope: .feed(feed.id), count: store.feedCounts[feed.id] ?? 0)
+                            .padding(.leading, group.categoryID == nil ? 0 : 16)
                     }
+                } header: {
+                    if group.categoryID == nil { Text(group.title) }
                 }
             }
         }
@@ -36,17 +35,17 @@ struct NewsNavigationView: View {
         )
     }
 
-    private var visibleFeeds: [Feed] {
-        let feeds = store.catalog.feeds
-        guard store.hideEmptyNavigationEntries else { return feeds }
-        return NavigationVisibility.visibleFeeds(feeds.map { NavigationPresentationFeed(id: $0.id, categoryID: $0.categoryId) }, hidingEmpty: true, counts: store.feedCounts).compactMap { id in feeds.first { $0.id == id.id } }
+    private var groups: [NavigationPresentationGroup] {
+        NavigationVisibility.groups(
+            categories: store.catalog.categories.map { NavigationPresentationCategory(id: $0.id, title: $0.title) },
+            feeds: store.catalog.feeds.map { NavigationPresentationFeed(id: $0.id, categoryID: $0.categoryId) },
+            hidingEmpty: store.hideEmptyNavigationEntries,
+            counts: store.feedCounts
+        )
     }
 
-    private var visibleCategories: [Category] {
-        let categories = store.catalog.categories
-        guard store.hideEmptyNavigationEntries else { return categories }
-        let feedIDs = Set(visibleFeeds.map(\.categoryId))
-        return categories.filter { feedIDs.contains($0.id) }
+    private func feedTitle(_ feedID: Int64) -> String {
+        store.catalog.feeds.first { $0.id == feedID }?.title ?? "Feed"
     }
 
     @ViewBuilder

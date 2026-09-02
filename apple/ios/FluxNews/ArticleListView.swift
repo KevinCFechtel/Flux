@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ArticleListView: View {
     @ObservedObject var store: NewsreaderStore
@@ -13,14 +14,15 @@ struct ArticleListView: View {
             } else if store.articles.isEmpty {
                 ContentUnavailableView("No Articles", systemImage: "newspaper")
             } else {
-                GeometryReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(store.articles, id: \.id) { article in
-                                ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width)
+                    GeometryReader { proxy in
+                        let horizontalInset: CGFloat = proxy.size.width > 700 ? 28 : 16
+                        ScrollView {
+                            LazyVStack(spacing: 12) {
+                                ForEach(store.articles, id: \.id) { article in
+                                ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, store: store)
+                                }
                             }
-                        }
-                        .padding(.horizontal, proxy.size.width > 700 ? 28 : 16)
+                        .padding(.horizontal, horizontalInset)
                         .padding(.vertical, 12)
                     }
                     .scrollIndicators(.hidden)
@@ -44,6 +46,7 @@ private struct ArticlePresentationView: View {
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
     let availableWidth: CGFloat
+    @ObservedObject var store: NewsreaderStore
 
     var body: some View {
         Button(action: {}) {
@@ -62,7 +65,16 @@ private struct ArticlePresentationView: View {
         .accessibilityHint("Article opening will be added in a later release.")
     }
 
+    @ViewBuilder
     private var visual: some View {
+        if ArticlePresentationLayout.usesLandscapeVisual(mode: mode, availableWidth: availableWidth) {
+            landscapeVisual
+        } else {
+            portraitVisual
+        }
+    }
+
+    private var portraitVisual: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let imageURL = article.imageUrl.flatMap(URL.init(string:)) {
                 AsyncImage(url: imageURL) { phase in
@@ -72,8 +84,9 @@ private struct ArticlePresentationView: View {
                         placeholder
                     }
                 }
-                .frame(height: availableWidth > 700 ? 230 : 190)
+                .aspectRatio(16 / 9, contentMode: .fit)
                 .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .clipped()
                 .accessibilityHidden(true)
             }
@@ -81,17 +94,35 @@ private struct ArticlePresentationView: View {
         }
         .padding(12)
         .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(alignment: .topLeading) { unreadMarker }
+    }
+
+    private var landscapeVisual: some View {
+        HStack(alignment: .top, spacing: 14) {
+            if let imageURL = article.imageUrl.flatMap(URL.init(string:)) {
+                AsyncImage(url: imageURL) { phase in
+                    if case let .success(image) = phase {
+                        image.resizable().scaledToFill()
+                    } else {
+                        placeholder
+                    }
+                }
+                .frame(width: min(260, availableWidth * 0.36))
+                .aspectRatio(4 / 3, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .accessibilityHidden(true)
+            }
+            articleText
+        }
+        .padding(12)
+        .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var compact: some View {
         HStack(alignment: .top, spacing: 12) {
-            FeedBadge(title: article.feedTitle)
             articleText
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 4)
-        .overlay(alignment: .leading) { unreadMarker }
     }
 
     private var articleText: some View {
@@ -109,6 +140,13 @@ private struct ArticlePresentationView: View {
                 }
             }
             HStack(spacing: 6) {
+                if ArticlePresentationLayout.showsInternalUnreadIndicator(isRead: article.isRead) {
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 6, height: 6)
+                        .accessibilityHidden(true)
+                }
+                FeedIconView(feedID: article.feedId, title: article.feedTitle, store: store)
                 Text(article.feedTitle)
                     .font(.subheadline.weight(.medium))
                 Text("•")
@@ -132,15 +170,6 @@ private struct ArticlePresentationView: View {
             .overlay { Image(systemName: "photo").font(.title).foregroundStyle(.secondary) }
     }
 
-    private var unreadMarker: some View {
-        Circle()
-            .fill(article.isRead ? .clear : Color.accentColor)
-            .frame(width: 8, height: 8)
-            .padding(.top, 18)
-            .padding(.leading, 2)
-            .accessibilityHidden(true)
-    }
-
     private var date: String {
         ISO8601DateFormatter().date(from: article.publishedAt).map { $0.formatted(date: .abbreviated, time: .shortened) } ?? article.publishedAt
     }
@@ -152,15 +181,27 @@ private struct ArticlePresentationView: View {
     }
 }
 
-private struct FeedBadge: View {
+private struct FeedIconView: View {
+    let feedID: Int64
     let title: String
+    @ObservedObject var store: NewsreaderStore
 
     var body: some View {
-        Text(title.prefix(1).uppercased())
-            .font(.caption.weight(.bold))
-            .foregroundStyle(.white)
-            .frame(width: 30, height: 30)
-            .background(Color.accentColor.gradient, in: Circle())
-            .accessibilityLabel("Feed \(title)")
+        Group {
+            if let data = store.feedIcons[feedID], let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Text(title.prefix(1).uppercased())
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 22, height: 22)
+                    .background(Color.accentColor.gradient, in: Circle())
+            }
+        }
+        .frame(width: 22, height: 22)
+        .accessibilityLabel("Feed \(title)")
+        .task { store.requestFeedIcon(feedID) }
     }
 }

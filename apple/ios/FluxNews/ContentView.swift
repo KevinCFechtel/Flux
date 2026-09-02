@@ -34,9 +34,17 @@ struct ContentView: View {
                             Button { navigationPresented = true } label: { Image(systemName: "sidebar.leading") }
                                 .accessibilityLabel("Choose news scope")
                         }
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button { diagnosticsPresented = true } label: { Image(systemName: "info.circle") }
-                                .accessibilityLabel("Developer diagnostics")
+                        ToolbarItemGroup(placement: .bottomBar) {
+                            Button {
+                                Task { await newsreaderStore.syncManually() }
+                            } label: {
+                                Label("Sync", systemImage: "arrow.clockwise")
+                            }
+                            .disabled(newsreaderStore.isLoading)
+                            Button { diagnosticsPresented = true } label: {
+                                Label("Diagnostics", systemImage: "info.circle")
+                            }
+                            .accessibilityLabel("Developer diagnostics")
                         }
                     }
                     .sheet(isPresented: $navigationPresented) {
@@ -55,6 +63,15 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 if horizontalSizeClass == .regular {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            Task { await newsreaderStore.syncManually() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .disabled(newsreaderStore.isLoading)
+                        .accessibilityLabel("Sync news")
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { diagnosticsPresented = true } label: { Image(systemName: "info.circle") }
                             .accessibilityLabel("Developer diagnostics")

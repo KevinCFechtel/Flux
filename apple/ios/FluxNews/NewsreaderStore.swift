@@ -21,6 +21,7 @@ final class NewsreaderStore: ObservableObject {
     @Published private(set) var selectionTotal: UInt64 = 0
     @Published private(set) var categoryCounts: [Int64: UInt64] = [:]
     @Published private(set) var feedCounts: [Int64: UInt64] = [:]
+    @Published private(set) var feedIcons: [Int64: Data] = [:]
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var pendingNewByFeed: [Int64: Int] = [:]
@@ -40,6 +41,8 @@ final class NewsreaderStore: ObservableObject {
 
     private(set) var core: Flux?
     private var pending = PendingNewData()
+    private var requestedFeedIcons = Set<Int64>()
+    private var unavailableFeedIcons = Set<Int64>()
 
     init(defaults: UserDefaults = .standard) {
         startupScope = defaults.string(forKey: Key.startupScope).flatMap(StartupScopePreference.init(rawValue:)) ?? .allNews
@@ -95,6 +98,36 @@ final class NewsreaderStore: ObservableObject {
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
         isLoading = false
+    }
+
+    func requestFeedIcon(_ feedID: Int64) {
+        guard feedIcons[feedID] == nil, !unavailableFeedIcons.contains(feedID), let core else { return }
+        guard requestedFeedIcons.insert(feedID).inserted else { return }
+        Task { [weak self, core] in
+            let data = await Task.detached {
+                try? core.feedIcon(feedId: feedID, variant: .normal)?.pngData
+            }.value
+            guard let self else { return }
+            requestedFeedIcons.remove(feedID)
+            if let data { feedIcons[feedID] = Data(data) }
+            else { unavailableFeedIcons.insert(feedID) }
+        }
+    }
+
+    func syncManually() async {
+        guard let core, !isLoading else { return }
+        isLoading = true
+        errorMessage = nil
+
+        let result = await Task.detached { Result { try core.sync(reason: .manual) } }.value
+        switch result {
+        case .success:
+            loadNavigationAndCounts()
+            loadVisibleArticles()
+        case let .failure(error):
+            errorMessage = error.localizedDescription
+            isLoading = false
+        }
     }
 
     func select(_ newScope: BrowserScope) { scope = newScope; loadVisibleArticles(acknowledgePending: true, resetSnapshot: true) }
