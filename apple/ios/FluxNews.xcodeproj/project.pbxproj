@@ -8,22 +8,32 @@
 
 /* Begin PBXBuildFile section */
 		A1 /* FluxNewsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1 /* FluxNewsApp.swift */; };
+		A10 /* FluxNews/ArticleListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B12 /* FluxNews/ArticleListView.swift */; };
+		A11 /* FluxNews/NewsNavigationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B13 /* FluxNews/NewsNavigationView.swift */; };
+		A12 /* FluxNews/DeveloperDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B14 /* FluxNews/DeveloperDiagnosticsView.swift */; };
+		A13 /* FluxNewsTests/NewsreaderPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15 /* FluxNewsTests/NewsreaderPresentationTests.swift */; };
 		A2 /* CoreBootstrapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2 /* CoreBootstrapper.swift */; };
 		A3 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3 /* ContentView.swift */; };
 		A4 /* flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4 /* flux_uniffi.swift */; };
 		A5 /* LegacyStateDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5 /* LegacyStateDiscovery.swift */; };
 		A6 /* FluxNewsTests/LegacyStateDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8 /* FluxNewsTests/LegacyStateDiscoveryTests.swift */; };
-		A7 /* BrowserPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9 /* BrowserPresentation.swift */; };
-		A8 /* ScrolloverPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10 /* ScrolloverPresentation.swift */; };
-		A9 /* NewsreaderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11 /* NewsreaderStore.swift */; };
-		A10 /* ArticleListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B12 /* ArticleListView.swift */; };
-		A11 /* NewsNavigationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B13 /* NewsNavigationView.swift */; };
-		A12 /* DeveloperDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B14 /* DeveloperDiagnosticsView.swift */; };
-		A13 /* NewsreaderPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15 /* NewsreaderPresentationTests.swift */; };
+		A7 /* ../shared/FluxApple/BrowserPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9 /* ../shared/FluxApple/BrowserPresentation.swift */; };
+		A8 /* ../shared/FluxApple/ScrolloverPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10 /* ../shared/FluxApple/ScrolloverPresentation.swift */; };
+		A9 /* FluxNews/NewsreaderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11 /* FluxNews/NewsreaderStore.swift */; };
+		E17F743830471E2D00698DA5 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = E17F743730471E2D00698DA5 /* AppIcon.icon */; };
 		E17F744030471E2D00698DA5 /* FluxUniFFI.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */; };
 		E17F744130471E2D00698DA5 /* FluxUniFFI.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		E17F743830471E2D00698DA5 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = E17F743730471E2D00698DA5 /* AppIcon.icon */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		X1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = PR1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = T1;
+			remoteInfo = FluxNews;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		E17F744230471E2D00698DA5 /* Embed Frameworks */ = {
@@ -39,18 +49,14 @@
 		};
 /* End PBXCopyFilesBuildPhase section */
 
-/* Begin PBXContainerItemProxy section */
-		X1 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = PR1 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = T1;
-			remoteInfo = FluxNews;
-		};
-/* End PBXContainerItemProxy section */
-
 /* Begin PBXFileReference section */
 		B1 /* FluxNewsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsApp.swift; sourceTree = "<group>"; };
+		B10 /* ../shared/FluxApple/ScrolloverPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/ScrolloverPresentation.swift; sourceTree = "<group>"; };
+		B11 /* FluxNews/NewsreaderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/NewsreaderStore.swift; sourceTree = "<group>"; };
+		B12 /* FluxNews/ArticleListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/ArticleListView.swift; sourceTree = "<group>"; };
+		B13 /* FluxNews/NewsNavigationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/NewsNavigationView.swift; sourceTree = "<group>"; };
+		B14 /* FluxNews/DeveloperDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/DeveloperDiagnosticsView.swift; sourceTree = "<group>"; };
+		B15 /* FluxNewsTests/NewsreaderPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/NewsreaderPresentationTests.swift; sourceTree = "<group>"; };
 		B2 /* CoreBootstrapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreBootstrapper.swift; sourceTree = "<group>"; };
 		B3 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		B4 /* flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = flux_uniffi.swift; path = ../Build/Products/FluxUniFFI/Sources/flux_uniffi.swift; sourceTree = "<group>"; };
@@ -58,16 +64,10 @@
 		B6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B7 /* FluxNewsUpgradeTest.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FluxNewsUpgradeTest.entitlements; sourceTree = "<group>"; };
 		B8 /* FluxNewsTests/LegacyStateDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/LegacyStateDiscoveryTests.swift; sourceTree = "<group>"; };
-		B9 /* BrowserPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/BrowserPresentation.swift; sourceTree = "<group>"; };
-		B10 /* ScrolloverPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/ScrolloverPresentation.swift; sourceTree = "<group>"; };
-		B11 /* NewsreaderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/NewsreaderStore.swift; sourceTree = "<group>"; };
-		B12 /* ArticleListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/ArticleListView.swift; sourceTree = "<group>"; };
-		B13 /* NewsNavigationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/NewsNavigationView.swift; sourceTree = "<group>"; };
-		B14 /* DeveloperDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/DeveloperDiagnosticsView.swift; sourceTree = "<group>"; };
-		B15 /* NewsreaderPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/NewsreaderPresentationTests.swift; sourceTree = "<group>"; };
-		E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = FluxUniFFI.xcframework; path = ../Build/Products/FluxUniFFI/FluxUniFFI.xcframework; sourceTree = "<group>"; };
+		B9 /* ../shared/FluxApple/BrowserPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/BrowserPresentation.swift; sourceTree = "<group>"; };
 		E17F743330471C1900698DA5 /* FluxNewsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FluxNewsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E17F743730471E2D00698DA5 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
+		E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = FluxUniFFI.xcframework; path = ../Build/Products/FluxUniFFI/FluxUniFFI.xcframework; sourceTree = "<group>"; };
 		P1 /* FluxNews.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FluxNews.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -89,17 +89,6 @@
 		};
 /* End PBXFrameworksBuildPhase section */
 
-/* Begin PBXResourcesBuildPhase section */
-		E17F743930471E2D00698DA5 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				E17F743830471E2D00698DA5 /* AppIcon.icon in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXResourcesBuildPhase section */
-
 /* Begin PBXGroup section */
 		E17F743230471C1900698DA5 /* Recovered References */ = {
 			isa = PBXGroup;
@@ -115,13 +104,13 @@
 				G2 /* FluxNews */,
 				G3 /* FluxNews */,
 				B4 /* flux_uniffi.swift */,
-				B9 /* BrowserPresentation.swift */,
-				B10 /* ScrolloverPresentation.swift */,
-				B11 /* NewsreaderStore.swift */,
-				B12 /* ArticleListView.swift */,
-				B13 /* NewsNavigationView.swift */,
-				B14 /* DeveloperDiagnosticsView.swift */,
-				B15 /* NewsreaderPresentationTests.swift */,
+				B9 /* ../shared/FluxApple/BrowserPresentation.swift */,
+				B10 /* ../shared/FluxApple/ScrolloverPresentation.swift */,
+				B11 /* FluxNews/NewsreaderStore.swift */,
+				B12 /* FluxNews/ArticleListView.swift */,
+				B13 /* FluxNews/NewsNavigationView.swift */,
+				B14 /* FluxNews/DeveloperDiagnosticsView.swift */,
+				B15 /* FluxNewsTests/NewsreaderPresentationTests.swift */,
 				E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */,
 				E17F743230471C1900698DA5 /* Recovered References */,
 			);
@@ -228,6 +217,17 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		E17F743930471E2D00698DA5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E17F743830471E2D00698DA5 /* AppIcon.icon in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXShellScriptBuildPhase section */
 		S0 /* Prepare Flux UniFFI */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -239,6 +239,8 @@
 				"$(SRCROOT)/../Build/Products/FluxUniFFI/Sources/flux_uniffi.swift",
 			);
 			name = "Prepare Flux UniFFI";
+			outputPaths = (
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
 			shellScript = "set -euo pipefail\npackage=\"${SRCROOT}/../Build/Products/FluxUniFFI\"\nif [[ ! -d \"${package}/FluxUniFFI.xcframework\" ]]; then\n  bash \"${SRCROOT}/../Build/build-uniffi.sh\"\nfi\n";
@@ -255,12 +257,12 @@
 				A3 /* ContentView.swift in Sources */,
 				A4 /* flux_uniffi.swift in Sources */,
 				A5 /* LegacyStateDiscovery.swift in Sources */,
-				A7 /* BrowserPresentation.swift in Sources */,
-				A8 /* ScrolloverPresentation.swift in Sources */,
-				A9 /* NewsreaderStore.swift in Sources */,
-				A10 /* ArticleListView.swift in Sources */,
-				A11 /* NewsNavigationView.swift in Sources */,
-				A12 /* DeveloperDiagnosticsView.swift in Sources */,
+				A7 /* ../shared/FluxApple/BrowserPresentation.swift in Sources */,
+				A8 /* ../shared/FluxApple/ScrolloverPresentation.swift in Sources */,
+				A9 /* FluxNews/NewsreaderStore.swift in Sources */,
+				A10 /* FluxNews/ArticleListView.swift in Sources */,
+				A11 /* FluxNews/NewsNavigationView.swift in Sources */,
+				A12 /* FluxNews/DeveloperDiagnosticsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -269,7 +271,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A6 /* FluxNewsTests/LegacyStateDiscoveryTests.swift in Sources */,
-				A13 /* NewsreaderPresentationTests.swift in Sources */,
+				A13 /* FluxNewsTests/NewsreaderPresentationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -293,8 +295,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_TESTABILITY = YES;
-				FLUX_STORAGE_NAMESPACE = FluxNewsNativeDev;
 				FLUX_DISPLAY_NAME = "FluxNews Dev";
+				FLUX_STORAGE_NAMESPACE = FluxNewsNativeDev;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FluxNews/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -307,6 +309,7 @@
 				SDKROOT = iphoneos;
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64/FluxUniFFI.framework/Headers";
 				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -318,8 +321,8 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
-				FLUX_STORAGE_NAMESPACE = FluxNewsNativeDev;
 				FLUX_DISPLAY_NAME = "FluxNews Dev";
+				FLUX_STORAGE_NAMESPACE = FluxNewsNativeDev;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FluxNews/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -332,6 +335,7 @@
 				SDKROOT = iphoneos;
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64/FluxUniFFI.framework/Headers";
 				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -358,8 +362,8 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
-				FLUX_STORAGE_NAMESPACE = FluxNewsNativeUpgradeTest;
 				FLUX_DISPLAY_NAME = FluxNews;
+				FLUX_STORAGE_NAMESPACE = FluxNewsNativeUpgradeTest;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FluxNews/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
