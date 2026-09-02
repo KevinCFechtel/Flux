@@ -34,7 +34,7 @@ struct ArticleListView: View {
                           ArticlePresentationLayout.usesLandscapeVisual(
                             mode: store.articlePresentationMode,
                             availableWidth: proxy.size.width - horizontalInset * 2) ? 20 : 26
-                        ScrollView {
+                         ScrollView {
                             LazyVStack(spacing: articleSpacing) {
                                 ForEach(store.articles, id: \.id) { article in
                                     ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, store: store)
@@ -43,8 +43,9 @@ struct ArticleListView: View {
                             }
                             .padding(.horizontal, horizontalInset)
                             .padding(.vertical, 12)
-                            .background { GeometryReader { content in Color.clear.preference(key: ArticleOffsetKey.self, value: content.frame(in: .named("ArticleScrollSpace")).minY) } }
-                        }
+                             .background { GeometryReader { content in Color.clear.preference(key: ArticleOffsetKey.self, value: content.frame(in: .named("ArticleScrollSpace")).minY) } }
+                         }
+                         .refreshable { await store.syncManually() }
                         .coordinateSpace(name: "ArticleScrollSpace")
                         .scrollIndicators(.hidden)
                         .onAppear { viewport = CGRect(origin: .zero, size: proxy.size) }
@@ -62,11 +63,12 @@ struct ArticleListView: View {
                             let ids = tracker.process(frames: frames, viewport: viewport, unread: unreadIDs, now: Date.timeIntervalSinceReferenceDate, offsetDelta: delta, userInitiated: true)
                             if !ids.isEmpty { store.flushScrollover(ids) }
                         }
-                        .simultaneousGesture(DragGesture().onChanged { _ in
-                            if !userScrolling { userScrolling = true; store.beginScrolloverUndoBatch() }
-                        }.onEnded { _ in userScrolling = false; store.finishScrolloverUndoBatch() })
+                         .simultaneousGesture(DragGesture().onChanged { _ in
+                             if !userScrolling { userScrolling = true; store.markMeaningfulInteraction(); store.beginScrolloverUndoBatch() }
+                         }.onEnded { _ in userScrolling = false; store.finishScrolloverUndoBatch() })
         .onReceive(timer) { _ in observe() }
-                        .onChange(of: store.markReadOnScrolloverEnabled) { _, enabled in if !enabled { tracker.reset() } }
+                         .onChange(of: store.markReadOnScrolloverEnabled) { _, enabled in if !enabled { tracker.reset() } }
+                         .onChange(of: store.snapshotRevision) { _, _ in tracker.reset(); userScrolling = false }
                     }
                 }
         }
@@ -91,6 +93,10 @@ struct ArticleListView: View {
                 .padding(.vertical, 10)
                 .background(.regularMaterial, in: Capsule())
                 .padding(.bottom, 12)
+            } else if store.newDataAvailable {
+                Button("New articles available") { store.adoptVisibleSnapshot() }
+                    .buttonStyle(.borderedProminent)
+                    .padding(.bottom, 12)
             }
         }
     }

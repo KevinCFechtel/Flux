@@ -89,4 +89,33 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertFalse(store.articles[0].isRead)
         XCTAssertFalse(store.articles[0].isStarred)
     }
+
+    func testAutomaticRefreshPreservesInteractedSnapshotAndSignalsNewData() {
+        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: false, dataChanged: true, hasMeaningfullyInteracted: true), .signalNewData)
+        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: false, dataChanged: true, hasMeaningfullyInteracted: false), .replace)
+        XCTAssertEqual(SnapshotRefreshPolicy.action(manual: false, dataChanged: false, hasMeaningfullyInteracted: true), .preserve)
+    }
+
+    func testPendingNewDataAdoptionIsScopeAware() {
+        var pending = PendingNewData()
+        pending.accumulate([(feedID: 1, count: 2), (feedID: 2, count: 1)])
+        pending.adoptFeeds(in: [1])
+        XCTAssertEqual(pending.byFeed, [2: 1])
+        XCTAssertTrue(pending.hasPending)
+    }
+
+    @MainActor
+    func testAccumulatedNewDataPublishesAdoptionSignal() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.accumulateNewData([(feedID: 10, count: 3)])
+        XCTAssertTrue(store.hasPendingNewData)
+        XCTAssertTrue(store.newDataAvailable)
+        store.resetVisibleSnapshot()
+        XCTAssertEqual(store.articles.count, 0)
+    }
+
+    func testInvalidStartupTargetsFallBackToAllNews() {
+        XCTAssertEqual(StartupScopeResolver.resolve(.category, categoryID: 99, feedID: nil, categoryIDs: [1], feedIDs: []), .all)
+        XCTAssertEqual(StartupScopeResolver.resolve(.feed, categoryID: nil, feedID: 99, categoryIDs: [], feedIDs: [1]), .all)
+    }
 }
