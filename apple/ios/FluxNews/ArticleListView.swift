@@ -86,6 +86,11 @@ final class IOSScrolloverRuntimeAdapter {
         if userScrolling { scheduleProcessing() }
     }
 
+    func observeIdle(now: TimeInterval = Date.timeIntervalSinceReferenceDate) {
+        guard enabled, !userScrolling, !viewport.isEmpty else { return }
+        tracker.observe(frames: frames, viewport: viewport, unread: unread, now: now)
+    }
+
     private func scheduleProcessing() {
         guard !processingScheduled else { return }
         processingScheduled = true
@@ -128,6 +133,93 @@ private struct IOSScrolloverInteractionModifier: ViewModifier {
                     .onEnded { _ in onEnd() }
             )
         }
+    }
+}
+
+enum IOSSwipeDirection: Equatable {
+    case right
+    case left
+}
+
+struct IOSSwipeArbitration: Equatable {
+    enum Axis { case undecided, vertical, horizontal }
+    private(set) var axis: Axis = .undecided
+    private(set) var direction: IOSSwipeDirection?
+
+    mutating func update(translation: CGSize, threshold: CGFloat = 12) {
+        guard axis == .undecided else { return }
+        guard max(abs(translation.width), abs(translation.height)) >= threshold else { return }
+        if abs(translation.width) > abs(translation.height) {
+            axis = .horizontal
+            direction = translation.width >= 0 ? .right : .left
+        } else {
+            axis = .vertical
+        }
+    }
+
+    mutating func reset() { axis = .undecided; direction = nil }
+}
+
+private struct IOSHorizontalSwipeRecognizer: UIViewRepresentable {
+    @Binding var offset: CGFloat
+    let actionWidth: CGFloat
+    let onEnded: (IOSSwipeDirection) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.backgroundColor = .clear
+        let recognizer = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        recognizer.minimumNumberOfTouches = 1
+        recognizer.maximumNumberOfTouches = 1
+        recognizer.delegate = context.coordinator
+        view.addGestureRecognizer(recognizer)
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.parent = self
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var parent: IOSHorizontalSwipeRecognizer
+        private var startOffset: CGFloat = 0
+        private var direction: IOSSwipeDirection?
+        private var arbitration = IOSSwipeArbitration()
+
+        init(_ parent: IOSHorizontalSwipeRecognizer) { self.parent = parent }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
+            let velocity = pan.velocity(in: pan.view)
+            return abs(velocity.x) > abs(velocity.y)
+        }
+
+        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            let translation = recognizer.translation(in: recognizer.view)
+            switch recognizer.state {
+            case .began:
+                startOffset = parent.offset
+                arbitration.reset()
+            case .changed:
+                arbitration.update(translation: CGSize(width: translation.x, height: translation.y))
+                guard arbitration.axis == .horizontal, let lockedDirection = arbitration.direction else { return }
+                direction = lockedDirection
+                let horizontalTranslation = lockedDirection == .right ? max(0, translation.x) : min(0, translation.x)
+                let proposed = startOffset + horizontalTranslation
+                parent.offset = min(parent.actionWidth, max(-parent.actionWidth, proposed))
+            case .ended, .cancelled, .failed:
+                guard let direction else { reset(); return }
+                let shouldReveal = abs(parent.offset) >= parent.actionWidth * 0.5
+                parent.offset = shouldReveal ? (direction == .right ? parent.actionWidth : -parent.actionWidth) : 0
+                if shouldReveal { parent.onEnded(direction) }
+                reset()
+            default: break
+            }
+        }
+
+        private func reset() { startOffset = 0; direction = nil; arbitration.reset() }
     }
 }
 
@@ -190,7 +282,7 @@ struct ArticleListView: View {
                                scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
                                scrolloverAdapter.receiveOffset(newOffset, unread: unreadIDs)
                            }))
-         .onReceive(timer) { _ in observe() }
+         .onReceive(timer) { _ in scrolloverAdapter.observeIdle() }
                           .onChange(of: store.markReadOnScrolloverEnabled) { _, enabled in scrolloverAdapter.updateEnabled(enabled) }
                           .onChange(of: store.snapshotRevision) { _, _ in scrolloverAdapter.reset() }
                     }
@@ -226,9 +318,6 @@ struct ArticleListView: View {
     }
 
     private var unreadIDs: Set<Int64> { Set(store.articles.filter { !$0.isRead }.map(\.id)) }
-    private func observe() {
-        scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
-    }
 }
 
 private struct ArticlePresentationView: View {
@@ -238,12 +327,11 @@ private struct ArticlePresentationView: View {
     let availableWidth: CGFloat
     @ObservedObject var store: NewsreaderStore
     @State private var horizontalOffset: CGFloat = 0
-    @State private var dragStartOffset: CGFloat = 0
 
     private let actionWidth: CGFloat = 76
 
     var body: some View {
-        ZStack(alignment: .trailing) {
+        ZStack(alignment: .leading) {
             HStack(spacing: 0) {
                 Button { store.setRead(article, read: !article.isRead); closeActions() } label: {
                     VStack(spacing: 4) {
@@ -252,7 +340,10 @@ private struct ArticlePresentationView: View {
                     }
                 }
                 .frame(width: actionWidth)
-                .tint(.blue)
+                .foregroundStyle(.white)
+                .frame(maxHeight: .infinity)
+                .background(Color.accentColor)
+                Spacer(minLength: 0)
                 Button { store.setStarred(article, starred: !article.isStarred); closeActions() } label: {
                     VStack(spacing: 4) {
                         Image(systemName: article.isStarred ? "star.slash" : "star")
@@ -260,42 +351,36 @@ private struct ArticlePresentationView: View {
                     }
                 }
                 .frame(width: actionWidth)
-                .tint(.yellow)
+                .foregroundStyle(.white)
+                .frame(maxHeight: .infinity)
+                .background(Color.orange)
             }
-             Group {
-                 switch mode {
-                 case .visual: visual
-                 case .compact: compact
-                 }
-             }
-             .contentShape(RoundedRectangle(cornerRadius: 16))
-             .frame(width: articleWidth, alignment: .leading)
-             .background(Color(uiColor: .systemGroupedBackground))
+            Group {
+                switch mode {
+                case .visual: visual
+                case .compact: compact
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 16))
+            .frame(width: articleWidth, alignment: .leading)
+            .background(Color(uiColor: .systemGroupedBackground))
             .offset(x: horizontalOffset)
-            .simultaneousGesture(horizontalSwipe)
+            .background {
+                IOSHorizontalSwipeRecognizer(offset: $horizontalOffset, actionWidth: actionWidth) { direction in
+                    switch direction {
+                    case .right: store.setRead(article, read: !article.isRead)
+                    case .left: store.setStarred(article, starred: !article.isStarred)
+                    }
+                }
+            }
         }
         .frame(width: articleWidth, alignment: .leading)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint("Article opening will be added in a later release.")
     }
 
-    private var horizontalSwipe: some Gesture {
-        DragGesture(minimumDistance: 12)
-            .onChanged { value in
-                guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                if dragStartOffset == 0 { dragStartOffset = horizontalOffset }
-                horizontalOffset = min(0, max(-actionWidth * 2, dragStartOffset + value.translation.width))
-            }
-            .onEnded { value in
-                guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                horizontalOffset = value.translation.width < -40 ? -actionWidth * 2 : 0
-                dragStartOffset = 0
-            }
-    }
-
     private func closeActions() {
         horizontalOffset = 0
-        dragStartOffset = 0
     }
 
     @ViewBuilder

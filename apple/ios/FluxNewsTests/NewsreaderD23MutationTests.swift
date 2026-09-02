@@ -60,6 +60,30 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertTrue(tracker.process(frames: [1: CGRect(x: 0, y: 120, width: 100, height: 100)], viewport: viewport, unread: [1], now: 2, offsetDelta: -40, userInitiated: true).isEmpty)
     }
 
+    func testScrolloverQualificationRequiresTheIdleDuration() {
+        var tracker = ScrolloverExposureTracker()
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let visible: [Int64: CGRect] = [1: CGRect(x: 0, y: 0, width: 100, height: 100)]
+        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0)
+        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0.6)
+        XCTAssertTrue(tracker.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100)], viewport: viewport, unread: [1], now: 0.6, offsetDelta: 40, userInitiated: true).isEmpty)
+
+        tracker = ScrolloverExposureTracker()
+        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0)
+        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0.6)
+        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0.8)
+        XCTAssertEqual(tracker.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100)], viewport: viewport, unread: [1], now: 0.8, offsetDelta: 40, userInitiated: true), [1])
+    }
+
+    func testScrolloverQualificationResetsBelowVisibilityThreshold() {
+        var tracker = ScrolloverExposureTracker()
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        tracker.observe(frames: [1: CGRect(x: 0, y: 0, width: 100, height: 100)], viewport: viewport, unread: [1], now: 0)
+        tracker.observe(frames: [1: CGRect(x: 0, y: 80, width: 100, height: 100)], viewport: viewport, unread: [1], now: 0.6)
+        tracker.observe(frames: [1: CGRect(x: 0, y: 0, width: 100, height: 100)], viewport: viewport, unread: [1], now: 1.0)
+        XCTAssertTrue(tracker.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100)], viewport: viewport, unread: [1], now: 1.0, offsetDelta: 40, userInitiated: true).isEmpty)
+    }
+
     func testRuntimeFrameProcessorProducesCandidateAfterIdleQualification() {
         var tracker = ScrolloverExposureTracker()
         let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
@@ -96,6 +120,26 @@ final class NewsreaderD23MutationTests: XCTestCase {
         adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
         try await Task.sleep(for: .milliseconds(50))
         XCTAssertEqual(candidates, [1])
+    }
+
+    func testSwipeArbitrationLocksVerticalInput() {
+        var arbitration = IOSSwipeArbitration()
+        arbitration.update(translation: CGSize(width: 4, height: 20))
+        arbitration.update(translation: CGSize(width: 40, height: 20))
+        XCTAssertEqual(arbitration.axis, .vertical)
+        XCTAssertNil(arbitration.direction)
+    }
+
+    func testSwipeArbitrationLocksHorizontalDirection() {
+        var right = IOSSwipeArbitration()
+        right.update(translation: CGSize(width: 20, height: 4))
+        right.update(translation: CGSize(width: -40, height: 4))
+        XCTAssertEqual(right.axis, .horizontal)
+        XCTAssertEqual(right.direction, .right)
+
+        var left = IOSSwipeArbitration()
+        left.update(translation: CGSize(width: -20, height: 4))
+        XCTAssertEqual(left.direction, .left)
     }
 
     func testScrolloverIDsAreDeduplicatedAndUndoRequiresTwo() {
