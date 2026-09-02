@@ -1,11 +1,21 @@
 import SwiftUI
+import UIKit
+
+enum NewsNavigationLayout {
+    static func usesSplitView(for idiom: UIUserInterfaceIdiom) -> Bool {
+        idiom == .pad
+    }
+}
 
 struct ContentView: View {
     @ObservedObject var bootstrapper: CoreBootstrapper
     @ObservedObject var newsreaderStore: NewsreaderStore
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var navigationPresented = false
     @State private var diagnosticsPresented = false
+
+    private var usesSplitNavigation: Bool {
+        NewsNavigationLayout.usesSplitView(for: UIDevice.current.userInterfaceIdiom)
+    }
 
     var body: some View {
         Group {
@@ -20,7 +30,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private var newsreader: some View {
-        if horizontalSizeClass == .regular {
+        if usesSplitNavigation {
             NavigationSplitView {
                 NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented)
             } detail: {
@@ -62,7 +72,7 @@ struct ContentView: View {
             .navigationTitle(scopeTitle)
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                if horizontalSizeClass == .regular {
+                if usesSplitNavigation {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             Task { await newsreaderStore.syncManually() }

@@ -2,6 +2,11 @@ import XCTest
 @testable import FluxNews
 
 final class NewsreaderPresentationTests: XCTestCase {
+    func testNewsNavigationUsesSplitViewOnlyOnIPad() {
+        XCTAssertFalse(NewsNavigationLayout.usesSplitView(for: .phone))
+        XCTAssertTrue(NewsNavigationLayout.usesSplitView(for: .pad))
+    }
+
     func testArticlePresentationModesAreStableAndVisualIsFirst() {
         XCTAssertEqual(ArticlePresentationMode.allCases, [.visual, .compact])
         XCTAssertEqual(ArticlePresentationMode(rawValue: "visual"), .visual)
