@@ -80,6 +80,24 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertTrue(IOSScrolloverFrameProcessor.process(frames: frames, viewport: viewport, unread: [1], offset: -100, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: true, userInitiated: true).isEmpty)
     }
 
+    @MainActor
+    func testRuntimeAdapterCoalescesSeparateFrameAndOffsetUpdates() async throws {
+        let adapter = IOSScrolloverRuntimeAdapter()
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let unread: Set<Int64> = [1]
+        var candidates: [Int64] = []
+        adapter.onCandidate = { candidates = $0 }
+        adapter.updateViewport(viewport)
+        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
+        try await Task.sleep(for: .milliseconds(750))
+        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
+        adapter.beginUserScroll()
+        adapter.receiveOffset(-50, unread: unread)
+        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(candidates, [1])
+    }
+
     func testScrolloverIDsAreDeduplicatedAndUndoRequiresTwo() {
         var batch = ScrolloverUndoBatch()
         batch.beginScroll()

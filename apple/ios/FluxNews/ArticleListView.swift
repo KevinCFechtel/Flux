@@ -28,14 +28,112 @@ enum IOSScrolloverFrameProcessor {
     }
 }
 
+@MainActor
+final class IOSScrolloverRuntimeAdapter {
+    var onCandidate: ([Int64]) -> Void = { _ in }
+
+    private var frames: [Int64: CGRect] = [:]
+    private var viewport = CGRect.zero
+    private var offset: CGFloat = 0
+    private var lastProcessedOffset: CGFloat = 0
+    private var unread = Set<Int64>()
+    private var enabled = true
+    private var userScrolling = false
+    private var tracker = ScrolloverExposureTracker()
+    private var processingScheduled = false
+
+    func updateViewport(_ viewport: CGRect) {
+        guard self.viewport != viewport else { return }
+        self.viewport = viewport
+        tracker.reset()
+    }
+
+    func updateEnabled(_ enabled: Bool) {
+        self.enabled = enabled
+        if !enabled { tracker.reset() }
+    }
+
+    func beginUserScroll() {
+        guard !userScrolling else { return }
+        userScrolling = true
+        lastProcessedOffset = offset
+    }
+
+    func endUserScroll() {
+        userScrolling = false
+    }
+
+    func reset() {
+        tracker.reset()
+        userScrolling = false
+        processingScheduled = false
+    }
+
+    func receiveFrames(_ frames: [Int64: CGRect], unread: Set<Int64>) {
+        self.frames = frames
+        self.unread = unread
+        if userScrolling {
+            scheduleProcessing()
+        } else if enabled && !viewport.isEmpty {
+            tracker.rebase(frames: frames, unread: unread)
+            tracker.observe(frames: frames, viewport: viewport, unread: unread, now: Date.timeIntervalSinceReferenceDate)
+        }
+    }
+
+    func receiveOffset(_ offset: CGFloat, unread: Set<Int64>) {
+        self.offset = offset
+        self.unread = unread
+        if userScrolling { scheduleProcessing() }
+    }
+
+    private func scheduleProcessing() {
+        guard !processingScheduled else { return }
+        processingScheduled = true
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self else { return }
+            processingScheduled = false
+            guard userScrolling else { return }
+            let ids = IOSScrolloverFrameProcessor.process(frames: frames, viewport: viewport, unread: unread, offset: offset, lastProcessedOffset: &lastProcessedOffset, tracker: &tracker, enabled: enabled, userInitiated: true)
+            if !ids.isEmpty { onCandidate(ids) }
+        }
+    }
+}
+
+private struct IOSScrolloverInteractionModifier: ViewModifier {
+    let onBegin: () -> Void
+    let onEnd: () -> Void
+    let onOffset: (CGFloat) -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content
+                .onScrollPhaseChange { _, phase in
+                    switch phase {
+                    case .interacting: onBegin()
+                    case .idle: onEnd()
+                    default: break
+                    }
+                }
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.contentOffset.y
+                } action: { _, newOffset in
+                    onOffset(newOffset)
+                }
+        } else {
+            content.simultaneousGesture(
+                DragGesture()
+                    .onChanged { _ in onBegin() }
+                    .onEnded { _ in onEnd() }
+            )
+        }
+    }
+}
+
 struct ArticleListView: View {
     @ObservedObject var store: NewsreaderStore
-    @State private var tracker = ScrolloverExposureTracker()
-    @State private var frames: [Int64: CGRect] = [:]
-    @State private var viewport = CGRect.zero
-    @State private var offset: CGFloat = 0
-    @State private var userScrolling = false
-    @State private var lastProcessedOffset: CGFloat = 0
+    @State private var scrolloverAdapter = IOSScrolloverRuntimeAdapter()
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -68,29 +166,33 @@ struct ArticleListView: View {
                          .refreshable { await store.syncManually() }
                         .coordinateSpace(name: "ArticleScrollSpace")
                         .scrollIndicators(.hidden)
-                        .onAppear { viewport = CGRect(origin: .zero, size: proxy.size) }
-                        .onChange(of: proxy.size) { _, size in viewport = CGRect(origin: .zero, size: size); tracker.reset() }
-                         .onPreferenceChange(ArticleFrameKey.self) { values in
-                             frames = values
-                             if userScrolling {
-                                 let ids = IOSScrolloverFrameProcessor.process(frames: values, viewport: viewport, unread: unreadIDs, offset: offset, lastProcessedOffset: &lastProcessedOffset, tracker: &tracker, enabled: store.markReadOnScrolloverEnabled, userInitiated: true)
-                                 if !ids.isEmpty { store.flushScrollover(ids) }
-                             } else {
-                                 tracker.rebase(frames: values, unread: unreadIDs)
-                                 observe()
-                             }
-                        }
-                         .onPreferenceChange(ArticleOffsetKey.self) { newOffset in
-                             offset = newOffset
-                             guard userScrolling else { return }
-                             guard IOSScrolloverProcessingGate.shouldProcess(enabled: store.markReadOnScrolloverEnabled) else { tracker.reset(); return }
-                        }
-                         .simultaneousGesture(DragGesture().onChanged { _ in
-                             if !userScrolling { userScrolling = true; lastProcessedOffset = offset; store.markMeaningfulInteraction(); store.beginScrolloverUndoBatch() }
-                         }.onEnded { _ in userScrolling = false; store.finishScrolloverUndoBatch() })
-        .onReceive(timer) { _ in observe() }
-                         .onChange(of: store.markReadOnScrolloverEnabled) { _, enabled in if !enabled { tracker.reset() } }
-                         .onChange(of: store.snapshotRevision) { _, _ in tracker.reset(); userScrolling = false }
+                         .onAppear {
+                             scrolloverAdapter.updateViewport(CGRect(origin: .zero, size: proxy.size))
+                             scrolloverAdapter.onCandidate = { ids in store.flushScrollover(ids) }
+                         }
+                         .onChange(of: proxy.size) { _, size in scrolloverAdapter.updateViewport(CGRect(origin: .zero, size: size)) }
+                           .onPreferenceChange(ArticleFrameKey.self) { values in
+                               scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
+                               scrolloverAdapter.receiveFrames(values, unread: unreadIDs)
+                         }
+                           .onPreferenceChange(ArticleOffsetKey.self) { newOffset in
+                               scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
+                               scrolloverAdapter.receiveOffset(newOffset, unread: unreadIDs)
+                         }
+                           .modifier(IOSScrolloverInteractionModifier(onBegin: {
+                               scrolloverAdapter.beginUserScroll()
+                               store.markMeaningfulInteraction()
+                               store.beginScrolloverUndoBatch()
+                           }, onEnd: {
+                               scrolloverAdapter.endUserScroll()
+                               store.finishScrolloverUndoBatch()
+                           }, onOffset: { newOffset in
+                               scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
+                               scrolloverAdapter.receiveOffset(newOffset, unread: unreadIDs)
+                           }))
+         .onReceive(timer) { _ in observe() }
+                          .onChange(of: store.markReadOnScrolloverEnabled) { _, enabled in scrolloverAdapter.updateEnabled(enabled) }
+                          .onChange(of: store.snapshotRevision) { _, _ in scrolloverAdapter.reset() }
                     }
                 }
         }
@@ -125,9 +227,7 @@ struct ArticleListView: View {
 
     private var unreadIDs: Set<Int64> { Set(store.articles.filter { !$0.isRead }.map(\.id)) }
     private func observe() {
-        guard IOSScrolloverProcessingGate.shouldProcess(enabled: store.markReadOnScrolloverEnabled) else { tracker.reset(); return }
-        guard !userScrolling, !viewport.isEmpty else { return }
-        tracker.observe(frames: frames, viewport: viewport, unread: unreadIDs, now: Date.timeIntervalSinceReferenceDate)
+        scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
     }
 }
 
@@ -162,18 +262,15 @@ private struct ArticlePresentationView: View {
                 .frame(width: actionWidth)
                 .tint(.yellow)
             }
-            Button(action: {}) {
-                Group {
-                    switch mode {
-                    case .visual: visual
-                    case .compact: compact
-                    }
-                }
-                .contentShape(RoundedRectangle(cornerRadius: 16))
-                .frame(width: articleWidth, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-            .background(Color(uiColor: .systemGroupedBackground))
+             Group {
+                 switch mode {
+                 case .visual: visual
+                 case .compact: compact
+                 }
+             }
+             .contentShape(RoundedRectangle(cornerRadius: 16))
+             .frame(width: articleWidth, alignment: .leading)
+             .background(Color(uiColor: .systemGroupedBackground))
             .offset(x: horizontalOffset)
             .simultaneousGesture(horizontalSwipe)
         }
