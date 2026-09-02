@@ -30,6 +30,19 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(ArticlePresentationMode.compact.showsArticleImage)
     }
 
+    func testArticlePresentationLayoutUsesBoundedDeterministicImageSlots() {
+        let availableWidth: CGFloat = 390
+        let contentWidth = ArticlePresentationLayout.articleContentWidth(availableWidth)
+
+        XCTAssertEqual(ArticlePresentationLayout.boundedArticleWidth(availableWidth), availableWidth)
+        XCTAssertEqual(contentWidth, 366)
+        XCTAssertEqual(ArticlePresentationLayout.portraitImageHeight(contentWidth: contentWidth), 205.875, accuracy: 0.01)
+        XCTAssertEqual(ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth), 131.76, accuracy: 0.01)
+        XCTAssertEqual(ArticlePresentationLayout.landscapeImageHeight(imageWidth: 131.76), 98.82, accuracy: 0.01)
+        XCTAssertEqual(ArticlePresentationLayout.boundedArticleWidth(availableWidth + 100), availableWidth + 100)
+        XCTAssertEqual(ArticlePresentationLayout.boundedArticleWidth(-1), 0)
+    }
+
     func testNavigationGroupsNestFeedsUnderCategoriesAndKeepOrphansVisible() {
         let categories = [NavigationPresentationCategory(id: 1, title: "Tech"), NavigationPresentationCategory(id: 2, title: "World")]
         let feeds = [

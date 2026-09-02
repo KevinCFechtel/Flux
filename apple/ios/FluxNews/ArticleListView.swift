@@ -59,6 +59,7 @@ private struct ArticlePresentationView: View {
                 }
             }
             .contentShape(RoundedRectangle(cornerRadius: 16))
+            .frame(width: articleWidth, alignment: .leading)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
@@ -84,20 +85,22 @@ private struct ArticlePresentationView: View {
                         placeholder
                     }
                 }
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .frame(maxWidth: .infinity)
+                .frame(width: contentWidth, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: contentWidth))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .clipped()
                 .accessibilityHidden(true)
             }
             articleText
+                .frame(width: contentWidth, alignment: .leading)
         }
+        .frame(width: contentWidth, alignment: .leading)
         .padding(12)
         .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var landscapeVisual: some View {
         HStack(alignment: .top, spacing: 14) {
+            let imageWidth = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
             if let imageURL = article.imageUrl.flatMap(URL.init(string:)) {
                 AsyncImage(url: imageURL) { phase in
                     if case let .success(image) = phase {
@@ -106,13 +109,15 @@ private struct ArticlePresentationView: View {
                         placeholder
                     }
                 }
-                .frame(width: min(260, availableWidth * 0.36))
-                .aspectRatio(4 / 3, contentMode: .fit)
+                .frame(width: imageWidth, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: imageWidth))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipped()
                 .accessibilityHidden(true)
             }
             articleText
+                .frame(width: hasImage ? max(0, contentWidth - imageWidth - 14) : contentWidth, alignment: .leading)
         }
+        .frame(width: contentWidth, alignment: .leading)
         .padding(12)
         .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
@@ -121,8 +126,21 @@ private struct ArticlePresentationView: View {
         HStack(alignment: .top, spacing: 12) {
             articleText
         }
+        .frame(width: contentWidth, alignment: .leading)
         .padding(.vertical, 12)
         .padding(.horizontal, 4)
+    }
+
+    private var articleWidth: CGFloat {
+        ArticlePresentationLayout.boundedArticleWidth(availableWidth)
+    }
+
+    private var contentWidth: CGFloat {
+        ArticlePresentationLayout.articleContentWidth(articleWidth)
+    }
+
+    private var hasImage: Bool {
+        article.imageUrl.flatMap(URL.init(string:)) != nil
     }
 
     private var articleText: some View {
@@ -149,8 +167,12 @@ private struct ArticlePresentationView: View {
                 FeedIconView(feedID: article.feedId, title: article.feedTitle, store: store)
                 Text(article.feedTitle)
                     .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Text("•")
                 Text(date)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
             .foregroundStyle(.secondary)
             .font(.caption)
