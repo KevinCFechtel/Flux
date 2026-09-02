@@ -50,6 +50,7 @@ final class NewsreaderStore: ObservableObject {
     private var scrolloverOriginalOrder: [Int64: Int] = [:]
     private var scrolloverCountsPending = false
     private var scrolloverBatchActive = false
+    private var scrolloverMutationsInFlight = 0
 
     init(defaults: UserDefaults = .standard) {
         startupScope = defaults.string(forKey: Key.startupScope).flatMap(StartupScopePreference.init(rawValue:)) ?? .allNews
@@ -159,7 +160,7 @@ final class NewsreaderStore: ObservableObject {
             let result = await Task.detached { Result { try core.setReadStateBulk(articleIds: articleIDs, read: read) } }.value
             guard let self else { return }
             switch result {
-            case .success: updateVisibleRead(articleIDs, read: read); reloadCounts()
+            case .success: updateVisibleRead(articleIDs, read: read); reloadCounts(includeNavigationCounts: true)
             case let .failure(error): errorMessage = error.localizedDescription
             }
         }
@@ -171,7 +172,10 @@ final class NewsreaderStore: ObservableObject {
             let result = await Task.detached { Result { try core.setStarredStateBulk(articleIds: articleIDs, starred: starred) } }.value
             guard let self else { return }
             switch result {
-            case .success: updateVisible(articleIDs) { $0.isStarred = starred }; reloadCounts()
+            case .success:
+                if !starred && scope == .starred { articles.removeAll { articleIDs.contains($0.id) } }
+                else { updateVisible(articleIDs) { $0.isStarred = starred } }
+                reloadCounts(includeNavigationCounts: true)
             case let .failure(error): errorMessage = error.localizedDescription
             }
         }
@@ -186,16 +190,17 @@ final class NewsreaderStore: ObservableObject {
 
     func flushScrollover(_ ids: [Int64]) {
         guard let core, !ids.isEmpty else { return }
+        scrolloverMutationsInFlight += 1
         Task { [weak self, core] in
             let result = await Task.detached { Result { try core.setReadStateBulk(articleIds: ids, read: true) } }.value
             guard let self else { return }
             switch result {
             case .success:
-                let unique = ids.filter { !self.scrolloverUndoIDs.contains($0) }
+                var seen = Set(self.scrolloverUndoIDs)
+                let unique = ids.filter { seen.insert($0).inserted }
                 scrolloverUndoIDs.append(contentsOf: unique)
                 updateVisibleRead(unique, read: true, retainingForScrolloverUndo: true)
                 scrolloverCountsPending = true
-                if !scrolloverBatchActive { scrolloverCountsPending = false; reloadCounts() }
                 scrolloverUndoVisible = scrolloverUndoIDs.count >= 2
                 scrolloverUndoTask?.cancel()
                 scrolloverUndoTask = Task { [weak self] in
@@ -205,12 +210,17 @@ final class NewsreaderStore: ObservableObject {
                 }
             case let .failure(error): errorMessage = error.localizedDescription
             }
+            scrolloverMutationsInFlight -= 1
+            if !scrolloverBatchActive && scrolloverMutationsInFlight == 0 && scrolloverCountsPending {
+                scrolloverCountsPending = false
+                reloadCounts(includeNavigationCounts: true)
+            }
         }
     }
 
     func finishScrolloverUndoBatch() {
         scrolloverBatchActive = false
-        if scrolloverCountsPending { scrolloverCountsPending = false; reloadCounts() }
+        if scrolloverMutationsInFlight == 0 && scrolloverCountsPending { scrolloverCountsPending = false; reloadCounts(includeNavigationCounts: true) }
     }
 
     func undoScrollover() {
@@ -222,7 +232,7 @@ final class NewsreaderStore: ObservableObject {
             switch result {
             case .success:
                 updateVisibleRead(ids, read: false); restoreScrolloverRemovedArticles()
-                scrolloverUndoIDs = []; scrolloverUndoVisible = false; scrolloverUndoTask?.cancel(); reloadCounts()
+                scrolloverUndoIDs = []; scrolloverUndoVisible = false; scrolloverUndoTask?.cancel(); reloadCounts(includeNavigationCounts: true)
             case let .failure(error): errorMessage = error.localizedDescription
             }
         }
@@ -263,19 +273,44 @@ final class NewsreaderStore: ObservableObject {
         for index in articles.indices where ids.contains(articles[index].id) { change(&articles[index]) }
     }
 
-    private func reloadCounts() {
+    // Narrow seam for deterministic iOS mutation-state tests without a live Core.
+    @MainActor
+    func setArticlesForTesting(_ value: [ArticleSummary]) { articles = value }
+    @MainActor
+    func applyReadMutationForTesting(_ ids: [Int64], read: Bool, retainingForScrolloverUndo: Bool = false) { updateVisibleRead(ids, read: read, retainingForScrolloverUndo: retainingForScrolloverUndo) }
+    @MainActor
+    func applyStarredMutationForTesting(_ ids: [Int64], starred: Bool) {
+        if !starred && scope == .starred { articles.removeAll { ids.contains($0.id) } }
+        else { updateVisible(ids) { $0.isStarred = starred } }
+    }
+    @MainActor
+    func restoreScrolloverRemovedArticlesForTesting() { restoreScrolloverRemovedArticles() }
+
+    private func reloadCounts(includeNavigationCounts: Bool = false) {
         guard let core else { return }
         let selectionQuery = query()
+        let categoryQueries = includeNavigationCounts ? catalog.categories.map { (id: $0.id, query: query(scope: .category($0.id))) } : []
+        let feedQueries = includeNavigationCounts ? catalog.feeds.map { (id: $0.id, query: query(scope: .feed($0.id))) } : []
         Task { [weak self, core] in
             let result = await Task.detached {
                 Result {
-                    (try core.countArticles(query: selectionQuery),
-                     try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil)),
-                     try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .all, starredFilter: .starred, sort: .newestFirst, limit: 0, cursor: nil)))
+                    let selection = try core.countArticles(query: selectionQuery)
+                    let unread = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil))
+                    let starred = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .all, starredFilter: .starred, sort: .newestFirst, limit: 0, cursor: nil))
+                    var categories: [Int64: UInt64] = [:]
+                    var feeds: [Int64: UInt64] = [:]
+                    for item in categoryQueries { categories[item.id] = try core.countArticles(query: item.query) }
+                    for item in feedQueries { feeds[item.id] = try core.countArticles(query: item.query) }
+                    return (selection, unread, starred, categories, feeds)
                 }
             }.value
             guard let self else { return }
-            switch result { case let .success(counts): selectionTotal = counts.0; unreadTotal = counts.1; starredTotal = counts.2; case let .failure(error): errorMessage = error.localizedDescription }
+            switch result {
+            case let .success(counts):
+                selectionTotal = counts.0; unreadTotal = counts.1; starredTotal = counts.2
+                if includeNavigationCounts { categoryCounts = counts.3; feedCounts = counts.4 }
+            case let .failure(error): errorMessage = error.localizedDescription
+            }
         }
     }
 }

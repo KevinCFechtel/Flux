@@ -1,6 +1,14 @@
 import SwiftUI
 import UIKit
 
+enum IOSScrolloverDirection {
+    static func offsetDelta(contentMinYDelta: CGFloat) -> CGFloat { -contentMinYDelta }
+}
+
+enum IOSScrolloverProcessingGate {
+    static func shouldProcess(enabled: Bool) -> Bool { enabled }
+}
+
 struct ArticleListView: View {
     @ObservedObject var store: NewsreaderStore
     @State private var tracker = ScrolloverExposureTracker()
@@ -47,16 +55,18 @@ struct ArticleListView: View {
                             observe()
                         }
                         .onPreferenceChange(ArticleOffsetKey.self) { newOffset in
-                            let delta = newOffset - offset
+                            let delta = IOSScrolloverDirection.offsetDelta(contentMinYDelta: newOffset - offset)
                             offset = newOffset
                             guard userScrolling else { return }
+                            guard IOSScrolloverProcessingGate.shouldProcess(enabled: store.markReadOnScrolloverEnabled) else { tracker.reset(); return }
                             let ids = tracker.process(frames: frames, viewport: viewport, unread: unreadIDs, now: Date.timeIntervalSinceReferenceDate, offsetDelta: delta, userInitiated: true)
                             if !ids.isEmpty { store.flushScrollover(ids) }
                         }
                         .simultaneousGesture(DragGesture().onChanged { _ in
                             if !userScrolling { userScrolling = true; store.beginScrolloverUndoBatch() }
                         }.onEnded { _ in userScrolling = false; store.finishScrolloverUndoBatch() })
-                        .onReceive(timer) { _ in observe() }
+        .onReceive(timer) { _ in observe() }
+                        .onChange(of: store.markReadOnScrolloverEnabled) { _, enabled in if !enabled { tracker.reset() } }
                     }
                 }
         }
@@ -69,11 +79,26 @@ struct ArticleListView: View {
                     .padding(.top, 8)
             }
         }
+        .overlay(alignment: .bottom) {
+            if store.scrolloverUndoVisible {
+                HStack(spacing: 10) {
+                    Text("\(store.scrolloverUndoIDs.count) articles marked as read")
+                    Button("Undo") { store.undoScrollover() }
+                        .buttonStyle(.borderless)
+                }
+                .font(.callout)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.regularMaterial, in: Capsule())
+                .padding(.bottom, 12)
+            }
+        }
     }
 
     private var unreadIDs: Set<Int64> { Set(store.articles.filter { !$0.isRead }.map(\.id)) }
     private func observe() {
-        guard !userScrolling, store.markReadOnScrolloverEnabled, !viewport.isEmpty else { return }
+        guard IOSScrolloverProcessingGate.shouldProcess(enabled: store.markReadOnScrolloverEnabled) else { tracker.reset(); return }
+        guard !userScrolling, !viewport.isEmpty else { return }
         tracker.observe(frames: frames, viewport: viewport, unread: unreadIDs, now: Date.timeIntervalSinceReferenceDate)
     }
 }
