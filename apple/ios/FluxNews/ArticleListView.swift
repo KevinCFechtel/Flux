@@ -9,6 +9,25 @@ enum IOSScrolloverProcessingGate {
     static func shouldProcess(enabled: Bool) -> Bool { enabled }
 }
 
+enum IOSScrolloverFrameProcessor {
+    static func process(
+        frames: [Int64: CGRect],
+        viewport: CGRect,
+        unread: Set<Int64>,
+        offset: CGFloat,
+        lastProcessedOffset: inout CGFloat,
+        tracker: inout ScrolloverExposureTracker,
+        enabled: Bool,
+        userInitiated: Bool
+    ) -> [Int64] {
+        guard enabled, userInitiated else { return [] }
+        let delta = IOSScrolloverDirection.offsetDelta(contentMinYDelta: offset - lastProcessedOffset)
+        guard abs(delta) > 0.5 else { return [] }
+        lastProcessedOffset = offset
+        return tracker.process(frames: frames, viewport: viewport, unread: unread, now: Date.timeIntervalSinceReferenceDate, offsetDelta: delta, userInitiated: true)
+    }
+}
+
 struct ArticleListView: View {
     @ObservedObject var store: NewsreaderStore
     @State private var tracker = ScrolloverExposureTracker()
@@ -16,6 +35,7 @@ struct ArticleListView: View {
     @State private var viewport = CGRect.zero
     @State private var offset: CGFloat = 0
     @State private var userScrolling = false
+    @State private var lastProcessedOffset: CGFloat = 0
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -50,21 +70,23 @@ struct ArticleListView: View {
                         .scrollIndicators(.hidden)
                         .onAppear { viewport = CGRect(origin: .zero, size: proxy.size) }
                         .onChange(of: proxy.size) { _, size in viewport = CGRect(origin: .zero, size: size); tracker.reset() }
-                        .onPreferenceChange(ArticleFrameKey.self) { values in
-                            frames = values
-                            if !userScrolling { tracker.rebase(frames: values, unread: unreadIDs) }
-                            observe()
+                         .onPreferenceChange(ArticleFrameKey.self) { values in
+                             frames = values
+                             if userScrolling {
+                                 let ids = IOSScrolloverFrameProcessor.process(frames: values, viewport: viewport, unread: unreadIDs, offset: offset, lastProcessedOffset: &lastProcessedOffset, tracker: &tracker, enabled: store.markReadOnScrolloverEnabled, userInitiated: true)
+                                 if !ids.isEmpty { store.flushScrollover(ids) }
+                             } else {
+                                 tracker.rebase(frames: values, unread: unreadIDs)
+                                 observe()
+                             }
                         }
-                        .onPreferenceChange(ArticleOffsetKey.self) { newOffset in
-                            let delta = IOSScrolloverDirection.offsetDelta(contentMinYDelta: newOffset - offset)
-                            offset = newOffset
-                            guard userScrolling else { return }
-                            guard IOSScrolloverProcessingGate.shouldProcess(enabled: store.markReadOnScrolloverEnabled) else { tracker.reset(); return }
-                            let ids = tracker.process(frames: frames, viewport: viewport, unread: unreadIDs, now: Date.timeIntervalSinceReferenceDate, offsetDelta: delta, userInitiated: true)
-                            if !ids.isEmpty { store.flushScrollover(ids) }
+                         .onPreferenceChange(ArticleOffsetKey.self) { newOffset in
+                             offset = newOffset
+                             guard userScrolling else { return }
+                             guard IOSScrolloverProcessingGate.shouldProcess(enabled: store.markReadOnScrolloverEnabled) else { tracker.reset(); return }
                         }
                          .simultaneousGesture(DragGesture().onChanged { _ in
-                             if !userScrolling { userScrolling = true; store.markMeaningfulInteraction(); store.beginScrolloverUndoBatch() }
+                             if !userScrolling { userScrolling = true; lastProcessedOffset = offset; store.markMeaningfulInteraction(); store.beginScrolloverUndoBatch() }
                          }.onEnded { _ in userScrolling = false; store.finishScrolloverUndoBatch() })
         .onReceive(timer) { _ in observe() }
                          .onChange(of: store.markReadOnScrolloverEnabled) { _, enabled in if !enabled { tracker.reset() } }
@@ -81,7 +103,7 @@ struct ArticleListView: View {
                     .padding(.top, 8)
             }
         }
-        .overlay(alignment: .bottom) {
+         .overlay(alignment: .bottom) {
             if store.scrolloverUndoVisible {
                 HStack(spacing: 10) {
                     Text("\(store.scrolloverUndoIDs.count) articles marked as read")
@@ -115,27 +137,68 @@ private struct ArticlePresentationView: View {
     let previewLines: ArticlePreviewLines
     let availableWidth: CGFloat
     @ObservedObject var store: NewsreaderStore
+    @State private var horizontalOffset: CGFloat = 0
+    @State private var dragStartOffset: CGFloat = 0
+
+    private let actionWidth: CGFloat = 76
 
     var body: some View {
-        Button(action: {}) {
-            Group {
-                switch mode {
-                case .visual:
-                    visual
-                case .compact:
-                    compact
+        ZStack(alignment: .trailing) {
+            HStack(spacing: 0) {
+                Button { store.setRead(article, read: !article.isRead); closeActions() } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: article.isRead ? "envelope" : "envelope.open")
+                        Text(article.isRead ? "Unread" : "Read")
+                    }
                 }
+                .frame(width: actionWidth)
+                .tint(.blue)
+                Button { store.setStarred(article, starred: !article.isStarred); closeActions() } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: article.isStarred ? "star.slash" : "star")
+                        Text(article.isStarred ? "Unstar" : "Star")
+                    }
+                }
+                .frame(width: actionWidth)
+                .tint(.yellow)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 16))
-            .frame(width: articleWidth, alignment: .leading)
+            Button(action: {}) {
+                Group {
+                    switch mode {
+                    case .visual: visual
+                    case .compact: compact
+                    }
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 16))
+                .frame(width: articleWidth, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .background(Color(uiColor: .systemGroupedBackground))
+            .offset(x: horizontalOffset)
+            .simultaneousGesture(horizontalSwipe)
         }
-        .buttonStyle(.plain)
-        .swipeActions(edge: .trailing) {
-            Button { store.setRead(article, read: !article.isRead) } label: { Label(article.isRead ? "Unread" : "Read", systemImage: article.isRead ? "envelope" : "envelope.open") }
-            Button { store.setStarred(article, starred: !article.isStarred) } label: { Label(article.isStarred ? "Unstar" : "Star", systemImage: article.isStarred ? "star.slash" : "star") }.tint(.yellow)
-        }
+        .frame(width: articleWidth, alignment: .leading)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint("Article opening will be added in a later release.")
+    }
+
+    private var horizontalSwipe: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                if dragStartOffset == 0 { dragStartOffset = horizontalOffset }
+                horizontalOffset = min(0, max(-actionWidth * 2, dragStartOffset + value.translation.width))
+            }
+            .onEnded { value in
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                horizontalOffset = value.translation.width < -40 ? -actionWidth * 2 : 0
+                dragStartOffset = 0
+            }
+    }
+
+    private func closeActions() {
+        horizontalOffset = 0
+        dragStartOffset = 0
     }
 
     @ViewBuilder

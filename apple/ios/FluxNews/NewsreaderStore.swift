@@ -254,7 +254,7 @@ final class NewsreaderStore: ObservableObject {
 
     func accumulateNewData(_ additions: [(feedID: Int64, count: UInt32)]) { pending.accumulate(additions); publishPending() }
     func adoptVisibleSnapshot() { acknowledgePendingForCurrentScope(); hasUnscopedNewDataSignal = false; resetPresentationState(); replaceSnapshot() }
-    func resetVisibleSnapshot() { articles = []; selectionTotal = 0; snapshotRevision &+= 1 }
+    func resetVisibleSnapshot() { articles = []; selectionTotal = 0; resetPresentationState() }
 
     private func acknowledgePendingForCurrentScope() {
         switch scope {

@@ -60,6 +60,26 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertTrue(tracker.process(frames: [1: CGRect(x: 0, y: 120, width: 100, height: 100)], viewport: viewport, unread: [1], now: 2, offsetDelta: -40, userInitiated: true).isEmpty)
     }
 
+    func testRuntimeFrameProcessorProducesCandidateAfterIdleQualification() {
+        var tracker = ScrolloverExposureTracker()
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let visible: [Int64: CGRect] = [1: CGRect(x: 0, y: 0, width: 100, height: 100)]
+        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0)
+        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 1)
+        var lastOffset: CGFloat = 0
+        let ids = IOSScrolloverFrameProcessor.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100)], viewport: viewport, unread: [1], offset: -50, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: true, userInitiated: true)
+        XCTAssertEqual(ids, [1])
+    }
+
+    func testRuntimeFrameProcessorRejectsDisabledAndLargeJumpInput() {
+        var tracker = ScrolloverExposureTracker()
+        var lastOffset: CGFloat = 0
+        let frames: [Int64: CGRect] = [1: CGRect(x: 0, y: -200, width: 100, height: 100)]
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        XCTAssertTrue(IOSScrolloverFrameProcessor.process(frames: frames, viewport: viewport, unread: [1], offset: -20, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: false, userInitiated: true).isEmpty)
+        XCTAssertTrue(IOSScrolloverFrameProcessor.process(frames: frames, viewport: viewport, unread: [1], offset: -100, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: true, userInitiated: true).isEmpty)
+    }
+
     func testScrolloverIDsAreDeduplicatedAndUndoRequiresTwo() {
         var batch = ScrolloverUndoBatch()
         batch.beginScroll()
