@@ -12,6 +12,7 @@ struct ContentView: View {
     @ObservedObject var newsreaderStore: NewsreaderStore
     @State private var navigationPresented = false
     @State private var diagnosticsPresented = false
+    @State private var iPadColumnVisibility: NavigationSplitViewVisibility = .all
 
     private var usesSplitNavigation: Bool {
         NewsNavigationLayout.usesSplitView(for: UIDevice.current.userInterfaceIdiom)
@@ -31,7 +32,7 @@ struct ContentView: View {
     @ViewBuilder
     private var newsreader: some View {
         if usesSplitNavigation {
-            NavigationSplitView {
+            NavigationSplitView(columnVisibility: $iPadColumnVisibility) {
                 NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented)
             } detail: {
                 articleList
