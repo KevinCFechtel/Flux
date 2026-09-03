@@ -239,8 +239,9 @@ final class NewsreaderStore: ObservableObject {
     }
 
     private func recordSuccessfulScrolloverRead(_ ids: [Int64], batchGeneration: UInt64) {
+        let undoEligible: Bool
         if let undoGeneration = scrolloverUndoBatchGeneration {
-            guard batchGeneration >= undoGeneration else { return }
+            undoEligible = batchGeneration >= undoGeneration
             if batchGeneration > undoGeneration {
                 scrolloverUndoIDs = []
                 scrolloverRemovedArticles = [:]
@@ -252,8 +253,17 @@ final class NewsreaderStore: ObservableObject {
             scrolloverRemovedArticles = [:]
             scrolloverOriginalOrder = Dictionary(uniqueKeysWithValues: articles.enumerated().map { ($0.element.id, $0.offset) })
             scrolloverUndoBatchGeneration = batchGeneration
+            undoEligible = true
         }
 
+        // A completed Core mutation always updates the visible snapshot. Generation
+        // ordering controls only whether it belongs to the current Undo transaction.
+        guard undoEligible else {
+            markMeaningfulInteraction()
+            updateVisibleRead(ids, read: true)
+            scrolloverCountsPending = true
+            return
+        }
         var seen = Set(scrolloverUndoIDs)
         let unique = ids.filter { seen.insert($0).inserted }
         guard !unique.isEmpty else { return }
@@ -397,6 +407,10 @@ final class NewsreaderStore: ObservableObject {
     func applyReadMutationForTesting(_ ids: [Int64], read: Bool, retainingForScrolloverUndo: Bool = false) { markMeaningfulInteraction(); updateVisibleRead(ids, read: read, retainingForScrolloverUndo: retainingForScrolloverUndo) }
     @MainActor
     func applyScrolloverMutationForTesting(_ ids: [Int64], batchGeneration: UInt64) { recordSuccessfulScrolloverRead(ids, batchGeneration: batchGeneration) }
+    @MainActor
+    func applyScrolloverUndoForTesting() { let ids = scrolloverUndoIDs; updateVisibleRead(ids, read: false); restoreScrolloverRemovedArticles(); scrolloverUndoIDs = []; scrolloverUndoBatchGeneration = nil; scrolloverUndoVisible = false }
+    @MainActor
+    var scrolloverUndoIDsForTesting: [Int64] { scrolloverUndoIDs }
     @MainActor
     func applyStarredMutationForTesting(_ ids: [Int64], starred: Bool) {
         markMeaningfulInteraction()

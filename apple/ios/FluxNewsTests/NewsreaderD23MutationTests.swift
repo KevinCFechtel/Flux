@@ -358,6 +358,44 @@ final class NewsreaderD23MutationTests: XCTestCase {
     }
 
     @MainActor
+    func testOutOfOrderScrolloverSuccessUpdatesVisibleStateWithoutJoiningNewerUndo() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.unreadOnly = false
+        store.setArticlesForTesting([article(1), article(2)])
+        let first = store.beginScrolloverUndoBatch()
+        store.finishScrolloverUndoBatch()
+        let second = store.beginScrolloverUndoBatch()
+
+        store.applyScrolloverMutationForTesting([2], batchGeneration: second)
+        store.applyScrolloverMutationForTesting([1], batchGeneration: first)
+
+        XCTAssertTrue(store.articles.allSatisfy(\.isRead))
+        XCTAssertEqual(store.scrolloverUndoIDsForTesting, [2])
+        store.applyScrolloverUndoForTesting()
+        XCTAssertTrue(store.articles.first(where: { $0.id == 1 })!.isRead)
+        XCTAssertFalse(store.articles.first(where: { $0.id == 2 })!.isRead)
+    }
+
+    @MainActor
+    func testOutOfOrderScrolloverSuccessDoesNotRetainStaleRemovedArticleForUndo() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.removeArticlesWhenMarkedRead = true
+        store.unreadOnly = true
+        store.setArticlesForTesting([article(1), article(2), article(3)])
+        let first = store.beginScrolloverUndoBatch()
+        store.finishScrolloverUndoBatch()
+        let second = store.beginScrolloverUndoBatch()
+
+        store.applyScrolloverMutationForTesting([2], batchGeneration: second)
+        store.applyScrolloverMutationForTesting([1], batchGeneration: first)
+
+        XCTAssertEqual(store.articles.map(\.id), [3])
+        XCTAssertEqual(store.scrolloverUndoIDsForTesting, [2])
+        store.applyScrolloverUndoForTesting()
+        XCTAssertEqual(store.articles.map(\.id), [2, 3])
+    }
+
+    @MainActor
     func testLateScrolloverMutationAfterIdleKeepsItsUndoBatch() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setArticlesForTesting([article(1), article(2)])
