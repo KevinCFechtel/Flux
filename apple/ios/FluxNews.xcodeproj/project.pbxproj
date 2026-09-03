@@ -311,6 +311,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev;
 				PRODUCT_NAME = FluxNews;
 				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64/FluxUniFFI.framework/Headers";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
