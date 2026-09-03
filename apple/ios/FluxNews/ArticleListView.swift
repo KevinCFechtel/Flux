@@ -259,16 +259,19 @@ private struct IOSHorizontalSwipeRecognizer: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         let view = UIView(frame: .zero)
         view.backgroundColor = .clear
-        let recognizer = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
-        recognizer.minimumNumberOfTouches = 1
-        recognizer.maximumNumberOfTouches = 1
-        recognizer.delegate = context.coordinator
-        view.addGestureRecognizer(recognizer)
+        SwipeDiagnostic.log("makeUIView")
+        DispatchQueue.main.async { context.coordinator.install(on: view.superview) }
         return view
     }
 
     func updateUIView(_ view: UIView, context: Context) {
         context.coordinator.parent = self
+        context.coordinator.install(on: view.superview)
+        SwipeDiagnostic.log("updateUIView offset=\(offset)")
+    }
+
+    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
+        coordinator.removeRecognizer()
     }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
@@ -276,19 +279,44 @@ private struct IOSHorizontalSwipeRecognizer: UIViewRepresentable {
         private var startOffset: CGFloat = 0
         private var direction: IOSSwipeDirection?
         private var arbitration = IOSSwipeArbitration()
+        private weak var installedView: UIView?
+        private var recognizer: UIPanGestureRecognizer?
 
         init(_ parent: IOSHorizontalSwipeRecognizer) { self.parent = parent }
+
+        func install(on view: UIView?) {
+            guard let view else { return }
+            guard installedView !== view else { return }
+            removeRecognizer()
+            let recognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+            recognizer.minimumNumberOfTouches = 1
+            recognizer.maximumNumberOfTouches = 1
+            recognizer.delegate = self
+            view.addGestureRecognizer(recognizer)
+            installedView = view
+            self.recognizer = recognizer
+            SwipeDiagnostic.log("installed on parent=\(String(describing: type(of: view)))")
+        }
+
+        func removeRecognizer() {
+            recognizer?.view?.removeGestureRecognizer(recognizer!)
+            recognizer = nil
+            installedView = nil
+        }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
             let velocity = pan.velocity(in: pan.view)
-            return abs(velocity.x) > abs(velocity.y)
+            let accepts = abs(velocity.x) > abs(velocity.y)
+            SwipeDiagnostic.log("shouldBegin velocity=(\(velocity.x),\(velocity.y)) accepts=\(accepts)")
+            return accepts
         }
 
         @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
             let translation = recognizer.translation(in: recognizer.view)
             switch recognizer.state {
             case .began:
+                SwipeDiagnostic.log("began")
                 startOffset = parent.offset
                 arbitration.reset()
             case .changed:
@@ -298,11 +326,13 @@ private struct IOSHorizontalSwipeRecognizer: UIViewRepresentable {
                 let horizontalTranslation = lockedDirection == .right ? max(0, translation.x) : min(0, translation.x)
                 let proposed = startOffset + horizontalTranslation
                 parent.offset = min(parent.actionWidth, max(-parent.actionWidth, proposed))
+                SwipeDiagnostic.log("changed direction=\(lockedDirection) offset=\(parent.offset)")
             case .ended, .cancelled, .failed:
-                guard let direction else { reset(); return }
+                guard let direction else { SwipeDiagnostic.log("end state=\(recognizer.state.rawValue) no-direction"); reset(); return }
                 let shouldReveal = abs(parent.offset) >= parent.actionWidth * 0.5
                 parent.offset = shouldReveal ? (direction == .right ? parent.actionWidth : -parent.actionWidth) : 0
-                if shouldReveal { parent.onEnded(direction) }
+                SwipeDiagnostic.log("end state=\(recognizer.state.rawValue) direction=\(direction) reveal=\(shouldReveal) offset=\(parent.offset)")
+                if shouldReveal { SwipeDiagnostic.log("action direction=\(direction)"); parent.onEnded(direction) }
                 reset()
             default: break
             }
@@ -310,6 +340,15 @@ private struct IOSHorizontalSwipeRecognizer: UIViewRepresentable {
 
         private func reset() { startOffset = 0; direction = nil; arbitration.reset() }
     }
+}
+
+private enum SwipeDiagnostic {
+    #if DEBUG
+    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "swipe-diagnostic")
+    static func log(_ message: String) { logger.debug("\(message, privacy: .public)") }
+    #else
+    static func log(_ message: String) {}
+    #endif
 }
 
 struct ArticleListView: View {
