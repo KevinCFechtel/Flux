@@ -224,6 +224,68 @@ final class NewsreaderD23MutationTests: XCTestCase {
     }
 
     @MainActor
+    func testRuntimeAdapterPreservesQualifiedCrossingAcrossActiveViewportChanges() {
+        let adapter = IOSScrolloverRuntimeAdapter()
+        let unread: Set<Int64> = [1]
+        var candidates: [Int64] = []
+        adapter.onCandidate = { candidates.append(contentsOf: $0) }
+        adapter.updateViewport(CGRect(x: 0, y: 0, width: 100, height: 100))
+        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
+        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
+        adapter.receiveContentOffsetY(100, unread: unread)
+        adapter.beginUserScroll()
+
+        for height: CGFloat in [102, 105, 108, 110] {
+            adapter.updateViewport(CGRect(x: 0, y: 0, width: 100, height: height))
+        }
+        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
+        adapter.receiveContentOffsetY(120, unread: unread)
+        adapter.receiveFrames([1: CGRect(x: 0, y: -120, width: 100, height: 100)], unread: unread)
+        adapter.receiveContentOffsetY(140, unread: unread)
+
+        XCTAssertEqual(candidates, [1])
+    }
+
+    @MainActor
+    func testRuntimeAdapterSnapshotResetClearsQualifiedExposure() {
+        let adapter = IOSScrolloverRuntimeAdapter()
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let unread: Set<Int64> = [1]
+        var candidates: [Int64] = []
+        adapter.onCandidate = { candidates.append(contentsOf: $0) }
+        adapter.updateViewport(viewport)
+        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
+        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
+        adapter.reset() // ArticleListView invokes this for snapshotRevision changes.
+        adapter.receiveContentOffsetY(100, unread: unread)
+        adapter.beginUserScroll()
+        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
+        adapter.receiveContentOffsetY(120, unread: unread)
+
+        XCTAssertTrue(candidates.isEmpty)
+    }
+
+    @MainActor
+    func testRuntimeAdapterDisabledScrolloverDoesNotEmitAfterViewportChanges() {
+        let adapter = IOSScrolloverRuntimeAdapter()
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let unread: Set<Int64> = [1]
+        var candidates: [Int64] = []
+        adapter.onCandidate = { candidates.append(contentsOf: $0) }
+        adapter.updateViewport(viewport)
+        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
+        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
+        adapter.updateEnabled(false)
+        adapter.receiveContentOffsetY(100, unread: unread)
+        adapter.beginUserScroll()
+        adapter.updateViewport(CGRect(x: 0, y: 0, width: 100, height: 105))
+        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
+        adapter.receiveContentOffsetY(120, unread: unread)
+
+        XCTAssertTrue(candidates.isEmpty)
+    }
+
+    @MainActor
     func testRuntimeAdapterDoesNotEmitForBackwardMovement() {
         let adapter = IOSScrolloverRuntimeAdapter()
         let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)

@@ -55,8 +55,12 @@ final class IOSScrolloverRuntimeAdapter {
     func updateViewport(_ viewport: CGRect) {
         guard self.viewport != viewport else { return }
         self.viewport = viewport
-        tracker.reset()
-        diagnostic("viewport reset viewport=\(rect(viewport))")
+        // GeometryReader size changes occur during an active scroll; frames remain
+        // in ArticleScrollSpace, so their exposure history is still meaningful.
+        if !userScrolling {
+            tracker.rebase(frames: frames, unread: unread)
+        }
+        diagnostic("viewport update viewport=\(rect(viewport)) rebase=\(!userScrolling)")
     }
 
     func updateEnabled(_ enabled: Bool) {
