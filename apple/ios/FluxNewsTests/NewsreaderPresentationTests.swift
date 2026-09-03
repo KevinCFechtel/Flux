@@ -4,7 +4,7 @@ import XCTest
 final class NewsreaderPresentationTests: XCTestCase {
     func testNewsNavigationPresentationMatchesDeviceRoutes() {
         XCTAssertEqual(NewsNavigationPresentation.sidebar, .sidebar)
-        XCTAssertEqual(NewsNavigationPresentation.stack, .stack)
+        XCTAssertEqual(NewsNavigationPresentation.sheet, .sheet)
     }
 
     func testNewsNavigationUsesSplitViewOnlyOnIPad() {
