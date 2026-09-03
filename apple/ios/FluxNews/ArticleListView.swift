@@ -39,13 +39,10 @@ final class IOSScrolloverRuntimeAdapter {
     private var viewport = CGRect.zero
     private var canonicalPosition: CGFloat = 0
     private var lastProcessedOffset: CGFloat = 0
-    private var frameGeneration = 0
-    private var lastProcessedFrameGeneration = 0
     private var unread = Set<Int64>()
     private var enabled = true
     private var userScrolling = false
     private var tracker = ScrolloverExposureTracker()
-    private var processingScheduled = false
 
     func updateViewport(_ viewport: CGRect) {
         guard self.viewport != viewport else { return }
@@ -62,7 +59,6 @@ final class IOSScrolloverRuntimeAdapter {
         guard !userScrolling else { return }
         userScrolling = true
         lastProcessedOffset = canonicalPosition
-        lastProcessedFrameGeneration = frameGeneration
     }
 
     func endUserScroll() {
@@ -72,21 +68,14 @@ final class IOSScrolloverRuntimeAdapter {
     func reset() {
         tracker.reset()
         userScrolling = false
-        processingScheduled = false
     }
 
     func receiveFrames(_ frames: [Int64: CGRect], unread: Set<Int64>) {
-        let framesChanged = self.frames != frames
         self.frames = frames
         self.unread = unread
-        if framesChanged { frameGeneration &+= 1 }
-        if userScrolling {
-            if framesChanged { scheduleProcessing() }
-        } else if enabled && !viewport.isEmpty {
-            tracker.rebase(frames: frames, unread: unread)
-            tracker.observe(frames: frames, viewport: viewport, unread: unread, now: Date.timeIntervalSinceReferenceDate)
-            lastProcessedFrameGeneration = frameGeneration
-        }
+        guard enabled, !viewport.isEmpty else { return }
+        if !userScrolling { tracker.rebase(frames: frames, unread: unread) }
+        tracker.observe(frames: frames, viewport: viewport, unread: unread, now: Date.timeIntervalSinceReferenceDate)
     }
 
     func receiveContentOffsetY(_ contentOffsetY: CGFloat, unread: Set<Int64>) {
@@ -100,7 +89,7 @@ final class IOSScrolloverRuntimeAdapter {
     private func receiveCanonicalPosition(_ canonicalPosition: CGFloat, unread: Set<Int64>) {
         self.canonicalPosition = canonicalPosition
         self.unread = unread
-        if userScrolling { scheduleProcessing() }
+        processScrollDelta()
     }
 
     func observeIdle(now: TimeInterval = Date.timeIntervalSinceReferenceDate) {
@@ -108,22 +97,10 @@ final class IOSScrolloverRuntimeAdapter {
         tracker.observe(frames: frames, viewport: viewport, unread: unread, now: now)
     }
 
-    private func scheduleProcessing() {
-        guard !processingScheduled else { return }
-        processingScheduled = true
-        Task { @MainActor [weak self] in
-            await Task.yield()
-            guard let self else { return }
-            processingScheduled = false
-            guard userScrolling else { return }
-            // Preserve movement until SwiftUI has published the matching row geometry.
-            guard frameGeneration != lastProcessedFrameGeneration else { return }
-            let delta = IOSScrolloverOffset.forwardDelta(current: canonicalPosition, previous: lastProcessedOffset)
-            guard abs(delta) > 0.5 else { return }
-            let ids = IOSScrolloverFrameProcessor.process(frames: frames, viewport: viewport, unread: unread, canonicalPosition: canonicalPosition, lastProcessedOffset: &lastProcessedOffset, tracker: &tracker, enabled: enabled, userInitiated: true)
-            lastProcessedFrameGeneration = frameGeneration
-            if !ids.isEmpty { onCandidate(ids) }
-        }
+    private func processScrollDelta() {
+        guard userScrolling else { return }
+        let ids = IOSScrolloverFrameProcessor.process(frames: frames, viewport: viewport, unread: unread, canonicalPosition: canonicalPosition, lastProcessedOffset: &lastProcessedOffset, tracker: &tracker, enabled: enabled, userInitiated: true)
+        if !ids.isEmpty { onCandidate(ids) }
     }
 }
 
@@ -265,6 +242,7 @@ private struct IOSHorizontalSwipeRecognizer: UIViewRepresentable {
 struct ArticleListView: View {
     @ObservedObject var store: NewsreaderStore
     @State private var scrolloverAdapter = IOSScrolloverRuntimeAdapter()
+    @State private var unreadArticleIDs = Set<Int64>()
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -297,21 +275,22 @@ struct ArticleListView: View {
                          .refreshable { await store.syncManually() }
                         .coordinateSpace(name: "ArticleScrollSpace")
                         .scrollIndicators(.hidden)
-                         .onAppear {
-                             scrolloverAdapter.updateViewport(CGRect(origin: .zero, size: proxy.size))
-                             scrolloverAdapter.onCandidate = { ids in store.flushScrollover(ids) }
-                         }
+                          .onAppear {
+                              scrolloverAdapter.updateViewport(CGRect(origin: .zero, size: proxy.size))
+                              scrolloverAdapter.onCandidate = { ids in store.flushScrollover(ids) }
+                              refreshUnreadArticleIDs()
+                          }
                          .onChange(of: proxy.size) { _, size in scrolloverAdapter.updateViewport(CGRect(origin: .zero, size: size)) }
                            .onPreferenceChange(ArticleFrameKey.self) { values in
-                               scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
-                               scrolloverAdapter.receiveFrames(values, unread: unreadIDs)
+                                scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
+                                scrolloverAdapter.receiveFrames(values, unread: unreadArticleIDs)
                          }
                             .onPreferenceChange(ArticleOffsetKey.self) { newOffset in
                                 if #available(iOS 18.0, *) {
                                     // iOS 18 uses onScrollGeometryChange as its only offset source.
                                 } else {
-                                    scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
-                                    scrolloverAdapter.receiveLegacyContentMinY(newOffset, unread: unreadIDs)
+                                     scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
+                                     scrolloverAdapter.receiveLegacyContentMinY(newOffset, unread: unreadArticleIDs)
                                 }
                          }
                            .modifier(IOSScrolloverInteractionModifier(onBegin: {
@@ -322,11 +301,12 @@ struct ArticleListView: View {
                                scrolloverAdapter.endUserScroll()
                                store.finishScrolloverUndoBatch()
                             }, onContentOffsetY: { newOffset in
-                                scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
-                                scrolloverAdapter.receiveContentOffsetY(newOffset, unread: unreadIDs)
-                           }))
-         .onReceive(timer) { _ in scrolloverAdapter.observeIdle() }
-                          .onChange(of: store.markReadOnScrolloverEnabled) { _, enabled in scrolloverAdapter.updateEnabled(enabled) }
+                                 scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
+                                 scrolloverAdapter.receiveContentOffsetY(newOffset, unread: unreadArticleIDs)
+                            }))
+          .onReceive(timer) { _ in scrolloverAdapter.observeIdle() }
+                           .onChange(of: store.articles) { _, _ in refreshUnreadArticleIDs() }
+                           .onChange(of: store.markReadOnScrolloverEnabled) { _, enabled in scrolloverAdapter.updateEnabled(enabled) }
                           .onChange(of: store.snapshotRevision) { _, _ in scrolloverAdapter.reset() }
                     }
                 }
@@ -360,7 +340,9 @@ struct ArticleListView: View {
         }
     }
 
-    private var unreadIDs: Set<Int64> { Set(store.articles.filter { !$0.isRead }.map(\.id)) }
+    private func refreshUnreadArticleIDs() {
+        unreadArticleIDs = Set(store.articles.lazy.filter { !$0.isRead }.map(\.id))
+    }
 }
 
 private struct ArticlePresentationView: View {

@@ -127,7 +127,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
     }
 
     @MainActor
-    func testRuntimeAdapterProducesCandidateFromIOS18ContentOffsetAfterIdleQualification() async throws {
+    func testRuntimeAdapterEmitsFirstQualifiedCrossingWithoutPrimingProcess() {
         let adapter = IOSScrolloverRuntimeAdapter()
         let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
         let unread: Set<Int64> = [1]
@@ -136,15 +136,16 @@ final class NewsreaderD23MutationTests: XCTestCase {
         adapter.updateViewport(viewport)
         adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
         adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
+        adapter.receiveContentOffsetY(100, unread: unread)
         adapter.beginUserScroll()
-        adapter.receiveContentOffsetY(50, unread: unread)
         adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
-        try await Task.sleep(for: .milliseconds(50))
+        adapter.receiveContentOffsetY(120, unread: unread)
+
         XCTAssertEqual(candidates, [1])
     }
 
     @MainActor
-    func testRuntimeAdapterProcessesQualifiedCrossingWhenOffsetArrivesBeforeFrames() async throws {
+    func testRuntimeAdapterEmitsFirstQualifiedCrossingWhenOffsetArrivesBeforeFrames() {
         let adapter = IOSScrolloverRuntimeAdapter()
         let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
         let unread: Set<Int64> = [1]
@@ -157,15 +158,14 @@ final class NewsreaderD23MutationTests: XCTestCase {
         adapter.beginUserScroll()
 
         adapter.receiveContentOffsetY(120, unread: unread)
-        try await Task.sleep(for: .milliseconds(20))
         adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
-        try await Task.sleep(for: .milliseconds(20))
+        adapter.receiveContentOffsetY(140, unread: unread)
 
         XCTAssertEqual(candidates, [1])
     }
 
     @MainActor
-    func testRuntimeAdapterProcessesQualifiedCrossingWhenFramesArriveBeforeOffset() async throws {
+    func testRuntimeAdapterEmitsFirstQualifiedCrossingWhenFramesArriveBeforeOffset() {
         let adapter = IOSScrolloverRuntimeAdapter()
         let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
         let unread: Set<Int64> = [1]
@@ -178,15 +178,14 @@ final class NewsreaderD23MutationTests: XCTestCase {
         adapter.beginUserScroll()
 
         adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
-        try await Task.sleep(for: .milliseconds(20))
         adapter.receiveContentOffsetY(120, unread: unread)
-        try await Task.sleep(for: .milliseconds(20))
+        adapter.receiveContentOffsetY(140, unread: unread)
 
         XCTAssertEqual(candidates, [1])
     }
 
     @MainActor
-    func testRuntimeAdapterDoesNotProcessLayoutOnlyFrameChanges() async throws {
+    func testRuntimeAdapterDoesNotProcessLayoutOnlyFrameChanges() {
         let adapter = IOSScrolloverRuntimeAdapter()
         let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
         let unread: Set<Int64> = [1]
@@ -199,7 +198,46 @@ final class NewsreaderD23MutationTests: XCTestCase {
         adapter.beginUserScroll()
 
         adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
-        try await Task.sleep(for: .milliseconds(20))
+
+        XCTAssertTrue(candidates.isEmpty)
+    }
+
+    @MainActor
+    func testRuntimeAdapterEmitsCandidateOnlyOnce() {
+        let adapter = IOSScrolloverRuntimeAdapter()
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let unread: Set<Int64> = [1]
+        var candidates: [Int64] = []
+        adapter.onCandidate = { candidates.append(contentsOf: $0) }
+        adapter.updateViewport(viewport)
+        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
+        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
+        adapter.receiveContentOffsetY(100, unread: unread)
+        adapter.beginUserScroll()
+
+        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
+        adapter.receiveContentOffsetY(120, unread: unread)
+        adapter.receiveFrames([1: CGRect(x: 0, y: -140, width: 100, height: 100)], unread: unread)
+        adapter.receiveContentOffsetY(140, unread: unread)
+
+        XCTAssertEqual(candidates, [1])
+    }
+
+    @MainActor
+    func testRuntimeAdapterDoesNotEmitForBackwardMovement() {
+        let adapter = IOSScrolloverRuntimeAdapter()
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let unread: Set<Int64> = [1]
+        var candidates: [Int64] = []
+        adapter.onCandidate = { candidates.append(contentsOf: $0) }
+        adapter.updateViewport(viewport)
+        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
+        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
+        adapter.receiveContentOffsetY(100, unread: unread)
+        adapter.beginUserScroll()
+
+        adapter.receiveFrames([1: CGRect(x: 0, y: 100, width: 100, height: 100)], unread: unread)
+        adapter.receiveContentOffsetY(80, unread: unread)
 
         XCTAssertTrue(candidates.isEmpty)
     }
