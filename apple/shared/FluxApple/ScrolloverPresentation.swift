@@ -10,6 +10,25 @@ struct ScrolloverExposureTracker {
     mutating func process(frames: [Int64: CGRect], viewport: CGRect, unread: Set<Int64>, now: TimeInterval, offsetDelta: CGFloat, userInitiated: Bool) -> [Int64] { guard userInitiated, offsetDelta > 0, offsetDelta <= viewport.height * 0.85 else { reset(); observe(frames: frames, viewport: viewport, unread: unread, now: now); return [] }; let ids = exposures.compactMap { id, e -> Int64? in let crossed = frames[id].map { e.processedFrame.maxY > viewport.minY && $0.maxY <= viewport.minY } ?? (e.currentFrame.midY < viewport.midY); return e.qualified && unread.contains(id) && crossed ? id : nil }.sorted(); for id in ids { exposures.removeValue(forKey: id) }; observe(frames: frames, viewport: viewport, unread: unread, now: now); for id in Array(exposures.keys) { if var e = exposures[id] { e.processedFrame = e.currentFrame; exposures[id] = e } }; return ids }
 }
 
+#if DEBUG
+struct ScrolloverExposureDiagnostic: Sendable {
+    let id: Int64
+    let visibleSince: TimeInterval?
+    let qualified: Bool
+    let processedFrame: CGRect
+    let currentFrame: CGRect
+}
+
+extension ScrolloverExposureTracker {
+    // Read-only diagnostic state for native runtime investigation.
+    func diagnosticExposures() -> [ScrolloverExposureDiagnostic] {
+        exposures.map {
+            ScrolloverExposureDiagnostic(id: $0.key, visibleSince: $0.value.visibleSince, qualified: $0.value.qualified, processedFrame: $0.value.processedFrame, currentFrame: $0.value.currentFrame)
+        }
+    }
+}
+#endif
+
 enum SnapshotRefreshPolicy {
     enum Action: Equatable { case replace, preserve, signalNewData }
     static func action(manual: Bool, dataChanged: Bool, hasMeaningfullyInteracted: Bool) -> Action {

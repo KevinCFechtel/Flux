@@ -1,8 +1,14 @@
 import Combine
 import Foundation
+#if DEBUG
+import OSLog
+#endif
 
 @MainActor
 final class NewsreaderStore: ObservableObject {
+#if DEBUG
+    private static let scrolloverDiagnosticLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "scrollover-diagnostic")
+#endif
     private enum Key {
         static let startupScope = "FluxNews.iOS.startupScope"
         static let startupCategoryID = "FluxNews.iOS.startupCategoryID"
@@ -206,6 +212,7 @@ final class NewsreaderStore: ObservableObject {
     func flushScrollover(_ ids: [Int64]) {
         guard let core, !ids.isEmpty else { return }
         let batchGeneration = scrolloverBatchGeneration
+        scrolloverDiagnostic("flush ids=\(ids) batch=\(batchGeneration)")
         scrolloverMutationsInFlight += 1
         Task { [weak self, core] in
             let result = await Task.detached { Result { try core.setReadStateBulk(articleIds: ids, read: true) } }.value
@@ -213,7 +220,10 @@ final class NewsreaderStore: ObservableObject {
             switch result {
             case .success:
                 recordSuccessfulScrolloverRead(ids, batchGeneration: batchGeneration)
-            case let .failure(error): errorMessage = error.localizedDescription
+                scrolloverDiagnostic("mutation success ids=\(ids) batch=\(batchGeneration)")
+            case let .failure(error):
+                errorMessage = error.localizedDescription
+                scrolloverDiagnostic("mutation failure ids=\(ids) batch=\(batchGeneration) error=\(error.localizedDescription)")
             }
             scrolloverMutationsInFlight -= 1
             if !scrolloverBatchActive && scrolloverMutationsInFlight == 0 && scrolloverCountsPending {
@@ -372,6 +382,12 @@ final class NewsreaderStore: ObservableObject {
     private func updateVisible(_ ids: [Int64], _ change: (inout ArticleSummary) -> Void) {
         let ids = Set(ids)
         for index in articles.indices where ids.contains(articles[index].id) { change(&articles[index]) }
+    }
+
+    private func scrolloverDiagnostic(_ message: String) {
+#if DEBUG
+        Self.scrolloverDiagnosticLog.debug("\(message, privacy: .public)")
+#endif
     }
 
     // Narrow seam for deterministic iOS mutation-state tests without a live Core.

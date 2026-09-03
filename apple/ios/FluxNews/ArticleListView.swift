@@ -1,5 +1,8 @@
 import SwiftUI
 import UIKit
+#if DEBUG
+import OSLog
+#endif
 
 enum IOSScrolloverOffset {
     // Canonical positions increase as the list moves forward/downward.
@@ -43,11 +46,17 @@ final class IOSScrolloverRuntimeAdapter {
     private var enabled = true
     private var userScrolling = false
     private var tracker = ScrolloverExposureTracker()
+#if DEBUG
+    private static let diagnosticLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "scrollover-diagnostic")
+    private var diagnosticIndices: [Int64: Int] = [:]
+    private var diagnosticIDs = Set<Int64>()
+#endif
 
     func updateViewport(_ viewport: CGRect) {
         guard self.viewport != viewport else { return }
         self.viewport = viewport
         tracker.reset()
+        diagnostic("viewport reset viewport=\(rect(viewport))")
     }
 
     func updateEnabled(_ enabled: Bool) {
@@ -59,23 +68,30 @@ final class IOSScrolloverRuntimeAdapter {
         guard !userScrolling else { return }
         userScrolling = true
         lastProcessedOffset = canonicalPosition
+        diagnostic("begin offset=\(canonicalPosition) baseline=\(lastProcessedOffset) userScrolling=true")
     }
 
     func endUserScroll() {
         userScrolling = false
+        diagnostic("end offset=\(canonicalPosition) userScrolling=false")
     }
 
     func reset() {
         tracker.reset()
         userScrolling = false
+        diagnostic("reset")
     }
 
     func receiveFrames(_ frames: [Int64: CGRect], unread: Set<Int64>) {
         self.frames = frames
         self.unread = unread
         guard enabled, !viewport.isEmpty else { return }
-        if !userScrolling { tracker.rebase(frames: frames, unread: unread) }
+        if !userScrolling {
+            tracker.rebase(frames: frames, unread: unread)
+            diagnostic("frames rebase count=\(frames.count) viewport=\(rect(viewport))")
+        }
         tracker.observe(frames: frames, viewport: viewport, unread: unread, now: Date.timeIntervalSinceReferenceDate)
+        diagnosticExposures(event: "observe", delta: nil)
     }
 
     func receiveContentOffsetY(_ contentOffsetY: CGFloat, unread: Set<Int64>) {
@@ -89,31 +105,84 @@ final class IOSScrolloverRuntimeAdapter {
     private func receiveCanonicalPosition(_ canonicalPosition: CGFloat, unread: Set<Int64>) {
         self.canonicalPosition = canonicalPosition
         self.unread = unread
+        diagnostic("offset position=\(canonicalPosition) baseline=\(lastProcessedOffset) userScrolling=\(userScrolling)")
         processScrollDelta()
     }
 
     func observeIdle(now: TimeInterval = Date.timeIntervalSinceReferenceDate) {
         guard enabled, !userScrolling, !viewport.isEmpty else { return }
         tracker.observe(frames: frames, viewport: viewport, unread: unread, now: now)
+        diagnosticExposures(event: "idle-observe", delta: nil)
     }
 
     private func processScrollDelta() {
         guard userScrolling else { return }
+        let delta = IOSScrolloverOffset.forwardDelta(current: canonicalPosition, previous: lastProcessedOffset)
+        diagnosticExposures(event: "process-before", delta: delta)
+        if delta <= 0 || delta > viewport.height * 0.85 {
+            diagnostic("process reset delta=\(delta) limit=\(viewport.height * 0.85)")
+        }
         let ids = IOSScrolloverFrameProcessor.process(frames: frames, viewport: viewport, unread: unread, canonicalPosition: canonicalPosition, lastProcessedOffset: &lastProcessedOffset, tracker: &tracker, enabled: enabled, userInitiated: true)
+        diagnosticExposures(event: "process-after emitted=\(ids)", delta: delta)
         if !ids.isEmpty { onCandidate(ids) }
     }
+
+    func recordScrollPhase(previous: String, current: String) {
+        diagnostic("phase \(previous)->\(current) offset=\(canonicalPosition) userScrolling=\(userScrolling)")
+    }
+
+#if DEBUG
+    func updateDiagnosticArticles(_ articles: [ArticleSummary]) {
+        diagnosticIndices = Dictionary(uniqueKeysWithValues: articles.enumerated().map { ($0.element.id, $0.offset) })
+        diagnosticIDs = Set(articles.lazy.filter { !$0.isRead }.prefix(6).map(\.id))
+        diagnostic("tracking ids=\(diagnosticIDs.sorted())")
+    }
+
+    private func diagnosticExposures(event: String, delta: CGFloat?) {
+        let now = Date.timeIntervalSinceReferenceDate
+        let exposures = Dictionary(uniqueKeysWithValues: tracker.diagnosticExposures().map { ($0.id, $0) })
+        for id in diagnosticIDs.sorted() {
+            guard let exposure = exposures[id] else {
+                diagnostic("id=\(id) index=\(diagnosticIndices[id] ?? -1) event=\(event) exposure=missing frame=\(rect(frames[id]))")
+                continue
+            }
+            let frame = frames[id]
+            let visibleHeight = frame?.intersection(viewport).height ?? 0
+            let visibleFraction = visibleHeight / max(1, frame?.height ?? 1)
+            let crossed = frame.map { exposure.processedFrame.maxY > viewport.minY && $0.maxY <= viewport.minY } ?? (exposure.currentFrame.midY < viewport.midY)
+            let visibleFor = exposure.visibleSince.map { now - $0 } ?? 0
+            diagnostic("id=\(id) index=\(diagnosticIndices[id] ?? -1) event=\(event) delta=\(delta ?? 0) visible=\(visibleFraction) visibleFor=\(visibleFor) qualified=\(exposure.qualified) crossed=\(crossed) frame=\(rect(frame)) processed=\(rect(exposure.processedFrame)) current=\(rect(exposure.currentFrame)) viewport=\(rect(viewport))")
+        }
+    }
+
+    private func diagnostic(_ message: String) {
+        Self.diagnosticLog.debug("\(message, privacy: .public)")
+    }
+
+    private func rect(_ rect: CGRect?) -> String {
+        guard let rect else { return "nil" }
+        return "(x:\(rect.origin.x),y:\(rect.origin.y),w:\(rect.width),h:\(rect.height))"
+    }
+#else
+    func updateDiagnosticArticles(_ articles: [ArticleSummary]) {}
+    private func diagnostic(_ message: String) {}
+    private func diagnosticExposures(event: String, delta: CGFloat?) {}
+    private func rect(_ rect: CGRect) -> String { "" }
+#endif
 }
 
 private struct IOSScrolloverInteractionModifier: ViewModifier {
     let onBegin: () -> Void
     let onEnd: () -> Void
     let onContentOffsetY: (CGFloat) -> Void
+    let onPhase: (String, String) -> Void
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
             content
-                .onScrollPhaseChange { _, phase in
+                .onScrollPhaseChange { previous, phase in
+                    onPhase(String(describing: previous), String(describing: phase))
                     switch phase {
                     case .interacting: onBegin()
                     case .idle: onEnd()
@@ -293,16 +362,18 @@ struct ArticleListView: View {
                                      scrolloverAdapter.receiveLegacyContentMinY(newOffset, unread: unreadArticleIDs)
                                 }
                          }
-                           .modifier(IOSScrolloverInteractionModifier(onBegin: {
-                               scrolloverAdapter.beginUserScroll()
-                               store.markMeaningfulInteraction()
-                               store.beginScrolloverUndoBatch()
+                            .modifier(IOSScrolloverInteractionModifier(onBegin: {
+                                scrolloverAdapter.beginUserScroll()
+                                store.markMeaningfulInteraction()
+                                store.beginScrolloverUndoBatch()
                            }, onEnd: {
                                scrolloverAdapter.endUserScroll()
                                store.finishScrolloverUndoBatch()
-                            }, onContentOffsetY: { newOffset in
+                             }, onContentOffsetY: { newOffset in
                                  scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
                                  scrolloverAdapter.receiveContentOffsetY(newOffset, unread: unreadArticleIDs)
+                            }, onPhase: { previous, current in
+                                scrolloverAdapter.recordScrollPhase(previous: previous, current: current)
                             }))
           .onReceive(timer) { _ in scrolloverAdapter.observeIdle() }
                            .onChange(of: store.articles) { _, _ in refreshUnreadArticleIDs() }
@@ -342,6 +413,7 @@ struct ArticleListView: View {
 
     private func refreshUnreadArticleIDs() {
         unreadArticleIDs = Set(store.articles.lazy.filter { !$0.isRead }.map(\.id))
+        scrolloverAdapter.updateDiagnosticArticles(store.articles)
     }
 }
 
