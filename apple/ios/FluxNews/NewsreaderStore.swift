@@ -53,6 +53,8 @@ final class NewsreaderStore: ObservableObject {
     private var scrolloverOriginalOrder: [Int64: Int] = [:]
     private var scrolloverCountsPending = false
     private var scrolloverBatchActive = false
+    private var scrolloverBatchGeneration: UInt64 = 0
+    private var scrolloverUndoBatchGeneration: UInt64?
     private var scrolloverMutationsInFlight = 0
     private var hasMeaningfullyInteracted = false
 
@@ -194,34 +196,23 @@ final class NewsreaderStore: ObservableObject {
         }
     }
 
-    func beginScrolloverUndoBatch() {
+    @discardableResult
+    func beginScrolloverUndoBatch() -> UInt64 {
         scrolloverBatchActive = true
-        scrolloverUndoIDs = []
-        scrolloverRemovedArticles = [:]
-        scrolloverOriginalOrder = Dictionary(uniqueKeysWithValues: articles.enumerated().map { ($0.element.id, $0.offset) })
+        scrolloverBatchGeneration &+= 1
+        return scrolloverBatchGeneration
     }
 
     func flushScrollover(_ ids: [Int64]) {
         guard let core, !ids.isEmpty else { return }
+        let batchGeneration = scrolloverBatchGeneration
         scrolloverMutationsInFlight += 1
         Task { [weak self, core] in
             let result = await Task.detached { Result { try core.setReadStateBulk(articleIds: ids, read: true) } }.value
             guard let self else { return }
             switch result {
             case .success:
-                var seen = Set(self.scrolloverUndoIDs)
-                let unique = ids.filter { seen.insert($0).inserted }
-                markMeaningfulInteraction()
-                scrolloverUndoIDs.append(contentsOf: unique)
-                updateVisibleRead(unique, read: true, retainingForScrolloverUndo: true)
-                scrolloverCountsPending = true
-                scrolloverUndoVisible = scrolloverUndoIDs.count >= 2
-                scrolloverUndoTask?.cancel()
-                scrolloverUndoTask = Task { [weak self] in
-                    try? await Task.sleep(for: .seconds(8))
-                    guard !Task.isCancelled else { return }
-                    self?.scrolloverUndoVisible = false
-                }
+                recordSuccessfulScrolloverRead(ids, batchGeneration: batchGeneration)
             case let .failure(error): errorMessage = error.localizedDescription
             }
             scrolloverMutationsInFlight -= 1
@@ -237,6 +228,38 @@ final class NewsreaderStore: ObservableObject {
         if scrolloverMutationsInFlight == 0 && scrolloverCountsPending { scrolloverCountsPending = false; reloadCounts(includeNavigationCounts: true) }
     }
 
+    private func recordSuccessfulScrolloverRead(_ ids: [Int64], batchGeneration: UInt64) {
+        if let undoGeneration = scrolloverUndoBatchGeneration {
+            guard batchGeneration >= undoGeneration else { return }
+            if batchGeneration > undoGeneration {
+                scrolloverUndoIDs = []
+                scrolloverRemovedArticles = [:]
+                scrolloverOriginalOrder = Dictionary(uniqueKeysWithValues: articles.enumerated().map { ($0.element.id, $0.offset) })
+                scrolloverUndoBatchGeneration = batchGeneration
+            }
+        } else {
+            scrolloverUndoIDs = []
+            scrolloverRemovedArticles = [:]
+            scrolloverOriginalOrder = Dictionary(uniqueKeysWithValues: articles.enumerated().map { ($0.element.id, $0.offset) })
+            scrolloverUndoBatchGeneration = batchGeneration
+        }
+
+        var seen = Set(scrolloverUndoIDs)
+        let unique = ids.filter { seen.insert($0).inserted }
+        guard !unique.isEmpty else { return }
+        markMeaningfulInteraction()
+        scrolloverUndoIDs.append(contentsOf: unique)
+        updateVisibleRead(unique, read: true, retainingForScrolloverUndo: true)
+        scrolloverCountsPending = true
+        scrolloverUndoVisible = scrolloverUndoIDs.count >= 2
+        scrolloverUndoTask?.cancel()
+        scrolloverUndoTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled else { return }
+            self?.scrolloverUndoVisible = false
+        }
+    }
+
     func undoScrollover() {
         guard let core, !scrolloverUndoIDs.isEmpty else { return }
         let ids = scrolloverUndoIDs
@@ -246,7 +269,7 @@ final class NewsreaderStore: ObservableObject {
             switch result {
             case .success:
                 updateVisibleRead(ids, read: false); restoreScrolloverRemovedArticles()
-                scrolloverUndoIDs = []; scrolloverUndoVisible = false; scrolloverUndoTask?.cancel(); reloadCounts(includeNavigationCounts: true)
+                scrolloverUndoIDs = []; scrolloverUndoBatchGeneration = nil; scrolloverUndoVisible = false; scrolloverUndoTask?.cancel(); reloadCounts(includeNavigationCounts: true)
             case let .failure(error): errorMessage = error.localizedDescription
             }
         }
@@ -289,6 +312,8 @@ final class NewsreaderStore: ObservableObject {
         scrolloverRemovedArticles = [:]
         scrolloverOriginalOrder = [:]
         scrolloverBatchActive = false
+        scrolloverBatchGeneration = 0
+        scrolloverUndoBatchGeneration = nil
         scrolloverCountsPending = false
     }
 
@@ -322,6 +347,8 @@ final class NewsreaderStore: ObservableObject {
         scrolloverRemovedArticles = [:]
         scrolloverOriginalOrder = [:]
         scrolloverBatchActive = false
+        scrolloverBatchGeneration = 0
+        scrolloverUndoBatchGeneration = nil
         scrolloverCountsPending = false
         resetPresentationState()
         loadVisibleArticles(resetSnapshot: true)
@@ -352,6 +379,8 @@ final class NewsreaderStore: ObservableObject {
     func setArticlesForTesting(_ value: [ArticleSummary]) { articles = value }
     @MainActor
     func applyReadMutationForTesting(_ ids: [Int64], read: Bool, retainingForScrolloverUndo: Bool = false) { markMeaningfulInteraction(); updateVisibleRead(ids, read: read, retainingForScrolloverUndo: retainingForScrolloverUndo) }
+    @MainActor
+    func applyScrolloverMutationForTesting(_ ids: [Int64], batchGeneration: UInt64) { recordSuccessfulScrolloverRead(ids, batchGeneration: batchGeneration) }
     @MainActor
     func applyStarredMutationForTesting(_ ids: [Int64], starred: Bool) {
         markMeaningfulInteraction()

@@ -143,6 +143,67 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(candidates, [1])
     }
 
+    @MainActor
+    func testRuntimeAdapterProcessesQualifiedCrossingWhenOffsetArrivesBeforeFrames() async throws {
+        let adapter = IOSScrolloverRuntimeAdapter()
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let unread: Set<Int64> = [1]
+        var candidates: [Int64] = []
+        adapter.onCandidate = { candidates.append(contentsOf: $0) }
+        adapter.updateViewport(viewport)
+        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
+        adapter.receiveContentOffsetY(100, unread: unread)
+        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
+        adapter.beginUserScroll()
+
+        adapter.receiveContentOffsetY(120, unread: unread)
+        try await Task.sleep(for: .milliseconds(20))
+        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
+        try await Task.sleep(for: .milliseconds(20))
+
+        XCTAssertEqual(candidates, [1])
+    }
+
+    @MainActor
+    func testRuntimeAdapterProcessesQualifiedCrossingWhenFramesArriveBeforeOffset() async throws {
+        let adapter = IOSScrolloverRuntimeAdapter()
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let unread: Set<Int64> = [1]
+        var candidates: [Int64] = []
+        adapter.onCandidate = { candidates.append(contentsOf: $0) }
+        adapter.updateViewport(viewport)
+        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
+        adapter.receiveContentOffsetY(100, unread: unread)
+        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
+        adapter.beginUserScroll()
+
+        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
+        try await Task.sleep(for: .milliseconds(20))
+        adapter.receiveContentOffsetY(120, unread: unread)
+        try await Task.sleep(for: .milliseconds(20))
+
+        XCTAssertEqual(candidates, [1])
+    }
+
+    @MainActor
+    func testRuntimeAdapterDoesNotProcessLayoutOnlyFrameChanges() async throws {
+        let adapter = IOSScrolloverRuntimeAdapter()
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let unread: Set<Int64> = [1]
+        var candidates: [Int64] = []
+        adapter.onCandidate = { candidates.append(contentsOf: $0) }
+        adapter.updateViewport(viewport)
+        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
+        adapter.receiveContentOffsetY(100, unread: unread)
+        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
+        adapter.beginUserScroll()
+
+        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
+        try await Task.sleep(for: .milliseconds(20))
+
+        XCTAssertTrue(candidates.isEmpty)
+    }
+
     func testSwipeArbitrationLocksVerticalInput() {
         var arbitration = IOSSwipeArbitration()
         arbitration.update(translation: CGSize(width: 4, height: 20))
@@ -176,10 +237,51 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.removeArticlesWhenMarkedRead = true
         store.unreadOnly = true
         store.setArticlesForTesting([article(1), article(2), article(3)])
-        store.beginScrolloverUndoBatch()
-        store.applyReadMutationForTesting([1, 3], read: true, retainingForScrolloverUndo: true)
+        let batchGeneration = store.beginScrolloverUndoBatch()
+        store.applyScrolloverMutationForTesting([1, 3], batchGeneration: batchGeneration)
         store.restoreScrolloverRemovedArticlesForTesting()
         XCTAssertEqual(store.articles.map(\.id), [1, 2, 3])
+    }
+
+    @MainActor
+    func testScrolloverUndoSurvivesAnEmptyNewScrollSession() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2), article(3)])
+        let batchGeneration = store.beginScrolloverUndoBatch()
+        store.applyScrolloverMutationForTesting([1, 2], batchGeneration: batchGeneration)
+
+        store.beginScrolloverUndoBatch()
+        store.finishScrolloverUndoBatch()
+
+        XCTAssertEqual(store.scrolloverUndoIDs, [1, 2])
+        XCTAssertTrue(store.scrolloverUndoVisible)
+    }
+
+    @MainActor
+    func testLateScrolloverMutationAfterIdleKeepsItsUndoBatch() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2)])
+        let batchGeneration = store.beginScrolloverUndoBatch()
+        store.finishScrolloverUndoBatch()
+
+        store.applyScrolloverMutationForTesting([1, 2], batchGeneration: batchGeneration)
+
+        XCTAssertEqual(store.scrolloverUndoIDs, [1, 2])
+        XCTAssertTrue(store.scrolloverUndoVisible)
+    }
+
+    @MainActor
+    func testExplicitReadMutationDoesNotAlterScrolloverUndo() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.unreadOnly = false
+        store.setArticlesForTesting([article(1), article(2), article(3)])
+        let batchGeneration = store.beginScrolloverUndoBatch()
+        store.applyScrolloverMutationForTesting([1, 2], batchGeneration: batchGeneration)
+
+        store.applyReadMutationForTesting([3], read: true)
+
+        XCTAssertEqual(store.scrolloverUndoIDs, [1, 2])
+        XCTAssertTrue(store.scrolloverUndoVisible)
     }
 
     @MainActor

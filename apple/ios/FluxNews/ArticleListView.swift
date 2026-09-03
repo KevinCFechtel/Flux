@@ -39,6 +39,8 @@ final class IOSScrolloverRuntimeAdapter {
     private var viewport = CGRect.zero
     private var canonicalPosition: CGFloat = 0
     private var lastProcessedOffset: CGFloat = 0
+    private var frameGeneration = 0
+    private var lastProcessedFrameGeneration = 0
     private var unread = Set<Int64>()
     private var enabled = true
     private var userScrolling = false
@@ -60,6 +62,7 @@ final class IOSScrolloverRuntimeAdapter {
         guard !userScrolling else { return }
         userScrolling = true
         lastProcessedOffset = canonicalPosition
+        lastProcessedFrameGeneration = frameGeneration
     }
 
     func endUserScroll() {
@@ -73,13 +76,16 @@ final class IOSScrolloverRuntimeAdapter {
     }
 
     func receiveFrames(_ frames: [Int64: CGRect], unread: Set<Int64>) {
+        let framesChanged = self.frames != frames
         self.frames = frames
         self.unread = unread
+        if framesChanged { frameGeneration &+= 1 }
         if userScrolling {
-            scheduleProcessing()
+            if framesChanged { scheduleProcessing() }
         } else if enabled && !viewport.isEmpty {
             tracker.rebase(frames: frames, unread: unread)
             tracker.observe(frames: frames, viewport: viewport, unread: unread, now: Date.timeIntervalSinceReferenceDate)
+            lastProcessedFrameGeneration = frameGeneration
         }
     }
 
@@ -110,7 +116,12 @@ final class IOSScrolloverRuntimeAdapter {
             guard let self else { return }
             processingScheduled = false
             guard userScrolling else { return }
+            // Preserve movement until SwiftUI has published the matching row geometry.
+            guard frameGeneration != lastProcessedFrameGeneration else { return }
+            let delta = IOSScrolloverOffset.forwardDelta(current: canonicalPosition, previous: lastProcessedOffset)
+            guard abs(delta) > 0.5 else { return }
             let ids = IOSScrolloverFrameProcessor.process(frames: frames, viewport: viewport, unread: unread, canonicalPosition: canonicalPosition, lastProcessedOffset: &lastProcessedOffset, tracker: &tracker, enabled: enabled, userInitiated: true)
+            lastProcessedFrameGeneration = frameGeneration
             if !ids.isEmpty { onCandidate(ids) }
         }
     }
