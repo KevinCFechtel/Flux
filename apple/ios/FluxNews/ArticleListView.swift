@@ -7,7 +7,6 @@ import OSLog
 enum IOSScrolloverOffset {
     // Canonical positions increase as the list moves forward/downward.
     static func canonicalPosition(contentOffsetY: CGFloat) -> CGFloat { contentOffsetY }
-    static func canonicalPosition(contentMinY: CGFloat) -> CGFloat { -contentMinY }
     static func forwardDelta(current: CGFloat, previous: CGFloat) -> CGFloat { current - previous }
 }
 
@@ -102,10 +101,6 @@ final class IOSScrolloverRuntimeAdapter {
         receiveCanonicalPosition(IOSScrolloverOffset.canonicalPosition(contentOffsetY: contentOffsetY), unread: unread)
     }
 
-    func receiveLegacyContentMinY(_ contentMinY: CGFloat, unread: Set<Int64>) {
-        receiveCanonicalPosition(IOSScrolloverOffset.canonicalPosition(contentMinY: contentMinY), unread: unread)
-    }
-
     private func receiveCanonicalPosition(_ canonicalPosition: CGFloat, unread: Set<Int64>) {
         self.canonicalPosition = canonicalPosition
         self.unread = unread
@@ -181,47 +176,21 @@ private struct IOSScrolloverInteractionModifier: ViewModifier {
     let onContentOffsetY: (CGFloat) -> Void
     let onPhase: (String, String) -> Void
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content
-                .onScrollPhaseChange { previous, phase in
-                    onPhase(String(describing: previous), String(describing: phase))
-                    switch phase {
-                    case .interacting: onBegin()
-                    case .idle: onEnd()
-                    default: break
-                    }
-                }
-                .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    geometry.contentOffset.y
-                } action: { _, newOffset in
-                    onContentOffsetY(newOffset)
-                }
-        } else {
-            content.simultaneousGesture(
-                DragGesture()
-                    .onChanged { _ in onBegin() }
-                    .onEnded { _ in onEnd() }
-            )
-        }
-    }
-}
-
-private struct IOSLegacyArticleOffsetPreferenceModifier: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content
-        } else {
-            content.background {
-                GeometryReader { geometry in
-                    Color.clear.preference(
-                        key: ArticleOffsetKey.self,
-                        value: geometry.frame(in: .named("ArticleScrollSpace")).minY)
+        content
+            .onScrollPhaseChange { previous, phase in
+                onPhase(String(describing: previous), String(describing: phase))
+                switch phase {
+                case .interacting: onBegin()
+                case .idle: onEnd()
+                default: break
                 }
             }
-        }
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.y
+            } action: { _, newOffset in
+                onContentOffsetY(newOffset)
+            }
     }
 }
 
@@ -249,74 +218,49 @@ struct IOSSwipeArbitration: Equatable {
     mutating func reset() { axis = .undecided; direction = nil }
 }
 
-private struct IOSHorizontalSwipeRecognizer: UIViewRepresentable {
+@available(iOS 18.0, *)
+private struct IOSHorizontalSwipeGesture: UIGestureRecognizerRepresentable {
     @Binding var offset: CGFloat
     let actionWidth: CGFloat
     let onEnded: (IOSSwipeDirection) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeCoordinator(converter: Self.CoordinateSpaceConverter) -> Coordinator { Coordinator(self) }
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
-        view.backgroundColor = .clear
-        SwipeDiagnostic.log("makeUIView")
-        DispatchQueue.main.async { context.coordinator.install(on: view.superview) }
-        return view
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let recognizer = UIPanGestureRecognizer()
+        recognizer.minimumNumberOfTouches = 1
+        recognizer.maximumNumberOfTouches = 1
+        recognizer.delegate = context.coordinator
+        return recognizer
     }
 
-    func updateUIView(_ view: UIView, context: Context) {
+    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
         context.coordinator.parent = self
-        context.coordinator.install(on: view.superview)
-        SwipeDiagnostic.log("updateUIView offset=\(offset)")
+        recognizer.delegate = context.coordinator
     }
 
-    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
-        coordinator.removeRecognizer()
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        context.coordinator.handlePan(recognizer)
     }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var parent: IOSHorizontalSwipeRecognizer
+        var parent: IOSHorizontalSwipeGesture
         private var startOffset: CGFloat = 0
         private var direction: IOSSwipeDirection?
         private var arbitration = IOSSwipeArbitration()
-        private weak var installedView: UIView?
-        private var recognizer: UIPanGestureRecognizer?
 
-        init(_ parent: IOSHorizontalSwipeRecognizer) { self.parent = parent }
-
-        func install(on view: UIView?) {
-            guard let view else { return }
-            guard installedView !== view else { return }
-            removeRecognizer()
-            let recognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-            recognizer.minimumNumberOfTouches = 1
-            recognizer.maximumNumberOfTouches = 1
-            recognizer.delegate = self
-            view.addGestureRecognizer(recognizer)
-            installedView = view
-            self.recognizer = recognizer
-            SwipeDiagnostic.log("installed on parent=\(String(describing: type(of: view)))")
-        }
-
-        func removeRecognizer() {
-            recognizer?.view?.removeGestureRecognizer(recognizer!)
-            recognizer = nil
-            installedView = nil
-        }
+        init(_ parent: IOSHorizontalSwipeGesture) { self.parent = parent }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
             let velocity = pan.velocity(in: pan.view)
-            let accepts = abs(velocity.x) > abs(velocity.y)
-            SwipeDiagnostic.log("shouldBegin velocity=(\(velocity.x),\(velocity.y)) accepts=\(accepts)")
-            return accepts
+            return abs(velocity.x) > abs(velocity.y)
         }
 
-        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+        func handlePan(_ recognizer: UIPanGestureRecognizer) {
             let translation = recognizer.translation(in: recognizer.view)
             switch recognizer.state {
             case .began:
-                SwipeDiagnostic.log("began")
                 startOffset = parent.offset
                 arbitration.reset()
             case .changed:
@@ -326,13 +270,11 @@ private struct IOSHorizontalSwipeRecognizer: UIViewRepresentable {
                 let horizontalTranslation = lockedDirection == .right ? max(0, translation.x) : min(0, translation.x)
                 let proposed = startOffset + horizontalTranslation
                 parent.offset = min(parent.actionWidth, max(-parent.actionWidth, proposed))
-                SwipeDiagnostic.log("changed direction=\(lockedDirection) offset=\(parent.offset)")
             case .ended, .cancelled, .failed:
-                guard let direction else { SwipeDiagnostic.log("end state=\(recognizer.state.rawValue) no-direction"); reset(); return }
+                guard let direction else { reset(); return }
                 let shouldReveal = abs(parent.offset) >= parent.actionWidth * 0.5
                 parent.offset = shouldReveal ? (direction == .right ? parent.actionWidth : -parent.actionWidth) : 0
-                SwipeDiagnostic.log("end state=\(recognizer.state.rawValue) direction=\(direction) reveal=\(shouldReveal) offset=\(parent.offset)")
-                if shouldReveal { SwipeDiagnostic.log("action direction=\(direction)"); parent.onEnded(direction) }
+                if shouldReveal { parent.onEnded(direction) }
                 reset()
             default: break
             }
@@ -340,15 +282,6 @@ private struct IOSHorizontalSwipeRecognizer: UIViewRepresentable {
 
         private func reset() { startOffset = 0; direction = nil; arbitration.reset() }
     }
-}
-
-private enum SwipeDiagnostic {
-    #if DEBUG
-    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "swipe-diagnostic")
-    static func log(_ message: String) { logger.debug("\(message, privacy: .public)") }
-    #else
-    static func log(_ message: String) {}
-    #endif
 }
 
 struct ArticleListView: View {
@@ -382,8 +315,7 @@ struct ArticleListView: View {
                              }
                              .padding(.horizontal, horizontalInset)
                              .padding(.vertical, 12)
-                             .modifier(IOSLegacyArticleOffsetPreferenceModifier())
-                         }
+                          }
                          .refreshable { await store.syncManually() }
                         .coordinateSpace(name: "ArticleScrollSpace")
                         .scrollIndicators(.hidden)
@@ -397,15 +329,7 @@ struct ArticleListView: View {
                                 scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
                                 scrolloverAdapter.receiveFrames(values, unread: unreadArticleIDs)
                          }
-                            .onPreferenceChange(ArticleOffsetKey.self) { newOffset in
-                                if #available(iOS 18.0, *) {
-                                    // iOS 18 uses onScrollGeometryChange as its only offset source.
-                                } else {
-                                     scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
-                                     scrolloverAdapter.receiveLegacyContentMinY(newOffset, unread: unreadArticleIDs)
-                                }
-                         }
-                            .modifier(IOSScrolloverInteractionModifier(onBegin: {
+                             .modifier(IOSScrolloverInteractionModifier(onBegin: {
                                 scrolloverAdapter.beginUserScroll()
                                 store.markMeaningfulInteraction()
                                 store.beginScrolloverUndoBatch()
@@ -505,14 +429,14 @@ private struct ArticlePresentationView: View {
             .frame(width: articleWidth, alignment: .leading)
             .background(Color(uiColor: .systemGroupedBackground))
             .offset(x: horizontalOffset)
-            .background {
-                IOSHorizontalSwipeRecognizer(offset: $horizontalOffset, actionWidth: actionWidth) { direction in
+            .gesture(
+                IOSHorizontalSwipeGesture(offset: $horizontalOffset, actionWidth: actionWidth) { direction in
                     switch direction {
                     case .right: store.setRead(article, read: !article.isRead)
                     case .left: store.setStarred(article, starred: !article.isStarred)
                     }
                 }
-            }
+            )
         }
         .frame(width: articleWidth, alignment: .leading)
         .accessibilityLabel(accessibilityLabel)
@@ -665,11 +589,6 @@ private struct ArticlePresentationView: View {
 private struct ArticleFrameKey: PreferenceKey {
     static var defaultValue: [Int64: CGRect] = [:]
     static func reduce(value: inout [Int64: CGRect], nextValue: () -> [Int64: CGRect]) { value.merge(nextValue(), uniquingKeysWith: { $1 }) }
-}
-
-private struct ArticleOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 private struct FeedIconView: View {

@@ -303,7 +303,7 @@
 				FLUX_STORAGE_NAMESPACE = FluxNewsNativeDev;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FluxNews/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -330,7 +330,7 @@
 				FLUX_STORAGE_NAMESPACE = FluxNewsNativeDev;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FluxNews/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -371,7 +371,7 @@
 				FLUX_STORAGE_NAMESPACE = FluxNewsNativeUpgradeTest;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FluxNews/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -394,7 +394,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev.tests;
 				PRODUCT_NAME = FluxNewsTests;
 				SDKROOT = iphoneos;
@@ -413,7 +413,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev.tests;
 				PRODUCT_NAME = FluxNewsTests;
 				SDKROOT = iphoneos;

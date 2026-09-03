@@ -12,6 +12,8 @@
 
 ## 1. Goal and non-goals
 
+Native FluxNews iOS/iPadOS minimum deployment target: 18.0.
+
 Phase D delivers a first-class native iPhone/iPadOS FluxNews client without
 creating a second domain layer in Swift.
 

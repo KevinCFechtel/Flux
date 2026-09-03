@@ -10,7 +10,6 @@ enum NewsNavigationLayout {
 struct ContentView: View {
     @ObservedObject var bootstrapper: CoreBootstrapper
     @ObservedObject var newsreaderStore: NewsreaderStore
-    @State private var navigationPresented = false
     @State private var diagnosticsPresented = false
     @State private var optionsPresented = false
     @State private var iPadColumnVisibility: NavigationSplitViewVisibility = .all
@@ -34,50 +33,31 @@ struct ContentView: View {
     private var newsreader: some View {
         if usesSplitNavigation {
             NavigationSplitView(columnVisibility: $iPadColumnVisibility) {
-                NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented, presentation: .sidebar).toolbar(removing: .sidebarToggle)
+                NewsNavigationView(store: newsreaderStore, presentation: .sidebar).toolbar(removing: .sidebarToggle)
             } detail: {
                 articleList
             }
         } else {
             NavigationStack {
                 articleList
-                    .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button { navigationPresented = true } label: { Image(systemName: "sidebar.leading") }
-                                .accessibilityLabel("Choose news scope")
-                        }
-                         ToolbarItemGroup(placement: .bottomBar) {
-                             Button {
-                                 Task { await newsreaderStore.syncManually() }
-                             } label: {
-                                 Label("Sync", systemImage: "arrow.clockwise")
-                             }
-                             .disabled(newsreaderStore.isLoading)
-                            Button { diagnosticsPresented = true } label: {
-                                Label("Diagnostics", systemImage: "info.circle")
-                            }
-                            .accessibilityLabel("Developer diagnostics")
-                         }
-                         ToolbarItem(placement: .topBarTrailing) {
-                             Button { optionsPresented = true } label: { Image(systemName: "slider.horizontal.3") }
-                                 .accessibilityLabel("Newsreader options")
-                         }
-                     }
-                    .sheet(isPresented: $navigationPresented) {
-                        NavigationStack {
-                            NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented, presentation: .sheet)
-                                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { navigationPresented = false } } }
-                        }
+                    .navigationDestination(for: BrowserScope.self) { destination in
+                        articleList(for: destination)
                     }
-                    .sheet(isPresented: $optionsPresented) { NewsreaderOptionsView(store: newsreaderStore) }
             }
         }
     }
 
-    private var articleList: some View {
+    private var articleList: some View { articleList(for: nil) }
+
+    private func articleList(for destination: BrowserScope?) -> some View {
         ArticleListView(store: newsreaderStore)
-            .navigationTitle(scopeTitle)
+            .navigationTitle(scopeTitle(for: destination))
             .navigationBarTitleDisplayMode(.large)
+            .onAppear {
+                if let destination, newsreaderStore.scope != destination {
+                    newsreaderStore.select(destination)
+                }
+            }
             .toolbar {
                 if usesSplitNavigation {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -95,15 +75,40 @@ struct ContentView: View {
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { diagnosticsPresented = true } label: { Image(systemName: "info.circle") }
-                            .accessibilityLabel("Developer diagnostics")
+                        .accessibilityLabel("Developer diagnostics")
+                    }
+                } else {
+                    ToolbarItem(placement: .topBarLeading) {
+                        NavigationLink {
+                            NewsNavigationView(store: newsreaderStore, presentation: .stack)
+                        } label: {
+                            Image(systemName: "sidebar.leading")
+                        }
+                        .accessibilityLabel("Choose news scope")
+                    }
+                    ToolbarItemGroup(placement: .bottomBar) {
+                        Button {
+                            Task { await newsreaderStore.syncManually() }
+                        } label: {
+                            Label("Sync", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(newsreaderStore.isLoading)
+                        Button { diagnosticsPresented = true } label: {
+                            Label("Diagnostics", systemImage: "info.circle")
+                        }
+                        .accessibilityLabel("Developer diagnostics")
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { optionsPresented = true } label: { Image(systemName: "slider.horizontal.3") }
+                            .accessibilityLabel("Newsreader options")
                     }
                 }
             }
             .sheet(isPresented: $optionsPresented) { NewsreaderOptionsView(store: newsreaderStore) }
     }
 
-    private var scopeTitle: String {
-        switch newsreaderStore.scope {
+    private func scopeTitle(for destination: BrowserScope?) -> String {
+        switch destination ?? newsreaderStore.scope {
         case .all: "All News"
         case .starred: "Starred"
         case .category(let id): newsreaderStore.catalog.categories.first { $0.id == id }?.title ?? "Category"

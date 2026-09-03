@@ -1,45 +1,20 @@
 import SwiftUI
 
 enum NewsNavigationPresentation: Equatable {
-    case sheet
     case sidebar
+    case stack
 }
 
 struct NewsNavigationView: View {
     @ObservedObject var store: NewsreaderStore
-    @Binding var iPhoneSheetPresented: Bool
     let presentation: NewsNavigationPresentation
 
     var body: some View {
         if presentation == .sidebar {
             sidebarList
         } else {
-            sheetList
+            stackList
         }
-    }
-
-    private var sheetList: some View {
-        List(selection: selection) {
-            Section("News") {
-                scopeRow("All News", systemImage: "newspaper", scope: .all, count: store.unreadTotal)
-                scopeRow("Starred", systemImage: "star", scope: .starred, count: store.starredTotal)
-            }
-            ForEach(groups) { group in
-                Section {
-                    if let categoryID = group.categoryID {
-                        scopeRow(group.title, systemImage: "folder", scope: .category(categoryID), count: store.categoryCounts[categoryID] ?? 0)
-                    }
-                    ForEach(group.feeds, id: \.id) { feed in
-                        scopeRow(feedTitle(feed.id), systemImage: "dot.radiowaves.left.and.right", scope: .feed(feed.id), count: store.feedCounts[feed.id] ?? 0)
-                            .padding(.leading, group.categoryID == nil ? 0 : 16)
-                    }
-                } header: {
-                    if group.categoryID == nil { Text(group.title) }
-                }
-            }
-        }
-        .listStyle(.insetGrouped)
-        .navigationTitle("News")
     }
 
     private var sidebarList: some View {
@@ -66,10 +41,34 @@ struct NewsNavigationView: View {
         .navigationTitle("News")
     }
 
+    private var stackList: some View {
+        List {
+            Section {
+                scopeRow("All News", systemImage: "newspaper", scope: .all, count: store.unreadTotal)
+                scopeRow("Starred", systemImage: "star", scope: .starred, count: store.starredTotal)
+            }
+            Section("Feeds") {
+                ForEach(groups) { group in
+                    if group.categoryID != nil {
+                        OutlineGroup([sidebarItem(for: group)], children: \.children) { item in
+                            scopeRow(item.title, systemImage: item.systemImage, scope: item.scope, count: item.count)
+                        }
+                    } else {
+                        ForEach(group.feeds, id: \.id) { feed in
+                            scopeRow(feedTitle(feed.id), systemImage: "dot.radiowaves.left.and.right", scope: .feed(feed.id), count: store.feedCounts[feed.id] ?? 0)
+                        }
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("News")
+    }
+
     private var selection: Binding<BrowserScope?> {
         Binding(
             get: { store.scope },
-            set: { if let value = $0 { store.select(value); iPhoneSheetPresented = false } }
+            set: { if let value = $0 { store.select(value) } }
         )
     }
 
@@ -109,7 +108,7 @@ struct NewsNavigationView: View {
 
     @ViewBuilder
     private func scopeRow(_ title: String, systemImage: String, scope: BrowserScope, count: UInt64) -> some View {
-        Label {
+        let label = Label {
             HStack {
                 Text(title)
                 Spacer()
@@ -118,8 +117,14 @@ struct NewsNavigationView: View {
         } icon: {
             Image(systemName: systemImage)
         }
-        .tag(scope)
-        .accessibilityValue(count > 0 ? "\(count) unread articles" : "No unread articles")
+        if presentation == .stack {
+            NavigationLink(value: scope) { label }
+                .accessibilityValue(count > 0 ? "\(count) unread articles" : "No unread articles")
+        } else {
+            label
+                .tag(scope)
+                .accessibilityValue(count > 0 ? "\(count) unread articles" : "No unread articles")
+        }
     }
 }
 

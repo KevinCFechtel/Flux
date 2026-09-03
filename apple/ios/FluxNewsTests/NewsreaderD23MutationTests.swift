@@ -12,12 +12,6 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(IOSScrolloverOffset.forwardDelta(current: IOSScrolloverOffset.canonicalPosition(contentOffsetY: 40), previous: IOSScrolloverOffset.canonicalPosition(contentOffsetY: 80)), -40)
     }
 
-    func testIOS17ContentMinYNormalizesToForwardIncreasingCanonicalPositions() {
-        XCTAssertEqual(IOSScrolloverOffset.forwardDelta(current: IOSScrolloverOffset.canonicalPosition(contentMinY: -40), previous: IOSScrolloverOffset.canonicalPosition(contentMinY: 0)), 40)
-        XCTAssertEqual(IOSScrolloverOffset.forwardDelta(current: IOSScrolloverOffset.canonicalPosition(contentMinY: -80), previous: IOSScrolloverOffset.canonicalPosition(contentMinY: -40)), 40)
-        XCTAssertEqual(IOSScrolloverOffset.forwardDelta(current: IOSScrolloverOffset.canonicalPosition(contentMinY: -40), previous: IOSScrolloverOffset.canonicalPosition(contentMinY: -80)), -40)
-    }
-
     func testDisabledScrolloverGateRejectsProcessing() {
         XCTAssertFalse(IOSScrolloverProcessingGate.shouldProcess(enabled: false))
         XCTAssertTrue(IOSScrolloverProcessingGate.shouldProcess(enabled: true))
