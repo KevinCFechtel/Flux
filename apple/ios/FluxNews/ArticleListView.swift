@@ -354,12 +354,14 @@ struct ArticleListView: View {
                                 scrolloverAdapter.receiveFrames(values, unread: unreadArticleIDs)
                          }
                              .modifier(IOSScrolloverInteractionModifier(onBegin: {
-                                scrolloverAdapter.beginUserScroll()
-                                store.markMeaningfulInteraction()
-                                store.beginScrolloverUndoBatch()
-                           }, onEnd: {
-                               scrolloverAdapter.endUserScroll()
-                               store.finishScrolloverUndoBatch()
+                                 scrolloverAdapter.beginUserScroll()
+                                 store.beginScrolloverPresentationScroll()
+                                 store.markMeaningfulInteraction()
+                                 store.beginScrolloverUndoBatch()
+                            }, onEnd: {
+                                 scrolloverAdapter.endUserScroll()
+                                 store.finishScrolloverPresentationScroll()
+                                 store.finishScrolloverUndoBatch()
                              }, onContentOffsetY: { newOffset in
                                  scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
                                  scrolloverAdapter.receiveContentOffsetY(newOffset, unread: unreadArticleIDs)
