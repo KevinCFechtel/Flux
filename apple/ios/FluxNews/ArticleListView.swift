@@ -313,6 +313,7 @@ struct ArticleListView: View {
     @State private var unreadArticleIDs = Set<Int64>()
     @State private var sensoryFeedbackTrigger = 0
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
+    private let topAnchorID = "article-list-top"
 
     var body: some View {
         Group {
@@ -324,14 +325,16 @@ struct ArticleListView: View {
             } else if store.articles.isEmpty {
                 ContentUnavailableView("No Articles", systemImage: "newspaper")
             } else {
+                    ScrollViewReader { scrollProxy in
                     GeometryReader { proxy in
                         let horizontalInset: CGFloat = proxy.size.width > 700 ? 28 : 16
                         let articleSpacing: CGFloat =
                           ArticlePresentationLayout.usesLandscapeVisual(
                             mode: store.articlePresentationMode,
                             availableWidth: proxy.size.width - horizontalInset * 2) ? 20 : 26
-                         ScrollView {
-                            LazyVStack(spacing: articleSpacing) {
+                          ScrollView {
+                             Color.clear.frame(height: 0).id(topAnchorID)
+                             LazyVStack(spacing: articleSpacing) {
                                 ForEach(store.articles, id: \.id) { article in
                                        ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIconData: store.feedIcons[article.feedId], onRequestFeedIcon: { store.requestFeedIcon(article.feedId) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { article, read in store.setRead(article, read: read) }, onSetStarred: { article, starred in store.setStarred(article, starred: starred) })
                                          .equatable()
@@ -372,13 +375,17 @@ struct ArticleListView: View {
           .onReceive(timer) { _ in scrolloverAdapter.observeIdle() }
                            .onChange(of: store.articles) { _, _ in refreshUnreadArticleIDs() }
                             .onChange(of: store.markReadOnScrolloverEnabled) { _, enabled in scrolloverAdapter.updateEnabled(enabled) }
-                           .onChange(of: store.snapshotRevision) { _, _ in scrolloverAdapter.reset() }
+                            .onChange(of: store.snapshotRevision) { _, _ in scrolloverAdapter.reset() }
+                            .onChange(of: store.scrollResetRevision) { _, _ in
+                                scrollProxy.scrollTo(topAnchorID, anchor: .top)
+                            }
                            .onChange(of: store.scrolloverUndoVisible) { _, visible in
                                if visible { sensoryFeedbackTrigger += 1 }
                            }
                            .sensoryFeedback(.success, trigger: sensoryFeedbackTrigger)
-                     }
-                }
+                      }
+                    }
+                 }
         }
         .background(.background)
         .overlay(alignment: .top) {

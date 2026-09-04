@@ -35,6 +35,7 @@ final class NewsreaderStore: ObservableObject {
     @Published private(set) var hasPendingNewData = false
     @Published private(set) var hasUnscopedNewDataSignal = false
     @Published private(set) var snapshotRevision: UInt64 = 0
+    @Published private(set) var scrollResetRevision: UInt64 = 0
     @Published var scope: BrowserScope = .all
     @Published var unreadOnly = true
     @Published var newestFirst = false
@@ -179,10 +180,27 @@ final class NewsreaderStore: ObservableObject {
         }
     }
 
-    func select(_ newScope: BrowserScope) { markMeaningfulInteraction(); scope = newScope; loadVisibleArticles(acknowledgePending: true, resetSnapshot: true) }
+    func select(_ newScope: BrowserScope) {
+        markMeaningfulInteraction()
+        scope = newScope
+        loadVisibleArticles(acknowledgePending: true, resetSnapshot: true)
+        requestScrollReset()
+    }
 
-    func setUnreadOnly(_ value: Bool) { unreadOnly = value; resetPresentationState(); loadVisibleArticles(resetSnapshot: true) }
-    func setNewestFirst(_ value: Bool) { newestFirst = value; resetPresentationState(); loadVisibleArticles(resetSnapshot: true) }
+    func setUnreadOnly(_ value: Bool) {
+        guard unreadOnly != value else { return }
+        unreadOnly = value
+        resetPresentationState()
+        loadVisibleArticles(resetSnapshot: true)
+        requestScrollReset()
+    }
+    func setNewestFirst(_ value: Bool) {
+        guard newestFirst != value else { return }
+        newestFirst = value
+        resetPresentationState()
+        loadVisibleArticles(resetSnapshot: true)
+        requestScrollReset()
+    }
     func setStartupScope(_ value: StartupScopePreference) { startupScope = value; defaults.set(value.rawValue, forKey: Key.startupScope) }
     func setStartupCategoryID(_ value: Int64?) { startupCategoryID = value; defaults.set(value, forKey: Key.startupCategoryID) }
     func setStartupFeedID(_ value: Int64?) { startupFeedID = value; defaults.set(value, forKey: Key.startupFeedID) }
@@ -372,7 +390,7 @@ final class NewsreaderStore: ObservableObject {
     }
 
     func accumulateNewData(_ additions: [(feedID: Int64, count: UInt32)]) { pending.accumulate(additions); publishPending() }
-    func adoptVisibleSnapshot() { acknowledgePendingForCurrentScope(); hasUnscopedNewDataSignal = false; resetPresentationState(); replaceSnapshot() }
+    func adoptVisibleSnapshot() { acknowledgePendingForCurrentScope(); hasUnscopedNewDataSignal = false; resetPresentationState(); replaceSnapshot(shouldResetScroll: true) }
     func resetVisibleSnapshot() { articles = []; selectionTotal = 0; resetPresentationState() }
 
     private func acknowledgePendingForCurrentScope() {
@@ -429,7 +447,7 @@ final class NewsreaderStore: ObservableObject {
         case .replace:
             hasUnscopedNewDataSignal = false
             if metadata.reason == .manual { acknowledgePendingForCurrentScope() }
-            replaceSnapshot()
+            replaceSnapshot(shouldResetScroll: metadata.reason == .manual)
         case .signalNewData:
             if metadata.newArticlesByFeed.isEmpty { hasUnscopedNewDataSignal = true }
         case .preserve:
@@ -437,7 +455,7 @@ final class NewsreaderStore: ObservableObject {
         }
     }
 
-    private func replaceSnapshot() {
+    private func replaceSnapshot(shouldResetScroll: Bool = false) {
         scrolloverUndoTask?.cancel()
         scrolloverUndoTask = nil
         scrolloverUndoIDs = []
@@ -450,6 +468,7 @@ final class NewsreaderStore: ObservableObject {
         scrolloverCountsPending = false
         resetPresentationState()
         loadVisibleArticles(resetSnapshot: true)
+        if shouldResetScroll { requestScrollReset() }
     }
 
     private func updateVisibleRead(_ ids: [Int64], read: Bool, retainingForScrolloverUndo: Bool = false, deferStructuralRemoval: Bool = false) {
@@ -475,6 +494,7 @@ final class NewsreaderStore: ObservableObject {
         let removesReadArticles = ArticleListPresentationPolicy.removesMarkedReadArticle(removeWhenMarkedRead: removeArticlesWhenMarkedRead, unreadOnly: unreadOnly, scope: scope)
         if removesReadArticles {
             articles.removeAll { removalIDs.contains($0.id) }
+            requestScrollReset()
         }
     }
 
@@ -532,6 +552,8 @@ final class NewsreaderStore: ObservableObject {
     func normalizeStartupScopeForTesting(categoryIDs: Set<Int64>, feedIDs: Set<Int64>) { normalizeStartupScope(categoryIDs: categoryIDs, feedIDs: feedIDs) }
     @MainActor
     func setCatalogForTesting(_ value: NavigationCatalog) { catalog = value }
+    @MainActor
+    func setSelectionTotalForTesting(_ value: UInt64) { selectionTotal = value }
 
     private func reloadCounts(includeNavigationCounts: Bool = false) {
         guard let core else { return }
@@ -560,6 +582,8 @@ final class NewsreaderStore: ObservableObject {
             }
         }
     }
+
+    private func requestScrollReset() { scrollResetRevision &+= 1 }
 }
 
 private final class IOSNewsreaderEventListener: EventListener, @unchecked Sendable {

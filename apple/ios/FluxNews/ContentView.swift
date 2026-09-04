@@ -95,20 +95,8 @@ struct ContentView: View {
                     .navigationDestination(isPresented: $searchPresented) { searchView }
                     .toolbar {
                         ToolbarItem(placement: .topBarLeading) {
-                            Button { navigationPresented = true } label: { Image(systemName: "sidebar.leading") }
+                            Button { navigationPresented = true } label: { Image(systemName: "book.closed") }
                                 .accessibilityLabel("Choose news scope")
-                        }
-                        ToolbarItemGroup(placement: .bottomBar) {
-                            Button {
-                                Task { await newsreaderStore.syncManually() }
-                            } label: {
-                                Label("Sync", systemImage: "arrow.clockwise")
-                            }
-                            .disabled(newsreaderStore.isLoading)
-                        }
-                        ToolbarItem(placement: .topBarTrailing) {
-                             Button { settingsPresented = true } label: { Image(systemName: "gearshape") }
-                                 .accessibilityLabel("Settings")
                         }
                     }
                     .sheet(isPresented: $navigationPresented) {
@@ -124,23 +112,42 @@ struct ContentView: View {
 
     private var articleList: some View {
         ArticleListView(store: newsreaderStore, onArticleTap: openArticle, onArticleAction: handleArticleAction)
-            .navigationTitle(scopeTitle)
+            .navigationTitle(ArticleListTitlePresentation.title(scope: newsreaderStore.scope, catalog: newsreaderStore.catalog, count: newsreaderStore.selectionTotal))
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                if usesSplitNavigation {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            Task { await newsreaderStore.syncManually() }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
+                ToolbarItemGroup(placement: .bottomBar) {
+                    Button { Task { await newsreaderStore.syncManually() } } label: {
+                        Label("Sync", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(newsreaderStore.isLoading)
+                    .accessibilityLabel("Sync news")
+
+                    Menu {
+                        Section("Show") {
+                            Button { newsreaderStore.setUnreadOnly(true) } label: {
+                                filterMenuLabel("Unread Only", selected: newsreaderStore.unreadOnly)
+                            }
+                            Button { newsreaderStore.setUnreadOnly(false) } label: {
+                                filterMenuLabel("All Articles", selected: !newsreaderStore.unreadOnly)
+                            }
                         }
-                        .disabled(newsreaderStore.isLoading)
-                        .accessibilityLabel("Sync news")
+                        Section("Sort") {
+                            Button { newsreaderStore.setNewestFirst(true) } label: {
+                                filterMenuLabel("Newest First", selected: newsreaderStore.newestFirst)
+                            }
+                            Button { newsreaderStore.setNewestFirst(false) } label: {
+                                filterMenuLabel("Oldest First", selected: !newsreaderStore.newestFirst)
+                            }
+                        }
+                    } label: {
+                        Label("Filter and Sort", systemImage: "line.3.horizontal.decrease.circle")
                     }
-                    ToolbarItem(placement: .topBarTrailing) {
-                         Button { settingsPresented = true } label: { Image(systemName: "gearshape") }
-                             .accessibilityLabel("Settings")
+                    .accessibilityIdentifier("articleList.filterSort")
+
+                    Button { settingsPresented = true } label: {
+                        Label("Settings", systemImage: "gearshape")
                     }
+                    .accessibilityIdentifier("articleList.settings")
                 }
             }
             .sheet(isPresented: $settingsPresented) { SettingsView(store: newsreaderStore, bootstrapper: bootstrapper, onDiagnostics: { diagnosticsPresented = true }) }
@@ -329,17 +336,31 @@ struct ContentView: View {
         }
     }
 
-    private var scopeTitle: String {
-        switch newsreaderStore.scope {
+    @ViewBuilder
+    private func filterMenuLabel(_ title: String, selected: Bool) -> some View {
+        if selected { Label(title, systemImage: "checkmark") }
+        else { Text(title) }
+    }
+}
+
+enum ArticleListTitlePresentation {
+    static func title(scope: BrowserScope, catalog: NavigationCatalog, count: UInt64) -> String {
+        "\(scopeTitle(scope: scope, catalog: catalog)) (\(count))"
+    }
+
+    private static func scopeTitle(scope: BrowserScope, catalog: NavigationCatalog) -> String {
+        switch scope {
         case .all: "All News"
         case .starred: "Starred"
-        case .category(let id): newsreaderStore.catalog.categories.first { $0.id == id }?.title ?? "Category"
-        case .feed(let id): newsreaderStore.catalog.feeds.first { $0.id == id }?.title ?? "Feed"
+        case .category(let id): catalog.categories.first { $0.id == id }?.title ?? "Category"
+        case .feed(let id): catalog.feeds.first { $0.id == id }?.title ?? "Feed"
         case .search: "Search"
         case .listeningList: "Listening List"
         }
     }
+}
 
+extension ContentView {
     private var usesReaderInspector: Bool {
         ReaderPresentationPolicy.kind(isPad: usesSplitNavigation, isRegularWidth: horizontalSizeClass == .regular) == .inspector
     }

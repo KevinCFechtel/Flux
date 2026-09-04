@@ -12,6 +12,44 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(NewsNavigationLayout.usesSplitView(for: .pad))
     }
 
+    func testArticleListTitleUsesAllNewsSelectionCount() {
+        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .all, catalog: NavigationCatalog(categories: [], feeds: []), count: 123), "All News (123)")
+    }
+
+    func testArticleListTitleUsesCategorySelectionCount() {
+        let catalog = NavigationCatalog(categories: [Category(id: 1, title: "Technology")], feeds: [])
+        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .category(1), catalog: catalog, count: 31), "Technology (31)")
+    }
+
+    func testArticleListTitleUsesFeedSelectionCount() {
+        let catalog = NavigationCatalog(categories: [], feeds: [Feed(id: 10, categoryId: 1, title: "Ars Technica")])
+        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .feed(10), catalog: catalog, count: 12), "Ars Technica (12)")
+    }
+
+    func testArticleListTitleUsesStarredSelectionCount() {
+        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .starred, catalog: NavigationCatalog(categories: [], feeds: []), count: 8), "Starred (8)")
+    }
+
+    @MainActor
+    func testArticleListTitleReflectsUpdatedSelectionCount() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.scope = .all
+        store.setSelectionTotalForTesting(4)
+        XCTAssertEqual(ArticleListTitlePresentation.title(scope: store.scope, catalog: store.catalog, count: store.selectionTotal), "All News (4)")
+
+        store.setSelectionTotalForTesting(3)
+        XCTAssertEqual(ArticleListTitlePresentation.title(scope: store.scope, catalog: store.catalog, count: store.selectionTotal), "All News (3)")
+    }
+
+    func testNewsNavigationSelectionMatchesOnlyTheActiveScope() {
+        XCTAssertTrue(NewsNavigationSelection.isSelected(.all, activeScope: .all))
+        XCTAssertTrue(NewsNavigationSelection.isSelected(.starred, activeScope: .starred))
+        XCTAssertTrue(NewsNavigationSelection.isSelected(.category(1), activeScope: .category(1)))
+        XCTAssertTrue(NewsNavigationSelection.isSelected(.feed(10), activeScope: .feed(10)))
+        XCTAssertFalse(NewsNavigationSelection.isSelected(.category(1), activeScope: .feed(10)))
+        XCTAssertFalse(NewsNavigationSelection.isSelected(.feed(11), activeScope: .feed(10)))
+    }
+
     func testArticlePresentationModesAreStableAndVisualIsFirst() {
         XCTAssertEqual(ArticlePresentationMode.allCases, [.visual, .compact])
         XCTAssertEqual(ArticlePresentationMode(rawValue: "visual"), .visual)

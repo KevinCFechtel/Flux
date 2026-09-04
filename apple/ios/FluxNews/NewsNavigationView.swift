@@ -5,6 +5,12 @@ enum NewsNavigationPresentation: Equatable {
     case sheet
 }
 
+enum NewsNavigationSelection {
+    static func isSelected(_ rowScope: BrowserScope, activeScope: BrowserScope) -> Bool {
+        rowScope == activeScope
+    }
+}
+
 struct NewsNavigationView: View {
     @ObservedObject var store: NewsreaderStore
     @Binding var iPhoneSheetPresented: Bool
@@ -155,6 +161,7 @@ struct NewsNavigationView: View {
             scopeLabel(title, systemImage: systemImage, count: count)
         }
         .buttonStyle(.plain)
+        .tag(scope)
         .accessibilityValue(count > 0 ? "\(count) unread articles" : "No unread articles")
     }
 

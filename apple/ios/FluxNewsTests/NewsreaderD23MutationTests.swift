@@ -62,10 +62,12 @@ final class NewsreaderD23MutationTests: XCTestCase {
         let generation = store.beginScrolloverUndoBatch()
         store.applyScrolloverMutationForTesting([1], batchGeneration: generation)
 
+        let resetRevision = store.scrollResetRevision
         store.finishScrolloverPresentationScrollForTesting()
 
         XCTAssertEqual(store.articles.map(\.id), [2])
         XCTAssertTrue(store.scrolloverPendingRemovalsForTesting.isEmpty)
+        XCTAssertGreaterThan(store.scrollResetRevision, resetRevision)
     }
 
     @MainActor
@@ -487,6 +489,57 @@ final class NewsreaderD23MutationTests: XCTestCase {
 
         XCTAssertNil(defaults.object(forKey: "FluxNews.iOS.unreadOnly"))
         XCTAssertNil(defaults.object(forKey: "FluxNews.iOS.newestFirst"))
+    }
+
+    @MainActor
+    func testFilterAndSortActionsUpdateOnlyTransientStoreState() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+
+        store.setUnreadOnly(false)
+        store.setNewestFirst(true)
+
+        XCTAssertFalse(store.unreadOnly)
+        XCTAssertTrue(store.newestFirst)
+    }
+
+    @MainActor
+    func testScopeFilterAndSortChangesRequestScrollReset() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let initial = store.scrollResetRevision
+
+        store.select(.starred)
+        let afterScope = store.scrollResetRevision
+        store.setUnreadOnly(false)
+        let afterFilter = store.scrollResetRevision
+        store.setNewestFirst(true)
+
+        XCTAssertGreaterThan(afterScope, initial)
+        XCTAssertGreaterThan(afterFilter, afterScope)
+        XCTAssertGreaterThan(store.scrollResetRevision, afterFilter)
+    }
+
+    @MainActor
+    func testManualSnapshotReplacementRequestsScrollReset() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let revision = store.scrollResetRevision
+
+        store.completeSyncForTesting(syncMetadata(reason: .manual, dataChanged: true))
+
+        XCTAssertGreaterThan(store.scrollResetRevision, revision)
+    }
+
+    @MainActor
+    func testImmediateReadAndUnrelatedRowMutationsDoNotRequestScrollReset() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.unreadOnly = false
+        store.setArticlesForTesting([article(1), article(2)])
+        let revision = store.scrollResetRevision
+
+        store.applyReadMutationForTesting([1], read: true)
+        store.applyStarredMutationForTesting([2], starred: true)
+        store.setArticlesForTesting([article(1, read: true), article(2, starred: true)])
+
+        XCTAssertEqual(store.scrollResetRevision, revision)
     }
 
     @MainActor
