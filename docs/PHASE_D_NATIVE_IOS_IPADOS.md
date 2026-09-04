@@ -274,13 +274,17 @@ Flutter credentials, settings, SQLite state, downloads, and playback are not
 read, imported, rewritten, or deleted by D4.1. Flutter-to-native migration
 remains entirely in D9.
 
-#### D4.2 — Native Settings Redesign
+#### D4.2 — Native Settings
 
-Implement a conventional native Settings screen for current Core and native UI
-settings, including feed/media settings and System + True Black appearance.
-Integrate native quality requirements such as Dynamic Type, VoiceOver, haptics,
-context menus and iPad keyboard/pointer behavior as part of the affected UI,
-not as a parallel custom framework.
+Implement a conventional native Settings hierarchy with dedicated Account,
+Articles, Navigation, and Developer Diagnostics destinations. D4.2 exposes only
+currently functional native/Core settings and reuses the frozen D4.1 account
+lifecycle. Transient article-list filters such as Unread Only and Newest First
+remain list controls rather than persistent Settings.
+
+D4.2 does not add Appearance or True Black settings, future media/notification/
+background/widget settings, or a factory reset action. Those concerns remain in
+D4.3 or their later feature phases.
 
 #### D4.3 — Native Presentation Quality
 

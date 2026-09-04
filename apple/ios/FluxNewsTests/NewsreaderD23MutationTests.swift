@@ -338,6 +338,39 @@ final class NewsreaderD23MutationTests: XCTestCase {
     }
 
     @MainActor
+    func testTransientArticleFiltersAreNotPersistedAsSettings() {
+        let suiteName = "FluxNews.SettingsTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = NewsreaderStore(defaults: defaults)
+
+        store.setUnreadOnly(false)
+        store.setNewestFirst(true)
+
+        XCTAssertNil(defaults.object(forKey: "FluxNews.iOS.unreadOnly"))
+        XCTAssertNil(defaults.object(forKey: "FluxNews.iOS.newestFirst"))
+    }
+
+    @MainActor
+    func testSettingsBackedArticleAndNavigationPreferencesRoundTrip() {
+        let suiteName = "FluxNews.SettingsTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = NewsreaderStore(defaults: defaults)
+
+        store.setClickOnNews(.openDetailView)
+        store.setArticlePreviewLines(.extended)
+        store.setHideEmptyNavigationEntries(true)
+        store.setStartupScope(.starred)
+
+        let reloaded = NewsreaderStore(defaults: defaults)
+        XCTAssertEqual(reloaded.clickOnNews, .openDetailView)
+        XCTAssertEqual(reloaded.articlePreviewLines, .extended)
+        XCTAssertTrue(reloaded.hideEmptyNavigationEntries)
+        XCTAssertEqual(reloaded.startupScope, .starred)
+    }
+
+    @MainActor
     func testScrolloverUndoSurvivesAnEmptyNewScrollSession() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setArticlesForTesting([article(1), article(2), article(3)])

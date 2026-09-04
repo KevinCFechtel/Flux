@@ -31,7 +31,7 @@ struct ContentView: View {
     @State private var navigationPresented = false
     @State private var searchPresented = false
     @State private var diagnosticsPresented = false
-    @State private var optionsPresented = false
+    @State private var settingsPresented = false
     @State private var iPadColumnVisibility: NavigationSplitViewVisibility = .all
     @State private var browser: IOSBrowserURL?
     @State private var articleOpenError: String?
@@ -107,8 +107,8 @@ struct ContentView: View {
                             .disabled(newsreaderStore.isLoading)
                         }
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button { optionsPresented = true } label: { Image(systemName: "slider.horizontal.3") }
-                                .accessibilityLabel("Newsreader options")
+                             Button { settingsPresented = true } label: { Image(systemName: "gearshape") }
+                                 .accessibilityLabel("Settings")
                         }
                     }
                     .sheet(isPresented: $navigationPresented) {
@@ -117,7 +117,7 @@ struct ContentView: View {
                                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { navigationPresented = false } } }
                         }
                     }
-                    .sheet(isPresented: $optionsPresented) { NewsreaderOptionsView(store: newsreaderStore, bootstrapper: bootstrapper, onDiagnostics: { diagnosticsPresented = true }) }
+                    .sheet(isPresented: $settingsPresented) { SettingsView(store: newsreaderStore, bootstrapper: bootstrapper, onDiagnostics: { diagnosticsPresented = true }) }
             }
         }
     }
@@ -138,12 +138,12 @@ struct ContentView: View {
                         .accessibilityLabel("Sync news")
                     }
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button { optionsPresented = true } label: { Image(systemName: "slider.horizontal.3") }
-                            .accessibilityLabel("Newsreader options")
+                         Button { settingsPresented = true } label: { Image(systemName: "gearshape") }
+                             .accessibilityLabel("Settings")
                     }
                 }
             }
-            .sheet(isPresented: $optionsPresented) { NewsreaderOptionsView(store: newsreaderStore, bootstrapper: bootstrapper, onDiagnostics: { diagnosticsPresented = true }) }
+            .sheet(isPresented: $settingsPresented) { SettingsView(store: newsreaderStore, bootstrapper: bootstrapper, onDiagnostics: { diagnosticsPresented = true }) }
     }
 
     private var searchView: some View {
@@ -410,60 +410,4 @@ private struct IOSShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
-}
-
-private struct NewsreaderOptionsView: View {
-    @ObservedObject var store: NewsreaderStore
-    @ObservedObject var bootstrapper: CoreBootstrapper
-    let onDiagnostics: () -> Void
-    @State private var accountPresented = false
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Account") {
-                    Button("Account") { accountPresented = true }
-                    Button("Developer Diagnostics") { onDiagnostics() }
-                }
-                Section("Articles") {
-                    Picker("Click on article", selection: Binding(get: { store.clickOnNews }, set: store.setClickOnNews)) {
-                        Text("Open Link").tag(ClickOnNews.openLink)
-                        Text("Open Reader").tag(ClickOnNews.openDetailView)
-                    }
-                    Picker("Presentation", selection: Binding(get: { store.articlePresentationMode }, set: store.setArticlePresentationMode)) {
-                        ForEach(ArticlePresentationMode.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
-                    }
-                    Picker("Preview", selection: Binding(get: { store.articlePreviewLines }, set: store.setArticlePreviewLines)) {
-                        ForEach(ArticlePreviewLines.allCases, id: \.self) { Text("\($0.rawValue) lines").tag($0) }
-                    }
-                    Toggle("Unread only", isOn: Binding(get: { store.unreadOnly }, set: store.setUnreadOnly))
-                    Toggle("Newest first", isOn: Binding(get: { store.newestFirst }, set: store.setNewestFirst))
-                    Toggle("Remove articles when read", isOn: Binding(get: { store.removeArticlesWhenMarkedRead }, set: store.setRemoveArticlesWhenMarkedRead))
-                    Toggle("Mark read on scrollover", isOn: Binding(get: { store.markReadOnScrolloverEnabled }, set: store.setMarkReadOnScrolloverEnabled))
-                }
-                Section("Navigation") {
-                    Toggle("Hide empty feeds", isOn: Binding(get: { store.hideEmptyNavigationEntries }, set: store.setHideEmptyNavigationEntries))
-                    Picker("Startup scope", selection: Binding(get: { store.startupScope }, set: store.setStartupScope)) {
-                        Text("All News").tag(StartupScopePreference.allNews)
-                        Text("Starred").tag(StartupScopePreference.starred)
-                        Text("Category").tag(StartupScopePreference.category)
-                        Text("Feed").tag(StartupScopePreference.feed)
-                    }
-                    if store.startupScope == .category {
-                        Picker("Startup category", selection: Binding(get: { store.startupCategoryID ?? 0 }, set: { store.setStartupCategoryID($0) })) {
-                            ForEach(store.catalog.categories, id: \.id) { Text($0.title).tag($0.id) }
-                        }
-                    }
-                    if store.startupScope == .feed {
-                        Picker("Startup feed", selection: Binding(get: { store.startupFeedID ?? 0 }, set: { store.setStartupFeedID($0) })) {
-                            ForEach(store.catalog.feeds, id: \.id) { Text($0.title).tag($0.id) }
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Options")
-            .navigationBarTitleDisplayMode(.inline)
-            .sheet(isPresented: $accountPresented) { AccountConfigurationView(bootstrapper: bootstrapper, allowsRemoval: true) }
-        }
-    }
 }
