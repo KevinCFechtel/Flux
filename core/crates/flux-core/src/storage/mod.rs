@@ -4179,9 +4179,16 @@ mod tests {
             .connection
             .lock()
             .unwrap()
-            .execute_batch("INSERT INTO categories VALUES(1, 'Old'); INSERT INTO feeds VALUES(2, 1, 'Old Feed'); INSERT INTO articles(id,feed_id,title,url,published_at,is_read,is_starred,raw_html_content) VALUES(3,2,'Old','https://old.example/post','2024-01-01T00:00:00Z',0,0,'');")
+            .execute_batch("INSERT INTO categories VALUES(1, 'Old'); INSERT INTO feeds VALUES(2, 1, 'Old Feed'); INSERT INTO articles(id,feed_id,title,url,published_at,is_read,is_starred,raw_html_content) VALUES(3,2,'Old','https://old.example/post','2024-01-01T00:00:00Z',0,0,''); INSERT INTO enclosures(id,article_id,url,mime_type,remote_media_progression_seconds) VALUES(4,3,'https://old.example/audio.mp3','audio/mpeg',0);")
             .unwrap();
         store.set_feed_open_in_miniflux(2, true).unwrap();
+        store
+            .set_state_bulk(&[3], MutationField::Read, true)
+            .unwrap();
+        store.save_media(4, "2026-01-01T00:00:00Z").unwrap();
+        store
+            .checkpoint_playback(4, 10_000, Some(60_000), "2026-01-01T00:00:00Z", true)
+            .unwrap();
         std::fs::create_dir_all(&media).unwrap();
         std::fs::write(media.join("old-account.mp3"), b"account data").unwrap();
 
@@ -4207,6 +4214,23 @@ mod tests {
                 .unwrap(),
             0
         );
+        for table in [
+            "pending_mutations",
+            "enclosures",
+            "saved_media",
+            "playback_states",
+            "pending_media_progress_mutations",
+            "media_downloads",
+        ] {
+            assert_eq!(
+                connection
+                    .query_row::<i64, _, _>(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row
+                        .get(0))
+                    .unwrap(),
+                0,
+                "{table} should be empty after account removal"
+            );
+        }
     }
 
     #[test]

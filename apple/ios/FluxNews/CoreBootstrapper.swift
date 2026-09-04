@@ -30,14 +30,17 @@ final class CoreBootstrapper: ObservableObject {
     var onCoreChanged: ((Flux?) -> Void)?
 
     private let coreFactory: (IOSMinifluxCredentials) throws -> Flux
+    private let accountValidator: (IOSMinifluxCredentials) throws -> AccountValidationResult
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "core")
 
     init(
         credentialStore: IOSCredentialStoreProtocol = IOSKeychainCredentialStore(),
-        coreFactory: @escaping (IOSMinifluxCredentials) throws -> Flux = CoreBootstrapper.makeCore
+        coreFactory: @escaping (IOSMinifluxCredentials) throws -> Flux = CoreBootstrapper.makeCore,
+        accountValidator: @escaping (IOSMinifluxCredentials) throws -> AccountValidationResult = CoreBootstrapper.validateAccount
     ) {
         self.credentialStore = credentialStore
         self.coreFactory = coreFactory
+        self.accountValidator = accountValidator
     }
 
     func start() async {
@@ -70,8 +73,9 @@ final class CoreBootstrapper: ObservableObject {
             validationMessage = "Enter both a Miniflux server URL and API key."
             return
         }
+        let validator = accountValidator
         let validation = await Task.detached(priority: .userInitiated) {
-            Result { try validateMinifluxAccount(serverUrl: proposed.server, apiKey: proposed.apiKey, customHeaders: proposed.customHeaders.map { HttpHeader(name: $0.name, value: $0.value) }) }
+            Result { try validator(proposed) }
         }.value
         switch validation {
         case let .failure(error): validationMessage = IOSAccountValidationPresentation.message(for: IOSAccountValidationPresentation.failure(for: error))
@@ -127,7 +131,7 @@ final class CoreBootstrapper: ObservableObject {
         onCoreChanged?(nil)
     }
 
-    private static func makeCore(_ account: IOSMinifluxCredentials) throws -> Flux {
+    private nonisolated static func makeCore(_ account: IOSMinifluxCredentials) throws -> Flux {
         let paths = try CorePaths()
         return try Flux.initialize(config: InitializationConfig(
             persistentData: paths.persistentData.path,
@@ -137,6 +141,14 @@ final class CoreBootstrapper: ObservableObject {
             apiKey: account.apiKey,
             customHeaders: account.customHeaders.map { HttpHeader(name: $0.name, value: $0.value) }
         ))
+    }
+
+    private nonisolated static func validateAccount(_ account: IOSMinifluxCredentials) throws -> AccountValidationResult {
+        try validateMinifluxAccount(
+            serverUrl: account.server,
+            apiKey: account.apiKey,
+            customHeaders: account.customHeaders.map { HttpHeader(name: $0.name, value: $0.value) }
+        )
     }
 
     private static func safeMessage(for error: Error) -> String {
