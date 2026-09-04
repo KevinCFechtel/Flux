@@ -286,6 +286,7 @@ private struct IOSHorizontalSwipeGesture: UIGestureRecognizerRepresentable {
 
 struct ArticleListView: View {
     @ObservedObject var store: NewsreaderStore
+    let onArticleTap: (ArticleSummary) -> Void
     @State private var scrolloverAdapter = IOSScrolloverRuntimeAdapter()
     @State private var unreadArticleIDs = Set<Int64>()
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
@@ -309,7 +310,7 @@ struct ArticleListView: View {
                          ScrollView {
                             LazyVStack(spacing: articleSpacing) {
                                 ForEach(store.articles, id: \.id) { article in
-                                    ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, store: store)
+                                     ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, store: store, onTap: { onArticleTap(article) })
                                         .background { GeometryReader { row in Color.clear.preference(key: ArticleFrameKey.self, value: [article.id: row.frame(in: .named("ArticleScrollSpace"))]) } }
                                 }
                              }
@@ -390,6 +391,7 @@ private struct ArticlePresentationView: View {
     let previewLines: ArticlePreviewLines
     let availableWidth: CGFloat
     @ObservedObject var store: NewsreaderStore
+    let onTap: () -> Void
     @State private var horizontalOffset: CGFloat = 0
 
     private let actionWidth: CGFloat = 76
@@ -426,6 +428,7 @@ private struct ArticlePresentationView: View {
                 }
             }
             .contentShape(RoundedRectangle(cornerRadius: 16))
+            .onTapGesture(perform: onTap)
             .frame(width: articleWidth, alignment: .leading)
             .background(Color(uiColor: .systemGroupedBackground))
             .offset(x: horizontalOffset)
@@ -440,7 +443,7 @@ private struct ArticlePresentationView: View {
         }
         .frame(width: articleWidth, alignment: .leading)
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityHint("Article opening will be added in a later release.")
+        .accessibilityHint("Opens the article")
     }
 
     private func closeActions() {

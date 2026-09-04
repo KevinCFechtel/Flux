@@ -1,5 +1,39 @@
 import Foundation
 
+enum ClickOnNews: String, CaseIterable { case openLink, openDetailView }
+enum NormalOpenAction: Equatable { case original, miniflux, detail }
+
+enum ArticleOpenRouting {
+    static func action(clickOnNews: ClickOnNews, openInMiniflux: Bool) -> NormalOpenAction {
+        if clickOnNews == .openDetailView { return .detail }
+        return openInMiniflux ? .miniflux : .original
+    }
+}
+
+enum ArticleOpenDestination: Equatable {
+    case external(URL)
+    case browser(URL)
+    case invalid
+}
+
+enum ArticleOpenRoutingPolicy {
+    static func validWebURL(_ value: String) -> URL? {
+        guard let url = URL(string: value), ["http", "https"].contains(url.scheme?.lowercased()), url.host != nil else { return nil }
+        return url
+    }
+
+    static func externalCandidate(openInMiniflux: Bool, minifluxURL: String?) -> URL? {
+        guard openInMiniflux, let minifluxURL else { return nil }
+        return validWebURL(minifluxURL)
+    }
+
+    static func destination(originalURL: String, externalCandidate: URL?, canOpenExternal: Bool, externalOpenSucceeded: Bool? = nil) -> ArticleOpenDestination {
+        guard let original = validWebURL(originalURL) else { return .invalid }
+        guard let externalCandidate, canOpenExternal, externalOpenSucceeded != false else { return .browser(original) }
+        return .external(externalCandidate)
+    }
+}
+
 enum BrowserScope: Hashable { case all, starred, search, listeningList, category(Int64), feed(Int64) }
 
 enum StartupScopePreference: String, CaseIterable { case allNews, starred, category, feed }

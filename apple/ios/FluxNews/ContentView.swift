@@ -1,5 +1,11 @@
 import SwiftUI
 import UIKit
+import SafariServices
+
+private struct IOSBrowserURL: Identifiable {
+    let url: URL
+    var id: URL { url }
+}
 
 enum NewsNavigationLayout {
     static func usesSplitView(for idiom: UIUserInterfaceIdiom) -> Bool {
@@ -14,6 +20,8 @@ struct ContentView: View {
     @State private var diagnosticsPresented = false
     @State private var optionsPresented = false
     @State private var iPadColumnVisibility: NavigationSplitViewVisibility = .all
+    @State private var browser: IOSBrowserURL?
+    @State private var articleOpenError: String?
 
     private var usesSplitNavigation: Bool {
         NewsNavigationLayout.usesSplitView(for: UIDevice.current.userInterfaceIdiom)
@@ -28,6 +36,10 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $diagnosticsPresented) { DeveloperDiagnosticsView(bootstrapper: bootstrapper) }
+        .sheet(item: $browser) { item in IOSInAppBrowser(url: item.url) }
+        .alert("Unable to Open Article", isPresented: Binding(get: { articleOpenError != nil }, set: { if !$0 { articleOpenError = nil } })) {
+            Button("OK", role: .cancel) { articleOpenError = nil }
+        } message: { Text(articleOpenError ?? "") }
     }
 
     @ViewBuilder
@@ -75,7 +87,7 @@ struct ContentView: View {
     }
 
     private var articleList: some View {
-        ArticleListView(store: newsreaderStore)
+        ArticleListView(store: newsreaderStore, onArticleTap: openArticle)
             .navigationTitle(scopeTitle)
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
@@ -102,6 +114,33 @@ struct ContentView: View {
             .sheet(isPresented: $optionsPresented) { NewsreaderOptionsView(store: newsreaderStore) }
     }
 
+    private func openArticle(_ article: ArticleSummary) {
+        newsreaderStore.open(article) { original, candidate in
+            guard let candidate else {
+                let destination = ArticleOpenRoutingPolicy.destination(originalURL: original, externalCandidate: nil, canOpenExternal: false)
+                present(destination)
+                return
+            }
+            guard UIApplication.shared.canOpenURL(candidate) else {
+                present(ArticleOpenRoutingPolicy.destination(originalURL: original, externalCandidate: candidate, canOpenExternal: false))
+                return
+            }
+            UIApplication.shared.open(candidate, options: [:]) { succeeded in
+                Task { @MainActor in
+                    present(ArticleOpenRoutingPolicy.destination(originalURL: original, externalCandidate: candidate, canOpenExternal: true, externalOpenSucceeded: succeeded))
+                }
+            }
+        }
+    }
+
+    private func present(_ destination: ArticleOpenDestination) {
+        switch destination {
+        case .external: break
+        case .browser(let url): browser = IOSBrowserURL(url: url)
+        case .invalid: articleOpenError = "The article does not have a valid web URL."
+        }
+    }
+
     private var scopeTitle: String {
         switch newsreaderStore.scope {
         case .all: "All News"
@@ -112,6 +151,13 @@ struct ContentView: View {
         case .listeningList: "Listening List"
         }
     }
+}
+
+private struct IOSInAppBrowser: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController { SFSafariViewController(url: url) }
+    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
 }
 
 private struct NewsreaderOptionsView: View {

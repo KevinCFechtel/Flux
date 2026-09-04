@@ -174,6 +174,22 @@ final class NewsreaderStore: ObservableObject {
     func setRead(_ article: ArticleSummary, read: Bool) { setRead(articleIDs: [article.id], read: read) }
     func setStarred(_ article: ArticleSummary, starred: Bool) { setStarred(articleIDs: [article.id], starred: starred) }
 
+    // Read-on-open stays on the existing Core mutation path; only routing is returned to the view.
+    func open(_ article: ArticleSummary, completion: @escaping (String, URL?) -> Void) {
+        setRead(article, read: true)
+        guard let core else { completion(article.url, nil); return }
+        Task { [weak self, core] in
+            let candidate = await Task.detached {
+                ArticleOpenRoutingPolicy.externalCandidate(
+                    openInMiniflux: (try? core.feedPreferences(feedId: article.feedId).openInMiniflux) ?? false,
+                    minifluxURL: core.minifluxEntryUrl(articleId: article.id)
+                )
+            }.value
+            guard self != nil else { return }
+            completion(article.url, candidate)
+        }
+    }
+
     func setRead(articleIDs: [Int64], read: Bool) {
         guard let core, !articleIDs.isEmpty else { return }
         Task { [weak self, core] in

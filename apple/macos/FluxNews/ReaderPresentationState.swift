@@ -1,15 +1,5 @@
 import AppKit
 
-enum ClickOnNews: String, CaseIterable { case openLink, openDetailView }
-enum NormalOpenAction: Equatable { case original, miniflux, detail }
-
-enum ArticleOpenRouting {
-    static func action(clickOnNews: ClickOnNews, openInMiniflux: Bool) -> NormalOpenAction {
-        if clickOnNews == .openDetailView { return .detail }
-        return openInMiniflux ? .miniflux : .original
-    }
-}
-
 enum FeedSettingsRouting {
     static func isAvailable(feedID: Int64?) -> Bool { feedID != nil }
 }
