@@ -1,6 +1,6 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: D1-D3 COMPLETE / D4.1 IN PROGRESS / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D3 COMPLETE / D4.1-D4.2 COMPLETE / D4.3 IN PROGRESS / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
 > replaces the existing Flutter iOS/iPadOS client with a native Swift/SwiftUI
@@ -95,7 +95,7 @@ Migrate when semantically compatible and not reconstructable from Miniflux:
 
 - account association and credentials;
 - custom HTTP headers;
-- compatible native/Core settings, including True Black;
+- compatible native/Core settings;
 - compatible feed preferences;
 - podcast/download settings that still exist;
 - playback progress;
@@ -137,8 +137,10 @@ Native swipe actions and Mark-as-Read-on-Scrollover are retained. The proven
 macOS Scrollover state machine and Undo semantics are the reference; iOS only
 adapts geometry and scroll-event integration.
 
-Appearance follows the system Light/Dark mode with an optional True Black mode.
-There is no manual Light/Dark override or separate theme framework.
+Appearance follows the system Light/Dark mode. Primary content surfaces use the
+system content background, which is true black in Dark Mode. There is no manual
+Light/Dark override, True Black setting, persisted theme preference, or separate
+theme framework.
 
 ## 6. Search, Reader and article actions
 
@@ -288,8 +290,13 @@ D4.3 or their later feature phases.
 
 #### D4.3 — Native Presentation Quality
 
-Complete the remaining native presentation quality work, including True Black,
-Dynamic Type, and accessibility polish.
+Complete native presentation quality work across system-controlled appearance,
+flat content surfaces, Dynamic Type, VoiceOver, context-menu presentation,
+semantic sensory feedback, and iPad input behavior. FluxNews has no Appearance
+screen or True Black setting. Dark Mode content surfaces are true black by
+design; Light Mode may retain subtle native background differentiation for
+structured UI, while sheets, menus, popovers, and controls retain system
+elevation.
 
 #### D4.4 — Real-Device Validation & Polish
 

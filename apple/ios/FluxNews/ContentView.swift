@@ -379,6 +379,7 @@ struct ContentView: View {
             UIApplication.shared.open(url, options: [:])
             return .handled
         })
+        .background(.background)
     }
 
     private func openOriginal(_ article: ArticleSummary) {

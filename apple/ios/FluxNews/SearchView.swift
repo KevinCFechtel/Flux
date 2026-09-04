@@ -57,7 +57,7 @@ struct SearchView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(uiColor: .systemGroupedBackground))
+        .background(.background)
         .navigationTitle(store.hasSearched ? "Search Results" : "Search")
         .navigationBarTitleDisplayMode(.large)
         .searchable(text: $store.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search Miniflux")

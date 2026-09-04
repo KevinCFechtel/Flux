@@ -311,6 +311,7 @@ struct ArticleListView: View {
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
     @State private var scrolloverAdapter = IOSScrolloverRuntimeAdapter()
     @State private var unreadArticleIDs = Set<Int64>()
+    @State private var sensoryFeedbackTrigger = 0
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -367,12 +368,16 @@ struct ArticleListView: View {
                             }))
           .onReceive(timer) { _ in scrolloverAdapter.observeIdle() }
                            .onChange(of: store.articles) { _, _ in refreshUnreadArticleIDs() }
-                           .onChange(of: store.markReadOnScrolloverEnabled) { _, enabled in scrolloverAdapter.updateEnabled(enabled) }
-                          .onChange(of: store.snapshotRevision) { _, _ in scrolloverAdapter.reset() }
-                    }
+                            .onChange(of: store.markReadOnScrolloverEnabled) { _, enabled in scrolloverAdapter.updateEnabled(enabled) }
+                           .onChange(of: store.snapshotRevision) { _, _ in scrolloverAdapter.reset() }
+                           .onChange(of: store.scrolloverUndoVisible) { _, visible in
+                               if visible { sensoryFeedbackTrigger += 1 }
+                           }
+                           .sensoryFeedback(.success, trigger: sensoryFeedbackTrigger)
+                     }
                 }
         }
-        .background(Color(uiColor: .systemGroupedBackground))
+        .background(.background)
         .overlay(alignment: .top) {
             if store.isLoading && !store.articles.isEmpty {
                 ProgressView()
@@ -455,7 +460,7 @@ struct ArticlePresentationView: View {
             .contentShape(RoundedRectangle(cornerRadius: 16))
             .onTapGesture(perform: onTap)
             .frame(width: articleWidth, alignment: .leading)
-            .background(Color(uiColor: .systemGroupedBackground))
+            .background(.background)
             .offset(x: horizontalOffset)
             .gesture(
                 IOSHorizontalSwipeGesture(offset: $horizontalOffset, actionWidth: actionWidth) { direction in
@@ -467,7 +472,10 @@ struct ArticlePresentationView: View {
             )
         }
         .frame(width: articleWidth, alignment: .leading)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityAddTraits(.isButton)
         .accessibilityHint("Opens the article")
         .contextMenu {
             Button { onAction(.starred) } label: {
@@ -586,25 +594,10 @@ struct ArticlePresentationView: View {
                         .accessibilityLabel("Starred")
                 }
             }
-            HStack(spacing: 6) {
-                if ArticlePresentationLayout.showsInternalUnreadIndicator(isRead: article.isRead) {
-                    Circle()
-                        .fill(Color.accentColor)
-                        .frame(width: 6, height: 6)
-                        .accessibilityHidden(true)
-                }
-                FeedIconView(feedID: article.feedId, title: article.feedTitle, store: store)
-                Text(article.feedTitle)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text("•")
-                Text(date)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+            ViewThatFits(in: .horizontal) {
+                metadataRow
+                metadataColumn
             }
-            .foregroundStyle(.secondary)
-            .font(.caption)
             if !article.preview.isEmpty {
                 Text(article.preview)
                     .font(.subheadline)
@@ -629,6 +622,46 @@ struct ArticlePresentationView: View {
         let state = article.isRead ? "Read" : "Unread"
         let star = article.isStarred ? ", starred" : ""
         return "\(article.title), \(article.feedTitle), \(date), \(state)\(star)"
+    }
+
+    private var accessibilityValue: String {
+        article.isRead ? (article.isStarred ? "Read, starred" : "Read") : (article.isStarred ? "Unread, starred" : "Unread")
+    }
+
+    private var metadataRow: some View {
+        HStack(spacing: 6) {
+            unreadIndicator
+            FeedIconView(feedID: article.feedId, title: article.feedTitle, store: store)
+            Text(article.feedTitle).font(.subheadline.weight(.medium))
+            Text("•")
+            Text(date)
+        }
+        .foregroundStyle(.secondary)
+        .font(.caption)
+        .lineLimit(1)
+    }
+
+    private var metadataColumn: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                unreadIndicator
+                FeedIconView(feedID: article.feedId, title: article.feedTitle, store: store)
+                Text(article.feedTitle).font(.subheadline.weight(.medium))
+            }
+            Text(date)
+        }
+        .foregroundStyle(.secondary)
+        .font(.caption)
+    }
+
+    @ViewBuilder
+    private var unreadIndicator: some View {
+        if ArticlePresentationLayout.showsInternalUnreadIndicator(isRead: article.isRead) {
+            Circle()
+                .fill(Color.accentColor)
+                .frame(width: 6, height: 6)
+                .accessibilityHidden(true)
+        }
     }
 }
 
@@ -657,7 +690,7 @@ private struct FeedIconView: View {
             }
         }
         .frame(width: 22, height: 22)
-        .accessibilityLabel("Feed \(title)")
+        .accessibilityHidden(true)
         .task { store.requestFeedIcon(feedID) }
     }
 }
