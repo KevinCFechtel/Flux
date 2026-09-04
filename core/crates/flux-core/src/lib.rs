@@ -431,7 +431,42 @@ impl FluxCore {
     }
     pub fn reader_document(&self, article_id: i64) -> Result<ReaderDocument, CoreError> {
         let article = self.store.reader_article(article_id)?;
-        let preferences = self.store.feed_preferences(article.feed_id)?;
+        self.reader_document_for_article(
+            article.feed_id,
+            &article.raw_html_content,
+            &article.url,
+            article.image_url.as_deref(),
+        )
+    }
+    pub fn reader_document_for_search(&self, article_id: i64) -> Result<ReaderDocument, CoreError> {
+        if article_id <= 0 {
+            return Err(CoreError::data("article ID must be positive"));
+        }
+        let article = self.remote.fetch_article_by_id(article_id)?.article;
+        self.reader_document_for_article(
+            article.feed_id,
+            &article.raw_html_content,
+            &article.url,
+            article.image_url.as_deref(),
+        )
+    }
+    fn reader_document_for_article(
+        &self,
+        feed_id: i64,
+        raw_html_content: &str,
+        url: &str,
+        image_url: Option<&str>,
+    ) -> Result<ReaderDocument, CoreError> {
+        let preferences = match self.store.feed_preferences(feed_id) {
+            Ok(preferences) => preferences,
+            Err(error)
+                if error.kind == CoreErrorKind::Data
+                    && error.message == format!("feed {feed_id} does not exist") =>
+            {
+                FeedPreferences::defaults(feed_id)
+            }
+            Err(error) => return Err(error),
+        };
         let limit = preferences
             .truncate_detail
             .then(|| {
@@ -441,10 +476,10 @@ impl FluxCore {
             })
             .transpose()?;
         Ok(article_document::project_with_fallback_image(
-            article_document::parse(&article.raw_html_content, &article.url),
+            article_document::parse(raw_html_content, url),
             preferences.detail_rendering,
             limit,
-            article.image_url.as_deref(),
+            image_url,
         ))
     }
     pub fn count_articles(&self, query: ArticleQuery) -> Result<u64, CoreError> {
@@ -1254,7 +1289,7 @@ fn _is_beneath(path: &Path, root: &Path) -> bool {
 mod tests {
     use super::*;
     use crate::domain::*;
-    use crate::miniflux::{RemoteSnapshot, RemoteSource};
+    use crate::miniflux::{RemoteSavedMediaArticle, RemoteSnapshot, RemoteSource};
     use chrono::{Duration as ChronoDuration, Utc};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
@@ -1395,6 +1430,32 @@ mod tests {
             self.captured_requests.lock().unwrap().push(request.clone());
             assert_eq!(request.query, "rust");
             Ok(self.search_result.lock().unwrap().clone())
+        }
+        fn fetch_article_by_id(
+            &self,
+            article_id: i64,
+        ) -> Result<RemoteSavedMediaArticle, CoreError> {
+            if article_id != 99 {
+                return Err(CoreError::data(format!(
+                    "article {article_id} was not found remotely"
+                )));
+            }
+            Ok(RemoteSavedMediaArticle {
+                article: Article {
+                    id: 99,
+                    feed_id: 10,
+                    title: "Remote result".into(),
+                    url: "https://example.test/99".into(),
+                    comments_url: String::new(),
+                    published_at: "2026-01-02T03:04:05Z".into(),
+                    is_read: false,
+                    is_starred: false,
+                    raw_html_content: "<p>Equivalent content</p>".into(),
+                    preview: "Remote preview".into(),
+                    image_url: None,
+                },
+                enclosures: vec![],
+            })
         }
     }
     impl RemoteSource for PhaseLoggingSource {
@@ -2798,6 +2859,70 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn search_reader_loads_remote_content_without_persisting_the_result() {
+        let temp = TempDir::new().unwrap();
+        let (core, _) = search_core(&temp);
+
+        let result = core
+            .search_articles(SearchArticlesRequest {
+                query: "rust".into(),
+                offset: 0,
+                limit: 20,
+            })
+            .unwrap();
+
+        assert_eq!(result.articles[0].id, 99);
+        let document = core
+            .reader_document_for_search(result.articles[0].id)
+            .unwrap();
+        assert!(matches!(document.blocks[0], ReaderBlock::Paragraph { .. }));
+        assert!(core.reader_document(result.articles[0].id).is_err());
+        assert!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn search_reader_uses_the_same_projection_as_local_reader() {
+        let local_temp = TempDir::new().unwrap();
+        let mut data = snapshot();
+        data.articles[0].raw_html_content = "<p>Equivalent content</p>".into();
+        let (local_core, _) = core(&local_temp, data);
+        local_core.sync(SyncReason::Manual).unwrap();
+        let local_document = local_core.reader_document(1).unwrap();
+
+        let remote_temp = TempDir::new().unwrap();
+        let (remote_core, _) = search_core(&remote_temp);
+        let remote_document = remote_core.reader_document_for_search(99).unwrap();
+
+        assert_eq!(local_document.blocks, remote_document.blocks);
+        assert_eq!(
+            local_document.has_simplified_content,
+            remote_document.has_simplified_content
+        );
+        assert_eq!(local_document.was_truncated, remote_document.was_truncated);
+    }
+
+    #[test]
+    fn search_reader_reports_missing_remote_articles() {
+        let temp = TempDir::new().unwrap();
+        let (core, _) = search_core(&temp);
+
+        assert_eq!(
+            core.reader_document_for_search(100)
+                .unwrap_err()
+                .to_string(),
+            "article 100 was not found remotely"
+        );
+    }
+
     #[test]
     fn search_overlays_all_local_read_and_starred_state_combinations() {
         let temp = TempDir::new().unwrap();

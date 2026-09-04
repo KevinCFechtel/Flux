@@ -1,5 +1,14 @@
 import AppKit
 
+enum ReaderDocumentSource: Equatable {
+    case local
+    case search
+
+    static func forScope(_ scope: BrowserScope) -> Self {
+        scope == .search ? .search : .local
+    }
+}
+
 enum FeedSettingsRouting {
     static func isAvailable(feedID: Int64?) -> Bool { feedID != nil }
 }

@@ -884,6 +884,12 @@ impl Flux {
             .map(Into::into)
             .map_err(map_error)
     }
+    pub fn reader_document_for_search(&self, article_id: i64) -> Result<ReaderDocument, FluxError> {
+        self.core
+            .reader_document_for_search(article_id)
+            .map(Into::into)
+            .map_err(map_error)
+    }
     pub fn miniflux_entry_url(&self, article_id: i64) -> String {
         self.core.miniflux_entry_url(article_id)
     }
