@@ -29,3 +29,7 @@ usvg.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+rustls.workspace = true
+rustls-platform-verifier.workspace = true

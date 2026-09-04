@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 use std::io::Read;
+#[cfg(target_vendor = "apple")]
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -386,11 +388,15 @@ impl MinifluxClient {
                 _ => unreachable!("URL normalization only returns URL errors"),
             })?;
         let api_base = format!("{installation_base}/v1");
+        let mut agent_builder = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(80))
+            .redirects(10);
+        #[cfg(target_vendor = "apple")]
+        {
+            agent_builder = agent_builder.tls_config(apple_tls_config());
+        }
         Ok(Self {
-            agent: ureq::AgentBuilder::new()
-                .timeout(std::time::Duration::from_secs(80))
-                .redirects(10)
-                .build(),
+            agent: agent_builder.build(),
             installation_base,
             api_base,
             api_key: api_key.to_string(),
@@ -866,6 +872,13 @@ impl MinifluxClient {
             version: response.version,
         })
     }
+}
+
+#[cfg(target_vendor = "apple")]
+fn apple_tls_config() -> Arc<rustls::ClientConfig> {
+    use rustls_platform_verifier::ConfigVerifierExt;
+
+    Arc::new(rustls::ClientConfig::with_platform_verifier())
 }
 
 #[derive(Debug)]
