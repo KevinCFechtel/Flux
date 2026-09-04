@@ -50,6 +50,26 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(NewsNavigationSelection.isSelected(.feed(11), activeScope: .feed(10)))
     }
 
+    func testFeedIconAppearanceUsesCoreVariants() {
+        XCTAssertEqual(IOSFeedIconPresentation.variant(isDark: false), .normal)
+        XCTAssertEqual(IOSFeedIconPresentation.variant(isDark: true), .dark)
+        XCTAssertNotEqual(IOSFeedIconKey(feedID: 1, variant: .normal), IOSFeedIconKey(feedID: 1, variant: .dark))
+    }
+
+    func testFeedCreationPoliciesValidateURLsAndTrimCategories() {
+        XCTAssertEqual(IOSFeedCreationPolicy.validURL(" https://example.com/feed "), "https://example.com/feed")
+        XCTAssertNil(IOSFeedCreationPolicy.validURL("not a url"))
+        XCTAssertEqual(IOSFeedCreationPolicy.categoryTitle("  Technology  "), "Technology")
+        XCTAssertNil(IOSFeedCreationPolicy.categoryTitle(" \n "))
+    }
+
+    func testSingleAndMultipleDiscoveryOutcomesRemainDistinct() {
+        let item = DiscoveredSubscription(url: "https://example.com/feed", title: "Feed", feedType: "rss")
+        XCTAssertEqual(IOSAddFeedDiscoveryOutcome.from([]), .none)
+        XCTAssertEqual(IOSAddFeedDiscoveryOutcome.from([item]), .automatic(item))
+        XCTAssertEqual(IOSAddFeedDiscoveryOutcome.from([item, item]), .choose)
+    }
+
     func testArticlePresentationModesAreStableAndVisualIsFirst() {
         XCTAssertEqual(ArticlePresentationMode.allCases, [.visual, .compact])
         XCTAssertEqual(ArticlePresentationMode(rawValue: "visual"), .visual)
@@ -163,13 +183,14 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     func testArticleContextMenuExposesDistinctNativeActions() {
         let actions: [IOSArticleContextAction] = [
-            .starred, .read, .original, .miniflux, .comments, .copyLink, .share, .saveToService
+            .starred, .read, .original, .reader, .miniflux, .comments, .copyLink, .share, .saveToService
         ]
 
-        XCTAssertEqual(Set(actions).count, 8)
+        XCTAssertEqual(Set(actions).count, 9)
         XCTAssertEqual(actions[2], .original)
-        XCTAssertEqual(actions[3], .miniflux)
-        XCTAssertEqual(actions[7], .saveToService)
+        XCTAssertEqual(actions[3], .reader)
+        XCTAssertEqual(actions[4], .miniflux)
+        XCTAssertEqual(actions[8], .saveToService)
     }
 
     func testArticleContextMenuOnlyAcceptsHTTPAndHTTPSURLs() {
@@ -184,6 +205,12 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertNil(IOSArticleContextMenuPolicy.commentsURL("mailto:comments@example.com"))
         XCTAssertNil(IOSArticleContextMenuPolicy.originalURL("not a URL"))
         XCTAssertNil(IOSArticleContextMenuPolicy.commentsURL("https:///missing-host"))
+    }
+
+    func testCommentsIndicatorUsesTheSameValidatedURLContract() {
+        XCTAssertNotNil(IOSArticleContextMenuPolicy.commentsURL("https://example.com/comments"))
+        XCTAssertNil(IOSArticleContextMenuPolicy.commentsURL(""))
+        XCTAssertNil(IOSArticleContextMenuPolicy.commentsURL("mailto:comments@example.com"))
     }
 
     func testConfiguredDetailModeSelectsReaderBeforeNormalOpenRouting() {

@@ -4,6 +4,15 @@ import Foundation
 import OSLog
 #endif
 
+struct IOSFeedIconKey: Hashable {
+    let feedID: Int64
+    let variant: FeedIconVariant
+}
+
+enum IOSFeedIconPresentation {
+    static func variant(isDark: Bool) -> FeedIconVariant { isDark ? .dark : .normal }
+}
+
 @MainActor
 final class NewsreaderStore: ObservableObject {
 #if DEBUG
@@ -28,7 +37,7 @@ final class NewsreaderStore: ObservableObject {
     @Published private(set) var selectionTotal: UInt64 = 0
     @Published private(set) var categoryCounts: [Int64: UInt64] = [:]
     @Published private(set) var feedCounts: [Int64: UInt64] = [:]
-    @Published private(set) var feedIcons: [Int64: Data] = [:]
+    @Published private(set) var feedIcons: [IOSFeedIconKey: Data] = [:]
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var pendingNewByFeed: [Int64: Int] = [:]
@@ -55,8 +64,8 @@ final class NewsreaderStore: ObservableObject {
     private var eventSubscription: EventSubscription?
     private let defaults: UserDefaults
     private var pending = PendingNewData()
-    private var requestedFeedIcons = Set<Int64>()
-    private var unavailableFeedIcons = Set<Int64>()
+    private var requestedFeedIcons = Set<IOSFeedIconKey>()
+    private var unavailableFeedIcons = Set<IOSFeedIconKey>()
     private var scrolloverUndoTask: Task<Void, Never>?
     private var scrolloverRemovedArticles: [Int64: ArticleSummary] = [:]
     private var scrolloverOriginalOrder: [Int64: Int] = [:]
@@ -151,17 +160,18 @@ final class NewsreaderStore: ObservableObject {
         isLoading = false
     }
 
-    func requestFeedIcon(_ feedID: Int64) {
-        guard feedIcons[feedID] == nil, !unavailableFeedIcons.contains(feedID), let core else { return }
-        guard requestedFeedIcons.insert(feedID).inserted else { return }
+    func requestFeedIcon(_ feedID: Int64, variant: FeedIconVariant) {
+        let key = IOSFeedIconKey(feedID: feedID, variant: variant)
+        guard feedIcons[key] == nil, !unavailableFeedIcons.contains(key), let core else { return }
+        guard requestedFeedIcons.insert(key).inserted else { return }
         Task { [weak self, core] in
             let data = await Task.detached {
-                try? core.feedIcon(feedId: feedID, variant: .normal)?.pngData
+                try? core.feedIcon(feedId: feedID, variant: variant)?.pngData
             }.value
             guard let self else { return }
-            requestedFeedIcons.remove(feedID)
-            if let data { feedIcons[feedID] = Data(data) }
-            else { unavailableFeedIcons.insert(feedID) }
+            requestedFeedIcons.remove(key)
+            if let data { feedIcons[key] = Data(data) }
+            else { unavailableFeedIcons.insert(key) }
         }
     }
 
@@ -214,6 +224,19 @@ final class NewsreaderStore: ObservableObject {
     func setRead(_ article: ArticleSummary, read: Bool) { setRead(articleIDs: [article.id], read: read) }
     func setStarred(_ article: ArticleSummary, starred: Bool) { setStarred(articleIDs: [article.id], starred: starred) }
 
+    func markCurrentScopeAsRead() {
+        guard case .all = scope else {
+            guard case .category = scope else {
+                guard case .feed = scope else { return }
+                markCurrentScopeArticlesRead()
+                return
+            }
+            markCurrentScopeArticlesRead()
+            return
+        }
+        markCurrentScopeArticlesRead()
+    }
+
     // Read-on-open stays on the existing Core mutation path; only the original URL is returned.
     func open(_ article: ArticleSummary, completion: @escaping (String) -> Void) {
         setRead(article, read: true)
@@ -257,6 +280,34 @@ final class NewsreaderStore: ObservableObject {
             completion(result)
         }
     }
+
+    func discoverSubscriptions(_ request: DiscoverSubscriptionsRequest, completion: @escaping (Result<[DiscoveredSubscription], Error>) -> Void) {
+        guard let core else { completion(.failure(unconfiguredError)); return }
+        Task { let result = await Task.detached { Result { try core.discoverSubscriptions(request: request) } }.value; completion(result) }
+    }
+
+    func createFeed(_ request: CreateFeedRequest, completion: @escaping (Result<CreateFeedResult, Error>) -> Void) {
+        guard let core else { completion(.failure(unconfiguredError)); return }
+        Task { [weak self] in
+            let result = await Task.detached { Result { try core.createFeed(request: request) } }.value
+            if case .success = result { self?.loadNavigationAndCounts() }
+            completion(result)
+        }
+    }
+
+    func createCategory(_ title: String, completion: @escaping (Result<CreateCategoryResult, Error>) -> Void) {
+        guard let core else { completion(.failure(unconfiguredError)); return }
+        Task { [weak self] in
+            let result = await Task.detached { Result { try core.createCategory(title: title) } }.value
+            if case .success = result { self?.loadNavigationAndCounts() }
+            completion(result)
+        }
+    }
+
+    func feedPreferences(feedID: Int64) throws -> FeedPreferences { guard let core else { throw unconfiguredError }; return try core.feedPreferences(feedId: feedID) }
+    func setFeedDetailRendering(feedID: Int64, mode: DetailRenderingMode) throws { try core?.setFeedDetailRendering(feedId: feedID, mode: mode) }
+    func setFeedTruncateDetail(feedID: Int64, enabled: Bool) throws { try core?.setFeedTruncateDetail(feedId: feedID, enabled: enabled) }
+    func setFeedOpenInMiniflux(feedID: Int64, enabled: Bool) throws { try core?.setFeedOpenInMiniflux(feedId: feedID, enabled: enabled) }
 
     func setRead(articleIDs: [Int64], read: Bool) {
         guard let core, !articleIDs.isEmpty else { return }
@@ -509,6 +560,32 @@ final class NewsreaderStore: ObservableObject {
     private func updateVisible(_ ids: [Int64], _ change: (inout ArticleSummary) -> Void) {
         let ids = Set(ids)
         for index in articles.indices where ids.contains(articles[index].id) { change(&articles[index]) }
+    }
+
+    private var unconfiguredError: NSError { NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"]) }
+
+    private func markCurrentScopeArticlesRead() {
+        guard let core else { return }
+        let scope = scope
+        let query = ArticleQuery(scope: query(scope: scope).scope, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil)
+        Task { [weak self, core] in
+            let result = await Task.detached { Result { try core.queryArticles(query: query).map(\.id) } }.value
+            guard let self else { return }
+            switch result {
+            case let .success(ids):
+                guard !ids.isEmpty else { return }
+                let mutation = await Task.detached { Result { try core.setReadStateBulk(articleIds: ids, read: true) } }.value
+                switch mutation {
+                case .success:
+                    self.markMeaningfulInteraction()
+                    self.loadNavigationAndCounts()
+                    self.loadVisibleArticles(resetSnapshot: true)
+                    self.requestScrollReset()
+                case let .failure(error): self.errorMessage = error.localizedDescription
+                }
+            case let .failure(error): self.errorMessage = error.localizedDescription
+            }
+        }
     }
 
     private func scrolloverDiagnostic(_ message: String) {

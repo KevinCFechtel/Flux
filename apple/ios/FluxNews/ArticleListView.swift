@@ -288,6 +288,7 @@ enum IOSArticleContextAction: Equatable {
     case starred
     case read
     case original
+    case reader
     case miniflux
     case comments
     case copyLink
@@ -306,6 +307,7 @@ enum IOSArticleContextMenuPolicy {
 }
 
 struct ArticleListView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var store: NewsreaderStore
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
@@ -336,7 +338,7 @@ struct ArticleListView: View {
                              Color.clear.frame(height: 0).id(topAnchorID)
                              LazyVStack(spacing: articleSpacing) {
                                 ForEach(store.articles, id: \.id) { article in
-                                       ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIconData: store.feedIcons[article.feedId], onRequestFeedIcon: { store.requestFeedIcon(article.feedId) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { article, read in store.setRead(article, read: read) }, onSetStarred: { article, starred in store.setStarred(article, starred: starred) })
+                                       ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIconData: store.feedIcons[IOSFeedIconKey(feedID: article.feedId, variant: IOSFeedIconPresentation.variant(isDark: colorScheme == .dark))], iconVariant: IOSFeedIconPresentation.variant(isDark: colorScheme == .dark), onRequestFeedIcon: { store.requestFeedIcon(article.feedId, variant: IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { article, read in store.setRead(article, read: read) }, onSetStarred: { article, starred in store.setStarred(article, starred: starred) })
                                          .equatable()
                                         .background { GeometryReader { row in Color.clear.preference(key: ArticleFrameKey.self, value: [article.id: row.frame(in: .named("ArticleScrollSpace"))]) } }
                                 }
@@ -428,6 +430,7 @@ struct ArticlePresentationView: View, Equatable {
     let previewLines: ArticlePreviewLines
     let availableWidth: CGFloat
     let feedIconData: Data?
+    let iconVariant: FeedIconVariant
     let onRequestFeedIcon: () -> Void
     let onTap: () -> Void
     let onAction: (IOSArticleContextAction) -> Void
@@ -444,7 +447,8 @@ struct ArticlePresentationView: View, Equatable {
             lhs.mode == rhs.mode &&
             lhs.previewLines == rhs.previewLines &&
             lhs.availableWidth == rhs.availableWidth &&
-            lhs.feedIconData == rhs.feedIconData
+            lhs.feedIconData == rhs.feedIconData &&
+            lhs.iconVariant == rhs.iconVariant
     }
 
     var body: some View {
@@ -507,6 +511,7 @@ struct ArticlePresentationView: View, Equatable {
             }
             Divider()
             Button { onAction(.original) } label: { Label("Open Original", systemImage: "safari") }
+            Button { onAction(.reader) } label: { Label("Open in Reader", systemImage: "doc.text") }
             Button { onAction(.miniflux) } label: { Label("Open in Miniflux", systemImage: "arrow.up.forward.app") }
             if IOSArticleContextMenuPolicy.commentsURL(article.commentsUrl) != nil {
                 Button { onAction(.comments) } label: { Label("Open Comments", systemImage: "bubble.left") }
@@ -656,6 +661,7 @@ struct ArticlePresentationView: View, Equatable {
             Text(article.feedTitle).font(.subheadline.weight(.medium))
             Text("•")
             Text(date)
+            commentsIndicator
         }
         .foregroundStyle(.secondary)
         .font(.caption)
@@ -668,11 +674,20 @@ struct ArticlePresentationView: View, Equatable {
                 unreadIndicator
                 FeedIconView(feedID: article.feedId, title: article.feedTitle, data: feedIconData, onRequest: onRequestFeedIcon)
                 Text(article.feedTitle).font(.subheadline.weight(.medium))
+                commentsIndicator
             }
             Text(date)
         }
         .foregroundStyle(.secondary)
         .font(.caption)
+    }
+
+    @ViewBuilder
+    private var commentsIndicator: some View {
+        if IOSArticleContextMenuPolicy.commentsURL(article.commentsUrl) != nil {
+            Image(systemName: "bubble.left")
+                .accessibilityLabel("Comments available")
+        }
     }
 
     @ViewBuilder
@@ -691,11 +706,12 @@ private struct ArticleFrameKey: PreferenceKey {
     static func reduce(value: inout [Int64: CGRect], nextValue: () -> [Int64: CGRect]) { value.merge(nextValue(), uniquingKeysWith: { $1 }) }
 }
 
-private struct FeedIconView: View {
+struct FeedIconView: View {
     let feedID: Int64
     let title: String
     let data: Data?
     let onRequest: () -> Void
+    var size: CGFloat = 22
 
     var body: some View {
         Group {
@@ -707,11 +723,11 @@ private struct FeedIconView: View {
                 Text(title.prefix(1).uppercased())
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.white)
-                    .frame(width: 22, height: 22)
+                    .frame(width: size, height: size)
                     .background(Color.accentColor.gradient, in: Circle())
             }
         }
-        .frame(width: 22, height: 22)
+        .frame(width: size, height: size)
         .accessibilityHidden(true)
         .task { onRequest() }
     }

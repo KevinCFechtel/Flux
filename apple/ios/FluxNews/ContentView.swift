@@ -44,6 +44,7 @@ struct ContentView: View {
     @State private var sharePayload: IOSSharePayload?
     @State private var actionConfirmation: String?
     @State private var actionError: String?
+    @State private var markReadConfirmationPresented = false
 
     private var usesSplitNavigation: Bool {
         NewsNavigationLayout.usesSplitView(for: UIDevice.current.userInterfaceIdiom)
@@ -73,6 +74,9 @@ struct ContentView: View {
         .alert("Article Action", isPresented: Binding(get: { actionConfirmation != nil }, set: { if !$0 { actionConfirmation = nil } })) {
             Button("OK", role: .cancel) { actionConfirmation = nil }
         } message: { Text(actionConfirmation ?? "") }
+        .confirmationDialog(scopeMarkReadTitle, isPresented: $markReadConfirmationPresented, titleVisibility: .visible) {
+            Button(scopeMarkReadTitle, role: .destructive) { newsreaderStore.markCurrentScopeAsRead() }
+        } message: { Text("Marks all unread articles in this scope as read.") }
         .task(id: bootstrapper.coreRevision) {
             if let core = newsreaderStore.core {
                 searchStore.attach(to: core)
@@ -95,7 +99,10 @@ struct ContentView: View {
                     .navigationDestination(isPresented: $searchPresented) { searchView }
                     .toolbar {
                         ToolbarItem(placement: .topBarLeading) {
-                            Button { navigationPresented = true } label: { Image(systemName: "book.closed") }
+                            Button { navigationPresented = true } label: {
+                                Image("FluxNewsTemplate")
+                                    .renderingMode(.template)
+                            }
                                 .accessibilityLabel("Choose news scope")
                         }
                     }
@@ -137,6 +144,11 @@ struct ContentView: View {
                             }
                             Button { newsreaderStore.setNewestFirst(false) } label: {
                                 filterMenuLabel("Oldest First", selected: !newsreaderStore.newestFirst)
+                            }
+                        }
+                        if scopeSupportsMarkRead {
+                            Section {
+                                Button(scopeMarkReadTitle, role: .destructive) { markReadConfirmationPresented = true }
                             }
                         }
                     } label: {
@@ -222,6 +234,8 @@ struct ContentView: View {
             newsreaderStore.setRead(article, read: !article.isRead)
         case .original:
             openOriginalArticle(article)
+        case .reader:
+            openReader(article)
         case .miniflux:
             newsreaderStore.minifluxEntryURL(for: article) { result in
                 switch result {
@@ -230,13 +244,13 @@ struct ContentView: View {
                         actionError = "Flux could not resolve a valid Miniflux entry URL."
                         return
                     }
-                    UIApplication.shared.open(url, options: [:])
+                    browser = IOSBrowserURL(url: url)
                 case let .failure(error): actionError = error.localizedDescription
                 }
             }
         case .comments:
             guard let url = IOSArticleContextMenuPolicy.commentsURL(article.commentsUrl) else { return }
-            UIApplication.shared.open(url, options: [:])
+            browser = IOSBrowserURL(url: url)
         case .copyLink:
             UIPasteboard.general.string = article.url
             actionConfirmation = "Link copied"
@@ -262,10 +276,11 @@ struct ContentView: View {
         case .starred: searchStore.setStarred(article, starred: !article.isStarred)
         case .read: searchStore.setRead(article, read: !article.isRead)
         case .original: openSearchOriginalArticle(article)
+        case .reader: openSearchReader(article)
         case .miniflux: openMiniflux(article, using: searchStore)
         case .comments:
             guard let url = IOSArticleContextMenuPolicy.commentsURL(article.commentsUrl) else { return }
-            UIApplication.shared.open(url, options: [:])
+            browser = IOSBrowserURL(url: url)
         case .copyLink:
             UIPasteboard.general.string = article.url
             actionConfirmation = "Link copied"
@@ -288,7 +303,7 @@ struct ContentView: View {
             switch result {
             case let .success(value):
                 guard let url = ArticleOpenRoutingPolicy.validWebURL(value) else { actionError = "Flux could not resolve a valid Miniflux entry URL."; return }
-                UIApplication.shared.open(url, options: [:])
+                browser = IOSBrowserURL(url: url)
             case let .failure(error): actionError = error.localizedDescription
             }
         }
@@ -340,6 +355,22 @@ struct ContentView: View {
     private func filterMenuLabel(_ title: String, selected: Bool) -> some View {
         if selected { Label(title, systemImage: "checkmark") }
         else { Text(title) }
+    }
+
+    private var scopeSupportsMarkRead: Bool {
+        switch newsreaderStore.scope {
+        case .all, .category, .feed: true
+        case .starred, .search, .listeningList: false
+        }
+    }
+
+    private var scopeMarkReadTitle: String {
+        switch newsreaderStore.scope {
+        case .all: "Mark All as Read"
+        case .category: "Mark Category as Read"
+        case .feed: "Mark Feed as Read"
+        case .starred, .search, .listeningList: "Mark as Read"
+        }
     }
 }
 
@@ -401,6 +432,11 @@ extension ContentView {
             return .handled
         })
         .background(.background)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Done") { readerArticle = nil; readerGeneration += 1 }
+            }
+        }
     }
 
     private func openOriginal(_ article: ArticleSummary) {
