@@ -9,6 +9,14 @@ struct NewsNavigationView: View {
     @ObservedObject var store: NewsreaderStore
     @Binding var iPhoneSheetPresented: Bool
     let presentation: NewsNavigationPresentation
+    let onSearch: () -> Void
+
+    init(store: NewsreaderStore, iPhoneSheetPresented: Binding<Bool>, presentation: NewsNavigationPresentation, onSearch: @escaping () -> Void = {}) {
+        self.store = store
+        self._iPhoneSheetPresented = iPhoneSheetPresented
+        self.presentation = presentation
+        self.onSearch = onSearch
+    }
 
     var body: some View {
         if presentation == .sidebar {
@@ -29,6 +37,7 @@ struct NewsNavigationView: View {
     private var sheetList: some View {
         List(selection: selection) {
             Section("News") {
+                searchRow
                 scopeRow("All News", systemImage: "newspaper", scope: .all, count: store.unreadTotal)
                 scopeRow("Starred", systemImage: "star", scope: .starred, count: store.starredTotal)
                 scopeRow("Listening List", systemImage: "headphones", scope: .listeningList, count: 0)
@@ -58,6 +67,7 @@ struct NewsNavigationView: View {
     @ViewBuilder
     private var navigationRows: some View {
         Section {
+            searchRow
             scopeRow("All News", systemImage: "newspaper", scope: .all, count: store.unreadTotal)
             scopeRow("Starred", systemImage: "star", scope: .starred, count: store.starredTotal)
         }
@@ -119,6 +129,15 @@ struct NewsNavigationView: View {
 
     private func feedTitle(_ feedID: Int64) -> String {
         store.catalog.feeds.first { $0.id == feedID }?.title ?? "Feed"
+    }
+
+    private var searchRow: some View {
+        Button {
+            onSearch()
+        } label: {
+            Label("Search", systemImage: "magnifyingglass")
+        }
+        .accessibilityIdentifier("navigation.search")
     }
 
     @ViewBuilder

@@ -27,7 +27,9 @@ struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @ObservedObject var bootstrapper: CoreBootstrapper
     @ObservedObject var newsreaderStore: NewsreaderStore
+    @StateObject private var searchStore = IOSSearchStore()
     @State private var navigationPresented = false
+    @State private var searchPresented = false
     @State private var diagnosticsPresented = false
     @State private var optionsPresented = false
     @State private var iPadColumnVisibility: NavigationSplitViewVisibility = .all
@@ -71,19 +73,26 @@ struct ContentView: View {
         .alert("Article Action", isPresented: Binding(get: { actionConfirmation != nil }, set: { if !$0 { actionConfirmation = nil } })) {
             Button("OK", role: .cancel) { actionConfirmation = nil }
         } message: { Text(actionConfirmation ?? "") }
+        .task(id: newsreaderStore.core != nil) {
+            if let core = newsreaderStore.core {
+                searchStore.attach(to: core)
+                searchStore.onLocalFirstMutation = { newsreaderStore.loadNavigationAndCounts() }
+            }
+        }
     }
 
     @ViewBuilder
     private var newsreader: some View {
         if usesSplitNavigation {
             NavigationSplitView(columnVisibility: $iPadColumnVisibility) {
-                NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented, presentation: .sidebar).toolbar(removing: .sidebarToggle)
+                NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented, presentation: .sidebar, onSearch: openSearch).toolbar(removing: .sidebarToggle)
             } detail: {
-                articleList
+                if searchPresented { searchView } else { articleList }
             }
         } else {
             NavigationStack {
                 articleList
+                    .navigationDestination(isPresented: $searchPresented) { searchView }
                     .toolbar {
                         ToolbarItem(placement: .topBarLeading) {
                             Button { navigationPresented = true } label: { Image(systemName: "sidebar.leading") }
@@ -108,7 +117,7 @@ struct ContentView: View {
                     }
                     .sheet(isPresented: $navigationPresented) {
                         NavigationStack {
-                            NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented, presentation: .sheet)
+                            NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented, presentation: .sheet, onSearch: openSearch)
                                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { navigationPresented = false } } }
                         }
                     }
@@ -145,6 +154,15 @@ struct ContentView: View {
             .sheet(isPresented: $optionsPresented) { NewsreaderOptionsView(store: newsreaderStore) }
     }
 
+    private var searchView: some View {
+        SearchView(store: searchStore, newsreaderStore: newsreaderStore, onArticleTap: openSearchArticle, onArticleAction: handleSearchArticleAction, onSetRead: { article, read in searchStore.setRead(article, read: read) }, onSetStarred: { article, starred in searchStore.setStarred(article, starred: starred) })
+    }
+
+    private func openSearch() {
+        navigationPresented = false
+        searchPresented = true
+    }
+
     private func openArticle(_ article: ArticleSummary) {
         switch ArticleOpenRouting.action(clickOnNews: newsreaderStore.clickOnNews, openInMiniflux: false) {
         case .detail:
@@ -160,6 +178,30 @@ struct ContentView: View {
         articleOpenGeneration += 1
         let generation = articleOpenGeneration
         newsreaderStore.open(article) { original in
+            guard let url = ArticleOpenRoutingPolicy.validWebURL(original) else {
+                present(.invalid)
+                return
+            }
+            UIApplication.shared.open(url, options: [.universalLinksOnly: true]) { succeeded in
+                Task { @MainActor in
+                    guard generation == articleOpenGeneration else { return }
+                    present(ArticleOpenRoutingPolicy.destination(originalURL: original, universalLinkSucceeded: succeeded))
+                }
+            }
+        }
+    }
+
+    private func openSearchArticle(_ article: ArticleSummary) {
+        switch ArticleOpenRouting.action(clickOnNews: newsreaderStore.clickOnNews, openInMiniflux: false) {
+        case .detail: openSearchReader(article)
+        case .original, .miniflux: openSearchOriginalArticle(article)
+        }
+    }
+
+    private func openSearchOriginalArticle(_ article: ArticleSummary) {
+        articleOpenGeneration += 1
+        let generation = articleOpenGeneration
+        searchStore.open(article) { original in
             guard let url = ArticleOpenRoutingPolicy.validWebURL(original) else {
                 present(.invalid)
                 return
@@ -216,6 +258,43 @@ struct ContentView: View {
         }
     }
 
+    private func handleSearchArticleAction(_ article: ArticleSummary, _ action: IOSArticleContextAction) {
+        switch action {
+        case .starred: searchStore.setStarred(article, starred: !article.isStarred)
+        case .read: searchStore.setRead(article, read: !article.isRead)
+        case .original: openSearchOriginalArticle(article)
+        case .miniflux: openMiniflux(article, using: searchStore)
+        case .comments:
+            guard let url = IOSArticleContextMenuPolicy.commentsURL(article.commentsUrl) else { return }
+            UIApplication.shared.open(url, options: [:])
+        case .copyLink:
+            UIPasteboard.general.string = article.url
+            actionConfirmation = "Link copied"
+        case .share:
+            guard let url = IOSArticleContextMenuPolicy.originalURL(article.url) else { actionError = "The article does not have a valid web URL."; return }
+            sharePayload = IOSSharePayload(items: [article.title, url])
+        case .saveToService:
+            searchStore.saveToService(article) { result in
+                switch result {
+                case .success(.saved): actionConfirmation = "Saved to third-party service"
+                case .success(.noIntegrationConfigured): actionConfirmation = "No third-party integration is configured in Miniflux"
+                case let .failure(error): actionError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func openMiniflux(_ article: ArticleSummary, using store: IOSSearchStore) {
+        store.minifluxEntryURL(for: article) { result in
+            switch result {
+            case let .success(value):
+                guard let url = ArticleOpenRoutingPolicy.validWebURL(value) else { actionError = "Flux could not resolve a valid Miniflux entry URL."; return }
+                UIApplication.shared.open(url, options: [:])
+            case let .failure(error): actionError = error.localizedDescription
+            }
+        }
+    }
+
     private func openReader(_ article: ArticleSummary) {
         readerGeneration += 1
         let generation = readerGeneration
@@ -224,6 +303,23 @@ struct ContentView: View {
         readerErrorMessage = nil
         readerIsLoading = true
         newsreaderStore.openReader(article) { result in
+            guard generation == readerGeneration else { return }
+            readerIsLoading = false
+            switch result {
+            case let .success(document): readerDocument = document
+            case let .failure(error): readerErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func openSearchReader(_ article: ArticleSummary) {
+        readerGeneration += 1
+        let generation = readerGeneration
+        readerArticle = IOSReaderArticle(article: article)
+        readerDocument = nil
+        readerErrorMessage = nil
+        readerIsLoading = true
+        searchStore.openReader(article) { result in
             guard generation == readerGeneration else { return }
             readerIsLoading = false
             switch result {

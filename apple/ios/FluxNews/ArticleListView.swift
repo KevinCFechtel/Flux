@@ -332,7 +332,7 @@ struct ArticleListView: View {
                          ScrollView {
                             LazyVStack(spacing: articleSpacing) {
                                 ForEach(store.articles, id: \.id) { article in
-                                      ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, store: store, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) })
+                                      ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, store: store, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { article, read in store.setRead(article, read: read) }, onSetStarred: { article, starred in store.setStarred(article, starred: starred) })
                                         .background { GeometryReader { row in Color.clear.preference(key: ArticleFrameKey.self, value: [article.id: row.frame(in: .named("ArticleScrollSpace"))]) } }
                                 }
                              }
@@ -407,7 +407,7 @@ struct ArticleListView: View {
     }
 }
 
-private struct ArticlePresentationView: View {
+struct ArticlePresentationView: View {
     let article: ArticleSummary
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
@@ -415,6 +415,8 @@ private struct ArticlePresentationView: View {
     @ObservedObject var store: NewsreaderStore
     let onTap: () -> Void
     let onAction: (IOSArticleContextAction) -> Void
+    let onSetRead: (ArticleSummary, Bool) -> Void
+    let onSetStarred: (ArticleSummary, Bool) -> Void
     @State private var horizontalOffset: CGFloat = 0
 
     private let actionWidth: CGFloat = 76
@@ -422,7 +424,7 @@ private struct ArticlePresentationView: View {
     var body: some View {
         ZStack(alignment: .leading) {
             HStack(spacing: 0) {
-                Button { store.setRead(article, read: !article.isRead); closeActions() } label: {
+                Button { onSetRead(article, !article.isRead); closeActions() } label: {
                     VStack(spacing: 4) {
                         Image(systemName: article.isRead ? "envelope" : "envelope.open")
                         Text(article.isRead ? "Unread" : "Read")
@@ -433,7 +435,7 @@ private struct ArticlePresentationView: View {
                 .frame(maxHeight: .infinity)
                 .background(Color.accentColor)
                 Spacer(minLength: 0)
-                Button { store.setStarred(article, starred: !article.isStarred); closeActions() } label: {
+                Button { onSetStarred(article, !article.isStarred); closeActions() } label: {
                     VStack(spacing: 4) {
                         Image(systemName: article.isStarred ? "star.slash" : "star")
                         Text(article.isStarred ? "Unstar" : "Star")
@@ -458,8 +460,8 @@ private struct ArticlePresentationView: View {
             .gesture(
                 IOSHorizontalSwipeGesture(offset: $horizontalOffset, actionWidth: actionWidth) { direction in
                     switch direction {
-                    case .right: store.setRead(article, read: !article.isRead)
-                    case .left: store.setStarred(article, starred: !article.isStarred)
+                    case .right: onSetRead(article, !article.isRead)
+                    case .left: onSetStarred(article, !article.isStarred)
                     }
                 }
             )

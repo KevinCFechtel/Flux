@@ -23,6 +23,9 @@
 		A8 /* ../shared/FluxApple/ScrolloverPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10 /* ../shared/FluxApple/ScrolloverPresentation.swift */; };
 		A16 /* ../shared/FluxApple/ReaderPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B18 /* ../shared/FluxApple/ReaderPresentation.swift */; };
 		A17 /* FluxNewsTests/ReaderRequestStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B19 /* FluxNewsTests/ReaderRequestStateTests.swift */; };
+		A18 /* FluxNews/IOSSearchStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20 /* FluxNews/IOSSearchStore.swift */; };
+		A19 /* FluxNews/SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B21 /* FluxNews/SearchView.swift */; };
+		A20 /* FluxNewsTests/IOSSearchStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22 /* FluxNewsTests/IOSSearchStoreTests.swift */; };
 		A9 /* FluxNews/NewsreaderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11 /* FluxNews/NewsreaderStore.swift */; };
 		E17F743830471E2D00698DA5 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = E17F743730471E2D00698DA5 /* AppIcon.icon */; };
 		E17F744030471E2D00698DA5 /* FluxUniFFI.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */; };
@@ -73,6 +76,9 @@
 		B9 /* ../shared/FluxApple/BrowserPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/BrowserPresentation.swift; sourceTree = "<group>"; };
 		B18 /* ../shared/FluxApple/ReaderPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/ReaderPresentation.swift; sourceTree = "<group>"; };
 		B19 /* FluxNewsTests/ReaderRequestStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/ReaderRequestStateTests.swift; sourceTree = "<group>"; };
+		B20 /* FluxNews/IOSSearchStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSSearchStore.swift; sourceTree = "<group>"; };
+		B21 /* FluxNews/SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/SearchView.swift; sourceTree = "<group>"; };
+		B22 /* FluxNewsTests/IOSSearchStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/IOSSearchStoreTests.swift; sourceTree = "<group>"; };
 		E17F743330471C1900698DA5 /* FluxNewsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FluxNewsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E17F743730471E2D00698DA5 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = FluxUniFFI.xcframework; path = ../Build/Products/FluxUniFFI/FluxUniFFI.xcframework; sourceTree = "<group>"; };
@@ -123,6 +129,9 @@
 				B15 /* FluxNewsTests/NewsreaderPresentationTests.swift */,
 				B16 /* FluxNewsTests/NewsreaderD23MutationTests.swift */,
 				B19 /* FluxNewsTests/ReaderRequestStateTests.swift */,
+				B20 /* FluxNews/IOSSearchStore.swift */,
+				B21 /* FluxNews/SearchView.swift */,
+				B22 /* FluxNewsTests/IOSSearchStoreTests.swift */,
 				E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */,
 				E17F743230471C1900698DA5 /* Recovered References */,
 			);
@@ -277,6 +286,8 @@
 				A10 /* FluxNews/ArticleListView.swift in Sources */,
 				A11 /* FluxNews/NewsNavigationView.swift in Sources */,
 				A12 /* FluxNews/DeveloperDiagnosticsView.swift in Sources */,
+				A18 /* FluxNews/IOSSearchStore.swift in Sources */,
+				A19 /* FluxNews/SearchView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -288,6 +299,7 @@
 				A13 /* FluxNewsTests/NewsreaderPresentationTests.swift in Sources */,
 				A14 /* FluxNewsTests/NewsreaderD23MutationTests.swift in Sources */,
 				A17 /* FluxNewsTests/ReaderRequestStateTests.swift in Sources */,
+				A20 /* FluxNewsTests/IOSSearchStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
