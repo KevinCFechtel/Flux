@@ -54,7 +54,7 @@ struct ContentView: View {
             if case .ready = bootstrapper.state, newsreaderStore.core != nil {
                 newsreader
             } else {
-                DeveloperDiagnosticsView(bootstrapper: bootstrapper)
+                StartupView(bootstrapper: bootstrapper)
             }
         }
         .sheet(isPresented: $diagnosticsPresented) { DeveloperDiagnosticsView(bootstrapper: bootstrapper) }
@@ -73,11 +73,11 @@ struct ContentView: View {
         .alert("Article Action", isPresented: Binding(get: { actionConfirmation != nil }, set: { if !$0 { actionConfirmation = nil } })) {
             Button("OK", role: .cancel) { actionConfirmation = nil }
         } message: { Text(actionConfirmation ?? "") }
-        .task(id: newsreaderStore.core != nil) {
+        .task(id: bootstrapper.coreRevision) {
             if let core = newsreaderStore.core {
                 searchStore.attach(to: core)
                 searchStore.onLocalFirstMutation = { newsreaderStore.loadNavigationAndCounts() }
-            }
+            } else { searchStore.detach() }
         }
     }
 
@@ -105,10 +105,6 @@ struct ContentView: View {
                                 Label("Sync", systemImage: "arrow.clockwise")
                             }
                             .disabled(newsreaderStore.isLoading)
-                            Button { diagnosticsPresented = true } label: {
-                                Label("Diagnostics", systemImage: "info.circle")
-                            }
-                            .accessibilityLabel("Developer diagnostics")
                         }
                         ToolbarItem(placement: .topBarTrailing) {
                             Button { optionsPresented = true } label: { Image(systemName: "slider.horizontal.3") }
@@ -121,7 +117,7 @@ struct ContentView: View {
                                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { navigationPresented = false } } }
                         }
                     }
-                    .sheet(isPresented: $optionsPresented) { NewsreaderOptionsView(store: newsreaderStore) }
+                    .sheet(isPresented: $optionsPresented) { NewsreaderOptionsView(store: newsreaderStore, bootstrapper: bootstrapper, onDiagnostics: { diagnosticsPresented = true }) }
             }
         }
     }
@@ -145,13 +141,9 @@ struct ContentView: View {
                         Button { optionsPresented = true } label: { Image(systemName: "slider.horizontal.3") }
                             .accessibilityLabel("Newsreader options")
                     }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { diagnosticsPresented = true } label: { Image(systemName: "info.circle") }
-                        .accessibilityLabel("Developer diagnostics")
-                    }
                 }
             }
-            .sheet(isPresented: $optionsPresented) { NewsreaderOptionsView(store: newsreaderStore) }
+            .sheet(isPresented: $optionsPresented) { NewsreaderOptionsView(store: newsreaderStore, bootstrapper: bootstrapper, onDiagnostics: { diagnosticsPresented = true }) }
     }
 
     private var searchView: some View {
@@ -422,10 +414,17 @@ private struct IOSShareSheet: UIViewControllerRepresentable {
 
 private struct NewsreaderOptionsView: View {
     @ObservedObject var store: NewsreaderStore
+    @ObservedObject var bootstrapper: CoreBootstrapper
+    let onDiagnostics: () -> Void
+    @State private var accountPresented = false
 
     var body: some View {
         NavigationStack {
             Form {
+                Section("Account") {
+                    Button("Account") { accountPresented = true }
+                    Button("Developer Diagnostics") { onDiagnostics() }
+                }
                 Section("Articles") {
                     Picker("Click on article", selection: Binding(get: { store.clickOnNews }, set: store.setClickOnNews)) {
                         Text("Open Link").tag(ClickOnNews.openLink)
@@ -464,6 +463,7 @@ private struct NewsreaderOptionsView: View {
             }
             .navigationTitle("Options")
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $accountPresented) { AccountConfigurationView(bootstrapper: bootstrapper, allowsRemoval: true) }
         }
     }
 }

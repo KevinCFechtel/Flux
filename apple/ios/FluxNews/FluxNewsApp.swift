@@ -9,8 +9,11 @@ struct FluxNewsApp: App {
         WindowGroup {
             ContentView(bootstrapper: bootstrapper, newsreaderStore: newsreaderStore)
                 .task {
+                    bootstrapper.onCoreChanged = { core in
+                        if let core { newsreaderStore.attach(to: core) }
+                        else { newsreaderStore.detach() }
+                    }
                     await bootstrapper.start()
-                    if let core = bootstrapper.core { newsreaderStore.attach(to: core) }
                 }
         }
     }

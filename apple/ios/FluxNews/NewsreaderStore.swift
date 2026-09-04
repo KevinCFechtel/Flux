@@ -81,6 +81,7 @@ final class NewsreaderStore: ObservableObject {
     }
 
     func attach(to configuredCore: Flux) {
+        detach()
         core = configuredCore
         do {
             eventSubscription = try configuredCore.subscribeEvents(listener: IOSNewsreaderEventListener(store: self))
@@ -93,6 +94,20 @@ final class NewsreaderStore: ObservableObject {
         scope = StartupScopeResolver.resolve(startupScope, categoryID: startupCategoryID, feedID: startupFeedID, categoryIDs: categoryIDs, feedIDs: feedIDs)
         normalizeStartupScope(categoryIDs: categoryIDs, feedIDs: feedIDs)
         loadVisibleArticles()
+    }
+
+    func detach() {
+        eventSubscription = nil
+        core = nil
+        articles = []
+        catalog = NavigationCatalog(categories: [], feeds: [])
+        unreadTotal = 0
+        starredTotal = 0
+        selectionTotal = 0
+        categoryCounts = [:]
+        feedCounts = [:]
+        feedIcons = [:]
+        resetPresentationState()
     }
 
     func query(scope requestedScope: BrowserScope? = nil) -> ArticleQuery {

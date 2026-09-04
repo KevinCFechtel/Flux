@@ -383,6 +383,22 @@ impl FluxCore {
         result
     }
 
+    /// Removes account-bound state while preserving global Core settings.
+    pub fn remove_account_state(&self) -> Result<(), CoreError> {
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            let _sync = self
+                .sync_gate
+                .lock()
+                .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+            self.store.remove_account_state()?;
+            self.clear_regenerable_caches();
+            self.clear_backoff()?;
+            Ok(())
+        });
+        self.diagnostics.flush();
+        result
+    }
+
     pub fn configuration_snapshot(&self) -> Result<ConfigurationSnapshot, CoreError> {
         Ok(ConfigurationSnapshot {
             installation_base: self.store.base_url()?.unwrap_or_default(),

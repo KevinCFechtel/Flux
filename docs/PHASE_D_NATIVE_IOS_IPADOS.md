@@ -1,6 +1,6 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: PLANNED / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D3 COMPLETE / D4.1 IN PROGRESS / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
 > replaces the existing Flutter iOS/iPadOS client with a native Swift/SwiftUI
@@ -249,11 +249,48 @@ existing Core API.
 
 ### D4 — Settings & Native Presentation Quality
 
+D4 is subdivided into D4.1-D4.4. D4.1 introduces the independent native
+account/credential startup lifecycle. D4.2 is the full native Settings redesign,
+D4.3 covers presentation quality, and D4.4 performs combined real-device
+D2-D4 validation and polish.
+
+#### D4.1 — Production-Style Startup & Native Account/Credentials
+
+- start without developer environment credentials;
+- store the native account, API key, and custom HTTP headers in the native
+  Keychain namespace;
+- validate and reconfigure accounts through the existing Core/UniFFI contract;
+- keep account-required and recoverable-startup-error states separate from
+  Developer Diagnostics;
+- support Rebuild Local State and Remove Account with distinct semantics.
+
+Remove Account removes native credentials, account-bound Core state, feed
+preferences, and account media while preserving global application/display
+preferences. Rebuild Local State preserves the account and preferences while
+rebuilding reconstructable synchronized state. There is no general FluxNews
+Factory Reset product action.
+
+Flutter credentials, settings, SQLite state, downloads, and playback are not
+read, imported, rewritten, or deleted by D4.1. Flutter-to-native migration
+remains entirely in D9.
+
+#### D4.2 — Native Settings Redesign
+
 Implement a conventional native Settings screen for current Core and native UI
 settings, including feed/media settings and System + True Black appearance.
 Integrate native quality requirements such as Dynamic Type, VoiceOver, haptics,
 context menus and iPad keyboard/pointer behavior as part of the affected UI,
 not as a parallel custom framework.
+
+#### D4.3 — Native Presentation Quality
+
+Complete the remaining native presentation quality work, including True Black,
+Dynamic Type, and accessibility polish.
+
+#### D4.4 — Real-Device Validation & Polish
+
+Perform combined real-device D2-D4 validation and polish on representative
+iPhone and iPad devices.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 

@@ -843,6 +843,9 @@ impl Flux {
     pub fn reset_core_state(&self) -> Result<(), FluxError> {
         self.core.reset_core_state().map_err(map_error)
     }
+    pub fn remove_account_state(&self) -> Result<(), FluxError> {
+        self.core.remove_account_state().map_err(map_error)
+    }
     pub fn configuration_snapshot(&self) -> Result<ConfigurationSnapshot, FluxError> {
         self.core
             .configuration_snapshot()

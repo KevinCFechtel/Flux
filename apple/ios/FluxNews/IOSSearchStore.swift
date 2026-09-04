@@ -49,7 +49,8 @@ final class IOSSearchStore: ObservableObject {
     private let pageSize = IOSSearchPaginationPolicy.pageSize
     var onLocalFirstMutation: () -> Void = {}
 
-    func attach(to core: Flux) { self.core = core }
+    func attach(to core: Flux) { invalidate(); self.core = core }
+    func detach() { invalidate(); core = nil; clear() }
 
     func submit() {
         let value = query.trimmingCharacters(in: .whitespacesAndNewlines)

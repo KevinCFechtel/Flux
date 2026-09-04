@@ -178,6 +178,38 @@ impl Store {
         }
         tx.commit().map_err(sql_error)
     }
+    /// Removes the current account's local state while preserving Core settings.
+    pub fn remove_account_state(&self) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        clear_synchronized_state(&tx, true)?;
+        tx.execute("DELETE FROM core_settings WHERE key='base_url'", [])
+            .map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+
+        if self.media_root.exists() {
+            for entry in std::fs::read_dir(&self.media_root)
+                .map_err(|error| CoreError::persistence(format!("read media root: {error}")))?
+            {
+                let path = entry
+                    .map_err(|error| CoreError::persistence(format!("read media entry: {error}")))?
+                    .path();
+                if path.is_dir() {
+                    std::fs::remove_dir_all(path).map_err(|error| {
+                        CoreError::persistence(format!("remove account media: {error}"))
+                    })?;
+                } else {
+                    std::fs::remove_file(path).map_err(|error| {
+                        CoreError::persistence(format!("remove account media: {error}"))
+                    })?;
+                }
+            }
+        }
+        Ok(())
+    }
     pub fn base_url(&self) -> Result<Option<String>, CoreError> {
         self.connection
             .lock()
@@ -4131,6 +4163,47 @@ mod tests {
             connection
                 .query_row::<i64, _, _>("SELECT COUNT(*) FROM pending_mutations", [], |row| row
                     .get(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn remove_account_state_clears_account_data_but_preserves_core_settings() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        store.set_base_url("https://old.example").unwrap();
+        store.set_retention(ReadArticleRetention::Days30).unwrap();
+        store
+            .connection
+            .lock()
+            .unwrap()
+            .execute_batch("INSERT INTO categories VALUES(1, 'Old'); INSERT INTO feeds VALUES(2, 1, 'Old Feed'); INSERT INTO articles(id,feed_id,title,url,published_at,is_read,is_starred,raw_html_content) VALUES(3,2,'Old','https://old.example/post','2024-01-01T00:00:00Z',0,0,'');")
+            .unwrap();
+        store.set_feed_open_in_miniflux(2, true).unwrap();
+        std::fs::create_dir_all(&media).unwrap();
+        std::fs::write(media.join("old-account.mp3"), b"account data").unwrap();
+
+        store.remove_account_state().unwrap();
+
+        assert_eq!(store.base_url().unwrap(), None);
+        assert_eq!(
+            store.core_settings().unwrap().retention,
+            ReadArticleRetention::Days30
+        );
+        assert!(store.all_feed_preferences().unwrap().is_empty());
+        assert!(!media.join("old-account.mp3").exists());
+        let connection = store.connection.lock().unwrap();
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>("SELECT COUNT(*) FROM articles", [], |row| row.get(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>("SELECT COUNT(*) FROM feeds", [], |row| row.get(0))
                 .unwrap(),
             0
         );
