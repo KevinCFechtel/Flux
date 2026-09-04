@@ -48,9 +48,8 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.applyScrolloverMutationForTesting([1], batchGeneration: generation)
 
         XCTAssertEqual(store.articles.map(\.id), [1, 2])
-        XCTAssertFalse(store.articles[0].isRead)
+        XCTAssertTrue(store.articles[0].isRead)
         XCTAssertEqual(store.scrolloverPendingRemovalsForTesting, [1])
-        XCTAssertEqual(store.scrolloverPendingReadPresentationForTesting, [1])
     }
 
     @MainActor
@@ -81,13 +80,12 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.applyScrolloverMutationForTesting([1], batchGeneration: generation)
 
         XCTAssertEqual(store.articles.map(\.id), [1])
-        XCTAssertFalse(store.articles[0].isRead)
-        XCTAssertEqual(store.scrolloverPendingReadPresentationForTesting, [1])
+        XCTAssertTrue(store.articles[0].isRead)
+        XCTAssertTrue(store.scrolloverPendingRemovalsForTesting.isEmpty)
 
         store.finishScrolloverPresentationScrollForTesting()
 
         XCTAssertTrue(store.articles[0].isRead)
-        XCTAssertTrue(store.scrolloverPendingReadPresentationForTesting.isEmpty)
     }
 
     @MainActor
@@ -122,7 +120,6 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(store.articles.map(\.id), [1, 2])
         XCTAssertTrue(store.articles.allSatisfy { !$0.isRead })
         XCTAssertTrue(store.scrolloverPendingRemovalsForTesting.isEmpty)
-        XCTAssertTrue(store.scrolloverPendingReadPresentationForTesting.isEmpty)
     }
 
     @MainActor
@@ -464,15 +461,18 @@ final class NewsreaderD23MutationTests: XCTestCase {
     }
 
     @MainActor
-    func testUndoRestoresRemovedArticlesInOriginalOrder() {
+    func testUndoAfterIdleRestoresRemovedArticlesInOriginalOrder() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.removeArticlesWhenMarkedRead = true
         store.unreadOnly = true
         store.setArticlesForTesting([article(1), article(2), article(3)])
+        store.beginScrolloverPresentationScrollForTesting()
         let batchGeneration = store.beginScrolloverUndoBatch()
         store.applyScrolloverMutationForTesting([1, 3], batchGeneration: batchGeneration)
-        store.restoreScrolloverRemovedArticlesForTesting()
+        store.finishScrolloverPresentationScrollForTesting()
+        store.applyScrolloverUndoForTesting()
         XCTAssertEqual(store.articles.map(\.id), [1, 2, 3])
+        XCTAssertTrue(store.articles.allSatisfy { !$0.isRead })
     }
 
     @MainActor
@@ -596,7 +596,6 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.setStarred(value, starred: true)
         XCTAssertFalse(store.articles[0].isRead)
         XCTAssertFalse(store.articles[0].isStarred)
-        XCTAssertTrue(store.scrolloverPendingReadPresentationForTesting.isEmpty)
     }
 
     func testAutomaticRefreshPreservesInteractedSnapshotAndSignalsNewData() {

@@ -65,7 +65,6 @@ final class NewsreaderStore: ObservableObject {
     private var scrolloverUndoBatchGeneration: UInt64?
     private var scrolloverMutationsInFlight = 0
     private var scrolloverPendingRemovals = Set<Int64>()
-    private var scrolloverPendingReadPresentation = Set<Int64>()
     private var scrolloverPresentationScrollActive = false
     private var hasMeaningfullyInteracted = false
     private var readerRequests = ReaderRequestState()
@@ -365,7 +364,6 @@ final class NewsreaderStore: ObservableObject {
             switch result {
             case .success:
                 scrolloverPendingRemovals.subtract(ids)
-                scrolloverPendingReadPresentation.subtract(ids)
                 updateVisibleRead(ids, read: false); restoreScrolloverRemovedArticles()
                 scrolloverUndoIDs = []; scrolloverUndoBatchGeneration = nil; scrolloverUndoVisible = false; scrolloverUndoTask?.cancel(); reloadCounts(includeNavigationCounts: true)
             case let .failure(error): errorMessage = error.localizedDescription
@@ -414,7 +412,6 @@ final class NewsreaderStore: ObservableObject {
         scrolloverUndoBatchGeneration = nil
         scrolloverCountsPending = false
         scrolloverPendingRemovals = []
-        scrolloverPendingReadPresentation = []
         scrolloverPresentationScrollActive = false
     }
 
@@ -460,7 +457,7 @@ final class NewsreaderStore: ObservableObject {
         let removesReadArticles = ArticleListPresentationPolicy.removesMarkedReadArticle(removeWhenMarkedRead: removeArticlesWhenMarkedRead, unreadOnly: unreadOnly, scope: scope)
         if read && deferStructuralRemoval && scrolloverPresentationScrollActive {
             if retainingForScrolloverUndo { for article in articles where ids.contains(article.id) { scrolloverRemovedArticles[article.id] = article } }
-            scrolloverPendingReadPresentation.formUnion(ids)
+            updateVisible(Array(ids)) { $0.isRead = true }
             if removesReadArticles { scrolloverPendingRemovals.formUnion(ids) }
             return
         }
@@ -472,15 +469,12 @@ final class NewsreaderStore: ObservableObject {
     }
 
     private func applyPendingScrolloverPresentation() {
-        guard !scrolloverPendingReadPresentation.isEmpty || !scrolloverPendingRemovals.isEmpty else { return }
-        let presentationIDs = scrolloverPendingReadPresentation
-        scrolloverPendingReadPresentation.removeAll()
+        guard !scrolloverPendingRemovals.isEmpty else { return }
+        let removalIDs = scrolloverPendingRemovals
         scrolloverPendingRemovals.removeAll()
         let removesReadArticles = ArticleListPresentationPolicy.removesMarkedReadArticle(removeWhenMarkedRead: removeArticlesWhenMarkedRead, unreadOnly: unreadOnly, scope: scope)
         if removesReadArticles {
-            articles.removeAll { presentationIDs.contains($0.id) }
-        } else {
-            updateVisible(Array(presentationIDs)) { $0.isRead = true }
+            articles.removeAll { removalIDs.contains($0.id) }
         }
     }
 
@@ -511,15 +505,13 @@ final class NewsreaderStore: ObservableObject {
     @MainActor
     func applyScrolloverMutationForTesting(_ ids: [Int64], batchGeneration: UInt64) { recordSuccessfulScrolloverRead(ids, batchGeneration: batchGeneration) }
     @MainActor
-    func applyScrolloverUndoForTesting() { let ids = scrolloverUndoIDs; scrolloverPendingRemovals.subtract(ids); scrolloverPendingReadPresentation.subtract(ids); updateVisibleRead(ids, read: false); restoreScrolloverRemovedArticles(); scrolloverUndoIDs = []; scrolloverUndoBatchGeneration = nil; scrolloverUndoVisible = false }
+    func applyScrolloverUndoForTesting() { let ids = scrolloverUndoIDs; scrolloverPendingRemovals.subtract(ids); updateVisibleRead(ids, read: false); restoreScrolloverRemovedArticles(); scrolloverUndoIDs = []; scrolloverUndoBatchGeneration = nil; scrolloverUndoVisible = false }
     @MainActor
     func beginScrolloverPresentationScrollForTesting() { beginScrolloverPresentationScroll() }
     @MainActor
     func finishScrolloverPresentationScrollForTesting() { finishScrolloverPresentationScroll() }
     @MainActor
     var scrolloverPendingRemovalsForTesting: Set<Int64> { scrolloverPendingRemovals }
-    @MainActor
-    var scrolloverPendingReadPresentationForTesting: Set<Int64> { scrolloverPendingReadPresentation }
     @MainActor
     var scrolloverUndoIDsForTesting: [Int64] { scrolloverUndoIDs }
     @MainActor

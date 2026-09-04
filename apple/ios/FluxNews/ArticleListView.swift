@@ -333,7 +333,8 @@ struct ArticleListView: View {
                          ScrollView {
                             LazyVStack(spacing: articleSpacing) {
                                 ForEach(store.articles, id: \.id) { article in
-                                      ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, store: store, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { article, read in store.setRead(article, read: read) }, onSetStarred: { article, starred in store.setStarred(article, starred: starred) })
+                                       ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIconData: store.feedIcons[article.feedId], onRequestFeedIcon: { store.requestFeedIcon(article.feedId) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { article, read in store.setRead(article, read: read) }, onSetStarred: { article, starred in store.setStarred(article, starred: starred) })
+                                         .equatable()
                                         .background { GeometryReader { row in Color.clear.preference(key: ArticleFrameKey.self, value: [article.id: row.frame(in: .named("ArticleScrollSpace"))]) } }
                                 }
                              }
@@ -414,12 +415,13 @@ struct ArticleListView: View {
     }
 }
 
-struct ArticlePresentationView: View {
+struct ArticlePresentationView: View, Equatable {
     let article: ArticleSummary
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
     let availableWidth: CGFloat
-    @ObservedObject var store: NewsreaderStore
+    let feedIconData: Data?
+    let onRequestFeedIcon: () -> Void
     let onTap: () -> Void
     let onAction: (IOSArticleContextAction) -> Void
     let onSetRead: (ArticleSummary, Bool) -> Void
@@ -427,6 +429,16 @@ struct ArticlePresentationView: View {
     @State private var horizontalOffset: CGFloat = 0
 
     private let actionWidth: CGFloat = 76
+
+    // The list observes its snapshot, but Undo-only publications must not redraw
+    // rows whose article and presentation inputs have not changed.
+    static func == (lhs: ArticlePresentationView, rhs: ArticlePresentationView) -> Bool {
+        lhs.article == rhs.article &&
+            lhs.mode == rhs.mode &&
+            lhs.previewLines == rhs.previewLines &&
+            lhs.availableWidth == rhs.availableWidth &&
+            lhs.feedIconData == rhs.feedIconData
+    }
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -633,7 +645,7 @@ struct ArticlePresentationView: View {
     private var metadataRow: some View {
         HStack(spacing: 6) {
             unreadIndicator
-            FeedIconView(feedID: article.feedId, title: article.feedTitle, store: store)
+            FeedIconView(feedID: article.feedId, title: article.feedTitle, data: feedIconData, onRequest: onRequestFeedIcon)
             Text(article.feedTitle).font(.subheadline.weight(.medium))
             Text("•")
             Text(date)
@@ -647,7 +659,7 @@ struct ArticlePresentationView: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 unreadIndicator
-                FeedIconView(feedID: article.feedId, title: article.feedTitle, store: store)
+                FeedIconView(feedID: article.feedId, title: article.feedTitle, data: feedIconData, onRequest: onRequestFeedIcon)
                 Text(article.feedTitle).font(.subheadline.weight(.medium))
             }
             Text(date)
@@ -675,11 +687,12 @@ private struct ArticleFrameKey: PreferenceKey {
 private struct FeedIconView: View {
     let feedID: Int64
     let title: String
-    @ObservedObject var store: NewsreaderStore
+    let data: Data?
+    let onRequest: () -> Void
 
     var body: some View {
         Group {
-            if let data = store.feedIcons[feedID], let image = UIImage(data: data) {
+            if let image = data.flatMap(UIImage.init(data:)) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
@@ -693,6 +706,6 @@ private struct FeedIconView: View {
         }
         .frame(width: 22, height: 22)
         .accessibilityHidden(true)
-        .task { store.requestFeedIcon(feedID) }
+        .task { onRequest() }
     }
 }

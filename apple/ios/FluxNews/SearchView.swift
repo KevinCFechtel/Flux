@@ -32,7 +32,8 @@ struct SearchView: View {
                     ScrollView {
                         LazyVStack(spacing: spacing) {
                             ForEach(store.results, id: \.id) { article in
-                                ArticlePresentationView(article: article, mode: newsreaderStore.articlePresentationMode, previewLines: newsreaderStore.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, store: newsreaderStore, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: onSetRead, onSetStarred: onSetStarred)
+                                ArticlePresentationView(article: article, mode: newsreaderStore.articlePresentationMode, previewLines: newsreaderStore.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIconData: newsreaderStore.feedIcons[article.feedId], onRequestFeedIcon: { newsreaderStore.requestFeedIcon(article.feedId) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: onSetRead, onSetStarred: onSetStarred)
+                                    .equatable()
                                     .onAppear { if article.id == store.results.last?.id { store.loadMore() } }
                             }
                             if store.isLoadingMore { ProgressView().padding() }
