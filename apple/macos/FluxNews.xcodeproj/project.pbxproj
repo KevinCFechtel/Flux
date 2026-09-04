@@ -63,6 +63,7 @@
 		A59 /* MediaRemoteControlCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B56 /* MediaRemoteControlCoordinator.swift */; };
 		A60 /* MacOSPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60 /* MacOSPresentation.swift */; };
 		A61 /* MacOSPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60 /* MacOSPresentation.swift */; };
+		A62 /* ReaderPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B61 /* ReaderPresentation.swift */; };
 		A6 /* Generated/flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6 /* Generated/flux_uniffi.swift */; };
 		A7 /* KeyboardCommandObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7 /* KeyboardCommandObserver.swift */; };
 		A8 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8 /* CredentialStore.swift */; };
@@ -146,6 +147,7 @@
 		B55 /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		B56 /* MediaRemoteControlCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaRemoteControlCoordinator.swift; sourceTree = "<group>"; };
 		B60 /* MacOSPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOSPresentation.swift; sourceTree = "<group>"; };
+		B61 /* ReaderPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ReaderPresentation.swift; path = ../../shared/FluxApple/ReaderPresentation.swift; sourceTree = "<group>"; };
 		B6 /* Generated/flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Generated/flux_uniffi.swift; sourceTree = "<group>"; };
 		B7 /* KeyboardCommandObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardCommandObserver.swift; sourceTree = "<group>"; };
 		B8 /* CredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; };
@@ -228,6 +230,7 @@
 				B55 /* PlayerView.swift */,
 				B56 /* MediaRemoteControlCoordinator.swift */,
 				B60 /* MacOSPresentation.swift */,
+				B61 /* ReaderPresentation.swift */,
 				B31 /* FluxNews.entitlements */,
 				B13 /* FluxNewsTemplate.svg */,
 				B14 /* Localizable.xcstrings */,
@@ -436,6 +439,7 @@
 				A58 /* PlayerView.swift in Sources */,
 				A59 /* MediaRemoteControlCoordinator.swift in Sources */,
 				A60 /* MacOSPresentation.swift in Sources */,
+				A62 /* ReaderPresentation.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

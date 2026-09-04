@@ -7,6 +7,11 @@ private struct IOSBrowserURL: Identifiable {
     var id: URL { url }
 }
 
+private struct IOSReaderArticle: Identifiable {
+    let article: ArticleSummary
+    var id: Int64 { article.id }
+}
+
 enum NewsNavigationLayout {
     static func usesSplitView(for idiom: UIUserInterfaceIdiom) -> Bool {
         idiom == .pad
@@ -14,6 +19,7 @@ enum NewsNavigationLayout {
 }
 
 struct ContentView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @ObservedObject var bootstrapper: CoreBootstrapper
     @ObservedObject var newsreaderStore: NewsreaderStore
     @State private var navigationPresented = false
@@ -23,6 +29,11 @@ struct ContentView: View {
     @State private var browser: IOSBrowserURL?
     @State private var articleOpenError: String?
     @State private var articleOpenGeneration = 0
+    @State private var readerArticle: IOSReaderArticle?
+    @State private var readerDocument: ReaderDocument?
+    @State private var readerIsLoading = false
+    @State private var readerErrorMessage: String?
+    @State private var readerGeneration = 0
 
     private var usesSplitNavigation: Bool {
         NewsNavigationLayout.usesSplitView(for: UIDevice.current.userInterfaceIdiom)
@@ -38,6 +49,10 @@ struct ContentView: View {
         }
         .sheet(isPresented: $diagnosticsPresented) { DeveloperDiagnosticsView(bootstrapper: bootstrapper) }
         .sheet(item: $browser) { item in IOSInAppBrowser(url: item.url) }
+        .sheet(item: readerSheetBinding) { item in readerView(for: item.article) }
+        .inspector(isPresented: readerInspectorBinding) {
+            if let article = readerArticle?.article { readerView(for: article) }
+        }
         .alert("Unable to Open Article", isPresented: Binding(get: { articleOpenError != nil }, set: { if !$0 { articleOpenError = nil } })) {
             Button("OK", role: .cancel) { articleOpenError = nil }
         } message: { Text(articleOpenError ?? "") }
@@ -116,6 +131,13 @@ struct ContentView: View {
     }
 
     private func openArticle(_ article: ArticleSummary) {
+        switch ArticleOpenRouting.action(clickOnNews: newsreaderStore.clickOnNews, openInMiniflux: false) {
+        case .detail:
+            openReader(article)
+            return
+        case .original, .miniflux:
+            break
+        }
         articleOpenGeneration += 1
         let generation = articleOpenGeneration
         newsreaderStore.open(article) { original in
@@ -128,6 +150,23 @@ struct ContentView: View {
                     guard generation == articleOpenGeneration else { return }
                     present(ArticleOpenRoutingPolicy.destination(originalURL: original, universalLinkSucceeded: succeeded))
                 }
+            }
+        }
+    }
+
+    private func openReader(_ article: ArticleSummary) {
+        readerGeneration += 1
+        let generation = readerGeneration
+        readerArticle = IOSReaderArticle(article: article)
+        readerDocument = nil
+        readerErrorMessage = nil
+        readerIsLoading = true
+        newsreaderStore.openReader(article) { result in
+            guard generation == readerGeneration else { return }
+            readerIsLoading = false
+            switch result {
+            case let .success(document): readerDocument = document
+            case let .failure(error): readerErrorMessage = error.localizedDescription
             }
         }
     }
@@ -150,6 +189,55 @@ struct ContentView: View {
         case .listeningList: "Listening List"
         }
     }
+
+    private var usesReaderInspector: Bool {
+        ReaderPresentationPolicy.kind(isPad: usesSplitNavigation, isRegularWidth: horizontalSizeClass == .regular) == .inspector
+    }
+
+    private var readerSheetBinding: Binding<IOSReaderArticle?> {
+        Binding(
+            get: { usesReaderInspector ? nil : readerArticle },
+            set: { if $0 == nil { readerArticle = nil; readerGeneration += 1 } }
+        )
+    }
+
+    private var readerInspectorBinding: Binding<Bool> {
+        Binding(
+            get: { usesReaderInspector && readerArticle != nil },
+            set: { if !$0 { readerArticle = nil; readerGeneration += 1 } }
+        )
+    }
+
+    @ViewBuilder
+    private func readerView(for article: ArticleSummary) -> some View {
+        VStack(spacing: 0) {
+            ReaderArticleHeader(article: article)
+            Group {
+                if readerIsLoading {
+                    ProgressView("Loading article...")
+                } else if let readerErrorMessage {
+                    ContentUnavailableView("Unable to load article", systemImage: "exclamationmark.triangle", description: Text(readerErrorMessage))
+                } else if let readerDocument {
+                    ScrollView { ReaderDocumentContent(document: readerDocument, openOriginal: { openOriginal(article) }) }
+                } else {
+                    ContentUnavailableView("No article selected", systemImage: "doc.text")
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .environment(\.openURL, OpenURLAction { url in
+            UIApplication.shared.open(url, options: [:])
+            return .handled
+        })
+    }
+
+    private func openOriginal(_ article: ArticleSummary) {
+        guard let url = ArticleOpenRoutingPolicy.validWebURL(article.url) else {
+            readerErrorMessage = "The article does not have a valid web URL."
+            return
+        }
+        UIApplication.shared.open(url, options: [:])
+    }
 }
 
 private struct IOSInAppBrowser: UIViewControllerRepresentable {
@@ -166,6 +254,10 @@ private struct NewsreaderOptionsView: View {
         NavigationStack {
             Form {
                 Section("Articles") {
+                    Picker("Click on article", selection: Binding(get: { store.clickOnNews }, set: store.setClickOnNews)) {
+                        Text("Open Link").tag(ClickOnNews.openLink)
+                        Text("Open Reader").tag(ClickOnNews.openDetailView)
+                    }
                     Picker("Presentation", selection: Binding(get: { store.articlePresentationMode }, set: store.setArticlePresentationMode)) {
                         ForEach(ArticlePresentationMode.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
                     }

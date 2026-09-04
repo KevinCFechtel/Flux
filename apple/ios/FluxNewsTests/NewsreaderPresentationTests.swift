@@ -123,4 +123,52 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleOpenRouting.action(clickOnNews: .openDetailView, openInMiniflux: true), .detail)
     }
 
+    func testConfiguredDetailModeSelectsReaderBeforeNormalOpenRouting() {
+        XCTAssertEqual(ArticleOpenRouting.action(clickOnNews: .openDetailView, openInMiniflux: false), .detail)
+        XCTAssertEqual(ArticleOpenRouting.action(clickOnNews: .openLink, openInMiniflux: false), .original)
+    }
+
+    func testReaderPresentationUsesInspectorOnlyOnRegularWidthIPad() {
+        XCTAssertEqual(ReaderPresentationPolicy.kind(isPad: true, isRegularWidth: true), .inspector)
+        XCTAssertEqual(ReaderPresentationPolicy.kind(isPad: true, isRegularWidth: false), .sheet)
+        XCTAssertEqual(ReaderPresentationPolicy.kind(isPad: false, isRegularWidth: true), .sheet)
+    }
+
+    func testReaderRequestStateRejectsStaleResponses() {
+        var state = ReaderRequestState()
+        let first = state.begin()
+        let second = state.begin()
+        XCTAssertFalse(state.isCurrent(first))
+        XCTAssertTrue(state.isCurrent(second))
+    }
+
+    func testReaderDocumentNoticePreservesAllContentStates() {
+        XCTAssertNil(ReaderDocumentNotice.text(simplified: false, truncated: false))
+        XCTAssertEqual(ReaderDocumentNotice.text(simplified: true, truncated: false), "Some content was simplified")
+        XCTAssertEqual(ReaderDocumentNotice.text(simplified: false, truncated: true), "Some content was truncated")
+        XCTAssertEqual(ReaderDocumentNotice.text(simplified: true, truncated: true), "Some content was simplified and truncated")
+    }
+
+    func testReaderDocumentVariantsAreRepresentedByCoreProjection() {
+        let inline: [ReaderInline] = [
+            .text(text: "text"),
+            .bold(inlines: [.text(text: "bold")]),
+            .italic(inlines: [.text(text: "italic")]),
+            .code(text: "code"),
+            .link(url: "https://example.com", inlines: [.text(text: "link")])
+        ]
+        let blocks: [ReaderBlock] = [
+            .paragraph(inlines: inline),
+            .heading(level: 2, inlines: inline),
+            .image(url: "https://example.com/image.png", alt: "image", link: nil),
+            .list(ordered: false, items: [.init(blocks: [.paragraph(inlines: inline)])]),
+            .quote(blocks: [.paragraph(inlines: inline)]),
+            .codeBlock(text: "code"),
+            .horizontalRule,
+            .externalContent(url: "https://example.com", label: "external")
+        ]
+        XCTAssertEqual(blocks.count, 8)
+        XCTAssertEqual(inline.count, 5)
+    }
+
 }

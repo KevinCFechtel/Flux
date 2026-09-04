@@ -18,6 +18,7 @@ final class NewsreaderStore: ObservableObject {
         static let scrollover = "FluxNews.iOS.markReadOnScrollover"
         static let presentationMode = "FluxNews.iOS.articlePresentationMode"
         static let previewLines = "FluxNews.iOS.articlePreviewLines"
+        static let clickOnNews = "FluxNews.clickOnNews"
     }
 
     @Published private(set) var articles: [ArticleSummary] = []
@@ -45,6 +46,7 @@ final class NewsreaderStore: ObservableObject {
     @Published var markReadOnScrolloverEnabled: Bool
     @Published var articlePresentationMode: ArticlePresentationMode
     @Published var articlePreviewLines: ArticlePreviewLines
+    @Published var clickOnNews: ClickOnNews
     @Published private(set) var scrolloverUndoIDs: [Int64] = []
     @Published private(set) var scrolloverUndoVisible = false
 
@@ -63,6 +65,7 @@ final class NewsreaderStore: ObservableObject {
     private var scrolloverUndoBatchGeneration: UInt64?
     private var scrolloverMutationsInFlight = 0
     private var hasMeaningfullyInteracted = false
+    private var readerRequests = ReaderRequestState()
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -74,6 +77,7 @@ final class NewsreaderStore: ObservableObject {
         markReadOnScrolloverEnabled = defaults.object(forKey: Key.scrollover) as? Bool ?? true
         articlePresentationMode = defaults.string(forKey: Key.presentationMode).flatMap(ArticlePresentationMode.init(rawValue:)) ?? .visual
         articlePreviewLines = ArticlePreviewLines(rawValue: defaults.object(forKey: Key.previewLines) as? Int ?? 3) ?? .standard
+        clickOnNews = defaults.string(forKey: Key.clickOnNews).flatMap(ClickOnNews.init(rawValue:)) ?? .openLink
     }
 
     func attach(to configuredCore: Flux) {
@@ -170,6 +174,7 @@ final class NewsreaderStore: ObservableObject {
     func setMarkReadOnScrolloverEnabled(_ value: Bool) { markReadOnScrolloverEnabled = value; defaults.set(value, forKey: Key.scrollover) }
     func setArticlePresentationMode(_ value: ArticlePresentationMode) { articlePresentationMode = value; defaults.set(value.rawValue, forKey: Key.presentationMode); resetPresentationState() }
     func setArticlePreviewLines(_ value: ArticlePreviewLines) { articlePreviewLines = value; defaults.set(value.rawValue, forKey: Key.previewLines); resetPresentationState() }
+    func setClickOnNews(_ value: ClickOnNews) { clickOnNews = value; defaults.set(value.rawValue, forKey: Key.clickOnNews) }
 
     func setRead(_ article: ArticleSummary, read: Bool) { setRead(articleIDs: [article.id], read: read) }
     func setStarred(_ article: ArticleSummary, starred: Bool) { setStarred(articleIDs: [article.id], starred: starred) }
@@ -178,6 +183,24 @@ final class NewsreaderStore: ObservableObject {
     func open(_ article: ArticleSummary, completion: @escaping (String) -> Void) {
         setRead(article, read: true)
         completion(article.url)
+    }
+
+    func openReader(_ article: ArticleSummary, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
+        setRead(article, read: true)
+        loadReaderDocument(articleID: article.id, completion: completion)
+    }
+
+    func loadReaderDocument(articleID: Int64, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
+        let request = readerRequests.begin()
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            return
+        }
+        Task { [weak self, core] in
+            let result = await Task.detached { Result { try core.readerDocument(articleId: articleID) } }.value
+            guard let self, self.readerRequests.isCurrent(request) else { return }
+            completion(result)
+        }
     }
 
     func setRead(articleIDs: [Int64], read: Bool) {
