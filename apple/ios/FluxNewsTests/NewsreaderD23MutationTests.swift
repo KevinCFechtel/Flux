@@ -27,6 +27,15 @@ final class NewsreaderD23MutationTests: XCTestCase {
     }
 
     @MainActor
+    func testUnreadMutationUsesTheExistingReadMutationPath() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.unreadOnly = false
+        store.setArticlesForTesting([article(1, read: true)])
+        store.applyReadMutationForTesting([1], read: false)
+        XCTAssertFalse(store.articles[0].isRead)
+    }
+
+    @MainActor
     func testRemoveWhenReadRemovesOnlyUnreadScopeRows() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.removeArticlesWhenMarkedRead = true
@@ -130,6 +139,14 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.setArticlesForTesting([article(1)])
         store.applyStarredMutationForTesting([1], starred: true)
         XCTAssertTrue(store.articles[0].isStarred)
+    }
+
+    @MainActor
+    func testUnstarMutationUsesTheExistingStarMutationPath() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1, starred: true)])
+        store.applyStarredMutationForTesting([1], starred: false)
+        XCTAssertFalse(store.articles[0].isStarred)
     }
 
     @MainActor
@@ -435,24 +452,37 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertTrue(candidates.isEmpty)
     }
 
-    func testSwipeArbitrationLocksVerticalInput() {
-        var arbitration = IOSSwipeArbitration()
-        arbitration.update(translation: CGSize(width: 4, height: 20))
-        arbitration.update(translation: CGSize(width: 40, height: 20))
-        XCTAssertEqual(arbitration.axis, .vertical)
-        XCTAssertNil(arbitration.direction)
+    func testSwipeConfigurationSupportsZeroOneAndTwoActions() {
+        let empty = IOSArticleSwipeSideConfiguration(actions: [])
+        let one = IOSArticleSwipeSideConfiguration(actions: [.read])
+        let two = IOSArticleSwipeSideConfiguration(actions: [.unread, .star])
+
+        XCTAssertNil(empty.fullSwipeAction)
+        XCTAssertEqual(one.fullSwipeAction, .read)
+        XCTAssertEqual(two.fullSwipeAction, .star)
+        XCTAssertEqual(two.nativeDeclarationOrder, [.star, .unread])
     }
 
-    func testSwipeArbitrationLocksHorizontalDirection() {
-        var right = IOSSwipeArbitration()
-        right.update(translation: CGSize(width: 20, height: 4))
-        right.update(translation: CGSize(width: -40, height: 4))
-        XCTAssertEqual(right.axis, .horizontal)
-        XCTAssertEqual(right.direction, .right)
+    func testSwipeConfigurationKeepsTheOuterVisualActionAsFullSwipe() {
+        let leading = IOSArticleSwipeSideConfiguration(actions: [.star, .read])
+        let trailing = IOSArticleSwipeSideConfiguration(actions: [.unread, .unstar])
+        let configuration = IOSArticleSwipeConfiguration(leading: leading, trailing: trailing)
 
-        var left = IOSSwipeArbitration()
-        left.update(translation: CGSize(width: -20, height: 4))
-        XCTAssertEqual(left.direction, .left)
+        XCTAssertEqual(configuration.leading.actions, [.star, .read])
+        XCTAssertEqual(configuration.leading.fullSwipeAction, .read)
+        XCTAssertEqual(configuration.trailing.actions, [.unread, .unstar])
+        XCTAssertEqual(configuration.trailing.fullSwipeAction, .unstar)
+    }
+
+    func testSwipeActionsRouteToExistingArticleMutationsAndExposeAccessibilityLabels() {
+        XCTAssertEqual(IOSArticleSwipeAction.read.mutation, .read(true))
+        XCTAssertEqual(IOSArticleSwipeAction.unread.mutation, .read(false))
+        XCTAssertEqual(IOSArticleSwipeAction.star.mutation, .starred(true))
+        XCTAssertEqual(IOSArticleSwipeAction.unstar.mutation, .starred(false))
+        XCTAssertEqual(IOSArticleSwipeAction.read.accessibilityLabel, "Mark as Read")
+        XCTAssertEqual(IOSArticleSwipeAction.unread.accessibilityLabel, "Mark as Unread")
+        XCTAssertEqual(IOSArticleSwipeAction.star.accessibilityLabel, "Star")
+        XCTAssertEqual(IOSArticleSwipeAction.unstar.accessibilityLabel, "Unstar")
     }
 
     func testScrolloverIDsAreDeduplicatedAndUndoRequiresTwo() {

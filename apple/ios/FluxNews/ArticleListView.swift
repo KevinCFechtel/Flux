@@ -194,93 +194,102 @@ private struct IOSScrolloverInteractionModifier: ViewModifier {
     }
 }
 
-enum IOSSwipeDirection: Equatable {
-    case right
-    case left
+enum IOSArticleMutation: Equatable {
+    case read(Bool)
+    case starred(Bool)
 }
 
-struct IOSSwipeArbitration: Equatable {
-    enum Axis { case undecided, vertical, horizontal }
-    private(set) var axis: Axis = .undecided
-    private(set) var direction: IOSSwipeDirection?
+enum IOSArticleSwipeAction: Hashable {
+    case read
+    case unread
+    case star
+    case unstar
 
-    mutating func update(translation: CGSize, threshold: CGFloat = 12) {
-        guard axis == .undecided else { return }
-        guard max(abs(translation.width), abs(translation.height)) >= threshold else { return }
-        if abs(translation.width) > abs(translation.height) {
-            axis = .horizontal
-            direction = translation.width >= 0 ? .right : .left
-        } else {
-            axis = .vertical
+    var mutation: IOSArticleMutation {
+        switch self {
+        case .read: .read(true)
+        case .unread: .read(false)
+        case .star: .starred(true)
+        case .unstar: .starred(false)
         }
     }
 
-    mutating func reset() { axis = .undecided; direction = nil }
+    var accessibilityLabel: String {
+        switch self {
+        case .read: "Mark as Read"
+        case .unread: "Mark as Unread"
+        case .star: "Star"
+        case .unstar: "Unstar"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .read: "envelope.open"
+        case .unread: "envelope"
+        case .star: "star"
+        case .unstar: "star.slash"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .read, .unread: .accentColor
+        case .star, .unstar: .orange
+        }
+    }
 }
 
-@available(iOS 18.0, *)
-private struct IOSHorizontalSwipeGesture: UIGestureRecognizerRepresentable {
-    @Binding var offset: CGFloat
-    let actionWidth: CGFloat
-    let onEnded: (IOSSwipeDirection) -> Void
+struct IOSArticleSwipeSideConfiguration: Equatable {
+    // Visual order is inner-to-outer. The outer action is the Full Swipe action.
+    let actions: [IOSArticleSwipeAction]
 
-    func makeCoordinator(converter: Self.CoordinateSpaceConverter) -> Coordinator { Coordinator(self) }
+    var fullSwipeAction: IOSArticleSwipeAction? { actions.last }
 
-    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
-        let recognizer = UIPanGestureRecognizer()
-        recognizer.minimumNumberOfTouches = 1
-        recognizer.maximumNumberOfTouches = 1
-        recognizer.delegate = context.coordinator
-        return recognizer
+    // SwiftUI assigns Full Swipe to the first declared action, while displaying
+    // its actions from the swipe edge inward. Reverse the visual order here.
+    var nativeDeclarationOrder: [IOSArticleSwipeAction] { actions.reversed() }
+}
+
+struct IOSArticleSwipeConfiguration: Equatable {
+    let leading: IOSArticleSwipeSideConfiguration
+    let trailing: IOSArticleSwipeSideConfiguration
+
+    static func `default`(for article: ArticleSummary) -> Self {
+        Self(
+            leading: IOSArticleSwipeSideConfiguration(actions: [article.isRead ? .unread : .read]),
+            trailing: IOSArticleSwipeSideConfiguration(actions: [article.isStarred ? .unstar : .star])
+        )
     }
+}
 
-    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
-        context.coordinator.parent = self
-        recognizer.delegate = context.coordinator
-    }
+private struct IOSArticleSwipeAccessibilityModifier: ViewModifier {
+    let actions: [IOSArticleSwipeAction]
+    let perform: (IOSArticleSwipeAction) -> Void
 
-    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
-        context.coordinator.handlePan(recognizer)
-    }
-
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var parent: IOSHorizontalSwipeGesture
-        private var startOffset: CGFloat = 0
-        private var direction: IOSSwipeDirection?
-        private var arbitration = IOSSwipeArbitration()
-
-        init(_ parent: IOSHorizontalSwipeGesture) { self.parent = parent }
-
-        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
-            let velocity = pan.velocity(in: pan.view)
-            return abs(velocity.x) > abs(velocity.y)
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        switch actions.count {
+        case 0:
+            content
+        case 1:
+            content.accessibilityAction(named: actions[0].accessibilityLabel) { perform(actions[0]) }
+        case 2:
+            content
+                .accessibilityAction(named: actions[0].accessibilityLabel) { perform(actions[0]) }
+                .accessibilityAction(named: actions[1].accessibilityLabel) { perform(actions[1]) }
+        case 3:
+            content
+                .accessibilityAction(named: actions[0].accessibilityLabel) { perform(actions[0]) }
+                .accessibilityAction(named: actions[1].accessibilityLabel) { perform(actions[1]) }
+                .accessibilityAction(named: actions[2].accessibilityLabel) { perform(actions[2]) }
+        default:
+            content
+                .accessibilityAction(named: actions[0].accessibilityLabel) { perform(actions[0]) }
+                .accessibilityAction(named: actions[1].accessibilityLabel) { perform(actions[1]) }
+                .accessibilityAction(named: actions[2].accessibilityLabel) { perform(actions[2]) }
+                .accessibilityAction(named: actions[3].accessibilityLabel) { perform(actions[3]) }
         }
-
-        func handlePan(_ recognizer: UIPanGestureRecognizer) {
-            let translation = recognizer.translation(in: recognizer.view)
-            switch recognizer.state {
-            case .began:
-                startOffset = parent.offset
-                arbitration.reset()
-            case .changed:
-                arbitration.update(translation: CGSize(width: translation.x, height: translation.y))
-                guard arbitration.axis == .horizontal, let lockedDirection = arbitration.direction else { return }
-                direction = lockedDirection
-                let horizontalTranslation = lockedDirection == .right ? max(0, translation.x) : min(0, translation.x)
-                let proposed = startOffset + horizontalTranslation
-                parent.offset = min(parent.actionWidth, max(-parent.actionWidth, proposed))
-            case .ended, .cancelled, .failed:
-                guard let direction else { reset(); return }
-                let shouldReveal = abs(parent.offset) >= parent.actionWidth * 0.5
-                parent.offset = shouldReveal ? (direction == .right ? parent.actionWidth : -parent.actionWidth) : 0
-                if shouldReveal { parent.onEnded(direction) }
-                reset()
-            default: break
-            }
-        }
-
-        private func reset() { startOffset = 0; direction = nil; arbitration.reset() }
     }
 }
 
@@ -436,9 +445,6 @@ struct ArticlePresentationView: View, Equatable {
     let onAction: (IOSArticleContextAction) -> Void
     let onSetRead: (ArticleSummary, Bool) -> Void
     let onSetStarred: (ArticleSummary, Bool) -> Void
-    @State private var horizontalOffset: CGFloat = 0
-
-    private let actionWidth: CGFloat = 76
 
     // The list observes its snapshot, but Undo-only publications must not redraw
     // rows whose article and presentation inputs have not changed.
@@ -452,56 +458,28 @@ struct ArticlePresentationView: View, Equatable {
     }
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            HStack(spacing: 0) {
-                Button { onSetRead(article, !article.isRead); closeActions() } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: article.isRead ? "envelope" : "envelope.open")
-                        Text(article.isRead ? "Unread" : "Read")
-                    }
-                }
-                .frame(width: actionWidth)
-                .foregroundStyle(.white)
-                .frame(maxHeight: .infinity)
-                .background(Color.accentColor)
-                Spacer(minLength: 0)
-                Button { onSetStarred(article, !article.isStarred); closeActions() } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: article.isStarred ? "star.slash" : "star")
-                        Text(article.isStarred ? "Unstar" : "Star")
-                    }
-                }
-                .frame(width: actionWidth)
-                .foregroundStyle(.white)
-                .frame(maxHeight: .infinity)
-                .background(Color.orange)
+        Group {
+            switch mode {
+            case .visual: visual
+            case .compact: compact
             }
-            Group {
-                switch mode {
-                case .visual: visual
-                case .compact: compact
-                }
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 16))
-            .onTapGesture(perform: onTap)
-            .frame(width: articleWidth, alignment: .leading)
-            .background(.background)
-            .offset(x: horizontalOffset)
-            .gesture(
-                IOSHorizontalSwipeGesture(offset: $horizontalOffset, actionWidth: actionWidth) { direction in
-                    switch direction {
-                    case .right: onSetRead(article, !article.isRead)
-                    case .left: onSetStarred(article, !article.isStarred)
-                    }
-                }
-            )
         }
+        .contentShape(RoundedRectangle(cornerRadius: 16))
+        .onTapGesture(perform: onTap)
         .frame(width: articleWidth, alignment: .leading)
+        .background(.background)
+        .swipeActions(edge: .leading, allowsFullSwipe: swipeConfiguration.leading.fullSwipeAction != nil) {
+            ForEach(swipeConfiguration.leading.nativeDeclarationOrder, id: \.self, content: swipeActionButton)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: swipeConfiguration.trailing.fullSwipeAction != nil) {
+            ForEach(swipeConfiguration.trailing.nativeDeclarationOrder, id: \.self, content: swipeActionButton)
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityValue(accessibilityValue)
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Opens the article")
+        .modifier(IOSArticleSwipeAccessibilityModifier(actions: swipeConfiguration.leading.actions + swipeConfiguration.trailing.actions, perform: performSwipeAction))
         .contextMenu {
             Button { onAction(.starred) } label: {
                 Label(article.isStarred ? "Unstar" : "Star", systemImage: article.isStarred ? "star.slash" : "star")
@@ -523,8 +501,22 @@ struct ArticlePresentationView: View, Equatable {
         }
     }
 
-    private func closeActions() {
-        horizontalOffset = 0
+    private var swipeConfiguration: IOSArticleSwipeConfiguration {
+        .default(for: article)
+    }
+
+    private func swipeActionButton(_ action: IOSArticleSwipeAction) -> some View {
+        Button { performSwipeAction(action) } label: {
+            Label(action.accessibilityLabel, systemImage: action.systemImage)
+        }
+        .tint(action.tint)
+    }
+
+    private func performSwipeAction(_ action: IOSArticleSwipeAction) {
+        switch action.mutation {
+        case let .read(value): onSetRead(article, value)
+        case let .starred(value): onSetStarred(article, value)
+        }
     }
 
     @ViewBuilder
