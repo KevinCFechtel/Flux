@@ -12,6 +12,11 @@ private struct IOSReaderArticle: Identifiable {
     var id: Int64 { article.id }
 }
 
+private struct IOSSharePayload: Identifiable {
+    let items: [Any]
+    let id = UUID()
+}
+
 enum NewsNavigationLayout {
     static func usesSplitView(for idiom: UIUserInterfaceIdiom) -> Bool {
         idiom == .pad
@@ -34,6 +39,9 @@ struct ContentView: View {
     @State private var readerIsLoading = false
     @State private var readerErrorMessage: String?
     @State private var readerGeneration = 0
+    @State private var sharePayload: IOSSharePayload?
+    @State private var actionConfirmation: String?
+    @State private var actionError: String?
 
     private var usesSplitNavigation: Bool {
         NewsNavigationLayout.usesSplitView(for: UIDevice.current.userInterfaceIdiom)
@@ -53,9 +61,16 @@ struct ContentView: View {
         .inspector(isPresented: readerInspectorBinding) {
             if let article = readerArticle?.article { readerView(for: article) }
         }
+        .sheet(item: $sharePayload) { payload in IOSShareSheet(items: payload.items) }
         .alert("Unable to Open Article", isPresented: Binding(get: { articleOpenError != nil }, set: { if !$0 { articleOpenError = nil } })) {
             Button("OK", role: .cancel) { articleOpenError = nil }
         } message: { Text(articleOpenError ?? "") }
+        .alert("Article Action", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
+            Button("OK", role: .cancel) { actionError = nil }
+        } message: { Text(actionError ?? "") }
+        .alert("Article Action", isPresented: Binding(get: { actionConfirmation != nil }, set: { if !$0 { actionConfirmation = nil } })) {
+            Button("OK", role: .cancel) { actionConfirmation = nil }
+        } message: { Text(actionConfirmation ?? "") }
     }
 
     @ViewBuilder
@@ -103,7 +118,7 @@ struct ContentView: View {
     }
 
     private var articleList: some View {
-        ArticleListView(store: newsreaderStore, onArticleTap: openArticle)
+        ArticleListView(store: newsreaderStore, onArticleTap: openArticle, onArticleAction: handleArticleAction)
             .navigationTitle(scopeTitle)
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
@@ -136,8 +151,12 @@ struct ContentView: View {
             openReader(article)
             return
         case .original, .miniflux:
-            break
+            openOriginalArticle(article)
+            return
         }
+    }
+
+    private func openOriginalArticle(_ article: ArticleSummary) {
         articleOpenGeneration += 1
         let generation = articleOpenGeneration
         newsreaderStore.open(article) { original in
@@ -149,6 +168,49 @@ struct ContentView: View {
                 Task { @MainActor in
                     guard generation == articleOpenGeneration else { return }
                     present(ArticleOpenRoutingPolicy.destination(originalURL: original, universalLinkSucceeded: succeeded))
+                }
+            }
+        }
+    }
+
+    private func handleArticleAction(_ article: ArticleSummary, _ action: IOSArticleContextAction) {
+        switch action {
+        case .starred:
+            newsreaderStore.setStarred(article, starred: !article.isStarred)
+        case .read:
+            newsreaderStore.setRead(article, read: !article.isRead)
+        case .original:
+            openOriginalArticle(article)
+        case .miniflux:
+            newsreaderStore.minifluxEntryURL(for: article) { result in
+                switch result {
+                case let .success(value):
+                    guard let url = ArticleOpenRoutingPolicy.validWebURL(value) else {
+                        actionError = "Flux could not resolve a valid Miniflux entry URL."
+                        return
+                    }
+                    UIApplication.shared.open(url, options: [:])
+                case let .failure(error): actionError = error.localizedDescription
+                }
+            }
+        case .comments:
+            guard let url = IOSArticleContextMenuPolicy.commentsURL(article.commentsUrl) else { return }
+            UIApplication.shared.open(url, options: [:])
+        case .copyLink:
+            UIPasteboard.general.string = article.url
+            actionConfirmation = "Link copied"
+        case .share:
+            guard let url = IOSArticleContextMenuPolicy.originalURL(article.url) else {
+                actionError = "The article does not have a valid web URL."
+                return
+            }
+            sharePayload = IOSSharePayload(items: [article.title, url])
+        case .saveToService:
+            newsreaderStore.saveToService(article) { result in
+                switch result {
+                case .success(.saved): actionConfirmation = "Saved to third-party service"
+                case .success(.noIntegrationConfigured): actionConfirmation = "No third-party integration is configured in Miniflux"
+                case let .failure(error): actionError = error.localizedDescription
                 }
             }
         }
@@ -245,6 +307,21 @@ private struct IOSInAppBrowser: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> SFSafariViewController { SFSafariViewController(url: url) }
     func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
+}
+
+private struct IOSShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        if let popover = controller.popoverPresentationController {
+            popover.sourceView = controller.view
+            popover.sourceRect = CGRect(x: controller.view.bounds.midX, y: controller.view.bounds.midY, width: 1, height: 1)
+        }
+        return controller
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
 private struct NewsreaderOptionsView: View {

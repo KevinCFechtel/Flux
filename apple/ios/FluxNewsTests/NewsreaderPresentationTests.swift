@@ -123,6 +123,31 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleOpenRouting.action(clickOnNews: .openDetailView, openInMiniflux: true), .detail)
     }
 
+    func testArticleContextMenuExposesDistinctNativeActions() {
+        let actions: [IOSArticleContextAction] = [
+            .starred, .read, .original, .miniflux, .comments, .copyLink, .share, .saveToService
+        ]
+
+        XCTAssertEqual(Set(actions).count, 8)
+        XCTAssertEqual(actions[2], .original)
+        XCTAssertEqual(actions[3], .miniflux)
+        XCTAssertEqual(actions[7], .saveToService)
+    }
+
+    func testArticleContextMenuOnlyAcceptsHTTPAndHTTPSURLs() {
+        XCTAssertEqual(
+            IOSArticleContextMenuPolicy.commentsURL("https://example.com/comments")?.absoluteString,
+            "https://example.com/comments"
+        )
+        XCTAssertEqual(
+            IOSArticleContextMenuPolicy.originalURL("http://example.com/article")?.absoluteString,
+            "http://example.com/article"
+        )
+        XCTAssertNil(IOSArticleContextMenuPolicy.commentsURL("mailto:comments@example.com"))
+        XCTAssertNil(IOSArticleContextMenuPolicy.originalURL("not a URL"))
+        XCTAssertNil(IOSArticleContextMenuPolicy.commentsURL("https:///missing-host"))
+    }
+
     func testConfiguredDetailModeSelectsReaderBeforeNormalOpenRouting() {
         XCTAssertEqual(ArticleOpenRouting.action(clickOnNews: .openDetailView, openInMiniflux: false), .detail)
         XCTAssertEqual(ArticleOpenRouting.action(clickOnNews: .openLink, openInMiniflux: false), .original)

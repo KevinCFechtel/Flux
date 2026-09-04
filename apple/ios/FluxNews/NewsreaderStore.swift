@@ -203,6 +203,26 @@ final class NewsreaderStore: ObservableObject {
         }
     }
 
+    func minifluxEntryURL(for article: ArticleSummary, completion: @escaping (Result<String, Error>) -> Void) {
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            return
+        }
+        completion(.success(core.minifluxEntryUrl(articleId: article.id)))
+    }
+
+    func saveToService(_ article: ArticleSummary, completion: @escaping (Result<SaveToServiceResult, Error>) -> Void) {
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            return
+        }
+        Task { [weak self, core] in
+            let result = await Task.detached { Result { try core.saveToService(articleId: article.id) } }.value
+            guard self != nil else { return }
+            completion(result)
+        }
+    }
+
     func setRead(articleIDs: [Int64], read: Bool) {
         guard let core, !articleIDs.isEmpty else { return }
         Task { [weak self, core] in

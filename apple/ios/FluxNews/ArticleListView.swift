@@ -284,9 +284,31 @@ private struct IOSHorizontalSwipeGesture: UIGestureRecognizerRepresentable {
     }
 }
 
+enum IOSArticleContextAction: Equatable {
+    case starred
+    case read
+    case original
+    case miniflux
+    case comments
+    case copyLink
+    case share
+    case saveToService
+}
+
+enum IOSArticleContextMenuPolicy {
+    static func commentsURL(_ value: String) -> URL? {
+        ArticleOpenRoutingPolicy.validWebURL(value)
+    }
+
+    static func originalURL(_ value: String) -> URL? {
+        ArticleOpenRoutingPolicy.validWebURL(value)
+    }
+}
+
 struct ArticleListView: View {
     @ObservedObject var store: NewsreaderStore
     let onArticleTap: (ArticleSummary) -> Void
+    let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
     @State private var scrolloverAdapter = IOSScrolloverRuntimeAdapter()
     @State private var unreadArticleIDs = Set<Int64>()
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
@@ -310,7 +332,7 @@ struct ArticleListView: View {
                          ScrollView {
                             LazyVStack(spacing: articleSpacing) {
                                 ForEach(store.articles, id: \.id) { article in
-                                     ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, store: store, onTap: { onArticleTap(article) })
+                                      ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, store: store, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) })
                                         .background { GeometryReader { row in Color.clear.preference(key: ArticleFrameKey.self, value: [article.id: row.frame(in: .named("ArticleScrollSpace"))]) } }
                                 }
                              }
@@ -392,6 +414,7 @@ private struct ArticlePresentationView: View {
     let availableWidth: CGFloat
     @ObservedObject var store: NewsreaderStore
     let onTap: () -> Void
+    let onAction: (IOSArticleContextAction) -> Void
     @State private var horizontalOffset: CGFloat = 0
 
     private let actionWidth: CGFloat = 76
@@ -444,6 +467,24 @@ private struct ArticlePresentationView: View {
         .frame(width: articleWidth, alignment: .leading)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint("Opens the article")
+        .contextMenu {
+            Button { onAction(.starred) } label: {
+                Label(article.isStarred ? "Unstar" : "Star", systemImage: article.isStarred ? "star.slash" : "star")
+            }
+            Button { onAction(.read) } label: {
+                Label(article.isRead ? "Mark as Unread" : "Mark as Read", systemImage: article.isRead ? "envelope" : "envelope.open")
+            }
+            Divider()
+            Button { onAction(.original) } label: { Label("Open Original", systemImage: "safari") }
+            Button { onAction(.miniflux) } label: { Label("Open in Miniflux", systemImage: "arrow.up.forward.app") }
+            if IOSArticleContextMenuPolicy.commentsURL(article.commentsUrl) != nil {
+                Button { onAction(.comments) } label: { Label("Open Comments", systemImage: "bubble.left") }
+            }
+            Button { onAction(.copyLink) } label: { Label("Copy Link", systemImage: "doc.on.doc") }
+            Button { onAction(.share) } label: { Label("Share", systemImage: "square.and.arrow.up") }
+            Divider()
+            Button { onAction(.saveToService) } label: { Label("Save to Third-Party Service", systemImage: "tray.and.arrow.down") }
+        }
     }
 
     private func closeActions() {
