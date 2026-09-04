@@ -52,6 +52,17 @@ struct AccountConfigurationView: View {
             if let message = bootstrapper.validationMessage {
                 Section { Text(message).foregroundStyle(.red) }
             }
+            if let diagnostic = bootstrapper.validationDiagnostic {
+                Section("Developer Diagnostics") {
+                    DisclosureGroup("Connection Diagnostics") {
+                        LabeledContent("Category", value: diagnostic.category)
+                        Text(diagnostic.detail)
+                            .font(.footnote.monospaced())
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
             Section {
                 Button {
                     Task { await bootstrapper.configure(server: server, apiKey: apiKey, headers: headers) }

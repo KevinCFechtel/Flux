@@ -66,6 +66,17 @@ pub struct AccountValidationResult {
     pub version: String,
 }
 #[derive(uniffi::Record)]
+pub struct AccountValidationDiagnostic {
+    pub category: String,
+    pub detail: String,
+}
+#[derive(uniffi::Record)]
+pub struct AccountValidationAttempt {
+    pub result: Option<AccountValidationResult>,
+    pub error: Option<AccountValidationError>,
+    pub diagnostic: Option<AccountValidationDiagnostic>,
+}
+#[derive(uniffi::Record)]
 pub struct ArticleCursor {
     pub published_at: String,
     pub article_id: i64,
@@ -771,6 +782,28 @@ pub fn validate_miniflux_account(
     )
     .map(Into::into)
     .map_err(map_account_validation_error)
+}
+#[uniffi::export]
+pub fn validate_miniflux_account_with_diagnostic(
+    server_url: String,
+    api_key: String,
+    custom_headers: Vec<HttpHeader>,
+) -> AccountValidationAttempt {
+    let attempt = FluxCore::validate_miniflux_account_with_diagnostic(
+        &server_url,
+        &api_key,
+        custom_headers.into_iter().map(Into::into).collect(),
+    );
+    AccountValidationAttempt {
+        result: attempt.result.map(Into::into),
+        error: attempt.error.map(map_account_validation_error),
+        diagnostic: attempt
+            .diagnostic
+            .map(|diagnostic| AccountValidationDiagnostic {
+                category: diagnostic.category,
+                detail: diagnostic.detail,
+            }),
+    }
 }
 #[uniffi::export]
 pub fn export_config_backup(

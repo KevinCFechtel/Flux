@@ -118,7 +118,11 @@ final class AccountLifecycleTests: XCTestCase {
             factoryInputs.append(account)
             return factoryInputs.count == 1 ? oldCore : newCore
         }, accountValidator: { account in
-            AccountValidationResult(installationBase: "https://new.example", version: "2.0")
+            AccountValidationAttempt(
+                result: AccountValidationResult(installationBase: "https://new.example", version: "2.0"),
+                error: nil,
+                diagnostic: nil
+            )
         })
         bootstrapper.onCoreChanged = { changes.append($0) }
         await bootstrapper.start()
@@ -138,5 +142,44 @@ final class AccountLifecycleTests: XCTestCase {
 
         XCTAssertFalse(message.contains("super-secret-key"))
         XCTAssertFalse(message.contains("secret-header"))
+    }
+
+    @MainActor
+    func testValidationDiagnosticIsTransientAndDoesNotReplaceFriendlyMessage() async throws {
+        let store = IOSMemoryCredentialStore()
+        let core = try makeCore(for: IOSMinifluxCredentials(server: "https://example.com", apiKey: "key", customHeaders: []))
+        var shouldFail = true
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core },
+            accountValidator: { _ in
+                if shouldFail {
+                    return AccountValidationAttempt(
+                        result: nil,
+                        error: .Network,
+                        diagnostic: AccountValidationDiagnostic(category: "TLS/certificate", detail: "certificate verify failed")
+                    )
+                }
+                return AccountValidationAttempt(
+                    result: AccountValidationResult(installationBase: "https://example.com", version: "2.0"),
+                    error: nil,
+                    diagnostic: nil
+                )
+            }
+        )
+
+        await bootstrapper.configure(server: "https://example.com", apiKey: "api-secret", headers: [IOSCustomHTTPHeader(name: "X-Test", value: "header-secret")])
+
+        XCTAssertEqual(bootstrapper.validationMessage, "The Miniflux server could not be reached. Check the server URL and network connection.")
+        XCTAssertEqual(bootstrapper.validationDiagnostic?.category, "TLS/certificate")
+        XCTAssertEqual(bootstrapper.validationDiagnostic?.detail, "certificate verify failed")
+        XCTAssertFalse(bootstrapper.validationDiagnostic?.detail.contains("api-secret") == true)
+        XCTAssertFalse(bootstrapper.validationDiagnostic?.detail.contains("header-secret") == true)
+
+        shouldFail = false
+        await bootstrapper.configure(server: "https://example.com", apiKey: "api-secret", headers: [])
+
+        XCTAssertNil(bootstrapper.validationDiagnostic)
+        XCTAssertNil(bootstrapper.validationMessage)
     }
 }

@@ -23,6 +23,7 @@ final class CoreBootstrapper: ObservableObject {
     @Published private(set) var state: State = .starting
     @Published private(set) var credentials: IOSMinifluxCredentials?
     @Published private(set) var validationMessage: String?
+    @Published private(set) var validationDiagnostic: AccountValidationDiagnostic?
     @Published private(set) var isConfiguring = false
     @Published private(set) var core: Flux?
     @Published private(set) var coreRevision: UInt64 = 0
@@ -30,13 +31,13 @@ final class CoreBootstrapper: ObservableObject {
     var onCoreChanged: ((Flux?) -> Void)?
 
     private let coreFactory: (IOSMinifluxCredentials) throws -> Flux
-    private let accountValidator: (IOSMinifluxCredentials) throws -> AccountValidationResult
+    private let accountValidator: (IOSMinifluxCredentials) throws -> AccountValidationAttempt
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "core")
 
     init(
         credentialStore: IOSCredentialStoreProtocol = IOSKeychainCredentialStore(),
         coreFactory: @escaping (IOSMinifluxCredentials) throws -> Flux = CoreBootstrapper.makeCore,
-        accountValidator: @escaping (IOSMinifluxCredentials) throws -> AccountValidationResult = CoreBootstrapper.validateAccount
+        accountValidator: @escaping (IOSMinifluxCredentials) throws -> AccountValidationAttempt = CoreBootstrapper.validateAccount
     ) {
         self.credentialStore = credentialStore
         self.coreFactory = coreFactory
@@ -68,6 +69,7 @@ final class CoreBootstrapper: ObservableObject {
         isConfiguring = true
         defer { isConfiguring = false }
         validationMessage = nil
+        validationDiagnostic = nil
         let proposed = IOSMinifluxCredentials(server: server.trimmingCharacters(in: .whitespacesAndNewlines), apiKey: apiKey, customHeaders: headers)
         guard !proposed.server.isEmpty, !proposed.apiKey.isEmpty else {
             validationMessage = "Enter both a Miniflux server URL and API key."
@@ -79,7 +81,17 @@ final class CoreBootstrapper: ObservableObject {
         }.value
         switch validation {
         case let .failure(error): validationMessage = IOSAccountValidationPresentation.message(for: IOSAccountValidationPresentation.failure(for: error))
-        case let .success(result):
+        case let .success(attempt):
+            validationDiagnostic = attempt.diagnostic
+            if let error = attempt.error {
+                validationMessage = IOSAccountValidationPresentation.message(for: IOSAccountValidationPresentation.failure(for: error))
+                return
+            }
+            guard let result = attempt.result else {
+                validationMessage = "The Miniflux server returned an unexpected response."
+                validationDiagnostic = nil
+                return
+            }
             let normalized = IOSMinifluxCredentials(server: result.installationBase, apiKey: proposed.apiKey, customHeaders: proposed.customHeaders)
             do {
                 let previous = credentials
@@ -143,8 +155,8 @@ final class CoreBootstrapper: ObservableObject {
         ))
     }
 
-    private nonisolated static func validateAccount(_ account: IOSMinifluxCredentials) throws -> AccountValidationResult {
-        try validateMinifluxAccount(
+    private nonisolated static func validateAccount(_ account: IOSMinifluxCredentials) throws -> AccountValidationAttempt {
+        try validateMinifluxAccountWithDiagnostic(
             serverUrl: account.server,
             apiKey: account.apiKey,
             customHeaders: account.customHeaders.map { HttpHeader(name: $0.name, value: $0.value) }

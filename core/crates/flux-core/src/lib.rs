@@ -38,8 +38,9 @@ use domain::{
     SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason, WidgetData,
 };
 use miniflux::{
-    AccountValidationError, AccountValidationResult, HttpHeader, MinifluxClient, RemoteSource,
-    miniflux_entry_url, normalize_installation_base, validate_custom_headers,
+    AccountValidationAttempt, AccountValidationError, AccountValidationResult, HttpHeader,
+    MinifluxClient, RemoteSource, miniflux_entry_url, normalize_installation_base,
+    validate_custom_headers,
 };
 use storage::Store;
 
@@ -103,6 +104,14 @@ impl FluxCore {
         custom_headers: Vec<HttpHeader>,
     ) -> Result<AccountValidationResult, AccountValidationError> {
         MinifluxClient::validate_account(server_url, api_key, custom_headers)
+    }
+
+    pub fn validate_miniflux_account_with_diagnostic(
+        server_url: &str,
+        api_key: &str,
+        custom_headers: Vec<HttpHeader>,
+    ) -> AccountValidationAttempt {
+        MinifluxClient::validate_account_with_diagnostic(server_url, api_key, custom_headers)
     }
 
     pub fn initialize(config: CoreConfig) -> Result<Self, CoreError> {

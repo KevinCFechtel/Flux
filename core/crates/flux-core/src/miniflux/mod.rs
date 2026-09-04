@@ -117,6 +117,19 @@ pub enum AccountValidationError {
     InvalidCustomHeader,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountValidationDiagnostic {
+    pub category: String,
+    pub detail: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountValidationAttempt {
+    pub result: Option<AccountValidationResult>,
+    pub error: Option<AccountValidationError>,
+    pub diagnostic: Option<AccountValidationDiagnostic>,
+}
+
 impl std::fmt::Display for AccountValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
@@ -776,31 +789,97 @@ impl MinifluxClient {
         api_key: &str,
         custom_headers: Vec<HttpHeader>,
     ) -> Result<AccountValidationResult, AccountValidationError> {
-        if api_key.is_empty() {
-            return Err(AccountValidationError::Unauthorized);
+        let attempt = Self::validate_account_with_diagnostic(server_url, api_key, custom_headers);
+        match (attempt.result, attempt.error) {
+            (Some(result), _) => Ok(result),
+            (_, Some(error)) => Err(error),
+            (None, None) => Err(AccountValidationError::InvalidResponse),
         }
-        validate_custom_headers(&custom_headers)?;
-        let installation_base = normalize_installation_base(server_url)?;
-        let client = Self::new_with_headers(&installation_base, api_key, custom_headers)
-            .map_err(|_| AccountValidationError::InvalidUrl)?;
-        let _request = client
-            .request_lock
-            .lock()
-            .map_err(|_| AccountValidationError::Network)?;
+    }
+
+    pub fn validate_account_with_diagnostic(
+        server_url: &str,
+        api_key: &str,
+        custom_headers: Vec<HttpHeader>,
+    ) -> AccountValidationAttempt {
+        match Self::validate_account_inner(server_url, api_key, custom_headers) {
+            Ok(result) => AccountValidationAttempt {
+                result: Some(result),
+                error: None,
+                diagnostic: None,
+            },
+            Err(failure) => AccountValidationAttempt {
+                result: None,
+                error: Some(failure.error),
+                diagnostic: failure.diagnostic,
+            },
+        }
+    }
+
+    fn validate_account_inner(
+        server_url: &str,
+        api_key: &str,
+        custom_headers: Vec<HttpHeader>,
+    ) -> Result<AccountValidationResult, AccountValidationFailure> {
+        if api_key.is_empty() {
+            return Err(AccountValidationFailure::without_diagnostic(
+                AccountValidationError::Unauthorized,
+            ));
+        }
+        validate_custom_headers(&custom_headers)
+            .map_err(AccountValidationFailure::without_diagnostic)?;
+        let installation_base = normalize_installation_base(server_url)
+            .map_err(AccountValidationFailure::without_diagnostic)?;
+        let secret_values = custom_headers
+            .iter()
+            .map(|header| header.value.clone())
+            .chain(std::iter::once(api_key.to_owned()))
+            .collect::<Vec<_>>();
+        let client =
+            Self::new_with_headers(&installation_base, api_key, custom_headers).map_err(|_| {
+                AccountValidationFailure::without_diagnostic(AccountValidationError::InvalidUrl)
+            })?;
+        let _request = client.request_lock.lock().map_err(|_| {
+            AccountValidationFailure::without_diagnostic(AccountValidationError::Network)
+        })?;
         let response = client
             .authenticated_request(client.agent.get(&client.api_url("/v1/version")))
             .set("Accept", "application/json")
             .call()
-            .map_err(map_account_validation_error)?;
-        let response: VersionDto = serde_json::from_reader(response.into_reader())
-            .map_err(|_| AccountValidationError::InvalidResponse)?;
+            .map_err(|error| AccountValidationFailure {
+                error: map_account_validation_error(&error),
+                diagnostic: account_validation_diagnostic(&error, &secret_values),
+            })?;
+        let response: VersionDto =
+            serde_json::from_reader(response.into_reader()).map_err(|_| {
+                AccountValidationFailure::without_diagnostic(
+                    AccountValidationError::InvalidResponse,
+                )
+            })?;
         if response.version.trim().is_empty() {
-            return Err(AccountValidationError::InvalidResponse);
+            return Err(AccountValidationFailure::without_diagnostic(
+                AccountValidationError::InvalidResponse,
+            ));
         }
         Ok(AccountValidationResult {
             installation_base: client.installation_base,
             version: response.version,
         })
+    }
+}
+
+#[derive(Debug)]
+struct AccountValidationFailure {
+    error: AccountValidationError,
+    diagnostic: Option<AccountValidationDiagnostic>,
+}
+
+impl AccountValidationFailure {
+    fn without_diagnostic(error: AccountValidationError) -> Self {
+        Self {
+            error,
+            diagnostic: None,
+        }
     }
 }
 
@@ -1014,18 +1093,93 @@ fn map_http_error(error: ureq::Error) -> CoreError {
         other => CoreError::connectivity(format!("Miniflux request failed: {other}")),
     }
 }
-fn map_account_validation_error(error: ureq::Error) -> AccountValidationError {
+fn map_account_validation_error(error: &ureq::Error) -> AccountValidationError {
     match error {
         ureq::Error::Status(401, _) | ureq::Error::Status(403, _) => {
             AccountValidationError::Unauthorized
         }
         ureq::Error::Status(404, _) => AccountValidationError::IncompatibleServer,
-        ureq::Error::Status(status, _) if status == 429 || status >= 500 => {
+        ureq::Error::Status(status, _) if *status == 429 || *status >= 500 => {
             AccountValidationError::ServerUnavailable
         }
         ureq::Error::Status(_, _) => AccountValidationError::IncompatibleServer,
         ureq::Error::Transport(_) => AccountValidationError::Network,
     }
+}
+
+fn account_validation_diagnostic(
+    error: &ureq::Error,
+    secret_values: &[String],
+) -> Option<AccountValidationDiagnostic> {
+    match error {
+        ureq::Error::Transport(transport) => {
+            let message = transport.message().unwrap_or_default();
+            let source = std::error::Error::source(transport)
+                .map(ToString::to_string)
+                .unwrap_or_default();
+            let detail = sanitize_transport_detail(
+                &format!(
+                    "ureq kind: {}; {}{}",
+                    transport.kind(),
+                    message,
+                    if source.is_empty() {
+                        String::new()
+                    } else {
+                        format!("; source: {source}")
+                    }
+                ),
+                secret_values,
+            );
+            let lower = detail.to_ascii_lowercase();
+            let category = if lower.contains("tls")
+                || lower.contains("certificate")
+                || lower.contains("cert ")
+            {
+                "TLS/certificate"
+            } else if matches!(transport.kind(), ureq::ErrorKind::Dns) {
+                "DNS resolution"
+            } else if lower.contains("timeout") || lower.contains("timed out") {
+                "Timeout"
+            } else if matches!(transport.kind(), ureq::ErrorKind::ConnectionFailed) {
+                "Connection failed"
+            } else {
+                "Transport"
+            };
+            Some(AccountValidationDiagnostic {
+                category: category.to_string(),
+                detail: if detail.is_empty() {
+                    transport.kind().to_string()
+                } else {
+                    detail
+                },
+            })
+        }
+        ureq::Error::Status(status, _) if *status == 429 || *status >= 500 => {
+            Some(AccountValidationDiagnostic {
+                category: "HTTP server unavailable".to_string(),
+                detail: format!("HTTP status {status}"),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn sanitize_transport_detail(value: &str, secrets: &[String]) -> String {
+    let mut sanitized = value.to_string();
+    for secret in secrets.iter().filter(|secret| !secret.is_empty()) {
+        sanitized = sanitized.replace(secret, "[REDACTED]");
+    }
+    sanitized
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .take(512)
+        .collect()
 }
 fn map_image_http_error(error: ureq::Error) -> CoreError {
     match error {
@@ -1539,6 +1693,46 @@ mod tests {
                 .unwrap_err(),
             AccountValidationError::Network
         );
+    }
+
+    #[test]
+    fn validation_diagnostic_preserves_network_category_and_redacts_secrets() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let api_key = "validation-api-key";
+        let header_value = "validation-header-value";
+        let attempt = MinifluxClient::validate_account_with_diagnostic(
+            &format!("http://{address}"),
+            api_key,
+            vec![HttpHeader {
+                name: "X-Diagnostic".into(),
+                value: header_value.into(),
+            }],
+        );
+
+        assert_eq!(attempt.result, None);
+        assert_eq!(attempt.error, Some(AccountValidationError::Network));
+        let diagnostic = attempt.diagnostic.expect("transport diagnostic");
+        assert!(!diagnostic.category.is_empty());
+        assert!(!diagnostic.detail.is_empty());
+        assert!(!diagnostic.detail.contains(api_key));
+        assert!(!diagnostic.detail.contains(header_value));
+    }
+
+    #[test]
+    fn successful_validation_has_no_diagnostic() {
+        let (address, worker) = version_server(200, r#"{"version":"2.0.50"}"#);
+        let attempt = MinifluxClient::validate_account_with_diagnostic(
+            &format!("http://{address}"),
+            "test-key",
+            vec![],
+        );
+
+        assert!(attempt.error.is_none());
+        assert!(attempt.diagnostic.is_none());
+        assert_eq!(attempt.result.unwrap().version, "2.0.50");
+        worker.join().unwrap();
     }
 
     #[test]
