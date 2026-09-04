@@ -85,37 +85,39 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(groups[0].feeds.map(\.id), [11])
     }
 
-    func testArticleRoutingFallsBackToOriginalURLWithoutExternalCandidate() {
-        XCTAssertEqual(
-            ArticleOpenRoutingPolicy.destination(originalURL: "https://example.com/article", externalCandidate: nil, canOpenExternal: false),
-            .browser(URL(string: "https://example.com/article")!)
-        )
-    }
-
-    func testArticleRoutingPrefersAvailableExternalCandidate() {
-        let candidate = URL(string: "https://miniflux.example.com/entry/42")!
-        XCTAssertEqual(
-            ArticleOpenRoutingPolicy.destination(originalURL: "https://example.com/article", externalCandidate: candidate, canOpenExternal: true),
-            .external(candidate)
-        )
-    }
-
-    func testArticleRoutingFallsBackWhenExternalAppIsUnavailableOrOpenFails() {
+    func testArticleRoutingUsesValidOriginalURLForUniversalLinkHandoff() {
         let original = URL(string: "https://example.com/article")!
-        let candidate = URL(string: "https://miniflux.example.com/entry/42")!
-        XCTAssertEqual(ArticleOpenRoutingPolicy.destination(originalURL: original.absoluteString, externalCandidate: candidate, canOpenExternal: false), .browser(original))
-        XCTAssertEqual(ArticleOpenRoutingPolicy.destination(originalURL: original.absoluteString, externalCandidate: candidate, canOpenExternal: true, externalOpenSucceeded: false), .browser(original))
+        XCTAssertEqual(
+            ArticleOpenRoutingPolicy.destination(originalURL: original.absoluteString, universalLinkSucceeded: true),
+            .universalLink(original)
+        )
     }
 
-    func testArticleRoutingUsesConfiguredFeedPreferenceAndValidatesURLs() {
-        let candidate = ArticleOpenRoutingPolicy.externalCandidate(openInMiniflux: true, minifluxURL: "https://miniflux.example.com/entry/42")
-        XCTAssertEqual(candidate, URL(string: "https://miniflux.example.com/entry/42"))
-        XCTAssertNil(ArticleOpenRoutingPolicy.externalCandidate(openInMiniflux: false, minifluxURL: "https://miniflux.example.com/entry/42"))
-        XCTAssertNil(ArticleOpenRoutingPolicy.externalCandidate(openInMiniflux: true, minifluxURL: "not a URL"))
-        XCTAssertEqual(ArticleOpenRoutingPolicy.destination(originalURL: "not a URL", externalCandidate: candidate, canOpenExternal: true), .invalid)
+    func testArticleRoutingFallsBackWhenUniversalLinkIsNotHandled() {
+        let original = URL(string: "https://example.com/article")!
+        XCTAssertEqual(
+            ArticleOpenRoutingPolicy.destination(originalURL: original.absoluteString, universalLinkSucceeded: false),
+            .browser(original)
+        )
     }
 
-    func testSharedArticleRoutingSemanticsRemainTheSameForNativeClients() {
+    func testArticleRoutingAlwaysUsesOriginalURLForBrowserFallback() {
+        let original = URL(string: "https://example.com/article")!
+        XCTAssertEqual(ArticleOpenRoutingPolicy.destination(originalURL: original.absoluteString, universalLinkSucceeded: false), .browser(original))
+    }
+
+    func testArticleRoutingRejectsInvalidOriginalURL() {
+        XCTAssertEqual(ArticleOpenRoutingPolicy.destination(originalURL: "not a URL", universalLinkSucceeded: true), .invalid)
+    }
+
+    func testUniversalLinkRoutingDoesNotUseMinifluxEntryURLOrCanOpenURL() {
+        let original = URL(string: "https://publisher.example/article")!
+        let miniflux = URL(string: "https://miniflux.example/entry/42")!
+        XCTAssertEqual(ArticleOpenRoutingPolicy.destination(originalURL: original.absoluteString, universalLinkSucceeded: false), .browser(original))
+        XCTAssertNotEqual(ArticleOpenRoutingPolicy.destination(originalURL: miniflux.absoluteString, universalLinkSucceeded: true), .universalLink(original))
+    }
+
+    func testOpenInMinifluxRemainsSeparateFromUniversalLinkRouting() {
         XCTAssertEqual(ArticleOpenRouting.action(clickOnNews: .openLink, openInMiniflux: true), .miniflux)
         XCTAssertEqual(ArticleOpenRouting.action(clickOnNews: .openLink, openInMiniflux: false), .original)
         XCTAssertEqual(ArticleOpenRouting.action(clickOnNews: .openDetailView, openInMiniflux: true), .detail)

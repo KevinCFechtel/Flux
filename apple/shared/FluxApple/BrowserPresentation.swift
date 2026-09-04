@@ -11,7 +11,7 @@ enum ArticleOpenRouting {
 }
 
 enum ArticleOpenDestination: Equatable {
-    case external(URL)
+    case universalLink(URL)
     case browser(URL)
     case invalid
 }
@@ -22,15 +22,9 @@ enum ArticleOpenRoutingPolicy {
         return url
     }
 
-    static func externalCandidate(openInMiniflux: Bool, minifluxURL: String?) -> URL? {
-        guard openInMiniflux, let minifluxURL else { return nil }
-        return validWebURL(minifluxURL)
-    }
-
-    static func destination(originalURL: String, externalCandidate: URL?, canOpenExternal: Bool, externalOpenSucceeded: Bool? = nil) -> ArticleOpenDestination {
+    static func destination(originalURL: String, universalLinkSucceeded: Bool) -> ArticleOpenDestination {
         guard let original = validWebURL(originalURL) else { return .invalid }
-        guard let externalCandidate, canOpenExternal, externalOpenSucceeded != false else { return .browser(original) }
-        return .external(externalCandidate)
+        return universalLinkSucceeded ? .universalLink(original) : .browser(original)
     }
 }
 

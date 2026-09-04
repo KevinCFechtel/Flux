@@ -22,6 +22,7 @@ struct ContentView: View {
     @State private var iPadColumnVisibility: NavigationSplitViewVisibility = .all
     @State private var browser: IOSBrowserURL?
     @State private var articleOpenError: String?
+    @State private var articleOpenGeneration = 0
 
     private var usesSplitNavigation: Bool {
         NewsNavigationLayout.usesSplitView(for: UIDevice.current.userInterfaceIdiom)
@@ -115,19 +116,17 @@ struct ContentView: View {
     }
 
     private func openArticle(_ article: ArticleSummary) {
-        newsreaderStore.open(article) { original, candidate in
-            guard let candidate else {
-                let destination = ArticleOpenRoutingPolicy.destination(originalURL: original, externalCandidate: nil, canOpenExternal: false)
-                present(destination)
+        articleOpenGeneration += 1
+        let generation = articleOpenGeneration
+        newsreaderStore.open(article) { original in
+            guard let url = ArticleOpenRoutingPolicy.validWebURL(original) else {
+                present(.invalid)
                 return
             }
-            guard UIApplication.shared.canOpenURL(candidate) else {
-                present(ArticleOpenRoutingPolicy.destination(originalURL: original, externalCandidate: candidate, canOpenExternal: false))
-                return
-            }
-            UIApplication.shared.open(candidate, options: [:]) { succeeded in
+            UIApplication.shared.open(url, options: [.universalLinksOnly: true]) { succeeded in
                 Task { @MainActor in
-                    present(ArticleOpenRoutingPolicy.destination(originalURL: original, externalCandidate: candidate, canOpenExternal: true, externalOpenSucceeded: succeeded))
+                    guard generation == articleOpenGeneration else { return }
+                    present(ArticleOpenRoutingPolicy.destination(originalURL: original, universalLinkSucceeded: succeeded))
                 }
             }
         }
@@ -135,7 +134,7 @@ struct ContentView: View {
 
     private func present(_ destination: ArticleOpenDestination) {
         switch destination {
-        case .external: break
+        case .universalLink: break
         case .browser(let url): browser = IOSBrowserURL(url: url)
         case .invalid: articleOpenError = "The article does not have a valid web URL."
         }
