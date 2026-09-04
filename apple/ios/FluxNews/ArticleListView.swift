@@ -199,6 +199,13 @@ enum IOSArticleMutation: Equatable {
     case starred(Bool)
 }
 
+enum IOSSwipeDirection: Equatable {
+    case right
+    case left
+
+    var sign: CGFloat { self == .right ? 1 : -1 }
+}
+
 enum IOSArticleSwipeAction: Hashable {
     case read
     case unread
@@ -246,9 +253,6 @@ struct IOSArticleSwipeSideConfiguration: Equatable {
 
     var fullSwipeAction: IOSArticleSwipeAction? { actions.last }
 
-    // SwiftUI assigns Full Swipe to the first declared action, while displaying
-    // its actions from the swipe edge inward. Reverse the visual order here.
-    var nativeDeclarationOrder: [IOSArticleSwipeAction] { actions.reversed() }
 }
 
 struct IOSArticleSwipeConfiguration: Equatable {
@@ -260,6 +264,97 @@ struct IOSArticleSwipeConfiguration: Equatable {
             leading: IOSArticleSwipeSideConfiguration(actions: [article.isRead ? .unread : .read]),
             trailing: IOSArticleSwipeSideConfiguration(actions: [article.isStarred ? .unstar : .star])
         )
+    }
+}
+
+enum IOSArticleSwipeEndState: Equatable {
+    case closed
+    case revealed(IOSSwipeDirection)
+    case fullSwipe(IOSArticleSwipeAction)
+}
+
+enum IOSArticleSwipeInteraction {
+    static func endState(
+        offset: CGFloat,
+        direction: IOSSwipeDirection,
+        configuration: IOSArticleSwipeConfiguration,
+        revealThreshold: CGFloat,
+        fullSwipeDistance: CGFloat
+    ) -> IOSArticleSwipeEndState {
+        let side = direction == .right ? configuration.leading : configuration.trailing
+        guard !side.actions.isEmpty else { return .closed }
+        if abs(offset) >= fullSwipeDistance, let action = side.fullSwipeAction {
+            return .fullSwipe(action)
+        }
+        return abs(offset) >= revealThreshold ? .revealed(direction) : .closed
+    }
+}
+
+@available(iOS 18.0, *)
+private struct IOSHorizontalArticleSwipeGesture: UIGestureRecognizerRepresentable {
+    @Binding var offset: CGFloat
+    let maximumDistance: CGFloat
+    let canSwipe: (IOSSwipeDirection) -> Bool
+    let onEnded: (IOSSwipeDirection, CGFloat) -> Void
+
+    func makeCoordinator(converter: Self.CoordinateSpaceConverter) -> Coordinator { Coordinator(self) }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let recognizer = UIPanGestureRecognizer()
+        recognizer.minimumNumberOfTouches = 1
+        recognizer.maximumNumberOfTouches = 1
+        recognizer.delegate = context.coordinator
+        return recognizer
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        context.coordinator.parent = self
+        recognizer.delegate = context.coordinator
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        context.coordinator.handlePan(recognizer)
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var parent: IOSHorizontalArticleSwipeGesture
+        private var startOffset: CGFloat = 0
+        private var direction: IOSSwipeDirection?
+
+        init(_ parent: IOSHorizontalArticleSwipeGesture) { self.parent = parent }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
+            let velocity = pan.velocity(in: pan.view)
+            guard abs(velocity.x) >= 24, abs(velocity.x) > abs(velocity.y) * 1.25 else { return false }
+            return parent.canSwipe(velocity.x >= 0 ? .right : .left)
+        }
+
+        func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            let translation = recognizer.translation(in: recognizer.view)
+            switch recognizer.state {
+            case .began:
+                startOffset = parent.offset
+                direction = nil
+            case .changed:
+                let currentDirection: IOSSwipeDirection = translation.x >= 0 ? .right : .left
+                guard parent.canSwipe(currentDirection) else { return }
+                direction = currentDirection
+                let proposed = startOffset + translation.x
+                parent.offset = min(parent.maximumDistance, max(-parent.maximumDistance, proposed))
+            case .ended:
+                if let direction { parent.onEnded(direction, parent.offset) }
+                else { parent.offset = 0 }
+                reset()
+            case .cancelled, .failed:
+                parent.offset = 0
+                reset()
+            default:
+                break
+            }
+        }
+
+        private func reset() { startOffset = 0; direction = nil }
     }
 }
 
@@ -445,6 +540,10 @@ struct ArticlePresentationView: View, Equatable {
     let onAction: (IOSArticleContextAction) -> Void
     let onSetRead: (ArticleSummary, Bool) -> Void
     let onSetStarred: (ArticleSummary, Bool) -> Void
+    @State private var horizontalOffset: CGFloat = 0
+
+    private let swipeActionWidth: CGFloat = 76
+    private let swipeRevealThreshold: CGFloat = 28
 
     // The list observes its snapshot, but Undo-only publications must not redraw
     // rows whose article and presentation inputs have not changed.
@@ -458,22 +557,30 @@ struct ArticlePresentationView: View, Equatable {
     }
 
     var body: some View {
-        Group {
-            switch mode {
-            case .visual: visual
-            case .compact: compact
+        ZStack {
+            swipeActionBackground
+            Group {
+                switch mode {
+                case .visual: visual
+                case .compact: compact
+                }
             }
+            .contentShape(RoundedRectangle(cornerRadius: 16))
+            .onTapGesture(perform: onTap)
+            .frame(width: articleWidth, alignment: .leading)
+            .background(.background)
+            .offset(x: horizontalOffset)
+            .gesture(
+                IOSHorizontalArticleSwipeGesture(
+                    offset: $horizontalOffset,
+                    maximumDistance: fullSwipeDistance,
+                    canSwipe: { !swipeSide(for: $0).actions.isEmpty },
+                    onEnded: finishSwipe
+                )
+            )
         }
-        .contentShape(RoundedRectangle(cornerRadius: 16))
-        .onTapGesture(perform: onTap)
         .frame(width: articleWidth, alignment: .leading)
-        .background(.background)
-        .swipeActions(edge: .leading, allowsFullSwipe: swipeConfiguration.leading.fullSwipeAction != nil) {
-            ForEach(swipeConfiguration.leading.nativeDeclarationOrder, id: \.self, content: swipeActionButton)
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: swipeConfiguration.trailing.fullSwipeAction != nil) {
-            ForEach(swipeConfiguration.trailing.nativeDeclarationOrder, id: \.self, content: swipeActionButton)
-        }
+        .clipped()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityValue(accessibilityValue)
@@ -505,11 +612,58 @@ struct ArticlePresentationView: View, Equatable {
         .default(for: article)
     }
 
-    private func swipeActionButton(_ action: IOSArticleSwipeAction) -> some View {
-        Button { performSwipeAction(action) } label: {
-            Label(action.accessibilityLabel, systemImage: action.systemImage)
+    private var fullSwipeDistance: CGFloat {
+        max(articleWidth * 0.85, swipeActionWidth * 2.5)
+    }
+
+    private func swipeSide(for direction: IOSSwipeDirection) -> IOSArticleSwipeSideConfiguration {
+        direction == .right ? swipeConfiguration.leading : swipeConfiguration.trailing
+    }
+
+    private func finishSwipe(direction: IOSSwipeDirection, offset: CGFloat) {
+        switch IOSArticleSwipeInteraction.endState(
+            offset: offset,
+            direction: direction,
+            configuration: swipeConfiguration,
+            revealThreshold: swipeRevealThreshold,
+            fullSwipeDistance: fullSwipeDistance
+        ) {
+        case .closed:
+            horizontalOffset = 0
+        case let .revealed(direction):
+            horizontalOffset = direction.sign * swipeActionWidth * CGFloat(swipeSide(for: direction).actions.count)
+        case let .fullSwipe(action):
+            horizontalOffset = 0
+            performSwipeAction(action)
         }
-        .tint(action.tint)
+    }
+
+    private var swipeActionBackground: some View {
+        HStack(spacing: 0) {
+            swipeActionButtons(swipeConfiguration.leading.actions)
+            Spacer(minLength: 0)
+            swipeActionButtons(Array(swipeConfiguration.trailing.actions.reversed()))
+        }
+    }
+
+    @ViewBuilder
+    private func swipeActionButtons(_ actions: [IOSArticleSwipeAction]) -> some View {
+        ForEach(actions, id: \.self) { action in
+            Button {
+                horizontalOffset = 0
+                performSwipeAction(action)
+            } label: {
+                VStack(spacing: 4) {
+                    Image(systemName: action.systemImage)
+                    Text(action.accessibilityLabel)
+                        .font(.caption2)
+                }
+                .frame(minWidth: swipeActionWidth, maxWidth: swipeActionWidth, maxHeight: .infinity)
+                .foregroundStyle(.white)
+                .background(action.tint)
+            }
+            .accessibilityLabel(action.accessibilityLabel)
+        }
     }
 
     private func performSwipeAction(_ action: IOSArticleSwipeAction) {

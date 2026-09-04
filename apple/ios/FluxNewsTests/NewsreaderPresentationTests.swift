@@ -12,6 +12,12 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(NewsNavigationLayout.usesSplitView(for: .pad))
     }
 
+    func testIPhoneNavigationButtonUsesTheFluxTemplateAsset() {
+        XCTAssertEqual(IOSNavigationButtonPresentation.imageName, "FluxNewsTemplate")
+        XCTAssertEqual(IOSNavigationButtonPresentation.accessibilityLabel, "Choose news scope")
+        XCTAssertEqual(IOSNavigationButtonPresentation.glyphSize, 22)
+    }
+
     func testArticleListTitleUsesAllNewsSelectionCount() {
         XCTAssertEqual(ArticleListTitlePresentation.title(scope: .all, catalog: NavigationCatalog(categories: [], feeds: []), count: 123), "All News (123)")
     }
@@ -222,6 +228,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ReaderPresentationPolicy.kind(isPad: true, isRegularWidth: true), .inspector)
         XCTAssertEqual(ReaderPresentationPolicy.kind(isPad: true, isRegularWidth: false), .sheet)
         XCTAssertEqual(ReaderPresentationPolicy.kind(isPad: false, isRegularWidth: true), .sheet)
+    }
+
+    func testReaderPresentationExposesTheExplicitDismissAction() {
+        XCTAssertEqual(IOSReaderDismissalPresentation.title, "Done")
     }
 
     func testReaderRequestStateRejectsStaleResponses() {

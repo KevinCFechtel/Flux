@@ -460,7 +460,6 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertNil(empty.fullSwipeAction)
         XCTAssertEqual(one.fullSwipeAction, .read)
         XCTAssertEqual(two.fullSwipeAction, .star)
-        XCTAssertEqual(two.nativeDeclarationOrder, [.star, .unread])
     }
 
     func testSwipeConfigurationKeepsTheOuterVisualActionAsFullSwipe() {
@@ -472,6 +471,38 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(configuration.leading.fullSwipeAction, .read)
         XCTAssertEqual(configuration.trailing.actions, [.unread, .unstar])
         XCTAssertEqual(configuration.trailing.fullSwipeAction, .unstar)
+    }
+
+    func testPartialSwipeRevealsWithoutCommittingAMutation() {
+        let configuration = IOSArticleSwipeConfiguration(
+            leading: IOSArticleSwipeSideConfiguration(actions: [.read]),
+            trailing: IOSArticleSwipeSideConfiguration(actions: [.star])
+        )
+
+        XCTAssertEqual(
+            IOSArticleSwipeInteraction.endState(offset: 80, direction: .right, configuration: configuration, revealThreshold: 28, fullSwipeDistance: 300),
+            .revealed(.right)
+        )
+        XCTAssertEqual(
+            IOSArticleSwipeInteraction.endState(offset: 20, direction: .left, configuration: configuration, revealThreshold: 28, fullSwipeDistance: 300),
+            .closed
+        )
+    }
+
+    func testDeliberateFullSwipeCommitsOnlyTheOuterAction() {
+        let configuration = IOSArticleSwipeConfiguration(
+            leading: IOSArticleSwipeSideConfiguration(actions: [.star, .read]),
+            trailing: IOSArticleSwipeSideConfiguration(actions: [.unread, .unstar])
+        )
+
+        XCTAssertEqual(
+            IOSArticleSwipeInteraction.endState(offset: 300, direction: .right, configuration: configuration, revealThreshold: 28, fullSwipeDistance: 300),
+            .fullSwipe(.read)
+        )
+        XCTAssertEqual(
+            IOSArticleSwipeInteraction.endState(offset: -300, direction: .left, configuration: configuration, revealThreshold: 28, fullSwipeDistance: 300),
+            .fullSwipe(.unstar)
+        )
     }
 
     func testSwipeActionsRouteToExistingArticleMutationsAndExposeAccessibilityLabels() {

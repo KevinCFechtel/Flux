@@ -23,6 +23,16 @@ enum NewsNavigationLayout {
     }
 }
 
+enum IOSNavigationButtonPresentation {
+    static let imageName = "FluxNewsTemplate"
+    static let accessibilityLabel = "Choose news scope"
+    static let glyphSize: CGFloat = 22
+}
+
+enum IOSReaderDismissalPresentation {
+    static let title = "Done"
+}
+
 struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @ObservedObject var bootstrapper: CoreBootstrapper
@@ -60,9 +70,13 @@ struct ContentView: View {
         }
         .sheet(isPresented: $diagnosticsPresented) { DeveloperDiagnosticsView(bootstrapper: bootstrapper) }
         .sheet(item: $browser) { item in IOSInAppBrowser(url: item.url) }
-        .sheet(item: readerSheetBinding) { item in readerView(for: item.article) }
+        .sheet(item: readerSheetBinding) { item in
+            NavigationStack { readerView(for: item.article) }
+        }
         .inspector(isPresented: readerInspectorBinding) {
-            if let article = readerArticle?.article { readerView(for: article) }
+            if let article = readerArticle?.article {
+                NavigationStack { readerView(for: article) }
+            }
         }
         .sheet(item: $sharePayload) { payload in IOSShareSheet(items: payload.items) }
         .alert("Unable to Open Article", isPresented: Binding(get: { articleOpenError != nil }, set: { if !$0 { articleOpenError = nil } })) {
@@ -100,10 +114,13 @@ struct ContentView: View {
                     .toolbar {
                         ToolbarItem(placement: .topBarLeading) {
                             Button { navigationPresented = true } label: {
-                                Image("FluxNewsTemplate")
+                                Image(IOSNavigationButtonPresentation.imageName)
                                     .renderingMode(.template)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: IOSNavigationButtonPresentation.glyphSize, height: IOSNavigationButtonPresentation.glyphSize)
                             }
-                                .accessibilityLabel("Choose news scope")
+                                .accessibilityLabel(IOSNavigationButtonPresentation.accessibilityLabel)
                         }
                     }
                     .sheet(isPresented: $navigationPresented) {
@@ -434,9 +451,14 @@ extension ContentView {
         .background(.background)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Done") { readerArticle = nil; readerGeneration += 1 }
+                Button(IOSReaderDismissalPresentation.title, action: dismissReader)
             }
         }
+    }
+
+    private func dismissReader() {
+        readerArticle = nil
+        readerGeneration += 1
     }
 
     private func openOriginal(_ article: ArticleSummary) {
