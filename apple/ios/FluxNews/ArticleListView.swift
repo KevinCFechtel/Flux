@@ -315,7 +315,6 @@ struct ArticleListView: View {
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
     @State private var scrolloverTracker = IOSScrolloverOrderTracker()
-    @State private var sensoryFeedbackTrigger = 0
     // 15% admits a target that is only barely visible, so tall cards still give
     // the ordered tracker a reliable leading target. It is not a read threshold.
     private let scrolloverVisibilityThreshold: CGFloat = 0.15
@@ -373,12 +372,10 @@ struct ArticleListView: View {
                              .onChange(of: store.snapshotRevision) { _, _ in
                                  scrolloverTracker.updateSnapshot(store.articles.map(\.id))
                              }
-                             .onChange(of: store.scrolloverUndoIDs) { previousIDs, ids in
-                                 if previousIDs.count < 2 && ids.count >= 2 { sensoryFeedbackTrigger += 1 }
-                                 else if ids.isEmpty { scrolloverTracker.releaseEmittedIDs() }
-                            }
-                           .sensoryFeedback(.success, trigger: sensoryFeedbackTrigger)
-                  }
+                              .onChange(of: store.scrolloverRearmRevision) { _, _ in
+                                  scrolloverTracker.releaseEmittedIDs()
+                              }
+                   }
                  }
         }
         .background(.background)
@@ -390,26 +387,57 @@ struct ArticleListView: View {
                     .padding(.top, 8)
             }
         }
-         .overlay(alignment: .bottom) {
+          .overlay(alignment: .bottom) {
+             ArticleListBottomOverlay(store: store)
+          }
+    }
+
+}
+
+private struct ArticleListBottomOverlay: View {
+    var store: NewsreaderStore
+    @State private var sensoryFeedbackTrigger = 0
+
+    var body: some View {
+        Group {
             if store.scrolloverUndoVisible {
-                HStack(spacing: 10) {
-                    Text("\(store.scrolloverUndoIDs.count) articles marked as read")
-                    Button("Undo") { store.undoScrollover() }
-                        .buttonStyle(.borderless)
-                }
-                .font(.callout)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(.regularMaterial, in: Capsule())
-                .padding(.bottom, 12)
-             } else if store.hasPendingNewData || store.hasUnscopedNewDataSignal {
+                ScrolloverUndoPresentation(store: store)
+            } else if store.hasPendingNewData || store.hasUnscopedNewDataSignal {
                 Button("New articles available") { store.adoptVisibleSnapshot() }
                     .buttonStyle(.borderedProminent)
                     .padding(.bottom, 12)
             }
         }
+        .onChange(of: store.scrolloverUndoVisible) { previouslyVisible, currentlyVisible in
+            if ScrolloverUndoPresentationPolicy.shouldTriggerFeedback(previouslyVisible: previouslyVisible, currentlyVisible: currentlyVisible) {
+                sensoryFeedbackTrigger += 1
+            }
+        }
+        .sensoryFeedback(.success, trigger: sensoryFeedbackTrigger)
     }
+}
 
+enum ScrolloverUndoPresentationPolicy {
+    static func shouldTriggerFeedback(previouslyVisible: Bool, currentlyVisible: Bool) -> Bool {
+        !previouslyVisible && currentlyVisible
+    }
+}
+
+private struct ScrolloverUndoPresentation: View {
+    var store: NewsreaderStore
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("\(store.scrolloverUndoIDs.count) articles marked as read")
+            Button("Undo") { store.undoScrollover() }
+                .buttonStyle(.borderless)
+        }
+        .font(.callout)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: Capsule())
+        .padding(.bottom, 12)
+    }
 }
 
 struct ArticlePresentationView: View, Equatable {

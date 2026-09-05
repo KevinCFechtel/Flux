@@ -58,6 +58,8 @@ enum IOSFeedIconPresentation {
     var articlePreviewLines: ArticlePreviewLines
     var clickOnNews: ClickOnNews
     private(set) var scrolloverUndoIDs: [Int64] = []
+    // The tracker only needs to re-arm when an existing Undo group is cleared.
+    private(set) var scrolloverRearmRevision: UInt64 = 0
     var scrolloverUndoVisible: Bool { scrolloverUndoIDs.count >= 2 }
 
     private(set) var core: Flux?
@@ -385,7 +387,8 @@ enum IOSFeedIconPresentation {
             groupExpired = scrolloverUndoOpenedAt != nil || scrolloverUndoLastSuccessAt != nil
         }
         if scrolloverUndoOpenedAt == nil || groupExpired {
-            clearScrolloverUndoGroup()
+            // A replacement group never presented an empty array to the tracker.
+            clearScrolloverUndoGroup(rearmTracker: false)
             scrolloverUndoOpenedAt = now
         }
         var seen = Set(scrolloverUndoIDs)
@@ -425,7 +428,8 @@ enum IOSFeedIconPresentation {
         }
     }
 
-    private func clearScrolloverUndoGroup() {
+    private func clearScrolloverUndoGroup(rearmTracker: Bool = true) {
+        if rearmTracker && !scrolloverUndoIDs.isEmpty { scrolloverRearmRevision &+= 1 }
         scrolloverUndoTask?.cancel()
         scrolloverUndoTask = nil
         scrolloverUndoIDs = []
@@ -478,7 +482,8 @@ enum IOSFeedIconPresentation {
     private func resetPresentationState() {
         hasMeaningfullyInteracted = false
         snapshotRevision &+= 1
-        clearScrolloverUndoGroup()
+        // The structural snapshot change independently clears tracker emissions.
+        clearScrolloverUndoGroup(rearmTracker: false)
         scrolloverCountsPending = false
         pendingScrolloverIDs = []
         pendingScrolloverIDSet = []

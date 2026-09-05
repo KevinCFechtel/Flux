@@ -312,6 +312,42 @@ final class NewsreaderD23MutationTests: XCTestCase {
     }
 
     @MainActor
+    func testAddingToAnActiveUndoGroupKeepsTrackerRearmRevisionStableAndCountLive() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2), article(3)])
+        let revision = store.scrolloverRearmRevision
+
+        store.applyScrolloverMutationForTesting([1, 2])
+        XCTAssertTrue(store.scrolloverUndoVisible)
+        XCTAssertEqual(store.scrolloverUndoIDs.count, 2)
+        XCTAssertEqual(store.scrolloverRearmRevision, revision)
+
+        store.applyScrolloverMutationForTesting([3])
+        XCTAssertEqual(store.scrolloverUndoIDs.count, 3)
+        XCTAssertEqual(store.scrolloverRearmRevision, revision)
+    }
+
+    @MainActor
+    func testUndoClearRearmsTrackerAndPermitsLaterScrolloverCandidates() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2), article(3), article(4)])
+        var tracker = IOSScrolloverOrderTracker()
+        tracker.updateSnapshot([1, 2, 3, 4])
+        _ = tracker.receiveVisibleIDs([1], enabled: true)
+        tracker.setUserScrolling(true)
+        XCTAssertEqual(tracker.receiveVisibleIDs([4], enabled: true), [1, 2, 3])
+
+        store.applyScrolloverMutationForTesting([1, 2, 3])
+        let revision = store.scrolloverRearmRevision
+        store.applyScrolloverUndoForTesting()
+        XCTAssertEqual(store.scrolloverRearmRevision, revision + 1)
+
+        tracker.releaseEmittedIDs()
+        XCTAssertTrue(tracker.receiveVisibleIDs([1], enabled: true).isEmpty)
+        XCTAssertEqual(tracker.receiveVisibleIDs([4], enabled: true), [1, 2, 3])
+    }
+
+    @MainActor
     func testTransientArticleFiltersAreNotPersistedAsSettings() {
         let suiteName = "FluxNews.SettingsTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -424,14 +460,18 @@ final class NewsreaderD23MutationTests: XCTestCase {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setArticlesForTesting([article(1), article(2), article(3)])
         let start = Date(timeIntervalSinceReferenceDate: 100)
+        let rearmRevision = store.scrolloverRearmRevision
         store.applyScrolloverMutationForTesting([1, 2], now: start)
         store.applyScrolloverMutationForTesting([3], now: start.addingTimeInterval(3.5))
         store.expireScrolloverUndoGroupForTesting(now: start.addingTimeInterval(4.1))
         XCTAssertEqual(store.scrolloverUndoIDs, [1, 2, 3])
+        XCTAssertEqual(store.scrolloverRearmRevision, rearmRevision)
         store.expireScrolloverUndoGroupForTesting(now: start.addingTimeInterval(15))
         XCTAssertTrue(store.scrolloverUndoIDs.isEmpty)
+        XCTAssertEqual(store.scrolloverRearmRevision, rearmRevision + 1)
         store.applyScrolloverMutationForTesting([1], now: start.addingTimeInterval(16))
         XCTAssertEqual(store.scrolloverUndoIDs, [1])
+        XCTAssertEqual(store.scrolloverRearmRevision, rearmRevision + 1)
     }
 
     @MainActor
@@ -440,8 +480,10 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.setArticlesForTesting([article(1), article(2), article(3)])
         let start = Date(timeIntervalSinceReferenceDate: 100)
         store.applyScrolloverMutationForTesting([1, 2], now: start)
+        let rearmRevision = store.scrolloverRearmRevision
         store.applyScrolloverMutationForTesting([3], now: start.addingTimeInterval(5))
         XCTAssertEqual(store.scrolloverUndoIDs, [3])
+        XCTAssertEqual(store.scrolloverRearmRevision, rearmRevision)
     }
 
     @MainActor

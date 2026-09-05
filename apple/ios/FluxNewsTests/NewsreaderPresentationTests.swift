@@ -118,7 +118,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             _ = store.snapshotRevision
             _ = store.scrollResetRevision
             _ = store.markReadOnScrolloverEnabled
-            _ = store.scrolloverUndoIDs
+            _ = store.scrolloverRearmRevision
             _ = store.hasPendingNewData
             _ = store.hasUnscopedNewDataSignal
         } onChange: {
@@ -146,6 +146,13 @@ final class NewsreaderPresentationTests: XCTestCase {
 
         XCTAssertTrue(articleListInvalidated)
         XCTAssertTrue(store.articles[0].isRead)
+    }
+
+    func testScrolloverUndoFeedbackTriggersOnlyForNewlyVisiblePresentation() {
+        XCTAssertFalse(ScrolloverUndoPresentationPolicy.shouldTriggerFeedback(previouslyVisible: false, currentlyVisible: false))
+        XCTAssertTrue(ScrolloverUndoPresentationPolicy.shouldTriggerFeedback(previouslyVisible: false, currentlyVisible: true))
+        XCTAssertFalse(ScrolloverUndoPresentationPolicy.shouldTriggerFeedback(previouslyVisible: true, currentlyVisible: true))
+        XCTAssertFalse(ScrolloverUndoPresentationPolicy.shouldTriggerFeedback(previouslyVisible: true, currentlyVisible: false))
     }
 
     func testNewsNavigationSelectionMatchesOnlyTheActiveScope() {
