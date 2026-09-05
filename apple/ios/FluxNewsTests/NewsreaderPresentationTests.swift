@@ -395,6 +395,7 @@ final class NewsreaderPresentationTests: XCTestCase {
 
         _ = try await pipeline.image(for: small)
         _ = try await pipeline.image(for: small)
+        XCTAssertNotNil(pipeline.cachedImage(for: small))
         let cachedCalls = await counter.callCount()
         XCTAssertEqual(cachedCalls, 1)
 
@@ -402,6 +403,20 @@ final class NewsreaderPresentationTests: XCTestCase {
         let largerCalls = await counter.callCount()
         XCTAssertEqual(largerCalls, 2)
         XCTAssertGreaterThan(image.width, small.maxPixelDimension)
+    }
+
+    func testArticleImagePipelineSynchronousLookupUsesTheSameNormalizedCacheKey() async throws {
+        let pipeline = ArticleImagePipeline { _ in try self.imageData(width: 800, height: 400) }
+        let url = URL(string: "https://example.com/image.jpg")!
+        let cachedRequest = ArticleImageRequest(url: url, targetSize: CGSize(width: 100, height: 50), displayScale: 1)
+        let equivalentRequest = ArticleImageRequest(url: url, targetSize: CGSize(width: 127.9, height: 20), displayScale: 1)
+        let differentSizeRequest = ArticleImageRequest(url: url, targetSize: CGSize(width: 128.1, height: 20), displayScale: 1)
+
+        XCTAssertNil(pipeline.cachedImage(for: cachedRequest))
+        _ = try await pipeline.image(for: cachedRequest)
+
+        XCTAssertNotNil(pipeline.cachedImage(for: equivalentRequest))
+        XCTAssertNil(pipeline.cachedImage(for: differentSizeRequest))
     }
 
     func testArticleImagePipelineDeduplicatesEquivalentInFlightRequests() async throws {

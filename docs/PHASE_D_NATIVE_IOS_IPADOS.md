@@ -163,7 +163,9 @@ Visual article images are native iOS presentation infrastructure, not Core or
 sync state. They use display-sized ImageIO downsampling, normal HTTP response
 caching, and bounded in-memory caching of decoded images. Loading, failure, and
 success presentation remain inside the existing fixed portrait or landscape
-image slots and must not change article-card geometry.
+image slots and must not change article-card geometry. Recreating an article
+image view reuses an already-decoded memory-cache image synchronously so
+snapshot refreshes do not regress to a placeholder frame.
 
 Appearance follows the system Light/Dark mode. Primary content surfaces use the
 system content background, which is true black in Dark Mode. There is no manual

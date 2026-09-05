@@ -22,24 +22,41 @@ private final class ArticleImageCacheEntry: NSObject {
     }
 }
 
+private final class ArticleImageCache: @unchecked Sendable {
+    let storage = NSCache<NSString, ArticleImageCacheEntry>()
+
+    func image(for key: NSString) -> CGImage? {
+        storage.object(forKey: key)?.image
+    }
+
+    func insert(_ image: CGImage, for key: NSString) {
+        storage.setObject(ArticleImageCacheEntry(image: image), forKey: key, cost: image.width * image.height * 4)
+    }
+}
+
 actor ArticleImagePipeline {
     typealias Loader = @Sendable (URL) async throws -> Data
 
     static let shared = ArticleImagePipeline()
 
-    private let cache = NSCache<NSString, ArticleImageCacheEntry>()
+    private nonisolated let cache: ArticleImageCache
     private let loader: Loader
     private var inFlight: [ArticleImageRequest: Task<CGImage, Error>] = [:]
 
     init(loader: Loader? = nil) {
         self.loader = loader ?? { url in try await Self.loadData(from: url) }
-        cache.totalCostLimit = 48 * 1024 * 1024
+        cache = ArticleImageCache()
+        cache.storage.totalCostLimit = 48 * 1024 * 1024
+    }
+
+    nonisolated func cachedImage(for request: ArticleImageRequest) -> CGImage? {
+        cache.image(for: request.cacheKey)
     }
 
     func image(for request: ArticleImageRequest) async throws -> CGImage {
         let cacheKey = request.cacheKey
-        if let entry = cache.object(forKey: cacheKey) {
-            return entry.image
+        if let image = cache.image(for: cacheKey) {
+            return image
         }
 
         let task: Task<CGImage, Error>
@@ -56,7 +73,7 @@ actor ArticleImagePipeline {
 
         do {
             let image = try await task.value
-            cache.setObject(ArticleImageCacheEntry(image: image), forKey: cacheKey, cost: image.width * image.height * 4)
+            cache.insert(image, for: cacheKey)
             inFlight[request] = nil
             try Task.checkCancellation()
             return image
@@ -67,7 +84,7 @@ actor ArticleImagePipeline {
     }
 
     func removeAllCachedImages() {
-        cache.removeAllObjects()
+        cache.storage.removeAllObjects()
     }
 
     private static let session: URLSession = {
@@ -122,9 +139,11 @@ struct ArticleImageView: View {
     @State private var image: CGImage?
 
     var body: some View {
+        let request = ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale)
+        let displayedImage = image ?? ArticleImagePipeline.shared.cachedImage(for: request)
         Group {
-            if let image {
-                Image(decorative: image, scale: displayScale, orientation: .up)
+            if let displayedImage {
+                Image(decorative: displayedImage, scale: displayScale, orientation: .up)
                     .resizable()
                     .scaledToFill()
             } else {
@@ -135,10 +154,13 @@ struct ArticleImageView: View {
         }
         .frame(width: targetSize.width, height: targetSize.height)
         .clipped()
-        .task(id: ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale)) {
+        .task(id: request) {
+            if let cachedImage = ArticleImagePipeline.shared.cachedImage(for: request) {
+                image = cachedImage
+                return
+            }
             image = nil
             do {
-                let request = ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale)
                 let loadedImage = try await ArticleImagePipeline.shared.image(for: request)
                 try Task.checkCancellation()
                 image = loadedImage
