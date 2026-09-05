@@ -188,7 +188,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleListEmptyState.resolve(isSyncing: store.isSyncing, isLoading: store.isLoading, errorMessage: store.errorMessage, hasArticles: !store.articles.isEmpty), .loading)
     }
 
-    func testSyncButtonPresentationUsesProgressOnlyForSync() {
+    func testSyncButtonPresentationUsesStableSlotForEverySyncState() {
         XCTAssertFalse(IOSSyncButtonPresentation.showsProgress(isSyncing: false))
         XCTAssertTrue(IOSSyncButtonPresentation.showsProgress(isSyncing: true))
         XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(isSyncing: false), "Ready")

@@ -242,12 +242,14 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .bottomBar) {
                     Button { Task { await newsreaderStore.syncManually() } } label: {
-                        if IOSSyncButtonPresentation.showsProgress(isSyncing: newsreaderStore.isSyncing) {
+                        ZStack {
+                            Label("Sync", systemImage: "arrow.clockwise")
+                                .opacity(IOSSyncButtonPresentation.showsProgress(isSyncing: newsreaderStore.isSyncing) ? 0 : 1)
                             ProgressView()
                                 .frame(width: 20, height: 20)
-                        } else {
-                            Label("Sync", systemImage: "arrow.clockwise")
+                                .opacity(IOSSyncButtonPresentation.showsProgress(isSyncing: newsreaderStore.isSyncing) ? 1 : 0)
                         }
+                        .accessibilityHidden(true)
                     }
                     .disabled(newsreaderStore.isSyncing)
                     .accessibilityLabel("Sync news")
