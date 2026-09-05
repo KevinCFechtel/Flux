@@ -169,8 +169,11 @@ snapshot refreshes do not regress to a placeholder frame.
 
 The native bottom Sync control keeps the same `arrow.clockwise` symbol and
 stable toolbar geometry across idle, syncing, success, and failure states;
-active Sync is indicated by continuous symbol rotation, while Reduce Motion
-keeps the symbol stationary.
+active manual Sync is indicated by continuous symbol rotation, and successful
+manual Sync briefly presents a checkmark before returning to the idle symbol.
+Failure returns directly to the idle symbol. This is native transient
+presentation state and does not alter Core Sync semantics; Reduce Motion keeps
+the symbol stationary.
 
 Appearance follows the system Light/Dark mode. Primary content surfaces use the
 system content background, which is true black in Dark Mode. There is no manual
@@ -351,6 +354,18 @@ count can be disabled through the native iOS article presentation settings.
 
 Perform combined real-device D2-D4 validation and polish on representative
 iPhone and iPad devices.
+
+Before D4.4 completion, establish consistent native user-facing error
+presentation for Sync/network, account/credential, and user-action failures.
+Raw Rust/UniFFI/internal errors must not be exposed directly to users.
+Loading, empty, syncing, and error states remain semantically distinct.
+
+Localization is the final D4.4 presentation step after user-facing wording and
+error messages are stable. The native iOS/iPadOS app must provide English and
+German localization covering release-relevant UI text, user-facing error
+messages, accessibility text, counts/pluralization, Settings,
+Newsreader/navigation, Reader, and Search. D4 must not be marked
+complete/frozen until this localization pass is complete.
 
 For iOS Scrollover, D4.4 still requires real-device coverage of slow drags,
 fast flicks that skip rows, reverse-then-forward movement, Remove When Read,

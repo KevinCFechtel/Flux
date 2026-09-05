@@ -189,13 +189,22 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     func testSyncButtonPresentationUsesTheSameRotatingSymbolForEverySyncState() {
-        XCTAssertEqual(IOSSyncButtonPresentation.symbolName, "arrow.clockwise")
-        XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(isSyncing: false, reduceMotion: false), 0)
-        XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(isSyncing: true, reduceMotion: false), 360)
-        XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(isSyncing: false, reduceMotion: true), 0)
-        XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(isSyncing: true, reduceMotion: true), 0)
-        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(isSyncing: false), "Ready")
-        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(isSyncing: true), "Syncing")
+        XCTAssertEqual(IOSSyncButtonPresentation.symbolName(for: .idle), "arrow.clockwise")
+        XCTAssertEqual(IOSSyncButtonPresentation.symbolName(for: .syncing), "arrow.clockwise")
+        XCTAssertEqual(IOSSyncButtonPresentation.symbolName(for: .success), "checkmark")
+        XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(for: .idle, reduceMotion: false), 0)
+        XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(for: .syncing, reduceMotion: false), 360)
+        XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(for: .success, reduceMotion: false), 0)
+        XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(for: .syncing, reduceMotion: true), 0)
+        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(for: .idle), "Ready")
+        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(for: .syncing), "Syncing")
+        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(for: .success), "Sync complete")
+    }
+
+    func testSyncButtonSuccessTimeoutCannotOverwriteNewerSync() {
+        XCTAssertTrue(IOSSyncButtonPresentation.canEndSuccess(generation: 2, currentGeneration: 2, isSyncing: false))
+        XCTAssertFalse(IOSSyncButtonPresentation.canEndSuccess(generation: 1, currentGeneration: 2, isSyncing: false))
+        XCTAssertFalse(IOSSyncButtonPresentation.canEndSuccess(generation: 2, currentGeneration: 2, isSyncing: true))
     }
 
     @MainActor

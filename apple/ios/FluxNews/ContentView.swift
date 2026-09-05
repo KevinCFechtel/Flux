@@ -145,6 +145,8 @@ struct ContentView: View {
     @State private var actionError: String?
     @State private var markReadConfirmationPresented = false
     @State private var markReadWorkflow: IOSMarkReadWorkflow = .read
+    @State private var syncPresentation: IOSSyncButtonPresentation.State = .idle
+    @State private var syncPresentationGeneration: UInt64 = 0
 
     private var usesSplitNavigation: Bool {
         NewsNavigationLayout.usesSplitView(for: UIDevice.current.userInterfaceIdiom)
@@ -242,21 +244,22 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItemGroup(placement: .bottomBar) {
-                    Button { Task { await newsreaderStore.syncManually() } } label: {
-                        Image(systemName: IOSSyncButtonPresentation.symbolName)
-                            .rotationEffect(.degrees(IOSSyncButtonPresentation.rotationDegrees(isSyncing: newsreaderStore.isSyncing, reduceMotion: accessibilityReduceMotion)))
+                    Button { Task { await performManualSync() } } label: {
+                        Image(systemName: IOSSyncButtonPresentation.symbolName(for: syncPresentation))
+                            .rotationEffect(.degrees(IOSSyncButtonPresentation.rotationDegrees(for: syncPresentation, reduceMotion: accessibilityReduceMotion)))
                             .animation(
                                 accessibilityReduceMotion
                                     ? .default
-                                    : newsreaderStore.isSyncing
+                                    : syncPresentation == .syncing
                                         ? .linear(duration: 1).repeatForever(autoreverses: false)
                                         : .default,
-                                value: newsreaderStore.isSyncing
+                                value: syncPresentation
                             )
+                            .frame(width: 24, height: 24)
                     }
                     .disabled(newsreaderStore.isSyncing)
                     .accessibilityLabel("Sync news")
-                    .accessibilityValue(IOSSyncButtonPresentation.accessibilityValue(isSyncing: newsreaderStore.isSyncing))
+                    .accessibilityValue(IOSSyncButtonPresentation.accessibilityValue(for: syncPresentation))
 
                     Menu {
                         Section("Show") {
@@ -301,6 +304,37 @@ struct ContentView: View {
                     .accessibilityIdentifier("articleList.more")
                 }
             }
+    }
+
+    private func performManualSync() async {
+        syncPresentationGeneration &+= 1
+        let generation = syncPresentationGeneration
+        syncPresentation = .syncing
+
+        await newsreaderStore.syncManually()
+
+        guard IOSSyncButtonPresentation.canEndSuccess(
+            generation: generation,
+            currentGeneration: syncPresentationGeneration,
+            isSyncing: newsreaderStore.isSyncing
+        ) else { return }
+        guard newsreaderStore.errorMessage == nil else {
+            syncPresentation = .idle
+            return
+        }
+
+        syncPresentation = .success
+        do {
+            try await Task.sleep(for: .milliseconds(1500))
+        } catch {
+            return
+        }
+        guard IOSSyncButtonPresentation.canEndSuccess(
+            generation: generation,
+            currentGeneration: syncPresentationGeneration,
+            isSyncing: newsreaderStore.isSyncing
+        ) else { return }
+        syncPresentation = .idle
     }
 
     private var searchView: some View {
@@ -556,13 +590,31 @@ enum ArticleListCounterPresentation {
 }
 
 enum IOSSyncButtonPresentation {
-    static let symbolName = "arrow.clockwise"
-
-    static func rotationDegrees(isSyncing: Bool, reduceMotion: Bool) -> Double {
-        isSyncing && !reduceMotion ? 360 : 0
+    enum State: Equatable {
+        case idle
+        case syncing
+        case success
     }
 
-    static func accessibilityValue(isSyncing: Bool) -> String { isSyncing ? "Syncing" : "Ready" }
+    static func symbolName(for state: State) -> String {
+        state == .success ? "checkmark" : "arrow.clockwise"
+    }
+
+    static func rotationDegrees(for state: State, reduceMotion: Bool) -> Double {
+        state == .syncing && !reduceMotion ? 360 : 0
+    }
+
+    static func accessibilityValue(for state: State) -> String {
+        switch state {
+        case .idle: "Ready"
+        case .syncing: "Syncing"
+        case .success: "Sync complete"
+        }
+    }
+
+    static func canEndSuccess(generation: UInt64, currentGeneration: UInt64, isSyncing: Bool) -> Bool {
+        generation == currentGeneration && !isSyncing
+    }
 }
 
 private struct ArticleListNavigationChrome<Content: View>: View {
