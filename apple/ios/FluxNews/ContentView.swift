@@ -1,6 +1,9 @@
 import SwiftUI
 import UIKit
 import SafariServices
+#if DEBUG
+import OSLog
+#endif
 
 private struct IOSBrowserURL: Identifiable {
     let url: URL
@@ -98,6 +101,71 @@ enum IOSNavigationButtonPresentation {
 
 enum IOSReaderDismissalPresentation {
     static let title = "Done"
+}
+
+enum IOSLargeTitleResetPolicy {
+    static func shouldRepair(previousRevision: UInt64?, currentRevision: UInt64) -> Bool {
+        currentRevision > 0 && previousRevision != currentRevision
+    }
+}
+
+private struct IOSArticleListLargeTitleResetBridge: UIViewRepresentable {
+    let revision: UInt64
+
+    final class Coordinator {
+        var lastRevision: UInt64?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UIView { UIView(frame: .zero) }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        guard IOSLargeTitleResetPolicy.shouldRepair(previousRevision: context.coordinator.lastRevision, currentRevision: revision) else { return }
+        context.coordinator.lastRevision = revision
+
+        // SwiftUI recreates the Article ScrollView in this update. Let that
+        // replacement finish before refreshing the navigation presentation.
+        DispatchQueue.main.async { [weak view] in
+            guard let view,
+                  let navigationController = view.enclosingNavigationController,
+                  let viewController = navigationController.topViewController
+            else {
+                diagnostic("reset revision=\(revision) article navigation controller not found")
+                return
+            }
+
+            let navigationBar = navigationController.navigationBar
+            let navigationItem = viewController.navigationItem
+            diagnostic("reset revision=\(revision) nav=\(String(describing: type(of: navigationController))) item=\(navigationItem.title ?? "nil") beforePrefersLarge=\(navigationBar.prefersLargeTitles) beforeMode=\(String(describing: navigationItem.largeTitleDisplayMode)) beforeFrame=\(String(describing: navigationBar.frame))")
+            navigationBar.prefersLargeTitles = true
+            navigationItem.largeTitleDisplayMode = .always
+            navigationBar.setNeedsLayout()
+            navigationBar.layoutIfNeeded()
+            diagnostic("reset revision=\(revision) afterPrefersLarge=\(navigationBar.prefersLargeTitles) afterMode=\(String(describing: navigationItem.largeTitleDisplayMode)) afterFrame=\(String(describing: navigationBar.frame))")
+        }
+    }
+
+    private func diagnostic(_ message: String) {
+#if DEBUG
+        Self.diagnosticLog.debug("\(message, privacy: .public)")
+#endif
+    }
+
+#if DEBUG
+    private static let diagnosticLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "article-list-large-title")
+#endif
+}
+
+private extension UIView {
+    var enclosingNavigationController: UINavigationController? {
+        var responder: UIResponder? = self
+        while let current = responder {
+            if let navigationController = current as? UINavigationController { return navigationController }
+            responder = current.next
+        }
+        return nil
+    }
 }
 
 struct ContentView: View {
@@ -204,6 +272,7 @@ struct ContentView: View {
 
     private var articleList: some View {
         ArticleListView(store: newsreaderStore, onArticleTap: openArticle, onArticleAction: handleArticleAction)
+            .background(IOSArticleListLargeTitleResetBridge(revision: newsreaderStore.scrollResetRevision).accessibilityHidden(true))
             .navigationTitle(ArticleListTitlePresentation.title(scope: newsreaderStore.scope, catalog: newsreaderStore.catalog, count: newsreaderStore.selectionTotal))
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
