@@ -235,16 +235,23 @@ struct ContentView: View {
     }
 
     private var articleList: some View {
-        ArticleListView(store: newsreaderStore, onArticleTap: openArticle, onArticleAction: handleArticleAction)
-            .navigationTitle(ArticleListTitlePresentation.title(scope: newsreaderStore.scope, catalog: newsreaderStore.catalog, count: newsreaderStore.selectionTotal))
+        ArticleListNavigationChrome(store: newsreaderStore) {
+            ArticleListView(store: newsreaderStore, onArticleTap: openArticle, onArticleAction: handleArticleAction)
+        }
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItemGroup(placement: .bottomBar) {
                     Button { Task { await newsreaderStore.syncManually() } } label: {
-                        Label("Sync", systemImage: "arrow.clockwise")
+                        if IOSSyncButtonPresentation.showsProgress(isSyncing: newsreaderStore.isSyncing) {
+                            ProgressView()
+                                .frame(width: 20, height: 20)
+                        } else {
+                            Label("Sync", systemImage: "arrow.clockwise")
+                        }
                     }
-                    .disabled(newsreaderStore.isLoading)
+                    .disabled(newsreaderStore.isSyncing)
                     .accessibilityLabel("Sync news")
+                    .accessibilityValue(IOSSyncButtonPresentation.accessibilityValue(isSyncing: newsreaderStore.isSyncing))
 
                     Menu {
                         Section("Show") {
@@ -511,8 +518,8 @@ struct ContentView: View {
 }
 
 enum ArticleListTitlePresentation {
-    static func title(scope: BrowserScope, catalog: NavigationCatalog, count: UInt64) -> String {
-        "\(scopeTitle(scope: scope, catalog: catalog)) (\(count))"
+    static func title(scope: BrowserScope, catalog: NavigationCatalog) -> String {
+        scopeTitle(scope: scope, catalog: catalog)
     }
 
     private static func scopeTitle(scope: BrowserScope, catalog: NavigationCatalog) -> String {
@@ -524,6 +531,37 @@ enum ArticleListTitlePresentation {
         case .search: "Search"
         case .listeningList: "Listening List"
         }
+    }
+}
+
+enum ArticleListCounterPresentation {
+    static func compactCount(_ count: UInt64) -> String { String(count) }
+
+    static func expandedLabel(scope: BrowserScope, unreadOnly: Bool, count: UInt64) -> String {
+        if unreadOnly && scope != .starred { return "\(count) unread" }
+        return "\(count) articles"
+    }
+}
+
+enum IOSSyncButtonPresentation {
+    static func showsProgress(isSyncing: Bool) -> Bool { isSyncing }
+    static func accessibilityValue(isSyncing: Bool) -> String { isSyncing ? "Syncing" : "Ready" }
+}
+
+private struct ArticleListNavigationChrome<Content: View>: View {
+    var store: NewsreaderStore
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        content()
+            .navigationTitle(ArticleListTitlePresentation.title(scope: store.scope, catalog: store.catalog))
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Text(ArticleListCounterPresentation.compactCount(store.selectionTotal))
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(ArticleListCounterPresentation.expandedLabel(scope: store.scope, unreadOnly: store.unreadOnly, count: store.selectionTotal))
+                }
+            }
     }
 }
 

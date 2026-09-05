@@ -309,6 +309,18 @@ enum IOSArticleContextMenuPolicy {
     }
 }
 
+enum IOSArticleListEmptyState: Equatable {
+    case syncing
+    case noNews
+    case error(String)
+
+    static func resolve(isSyncing: Bool, errorMessage: String?, hasArticles: Bool) -> Self? {
+        guard !hasArticles else { return nil }
+        if let errorMessage { return .error(errorMessage) }
+        return isSyncing ? .syncing : .noNews
+    }
+}
+
 struct ArticleListView: View {
     @Environment(\.colorScheme) private var colorScheme
     var store: NewsreaderStore
@@ -321,13 +333,13 @@ struct ArticleListView: View {
 
     var body: some View {
         Group {
-            if store.isLoading && store.articles.isEmpty {
-                ProgressView("Loading articles")
+            if case let .error(message) = IOSArticleListEmptyState.resolve(isSyncing: store.isSyncing, errorMessage: store.errorMessage, hasArticles: !store.articles.isEmpty) {
+                ContentUnavailableView("Unable to Load Articles", systemImage: "exclamationmark.triangle", description: Text(message))
+            } else if case .syncing = IOSArticleListEmptyState.resolve(isSyncing: store.isSyncing, errorMessage: store.errorMessage, hasArticles: !store.articles.isEmpty) {
+                ProgressView("News syncing…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let errorMessage = store.errorMessage, store.articles.isEmpty {
-                ContentUnavailableView("Unable to Load Articles", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
-            } else if store.articles.isEmpty {
-                ContentUnavailableView("No Articles", systemImage: "newspaper")
+            } else if case .noNews = IOSArticleListEmptyState.resolve(isSyncing: store.isSyncing, errorMessage: store.errorMessage, hasArticles: !store.articles.isEmpty) {
+                ContentUnavailableView("No News", systemImage: "newspaper")
             } else {
                     GeometryReader { proxy in
                         let horizontalInset: CGFloat = proxy.size.width > 700 ? 28 : 16

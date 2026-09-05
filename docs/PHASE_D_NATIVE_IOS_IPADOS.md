@@ -326,6 +326,16 @@ design; Light Mode may retain subtle native background differentiation for
 structured UI, while sheets, menus, popovers, and controls retain system
 elevation.
 
+The Newsreader navigation scope title is stable and never embeds the live
+article count. The current-scope count remains separately visible in Newsreader
+chrome, including both expanded and collapsed native navigation-bar states.
+On the iOS 18 deployment target, the compact numeric toolbar presentation is
+used in both states; its expanded descriptive wording is also exposed through
+the native accessibility label because `navigationSubtitle` is not available.
+Sync activity is communicated by the normal Newsreader UI; an empty scope shows
+`News syncing…` while Sync is active and `No News` after it completes, without
+an additional custom splash screen.
+
 #### D4.4 — Real-Device Validation & Polish
 
 Perform combined real-device D2-D4 validation and polish on representative

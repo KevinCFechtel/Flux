@@ -110,6 +110,7 @@ private struct ArticleReadResult {
     private(set) var feedCounts: [Int64: UInt64] = [:]
     private(set) var feedIcons: [IOSFeedIconKey: Data] = [:]
     private(set) var isLoading = false
+    private(set) var isSyncing = false
     private(set) var errorMessage: String?
     private(set) var pendingNewByFeed: [Int64: Int] = [:]
     private(set) var hasPendingNewData = false
@@ -196,6 +197,7 @@ private struct ArticleReadResult {
         feedCounts = [:]
         feedIcons = [:]
         isLoading = false
+        isSyncing = false
         resetPresentationState()
     }
 
@@ -294,8 +296,8 @@ private struct ArticleReadResult {
     }
 
     func syncManually() async {
-        guard let core, !isLoading else { return }
-        isLoading = true
+        guard let core, !isSyncing else { return }
+        isSyncing = true
         errorMessage = nil
 
         let result = await Task.detached { Result { try core.sync(reason: .manual) } }.value
@@ -304,7 +306,7 @@ private struct ArticleReadResult {
             handleSyncCompleted(metadata)
         case let .failure(error):
             errorMessage = error.localizedDescription
-            isLoading = false
+            isSyncing = false
         }
     }
 
@@ -637,7 +639,7 @@ private struct ArticleReadResult {
     }
 
     fileprivate func handleSyncCompleted(_ metadata: SyncCompleted) {
-        isLoading = false
+        isSyncing = false
         if metadata.reason == .background || metadata.reason == .periodic {
             pending.accumulate(metadata.newArticlesByFeed.map { (feedID: $0.feedId, count: $0.count) })
             publishPending()
@@ -774,6 +776,8 @@ private struct ArticleReadResult {
     }
     @MainActor
     func completeSyncForTesting(_ metadata: SyncCompleted) { handleSyncCompleted(metadata) }
+    @MainActor
+    func setSyncingForTesting(_ value: Bool) { isSyncing = value }
     @MainActor
     var meaningfullyInteractedForTesting: Bool { hasMeaningfullyInteracted }
     @MainActor

@@ -106,22 +106,22 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleNavigationPresentation.identity(for: 2), 2)
     }
 
-    func testArticleListTitleUsesAllNewsSelectionCount() {
-        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .all, catalog: NavigationCatalog(categories: [], feeds: []), count: 123), "All News (123)")
+    func testArticleListTitleDoesNotContainSelectionCount() {
+        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .all, catalog: NavigationCatalog(categories: [], feeds: [])), "All News")
     }
 
     func testArticleListTitleUsesCategorySelectionCount() {
         let catalog = NavigationCatalog(categories: [Category(id: 1, title: "Technology")], feeds: [])
-        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .category(1), catalog: catalog, count: 31), "Technology (31)")
+        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .category(1), catalog: catalog), "Technology")
     }
 
     func testArticleListTitleUsesFeedSelectionCount() {
         let catalog = NavigationCatalog(categories: [], feeds: [Feed(id: 10, categoryId: 1, title: "Ars Technica")])
-        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .feed(10), catalog: catalog, count: 12), "Ars Technica (12)")
+        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .feed(10), catalog: catalog), "Ars Technica")
     }
 
     func testArticleListTitleUsesStarredSelectionCount() {
-        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .starred, catalog: NavigationCatalog(categories: [], feeds: []), count: 8), "Starred (8)")
+        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .starred, catalog: NavigationCatalog(categories: [], feeds: [])), "Starred")
     }
 
     @MainActor
@@ -129,10 +129,41 @@ final class NewsreaderPresentationTests: XCTestCase {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.scope = .all
         store.setSelectionTotalForTesting(4)
-        XCTAssertEqual(ArticleListTitlePresentation.title(scope: store.scope, catalog: store.catalog, count: store.selectionTotal), "All News (4)")
+        XCTAssertEqual(ArticleListCounterPresentation.compactCount(store.selectionTotal), "4")
 
         store.setSelectionTotalForTesting(3)
-        XCTAssertEqual(ArticleListTitlePresentation.title(scope: store.scope, catalog: store.catalog, count: store.selectionTotal), "All News (3)")
+        XCTAssertEqual(ArticleListCounterPresentation.compactCount(store.selectionTotal), "3")
+    }
+
+    func testArticleListCounterUsesCurrentScopeAndFilterSemantics() {
+        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: true, count: 117), "117 unread")
+        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: false, count: 842), "842 articles")
+        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .starred, unreadOnly: true, count: 8), "8 articles")
+        XCTAssertEqual(ArticleListCounterPresentation.compactCount(1000), "1000")
+    }
+
+    func testEmptyStatePresentationUsesSyncingAndNoNews() {
+        XCTAssertEqual(IOSArticleListEmptyState.resolve(isSyncing: true, errorMessage: nil, hasArticles: false), .syncing)
+        XCTAssertEqual(IOSArticleListEmptyState.resolve(isSyncing: false, errorMessage: nil, hasArticles: false), .noNews)
+        XCTAssertEqual(IOSArticleListEmptyState.resolve(isSyncing: true, errorMessage: "Offline", hasArticles: false), .error("Offline"))
+        XCTAssertNil(IOSArticleListEmptyState.resolve(isSyncing: true, errorMessage: nil, hasArticles: true))
+    }
+
+    func testSyncButtonPresentationUsesProgressOnlyForSync() {
+        XCTAssertFalse(IOSSyncButtonPresentation.showsProgress(isSyncing: false))
+        XCTAssertTrue(IOSSyncButtonPresentation.showsProgress(isSyncing: true))
+        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(isSyncing: false), "Ready")
+        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(isSyncing: true), "Syncing")
+    }
+
+    @MainActor
+    func testEmptyStatePresentationUsesSyncLifecycle() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        XCTAssertFalse(store.isSyncing)
+        store.setSyncingForTesting(true)
+        XCTAssertTrue(store.isSyncing)
+        store.setSyncingForTesting(false)
+        XCTAssertFalse(store.isSyncing)
     }
 
     @MainActor
