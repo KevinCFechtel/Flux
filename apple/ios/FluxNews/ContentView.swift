@@ -17,6 +17,73 @@ private struct IOSSharePayload: Identifiable {
     let id = UUID()
 }
 
+enum IOSBottomAction: Equatable {
+    case sync
+    case filterAndSort
+    case search
+    case listeningList
+    case markAllRead
+    case markAllReadAndNext
+    case settings
+    case more
+
+    static let defaultActions: [Self] = [.sync, .filterAndSort, .more]
+}
+
+enum IOSMoreAction: Equatable {
+    case markAllRead
+    case markAllReadAndNext
+    case settings
+
+    static func actions(for scope: BrowserScope, hasNextScope: Bool) -> [Self] {
+        let supportsMarkRead: Bool = switch scope {
+        case .all, .category, .feed: true
+        case .starred, .search, .listeningList: false
+        }
+        guard supportsMarkRead else { return [.settings] }
+        let canAdvance = hasNextScope && {
+            switch scope {
+            case .category, .feed: true
+            case .all, .starred, .search, .listeningList: false
+            }
+        }()
+        return canAdvance ? [.markAllRead, .markAllReadAndNext, .settings] : [.markAllRead, .settings]
+    }
+}
+
+enum IOSScopeNavigation {
+    static func nextScope(
+        after scope: BrowserScope,
+        catalog: NavigationCatalog,
+        hidingEmpty: Bool,
+        counts: [Int64: UInt64]
+    ) -> BrowserScope? {
+        let groups = NavigationVisibility.groups(
+            categories: catalog.categories.map { .init(id: $0.id, title: $0.title) },
+            feeds: catalog.feeds.map { .init(id: $0.id, categoryID: $0.categoryId) },
+            hidingEmpty: hidingEmpty,
+            counts: counts
+        )
+        switch scope {
+        case let .feed(feedID):
+            let feeds = groups.flatMap(\.feeds)
+            guard let index = feeds.firstIndex(where: { $0.id == feedID }), feeds.indices.contains(feeds.index(after: index)) else { return nil }
+            return .feed(feeds[feeds.index(after: index)].id)
+        case let .category(categoryID):
+            let categories = groups.compactMap(\.categoryID)
+            guard let index = categories.firstIndex(of: categoryID), categories.indices.contains(categories.index(after: index)) else { return nil }
+            return .category(categories[categories.index(after: index)])
+        case .all, .starred, .search, .listeningList:
+            return nil
+        }
+    }
+}
+
+private enum IOSMarkReadWorkflow: Equatable {
+    case read
+    case readAndNext
+}
+
 enum NewsNavigationLayout {
     static func usesSplitView(for idiom: UIUserInterfaceIdiom) -> Bool {
         idiom == .pad
@@ -55,6 +122,7 @@ struct ContentView: View {
     @State private var actionConfirmation: String?
     @State private var actionError: String?
     @State private var markReadConfirmationPresented = false
+    @State private var markReadWorkflow: IOSMarkReadWorkflow = .read
 
     private var usesSplitNavigation: Bool {
         NewsNavigationLayout.usesSplitView(for: UIDevice.current.userInterfaceIdiom)
@@ -88,8 +156,8 @@ struct ContentView: View {
         .alert("Article Action", isPresented: Binding(get: { actionConfirmation != nil }, set: { if !$0 { actionConfirmation = nil } })) {
             Button("OK", role: .cancel) { actionConfirmation = nil }
         } message: { Text(actionConfirmation ?? "") }
-        .confirmationDialog(scopeMarkReadTitle, isPresented: $markReadConfirmationPresented, titleVisibility: .visible) {
-            Button(scopeMarkReadTitle, role: .destructive) { newsreaderStore.markCurrentScopeAsRead() }
+        .confirmationDialog(markReadDialogTitle, isPresented: $markReadConfirmationPresented, titleVisibility: .visible) {
+            Button(markReadDialogTitle, role: .destructive) { performMarkReadWorkflow() }
         } message: { Text("Marks all unread articles in this scope as read.") }
         .task(id: bootstrapper.coreRevision) {
             if let core = newsreaderStore.core {
@@ -163,20 +231,30 @@ struct ContentView: View {
                                 filterMenuLabel("Oldest First", selected: !newsreaderStore.newestFirst)
                             }
                         }
-                        if scopeSupportsMarkRead {
-                            Section {
-                                Button(scopeMarkReadTitle, role: .destructive) { markReadConfirmationPresented = true }
-                            }
-                        }
                     } label: {
                         Label("Filter and Sort", systemImage: "line.3.horizontal.decrease.circle")
                     }
                     .accessibilityIdentifier("articleList.filterSort")
 
-                    Button { settingsPresented = true } label: {
-                        Label("Settings", systemImage: "gearshape")
+                    Menu {
+                        ForEach(IOSMoreAction.actions(for: newsreaderStore.scope, hasNextScope: nextScope != nil), id: \.self) { action in
+                            switch action {
+                            case .markAllRead:
+                                Button("Mark All as Read", role: .destructive) { presentMarkReadConfirmation(.read) }
+                            case .markAllReadAndNext:
+                                Button("Mark All as Read & Next", role: .destructive) { presentMarkReadConfirmation(.readAndNext) }
+                            case .settings:
+                                Divider()
+                                Button { settingsPresented = true } label: {
+                                    Label("Settings", systemImage: "gearshape")
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("More", systemImage: "ellipsis.circle")
                     }
-                    .accessibilityIdentifier("articleList.settings")
+                    .accessibilityLabel("More")
+                    .accessibilityIdentifier("articleList.more")
                 }
             }
             .sheet(isPresented: $settingsPresented) { SettingsView(store: newsreaderStore, bootstrapper: bootstrapper, onDiagnostics: { diagnosticsPresented = true }) }
@@ -374,19 +452,29 @@ struct ContentView: View {
         else { Text(title) }
     }
 
-    private var scopeSupportsMarkRead: Bool {
-        switch newsreaderStore.scope {
-        case .all, .category, .feed: true
-        case .starred, .search, .listeningList: false
-        }
+    private var markReadDialogTitle: String {
+        markReadWorkflow == .readAndNext ? "Mark All as Read & Next" : "Mark All as Read"
     }
 
-    private var scopeMarkReadTitle: String {
-        switch newsreaderStore.scope {
-        case .all: "Mark All as Read"
-        case .category: "Mark Category as Read"
-        case .feed: "Mark Feed as Read"
-        case .starred, .search, .listeningList: "Mark as Read"
+    private var nextScope: BrowserScope? {
+        IOSScopeNavigation.nextScope(
+            after: newsreaderStore.scope,
+            catalog: newsreaderStore.catalog,
+            hidingEmpty: newsreaderStore.hideEmptyNavigationEntries,
+            counts: newsreaderStore.feedCounts
+        )
+    }
+
+    private func presentMarkReadConfirmation(_ workflow: IOSMarkReadWorkflow) {
+        markReadWorkflow = workflow
+        markReadConfirmationPresented = true
+    }
+
+    private func performMarkReadWorkflow() {
+        let target = markReadWorkflow == .readAndNext ? nextScope : nil
+        newsreaderStore.markCurrentScopeAsRead { succeeded in
+            guard succeeded, let target else { return }
+            newsreaderStore.select(target)
         }
     }
 }

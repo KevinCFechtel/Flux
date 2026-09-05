@@ -537,12 +537,24 @@ final class NewsreaderD23MutationTests: XCTestCase {
             trailing: IOSArticleSwipeSideConfiguration(actions: [.unstar])
         )
 
-        XCTAssertEqual(IOSArticleSwipeInteraction.visibleOffset(effectiveOffset: 300, configuration: configuration, swipeActionWidth: 76), 152)
+        XCTAssertEqual(IOSArticleSwipeInteraction.visibleOffset(effectiveOffset: 300, configuration: configuration, swipeActionWidth: 190), 300)
         XCTAssertEqual(IOSArticleSwipeInteraction.state(effectiveOffset: 299, configuration: configuration, fullSwipeDistance: 300), .dragging(.right))
         XCTAssertEqual(IOSArticleSwipeInteraction.state(effectiveOffset: 300, configuration: configuration, fullSwipeDistance: 300), .fullSwipeArmed(.right))
         XCTAssertEqual(IOSArticleSwipeInteraction.state(effectiveOffset: 250, configuration: configuration, fullSwipeDistance: 300), .dragging(.right))
         XCTAssertEqual(IOSArticleSwipeInteraction.endState(effectiveOffset: 250, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300), .revealed(.right))
         XCTAssertEqual(IOSArticleSwipeInteraction.endState(effectiveOffset: 300, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300), .fullSwipe(.read))
+    }
+
+    func testFullSwipeDistanceIsActionBasedAndIndependentOfArticleWidth() {
+        XCTAssertEqual(IOSArticleSwipeInteraction.fullSwipeDistance(actionWidth: 76), 190)
+        XCTAssertLessThan(IOSArticleSwipeInteraction.fullSwipeDistance(actionWidth: 76), 390 * 0.85)
+    }
+
+    func testArmedFeedbackTriggersOnlyWhenEnteringArmedState() {
+        XCTAssertTrue(IOSArticleSwipeInteraction.shouldTriggerArmedFeedback(from: .dragging(.right), to: .fullSwipeArmed(.right)))
+        XCTAssertFalse(IOSArticleSwipeInteraction.shouldTriggerArmedFeedback(from: .fullSwipeArmed(.right), to: .fullSwipeArmed(.right)))
+        XCTAssertFalse(IOSArticleSwipeInteraction.shouldTriggerArmedFeedback(from: .fullSwipeArmed(.right), to: .dragging(.right)))
+        XCTAssertTrue(IOSArticleSwipeInteraction.shouldTriggerArmedFeedback(from: .dragging(.right), to: .fullSwipeArmed(.right)))
     }
 
     func testSwipeActionsRouteToExistingArticleMutationsAndExposeAccessibilityLabels() {

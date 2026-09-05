@@ -280,6 +280,16 @@ enum IOSArticleSwipeState: Equatable {
 }
 
 enum IOSArticleSwipeInteraction {
+    static func fullSwipeDistance(actionWidth: CGFloat) -> CGFloat {
+        actionWidth * 2.5
+    }
+
+    static func shouldTriggerArmedFeedback(from oldState: IOSArticleSwipeState, to newState: IOSArticleSwipeState) -> Bool {
+        guard oldState != newState else { return false }
+        if case .fullSwipeArmed = newState { return true }
+        return false
+    }
+
     static func effectiveOffset(startOffset: CGFloat, rawTranslation: CGFloat) -> CGFloat {
         startOffset + rawTranslation
     }
@@ -334,7 +344,9 @@ enum IOSArticleSwipeInteraction {
 private struct IOSHorizontalArticleSwipeGesture: UIGestureRecognizerRepresentable {
     @Binding var offset: CGFloat
     let canBegin: (IOSSwipeDirection, CGFloat) -> Bool
+    let state: (CGFloat) -> IOSArticleSwipeState
     let visibleOffset: (CGFloat) -> CGFloat
+    let onStateChanged: (IOSArticleSwipeState) -> Void
     let onEnded: (CGFloat) -> Void
 
     func makeCoordinator(converter: Self.CoordinateSpaceConverter) -> Coordinator { Coordinator(self) }
@@ -374,14 +386,17 @@ private struct IOSHorizontalArticleSwipeGesture: UIGestureRecognizerRepresentabl
             switch recognizer.state {
             case .began:
                 startOffset = parent.offset
+                parent.onStateChanged(.closed)
             case .changed:
                 let effectiveOffset = IOSArticleSwipeInteraction.effectiveOffset(startOffset: startOffset, rawTranslation: translation.x)
+                parent.onStateChanged(parent.state(effectiveOffset))
                 parent.offset = parent.visibleOffset(effectiveOffset)
             case .ended:
                 parent.onEnded(IOSArticleSwipeInteraction.effectiveOffset(startOffset: startOffset, rawTranslation: translation.x))
                 reset()
             case .cancelled, .failed:
                 parent.offset = startOffset
+                parent.onStateChanged(.closed)
                 reset()
             default:
                 break
@@ -575,6 +590,7 @@ struct ArticlePresentationView: View, Equatable {
     let onSetRead: (ArticleSummary, Bool) -> Void
     let onSetStarred: (ArticleSummary, Bool) -> Void
     @State private var horizontalOffset: CGFloat = 0
+    @State private var swipeState: IOSArticleSwipeState = .closed
 
     private let swipeActionWidth: CGFloat = 76
     private let swipeRevealThreshold: CGFloat = 38
@@ -608,7 +624,9 @@ struct ArticlePresentationView: View, Equatable {
                 IOSHorizontalArticleSwipeGesture(
                     offset: $horizontalOffset,
                     canBegin: canBeginSwipe,
+                    state: swipeStateForOffset,
                     visibleOffset: visibleSwipeOffset,
+                    onStateChanged: updateSwipeState,
                     onEnded: finishSwipe
                 )
             )
@@ -647,7 +665,7 @@ struct ArticlePresentationView: View, Equatable {
     }
 
     private var fullSwipeDistance: CGFloat {
-        max(articleWidth * 0.85, swipeActionWidth * 2.5)
+        IOSArticleSwipeInteraction.fullSwipeDistance(actionWidth: swipeActionWidth)
     }
 
     private func swipeSide(for direction: IOSSwipeDirection) -> IOSArticleSwipeSideConfiguration {
@@ -662,8 +680,25 @@ struct ArticlePresentationView: View, Equatable {
         IOSArticleSwipeInteraction.visibleOffset(
             effectiveOffset: effectiveOffset,
             configuration: swipeConfiguration,
-            swipeActionWidth: swipeActionWidth
+            swipeActionWidth: fullSwipeDistance
         )
+    }
+
+    private func swipeStateForOffset(_ effectiveOffset: CGFloat) -> IOSArticleSwipeState {
+        IOSArticleSwipeInteraction.state(
+            effectiveOffset: effectiveOffset,
+            configuration: swipeConfiguration,
+            fullSwipeDistance: fullSwipeDistance
+        )
+    }
+
+    private func updateSwipeState(_ newState: IOSArticleSwipeState) {
+        if IOSArticleSwipeInteraction.shouldTriggerArmedFeedback(from: swipeState, to: newState) {
+            let feedback = UIImpactFeedbackGenerator(style: .medium)
+            feedback.prepare()
+            feedback.impactOccurred()
+        }
+        swipeState = newState
     }
 
     private func finishSwipe(effectiveOffset: CGFloat) {
@@ -685,15 +720,17 @@ struct ArticlePresentationView: View, Equatable {
 
     private var swipeActionBackground: some View {
         HStack(spacing: 0) {
-            swipeActionButtons(swipeConfiguration.leading.actions)
+            swipeActionButtons(swipeConfiguration.leading.actions, direction: .right)
             Spacer(minLength: 0)
-            swipeActionButtons(Array(swipeConfiguration.trailing.actions.reversed()))
+            swipeActionButtons(Array(swipeConfiguration.trailing.actions.reversed()), direction: .left)
         }
     }
 
     @ViewBuilder
-    private func swipeActionButtons(_ actions: [IOSArticleSwipeAction]) -> some View {
-        ForEach(actions, id: \.self) { action in
+    private func swipeActionButtons(_ actions: [IOSArticleSwipeAction], direction: IOSSwipeDirection) -> some View {
+        ForEach(Array(actions.enumerated()), id: \.element) { index, action in
+            let isOuterAction = isOuterAction(index: index, actionCount: actions.count, direction: direction)
+            let buttonWidth = actionWidth(actionCount: actions.count, isOuterAction: isOuterAction)
             Button {
                 horizontalOffset = 0
                 performSwipeAction(action)
@@ -703,12 +740,30 @@ struct ArticlePresentationView: View, Equatable {
                     Text(action.accessibilityLabel)
                         .font(.caption2)
                 }
-                .frame(minWidth: swipeActionWidth, maxWidth: swipeActionWidth, maxHeight: .infinity)
+                .frame(minWidth: buttonWidth, maxWidth: buttonWidth, maxHeight: .infinity)
                 .foregroundStyle(.white)
                 .background(action.tint)
+                .scaleEffect(isOuterAction && isSwipeArmed(direction) ? 1.12 : 1)
+                .animation(.easeOut(duration: 0.12), value: isSwipeArmed(direction))
             }
             .accessibilityLabel(action.accessibilityLabel)
         }
+    }
+
+    private func isOuterAction(index: Int, actionCount: Int, direction: IOSSwipeDirection) -> Bool {
+        if direction == .right { return index == actionCount - 1 }
+        return index == 0
+    }
+
+    private func actionWidth(actionCount: Int, isOuterAction: Bool) -> CGFloat {
+        guard isOuterAction else { return swipeActionWidth }
+        let progress = max(swipeActionWidth, abs(horizontalOffset))
+        let innerWidth = swipeActionWidth * CGFloat(max(0, actionCount - 1))
+        return max(swipeActionWidth, progress - innerWidth)
+    }
+
+    private func isSwipeArmed(_ direction: IOSSwipeDirection) -> Bool {
+        swipeState == .fullSwipeArmed(direction)
     }
 
     private func performSwipeAction(_ action: IOSArticleSwipeAction) {

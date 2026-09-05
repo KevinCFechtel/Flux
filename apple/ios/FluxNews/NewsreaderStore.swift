@@ -224,17 +224,17 @@ final class NewsreaderStore: ObservableObject {
     func setRead(_ article: ArticleSummary, read: Bool) { setRead(articleIDs: [article.id], read: read) }
     func setStarred(_ article: ArticleSummary, starred: Bool) { setStarred(articleIDs: [article.id], starred: starred) }
 
-    func markCurrentScopeAsRead() {
+    func markCurrentScopeAsRead(completion: @escaping (Bool) -> Void = { _ in }) {
         guard case .all = scope else {
             guard case .category = scope else {
                 guard case .feed = scope else { return }
-                markCurrentScopeArticlesRead()
+                markCurrentScopeArticlesRead(completion: completion)
                 return
             }
-            markCurrentScopeArticlesRead()
+            markCurrentScopeArticlesRead(completion: completion)
             return
         }
-        markCurrentScopeArticlesRead()
+        markCurrentScopeArticlesRead(completion: completion)
     }
 
     // Read-on-open stays on the existing Core mutation path; only the original URL is returned.
@@ -564,8 +564,8 @@ final class NewsreaderStore: ObservableObject {
 
     private var unconfiguredError: NSError { NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"]) }
 
-    private func markCurrentScopeArticlesRead() {
-        guard let core else { return }
+    private func markCurrentScopeArticlesRead(completion: @escaping (Bool) -> Void) {
+        guard let core else { completion(false); return }
         let scope = scope
         let query = ArticleQuery(scope: query(scope: scope).scope, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil)
         Task { [weak self, core] in
@@ -573,7 +573,7 @@ final class NewsreaderStore: ObservableObject {
             guard let self else { return }
             switch result {
             case let .success(ids):
-                guard !ids.isEmpty else { return }
+                guard !ids.isEmpty else { completion(true); return }
                 let mutation = await Task.detached { Result { try core.setReadStateBulk(articleIds: ids, read: true) } }.value
                 switch mutation {
                 case .success:
@@ -581,9 +581,13 @@ final class NewsreaderStore: ObservableObject {
                     self.loadNavigationAndCounts()
                     self.loadVisibleArticles(resetSnapshot: true)
                     self.requestScrollReset()
+                    completion(true)
                 case let .failure(error): self.errorMessage = error.localizedDescription
+                    completion(false)
                 }
-            case let .failure(error): self.errorMessage = error.localizedDescription
+            case let .failure(error):
+                self.errorMessage = error.localizedDescription
+                completion(false)
             }
         }
     }

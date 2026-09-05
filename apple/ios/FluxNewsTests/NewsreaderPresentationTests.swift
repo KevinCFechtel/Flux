@@ -2,6 +2,47 @@ import XCTest
 @testable import FluxNews
 
 final class NewsreaderPresentationTests: XCTestCase {
+    func testDefaultBottomActionsAreSyncFilterAndMore() {
+        XCTAssertEqual(IOSBottomAction.defaultActions, [.sync, .filterAndSort, .more])
+        XCTAssertFalse(IOSBottomAction.defaultActions.contains(.settings))
+    }
+
+    func testMoreActionsKeepSettingsAndOnlyOfferNextForSupportedScopes() {
+        XCTAssertEqual(IOSMoreAction.actions(for: .feed(1), hasNextScope: true), [.markAllRead, .markAllReadAndNext, .settings])
+        XCTAssertEqual(IOSMoreAction.actions(for: .feed(1), hasNextScope: false), [.markAllRead, .settings])
+        XCTAssertEqual(IOSMoreAction.actions(for: .all, hasNextScope: true), [.markAllRead, .settings])
+        XCTAssertEqual(IOSMoreAction.actions(for: .starred, hasNextScope: true), [.settings])
+        XCTAssertEqual(IOSMoreAction.actions(for: .listeningList, hasNextScope: true), [.settings])
+    }
+
+    func testNextFeedUsesNavigationOrderAndDoesNotWrap() {
+        let catalog = NavigationCatalog(categories: [], feeds: [
+            .init(id: 10, categoryId: 1, title: "First"),
+            .init(id: 20, categoryId: 1, title: "Second")
+        ])
+        XCTAssertEqual(IOSScopeNavigation.nextScope(after: .feed(10), catalog: catalog, hidingEmpty: false, counts: [:]), .feed(20))
+        XCTAssertNil(IOSScopeNavigation.nextScope(after: .feed(20), catalog: catalog, hidingEmpty: false, counts: [:]))
+    }
+
+    func testNextCategoryUsesNavigationOrderAndDoesNotWrap() {
+        let catalog = NavigationCatalog(
+            categories: [.init(id: 1, title: "First"), .init(id: 2, title: "Second")],
+            feeds: [.init(id: 10, categoryId: 1, title: "Feed"), .init(id: 20, categoryId: 2, title: "Feed")]
+        )
+        XCTAssertEqual(IOSScopeNavigation.nextScope(after: .category(1), catalog: catalog, hidingEmpty: false, counts: [:]), .category(2))
+        XCTAssertNil(IOSScopeNavigation.nextScope(after: .category(2), catalog: catalog, hidingEmpty: false, counts: [:]))
+    }
+
+    func testNextScopeUsesVisibleNavigationProjectionAndNeverAppliesToGlobalScopes() {
+        let catalog = NavigationCatalog(
+            categories: [.init(id: 1, title: "First"), .init(id: 2, title: "Second"), .init(id: 3, title: "Third")],
+            feeds: [.init(id: 10, categoryId: 1, title: "Current"), .init(id: 20, categoryId: 2, title: "Empty"), .init(id: 30, categoryId: 3, title: "Visible")]
+        )
+        XCTAssertEqual(IOSScopeNavigation.nextScope(after: .feed(10), catalog: catalog, hidingEmpty: true, counts: [10: 1, 20: 0, 30: 1]), .feed(30))
+        XCTAssertNil(IOSScopeNavigation.nextScope(after: .all, catalog: catalog, hidingEmpty: false, counts: [:]))
+        XCTAssertNil(IOSScopeNavigation.nextScope(after: .starred, catalog: catalog, hidingEmpty: false, counts: [:]))
+    }
+
     func testNewsNavigationPresentationMatchesDeviceRoutes() {
         XCTAssertEqual(NewsNavigationPresentation.sidebar, .sidebar)
         XCTAssertEqual(NewsNavigationPresentation.sheet, .sheet)
