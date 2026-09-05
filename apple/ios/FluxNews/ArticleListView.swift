@@ -311,7 +311,7 @@ enum IOSArticleContextMenuPolicy {
 
 struct ArticleListView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @ObservedObject var store: NewsreaderStore
+    var store: NewsreaderStore
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
     @State private var scrolloverTracker = IOSScrolloverOrderTracker()

@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct FluxNewsApp: App {
     @StateObject private var bootstrapper = CoreBootstrapper()
-    @StateObject private var newsreaderStore = NewsreaderStore()
+    @State private var newsreaderStore = NewsreaderStore()
 
     var body: some Scene {
         WindowGroup {

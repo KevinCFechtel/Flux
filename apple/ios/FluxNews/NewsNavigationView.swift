@@ -46,7 +46,7 @@ struct NewsNavigationExpansionState: Equatable {
 
 struct NewsNavigationView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @ObservedObject var store: NewsreaderStore
+    var store: NewsreaderStore
     @Binding var iPhoneSheetPresented: Bool
     let presentation: NewsNavigationPresentation
     let onSearch: () -> Void

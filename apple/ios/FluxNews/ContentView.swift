@@ -124,7 +124,7 @@ struct IOSArticleNavigationHost<Content: View>: View {
 struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @ObservedObject var bootstrapper: CoreBootstrapper
-    @ObservedObject var newsreaderStore: NewsreaderStore
+    var newsreaderStore: NewsreaderStore
     @StateObject private var searchStore = IOSSearchStore()
     @State private var navigationPresented = false
     @State private var searchPresented = false

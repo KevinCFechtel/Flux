@@ -1,5 +1,6 @@
 import XCTest
 import ImageIO
+import Observation
 import UniformTypeIdentifiers
 @testable import FluxNews
 
@@ -100,6 +101,51 @@ final class NewsreaderPresentationTests: XCTestCase {
 
         store.setSelectionTotalForTesting(3)
         XCTAssertEqual(ArticleListTitlePresentation.title(scope: store.scope, catalog: store.catalog, count: store.selectionTotal), "All News (3)")
+    }
+
+    @MainActor
+    func testCountOnlyChangeDoesNotInvalidateArticleListDependencies() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        var articleListInvalidated = false
+
+        withObservationTracking {
+            _ = store.articles
+            _ = store.isLoading
+            _ = store.errorMessage
+            _ = store.articlePresentationMode
+            _ = store.articlePreviewLines
+            _ = store.feedIcons
+            _ = store.snapshotRevision
+            _ = store.scrollResetRevision
+            _ = store.markReadOnScrolloverEnabled
+            _ = store.scrolloverUndoIDs
+            _ = store.hasPendingNewData
+            _ = store.hasUnscopedNewDataSignal
+        } onChange: {
+            articleListInvalidated = true
+        }
+
+        store.setSelectionTotalForTesting(3)
+
+        XCTAssertFalse(articleListInvalidated)
+    }
+
+    @MainActor
+    func testArticleListDependenciesInvalidateForScrolloverReadStateChange() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([.init(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "", imageUrl: nil)])
+        var articleListInvalidated = false
+
+        withObservationTracking {
+            _ = store.articles
+        } onChange: {
+            articleListInvalidated = true
+        }
+
+        store.applyScrolloverMutationForTesting([1])
+
+        XCTAssertTrue(articleListInvalidated)
+        XCTAssertTrue(store.articles[0].isRead)
     }
 
     func testNewsNavigationSelectionMatchesOnlyTheActiveScope() {

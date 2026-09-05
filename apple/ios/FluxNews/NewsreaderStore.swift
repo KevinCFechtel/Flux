@@ -1,5 +1,5 @@
-import Combine
 import Foundation
+import Observation
 #if DEBUG
 import OSLog
 #endif
@@ -14,7 +14,7 @@ enum IOSFeedIconPresentation {
 }
 
 @MainActor
-final class NewsreaderStore: ObservableObject {
+@Observable final class NewsreaderStore {
 #if DEBUG
     private static let scrolloverDiagnosticLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "scrollover-diagnostic")
 #endif
@@ -30,34 +30,34 @@ final class NewsreaderStore: ObservableObject {
         static let clickOnNews = "FluxNews.clickOnNews"
     }
 
-    @Published private(set) var articles: [ArticleSummary] = []
-    @Published private(set) var catalog = NavigationCatalog(categories: [], feeds: [])
-    @Published private(set) var unreadTotal: UInt64 = 0
-    @Published private(set) var starredTotal: UInt64 = 0
-    @Published private(set) var selectionTotal: UInt64 = 0
-    @Published private(set) var categoryCounts: [Int64: UInt64] = [:]
-    @Published private(set) var feedCounts: [Int64: UInt64] = [:]
-    @Published private(set) var feedIcons: [IOSFeedIconKey: Data] = [:]
-    @Published private(set) var isLoading = false
-    @Published private(set) var errorMessage: String?
-    @Published private(set) var pendingNewByFeed: [Int64: Int] = [:]
-    @Published private(set) var hasPendingNewData = false
-    @Published private(set) var hasUnscopedNewDataSignal = false
-    @Published private(set) var snapshotRevision: UInt64 = 0
-    @Published private(set) var scrollResetRevision: UInt64 = 0
-    @Published var scope: BrowserScope = .all
-    @Published var unreadOnly = true
-    @Published var newestFirst = false
-    @Published var startupScope: StartupScopePreference
-    @Published var startupCategoryID: Int64?
-    @Published var startupFeedID: Int64?
-    @Published var hideEmptyNavigationEntries: Bool
-    @Published var removeArticlesWhenMarkedRead: Bool
-    @Published var markReadOnScrolloverEnabled: Bool
-    @Published var articlePresentationMode: ArticlePresentationMode
-    @Published var articlePreviewLines: ArticlePreviewLines
-    @Published var clickOnNews: ClickOnNews
-    @Published private(set) var scrolloverUndoIDs: [Int64] = []
+    private(set) var articles: [ArticleSummary] = []
+    private(set) var catalog = NavigationCatalog(categories: [], feeds: [])
+    private(set) var unreadTotal: UInt64 = 0
+    private(set) var starredTotal: UInt64 = 0
+    private(set) var selectionTotal: UInt64 = 0
+    private(set) var categoryCounts: [Int64: UInt64] = [:]
+    private(set) var feedCounts: [Int64: UInt64] = [:]
+    private(set) var feedIcons: [IOSFeedIconKey: Data] = [:]
+    private(set) var isLoading = false
+    private(set) var errorMessage: String?
+    private(set) var pendingNewByFeed: [Int64: Int] = [:]
+    private(set) var hasPendingNewData = false
+    private(set) var hasUnscopedNewDataSignal = false
+    private(set) var snapshotRevision: UInt64 = 0
+    private(set) var scrollResetRevision: UInt64 = 0
+    var scope: BrowserScope = .all
+    var unreadOnly = true
+    var newestFirst = false
+    var startupScope: StartupScopePreference
+    var startupCategoryID: Int64?
+    var startupFeedID: Int64?
+    var hideEmptyNavigationEntries: Bool
+    var removeArticlesWhenMarkedRead: Bool
+    var markReadOnScrolloverEnabled: Bool
+    var articlePresentationMode: ArticlePresentationMode
+    var articlePreviewLines: ArticlePreviewLines
+    var clickOnNews: ClickOnNews
+    private(set) var scrolloverUndoIDs: [Int64] = []
     var scrolloverUndoVisible: Bool { scrolloverUndoIDs.count >= 2 }
 
     private(set) var core: Flux?

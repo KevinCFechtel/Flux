@@ -34,7 +34,7 @@ enum IOSFeedCreationPolicy {
 
 struct IOSAddFeedView: View {
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject var store: NewsreaderStore
+    var store: NewsreaderStore
     @State private var url = ""
     @State private var categoryID: Int64?
     @State private var candidates: [DiscoveredSubscription] = []
@@ -128,7 +128,7 @@ struct IOSAddFeedView: View {
 
 struct IOSAddCategoryView: View {
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject var store: NewsreaderStore
+    var store: NewsreaderStore
     @State private var title = ""
     @State private var isWorking = false
     @State private var error: String?
@@ -163,7 +163,7 @@ struct IOSAddCategoryView: View {
 
 struct IOSFeedSettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject var store: NewsreaderStore
+    var store: NewsreaderStore
     let target: IOSFeedSettingsTarget
     @State private var preferences: FeedPreferences?
     @State private var error: String?

@@ -3,7 +3,7 @@ import SwiftUI
 struct SearchView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var store: IOSSearchStore
-    @ObservedObject var newsreaderStore: NewsreaderStore
+    var newsreaderStore: NewsreaderStore
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
     let onSetRead: (ArticleSummary, Bool) -> Void

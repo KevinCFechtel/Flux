@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ArticlesSettingsView: View {
-    @ObservedObject var store: NewsreaderStore
+    var store: NewsreaderStore
 
     var body: some View {
         Form {

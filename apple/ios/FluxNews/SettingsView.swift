@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject var store: NewsreaderStore
+    var store: NewsreaderStore
     @ObservedObject var bootstrapper: CoreBootstrapper
     let onDiagnostics: () -> Void
 
