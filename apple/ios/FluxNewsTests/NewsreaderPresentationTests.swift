@@ -142,11 +142,41 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleListCounterPresentation.compactCount(1000), "1000")
     }
 
+    @MainActor
+    func testArticleCountPreferenceDefaultsPersistsAndOnlyControlsCounterPresentation() {
+        let suiteName = "FluxNews.CounterSettings.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = NewsreaderStore(defaults: defaults)
+        XCTAssertTrue(store.showArticleCount)
+        XCTAssertTrue(ArticleListCounterPresentation.isVisible(showArticleCount: store.showArticleCount))
+
+        store.setShowArticleCount(false)
+        XCTAssertFalse(store.showArticleCount)
+        XCTAssertFalse(ArticleListCounterPresentation.isVisible(showArticleCount: store.showArticleCount))
+        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .all, catalog: store.catalog), "All News")
+        XCTAssertEqual(store.selectionTotal, 0)
+
+        let reloaded = NewsreaderStore(defaults: defaults)
+        XCTAssertFalse(reloaded.showArticleCount)
+    }
+
     func testEmptyStatePresentationUsesSyncingAndNoNews() {
-        XCTAssertEqual(IOSArticleListEmptyState.resolve(isSyncing: true, errorMessage: nil, hasArticles: false), .syncing)
-        XCTAssertEqual(IOSArticleListEmptyState.resolve(isSyncing: false, errorMessage: nil, hasArticles: false), .noNews)
-        XCTAssertEqual(IOSArticleListEmptyState.resolve(isSyncing: true, errorMessage: "Offline", hasArticles: false), .error("Offline"))
-        XCTAssertNil(IOSArticleListEmptyState.resolve(isSyncing: true, errorMessage: nil, hasArticles: true))
+        XCTAssertEqual(IOSArticleListEmptyState.resolve(isSyncing: true, isLoading: false, errorMessage: nil, hasArticles: false), .syncing)
+        XCTAssertEqual(IOSArticleListEmptyState.resolve(isSyncing: false, isLoading: true, errorMessage: nil, hasArticles: false), .loading)
+        XCTAssertEqual(IOSArticleListEmptyState.resolve(isSyncing: false, isLoading: false, errorMessage: nil, hasArticles: false), .noNews)
+        XCTAssertEqual(IOSArticleListEmptyState.resolve(isSyncing: true, isLoading: true, errorMessage: nil, hasArticles: false), .syncing)
+        XCTAssertEqual(IOSArticleListEmptyState.resolve(isSyncing: true, isLoading: true, errorMessage: "Offline", hasArticles: false), .error("Offline"))
+        XCTAssertNil(IOSArticleListEmptyState.resolve(isSyncing: true, isLoading: true, errorMessage: nil, hasArticles: true))
+    }
+
+    @MainActor
+    func testSyncReplacementRemainsLoadingUntilSnapshotResolves() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.completeSyncForTesting(SyncCompleted(reason: .manual, newArticles: 0, updatedArticles: 0, mutationsDelivered: 0, dataChanged: true, navigationChanged: false, newArticlesByFeed: [], systemNotificationCandidates: []))
+
+        XCTAssertEqual(IOSArticleListEmptyState.resolve(isSyncing: store.isSyncing, isLoading: store.isLoading, errorMessage: store.errorMessage, hasArticles: !store.articles.isEmpty), .loading)
     }
 
     func testSyncButtonPresentationUsesProgressOnlyForSync() {

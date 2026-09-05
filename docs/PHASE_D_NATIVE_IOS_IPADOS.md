@@ -335,6 +335,11 @@ the native accessibility label because `navigationSubtitle` is not available.
 Sync activity is communicated by the normal Newsreader UI; an empty scope shows
 `News syncing…` while Sync is active and `No News` after it completes, without
 an additional custom splash screen.
+`No News` is a confirmed-empty state, never an intermediate Sync or local
+snapshot-loading transition. Existing article content remains visible during
+snapshot refreshes without a generic loading overlay. The stable, count-free
+navigation scope title is unchanged; the separately presented current-scope
+count can be disabled through the native iOS article presentation settings.
 
 #### D4.4 — Real-Device Validation & Polish
 

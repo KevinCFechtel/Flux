@@ -98,6 +98,7 @@ private struct ArticleReadResult {
         static let scrollover = "FluxNews.iOS.markReadOnScrollover"
         static let presentationMode = "FluxNews.iOS.articlePresentationMode"
         static let previewLines = "FluxNews.iOS.articlePreviewLines"
+        static let showArticleCount = "FluxNews.iOS.showArticleCount"
         static let clickOnNews = "FluxNews.clickOnNews"
     }
 
@@ -128,6 +129,7 @@ private struct ArticleReadResult {
     var markReadOnScrolloverEnabled: Bool
     var articlePresentationMode: ArticlePresentationMode
     var articlePreviewLines: ArticlePreviewLines
+    var showArticleCount: Bool
     var clickOnNews: ClickOnNews
     private(set) var scrolloverUndoIDs: [Int64] = []
     // The tracker only needs to re-arm when an existing Undo group is cleared.
@@ -162,6 +164,7 @@ private struct ArticleReadResult {
         markReadOnScrolloverEnabled = defaults.object(forKey: Key.scrollover) as? Bool ?? true
         articlePresentationMode = defaults.string(forKey: Key.presentationMode).flatMap(ArticlePresentationMode.init(rawValue:)) ?? .visual
         articlePreviewLines = ArticlePreviewLines(rawValue: defaults.object(forKey: Key.previewLines) as? Int ?? 3) ?? .standard
+        showArticleCount = defaults.object(forKey: Key.showArticleCount) as? Bool ?? true
         clickOnNews = defaults.string(forKey: Key.clickOnNews).flatMap(ClickOnNews.init(rawValue:)) ?? .openLink
     }
 
@@ -340,6 +343,7 @@ private struct ArticleReadResult {
     func setMarkReadOnScrolloverEnabled(_ value: Bool) { markReadOnScrolloverEnabled = value; defaults.set(value, forKey: Key.scrollover) }
     func setArticlePresentationMode(_ value: ArticlePresentationMode) { articlePresentationMode = value; defaults.set(value.rawValue, forKey: Key.presentationMode); resetPresentationState() }
     func setArticlePreviewLines(_ value: ArticlePreviewLines) { articlePreviewLines = value; defaults.set(value.rawValue, forKey: Key.previewLines); resetPresentationState() }
+    func setShowArticleCount(_ value: Bool) { showArticleCount = value; defaults.set(value, forKey: Key.showArticleCount) }
     func setClickOnNews(_ value: ClickOnNews) { clickOnNews = value; defaults.set(value.rawValue, forKey: Key.clickOnNews) }
 
     func setRead(_ article: ArticleSummary, read: Bool) { setRead(articleIDs: [article.id], read: read) }
@@ -625,9 +629,9 @@ private struct ArticleReadResult {
 
     func markMeaningfulInteraction() { hasMeaningfullyInteracted = true }
 
-    private func resetPresentationState() {
+    private func resetPresentationState(preserveLoading: Bool = false) {
         readLifecycle.invalidateArticle()
-        isLoading = false
+        if !preserveLoading { isLoading = false }
         hasMeaningfullyInteracted = false
         snapshotRevision &+= 1
         // The structural snapshot change independently clears tracker emissions.
@@ -639,13 +643,14 @@ private struct ArticleReadResult {
     }
 
     fileprivate func handleSyncCompleted(_ metadata: SyncCompleted) {
-        isSyncing = false
         if metadata.reason == .background || metadata.reason == .periodic {
             pending.accumulate(metadata.newArticlesByFeed.map { (feedID: $0.feedId, count: $0.count) })
             publishPending()
             if metadata.dataChanged && metadata.newArticlesByFeed.isEmpty { hasUnscopedNewDataSignal = true }
         }
         let action = SnapshotRefreshPolicy.action(manual: metadata.reason == .manual, dataChanged: metadata.dataChanged, hasMeaningfullyInteracted: hasMeaningfullyInteracted)
+        if action == .replace { isLoading = true }
+        isSyncing = false
         if metadata.navigationChanged {
             loadNavigationAndCounts { [weak self] in self?.applySyncSnapshotRefresh(metadata, action: action) }
             return
@@ -668,7 +673,7 @@ private struct ArticleReadResult {
     }
 
     private func replaceSnapshot(shouldResetScroll: Bool = false) {
-        resetPresentationState()
+        resetPresentationState(preserveLoading: true)
         loadVisibleArticles(resetSnapshot: true)
         if shouldResetScroll { requestScrollReset() }
     }

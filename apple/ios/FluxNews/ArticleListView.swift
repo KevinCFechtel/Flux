@@ -311,13 +311,16 @@ enum IOSArticleContextMenuPolicy {
 
 enum IOSArticleListEmptyState: Equatable {
     case syncing
+    case loading
     case noNews
     case error(String)
 
-    static func resolve(isSyncing: Bool, errorMessage: String?, hasArticles: Bool) -> Self? {
+    static func resolve(isSyncing: Bool, isLoading: Bool, errorMessage: String?, hasArticles: Bool) -> Self? {
         guard !hasArticles else { return nil }
         if let errorMessage { return .error(errorMessage) }
-        return isSyncing ? .syncing : .noNews
+        if isSyncing { return .syncing }
+        if isLoading { return .loading }
+        return .noNews
     }
 }
 
@@ -332,13 +335,23 @@ struct ArticleListView: View {
     private let scrolloverVisibilityThreshold: CGFloat = 0.15
 
     var body: some View {
+        let emptyState = IOSArticleListEmptyState.resolve(
+            isSyncing: store.isSyncing,
+            isLoading: store.isLoading,
+            errorMessage: store.errorMessage,
+            hasArticles: !store.articles.isEmpty
+        )
+
         Group {
-            if case let .error(message) = IOSArticleListEmptyState.resolve(isSyncing: store.isSyncing, errorMessage: store.errorMessage, hasArticles: !store.articles.isEmpty) {
+            if case let .error(message) = emptyState {
                 ContentUnavailableView("Unable to Load Articles", systemImage: "exclamationmark.triangle", description: Text(message))
-            } else if case .syncing = IOSArticleListEmptyState.resolve(isSyncing: store.isSyncing, errorMessage: store.errorMessage, hasArticles: !store.articles.isEmpty) {
+            } else if case .syncing = emptyState {
                 ProgressView("News syncing…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if case .noNews = IOSArticleListEmptyState.resolve(isSyncing: store.isSyncing, errorMessage: store.errorMessage, hasArticles: !store.articles.isEmpty) {
+            } else if case .loading = emptyState {
+                ProgressView("Loading articles")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if case .noNews = emptyState {
                 ContentUnavailableView("No News", systemImage: "newspaper")
             } else {
                     GeometryReader { proxy in
@@ -391,17 +404,9 @@ struct ArticleListView: View {
                  }
         }
         .background(.background)
-        .overlay(alignment: .top) {
-            if store.isLoading && !store.articles.isEmpty {
-                ProgressView()
-                    .padding(8)
-                    .background(.regularMaterial, in: Capsule())
-                    .padding(.top, 8)
-            }
-        }
-          .overlay(alignment: .bottom) {
-             ArticleListBottomOverlay(store: store)
-          }
+        .overlay(alignment: .bottom) {
+              ArticleListBottomOverlay(store: store)
+           }
     }
 
 }

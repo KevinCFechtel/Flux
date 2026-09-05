@@ -536,6 +536,7 @@ enum ArticleListTitlePresentation {
 
 enum ArticleListCounterPresentation {
     static func compactCount(_ count: UInt64) -> String { String(count) }
+    static func isVisible(showArticleCount: Bool) -> Bool { showArticleCount }
 
     static func expandedLabel(scope: BrowserScope, unreadOnly: Bool, count: UInt64) -> String {
         if unreadOnly && scope != .starred { return "\(count) unread" }
@@ -556,10 +557,12 @@ private struct ArticleListNavigationChrome<Content: View>: View {
         content()
             .navigationTitle(ArticleListTitlePresentation.title(scope: store.scope, catalog: store.catalog))
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Text(ArticleListCounterPresentation.compactCount(store.selectionTotal))
-                        .foregroundStyle(.secondary)
-                        .accessibilityLabel(ArticleListCounterPresentation.expandedLabel(scope: store.scope, unreadOnly: store.unreadOnly, count: store.selectionTotal))
+                if ArticleListCounterPresentation.isVisible(showArticleCount: store.showArticleCount) {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Text(ArticleListCounterPresentation.compactCount(store.selectionTotal))
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel(ArticleListCounterPresentation.expandedLabel(scope: store.scope, unreadOnly: store.unreadOnly, count: store.selectionTotal))
+                    }
                 }
             }
     }
