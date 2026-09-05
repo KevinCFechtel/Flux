@@ -460,9 +460,21 @@ enum IOSArticleContextMenuPolicy {
 }
 
 enum IOSArticleListScrollReset {
+    static func shouldFinalize(pendingRevision: UInt64, currentRevision: UInt64) -> Bool {
+        pendingRevision == currentRevision
+    }
+
     static func topContentOffset(currentOffset: CGPoint, adjustedContentInsetTop: CGFloat) -> CGPoint {
         CGPoint(x: currentOffset.x, y: -adjustedContentInsetTop)
     }
+
+#if DEBUG
+    private static let diagnosticLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "article-list-reset")
+
+    static func diagnostic(_ message: String) {
+        diagnosticLog.debug("\(message)")
+    }
+#endif
 }
 
 private struct IOSArticleListScrollResetBridge: UIViewRepresentable {
@@ -481,19 +493,48 @@ private struct IOSArticleListScrollResetBridge: UIViewRepresentable {
         context.coordinator.lastRevision = revision
         guard revision > 0 else { return }
 
+#if DEBUG
+        Self.diagnosticLog.debug("article reset revision received: \(revision)")
+#endif
+
         // The marker is installed inside the existing SwiftUI ScrollView hierarchy.
         // One next-run-loop handoff lets UIKit finish attaching that hierarchy.
-        DispatchQueue.main.async { [weak view] in
-            guard let scrollView = view?.enclosingScrollView else { return }
+        let coordinator = context.coordinator
+        DispatchQueue.main.async { [weak view, weak coordinator] in
+            guard let coordinator,
+                  let currentRevision = coordinator.lastRevision,
+                  IOSArticleListScrollReset.shouldFinalize(pendingRevision: revision, currentRevision: currentRevision)
+            else {
+#if DEBUG
+                Self.diagnosticLog.debug("article reset finalization skipped as stale: \(revision)")
+#endif
+                return
+            }
+            guard let scrollView = view?.enclosingScrollView else {
+#if DEBUG
+                Self.diagnosticLog.debug("article reset UIScrollView unresolved: \(revision)")
+#endif
+                return
+            }
+            let before = scrollView.contentOffset
+            let adjustedTop = scrollView.adjustedContentInset.top
+            let target = IOSArticleListScrollReset.topContentOffset(currentOffset: before, adjustedContentInsetTop: adjustedTop)
+#if DEBUG
+            Self.diagnosticLog.debug("article reset finalizing revision=\(revision) before=\(String(describing: before)) adjustedTop=\(adjustedTop) targetY=\(target.y)")
+#endif
             scrollView.setContentOffset(
-                IOSArticleListScrollReset.topContentOffset(
-                    currentOffset: scrollView.contentOffset,
-                    adjustedContentInsetTop: scrollView.adjustedContentInset.top
-                ),
+                target,
                 animated: false
             )
+#if DEBUG
+            Self.diagnosticLog.debug("article reset final offset revision=\(revision) offset=\(String(describing: scrollView.contentOffset))")
+#endif
         }
     }
+
+#if DEBUG
+    private static let diagnosticLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "article-list-reset")
+#endif
 }
 
 private extension UIView {
@@ -515,6 +556,7 @@ struct ArticleListView: View {
     @State private var scrolloverAdapter = IOSScrolloverRuntimeAdapter()
     @State private var unreadArticleIDs = Set<Int64>()
     @State private var sensoryFeedbackTrigger = 0
+    @State private var scrollPosition = ScrollPosition(edge: .top)
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -546,7 +588,7 @@ struct ArticleListView: View {
                           }
                               .refreshable { await store.syncManually() }
                                .coordinateSpace(name: "ArticleScrollSpace")
-                          .background(IOSArticleListScrollResetBridge(revision: store.scrollResetRevision))
+                           .background(IOSArticleListScrollResetBridge(revision: store.scrollResetRevision).accessibilityHidden(true))
                           .scrollIndicators(.hidden)
                           .onAppear {
                               scrolloverAdapter.updateViewport(CGRect(origin: .zero, size: proxy.size))
@@ -576,7 +618,13 @@ struct ArticleListView: View {
           .onReceive(timer) { _ in scrolloverAdapter.observeIdle() }
                            .onChange(of: store.articles) { _, _ in refreshUnreadArticleIDs() }
                             .onChange(of: store.markReadOnScrolloverEnabled) { _, enabled in scrolloverAdapter.updateEnabled(enabled) }
-                            .onChange(of: store.snapshotRevision) { _, _ in scrolloverAdapter.reset() }
+                             .onChange(of: store.snapshotRevision) { _, _ in scrolloverAdapter.reset() }
+                             .onChange(of: store.scrollResetRevision) { _, revision in
+#if DEBUG
+                                 IOSArticleListScrollReset.diagnostic("ScrollPosition reset requested revision=\(revision)")
+#endif
+                                 scrollPosition.scrollTo(edge: .top)
+                             }
                             .onChange(of: store.scrolloverUndoVisible) { _, visible in
                                if visible { sensoryFeedbackTrigger += 1 }
                            }

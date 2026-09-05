@@ -72,6 +72,11 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testArticleListResetSkipsStaleUIKitFinalization() {
+        XCTAssertTrue(IOSArticleListScrollReset.shouldFinalize(pendingRevision: 4, currentRevision: 4))
+        XCTAssertFalse(IOSArticleListScrollReset.shouldFinalize(pendingRevision: 4, currentRevision: 5))
+    }
+
     func testArticleListTitleUsesAllNewsSelectionCount() {
         XCTAssertEqual(ArticleListTitlePresentation.title(scope: .all, catalog: NavigationCatalog(categories: [], feeds: []), count: 123), "All News (123)")
     }
