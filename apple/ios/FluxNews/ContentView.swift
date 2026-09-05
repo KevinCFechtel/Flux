@@ -123,6 +123,7 @@ struct IOSArticleNavigationHost<Content: View>: View {
 
 struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @ObservedObject var bootstrapper: CoreBootstrapper
     var newsreaderStore: NewsreaderStore
     @StateObject private var searchStore = IOSSearchStore()
@@ -242,14 +243,16 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .bottomBar) {
                     Button { Task { await newsreaderStore.syncManually() } } label: {
-                        ZStack {
-                            Label("Sync", systemImage: "arrow.clockwise")
-                                .opacity(IOSSyncButtonPresentation.showsProgress(isSyncing: newsreaderStore.isSyncing) ? 0 : 1)
-                            ProgressView()
-                                .frame(width: 20, height: 20)
-                                .opacity(IOSSyncButtonPresentation.showsProgress(isSyncing: newsreaderStore.isSyncing) ? 1 : 0)
-                        }
-                        .accessibilityHidden(true)
+                        Image(systemName: IOSSyncButtonPresentation.symbolName)
+                            .rotationEffect(.degrees(IOSSyncButtonPresentation.rotationDegrees(isSyncing: newsreaderStore.isSyncing, reduceMotion: accessibilityReduceMotion)))
+                            .animation(
+                                accessibilityReduceMotion
+                                    ? .default
+                                    : newsreaderStore.isSyncing
+                                        ? .linear(duration: 1).repeatForever(autoreverses: false)
+                                        : .default,
+                                value: newsreaderStore.isSyncing
+                            )
                     }
                     .disabled(newsreaderStore.isSyncing)
                     .accessibilityLabel("Sync news")
@@ -553,7 +556,12 @@ enum ArticleListCounterPresentation {
 }
 
 enum IOSSyncButtonPresentation {
-    static func showsProgress(isSyncing: Bool) -> Bool { isSyncing }
+    static let symbolName = "arrow.clockwise"
+
+    static func rotationDegrees(isSyncing: Bool, reduceMotion: Bool) -> Double {
+        isSyncing && !reduceMotion ? 360 : 0
+    }
+
     static func accessibilityValue(isSyncing: Bool) -> String { isSyncing ? "Syncing" : "Ready" }
 }
 

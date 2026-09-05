@@ -167,8 +167,10 @@ image slots and must not change article-card geometry. Recreating an article
 image view reuses an already-decoded memory-cache image synchronously so
 snapshot refreshes do not regress to a placeholder frame.
 
-The native bottom Sync control keeps stable toolbar geometry across idle,
-syncing, success, and failure states.
+The native bottom Sync control keeps the same `arrow.clockwise` symbol and
+stable toolbar geometry across idle, syncing, success, and failure states;
+active Sync is indicated by continuous symbol rotation, while Reduce Motion
+keeps the symbol stationary.
 
 Appearance follows the system Light/Dark mode. Primary content surfaces use the
 system content background, which is true black in Dark Mode. There is no manual

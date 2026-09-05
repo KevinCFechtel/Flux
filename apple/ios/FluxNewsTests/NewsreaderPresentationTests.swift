@@ -188,9 +188,12 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleListEmptyState.resolve(isSyncing: store.isSyncing, isLoading: store.isLoading, errorMessage: store.errorMessage, hasArticles: !store.articles.isEmpty), .loading)
     }
 
-    func testSyncButtonPresentationUsesStableSlotForEverySyncState() {
-        XCTAssertFalse(IOSSyncButtonPresentation.showsProgress(isSyncing: false))
-        XCTAssertTrue(IOSSyncButtonPresentation.showsProgress(isSyncing: true))
+    func testSyncButtonPresentationUsesTheSameRotatingSymbolForEverySyncState() {
+        XCTAssertEqual(IOSSyncButtonPresentation.symbolName, "arrow.clockwise")
+        XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(isSyncing: false, reduceMotion: false), 0)
+        XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(isSyncing: true, reduceMotion: false), 360)
+        XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(isSyncing: false, reduceMotion: true), 0)
+        XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(isSyncing: true, reduceMotion: true), 0)
         XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(isSyncing: false), "Ready")
         XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(isSyncing: true), "Syncing")
     }
