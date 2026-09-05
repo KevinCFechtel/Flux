@@ -46,6 +46,17 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertTrue(tracker.receiveVisibleIDs([4], unread: [9, 1, 2, 3, 4], enabled: true).isEmpty)
     }
 
+    func testReleasedScrolloverIDsCanBeEmittedAfterUndo() {
+        var tracker = IOSScrolloverOrderTracker()
+        tracker.updateSnapshot([1, 2, 3, 4])
+        _ = tracker.receiveVisibleIDs([1], unread: [1, 2, 3, 4], enabled: true)
+        tracker.setUserScrolling(true)
+        XCTAssertEqual(tracker.receiveVisibleIDs([4], unread: [1, 2, 3, 4], enabled: true), [1, 2, 3])
+        tracker.releaseEmittedIDs()
+        XCTAssertTrue(tracker.receiveVisibleIDs([1], unread: [1, 2, 3, 4], enabled: true).isEmpty)
+        XCTAssertEqual(tracker.receiveVisibleIDs([4], unread: [1, 2, 3, 4], enabled: true), [1, 2, 3])
+    }
+
     @MainActor
     func testReadMutationUpdatesVisibleState() {
         let store = NewsreaderStore(defaults: UserDefaults())
@@ -180,317 +191,6 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(store.articles.map(\.id), [2])
     }
 
-    // Obsolete geometry/exposure tracker coverage was replaced by the ordered-ID
-    // tracker tests above.
-    /*
-    func testScrolloverQualificationRequiresTheIdleDuration() {
-        var tracker = ScrolloverExposureTracker()
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        let visible: [Int64: CGRect] = [1: CGRect(x: 0, y: 0, width: 100, height: 100)]
-        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0)
-        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0.6)
-        XCTAssertTrue(tracker.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100)], viewport: viewport, unread: [1], now: 0.6, offsetDelta: 40, userInitiated: true).isEmpty)
-
-        tracker = ScrolloverExposureTracker()
-        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0)
-        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0.6)
-        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0.8)
-        XCTAssertEqual(tracker.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100)], viewport: viewport, unread: [1], now: 0.8, offsetDelta: 40, userInitiated: true), [1])
-    }
-
-    func testScrolloverQualificationResetsBelowVisibilityThreshold() {
-        var tracker = ScrolloverExposureTracker()
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        tracker.observe(frames: [1: CGRect(x: 0, y: 0, width: 100, height: 100)], viewport: viewport, unread: [1], now: 0)
-        tracker.observe(frames: [1: CGRect(x: 0, y: 80, width: 100, height: 100)], viewport: viewport, unread: [1], now: 0.6)
-        tracker.observe(frames: [1: CGRect(x: 0, y: 0, width: 100, height: 100)], viewport: viewport, unread: [1], now: 1.0)
-        XCTAssertTrue(tracker.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100)], viewport: viewport, unread: [1], now: 1.0, offsetDelta: 40, userInitiated: true).isEmpty)
-    }
-
-    func testRuntimeFrameProcessorProducesCandidateAfterIdleQualification() {
-        var tracker = ScrolloverExposureTracker()
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        let visible: [Int64: CGRect] = [1: CGRect(x: 0, y: 0, width: 100, height: 100)]
-        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0)
-        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 1)
-        var lastOffset: CGFloat = 0
-        let ids = IOSScrolloverFrameProcessor.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100)], viewport: viewport, unread: [1], canonicalPosition: 50, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: true, userInitiated: true)
-        XCTAssertEqual(ids, [1])
-    }
-
-    func testRuntimeFrameProcessorRejectsDisabledButChecksLargeJumpGeometry() {
-        var tracker = ScrolloverExposureTracker()
-        var lastOffset: CGFloat = 0
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        let visible: [Int64: CGRect] = [1: CGRect(x: 0, y: 0, width: 100, height: 100)]
-        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0)
-        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 1)
-
-        XCTAssertTrue(IOSScrolloverFrameProcessor.process(frames: [1: CGRect(x: 0, y: -20, width: 100, height: 100)], viewport: viewport, unread: [1], canonicalPosition: 20, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: false, userInitiated: true).isEmpty)
-        XCTAssertEqual(IOSScrolloverFrameProcessor.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100)], viewport: viewport, unread: [1], canonicalPosition: 100, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: true, userInitiated: true), [1])
-    }
-
-    func testScrolloverForwardReverseForwardPreservesQualificationAndEmitsOnce() {
-        var tracker = ScrolloverExposureTracker()
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        tracker.observe(frames: [1: CGRect(x: 0, y: 0, width: 100, height: 100)], viewport: viewport, unread: [1], now: 0)
-        tracker.observe(frames: [1: CGRect(x: 0, y: 0, width: 100, height: 100)], viewport: viewport, unread: [1], now: 0.7)
-
-        XCTAssertTrue(tracker.process(frames: [1: CGRect(x: 0, y: 30, width: 100, height: 100)], viewport: viewport, unread: [1], now: 0.8, offsetDelta: 30, userInitiated: true).isEmpty)
-        XCTAssertTrue(tracker.process(frames: [1: CGRect(x: 0, y: 10, width: 100, height: 100)], viewport: viewport, unread: [1], now: 0.9, offsetDelta: -20, userInitiated: true).isEmpty)
-        XCTAssertEqual(tracker.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100)], viewport: viewport, unread: [1], now: 1, offsetDelta: 20, userInitiated: true), [1])
-        XCTAssertTrue(tracker.process(frames: [1: CGRect(x: 0, y: -140, width: 100, height: 100)], viewport: viewport, unread: [1], now: 1.1, offsetDelta: 40, userInitiated: true).isEmpty)
-    }
-
-    func testScrolloverUnqualifiedFastCrossingDoesNotProcess() {
-        var tracker = ScrolloverExposureTracker()
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        tracker.observe(frames: [1: CGRect(x: 0, y: 0, width: 100, height: 100), 2: CGRect(x: 0, y: 100, width: 100, height: 100)], viewport: viewport, unread: [1, 2], now: 0)
-        tracker.observe(frames: [1: CGRect(x: 0, y: 0, width: 100, height: 100)], viewport: viewport, unread: [1, 2], now: 0.8)
-
-        XCTAssertEqual(tracker.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100), 2: CGRect(x: 0, y: -200, width: 100, height: 100)], viewport: viewport, unread: [1, 2], now: 0.9, offsetDelta: 200, userInitiated: true), [1])
-    }
-
-    @MainActor
-    func testRuntimeFrameProcessorRejectsBackwardCanonicalPosition() {
-        var tracker = ScrolloverExposureTracker()
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        let visible: [Int64: CGRect] = [1: CGRect(x: 0, y: 0, width: 100, height: 100)]
-        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 0)
-        tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 1)
-        var lastOffset: CGFloat = 80
-
-        XCTAssertTrue(IOSScrolloverFrameProcessor.process(frames: [1: CGRect(x: 0, y: 100, width: 100, height: 100)], viewport: viewport, unread: [1], canonicalPosition: 40, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: true, userInitiated: true).isEmpty)
-    }
-
-    @MainActor
-    func testRuntimeAdapterEmitsFirstQualifiedCrossingWithoutPrimingProcess() {
-        let adapter = IOSScrolloverRuntimeAdapter()
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        let unread: Set<Int64> = [1]
-        var candidates: [Int64] = []
-        adapter.onCandidate = { candidates = $0 }
-        adapter.updateViewport(viewport)
-        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
-        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
-        adapter.receiveContentOffsetY(100, unread: unread)
-        adapter.beginUserScroll()
-        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
-        adapter.receiveContentOffsetY(120, unread: unread)
-
-        XCTAssertEqual(candidates, [1])
-    }
-
-    @MainActor
-    func testRuntimeAdapterEmitsFirstQualifiedCrossingWhenOffsetArrivesBeforeFrames() {
-        let adapter = IOSScrolloverRuntimeAdapter()
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        let unread: Set<Int64> = [1]
-        var candidates: [Int64] = []
-        adapter.onCandidate = { candidates.append(contentsOf: $0) }
-        adapter.updateViewport(viewport)
-        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
-        adapter.receiveContentOffsetY(100, unread: unread)
-        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
-        adapter.beginUserScroll()
-
-        adapter.receiveContentOffsetY(120, unread: unread)
-        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
-        adapter.receiveContentOffsetY(140, unread: unread)
-
-        XCTAssertEqual(candidates, [1])
-    }
-
-    @MainActor
-    func testRuntimeAdapterEmitsFirstQualifiedCrossingWhenFramesArriveBeforeOffset() {
-        let adapter = IOSScrolloverRuntimeAdapter()
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        let unread: Set<Int64> = [1]
-        var candidates: [Int64] = []
-        adapter.onCandidate = { candidates.append(contentsOf: $0) }
-        adapter.updateViewport(viewport)
-        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
-        adapter.receiveContentOffsetY(100, unread: unread)
-        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
-        adapter.beginUserScroll()
-
-        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
-        adapter.receiveContentOffsetY(120, unread: unread)
-        adapter.receiveContentOffsetY(140, unread: unread)
-
-        XCTAssertEqual(candidates, [1])
-    }
-
-    @MainActor
-    func testRuntimeAdapterDoesNotProcessLayoutOnlyFrameChanges() {
-        let adapter = IOSScrolloverRuntimeAdapter()
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        let unread: Set<Int64> = [1]
-        var candidates: [Int64] = []
-        adapter.onCandidate = { candidates.append(contentsOf: $0) }
-        adapter.updateViewport(viewport)
-        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
-        adapter.receiveContentOffsetY(100, unread: unread)
-        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
-        adapter.beginUserScroll()
-
-        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
-
-        XCTAssertTrue(candidates.isEmpty)
-    }
-
-    @MainActor
-    func testRuntimeAdapterEmitsCandidateOnlyOnce() {
-        let adapter = IOSScrolloverRuntimeAdapter()
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        let unread: Set<Int64> = [1]
-        var candidates: [Int64] = []
-        adapter.onCandidate = { candidates.append(contentsOf: $0) }
-        adapter.updateViewport(viewport)
-        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
-        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
-        adapter.receiveContentOffsetY(100, unread: unread)
-        adapter.beginUserScroll()
-
-        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
-        adapter.receiveContentOffsetY(120, unread: unread)
-        adapter.receiveFrames([1: CGRect(x: 0, y: -140, width: 100, height: 100)], unread: unread)
-        adapter.receiveContentOffsetY(140, unread: unread)
-
-        XCTAssertEqual(candidates, [1])
-    }
-
-    @MainActor
-    func testRuntimeAdapterDoesNotReemitArticleAfterItBecomesReadWhilePending() {
-        let adapter = IOSScrolloverRuntimeAdapter()
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        let unread: Set<Int64> = [1]
-        var candidates: [Int64] = []
-        adapter.onCandidate = { candidates.append(contentsOf: $0) }
-        adapter.updateViewport(viewport)
-        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
-        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
-        adapter.receiveContentOffsetY(100, unread: unread)
-        adapter.beginUserScroll()
-        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
-        adapter.receiveContentOffsetY(120, unread: unread)
-
-        adapter.receiveFrames([1: CGRect(x: 0, y: -140, width: 100, height: 100)], unread: [])
-        adapter.receiveContentOffsetY(160, unread: [])
-
-        XCTAssertEqual(candidates, [1])
-    }
-
-    @MainActor
-    func testRuntimeAdapterRebasesAfterIdleGeometryChangeWithoutFalseCandidate() {
-        let adapter = IOSScrolloverRuntimeAdapter()
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        var candidates: [Int64] = []
-        adapter.onCandidate = { candidates.append(contentsOf: $0) }
-        adapter.updateViewport(viewport)
-        adapter.receiveFrames([
-            1: CGRect(x: 0, y: 0, width: 100, height: 100),
-            2: CGRect(x: 0, y: 100, width: 100, height: 100),
-        ], unread: [1, 2])
-        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
-        adapter.receiveContentOffsetY(100, unread: [1, 2])
-        adapter.beginUserScroll()
-        adapter.receiveFrames([
-            1: CGRect(x: 0, y: -100, width: 100, height: 100),
-            2: CGRect(x: 0, y: 0, width: 100, height: 100),
-        ], unread: [1, 2])
-        adapter.receiveContentOffsetY(120, unread: [1, 2])
-        XCTAssertEqual(candidates, [1])
-
-        adapter.endUserScroll()
-        adapter.receiveFrames([2: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: [2])
-        adapter.receiveContentOffsetY(160, unread: [2])
-
-        XCTAssertEqual(candidates, [1])
-    }
-
-    @MainActor
-    func testRuntimeAdapterPreservesQualifiedCrossingAcrossActiveViewportChanges() {
-        let adapter = IOSScrolloverRuntimeAdapter()
-        let unread: Set<Int64> = [1]
-        var candidates: [Int64] = []
-        adapter.onCandidate = { candidates.append(contentsOf: $0) }
-        adapter.updateViewport(CGRect(x: 0, y: 0, width: 100, height: 100))
-        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
-        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
-        adapter.receiveContentOffsetY(100, unread: unread)
-        adapter.beginUserScroll()
-
-        for height: CGFloat in [102, 105, 108, 110] {
-            adapter.updateViewport(CGRect(x: 0, y: 0, width: 100, height: height))
-        }
-        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
-        adapter.receiveContentOffsetY(120, unread: unread)
-        adapter.receiveFrames([1: CGRect(x: 0, y: -120, width: 100, height: 100)], unread: unread)
-        adapter.receiveContentOffsetY(140, unread: unread)
-
-        XCTAssertEqual(candidates, [1])
-    }
-
-    @MainActor
-    func testRuntimeAdapterSnapshotResetClearsQualifiedExposure() {
-        let adapter = IOSScrolloverRuntimeAdapter()
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        let unread: Set<Int64> = [1]
-        var candidates: [Int64] = []
-        adapter.onCandidate = { candidates.append(contentsOf: $0) }
-        adapter.updateViewport(viewport)
-        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
-        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
-        adapter.reset() // ArticleListView invokes this for snapshotRevision changes.
-        adapter.receiveContentOffsetY(100, unread: unread)
-        adapter.beginUserScroll()
-        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
-        adapter.receiveContentOffsetY(120, unread: unread)
-
-        XCTAssertTrue(candidates.isEmpty)
-    }
-
-    @MainActor
-    func testRuntimeAdapterDisabledScrolloverDoesNotEmitAfterViewportChanges() {
-        let adapter = IOSScrolloverRuntimeAdapter()
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        let unread: Set<Int64> = [1]
-        var candidates: [Int64] = []
-        adapter.onCandidate = { candidates.append(contentsOf: $0) }
-        adapter.updateViewport(viewport)
-        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
-        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
-        adapter.updateEnabled(false)
-        adapter.receiveContentOffsetY(100, unread: unread)
-        adapter.beginUserScroll()
-        adapter.updateViewport(CGRect(x: 0, y: 0, width: 100, height: 105))
-        adapter.receiveFrames([1: CGRect(x: 0, y: -100, width: 100, height: 100)], unread: unread)
-        adapter.receiveContentOffsetY(120, unread: unread)
-
-        XCTAssertTrue(candidates.isEmpty)
-    }
-
-    @MainActor
-    func testRuntimeAdapterDoesNotEmitForBackwardMovement() {
-        let adapter = IOSScrolloverRuntimeAdapter()
-        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
-        let unread: Set<Int64> = [1]
-        var candidates: [Int64] = []
-        adapter.onCandidate = { candidates.append(contentsOf: $0) }
-        adapter.updateViewport(viewport)
-        adapter.receiveFrames([1: CGRect(x: 0, y: 0, width: 100, height: 100)], unread: unread)
-        adapter.observeIdle(now: Date.timeIntervalSinceReferenceDate + 0.8)
-        adapter.receiveContentOffsetY(100, unread: unread)
-        adapter.beginUserScroll()
-
-        adapter.receiveFrames([1: CGRect(x: 0, y: 100, width: 100, height: 100)], unread: unread)
-        adapter.receiveContentOffsetY(80, unread: unread)
-
-        XCTAssertTrue(candidates.isEmpty)
-    }
-
-    */
     func testSwipeConfigurationSupportsZeroOneAndTwoActions() {
         let empty = IOSArticleSwipeSideConfiguration(actions: [])
         let one = IOSArticleSwipeSideConfiguration(actions: [.read])
@@ -720,6 +420,16 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertTrue(store.scrolloverUndoIDs.isEmpty)
         store.applyScrolloverMutationForTesting([1], now: start.addingTimeInterval(16))
         XCTAssertEqual(store.scrolloverUndoIDs, [1])
+    }
+
+    @MainActor
+    func testSuccessfulReadAfterInactivityStartsANewUndoGroupSynchronously() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2), article(3)])
+        let start = Date(timeIntervalSinceReferenceDate: 100)
+        store.applyScrolloverMutationForTesting([1, 2], now: start)
+        store.applyScrolloverMutationForTesting([3], now: start.addingTimeInterval(5))
+        XCTAssertEqual(store.scrolloverUndoIDs, [3])
     }
 
     @MainActor

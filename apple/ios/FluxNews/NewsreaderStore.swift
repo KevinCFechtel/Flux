@@ -390,7 +390,13 @@ final class NewsreaderStore: ObservableObject {
     }
 
     private func recordSuccessfulScrolloverRead(_ ids: [Int64], now: Date = .now) {
-        if scrolloverUndoOpenedAt == nil || now.timeIntervalSince(scrolloverUndoOpenedAt!) >= Self.scrolloverUndoMaximumLifetime {
+        let groupExpired: Bool
+        if let openedAt = scrolloverUndoOpenedAt, let lastSuccessAt = scrolloverUndoLastSuccessAt {
+            groupExpired = now.timeIntervalSince(lastSuccessAt) >= Self.scrolloverUndoInactivityTimeout || now.timeIntervalSince(openedAt) >= Self.scrolloverUndoMaximumLifetime
+        } else {
+            groupExpired = scrolloverUndoOpenedAt != nil || scrolloverUndoLastSuccessAt != nil
+        }
+        if scrolloverUndoOpenedAt == nil || groupExpired {
             clearScrolloverUndoGroup()
             scrolloverUndoOpenedAt = now
             scrolloverOriginalOrder = Dictionary(uniqueKeysWithValues: articles.enumerated().map { ($0.element.id, $0.offset) })

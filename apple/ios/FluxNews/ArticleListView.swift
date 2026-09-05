@@ -27,6 +27,8 @@ struct IOSScrolloverOrderTracker {
         isUserScrolling = false
     }
 
+    mutating func releaseEmittedIDs() { emittedIDs.removeAll() }
+
     mutating func receiveVisibleIDs(_ visibleIDs: [Int64], unread: Set<Int64>, enabled: Bool) -> [Int64] {
         guard let leadingID = visibleIDs.min(by: { positions[$0, default: .max] < positions[$1, default: .max] }),
               let leadingPosition = positions[leadingID] else { return [] }
@@ -339,7 +341,9 @@ struct ArticleListView: View {
                                ScrollView {
                                LazyVStack(spacing: articleSpacing) {
                                  ForEach(store.articles, id: \.id) { article in
-                                       ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIconData: store.feedIcons[IOSFeedIconKey(feedID: article.feedId, variant: IOSFeedIconPresentation.variant(isDark: colorScheme == .dark))], iconVariant: IOSFeedIconPresentation.variant(isDark: colorScheme == .dark), onRequestFeedIcon: { store.requestFeedIcon(article.feedId, variant: IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { article, read in store.setRead(article, read: read) }, onSetStarred: { article, starred in store.setStarred(article, starred: starred) })
+                                       let iconVariant = IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)
+                                       let feedIcon = store.feedIcons[IOSFeedIconKey(feedID: article.feedId, variant: iconVariant)]
+                                       ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIconData: feedIcon, iconVariant: iconVariant, onRequestFeedIcon: { store.requestFeedIcon(article.feedId, variant: iconVariant) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { article, read in store.setRead(article, read: read) }, onSetStarred: { article, starred in store.setStarred(article, starred: starred) })
                                           .equatable()
                                  }
                               }
@@ -371,10 +375,11 @@ struct ArticleListView: View {
                                 }
                             }
                             .onChange(of: store.articles) { _, _ in refreshUnreadArticleIDs() }
-                              .onChange(of: store.snapshotRevision) { _, _ in scrolloverTracker.reset() }
+                            .onChange(of: store.snapshotRevision) { _, _ in scrolloverTracker.reset() }
                             .onChange(of: store.scrolloverUndoVisible) { _, visible in
-                               if visible { sensoryFeedbackTrigger += 1 }
-                           }
+                                if visible { sensoryFeedbackTrigger += 1 }
+                                else { scrolloverTracker.releaseEmittedIDs() }
+                            }
                            .sensoryFeedback(.success, trigger: sensoryFeedbackTrigger)
                   }
                  }
