@@ -363,15 +363,13 @@ struct ArticleListView: View {
                             }
                             .onScrollPhaseChange { _, phase in
                                 switch phase {
-                                case .interacting:
-                                  scrolloverTracker.setUserScrolling(true)
-                                  store.beginScrolloverPresentationScroll()
-                                  store.markMeaningfulInteraction()
-                                case .idle:
-                                  scrolloverTracker.setUserScrolling(false)
-                                  store.finishScrolloverPresentationScroll()
-                                default:
-                                  break
+                                 case .interacting:
+                                   scrolloverTracker.setUserScrolling(true)
+                                   store.markMeaningfulInteraction()
+                                 case .idle:
+                                   scrolloverTracker.setUserScrolling(false)
+                                 default:
+                                   break
                                 }
                             }
                             .onChange(of: store.articles) { _, _ in refreshUnreadArticleIDs() }
@@ -780,12 +778,11 @@ struct ArticlePresentationView: View, Equatable {
 
     @ViewBuilder
     private var unreadIndicator: some View {
-        if ArticlePresentationLayout.showsInternalUnreadIndicator(isRead: article.isRead) {
-            Circle()
-                .fill(Color.accentColor)
-                .frame(width: 6, height: 6)
-                .accessibilityHidden(true)
-        }
+        Circle()
+            .fill(Color.accentColor)
+            .frame(width: 6, height: 6)
+            .opacity(ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: article.isRead))
+            .accessibilityHidden(true)
     }
 }
 

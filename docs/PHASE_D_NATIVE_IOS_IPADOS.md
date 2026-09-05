@@ -143,6 +143,13 @@ backward movement emits nothing. A 15% target-visibility threshold is used only
 to reliably identify a leading target for variable-height cards, including cards
 too tall to become 50% visible. It is not a read-exposure threshold.
 
+Remove When Read applies to explicit/manual read actions, including swipe and
+context-menu actions. It does not apply to Mark-as-Read-on-Scrollover:
+Scrollover updates read state without changing visible article list membership,
+including after scrolling becomes idle. The unread/read visual transition keeps
+the unread-indicator layout slot present and changes only its visual opacity, so
+it does not alter article-card geometry.
+
 iOS Scrollover keeps detection, Core mutation scheduling, and Undo separate.
 Detection is ID/order-only, with no geometry, exposure duration, or per-row
 timer. Candidates enter one serialized, deduplicating Core bulk-mutation queue.

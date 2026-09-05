@@ -127,6 +127,6 @@ enum ArticlePresentationLayout {
         imageWidth / landscapeImageAspectRatio
     }
 
-    static func showsInternalUnreadIndicator(isRead: Bool) -> Bool { !isRead }
+    static func internalUnreadIndicatorOpacity(isRead: Bool) -> CGFloat { isRead ? 0 : 1 }
 }
 enum ArticlePreviewLines: Int, CaseIterable { case compact = 2, standard = 3, extended = 5 }

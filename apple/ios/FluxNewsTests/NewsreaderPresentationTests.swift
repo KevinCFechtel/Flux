@@ -197,8 +197,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(ArticlePresentationLayout.usesLandscapeVisual(mode: .visual, availableWidth: 720))
         XCTAssertFalse(ArticlePresentationLayout.usesLandscapeVisual(mode: .visual, availableWidth: 390))
         XCTAssertFalse(ArticlePresentationLayout.usesLandscapeVisual(mode: .compact, availableWidth: 720))
-        XCTAssertTrue(ArticlePresentationLayout.showsInternalUnreadIndicator(isRead: false))
-        XCTAssertFalse(ArticlePresentationLayout.showsInternalUnreadIndicator(isRead: true))
+        XCTAssertEqual(ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: false), 1)
+        XCTAssertEqual(ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: true), 0)
         XCTAssertTrue(ArticlePresentationMode.visual.showsArticleImage)
         XCTAssertFalse(ArticlePresentationMode.compact.showsArticleImage)
     }

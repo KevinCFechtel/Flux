@@ -86,84 +86,42 @@ final class NewsreaderD23MutationTests: XCTestCase {
     }
 
     @MainActor
-    func testScrolloverReadDefersRemovalWhilePresentationScrollIsActive() {
+    func testScrolloverReadRemainsVisibleWhenRemoveWhenReadIsEnabled() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.removeArticlesWhenMarkedRead = true
         store.unreadOnly = true
         store.setArticlesForTesting([article(1), article(2)])
-        store.beginScrolloverPresentationScrollForTesting()
         store.applyScrolloverMutationForTesting([1])
 
         XCTAssertEqual(store.articles.map(\.id), [1, 2])
         XCTAssertTrue(store.articles[0].isRead)
-        XCTAssertEqual(store.scrolloverPendingRemovalsForTesting, [1])
     }
 
     @MainActor
-    func testScrolloverReadIsRemovedOncePresentationScrollReachesIdle() {
-        let store = NewsreaderStore(defaults: UserDefaults())
-        store.removeArticlesWhenMarkedRead = true
-        store.unreadOnly = true
-        store.setArticlesForTesting([article(1), article(2)])
-        store.beginScrolloverPresentationScrollForTesting()
-        store.applyScrolloverMutationForTesting([1])
-
-        let resetRevision = store.scrollResetRevision
-        store.finishScrolloverPresentationScrollForTesting()
-
-        XCTAssertEqual(store.articles.map(\.id), [2])
-        XCTAssertTrue(store.scrolloverPendingRemovalsForTesting.isEmpty)
-        XCTAssertGreaterThan(store.scrollResetRevision, resetRevision)
-    }
-
-    @MainActor
-    func testScrolloverReadRemainsVisibleWhenPolicyKeepsReadArticles() {
-        let store = NewsreaderStore(defaults: UserDefaults())
-        store.removeArticlesWhenMarkedRead = true
-        store.unreadOnly = false
-        store.setArticlesForTesting([article(1)])
-        store.beginScrolloverPresentationScrollForTesting()
-        store.applyScrolloverMutationForTesting([1])
-
-        XCTAssertEqual(store.articles.map(\.id), [1])
-        XCTAssertTrue(store.articles[0].isRead)
-        XCTAssertTrue(store.scrolloverPendingRemovalsForTesting.isEmpty)
-
-        store.finishScrolloverPresentationScrollForTesting()
-
-        XCTAssertTrue(store.articles[0].isRead)
-    }
-
-    @MainActor
-    func testMultipleScrolloverReadsAreRemovedCoherentlyAtIdle() {
+    func testMultipleScrolloverReadsRemainInOriginalVisibleOrder() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.removeArticlesWhenMarkedRead = true
         store.unreadOnly = true
         store.setArticlesForTesting([article(1), article(2), article(3), article(4)])
-        store.beginScrolloverPresentationScrollForTesting()
         store.applyScrolloverMutationForTesting([1])
         store.applyScrolloverMutationForTesting([2, 3])
 
         XCTAssertEqual(store.articles.map(\.id), [1, 2, 3, 4])
-        XCTAssertEqual(store.scrolloverPendingRemovalsForTesting, [1, 2, 3])
-        store.finishScrolloverPresentationScrollForTesting()
-        XCTAssertEqual(store.articles.map(\.id), [4])
+        XCTAssertTrue(store.articles.prefix(3).allSatisfy(\.isRead))
     }
 
     @MainActor
-    func testUndoRestoresScrolloverReadAwaitingDeferredRemoval() {
+    func testUndoChangesVisibleScrolloverReadsBackToUnread() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.removeArticlesWhenMarkedRead = true
         store.unreadOnly = true
-        store.setArticlesForTesting([article(1), article(2)])
-        store.beginScrolloverPresentationScrollForTesting()
+        store.setArticlesForTesting([article(1), article(2), article(3)])
         store.applyScrolloverMutationForTesting([1, 2])
 
         store.applyScrolloverUndoForTesting()
 
-        XCTAssertEqual(store.articles.map(\.id), [1, 2])
+        XCTAssertEqual(store.articles.map(\.id), [1, 2, 3])
         XCTAssertTrue(store.articles.allSatisfy { !$0.isRead })
-        XCTAssertTrue(store.scrolloverPendingRemovalsForTesting.isEmpty)
     }
 
     @MainActor
@@ -313,11 +271,10 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.removeArticlesWhenMarkedRead = true
         store.unreadOnly = true
         store.setArticlesForTesting((1...9).map { article(Int64($0)) })
-        store.beginScrolloverPresentationScrollForTesting()
         let start = Date(timeIntervalSinceReferenceDate: 100)
         store.applyScrolloverMutationForTesting([1, 2, 3, 4], now: start)
         store.applyScrolloverMutationForTesting([4, 5, 6, 7, 8, 9], now: start.addingTimeInterval(3))
-        store.finishScrolloverPresentationScrollForTesting()
+        XCTAssertEqual(store.articles.map(\.id), Array(1...9).map(Int64.init))
         store.applyScrolloverUndoForTesting()
         XCTAssertEqual(store.articles.map(\.id), Array(1...9).map(Int64.init))
         XCTAssertTrue(store.articles.allSatisfy { !$0.isRead })
