@@ -2,6 +2,66 @@ import XCTest
 @testable import FluxNews
 
 final class AccountLifecycleTests: XCTestCase {
+    private final class LockedBox<Value>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storedValue: Value
+
+        init(_ value: Value) { storedValue = value }
+
+        func withValue<Result>(_ body: (inout Value) -> Result) -> Result {
+            lock.lock()
+            defer { lock.unlock() }
+            return body(&storedValue)
+        }
+
+        func value() -> Value {
+            withValue { $0 }
+        }
+    }
+
+    private final class FirstFactoryGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private let releaseFirstFactory = DispatchSemaphore(value: 0)
+        private var firstFactoryStarted = false
+        private var startWaiters: [CheckedContinuation<Void, Never>] = []
+        private var callCount = 0
+        private var storedAccounts: [IOSMinifluxCredentials] = []
+
+        func make(_ account: IOSMinifluxCredentials, first: Flux, subsequent: Flux) -> Flux {
+            let shouldWait = withLock {
+                callCount += 1
+                storedAccounts.append(account)
+                guard callCount == 1 else { return false }
+                firstFactoryStarted = true
+                let waiters = startWaiters
+                startWaiters.removeAll()
+                waiters.forEach { $0.resume() }
+                return true
+            }
+            if shouldWait { releaseFirstFactory.wait() }
+            return shouldWait ? first : subsequent
+        }
+
+        func waitUntilFirstFactoryStarts() async {
+            await withCheckedContinuation { continuation in
+                let shouldResume = withLock {
+                    if firstFactoryStarted { return true }
+                    startWaiters.append(continuation)
+                    return false
+                }
+                if shouldResume { continuation.resume() }
+            }
+        }
+
+        func releaseFirst() { releaseFirstFactory.signal() }
+
+        private func withLock<Result>(_ body: () -> Result) -> Result {
+            lock.lock()
+            defer { lock.unlock() }
+            return body()
+        }
+    }
+
     private func makeCore(for credentials: IOSMinifluxCredentials) throws -> Flux {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let data = root.appendingPathComponent("data")
@@ -70,16 +130,16 @@ final class AccountLifecycleTests: XCTestCase {
         )
         let store = IOSMemoryCredentialStore()
         try store.save(credentials)
-        var activated: IOSMinifluxCredentials?
+        let activated = LockedBox<IOSMinifluxCredentials?>(nil)
         let bootstrapper = CoreBootstrapper(credentialStore: store, coreFactory: { account in
-            activated = account
+            activated.withValue { $0 = account }
             return try self.makeCore(for: account)
         })
 
         await bootstrapper.start()
 
         XCTAssertTrue({ if case .ready = bootstrapper.state { return true }; return false }())
-        XCTAssertEqual(activated, credentials)
+        XCTAssertEqual(activated.value(), credentials)
         XCTAssertEqual(bootstrapper.credentials, credentials)
     }
 
@@ -89,16 +149,16 @@ final class AccountLifecycleTests: XCTestCase {
         let store = IOSMemoryCredentialStore()
         try store.save(previous)
         let core = try makeCore(for: previous)
-        var validatorInput: IOSMinifluxCredentials?
+        let validatorInput = LockedBox<IOSMinifluxCredentials?>(nil)
         let bootstrapper = CoreBootstrapper(credentialStore: store, coreFactory: { _ in core }, accountValidator: { account in
-            validatorInput = account
+            validatorInput.withValue { $0 = account }
             throw AccountValidationError.Unauthorized
         })
         await bootstrapper.start()
 
         await bootstrapper.configure(server: "https://new.example", apiKey: "new-key", headers: [IOSCustomHTTPHeader(name: "X-Tenant", value: "new")])
 
-        XCTAssertEqual(validatorInput?.customHeaders.first?.value, "new")
+        XCTAssertEqual(validatorInput.value()?.customHeaders.first?.value, "new")
         XCTAssertEqual(try store.load(), previous)
         XCTAssertIdentical(bootstrapper.core, core)
         XCTAssertEqual(bootstrapper.credentials, previous)
@@ -112,11 +172,14 @@ final class AccountLifecycleTests: XCTestCase {
         try store.save(old)
         let oldCore = try makeCore(for: old)
         let newCore = try makeCore(for: replacement)
-        var factoryInputs: [IOSMinifluxCredentials] = []
+        let factoryInputs = LockedBox<[IOSMinifluxCredentials]>([])
         var changes: [Flux?] = []
         let bootstrapper = CoreBootstrapper(credentialStore: store, coreFactory: { account in
-            factoryInputs.append(account)
-            return factoryInputs.count == 1 ? oldCore : newCore
+            let isInitialActivation = factoryInputs.withValue {
+                $0.append(account)
+                return $0.count == 1
+            }
+            return isInitialActivation ? oldCore : newCore
         }, accountValidator: { account in
             AccountValidationAttempt(
                 result: AccountValidationResult(installationBase: "https://new.example", version: "2.0"),
@@ -131,7 +194,7 @@ final class AccountLifecycleTests: XCTestCase {
         XCTAssertEqual(try store.load(), replacement)
         XCTAssertEqual(bootstrapper.credentials, replacement)
         XCTAssertIdentical(bootstrapper.core, newCore)
-        XCTAssertEqual(factoryInputs, [old, replacement])
+        XCTAssertEqual(factoryInputs.value(), [old, replacement])
         XCTAssertEqual(changes.count, 2)
         XCTAssertIdentical(changes[0], oldCore)
         XCTAssertIdentical(changes[1], newCore)
@@ -148,12 +211,12 @@ final class AccountLifecycleTests: XCTestCase {
     func testValidationDiagnosticIsTransientAndDoesNotReplaceFriendlyMessage() async throws {
         let store = IOSMemoryCredentialStore()
         let core = try makeCore(for: IOSMinifluxCredentials(server: "https://example.com", apiKey: "key", customHeaders: []))
-        var shouldFail = true
+        let shouldFail = LockedBox(true)
         let bootstrapper = CoreBootstrapper(
             credentialStore: store,
             coreFactory: { _ in core },
             accountValidator: { _ in
-                if shouldFail {
+                if shouldFail.value() {
                     return AccountValidationAttempt(
                         result: nil,
                         error: .Network,
@@ -176,10 +239,167 @@ final class AccountLifecycleTests: XCTestCase {
         XCTAssertFalse(bootstrapper.validationDiagnostic?.detail.contains("api-secret") == true)
         XCTAssertFalse(bootstrapper.validationDiagnostic?.detail.contains("header-secret") == true)
 
-        shouldFail = false
+        shouldFail.withValue { $0 = false }
         await bootstrapper.configure(server: "https://example.com", apiKey: "api-secret", headers: [])
 
         XCTAssertNil(bootstrapper.validationDiagnostic)
         XCTAssertNil(bootstrapper.validationMessage)
+    }
+
+    @MainActor
+    func testStartupFactoryRunsOffMainAndPublishesAfterCompletion() async throws {
+        let account = IOSMinifluxCredentials(server: "https://miniflux.example", apiKey: "key", customHeaders: [])
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let gate = FirstFactoryGate()
+        let ranOnMainThread = LockedBox<Bool?>(nil)
+        let bootstrapper = CoreBootstrapper(credentialStore: store, coreFactory: { credentials in
+            ranOnMainThread.withValue { $0 = Thread.isMainThread }
+            return gate.make(credentials, first: core, subsequent: core)
+        })
+
+        let startup = Task { await bootstrapper.start() }
+        await gate.waitUntilFirstFactoryStarts()
+
+        XCTAssertNil(bootstrapper.core)
+        XCTAssertEqual(bootstrapper.state, .starting)
+        XCTAssertEqual(ranOnMainThread.value(), false)
+        gate.releaseFirst()
+        await startup.value
+
+        XCTAssertIdentical(bootstrapper.core, core)
+        XCTAssertEqual(bootstrapper.coreRevision, 1)
+    }
+
+    @MainActor
+    func testRetryDiscardsStaleStartupResult() async throws {
+        let account = IOSMinifluxCredentials(server: "https://miniflux.example", apiKey: "key", customHeaders: [])
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let staleCore = try makeCore(for: account)
+        let currentCore = try makeCore(for: account)
+        let gate = FirstFactoryGate()
+        var changes: [Flux?] = []
+        let bootstrapper = CoreBootstrapper(credentialStore: store, coreFactory: { credentials in
+            gate.make(credentials, first: staleCore, subsequent: currentCore)
+        })
+        bootstrapper.onCoreChanged = { changes.append($0) }
+
+        let firstStartup = Task { await bootstrapper.start() }
+        await gate.waitUntilFirstFactoryStarts()
+        let retry = Task { await bootstrapper.retry() }
+        await retry.value
+        gate.releaseFirst()
+        await firstStartup.value
+
+        XCTAssertIdentical(bootstrapper.core, currentCore)
+        XCTAssertEqual(bootstrapper.coreRevision, 1)
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertIdentical(changes[0], currentCore)
+    }
+
+    @MainActor
+    func testDeactivateDiscardsInFlightStartupFailure() async throws {
+        let account = IOSMinifluxCredentials(server: "https://miniflux.example", apiKey: "key", customHeaders: [])
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let fallbackCore = try makeCore(for: account)
+        let gate = FirstFactoryGate()
+        var changes: [Flux?] = []
+        let bootstrapper = CoreBootstrapper(credentialStore: store, coreFactory: { credentials in
+            _ = gate.make(credentials, first: fallbackCore, subsequent: fallbackCore)
+            throw NSError(domain: "FluxNewsTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "stale failure"])
+        })
+        bootstrapper.onCoreChanged = { changes.append($0) }
+
+        let startup = Task { await bootstrapper.start() }
+        await gate.waitUntilFirstFactoryStarts()
+        bootstrapper.deactivate()
+        gate.releaseFirst()
+        await startup.value
+
+        XCTAssertNil(bootstrapper.core)
+        XCTAssertEqual(bootstrapper.state, .starting)
+        XCTAssertEqual(bootstrapper.coreRevision, 1)
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertNil(changes[0])
+    }
+
+    @MainActor
+    func testRemoveAccountDiscardsInFlightStartupResult() async throws {
+        let account = IOSMinifluxCredentials(server: "https://miniflux.example", apiKey: "key", customHeaders: [])
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let gate = FirstFactoryGate()
+        var changes: [Flux?] = []
+        let bootstrapper = CoreBootstrapper(credentialStore: store, coreFactory: { credentials in
+            gate.make(credentials, first: core, subsequent: core)
+        })
+        bootstrapper.onCoreChanged = { changes.append($0) }
+
+        let startup = Task { await bootstrapper.start() }
+        await gate.waitUntilFirstFactoryStarts()
+        await bootstrapper.removeAccount()
+        gate.releaseFirst()
+        await startup.value
+
+        XCTAssertNil(bootstrapper.core)
+        XCTAssertNil(bootstrapper.credentials)
+        XCTAssertEqual(bootstrapper.state, .accountRequired)
+        XCTAssertEqual(bootstrapper.coreRevision, 0)
+        XCTAssertTrue(changes.isEmpty)
+    }
+
+    @MainActor
+    func testStaleConfigureActivationDoesNotReplaceActiveAccount() async throws {
+        let old = IOSMinifluxCredentials(server: "https://old.example", apiKey: "old-key", customHeaders: [])
+        let replacement = IOSMinifluxCredentials(server: "https://new.example", apiKey: "new-key", customHeaders: [])
+        let store = IOSMemoryCredentialStore()
+        try store.save(old)
+        let oldCore = try makeCore(for: old)
+        let replacementCore = try makeCore(for: replacement)
+        let gate = FirstFactoryGate()
+        let bootstrapper = CoreBootstrapper(credentialStore: store, coreFactory: { account in
+            if account == old { return oldCore }
+            return gate.make(account, first: replacementCore, subsequent: replacementCore)
+        }, accountValidator: { _ in
+            AccountValidationAttempt(result: AccountValidationResult(installationBase: replacement.server, version: "2.0"), error: nil, diagnostic: nil)
+        })
+        await bootstrapper.start()
+
+        let configure = Task { await bootstrapper.configure(server: replacement.server, apiKey: replacement.apiKey, headers: []) }
+        await gate.waitUntilFirstFactoryStarts()
+        bootstrapper.deactivate()
+        gate.releaseFirst()
+        await configure.value
+
+        XCTAssertNil(bootstrapper.core)
+        XCTAssertNil(bootstrapper.credentials)
+        XCTAssertEqual(bootstrapper.coreRevision, 2)
+    }
+
+    @MainActor
+    func testConfigureActivationFailureRestoresPreviousCredentials() async throws {
+        let previous = IOSMinifluxCredentials(server: "https://old.example", apiKey: "old-key", customHeaders: [])
+        let replacement = IOSMinifluxCredentials(server: "https://new.example", apiKey: "new-key", customHeaders: [])
+        let store = IOSMemoryCredentialStore()
+        try store.save(previous)
+        let previousCore = try makeCore(for: previous)
+        let bootstrapper = CoreBootstrapper(credentialStore: store, coreFactory: { account in
+            if account == previous { return previousCore }
+            throw NSError(domain: "FluxNewsTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "activation failed"])
+        }, accountValidator: { _ in
+            AccountValidationAttempt(result: AccountValidationResult(installationBase: replacement.server, version: "2.0"), error: nil, diagnostic: nil)
+        })
+        await bootstrapper.start()
+        await bootstrapper.configure(server: replacement.server, apiKey: replacement.apiKey, headers: [])
+
+        XCTAssertEqual(try store.load(), previous)
+        XCTAssertEqual(bootstrapper.credentials, previous)
+        XCTAssertIdentical(bootstrapper.core, previousCore)
+        XCTAssertEqual(bootstrapper.coreRevision, 1)
+        XCTAssertEqual(bootstrapper.validationMessage, "The account could not be activated. Your previous account is still active.")
     }
 }

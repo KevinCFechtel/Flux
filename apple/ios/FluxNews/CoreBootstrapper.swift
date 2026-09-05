@@ -30,14 +30,17 @@ final class CoreBootstrapper: ObservableObject {
     let credentialStore: IOSCredentialStoreProtocol
     var onCoreChanged: ((Flux?) -> Void)?
 
-    private let coreFactory: (IOSMinifluxCredentials) throws -> Flux
-    private let accountValidator: (IOSMinifluxCredentials) throws -> AccountValidationAttempt
+    private let coreFactory: @Sendable (IOSMinifluxCredentials) throws -> Flux
+    private let accountValidator: @Sendable (IOSMinifluxCredentials) throws -> AccountValidationAttempt
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "core")
+    private var bootstrapGeneration: UInt64 = 0
+    private nonisolated static let defaultCoreFactory: @Sendable (IOSMinifluxCredentials) throws -> Flux = { try makeCore($0) }
+    private nonisolated static let defaultAccountValidator: @Sendable (IOSMinifluxCredentials) throws -> AccountValidationAttempt = { validateAccount($0) }
 
     init(
         credentialStore: IOSCredentialStoreProtocol = IOSKeychainCredentialStore(),
-        coreFactory: @escaping (IOSMinifluxCredentials) throws -> Flux = CoreBootstrapper.makeCore,
-        accountValidator: @escaping (IOSMinifluxCredentials) throws -> AccountValidationAttempt = CoreBootstrapper.validateAccount
+        coreFactory: @escaping @Sendable (IOSMinifluxCredentials) throws -> Flux = CoreBootstrapper.defaultCoreFactory,
+        accountValidator: @escaping @Sendable (IOSMinifluxCredentials) throws -> AccountValidationAttempt = CoreBootstrapper.defaultAccountValidator
     ) {
         self.credentialStore = credentialStore
         self.coreFactory = coreFactory
@@ -46,26 +49,30 @@ final class CoreBootstrapper: ObservableObject {
 
     func start() async {
         guard case .starting = state else { return }
+        let generation = nextBootstrapGeneration()
         do {
             guard let stored = try credentialStore.load() else {
                 state = .accountRequired
                 return
             }
             credentials = stored
-            try activate(stored, persist: false)
+            _ = try await activate(stored, persist: false, generation: generation)
         } catch {
+            guard generation == bootstrapGeneration else { return }
             state = .recoverableError(Self.safeMessage(for: error))
             logger.error("Core startup failed: \(Self.safeMessage(for: error), privacy: .public)")
         }
     }
 
     func retry() async {
+        _ = nextBootstrapGeneration()
         state = .starting
         await start()
     }
 
     func configure(server: String, apiKey: String, headers: [IOSCustomHTTPHeader]) async {
         guard !isConfiguring else { return }
+        let generation = nextBootstrapGeneration()
         isConfiguring = true
         defer { isConfiguring = false }
         validationMessage = nil
@@ -79,6 +86,7 @@ final class CoreBootstrapper: ObservableObject {
         let validation = await Task.detached(priority: .userInitiated) {
             Result { try validator(proposed) }
         }.value
+        guard generation == bootstrapGeneration else { return }
         switch validation {
         case let .failure(error): validationMessage = IOSAccountValidationPresentation.message(for: IOSAccountValidationPresentation.failure(for: error))
         case let .success(attempt):
@@ -97,7 +105,7 @@ final class CoreBootstrapper: ObservableObject {
                 let previous = credentials
                 try credentialStore.save(normalized)
                 do {
-                    try activate(normalized, persist: false)
+                    guard try await activate(normalized, persist: false, generation: generation) else { return }
                 } catch {
                     if let previous { try? credentialStore.save(previous) } else { try? credentialStore.remove() }
                     throw error
@@ -107,6 +115,7 @@ final class CoreBootstrapper: ObservableObject {
     }
 
     func removeAccount() async {
+        let generation = nextBootstrapGeneration()
         guard let activeCore = core else {
             try? credentialStore.remove()
             credentials = nil
@@ -115,6 +124,7 @@ final class CoreBootstrapper: ObservableObject {
         }
         do {
             try await Task.detached { try activeCore.removeAccountState() }.value
+            guard generation == bootstrapGeneration else { return }
             try credentialStore.remove()
             deactivate()
             state = .accountRequired
@@ -126,21 +136,33 @@ final class CoreBootstrapper: ObservableObject {
         return "Application Support: \(paths.persistentData.path)\nCaches: \(paths.cache.path)\nMedia: \(paths.media.path)"
     }
 
-    private func activate(_ account: IOSMinifluxCredentials, persist: Bool) throws {
+    private func activate(_ account: IOSMinifluxCredentials, persist: Bool, generation: UInt64) async throws -> Bool {
         if persist { try credentialStore.save(account) }
-        let configuredCore = try coreFactory(account)
+        let factory = coreFactory
+        let result = await Task.detached(priority: .userInitiated) {
+            Result { try factory(account) }
+        }.value
+        guard generation == bootstrapGeneration else { return false }
+        let configuredCore = try result.get()
         core = configuredCore
         credentials = account
         coreRevision &+= 1
         state = .ready("Initialized")
         onCoreChanged?(configuredCore)
+        return true
     }
 
     func deactivate() {
+        _ = nextBootstrapGeneration()
         core = nil
         coreRevision &+= 1
         credentials = nil
         onCoreChanged?(nil)
+    }
+
+    private func nextBootstrapGeneration() -> UInt64 {
+        bootstrapGeneration &+= 1
+        return bootstrapGeneration
     }
 
     private nonisolated static func makeCore(_ account: IOSMinifluxCredentials) throws -> Flux {
@@ -155,8 +177,8 @@ final class CoreBootstrapper: ObservableObject {
         ))
     }
 
-    private nonisolated static func validateAccount(_ account: IOSMinifluxCredentials) throws -> AccountValidationAttempt {
-        try validateMinifluxAccountWithDiagnostic(
+    private nonisolated static func validateAccount(_ account: IOSMinifluxCredentials) -> AccountValidationAttempt {
+        validateMinifluxAccountWithDiagnostic(
             serverUrl: account.server,
             apiKey: account.apiKey,
             customHeaders: account.customHeaders.map { HttpHeader(name: $0.name, value: $0.value) }

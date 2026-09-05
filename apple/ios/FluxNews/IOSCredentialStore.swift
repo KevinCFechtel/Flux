@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-struct IOSCustomHTTPHeader: Codable, Equatable, Identifiable {
+struct IOSCustomHTTPHeader: Codable, Equatable, Identifiable, Sendable {
     var id: UUID
     var name: String
     var value: String
@@ -13,7 +13,7 @@ struct IOSCustomHTTPHeader: Codable, Equatable, Identifiable {
     }
 }
 
-struct IOSMinifluxCredentials: Codable, Equatable, CustomStringConvertible {
+struct IOSMinifluxCredentials: Codable, Equatable, CustomStringConvertible, Sendable {
     var server: String
     var apiKey: String
     var customHeaders: [IOSCustomHTTPHeader]
