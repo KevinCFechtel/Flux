@@ -1,9 +1,6 @@
 import SwiftUI
 import UIKit
 import SafariServices
-#if DEBUG
-import OSLog
-#endif
 
 private struct IOSBrowserURL: Identifiable {
     let url: URL
@@ -103,68 +100,24 @@ enum IOSReaderDismissalPresentation {
     static let title = "Done"
 }
 
-enum IOSLargeTitleResetPolicy {
-    static func shouldRepair(previousRevision: UInt64?, currentRevision: UInt64) -> Bool {
-        currentRevision > 0 && previousRevision != currentRevision
-    }
+enum IOSArticleNavigationPresentation {
+    // The navigation controller, rather than the Article ScrollView, owns the
+    // native large-title collapse state. Keep both lifecycles on this signal.
+    static func identity(for resetRevision: UInt64) -> UInt64 { resetRevision }
 }
 
-private struct IOSArticleListLargeTitleResetBridge: UIViewRepresentable {
-    let revision: UInt64
+struct IOSArticleNavigationHost<Content: View>: View {
+    let resetRevision: UInt64
+    @ViewBuilder let content: () -> Content
 
-    final class Coordinator {
-        var lastRevision: UInt64?
+    init(resetRevision: UInt64, @ViewBuilder content: @escaping () -> Content) {
+        self.resetRevision = resetRevision
+        self.content = content
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeUIView(context: Context) -> UIView { UIView(frame: .zero) }
-
-    func updateUIView(_ view: UIView, context: Context) {
-        guard IOSLargeTitleResetPolicy.shouldRepair(previousRevision: context.coordinator.lastRevision, currentRevision: revision) else { return }
-        context.coordinator.lastRevision = revision
-
-        // SwiftUI recreates the Article ScrollView in this update. Let that
-        // replacement finish before refreshing the navigation presentation.
-        DispatchQueue.main.async { [weak view] in
-            guard let view,
-                  let navigationController = view.enclosingNavigationController,
-                  let viewController = navigationController.topViewController
-            else {
-                diagnostic("reset revision=\(revision) article navigation controller not found")
-                return
-            }
-
-            let navigationBar = navigationController.navigationBar
-            let navigationItem = viewController.navigationItem
-            diagnostic("reset revision=\(revision) nav=\(String(describing: type(of: navigationController))) item=\(navigationItem.title ?? "nil") beforePrefersLarge=\(navigationBar.prefersLargeTitles) beforeMode=\(String(describing: navigationItem.largeTitleDisplayMode)) beforeFrame=\(String(describing: navigationBar.frame))")
-            navigationBar.prefersLargeTitles = true
-            navigationItem.largeTitleDisplayMode = .always
-            navigationBar.setNeedsLayout()
-            navigationBar.layoutIfNeeded()
-            diagnostic("reset revision=\(revision) afterPrefersLarge=\(navigationBar.prefersLargeTitles) afterMode=\(String(describing: navigationItem.largeTitleDisplayMode)) afterFrame=\(String(describing: navigationBar.frame))")
-        }
-    }
-
-    private func diagnostic(_ message: String) {
-#if DEBUG
-        Self.diagnosticLog.debug("\(message, privacy: .public)")
-#endif
-    }
-
-#if DEBUG
-    private static let diagnosticLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "article-list-large-title")
-#endif
-}
-
-private extension UIView {
-    var enclosingNavigationController: UINavigationController? {
-        var responder: UIResponder? = self
-        while let current = responder {
-            if let navigationController = current as? UINavigationController { return navigationController }
-            responder = current.next
-        }
-        return nil
+    var body: some View {
+        NavigationStack { content() }
+            .id(IOSArticleNavigationPresentation.identity(for: resetRevision))
     }
 }
 
@@ -237,42 +190,52 @@ struct ContentView: View {
 
     @ViewBuilder
     private var newsreader: some View {
-        if usesSplitNavigation {
-            NavigationSplitView(columnVisibility: $iPadColumnVisibility) {
-                NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented, presentation: .sidebar, onSearch: openSearch).toolbar(removing: .sidebarToggle)
-            } detail: {
-                if searchPresented { searchView } else { articleList }
-            }
-        } else {
+        Group {
+            if usesSplitNavigation { iPadNewsreader } else { iPhoneNewsreader }
+        }
+        // These presentations outlive an article-navigation reset.
+        .sheet(isPresented: $navigationPresented) {
             NavigationStack {
-                articleList
-                    .navigationDestination(isPresented: $searchPresented) { searchView }
-                    .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button { navigationPresented = true } label: {
-                                Image(IOSNavigationButtonPresentation.imageName)
-                                    .renderingMode(.template)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: IOSNavigationButtonPresentation.glyphSize, height: IOSNavigationButtonPresentation.glyphSize)
-                            }
-                                .accessibilityLabel(IOSNavigationButtonPresentation.accessibilityLabel)
-                        }
-                    }
-                    .sheet(isPresented: $navigationPresented) {
-                        NavigationStack {
-                            NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented, presentation: .sheet, onSearch: openSearch)
-                                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { navigationPresented = false } } }
-                        }
-                    }
-                    .sheet(isPresented: $settingsPresented) { SettingsView(store: newsreaderStore, bootstrapper: bootstrapper, onDiagnostics: { diagnosticsPresented = true }) }
+                NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented, presentation: .sheet, onSearch: openSearch)
+                    .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { navigationPresented = false } } }
             }
+        }
+        .sheet(isPresented: $settingsPresented) { SettingsView(store: newsreaderStore, bootstrapper: bootstrapper, onDiagnostics: { diagnosticsPresented = true }) }
+    }
+
+    private var iPadNewsreader: some View {
+        NavigationSplitView(columnVisibility: $iPadColumnVisibility) {
+            NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented, presentation: .sidebar, onSearch: openSearch).toolbar(removing: .sidebarToggle)
+        } detail: {
+            if searchPresented {
+                searchView
+            } else {
+                IOSArticleNavigationHost(resetRevision: newsreaderStore.scrollResetRevision) { articleList }
+            }
+        }
+    }
+
+    private var iPhoneNewsreader: some View {
+        IOSArticleNavigationHost(resetRevision: newsreaderStore.scrollResetRevision) {
+            articleList
+                .navigationDestination(isPresented: $searchPresented) { searchView }
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { navigationPresented = true } label: {
+                            Image(IOSNavigationButtonPresentation.imageName)
+                                .renderingMode(.template)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: IOSNavigationButtonPresentation.glyphSize, height: IOSNavigationButtonPresentation.glyphSize)
+                        }
+                            .accessibilityLabel(IOSNavigationButtonPresentation.accessibilityLabel)
+                    }
+                }
         }
     }
 
     private var articleList: some View {
         ArticleListView(store: newsreaderStore, onArticleTap: openArticle, onArticleAction: handleArticleAction)
-            .background(IOSArticleListLargeTitleResetBridge(revision: newsreaderStore.scrollResetRevision).accessibilityHidden(true))
             .navigationTitle(ArticleListTitlePresentation.title(scope: newsreaderStore.scope, catalog: newsreaderStore.catalog, count: newsreaderStore.selectionTotal))
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
@@ -326,7 +289,6 @@ struct ContentView: View {
                     .accessibilityIdentifier("articleList.more")
                 }
             }
-            .sheet(isPresented: $settingsPresented) { SettingsView(store: newsreaderStore, bootstrapper: bootstrapper, onDiagnostics: { diagnosticsPresented = true }) }
     }
 
     private var searchView: some View {

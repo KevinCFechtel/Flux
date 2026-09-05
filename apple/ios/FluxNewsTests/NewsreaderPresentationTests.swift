@@ -65,11 +65,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(IOSNavigationBranding.iconUsesSolidAccentColor)
     }
 
-    func testLargeTitleRepairUsesOnlyExplicitResetRevisions() {
-        XCTAssertFalse(IOSLargeTitleResetPolicy.shouldRepair(previousRevision: nil, currentRevision: 0))
-        XCTAssertTrue(IOSLargeTitleResetPolicy.shouldRepair(previousRevision: 0, currentRevision: 1))
-        XCTAssertFalse(IOSLargeTitleResetPolicy.shouldRepair(previousRevision: 1, currentRevision: 1))
-        XCTAssertTrue(IOSLargeTitleResetPolicy.shouldRepair(previousRevision: 1, currentRevision: 2))
+    func testArticleNavigationHostUsesTheExistingResetRevisionAsItsIdentity() {
+        XCTAssertEqual(IOSArticleNavigationPresentation.identity(for: 0), 0)
+        XCTAssertEqual(IOSArticleNavigationPresentation.identity(for: 1), 1)
+        XCTAssertEqual(IOSArticleNavigationPresentation.identity(for: 2), 2)
     }
 
     func testArticleListTitleUsesAllNewsSelectionCount() {
