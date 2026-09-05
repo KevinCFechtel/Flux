@@ -4,6 +4,38 @@ enum NewsNavigationPresentation: Equatable { case sidebar, sheet }
 
 enum NewsNavigationSelection {
     static func isSelected(_ rowScope: BrowserScope, activeScope: BrowserScope) -> Bool { rowScope == activeScope }
+
+    enum CategoryPresentation: Equatable {
+        case unselected
+        case directlySelected
+        case containsSelectedFeed
+    }
+
+    static func categoryPresentation(categoryID: Int64, activeScope: BrowserScope, catalog: NavigationCatalog) -> CategoryPresentation {
+        if activeScope == .category(categoryID) { return .directlySelected }
+        guard case let .feed(feedID) = activeScope,
+              catalog.feeds.first(where: { $0.id == feedID })?.categoryId == categoryID
+        else { return .unselected }
+        return .containsSelectedFeed
+    }
+}
+
+struct NewsNavigationExpansionState: Equatable {
+    private(set) var expandedCategoryIDs = Set<Int64>()
+
+    mutating func ensureSelectedFeedIsExpanded(scope: BrowserScope, catalog: NavigationCatalog) {
+        guard case let .feed(feedID) = scope,
+              let categoryID = catalog.feeds.first(where: { $0.id == feedID })?.categoryId
+        else { return }
+        expandedCategoryIDs.insert(categoryID)
+    }
+
+    mutating func setExpanded(_ expanded: Bool, categoryID: Int64) {
+        if expanded { expandedCategoryIDs.insert(categoryID) }
+        else { expandedCategoryIDs.remove(categoryID) }
+    }
+
+    func isExpanded(_ categoryID: Int64) -> Bool { expandedCategoryIDs.contains(categoryID) }
 }
 
 struct NewsNavigationView: View {
@@ -14,6 +46,7 @@ struct NewsNavigationView: View {
     let onSearch: () -> Void
     @State private var addDestination: IOSNavigationAddDestination?
     @State private var feedSettingsTarget: IOSFeedSettingsTarget?
+    @State private var expansionState = NewsNavigationExpansionState()
 
     init(store: NewsreaderStore, iPhoneSheetPresented: Binding<Bool>, presentation: NewsNavigationPresentation, onSearch: @escaping () -> Void = {}) {
         self.store = store
@@ -31,6 +64,8 @@ struct NewsNavigationView: View {
         .toolbar { addToolbar }
         .sheet(item: $addDestination) { destination in NavigationStack { addView(destination) } }
         .sheet(item: $feedSettingsTarget) { target in NavigationStack { IOSFeedSettingsView(store: store, target: target) } }
+        .onAppear(perform: ensureSelectedFeedIsExpanded)
+        .onChange(of: store.scope) { _, _ in ensureSelectedFeedIsExpanded() }
     }
 
     private var listContent: some View {
@@ -43,11 +78,15 @@ struct NewsNavigationView: View {
             }
             Section("Feeds") {
                 ForEach(groups) { group in
-                    if group.categoryID != nil {
-                        OutlineGroup([sidebarItem(for: group)], children: \.children) { item in
-                            if item.children != nil { categoryRow(item) }
-                            else { feedRow(item.title, feedID: feedID(for: item.scope), count: item.count) }
+                    if let categoryID = group.categoryID {
+                        DisclosureGroup(isExpanded: expansionBinding(for: categoryID)) {
+                            ForEach(group.feeds, id: \.id) { feed in
+                                feedRow(feedTitle(feed.id), feedID: feed.id, count: store.feedCounts[feed.id] ?? 0)
+                            }
+                        } label: {
+                            categoryRow(categoryID: categoryID, title: group.title, count: store.categoryCounts[categoryID] ?? 0)
                         }
+                        .tag(BrowserScope.category(categoryID))
                     } else {
                         ForEach(group.feeds, id: \.id) { feed in
                             feedRow(feedTitle(feed.id), feedID: feed.id, count: store.feedCounts[feed.id] ?? 0)
@@ -66,11 +105,6 @@ struct NewsNavigationView: View {
         NavigationVisibility.groups(categories: store.catalog.categories.map { .init(id: $0.id, title: $0.title) }, feeds: store.catalog.feeds.map { .init(id: $0.id, categoryID: $0.categoryId) }, hidingEmpty: store.hideEmptyNavigationEntries, counts: store.feedCounts)
     }
 
-    private func sidebarItem(for group: NavigationPresentationGroup) -> NewsNavigationItem {
-        let categoryID = group.categoryID!
-        return NewsNavigationItem(id: "category-\(categoryID)", title: group.title, scope: .category(categoryID), count: store.categoryCounts[categoryID] ?? 0, children: group.feeds.map { .init(id: "feed-\($0.id)", title: feedTitle($0.id), scope: .feed($0.id), count: store.feedCounts[$0.id] ?? 0, children: nil) })
-    }
-
     private func feedTitle(_ feedID: Int64) -> String { store.catalog.feeds.first { $0.id == feedID }?.title ?? "Feed" }
     private var searchRow: some View { Button(action: onSearch) { Label("Search", systemImage: "magnifyingglass") }.accessibilityIdentifier("navigation.search") }
 
@@ -80,12 +114,13 @@ struct NewsNavigationView: View {
             .accessibilityValue(count > 0 ? "\(count) unread articles" : "No unread articles")
     }
 
-    private func categoryRow(_ item: NewsNavigationItem) -> some View {
-        Button { store.select(item.scope); iPhoneSheetPresented = false } label: {
-            Label { labelTitle(item.title, count: item.count) } icon: { Image(systemName: "folder") }
+    private func categoryRow(categoryID: Int64, title: String, count: UInt64) -> some View {
+        let presentation = NewsNavigationSelection.categoryPresentation(categoryID: categoryID, activeScope: store.scope, catalog: store.catalog)
+        return Label { labelTitle(title, count: count) } icon: {
+            Image(systemName: presentation == .containsSelectedFeed ? "folder.fill" : "folder")
         }
-        .buttonStyle(.plain)
-        .tag(item.scope)
+        .fontWeight(presentation == .containsSelectedFeed ? .medium : .regular)
+        .tag(BrowserScope.category(categoryID))
     }
 
     private func feedRow(_ title: String, feedID: Int64?, count: UInt64) -> some View {
@@ -105,7 +140,14 @@ struct NewsNavigationView: View {
     }
 
     private var iconVariant: FeedIconVariant { IOSFeedIconPresentation.variant(isDark: colorScheme == .dark) }
-    private func feedID(for scope: BrowserScope) -> Int64? { if case let .feed(id) = scope { id } else { nil } }
+
+    private func expansionBinding(for categoryID: Int64) -> Binding<Bool> {
+        Binding(get: { expansionState.isExpanded(categoryID) }, set: { expansionState.setExpanded($0, categoryID: categoryID) })
+    }
+
+    private func ensureSelectedFeedIsExpanded() {
+        expansionState.ensureSelectedFeedIsExpanded(scope: store.scope, catalog: store.catalog)
+    }
 
     @ToolbarContentBuilder private var addToolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
@@ -125,4 +167,3 @@ struct NewsNavigationView: View {
 }
 
 private enum IOSNavigationAddDestination: Identifiable { case feed, category; var id: Self { self } }
-private struct NewsNavigationItem: Identifiable { let id: String; let title: String; let scope: BrowserScope; let count: UInt64; let children: [NewsNavigationItem]? }

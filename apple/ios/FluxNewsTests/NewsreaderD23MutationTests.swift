@@ -480,11 +480,11 @@ final class NewsreaderD23MutationTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            IOSArticleSwipeInteraction.endState(offset: 80, direction: .right, configuration: configuration, revealThreshold: 28, fullSwipeDistance: 300),
+            IOSArticleSwipeInteraction.endState(effectiveOffset: 80, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300),
             .revealed(.right)
         )
         XCTAssertEqual(
-            IOSArticleSwipeInteraction.endState(offset: 20, direction: .left, configuration: configuration, revealThreshold: 28, fullSwipeDistance: 300),
+            IOSArticleSwipeInteraction.endState(effectiveOffset: -20, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300),
             .closed
         )
     }
@@ -496,13 +496,53 @@ final class NewsreaderD23MutationTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            IOSArticleSwipeInteraction.endState(offset: 300, direction: .right, configuration: configuration, revealThreshold: 28, fullSwipeDistance: 300),
+            IOSArticleSwipeInteraction.endState(effectiveOffset: 300, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300),
             .fullSwipe(.read)
         )
         XCTAssertEqual(
-            IOSArticleSwipeInteraction.endState(offset: -300, direction: .left, configuration: configuration, revealThreshold: 28, fullSwipeDistance: 300),
+            IOSArticleSwipeInteraction.endState(effectiveOffset: -300, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300),
             .fullSwipe(.unstar)
         )
+    }
+
+    func testSwipeUsesEffectiveOffsetToCloseBeforeRevealingTheOppositeSide() {
+        let configuration = IOSArticleSwipeConfiguration(
+            leading: IOSArticleSwipeSideConfiguration(actions: [.read]),
+            trailing: IOSArticleSwipeSideConfiguration(actions: [.star])
+        )
+
+        XCTAssertEqual(IOSArticleSwipeInteraction.effectiveOffset(startOffset: 76, rawTranslation: -40), 36)
+        XCTAssertEqual(IOSArticleSwipeInteraction.visibleOffset(effectiveOffset: 36, configuration: configuration, swipeActionWidth: 76), 36)
+        XCTAssertEqual(IOSArticleSwipeInteraction.effectiveOffset(startOffset: 76, rawTranslation: -76), 0)
+        XCTAssertEqual(IOSArticleSwipeInteraction.endState(effectiveOffset: 0, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300), .closed)
+        XCTAssertEqual(IOSArticleSwipeInteraction.effectiveOffset(startOffset: 76, rawTranslation: -120), -44)
+        XCTAssertEqual(IOSArticleSwipeInteraction.endState(effectiveOffset: -44, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300), .revealed(.left))
+    }
+
+    func testSwipeMirrorsReversalFromTrailingToLeading() {
+        let configuration = IOSArticleSwipeConfiguration(
+            leading: IOSArticleSwipeSideConfiguration(actions: [.read]),
+            trailing: IOSArticleSwipeSideConfiguration(actions: [.star])
+        )
+
+        XCTAssertEqual(IOSArticleSwipeInteraction.effectiveOffset(startOffset: -76, rawTranslation: 40), -36)
+        XCTAssertEqual(IOSArticleSwipeInteraction.effectiveOffset(startOffset: -76, rawTranslation: 76), 0)
+        XCTAssertEqual(IOSArticleSwipeInteraction.effectiveOffset(startOffset: -76, rawTranslation: 120), 44)
+        XCTAssertEqual(IOSArticleSwipeInteraction.endState(effectiveOffset: 44, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300), .revealed(.right))
+    }
+
+    func testFullSwipeArmingUsesRawEffectiveProgressRatherThanVisibleOffset() {
+        let configuration = IOSArticleSwipeConfiguration(
+            leading: IOSArticleSwipeSideConfiguration(actions: [.star, .read]),
+            trailing: IOSArticleSwipeSideConfiguration(actions: [.unstar])
+        )
+
+        XCTAssertEqual(IOSArticleSwipeInteraction.visibleOffset(effectiveOffset: 300, configuration: configuration, swipeActionWidth: 76), 152)
+        XCTAssertEqual(IOSArticleSwipeInteraction.state(effectiveOffset: 299, configuration: configuration, fullSwipeDistance: 300), .dragging(.right))
+        XCTAssertEqual(IOSArticleSwipeInteraction.state(effectiveOffset: 300, configuration: configuration, fullSwipeDistance: 300), .fullSwipeArmed(.right))
+        XCTAssertEqual(IOSArticleSwipeInteraction.state(effectiveOffset: 250, configuration: configuration, fullSwipeDistance: 300), .dragging(.right))
+        XCTAssertEqual(IOSArticleSwipeInteraction.endState(effectiveOffset: 250, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300), .revealed(.right))
+        XCTAssertEqual(IOSArticleSwipeInteraction.endState(effectiveOffset: 300, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300), .fullSwipe(.read))
     }
 
     func testSwipeActionsRouteToExistingArticleMutationsAndExposeAccessibilityLabels() {

@@ -56,6 +56,52 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(NewsNavigationSelection.isSelected(.feed(11), activeScope: .feed(10)))
     }
 
+    func testCategoryPresentationDistinguishesDirectSelectionAndSelectedFeedContext() {
+        let catalog = NavigationCatalog(
+            categories: [.init(id: 1, title: "Technology"), .init(id: 2, title: "World")],
+            feeds: [.init(id: 10, categoryId: 1, title: "Ars"), .init(id: 11, categoryId: 2, title: "BBC")]
+        )
+
+        XCTAssertEqual(NewsNavigationSelection.categoryPresentation(categoryID: 1, activeScope: .category(1), catalog: catalog), .directlySelected)
+        XCTAssertEqual(NewsNavigationSelection.categoryPresentation(categoryID: 1, activeScope: .feed(10), catalog: catalog), .containsSelectedFeed)
+        XCTAssertEqual(NewsNavigationSelection.categoryPresentation(categoryID: 2, activeScope: .feed(10), catalog: catalog), .unselected)
+        XCTAssertEqual(NewsNavigationSelection.categoryPresentation(categoryID: 1, activeScope: .all, catalog: catalog), .unselected)
+        XCTAssertEqual(NewsNavigationSelection.categoryPresentation(categoryID: 1, activeScope: .starred, catalog: catalog), .unselected)
+        XCTAssertTrue(NewsNavigationSelection.isSelected(.feed(10), activeScope: .feed(10)))
+    }
+
+    func testNavigationExpansionEnsuresTheSelectedFeedParentWithoutDiscardingManualExpansion() {
+        let catalog = NavigationCatalog(
+            categories: [.init(id: 1, title: "Technology"), .init(id: 2, title: "World")],
+            feeds: [.init(id: 10, categoryId: 1, title: "Ars"), .init(id: 11, categoryId: 2, title: "BBC")]
+        )
+        var expansion = NewsNavigationExpansionState()
+
+        expansion.setExpanded(true, categoryID: 1)
+        expansion.ensureSelectedFeedIsExpanded(scope: .feed(11), catalog: catalog)
+
+        XCTAssertTrue(expansion.isExpanded(1))
+        XCTAssertTrue(expansion.isExpanded(2))
+    }
+
+    func testNavigationExpansionIgnoresNonFeedScopesAndExpandsNewActiveFeed() {
+        let catalog = NavigationCatalog(
+            categories: [.init(id: 1, title: "Technology"), .init(id: 2, title: "World")],
+            feeds: [.init(id: 10, categoryId: 1, title: "Ars"), .init(id: 11, categoryId: 2, title: "BBC")]
+        )
+        var expansion = NewsNavigationExpansionState()
+
+        expansion.ensureSelectedFeedIsExpanded(scope: .category(1), catalog: catalog)
+        expansion.ensureSelectedFeedIsExpanded(scope: .all, catalog: catalog)
+        expansion.ensureSelectedFeedIsExpanded(scope: .starred, catalog: catalog)
+        XCTAssertFalse(expansion.isExpanded(1))
+        XCTAssertFalse(expansion.isExpanded(2))
+
+        expansion.ensureSelectedFeedIsExpanded(scope: .feed(10), catalog: catalog)
+        XCTAssertTrue(expansion.isExpanded(1))
+        XCTAssertFalse(expansion.isExpanded(2))
+    }
+
     func testFeedIconAppearanceUsesCoreVariants() {
         XCTAssertEqual(IOSFeedIconPresentation.variant(isDark: false), .normal)
         XCTAssertEqual(IOSFeedIconPresentation.variant(isDark: true), .dark)
