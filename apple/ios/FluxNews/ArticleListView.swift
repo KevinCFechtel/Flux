@@ -118,8 +118,10 @@ final class IOSScrolloverRuntimeAdapter {
         guard userScrolling else { return }
         let delta = IOSScrolloverOffset.forwardDelta(current: canonicalPosition, previous: lastProcessedOffset)
         diagnosticExposures(event: "process-before", delta: delta)
-        if delta <= 0 || delta > viewport.height * 0.85 {
-            diagnostic("process reset delta=\(delta) limit=\(viewport.height * 0.85)")
+        if delta <= 0 {
+            diagnostic("process reversal delta=\(delta) rebase=true")
+        } else if delta > viewport.height * 0.85 {
+            diagnostic("process fast-forward delta=\(delta) geometry-check=true")
         }
         let ids = IOSScrolloverFrameProcessor.process(frames: frames, viewport: viewport, unread: unread, canonicalPosition: canonicalPosition, lastProcessedOffset: &lastProcessedOffset, tracker: &tracker, enabled: enabled, userInitiated: true)
         diagnosticExposures(event: "process-after emitted=\(ids)", delta: delta)

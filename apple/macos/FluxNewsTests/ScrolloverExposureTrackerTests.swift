@@ -25,27 +25,56 @@ final class ScrolloverExposureTrackerTests: XCTestCase {
         XCTAssertEqual(tracker.process(frames: frame(-100), viewport: viewport, unread: unread, now: 0.7, offsetDelta: 50, userInitiated: true), [])
     }
 
-    func testProgrammaticAndLargeScrollsDoNotProcess() {
+    func testProgrammaticScrollDoesNotProcessButLargeForwardGeometryDoes() {
         var tracker = ScrolloverExposureTracker()
         tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 0)
         tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 0.7)
 
         XCTAssertEqual(tracker.process(frames: frame(-100), viewport: viewport, unread: unread, now: 0.8, offsetDelta: 50, userInitiated: false), [])
+        tracker.rebase(frames: frame(0), unread: unread)
         tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 1)
         tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 1.7)
-        XCTAssertEqual(tracker.process(frames: frame(-100), viewport: viewport, unread: unread, now: 1.8, offsetDelta: 86, userInitiated: true), [])
+        XCTAssertEqual(tracker.process(frames: frame(-100), viewport: viewport, unread: unread, now: 1.8, offsetDelta: 86, userInitiated: true), [1])
+    }
+
+    func testQualificationSurvivesReversalAndMotionBaselineRebases() {
+        var tracker = ScrolloverExposureTracker()
+        tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 0)
+        tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 0.7)
+
+        XCTAssertEqual(tracker.process(frames: frame(30), viewport: viewport, unread: unread, now: 0.8, offsetDelta: 30, userInitiated: true), [])
+        XCTAssertEqual(tracker.process(frames: frame(10), viewport: viewport, unread: unread, now: 0.9, offsetDelta: -20, userInitiated: true), [])
+        XCTAssertEqual(tracker.process(frames: frame(-100), viewport: viewport, unread: unread, now: 1, offsetDelta: 20, userInitiated: true), [1])
+    }
+
+    func testReverseCrossingDoesNotProcessQualifiedItem() {
+        var tracker = ScrolloverExposureTracker()
+        tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 0)
+        tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 0.7)
+
+        XCTAssertEqual(tracker.process(frames: frame(-100), viewport: viewport, unread: unread, now: 0.8, offsetDelta: -50, userInitiated: true), [])
+    }
+
+    func testFastForwardProcessesEachQualifiedCrossingOnlyOnce() {
+        let ids: Set<Int64> = [1, 2]
+        var tracker = ScrolloverExposureTracker()
+        tracker.observe(frames: [1: frame(0)[1]!, 2: frame(0)[1]!], viewport: viewport, unread: ids, now: 0)
+        tracker.observe(frames: [1: frame(0)[1]!, 2: frame(0)[1]!], viewport: viewport, unread: ids, now: 0.7)
+
+        XCTAssertEqual(tracker.process(frames: [1: frame(-100)[1]!, 2: frame(-200)[1]!], viewport: viewport, unread: ids, now: 0.8, offsetDelta: 300, userInitiated: true), [1, 2])
+        XCTAssertEqual(tracker.process(frames: [1: frame(-140)[1]!, 2: frame(-240)[1]!], viewport: viewport, unread: ids, now: 0.9, offsetDelta: 40, userInitiated: true), [])
     }
 
     func testLaterQualifiedItemStillProcessesAfterRejectedScroll() {
         var tracker = ScrolloverExposureTracker()
         tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 0)
         tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 0.7)
-        XCTAssertEqual(tracker.process(frames: frame(-100), viewport: viewport, unread: unread, now: 0.8, offsetDelta: 86, userInitiated: true), [])
+        XCTAssertEqual(tracker.process(frames: frame(-100), viewport: viewport, unread: unread, now: 0.8, offsetDelta: 86, userInitiated: true), [1])
 
         tracker.rebase(frames: frame(0), unread: unread)
         tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 1)
         tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 1.7)
-        XCTAssertEqual(tracker.process(frames: frame(-100), viewport: viewport, unread: unread, now: 1.8, offsetDelta: 50, userInitiated: true), [1])
+        XCTAssertEqual(tracker.process(frames: frame(-100), viewport: viewport, unread: unread, now: 1.8, offsetDelta: 50, userInitiated: true), [])
     }
 
     func testUndoBatchAccumulatesMultipleFlushesInOneScroll() {

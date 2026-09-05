@@ -201,7 +201,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(ids, [1])
     }
 
-    func testRuntimeFrameProcessorRejectsDisabledAndLargeJumpInput() {
+    func testRuntimeFrameProcessorRejectsDisabledButChecksLargeJumpGeometry() {
         var tracker = ScrolloverExposureTracker()
         var lastOffset: CGFloat = 0
         let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
@@ -210,7 +210,28 @@ final class NewsreaderD23MutationTests: XCTestCase {
         tracker.observe(frames: visible, viewport: viewport, unread: [1], now: 1)
 
         XCTAssertTrue(IOSScrolloverFrameProcessor.process(frames: [1: CGRect(x: 0, y: -20, width: 100, height: 100)], viewport: viewport, unread: [1], canonicalPosition: 20, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: false, userInitiated: true).isEmpty)
-        XCTAssertTrue(IOSScrolloverFrameProcessor.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100)], viewport: viewport, unread: [1], canonicalPosition: 100, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: true, userInitiated: true).isEmpty)
+        XCTAssertEqual(IOSScrolloverFrameProcessor.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100)], viewport: viewport, unread: [1], canonicalPosition: 100, lastProcessedOffset: &lastOffset, tracker: &tracker, enabled: true, userInitiated: true), [1])
+    }
+
+    func testScrolloverForwardReverseForwardPreservesQualificationAndEmitsOnce() {
+        var tracker = ScrolloverExposureTracker()
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        tracker.observe(frames: [1: CGRect(x: 0, y: 0, width: 100, height: 100)], viewport: viewport, unread: [1], now: 0)
+        tracker.observe(frames: [1: CGRect(x: 0, y: 0, width: 100, height: 100)], viewport: viewport, unread: [1], now: 0.7)
+
+        XCTAssertTrue(tracker.process(frames: [1: CGRect(x: 0, y: 30, width: 100, height: 100)], viewport: viewport, unread: [1], now: 0.8, offsetDelta: 30, userInitiated: true).isEmpty)
+        XCTAssertTrue(tracker.process(frames: [1: CGRect(x: 0, y: 10, width: 100, height: 100)], viewport: viewport, unread: [1], now: 0.9, offsetDelta: -20, userInitiated: true).isEmpty)
+        XCTAssertEqual(tracker.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100)], viewport: viewport, unread: [1], now: 1, offsetDelta: 20, userInitiated: true), [1])
+        XCTAssertTrue(tracker.process(frames: [1: CGRect(x: 0, y: -140, width: 100, height: 100)], viewport: viewport, unread: [1], now: 1.1, offsetDelta: 40, userInitiated: true).isEmpty)
+    }
+
+    func testScrolloverUnqualifiedFastCrossingDoesNotProcess() {
+        var tracker = ScrolloverExposureTracker()
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        tracker.observe(frames: [1: CGRect(x: 0, y: 0, width: 100, height: 100), 2: CGRect(x: 0, y: 100, width: 100, height: 100)], viewport: viewport, unread: [1, 2], now: 0)
+        tracker.observe(frames: [1: CGRect(x: 0, y: 0, width: 100, height: 100)], viewport: viewport, unread: [1, 2], now: 0.8)
+
+        XCTAssertEqual(tracker.process(frames: [1: CGRect(x: 0, y: -100, width: 100, height: 100), 2: CGRect(x: 0, y: -200, width: 100, height: 100)], viewport: viewport, unread: [1, 2], now: 0.9, offsetDelta: 200, userInitiated: true), [1])
     }
 
     @MainActor

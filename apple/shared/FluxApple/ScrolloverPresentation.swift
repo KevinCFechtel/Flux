@@ -4,10 +4,71 @@ import Foundation
 struct ScrolloverExposureTracker {
     private struct Exposure { var visibleSince: TimeInterval?; var qualified = false; var processedFrame: CGRect; var currentFrame: CGRect }
     private var exposures: [Int64: Exposure] = [:]
-    mutating func reset() { exposures.removeAll() }
-    mutating func rebase(frames: [Int64: CGRect], unread: Set<Int64>) { exposures = exposures.filter { unread.contains($0.key) }; for (id, frame) in frames where unread.contains(id) { guard var e = exposures[id] else { continue }; e.processedFrame = frame; e.currentFrame = frame; exposures[id] = e } }
-    mutating func observe(frames: [Int64: CGRect], viewport: CGRect, unread: Set<Int64>, now: TimeInterval) { for (id, frame) in frames where unread.contains(id) { var e = exposures[id] ?? Exposure(processedFrame: frame, currentFrame: frame); let visible = frame.intersection(viewport).height / max(1, frame.height); if visible >= 0.6 { e.visibleSince = e.visibleSince ?? now; e.qualified = e.qualified || now - (e.visibleSince ?? now) >= 0.7 } else if !e.qualified { e.visibleSince = nil }; e.currentFrame = frame; exposures[id] = e }; exposures = exposures.filter { unread.contains($0.key) } }
-    mutating func process(frames: [Int64: CGRect], viewport: CGRect, unread: Set<Int64>, now: TimeInterval, offsetDelta: CGFloat, userInitiated: Bool) -> [Int64] { guard userInitiated, offsetDelta > 0, offsetDelta <= viewport.height * 0.85 else { reset(); observe(frames: frames, viewport: viewport, unread: unread, now: now); return [] }; let ids = exposures.compactMap { id, e -> Int64? in let crossed = frames[id].map { e.processedFrame.maxY > viewport.minY && $0.maxY <= viewport.minY } ?? (e.currentFrame.midY < viewport.midY); return e.qualified && unread.contains(id) && crossed ? id : nil }.sorted(); for id in ids { exposures.removeValue(forKey: id) }; observe(frames: frames, viewport: viewport, unread: unread, now: now); for id in Array(exposures.keys) { if var e = exposures[id] { e.processedFrame = e.currentFrame; exposures[id] = e } }; return ids }
+    private var emittedIDs = Set<Int64>()
+
+    mutating func reset() {
+        exposures.removeAll()
+        emittedIDs.removeAll()
+    }
+
+    mutating func rebase(frames: [Int64: CGRect], unread: Set<Int64>) {
+        exposures = exposures.filter { unread.contains($0.key) }
+        emittedIDs = emittedIDs.intersection(unread)
+        for (id, frame) in frames where unread.contains(id) {
+            guard var e = exposures[id] else { continue }
+            e.processedFrame = frame
+            e.currentFrame = frame
+            exposures[id] = e
+        }
+    }
+
+    mutating func observe(frames: [Int64: CGRect], viewport: CGRect, unread: Set<Int64>, now: TimeInterval) {
+        for (id, frame) in frames where unread.contains(id) {
+            var e = exposures[id] ?? Exposure(processedFrame: frame, currentFrame: frame)
+            let visible = frame.intersection(viewport).height / max(1, frame.height)
+            if visible >= 0.6 {
+                e.visibleSince = e.visibleSince ?? now
+                e.qualified = e.qualified || now - (e.visibleSince ?? now) >= 0.7
+            } else if !e.qualified {
+                e.visibleSince = nil
+            }
+            e.currentFrame = frame
+            exposures[id] = e
+        }
+        exposures = exposures.filter { unread.contains($0.key) }
+        emittedIDs = emittedIDs.intersection(unread)
+    }
+
+    mutating func process(frames: [Int64: CGRect], viewport: CGRect, unread: Set<Int64>, now: TimeInterval, offsetDelta: CGFloat, userInitiated: Bool) -> [Int64] {
+        guard userInitiated else {
+            reset()
+            observe(frames: frames, viewport: viewport, unread: unread, now: now)
+            return []
+        }
+
+        // Reversal changes the relevant crossing segment, but not exposure qualification.
+        if offsetDelta <= 0 {
+            observe(frames: frames, viewport: viewport, unread: unread, now: now)
+            rebase(frames: frames, unread: unread)
+            return []
+        }
+
+        let ids = exposures.compactMap { id, e -> Int64? in
+            guard !emittedIDs.contains(id), e.qualified, unread.contains(id), let frame = frames[id] else { return nil }
+            let crossed = e.processedFrame.maxY > viewport.minY && frame.maxY <= viewport.minY
+            return crossed ? id : nil
+        }.sorted()
+        emittedIDs.formUnion(ids)
+
+        observe(frames: frames, viewport: viewport, unread: unread, now: now)
+        for id in Array(exposures.keys) {
+            if var e = exposures[id] {
+                e.processedFrame = e.currentFrame
+                exposures[id] = e
+            }
+        }
+        return ids
+    }
 }
 
 #if DEBUG
