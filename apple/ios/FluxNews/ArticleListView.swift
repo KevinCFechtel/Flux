@@ -625,17 +625,11 @@ struct ArticlePresentationView: View, Equatable {
     private var portraitVisual: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let imageURL = article.imageUrl.flatMap(URL.init(string:)) {
-                AsyncImage(url: imageURL) { phase in
-                    if case let .success(image) = phase {
-                        image.resizable().scaledToFill()
-                    } else {
-                        placeholder
-                    }
-                }
-                .frame(width: portraitContentWidth, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: portraitContentWidth))
+                ArticleImageView(
+                    url: imageURL,
+                    targetSize: CGSize(width: portraitContentWidth, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: portraitContentWidth))
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .clipped()
-                .accessibilityHidden(true)
             }
             articleText
                 .frame(width: portraitContentWidth, alignment: .leading)
@@ -647,17 +641,11 @@ struct ArticlePresentationView: View, Equatable {
         HStack(alignment: .top, spacing: 14) {
             let imageWidth = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
             if let imageURL = article.imageUrl.flatMap(URL.init(string:)) {
-                AsyncImage(url: imageURL) { phase in
-                    if case let .success(image) = phase {
-                        image.resizable().scaledToFill()
-                    } else {
-                        placeholder
-                    }
-                }
-                .frame(width: imageWidth, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: imageWidth))
+                ArticleImageView(
+                    url: imageURL,
+                    targetSize: CGSize(width: imageWidth, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: imageWidth))
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .clipped()
-                .accessibilityHidden(true)
             }
             articleText
                 .frame(width: hasImage ? ArticlePresentationLayout.landscapeTextWidth(availableWidth: availableWidth, imageWidth: imageWidth, interColumnSpacing: 14) : contentWidth, alignment: .leading)
@@ -718,12 +706,6 @@ struct ArticlePresentationView: View, Equatable {
                     .multilineTextAlignment(.leading)
             }
         }
-    }
-
-    private var placeholder: some View {
-        Rectangle()
-            .fill(.quaternary)
-            .overlay { Image(systemName: "photo").font(.title).foregroundStyle(.secondary) }
     }
 
     private var date: String {

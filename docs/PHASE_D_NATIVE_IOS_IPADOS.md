@@ -157,6 +157,12 @@ Only successful writes join a rolling Undo group: a success extends its 4-second
 inactivity window without extending the 15-second maximum group lifetime. macOS
 retains its existing platform-specific frame integration.
 
+Visual article images are native iOS presentation infrastructure, not Core or
+sync state. They use display-sized ImageIO downsampling, normal HTTP response
+caching, and bounded in-memory caching of decoded images. Loading, failure, and
+success presentation remain inside the existing fixed portrait or landscape
+image slots and must not change article-card geometry.
+
 Appearance follows the system Light/Dark mode. Primary content surfaces use the
 system content background, which is true black in Dark Mode. There is no manual
 Light/Dark override, True Black setting, persisted theme preference, or separate

@@ -1,4 +1,6 @@
 import XCTest
+import ImageIO
+import UniformTypeIdentifiers
 @testable import FluxNews
 
 final class NewsreaderPresentationTests: XCTestCase {
@@ -221,6 +223,114 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticlePresentationLayout.boundedArticleWidth(-1), 0)
     }
 
+    func testArticleImageRequestBucketsDisplayPixelsDeterministically() {
+        let url = URL(string: "https://example.com/image.jpg")!
+        XCTAssertEqual(ArticleImageRequest(url: url, targetSize: CGSize(width: 100, height: 50), displayScale: 2).maxPixelDimension, 256)
+        XCTAssertEqual(ArticleImageRequest(url: url, targetSize: CGSize(width: 127.9, height: 20), displayScale: 1).maxPixelDimension, 128)
+        XCTAssertEqual(ArticleImageRequest(url: url, targetSize: CGSize(width: 128.1, height: 20), displayScale: 1).maxPixelDimension, 192)
+    }
+
+    func testArticleImagePipelineUsesDecodedCacheAndSeparatesLargerRequests() async throws {
+        let data = try imageData(width: 800, height: 400)
+        let counter = ImageLoadCounter(data: data)
+        let pipeline = ArticleImagePipeline { _ in await counter.load() }
+        let url = URL(string: "https://example.com/image.jpg")!
+        let small = ArticleImageRequest(url: url, targetSize: CGSize(width: 100, height: 50), displayScale: 1)
+        let large = ArticleImageRequest(url: url, targetSize: CGSize(width: 400, height: 200), displayScale: 1)
+
+        _ = try await pipeline.image(for: small)
+        _ = try await pipeline.image(for: small)
+        let cachedCalls = await counter.callCount()
+        XCTAssertEqual(cachedCalls, 1)
+
+        let image = try await pipeline.image(for: large)
+        let largerCalls = await counter.callCount()
+        XCTAssertEqual(largerCalls, 2)
+        XCTAssertGreaterThan(image.width, small.maxPixelDimension)
+    }
+
+    func testArticleImagePipelineDeduplicatesEquivalentInFlightRequests() async throws {
+        let gate = ImageLoadGate(data: try imageData(width: 800, height: 400))
+        let pipeline = ArticleImagePipeline { _ in try await gate.load() }
+        let request = ArticleImageRequest(url: URL(string: "https://example.com/image.jpg")!, targetSize: CGSize(width: 200, height: 100), displayScale: 1)
+
+        async let first = pipeline.image(for: request)
+        await gate.waitUntilStarted()
+        async let second = pipeline.image(for: request)
+        await Task.yield()
+        await gate.release()
+
+        _ = try await first
+        _ = try await second
+        let calls = await gate.callCount()
+        XCTAssertEqual(calls, 1)
+    }
+
+    func testArticleImagePipelineDownsamplesAndFailsSafely() async throws {
+        let data = try imageData(width: 800, height: 400)
+        let image = try ArticleImagePipeline.downsample(data: data, maxPixelDimension: 128)
+        XCTAssertLessThanOrEqual(max(image.width, image.height), 128)
+
+        let rotated = try ArticleImagePipeline.downsample(data: imageData(width: 800, height: 400, orientation: 6), maxPixelDimension: 128)
+        XCTAssertGreaterThan(rotated.height, rotated.width)
+
+        let url = URL(string: "https://example.com/image.jpg")!
+        let corrupt = ArticleImagePipeline { _ in Data("not an image".utf8) }
+        let failing = ArticleImagePipeline { _ in throw URLError(.badServerResponse) }
+        let request = ArticleImageRequest(url: url, targetSize: CGSize(width: 100, height: 50), displayScale: 1)
+        do {
+            _ = try await corrupt.image(for: request)
+            XCTFail("Corrupt data must fail")
+        } catch {}
+        do {
+            _ = try await failing.image(for: request)
+            XCTFail("Network failure must fail")
+        } catch {}
+    }
+
+    func testArticleImagePipelineCanLoadAfterCacheEvictionAndCancelledWaiter() async throws {
+        let data = try imageData(width: 800, height: 400)
+        let counter = ImageLoadCounter(data: data)
+        let pipeline = ArticleImagePipeline { _ in await counter.load() }
+        let request = ArticleImageRequest(url: URL(string: "https://example.com/image.jpg")!, targetSize: CGSize(width: 100, height: 50), displayScale: 1)
+        _ = try await pipeline.image(for: request)
+        await pipeline.removeAllCachedImages()
+        _ = try await pipeline.image(for: request)
+        let reloadCalls = await counter.callCount()
+        XCTAssertEqual(reloadCalls, 2)
+
+        let gate = ImageLoadGate(data: data)
+        let sharedPipeline = ArticleImagePipeline { _ in try await gate.load() }
+        let cancelled = Task { try await sharedPipeline.image(for: request) }
+        await gate.waitUntilStarted()
+        cancelled.cancel()
+        let active = Task { try await sharedPipeline.image(for: request) }
+        await Task.yield()
+        await gate.release()
+        do {
+            _ = try await cancelled.value
+            XCTFail("Cancelled consumer must not receive an image")
+        } catch is CancellationError {}
+        _ = try await active.value
+        let sharedCalls = await gate.callCount()
+        XCTAssertEqual(sharedCalls, 1)
+    }
+
+    private func imageData(width: Int, height: Int, orientation: Int? = nil) throws -> Data {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil), let image = context.makeImage() else {
+            throw XCTSkip("Unable to create image fixture")
+        }
+        let properties = orientation.map { [kCGImagePropertyOrientation: $0] as CFDictionary }
+        CGImageDestinationAddImage(destination, image, properties)
+        guard CGImageDestinationFinalize(destination) else { throw XCTSkip("Unable to encode image fixture") }
+        return data as Data
+    }
+
     func testNavigationGroupsNestFeedsUnderCategoriesAndKeepOrphansVisible() {
         let categories = [NavigationPresentationCategory(id: 1, title: "Tech"), NavigationPresentationCategory(id: 2, title: "World")]
         let feeds = [
@@ -370,4 +480,48 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(inline.count, 5)
     }
 
+}
+
+private actor ImageLoadCounter {
+    private let data: Data
+    private var calls = 0
+
+    init(data: Data) { self.data = data }
+
+    func load() -> Data {
+        calls += 1
+        return data
+    }
+
+    func callCount() -> Int { calls }
+}
+
+private actor ImageLoadGate {
+    private let data: Data
+    private var calls = 0
+    private var didStart: CheckedContinuation<Void, Never>?
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    init(data: Data) { self.data = data }
+
+    func load() async throws -> Data {
+        calls += 1
+        didStart?.resume()
+        didStart = nil
+        await withCheckedContinuation { releaseWaiters.append($0) }
+        return data
+    }
+
+    func waitUntilStarted() async {
+        guard calls == 0 else { return }
+        await withCheckedContinuation { didStart = $0 }
+    }
+
+    func release() {
+        let waiters = releaseWaiters
+        releaseWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+
+    func callCount() -> Int { calls }
 }
