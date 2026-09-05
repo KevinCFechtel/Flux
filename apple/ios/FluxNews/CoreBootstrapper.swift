@@ -132,7 +132,7 @@ final class CoreBootstrapper: ObservableObject {
     }
 
     var pathsDescription: String {
-        guard let paths = try? CorePaths() else { return "Unavailable" }
+        guard let paths = try? CorePaths(createDirectories: false) else { return "Unavailable" }
         return "Application Support: \(paths.persistentData.path)\nCaches: \(paths.cache.path)\nMedia: \(paths.media.path)"
     }
 
@@ -197,7 +197,7 @@ private struct CorePaths {
     let cache: URL
     let media: URL
 
-    init() throws {
+    init(createDirectories: Bool = true) throws {
         let fileManager = FileManager.default
         guard let applicationSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
               let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first else { throw CocoaError(.fileNoSuchFile) }
@@ -205,6 +205,8 @@ private struct CorePaths {
         persistentData = applicationSupport.appendingPathComponent("\(namespace)/Core", isDirectory: true)
         cache = caches.appendingPathComponent("\(namespace)/CoreCache", isDirectory: true)
         media = applicationSupport.appendingPathComponent("\(namespace)/Media", isDirectory: true)
-        for directory in [persistentData, cache, media] { try fileManager.createDirectory(at: directory, withIntermediateDirectories: true) }
+        if createDirectories {
+            for directory in [persistentData, cache, media] { try fileManager.createDirectory(at: directory, withIntermediateDirectories: true) }
+        }
     }
 }

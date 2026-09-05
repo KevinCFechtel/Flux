@@ -5,6 +5,38 @@ import UniformTypeIdentifiers
 @testable import FluxNews
 
 final class NewsreaderPresentationTests: XCTestCase {
+    @MainActor
+    private final class ObservationFlag {
+        var value = false
+    }
+
+    @MainActor
+    func testUnconfiguredFeedPreferenceOperationsFail() async {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let read = expectation(description: "read failure")
+        let write = expectation(description: "write failure")
+        store.loadFeedPreferences(feedID: 42) { result in
+            if case .success = result { XCTFail("Unexpected read success") }
+            read.fulfill()
+        }
+        store.setFeedOpenInMiniflux(feedID: 42, enabled: true) { result in
+            if case .success = result { XCTFail("Unexpected write success") }
+            write.fulfill()
+        }
+        await fulfillment(of: [read, write], timeout: 1)
+    }
+
+    func testFeedSettingsRequestLifecycleRejectsStaleResults() {
+        var lifecycle = IOSFeedSettingsRequestLifecycle()
+        let first = lifecycle.begin()
+        let second = lifecycle.begin()
+
+        XCTAssertFalse(lifecycle.isCurrent(first))
+        XCTAssertTrue(lifecycle.isCurrent(second))
+        lifecycle.invalidate()
+        XCTAssertFalse(lifecycle.isCurrent(second))
+    }
+
     func testDefaultBottomActionsAreSyncFilterAndMore() {
         XCTAssertEqual(IOSBottomAction.defaultActions, [.sync, .filterAndSort, .more])
         XCTAssertFalse(IOSBottomAction.defaultActions.contains(.settings))
@@ -106,7 +138,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     @MainActor
     func testCountOnlyChangeDoesNotInvalidateArticleListDependencies() {
         let store = NewsreaderStore(defaults: UserDefaults())
-        var articleListInvalidated = false
+        let articleListInvalidated = ObservationFlag()
 
         withObservationTracking {
             _ = store.articles
@@ -122,29 +154,29 @@ final class NewsreaderPresentationTests: XCTestCase {
             _ = store.hasPendingNewData
             _ = store.hasUnscopedNewDataSignal
         } onChange: {
-            articleListInvalidated = true
+            MainActor.assumeIsolated { articleListInvalidated.value = true }
         }
 
         store.setSelectionTotalForTesting(3)
 
-        XCTAssertFalse(articleListInvalidated)
+        XCTAssertFalse(articleListInvalidated.value)
     }
 
     @MainActor
     func testArticleListDependenciesInvalidateForScrolloverReadStateChange() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setArticlesForTesting([.init(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "", imageUrl: nil)])
-        var articleListInvalidated = false
+        let articleListInvalidated = ObservationFlag()
 
         withObservationTracking {
             _ = store.articles
         } onChange: {
-            articleListInvalidated = true
+            MainActor.assumeIsolated { articleListInvalidated.value = true }
         }
 
         store.applyScrolloverMutationForTesting([1])
 
-        XCTAssertTrue(articleListInvalidated)
+        XCTAssertTrue(articleListInvalidated.value)
         XCTAssertTrue(store.articles[0].isRead)
     }
 

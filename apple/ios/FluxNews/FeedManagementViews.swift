@@ -32,6 +32,18 @@ enum IOSFeedCreationPolicy {
     }
 }
 
+struct IOSFeedSettingsRequestLifecycle {
+    private(set) var generation: UInt64 = 0
+
+    mutating func begin() -> UInt64 {
+        generation &+= 1
+        return generation
+    }
+
+    mutating func invalidate() { generation &+= 1 }
+    func isCurrent(_ request: UInt64) -> Bool { request == generation }
+}
+
 struct IOSAddFeedView: View {
     @Environment(\.dismiss) private var dismiss
     var store: NewsreaderStore
@@ -167,16 +179,21 @@ struct IOSFeedSettingsView: View {
     let target: IOSFeedSettingsTarget
     @State private var preferences: FeedPreferences?
     @State private var error: String?
+    @State private var requestLifecycle = IOSFeedSettingsRequestLifecycle()
+    @State private var isSaving = false
 
     var body: some View {
         Form {
             if let preferences {
-                Picker("Detail Rendering", selection: Binding(get: { preferences.detailRendering }, set: updateDetailRendering)) {
-                    Text("Rendered").tag(DetailRenderingMode.rendered)
-                    Text("Text Only").tag(DetailRenderingMode.textOnly)
+                Group {
+                    Picker("Detail Rendering", selection: Binding(get: { preferences.detailRendering }, set: updateDetailRendering)) {
+                        Text("Rendered").tag(DetailRenderingMode.rendered)
+                        Text("Text Only").tag(DetailRenderingMode.textOnly)
+                    }
+                    Toggle("Truncate Detail", isOn: Binding(get: { preferences.truncateDetail }, set: updateTruncateDetail))
+                    Toggle("Open in Miniflux", isOn: Binding(get: { preferences.openInMiniflux }, set: updateOpenInMiniflux))
                 }
-                Toggle("Truncate Detail", isOn: Binding(get: { preferences.truncateDetail }, set: updateTruncateDetail))
-                Toggle("Open in Miniflux", isOn: Binding(get: { preferences.openInMiniflux }, set: updateOpenInMiniflux))
+                .disabled(isSaving)
             } else {
                 ProgressView().frame(maxWidth: .infinity)
             }
@@ -185,17 +202,32 @@ struct IOSFeedSettingsView: View {
         .navigationTitle(target.title)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         .onAppear(perform: load)
+        .onDisappear { requestLifecycle.invalidate() }
     }
 
     private func load() {
-        do { preferences = try store.feedPreferences(feedID: target.id); error = nil }
-        catch { self.error = error.localizedDescription }
+        let generation = requestLifecycle.begin()
+        store.loadFeedPreferences(feedID: target.id) { result in
+            guard requestLifecycle.isCurrent(generation) else { return }
+            switch result {
+            case let .success(preferences): self.preferences = preferences; error = nil
+            case let .failure(error): self.error = error.localizedDescription
+            }
+        }
     }
-    private func updateDetailRendering(_ mode: DetailRenderingMode) { update { try store.setFeedDetailRendering(feedID: target.id, mode: mode) } }
-    private func updateTruncateDetail(_ enabled: Bool) { update { try store.setFeedTruncateDetail(feedID: target.id, enabled: enabled) } }
-    private func updateOpenInMiniflux(_ enabled: Bool) { update { try store.setFeedOpenInMiniflux(feedID: target.id, enabled: enabled) } }
-    private func update(_ change: () throws -> Void) {
-        do { try change(); load() }
-        catch { self.error = error.localizedDescription }
+    private func updateDetailRendering(_ mode: DetailRenderingMode) { update { completion in store.setFeedDetailRendering(feedID: target.id, mode: mode, completion: completion) } }
+    private func updateTruncateDetail(_ enabled: Bool) { update { completion in store.setFeedTruncateDetail(feedID: target.id, enabled: enabled, completion: completion) } }
+    private func updateOpenInMiniflux(_ enabled: Bool) { update { completion in store.setFeedOpenInMiniflux(feedID: target.id, enabled: enabled, completion: completion) } }
+    private func update(_ change: (@escaping (Result<Void, Error>) -> Void) -> Void) {
+        let generation = requestLifecycle.begin()
+        isSaving = true
+        change { result in
+            guard requestLifecycle.isCurrent(generation) else { return }
+            isSaving = false
+            switch result {
+            case .success: load()
+            case let .failure(error): self.error = error.localizedDescription
+            }
+        }
     }
 }

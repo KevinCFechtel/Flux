@@ -423,10 +423,35 @@ private struct ArticleReadResult {
         }
     }
 
-    func feedPreferences(feedID: Int64) throws -> FeedPreferences { guard let core else { throw unconfiguredError }; return try core.feedPreferences(feedId: feedID) }
-    func setFeedDetailRendering(feedID: Int64, mode: DetailRenderingMode) throws { try core?.setFeedDetailRendering(feedId: feedID, mode: mode) }
-    func setFeedTruncateDetail(feedID: Int64, enabled: Bool) throws { try core?.setFeedTruncateDetail(feedId: feedID, enabled: enabled) }
-    func setFeedOpenInMiniflux(feedID: Int64, enabled: Bool) throws { try core?.setFeedOpenInMiniflux(feedId: feedID, enabled: enabled) }
+    func loadFeedPreferences(feedID: Int64, completion: @escaping (Result<FeedPreferences, Error>) -> Void) {
+        guard let core else { completion(.failure(unconfiguredError)); return }
+        Task { [weak self, core] in
+            let result = await Task.detached { Result { try core.feedPreferences(feedId: feedID) } }.value
+            guard self?.core === core else { return }
+            completion(result)
+        }
+    }
+
+    func setFeedDetailRendering(feedID: Int64, mode: DetailRenderingMode, completion: @escaping (Result<Void, Error>) -> Void) {
+        updateFeedPreferences(feedID: feedID, change: { try $0.setFeedDetailRendering(feedId: feedID, mode: mode) }, completion: completion)
+    }
+
+    func setFeedTruncateDetail(feedID: Int64, enabled: Bool, completion: @escaping (Result<Void, Error>) -> Void) {
+        updateFeedPreferences(feedID: feedID, change: { try $0.setFeedTruncateDetail(feedId: feedID, enabled: enabled) }, completion: completion)
+    }
+
+    func setFeedOpenInMiniflux(feedID: Int64, enabled: Bool, completion: @escaping (Result<Void, Error>) -> Void) {
+        updateFeedPreferences(feedID: feedID, change: { try $0.setFeedOpenInMiniflux(feedId: feedID, enabled: enabled) }, completion: completion)
+    }
+
+    private func updateFeedPreferences(feedID: Int64, change: @escaping @Sendable (Flux) throws -> Void, completion: @escaping (Result<Void, Error>) -> Void) {
+        guard let core else { completion(.failure(unconfiguredError)); return }
+        Task { [weak self, core] in
+            let result = await Task.detached { Result { try change(core) } }.value
+            guard self?.core === core else { return }
+            completion(result)
+        }
+    }
 
     func setRead(articleIDs: [Int64], read: Bool) {
         guard let core, !articleIDs.isEmpty else { return }
