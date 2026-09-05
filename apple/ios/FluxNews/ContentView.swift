@@ -537,6 +537,12 @@ enum ArticleListTitlePresentation {
 enum ArticleListCounterPresentation {
     static func compactCount(_ count: UInt64) -> String { String(count) }
     static func isVisible(showArticleCount: Bool) -> Bool { showArticleCount }
+    static func usesNativeSubtitle(showArticleCount: Bool, supportsNativeSubtitle: Bool) -> Bool {
+        showArticleCount && supportsNativeSubtitle
+    }
+    static func usesToolbarFallback(showArticleCount: Bool, supportsNativeSubtitle: Bool) -> Bool {
+        showArticleCount && !supportsNativeSubtitle
+    }
 
     static func expandedLabel(scope: BrowserScope, unreadOnly: Bool, count: UInt64) -> String {
         if unreadOnly && scope != .starred { return "\(count) unread" }
@@ -554,17 +560,31 @@ private struct ArticleListNavigationChrome<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        content()
-            .navigationTitle(ArticleListTitlePresentation.title(scope: store.scope, catalog: store.catalog))
-            .toolbar {
-                if ArticleListCounterPresentation.isVisible(showArticleCount: store.showArticleCount) {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Text(ArticleListCounterPresentation.compactCount(store.selectionTotal))
-                            .foregroundStyle(.secondary)
-                            .accessibilityLabel(ArticleListCounterPresentation.expandedLabel(scope: store.scope, unreadOnly: store.unreadOnly, count: store.selectionTotal))
+        let title = ArticleListTitlePresentation.title(scope: store.scope, catalog: store.catalog)
+        let subtitle = ArticleListCounterPresentation.expandedLabel(scope: store.scope, unreadOnly: store.unreadOnly, count: store.selectionTotal)
+
+        if #available(iOS 26.0, *) {
+            if ArticleListCounterPresentation.usesNativeSubtitle(showArticleCount: store.showArticleCount, supportsNativeSubtitle: true) {
+                content()
+                    .navigationTitle(title)
+                    .navigationSubtitle(Text(subtitle))
+            } else {
+                content()
+                    .navigationTitle(title)
+            }
+        } else {
+            content()
+                .navigationTitle(title)
+                .toolbar {
+                    if ArticleListCounterPresentation.usesToolbarFallback(showArticleCount: store.showArticleCount, supportsNativeSubtitle: false) {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Text(ArticleListCounterPresentation.compactCount(store.selectionTotal))
+                                .foregroundStyle(.secondary)
+                                .accessibilityLabel(subtitle)
+                        }
                     }
                 }
-            }
+        }
     }
 }
 

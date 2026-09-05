@@ -327,11 +327,10 @@ structured UI, while sheets, menus, popovers, and controls retain system
 elevation.
 
 The Newsreader navigation scope title is stable and never embeds the live
-article count. The current-scope count remains separately visible in Newsreader
-chrome, including both expanded and collapsed native navigation-bar states.
-On the iOS 18 deployment target, the compact numeric toolbar presentation is
-used in both states; its expanded descriptive wording is also exposed through
-the native accessibility label because `navigationSubtitle` is not available.
+article count. Where supported, iOS uses the native navigation subtitle for the
+optional current-scope count; older supported iOS versions retain the native
+trailing-counter fallback. System Large Title and collapsed navigation behavior
+is authoritative and is not recreated through custom scroll tracking.
 Sync activity is communicated by the normal Newsreader UI; an empty scope shows
 `News syncing…` while Sync is active and `No News` after it completes, without
 an additional custom splash screen.

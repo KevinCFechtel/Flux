@@ -155,11 +155,20 @@ final class NewsreaderPresentationTests: XCTestCase {
         store.setShowArticleCount(false)
         XCTAssertFalse(store.showArticleCount)
         XCTAssertFalse(ArticleListCounterPresentation.isVisible(showArticleCount: store.showArticleCount))
+        XCTAssertFalse(ArticleListCounterPresentation.usesNativeSubtitle(showArticleCount: store.showArticleCount, supportsNativeSubtitle: true))
+        XCTAssertFalse(ArticleListCounterPresentation.usesToolbarFallback(showArticleCount: store.showArticleCount, supportsNativeSubtitle: false))
         XCTAssertEqual(ArticleListTitlePresentation.title(scope: .all, catalog: store.catalog), "All News")
         XCTAssertEqual(store.selectionTotal, 0)
 
         let reloaded = NewsreaderStore(defaults: defaults)
         XCTAssertFalse(reloaded.showArticleCount)
+    }
+
+    func testArticleCountPresentationSelectsNativeSubtitleOrToolbarFallback() {
+        XCTAssertTrue(ArticleListCounterPresentation.usesNativeSubtitle(showArticleCount: true, supportsNativeSubtitle: true))
+        XCTAssertFalse(ArticleListCounterPresentation.usesToolbarFallback(showArticleCount: true, supportsNativeSubtitle: true))
+        XCTAssertFalse(ArticleListCounterPresentation.usesNativeSubtitle(showArticleCount: true, supportsNativeSubtitle: false))
+        XCTAssertTrue(ArticleListCounterPresentation.usesToolbarFallback(showArticleCount: true, supportsNativeSubtitle: false))
     }
 
     func testEmptyStatePresentationUsesSyncingAndNoNews() {
