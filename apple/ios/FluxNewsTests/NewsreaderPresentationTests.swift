@@ -65,6 +65,13 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(IOSNavigationBranding.iconUsesSolidAccentColor)
     }
 
+    func testArticleListResetUsesTheUIKitAdjustedTopOffset() {
+        XCTAssertEqual(
+            IOSArticleListScrollReset.topContentOffset(currentOffset: CGPoint(x: 12, y: 400), adjustedContentInsetTop: 96),
+            CGPoint(x: 12, y: -96)
+        )
+    }
+
     func testArticleListTitleUsesAllNewsSelectionCount() {
         XCTAssertEqual(ArticleListTitlePresentation.title(scope: .all, catalog: NavigationCatalog(categories: [], feeds: []), count: 123), "All News (123)")
     }

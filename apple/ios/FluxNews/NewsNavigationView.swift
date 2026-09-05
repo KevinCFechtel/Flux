@@ -119,6 +119,7 @@ struct NewsNavigationView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(IOSNavigationBranding.accessibilityLabel)
         .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
     }
 
     private var selection: Binding<BrowserScope?> {
