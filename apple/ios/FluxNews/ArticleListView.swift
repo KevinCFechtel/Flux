@@ -1,198 +1,45 @@
 import SwiftUI
 import UIKit
-#if DEBUG
-import OSLog
-#endif
 
-enum IOSScrolloverOffset {
-    // Canonical positions increase as the list moves forward/downward.
-    static func canonicalPosition(contentOffsetY: CGFloat) -> CGFloat { contentOffsetY }
-    static func forwardDelta(current: CGFloat, previous: CGFloat) -> CGFloat { current - previous }
-}
+/// iOS 18 visibility reports need not include every intermediate row. The ordered
+/// snapshot fills those gaps without using row geometry or exposure timing.
+struct IOSScrolloverOrderTracker {
+    private var orderedIDs: [Int64] = []
+    private var positions: [Int64: Int] = [:]
+    private var previousLeadingArticleID: Int64?
+    private var emittedIDs = Set<Int64>()
+    private var isUserScrolling = false
 
-enum IOSScrolloverProcessingGate {
-    static func shouldProcess(enabled: Bool) -> Bool { enabled }
-}
-
-enum IOSScrolloverFrameProcessor {
-    static func process(
-        frames: [Int64: CGRect],
-        viewport: CGRect,
-        unread: Set<Int64>,
-        canonicalPosition: CGFloat,
-        lastProcessedOffset: inout CGFloat,
-        tracker: inout ScrolloverExposureTracker,
-        enabled: Bool,
-        userInitiated: Bool
-    ) -> [Int64] {
-        guard enabled, userInitiated else { return [] }
-        let delta = IOSScrolloverOffset.forwardDelta(current: canonicalPosition, previous: lastProcessedOffset)
-        guard abs(delta) > 0.5 else { return [] }
-        lastProcessedOffset = canonicalPosition
-        return tracker.process(frames: frames, viewport: viewport, unread: unread, now: Date.timeIntervalSinceReferenceDate, offsetDelta: delta, userInitiated: true)
+    mutating func updateSnapshot(_ ids: [Int64]) {
+        guard ids != orderedIDs else { return }
+        orderedIDs = ids
+        positions = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset) })
+        // A changed ordering can be a sync/filter/layout snapshot, not a scroll.
+        previousLeadingArticleID = nil
+        emittedIDs.removeAll()
     }
-}
 
-@MainActor
-final class IOSScrolloverRuntimeAdapter {
-    var onCandidate: ([Int64]) -> Void = { _ in }
+    mutating func setUserScrolling(_ value: Bool) { isUserScrolling = value }
 
-    private var frames: [Int64: CGRect] = [:]
-    private var viewport = CGRect.zero
-    private var canonicalPosition: CGFloat = 0
-    private var lastProcessedOffset: CGFloat = 0
-    private var unread = Set<Int64>()
-    private var enabled = true
-    private var userScrolling = false
-    private var tracker = ScrolloverExposureTracker()
-#if DEBUG
-    private static let diagnosticLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "scrollover-diagnostic")
-    private var diagnosticIndices: [Int64: Int] = [:]
-    private var diagnosticIDs = Set<Int64>()
-#endif
+    mutating func reset() {
+        previousLeadingArticleID = nil
+        emittedIDs.removeAll()
+        isUserScrolling = false
+    }
 
-    func updateViewport(_ viewport: CGRect) {
-        guard self.viewport != viewport else { return }
-        self.viewport = viewport
-        // GeometryReader size changes occur during an active scroll; frames remain
-        // in ArticleScrollSpace, so their exposure history is still meaningful.
-        if !userScrolling {
-            tracker.rebase(frames: frames, unread: unread)
+    mutating func receiveVisibleIDs(_ visibleIDs: [Int64], unread: Set<Int64>, enabled: Bool) -> [Int64] {
+        guard let leadingID = visibleIDs.min(by: { positions[$0, default: .max] < positions[$1, default: .max] }),
+              let leadingPosition = positions[leadingID] else { return [] }
+        defer { previousLeadingArticleID = leadingID }
+
+        guard isUserScrolling, enabled, let previousLeadingArticleID,
+              let previousPosition = positions[previousLeadingArticleID] else { return [] }
+        guard leadingPosition > previousPosition else { return [] }
+
+        let candidates = orderedIDs[previousPosition..<leadingPosition].filter {
+            unread.contains($0) && emittedIDs.insert($0).inserted
         }
-        diagnostic("viewport update viewport=\(rect(viewport)) rebase=\(!userScrolling)")
-    }
-
-    func updateEnabled(_ enabled: Bool) {
-        self.enabled = enabled
-        if !enabled { tracker.reset() }
-    }
-
-    func beginUserScroll() {
-        guard !userScrolling else { return }
-        userScrolling = true
-        lastProcessedOffset = canonicalPosition
-        diagnostic("begin offset=\(canonicalPosition) baseline=\(lastProcessedOffset) userScrolling=true")
-    }
-
-    func endUserScroll() {
-        userScrolling = false
-        diagnostic("end offset=\(canonicalPosition) userScrolling=false")
-    }
-
-    func reset() {
-        tracker.reset()
-        userScrolling = false
-        diagnostic("reset")
-    }
-
-    func receiveFrames(_ frames: [Int64: CGRect], unread: Set<Int64>) {
-        self.frames = frames
-        self.unread = unread
-        guard enabled, !viewport.isEmpty else { return }
-        if !userScrolling {
-            tracker.rebase(frames: frames, unread: unread)
-            diagnostic("frames rebase count=\(frames.count) viewport=\(rect(viewport))")
-        }
-        tracker.observe(frames: frames, viewport: viewport, unread: unread, now: Date.timeIntervalSinceReferenceDate)
-        diagnosticExposures(event: "observe", delta: nil)
-    }
-
-    func receiveContentOffsetY(_ contentOffsetY: CGFloat, unread: Set<Int64>) {
-        receiveCanonicalPosition(IOSScrolloverOffset.canonicalPosition(contentOffsetY: contentOffsetY), unread: unread)
-    }
-
-    private func receiveCanonicalPosition(_ canonicalPosition: CGFloat, unread: Set<Int64>) {
-        self.canonicalPosition = canonicalPosition
-        self.unread = unread
-        diagnostic("offset position=\(canonicalPosition) baseline=\(lastProcessedOffset) userScrolling=\(userScrolling)")
-        processScrollDelta()
-    }
-
-    func observeIdle(now: TimeInterval = Date.timeIntervalSinceReferenceDate) {
-        guard enabled, !userScrolling, !viewport.isEmpty else { return }
-        tracker.observe(frames: frames, viewport: viewport, unread: unread, now: now)
-        diagnosticExposures(event: "idle-observe", delta: nil)
-    }
-
-    private func processScrollDelta() {
-        guard userScrolling else { return }
-        let delta = IOSScrolloverOffset.forwardDelta(current: canonicalPosition, previous: lastProcessedOffset)
-        diagnosticExposures(event: "process-before", delta: delta)
-        if delta <= 0 {
-            diagnostic("process reversal delta=\(delta) rebase=true")
-        } else if delta > viewport.height * 0.85 {
-            diagnostic("process fast-forward delta=\(delta) geometry-check=true")
-        }
-        let ids = IOSScrolloverFrameProcessor.process(frames: frames, viewport: viewport, unread: unread, canonicalPosition: canonicalPosition, lastProcessedOffset: &lastProcessedOffset, tracker: &tracker, enabled: enabled, userInitiated: true)
-        diagnosticExposures(event: "process-after emitted=\(ids)", delta: delta)
-        if !ids.isEmpty { onCandidate(ids) }
-    }
-
-    func recordScrollPhase(previous: String, current: String) {
-        diagnostic("phase \(previous)->\(current) offset=\(canonicalPosition) userScrolling=\(userScrolling)")
-    }
-
-#if DEBUG
-    func updateDiagnosticArticles(_ articles: [ArticleSummary]) {
-        diagnosticIndices = Dictionary(uniqueKeysWithValues: articles.enumerated().map { ($0.element.id, $0.offset) })
-        diagnosticIDs = Set(articles.lazy.filter { !$0.isRead }.prefix(6).map(\.id))
-        diagnostic("tracking ids=\(diagnosticIDs.sorted())")
-    }
-
-    private func diagnosticExposures(event: String, delta: CGFloat?) {
-        let now = Date.timeIntervalSinceReferenceDate
-        let exposures = Dictionary(uniqueKeysWithValues: tracker.diagnosticExposures().map { ($0.id, $0) })
-        for id in diagnosticIDs.sorted() {
-            guard let exposure = exposures[id] else {
-                diagnostic("id=\(id) index=\(diagnosticIndices[id] ?? -1) event=\(event) exposure=missing frame=\(rect(frames[id]))")
-                continue
-            }
-            let frame = frames[id]
-            let visibleHeight = frame?.intersection(viewport).height ?? 0
-            let visibleFraction = visibleHeight / max(1, frame?.height ?? 1)
-            let crossed = frame.map { exposure.processedFrame.maxY > viewport.minY && $0.maxY <= viewport.minY } ?? (exposure.currentFrame.midY < viewport.midY)
-            let visibleFor = exposure.visibleSince.map { now - $0 } ?? 0
-            diagnostic("id=\(id) index=\(diagnosticIndices[id] ?? -1) event=\(event) delta=\(delta ?? 0) visible=\(visibleFraction) visibleFor=\(visibleFor) qualified=\(exposure.qualified) crossed=\(crossed) frame=\(rect(frame)) processed=\(rect(exposure.processedFrame)) current=\(rect(exposure.currentFrame)) viewport=\(rect(viewport))")
-        }
-    }
-
-    private func diagnostic(_ message: String) {
-        Self.diagnosticLog.debug("\(message, privacy: .public)")
-    }
-
-    private func rect(_ rect: CGRect?) -> String {
-        guard let rect else { return "nil" }
-        return "(x:\(rect.origin.x),y:\(rect.origin.y),w:\(rect.width),h:\(rect.height))"
-    }
-#else
-    func updateDiagnosticArticles(_ articles: [ArticleSummary]) {}
-    private func diagnostic(_ message: String) {}
-    private func diagnosticExposures(event: String, delta: CGFloat?) {}
-    private func rect(_ rect: CGRect) -> String { "" }
-#endif
-}
-
-private struct IOSScrolloverInteractionModifier: ViewModifier {
-    let onBegin: () -> Void
-    let onEnd: () -> Void
-    let onContentOffsetY: (CGFloat) -> Void
-    let onPhase: (String, String) -> Void
-
-    func body(content: Content) -> some View {
-        content
-            .onScrollPhaseChange { previous, phase in
-                onPhase(String(describing: previous), String(describing: phase))
-                switch phase {
-                case .interacting: onBegin()
-                case .idle: onEnd()
-                default: break
-                }
-            }
-            .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                geometry.contentOffset.y
-            } action: { _, newOffset in
-                onContentOffsetY(newOffset)
-            }
+        return candidates
     }
 }
 
@@ -466,10 +313,12 @@ struct ArticleListView: View {
     @ObservedObject var store: NewsreaderStore
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
-    @State private var scrolloverAdapter = IOSScrolloverRuntimeAdapter()
+    @State private var scrolloverTracker = IOSScrolloverOrderTracker()
     @State private var unreadArticleIDs = Set<Int64>()
     @State private var sensoryFeedbackTrigger = 0
-    private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
+    // 15% admits a target that is only barely visible, so tall cards still give
+    // the ordered tracker a reliable leading target. It is not a read threshold.
+    private let scrolloverVisibilityThreshold: CGFloat = 0.15
 
     var body: some View {
         Group {
@@ -487,50 +336,42 @@ struct ArticleListView: View {
                           ArticlePresentationLayout.usesLandscapeVisual(
                             mode: store.articlePresentationMode,
                             availableWidth: proxy.size.width - horizontalInset * 2) ? 20 : 26
-                           ScrollView {
-                              LazyVStack(spacing: articleSpacing) {
-                                ForEach(store.articles, id: \.id) { article in
+                               ScrollView {
+                               LazyVStack(spacing: articleSpacing) {
+                                 ForEach(store.articles, id: \.id) { article in
                                        ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIconData: store.feedIcons[IOSFeedIconKey(feedID: article.feedId, variant: IOSFeedIconPresentation.variant(isDark: colorScheme == .dark))], iconVariant: IOSFeedIconPresentation.variant(isDark: colorScheme == .dark), onRequestFeedIcon: { store.requestFeedIcon(article.feedId, variant: IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { article, read in store.setRead(article, read: read) }, onSetStarred: { article, starred in store.setStarred(article, starred: starred) })
-                                         .equatable()
-                                        .background { GeometryReader { row in Color.clear.preference(key: ArticleFrameKey.self, value: [article.id: row.frame(in: .named("ArticleScrollSpace"))]) } }
+                                          .equatable()
+                                 }
+                              }
+                              .scrollTargetLayout()
+                              .padding(.horizontal, horizontalInset)
+                              .padding(.vertical, 12)
+                           }
+                               .id(store.scrollResetRevision)
+                               .refreshable { await store.syncManually() }
+                            .scrollIndicators(.hidden)
+                           .onAppear {
+                               refreshUnreadArticleIDs()
+                           }
+                            .onScrollTargetVisibilityChange(idType: Int64.self, threshold: scrolloverVisibilityThreshold) { visibleIDs in
+                                let candidates = scrolloverTracker.receiveVisibleIDs(visibleIDs, unread: unreadArticleIDs, enabled: store.markReadOnScrolloverEnabled)
+                                if !candidates.isEmpty { store.flushScrollover(candidates) }
+                            }
+                            .onScrollPhaseChange { _, phase in
+                                switch phase {
+                                case .interacting:
+                                  scrolloverTracker.setUserScrolling(true)
+                                  store.beginScrolloverPresentationScroll()
+                                  store.markMeaningfulInteraction()
+                                case .idle:
+                                  scrolloverTracker.setUserScrolling(false)
+                                  store.finishScrolloverPresentationScroll()
+                                default:
+                                  break
                                 }
-                             }
-                             .padding(.horizontal, horizontalInset)
-                             .padding(.vertical, 12)
-                          }
-                              .id(store.scrollResetRevision)
-                              .refreshable { await store.syncManually() }
-                               .coordinateSpace(name: "ArticleScrollSpace")
-                           .scrollIndicators(.hidden)
-                          .onAppear {
-                              scrolloverAdapter.updateViewport(CGRect(origin: .zero, size: proxy.size))
-                              scrolloverAdapter.onCandidate = { ids in store.flushScrollover(ids) }
-                              refreshUnreadArticleIDs()
-                          }
-                         .onChange(of: proxy.size) { _, size in scrolloverAdapter.updateViewport(CGRect(origin: .zero, size: size)) }
-                           .onPreferenceChange(ArticleFrameKey.self) { values in
-                                scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
-                                scrolloverAdapter.receiveFrames(values, unread: unreadArticleIDs)
-                         }
-                             .modifier(IOSScrolloverInteractionModifier(onBegin: {
-                                 scrolloverAdapter.beginUserScroll()
-                                 store.beginScrolloverPresentationScroll()
-                                 store.markMeaningfulInteraction()
-                                 store.beginScrolloverUndoBatch()
-                            }, onEnd: {
-                                 scrolloverAdapter.endUserScroll()
-                                 store.finishScrolloverPresentationScroll()
-                                 store.finishScrolloverUndoBatch()
-                             }, onContentOffsetY: { newOffset in
-                                 scrolloverAdapter.updateEnabled(store.markReadOnScrolloverEnabled)
-                                 scrolloverAdapter.receiveContentOffsetY(newOffset, unread: unreadArticleIDs)
-                            }, onPhase: { previous, current in
-                                scrolloverAdapter.recordScrollPhase(previous: previous, current: current)
-                            }))
-          .onReceive(timer) { _ in scrolloverAdapter.observeIdle() }
-                           .onChange(of: store.articles) { _, _ in refreshUnreadArticleIDs() }
-                            .onChange(of: store.markReadOnScrolloverEnabled) { _, enabled in scrolloverAdapter.updateEnabled(enabled) }
-                             .onChange(of: store.snapshotRevision) { _, _ in scrolloverAdapter.reset() }
+                            }
+                            .onChange(of: store.articles) { _, _ in refreshUnreadArticleIDs() }
+                              .onChange(of: store.snapshotRevision) { _, _ in scrolloverTracker.reset() }
                             .onChange(of: store.scrolloverUndoVisible) { _, visible in
                                if visible { sensoryFeedbackTrigger += 1 }
                            }
@@ -569,7 +410,7 @@ struct ArticleListView: View {
 
     private func refreshUnreadArticleIDs() {
         unreadArticleIDs = Set(store.articles.lazy.filter { !$0.isRead }.map(\.id))
-        scrolloverAdapter.updateDiagnosticArticles(store.articles)
+        scrolloverTracker.updateSnapshot(store.articles.map(\.id))
     }
 }
 
@@ -941,11 +782,6 @@ struct ArticlePresentationView: View, Equatable {
                 .accessibilityHidden(true)
         }
     }
-}
-
-private struct ArticleFrameKey: PreferenceKey {
-    static var defaultValue: [Int64: CGRect] = [:]
-    static func reduce(value: inout [Int64: CGRect], nextValue: () -> [Int64: CGRect]) { value.merge(nextValue(), uniquingKeysWith: { $1 }) }
 }
 
 struct FeedIconView: View {

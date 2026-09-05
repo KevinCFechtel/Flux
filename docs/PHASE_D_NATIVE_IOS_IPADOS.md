@@ -133,9 +133,22 @@ link and falls back to the in-app browser. The internal Reader is an explicitly
 configured exception and is temporary presentation, preferably an inspector on
 regular-width iPad and a sheet/full-screen presentation on compact width/iPhone.
 
-Native swipe actions and Mark-as-Read-on-Scrollover are retained. The proven
-macOS Scrollover state machine and Undo semantics are the reference; iOS only
-adapts geometry and scroll-event integration.
+Native swipe actions and Mark-as-Read-on-Scrollover are retained. iOS uses the
+iOS 18 `scrollTargetLayout`, scroll phase, and target-visibility APIs rather
+than row geometry: the leading visible Article ID is compared against the
+current ordered article snapshot, and the forward crossed ID range is marked
+read. This remains correct when fast scrolling skips intermediate visibility
+reports. Initial visibility and snapshot replacement establish a baseline only;
+backward movement emits nothing. A 15% target-visibility threshold is used only
+to reliably identify a leading target for variable-height cards, including cards
+too tall to become 50% visible. It is not a read-exposure threshold.
+
+iOS Scrollover keeps detection, Core mutation scheduling, and Undo separate.
+Detection is ID/order-only, with no geometry, exposure duration, or per-row
+timer. Candidates enter one serialized, deduplicating Core bulk-mutation queue.
+Only successful writes join a rolling Undo group: a success extends its 4-second
+inactivity window without extending the 15-second maximum group lifetime. macOS
+retains its existing platform-specific frame integration.
 
 Appearance follows the system Light/Dark mode. Primary content surfaces use the
 system content background, which is true black in Dark Mode. There is no manual
@@ -302,6 +315,11 @@ elevation.
 
 Perform combined real-device D2-D4 validation and polish on representative
 iPhone and iPad devices.
+
+For iOS Scrollover, D4.4 still requires real-device coverage of slow drags,
+fast flicks that skip rows, reverse-then-forward movement, Remove When Read,
+Dynamic Type, rotation/safe-area changes, and the rolling Undo window on both
+iPhone and iPad.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 
