@@ -58,7 +58,7 @@ final class NewsreaderStore: ObservableObject {
     @Published var articlePreviewLines: ArticlePreviewLines
     @Published var clickOnNews: ClickOnNews
     @Published private(set) var scrolloverUndoIDs: [Int64] = []
-    @Published private(set) var scrolloverUndoVisible = false
+    var scrolloverUndoVisible: Bool { scrolloverUndoIDs.count >= 2 }
 
     private(set) var core: Flux?
     private var eventSubscription: EventSubscription?
@@ -337,7 +337,8 @@ final class NewsreaderStore: ObservableObject {
 
     func flushScrollover(_ ids: [Int64]) {
         guard core != nil else { return }
-        for id in ids where pendingScrolloverIDSet.insert(id).inserted {
+        for id in eligibleScrolloverIDs(ids) {
+            pendingScrolloverIDSet.insert(id)
             pendingScrolloverIDs.append(id)
         }
         drainScrolloverMutations()
@@ -347,7 +348,6 @@ final class NewsreaderStore: ObservableObject {
         guard !scrolloverMutationRunning, let core, !pendingScrolloverIDs.isEmpty else { return }
         let ids = pendingScrolloverIDs
         pendingScrolloverIDs = []
-        pendingScrolloverIDSet = []
         scrolloverMutationRunning = true
         let generation = scrolloverQueueGeneration
         scrolloverDiagnostic("flush ids=\(ids)")
@@ -359,7 +359,7 @@ final class NewsreaderStore: ObservableObject {
                 if generation == scrolloverQueueGeneration {
                     recordSuccessfulScrolloverRead(ids)
                 } else {
-                    updateVisibleRead(ids, read: true, removeFromVisibleList: false)
+                    applySuccessfulScrolloverRead(ids)
                     scrolloverCountsPending = true
                 }
                 scrolloverDiagnostic("mutation success ids=\(ids)")
@@ -367,6 +367,7 @@ final class NewsreaderStore: ObservableObject {
                 errorMessage = error.localizedDescription
                 scrolloverDiagnostic("mutation failure ids=\(ids) error=\(error.localizedDescription)")
             }
+            pendingScrolloverIDSet.subtract(ids)
             scrolloverMutationRunning = false
             if pendingScrolloverIDs.isEmpty && scrolloverCountsPending {
                 scrolloverCountsPending = false
@@ -392,9 +393,8 @@ final class NewsreaderStore: ObservableObject {
         guard !unique.isEmpty else { return }
         markMeaningfulInteraction()
         scrolloverUndoIDs.append(contentsOf: unique)
-        updateVisibleRead(unique, read: true, removeFromVisibleList: false)
+        applySuccessfulScrolloverRead(unique)
         scrolloverCountsPending = true
-        scrolloverUndoVisible = scrolloverUndoIDs.count >= 2
         scrolloverUndoLastSuccessAt = now
         scheduleScrolloverUndoExpiry()
     }
@@ -429,7 +429,6 @@ final class NewsreaderStore: ObservableObject {
         scrolloverUndoTask?.cancel()
         scrolloverUndoTask = nil
         scrolloverUndoIDs = []
-        scrolloverUndoVisible = false
         scrolloverUndoOpenedAt = nil
         scrolloverUndoLastSuccessAt = nil
     }
@@ -520,7 +519,19 @@ final class NewsreaderStore: ObservableObject {
         if read && removeFromVisibleList && removesReadArticles {
             updateVisible(Array(ids)) { $0.isRead = true }
             articles.removeAll { ids.contains($0.id) }
+            snapshotRevision &+= 1
         } else { updateVisible(Array(ids)) { $0.isRead = read } }
+    }
+
+    // Scrollover is a presentation-only read-state update: it never changes list membership.
+    private func applySuccessfulScrolloverRead(_ ids: [Int64]) {
+        updateVisible(ids) { $0.isRead = true }
+    }
+
+    private func eligibleScrolloverIDs(_ ids: [Int64]) -> [Int64] {
+        ids.filter { id in
+            !pendingScrolloverIDSet.contains(id) && articles.contains { $0.id == id && !$0.isRead }
+        }
     }
 
     private func updateVisible(_ ids: [Int64], _ change: (inout ArticleSummary) -> Void) {
@@ -575,6 +586,25 @@ final class NewsreaderStore: ObservableObject {
     func applyScrolloverUndoForTesting() { updateVisibleRead(scrolloverUndoIDs, read: false); clearScrolloverUndoGroup() }
     @MainActor
     var scrolloverUndoIDsForTesting: [Int64] { scrolloverUndoIDs }
+    @MainActor
+    func eligibleScrolloverIDsForTesting(_ ids: [Int64]) -> [Int64] { eligibleScrolloverIDs(ids) }
+    @MainActor
+    func enqueueScrolloverForTesting(_ ids: [Int64]) -> [Int64] {
+        let eligible = eligibleScrolloverIDs(ids)
+        pendingScrolloverIDSet.formUnion(eligible)
+        pendingScrolloverIDs.append(contentsOf: eligible)
+        return eligible
+    }
+    @MainActor
+    func applyEligibleScrolloverMutationForTesting(_ ids: [Int64], now: Date = .now) {
+        recordSuccessfulScrolloverRead(eligibleScrolloverIDs(ids), now: now)
+    }
+    @MainActor
+    func beginScrolloverMutationForTesting() -> [Int64] {
+        let ids = pendingScrolloverIDs
+        pendingScrolloverIDs = []
+        return ids
+    }
     @MainActor
     func expireScrolloverUndoGroupForTesting(now: Date) { expireScrolloverUndoGroup(now: now) }
     @MainActor

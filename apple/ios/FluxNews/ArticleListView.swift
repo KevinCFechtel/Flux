@@ -17,6 +17,7 @@ struct IOSScrolloverOrderTracker {
         // A changed ordering can be a sync/filter/layout snapshot, not a scroll.
         previousLeadingArticleID = nil
         emittedIDs.removeAll()
+        isUserScrolling = false
     }
 
     mutating func setUserScrolling(_ value: Bool) { isUserScrolling = value }
@@ -29,7 +30,7 @@ struct IOSScrolloverOrderTracker {
 
     mutating func releaseEmittedIDs() { emittedIDs.removeAll() }
 
-    mutating func receiveVisibleIDs(_ visibleIDs: [Int64], unread: Set<Int64>, enabled: Bool) -> [Int64] {
+    mutating func receiveVisibleIDs(_ visibleIDs: [Int64], enabled: Bool) -> [Int64] {
         guard let leadingID = visibleIDs.min(by: { positions[$0, default: .max] < positions[$1, default: .max] }),
               let leadingPosition = positions[leadingID] else { return [] }
         defer { previousLeadingArticleID = leadingID }
@@ -38,9 +39,7 @@ struct IOSScrolloverOrderTracker {
               let previousPosition = positions[previousLeadingArticleID] else { return [] }
         guard leadingPosition > previousPosition else { return [] }
 
-        let candidates = orderedIDs[previousPosition..<leadingPosition].filter {
-            unread.contains($0) && emittedIDs.insert($0).inserted
-        }
+        let candidates = orderedIDs[previousPosition..<leadingPosition].filter { emittedIDs.insert($0).inserted }
         return candidates
     }
 }
@@ -316,7 +315,6 @@ struct ArticleListView: View {
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
     @State private var scrolloverTracker = IOSScrolloverOrderTracker()
-    @State private var unreadArticleIDs = Set<Int64>()
     @State private var sensoryFeedbackTrigger = 0
     // 15% admits a target that is only barely visible, so tall cards still give
     // the ordered tracker a reliable leading target. It is not a read threshold.
@@ -354,12 +352,12 @@ struct ArticleListView: View {
                                .id(store.scrollResetRevision)
                                .refreshable { await store.syncManually() }
                             .scrollIndicators(.hidden)
-                           .onAppear {
-                               refreshUnreadArticleIDs()
-                           }
-                            .onScrollTargetVisibilityChange(idType: Int64.self, threshold: scrolloverVisibilityThreshold) { visibleIDs in
-                                let candidates = scrolloverTracker.receiveVisibleIDs(visibleIDs, unread: unreadArticleIDs, enabled: store.markReadOnScrolloverEnabled)
-                                if !candidates.isEmpty { store.flushScrollover(candidates) }
+                            .onAppear {
+                                scrolloverTracker.updateSnapshot(store.articles.map(\.id))
+                            }
+                             .onScrollTargetVisibilityChange(idType: Int64.self, threshold: scrolloverVisibilityThreshold) { visibleIDs in
+                                 let candidates = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
+                                 if !candidates.isEmpty { store.flushScrollover(candidates) }
                             }
                             .onScrollPhaseChange { _, phase in
                                 switch phase {
@@ -372,11 +370,12 @@ struct ArticleListView: View {
                                    break
                                 }
                             }
-                            .onChange(of: store.articles) { _, _ in refreshUnreadArticleIDs() }
-                            .onChange(of: store.snapshotRevision) { _, _ in scrolloverTracker.reset() }
-                            .onChange(of: store.scrolloverUndoVisible) { _, visible in
-                                if visible { sensoryFeedbackTrigger += 1 }
-                                else { scrolloverTracker.releaseEmittedIDs() }
+                             .onChange(of: store.snapshotRevision) { _, _ in
+                                 scrolloverTracker.updateSnapshot(store.articles.map(\.id))
+                             }
+                             .onChange(of: store.scrolloverUndoIDs) { previousIDs, ids in
+                                 if previousIDs.count < 2 && ids.count >= 2 { sensoryFeedbackTrigger += 1 }
+                                 else if ids.isEmpty { scrolloverTracker.releaseEmittedIDs() }
                             }
                            .sensoryFeedback(.success, trigger: sensoryFeedbackTrigger)
                   }
@@ -411,10 +410,6 @@ struct ArticleListView: View {
         }
     }
 
-    private func refreshUnreadArticleIDs() {
-        unreadArticleIDs = Set(store.articles.lazy.filter { !$0.isRead }.map(\.id))
-        scrolloverTracker.updateSnapshot(store.articles.map(\.id))
-    }
 }
 
 struct ArticlePresentationView: View, Equatable {

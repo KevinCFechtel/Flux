@@ -153,6 +153,8 @@ it does not alter article-card geometry.
 iOS Scrollover keeps detection, Core mutation scheduling, and Undo separate.
 Detection is ID/order-only, with no geometry, exposure duration, or per-row
 timer. Candidates enter one serialized, deduplicating Core bulk-mutation queue.
+The ordered detection snapshot rebases only when visible membership or ordering
+changes; a Scrollover read-state presentation update is not structural.
 Only successful writes join a rolling Undo group: a success extends its 4-second
 inactivity window without extending the 15-second maximum group lifetime. macOS
 retains its existing platform-specific frame integration.
