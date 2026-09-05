@@ -504,6 +504,75 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(state.isCurrent(second))
     }
 
+    func testNewerArticleReadSupersedesOlderReadAndOwnsPublication() {
+        var lifecycle = IOSNewsreaderReadLifecycle()
+        let first = lifecycle.beginArticle()
+        let second = lifecycle.beginArticle()
+
+        XCTAssertFalse(lifecycle.isCurrentArticle(first))
+        XCTAssertFalse(lifecycle.isCurrentSelectionCount(first))
+        XCTAssertFalse(lifecycle.ownsError(first))
+        XCTAssertTrue(lifecycle.isCurrentArticle(second))
+        XCTAssertTrue(lifecycle.isCurrentSelectionCount(second))
+        XCTAssertTrue(lifecycle.ownsError(second))
+    }
+
+    func testStaleArticleFailureCannotReplaceNewerSuccessOrLoadingOwner() {
+        var lifecycle = IOSNewsreaderReadLifecycle()
+        let stale = lifecycle.beginArticle()
+        let current = lifecycle.beginArticle()
+
+        XCTAssertFalse(lifecycle.isCurrentArticle(stale))
+        XCTAssertFalse(lifecycle.ownsError(stale))
+        XCTAssertTrue(lifecycle.isCurrentArticle(current))
+        XCTAssertTrue(lifecycle.ownsError(current))
+    }
+
+    func testNavigationReadPublishesOnlyForItsCurrentGeneration() {
+        var lifecycle = IOSNewsreaderReadLifecycle()
+        let stale = lifecycle.beginNavigation()
+        let current = lifecycle.beginNavigation()
+
+        XCTAssertFalse(lifecycle.isCurrentNavigation(stale))
+        XCTAssertFalse(lifecycle.ownsError(stale))
+        XCTAssertTrue(lifecycle.isCurrentNavigation(current))
+        XCTAssertTrue(lifecycle.ownsError(current))
+    }
+
+    func testDetachAndReattachInvalidateAllPriorReadRequests() {
+        var lifecycle = IOSNewsreaderReadLifecycle()
+        let article = lifecycle.beginArticle()
+        let navigation = lifecycle.beginNavigation()
+
+        lifecycle.invalidateSession()
+        let reattachedArticle = lifecycle.beginArticle()
+
+        XCTAssertFalse(lifecycle.isCurrentArticle(article))
+        XCTAssertFalse(lifecycle.isCurrentNavigation(navigation))
+        XCTAssertFalse(lifecycle.ownsError(article))
+        XCTAssertTrue(lifecycle.isCurrentArticle(reattachedArticle))
+    }
+
+    func testPresentationResetInvalidatesCurrentArticleAndSelectionCount() {
+        var lifecycle = IOSNewsreaderReadLifecycle()
+        let request = lifecycle.beginArticle()
+
+        lifecycle.invalidateArticle()
+
+        XCTAssertFalse(lifecycle.isCurrentArticle(request))
+        XCTAssertFalse(lifecycle.isCurrentSelectionCount(request))
+        XCTAssertFalse(lifecycle.ownsError(request))
+    }
+
+    func testNewSelectionCountReadInvalidatesOlderArticleCount() {
+        var lifecycle = IOSNewsreaderReadLifecycle()
+        let article = lifecycle.beginArticle()
+        let count = lifecycle.beginSelectionCount()
+
+        XCTAssertFalse(lifecycle.isCurrentSelectionCount(article))
+        XCTAssertTrue(lifecycle.isCurrentSelectionCount(count))
+    }
+
     func testReaderDocumentNoticePreservesAllContentStates() {
         XCTAssertNil(ReaderDocumentNotice.text(simplified: false, truncated: false))
         XCTAssertEqual(ReaderDocumentNotice.text(simplified: true, truncated: false), "Some content was simplified")

@@ -13,6 +13,77 @@ enum IOSFeedIconPresentation {
     static func variant(isDark: Bool) -> FeedIconVariant { isDark ? .dark : .normal }
 }
 
+struct IOSNewsreaderReadRequest: Equatable {
+    let session: UInt64
+    let generation: UInt64
+    let selectionCountGeneration: UInt64
+    let errorGeneration: UInt64
+}
+
+struct IOSNewsreaderReadLifecycle {
+    private(set) var session: UInt64 = 0
+    private(set) var articleGeneration: UInt64 = 0
+    private(set) var navigationGeneration: UInt64 = 0
+    private(set) var selectionCountGeneration: UInt64 = 0
+    private(set) var errorGeneration: UInt64 = 0
+
+    mutating func invalidateSession() {
+        session &+= 1
+        articleGeneration &+= 1
+        navigationGeneration &+= 1
+        selectionCountGeneration &+= 1
+        errorGeneration &+= 1
+    }
+
+    mutating func beginArticle() -> IOSNewsreaderReadRequest {
+        articleGeneration &+= 1
+        selectionCountGeneration &+= 1
+        errorGeneration &+= 1
+        return .init(session: session, generation: articleGeneration, selectionCountGeneration: selectionCountGeneration, errorGeneration: errorGeneration)
+    }
+
+    mutating func invalidateArticle() {
+        articleGeneration &+= 1
+        selectionCountGeneration &+= 1
+        errorGeneration &+= 1
+    }
+
+    mutating func invalidateNavigation() {
+        navigationGeneration &+= 1
+        errorGeneration &+= 1
+    }
+
+    mutating func beginNavigation() -> IOSNewsreaderReadRequest {
+        navigationGeneration &+= 1
+        errorGeneration &+= 1
+        return .init(session: session, generation: navigationGeneration, selectionCountGeneration: selectionCountGeneration, errorGeneration: errorGeneration)
+    }
+
+    mutating func beginSelectionCount() -> IOSNewsreaderReadRequest {
+        selectionCountGeneration &+= 1
+        errorGeneration &+= 1
+        return .init(session: session, generation: selectionCountGeneration, selectionCountGeneration: selectionCountGeneration, errorGeneration: errorGeneration)
+    }
+
+    func isCurrentArticle(_ request: IOSNewsreaderReadRequest) -> Bool { request.session == session && request.generation == articleGeneration }
+    func isCurrentNavigation(_ request: IOSNewsreaderReadRequest) -> Bool { request.session == session && request.generation == navigationGeneration }
+    func isCurrentSelectionCount(_ request: IOSNewsreaderReadRequest) -> Bool { request.session == session && request.selectionCountGeneration == selectionCountGeneration }
+    func ownsError(_ request: IOSNewsreaderReadRequest) -> Bool { request.errorGeneration == errorGeneration }
+}
+
+private struct NavigationReadResult {
+    let catalog: NavigationCatalog
+    let unreadTotal: UInt64
+    let starredTotal: UInt64
+    let categoryCounts: [Int64: UInt64]
+    let feedCounts: [Int64: UInt64]
+}
+
+private struct ArticleReadResult {
+    let articles: [ArticleSummary]
+    let selectionTotal: UInt64
+}
+
 @MainActor
 @Observable final class NewsreaderStore {
 #if DEBUG
@@ -78,6 +149,7 @@ enum IOSFeedIconPresentation {
     private var scrolloverQueueGeneration: UInt64 = 0
     private var hasMeaningfullyInteracted = false
     private var readerRequests = ReaderRequestState()
+    private var readLifecycle = IOSNewsreaderReadLifecycle()
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -100,15 +172,19 @@ enum IOSFeedIconPresentation {
         } catch {
             errorMessage = error.localizedDescription
         }
-        loadNavigationAndCounts()
-        let categoryIDs = Set(catalog.categories.map(\.id))
-        let feedIDs = Set(catalog.feeds.map(\.id))
-        scope = StartupScopeResolver.resolve(startupScope, categoryID: startupCategoryID, feedID: startupFeedID, categoryIDs: categoryIDs, feedIDs: feedIDs)
-        normalizeStartupScope(categoryIDs: categoryIDs, feedIDs: feedIDs)
-        loadVisibleArticles()
+        let session = readLifecycle.session
+        loadNavigationAndCounts { [weak self] in
+            guard let self, self.readLifecycle.session == session else { return }
+            let categoryIDs = Set(self.catalog.categories.map(\.id))
+            let feedIDs = Set(self.catalog.feeds.map(\.id))
+            self.scope = StartupScopeResolver.resolve(self.startupScope, categoryID: self.startupCategoryID, feedID: self.startupFeedID, categoryIDs: categoryIDs, feedIDs: feedIDs)
+            self.normalizeStartupScope(categoryIDs: categoryIDs, feedIDs: feedIDs)
+            self.loadVisibleArticles()
+        }
     }
 
     func detach() {
+        readLifecycle.invalidateSession()
         eventSubscription = nil
         core = nil
         articles = []
@@ -119,6 +195,7 @@ enum IOSFeedIconPresentation {
         categoryCounts = [:]
         feedCounts = [:]
         feedIcons = [:]
+        isLoading = false
         resetPresentationState()
     }
 
@@ -133,31 +210,72 @@ enum IOSFeedIconPresentation {
         return ArticleQuery(scope: coreScope, readFilter: selected == .starred ? .all : (unreadOnly ? .unread : .all), starredFilter: selected == .starred ? .starred : .all, sort: newestFirst ? .newestFirst : .oldestFirst, limit: 0, cursor: nil)
     }
 
-    func loadNavigationAndCounts() {
+    nonisolated private static func navigationQuery(scope: ArticleScope, unreadOnly: Bool, newestFirst: Bool) -> ArticleQuery {
+        ArticleQuery(scope: scope, readFilter: unreadOnly ? .unread : .all, starredFilter: .all, sort: newestFirst ? .newestFirst : .oldestFirst, limit: 0, cursor: nil)
+    }
+
+    func loadNavigationAndCounts(afterCompletion: (() -> Void)? = nil) {
         guard let core else { return }
-        do {
-            catalog = try core.navigationCatalog()
-            unreadTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil))
-            starredTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .all, starredFilter: .starred, sort: .newestFirst, limit: 0, cursor: nil))
-            categoryCounts = try catalog.categories.reduce(into: [:]) { $0[$1.id] = try core.countArticles(query: query(scope: .category($1.id))) }
-            feedCounts = try catalog.feeds.reduce(into: [:]) { $0[$1.id] = try core.countArticles(query: query(scope: .feed($1.id))) }
-            pending.removeAbsentFeeds(Set(catalog.feeds.map(\.id)))
-            publishPending()
-            errorMessage = nil
-        } catch { errorMessage = error.localizedDescription }
+        let request = readLifecycle.beginNavigation()
+        let categoryQueryInputs = (unreadOnly, newestFirst)
+        Task { [weak self, core] in
+            let result = await Task.detached {
+                Result {
+                    let catalog = try core.navigationCatalog()
+                    let unreadTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil))
+                    let starredTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .all, starredFilter: .starred, sort: .newestFirst, limit: 0, cursor: nil))
+                    let categoryCounts = try catalog.categories.reduce(into: [:]) { counts, category in
+                        counts[category.id] = try core.countArticles(query: Self.navigationQuery(scope: .category(id: category.id), unreadOnly: categoryQueryInputs.0, newestFirst: categoryQueryInputs.1))
+                    }
+                    let feedCounts = try catalog.feeds.reduce(into: [:]) { counts, feed in
+                        counts[feed.id] = try core.countArticles(query: Self.navigationQuery(scope: .feed(id: feed.id), unreadOnly: categoryQueryInputs.0, newestFirst: categoryQueryInputs.1))
+                    }
+                    return NavigationReadResult(catalog: catalog, unreadTotal: unreadTotal, starredTotal: starredTotal, categoryCounts: categoryCounts, feedCounts: feedCounts)
+                }
+            }.value
+            guard let self, self.readLifecycle.isCurrentNavigation(request) else { return }
+            switch result {
+            case let .success(value):
+                catalog = value.catalog
+                unreadTotal = value.unreadTotal
+                starredTotal = value.starredTotal
+                categoryCounts = value.categoryCounts
+                feedCounts = value.feedCounts
+                pending.removeAbsentFeeds(Set(value.catalog.feeds.map(\.id)))
+                publishPending()
+                if readLifecycle.ownsError(request) { errorMessage = nil }
+            case let .failure(error):
+                if readLifecycle.ownsError(request) { errorMessage = error.localizedDescription }
+            }
+            afterCompletion?()
+        }
     }
 
     func loadVisibleArticles(acknowledgePending: Bool = false, resetSnapshot: Bool = false) {
         guard let core else { return }
+        let request = readLifecycle.beginArticle()
+        let articleQuery = query()
         isLoading = true
-        do {
-            articles = try core.queryArticles(query: query())
-            selectionTotal = try core.countArticles(query: query())
-            if acknowledgePending { acknowledgePendingForCurrentScope() }
-            if resetSnapshot { snapshotRevision &+= 1 }
-            errorMessage = nil
-        } catch { errorMessage = error.localizedDescription }
-        isLoading = false
+        errorMessage = nil
+        Task { [weak self, core] in
+            let result = await Task.detached {
+                Result {
+                    ArticleReadResult(articles: try core.queryArticles(query: articleQuery), selectionTotal: try core.countArticles(query: articleQuery))
+                }
+            }.value
+            guard let self, self.readLifecycle.isCurrentArticle(request), self.readLifecycle.isCurrentSelectionCount(request) else { return }
+            switch result {
+            case let .success(value):
+                articles = value.articles
+                selectionTotal = value.selectionTotal
+                if acknowledgePending { acknowledgePendingForCurrentScope() }
+                if resetSnapshot { snapshotRevision &+= 1 }
+                if readLifecycle.ownsError(request) { errorMessage = nil }
+            case let .failure(error):
+                if readLifecycle.ownsError(request) { errorMessage = error.localizedDescription }
+            }
+            isLoading = false
+        }
     }
 
     func requestFeedIcon(_ feedID: Int64, variant: FeedIconVariant) {
@@ -200,6 +318,7 @@ enum IOSFeedIconPresentation {
     func setUnreadOnly(_ value: Bool) {
         guard unreadOnly != value else { return }
         unreadOnly = value
+        readLifecycle.invalidateNavigation()
         resetPresentationState()
         loadVisibleArticles(resetSnapshot: true)
         requestScrollReset()
@@ -480,6 +599,8 @@ enum IOSFeedIconPresentation {
     func markMeaningfulInteraction() { hasMeaningfullyInteracted = true }
 
     private func resetPresentationState() {
+        readLifecycle.invalidateArticle()
+        isLoading = false
         hasMeaningfullyInteracted = false
         snapshotRevision &+= 1
         // The structural snapshot change independently clears tracker emissions.
@@ -497,9 +618,16 @@ enum IOSFeedIconPresentation {
             publishPending()
             if metadata.dataChanged && metadata.newArticlesByFeed.isEmpty { hasUnscopedNewDataSignal = true }
         }
-        if metadata.navigationChanged { loadNavigationAndCounts() }
-        else if metadata.dataChanged { reloadCounts(includeNavigationCounts: false) }
         let action = SnapshotRefreshPolicy.action(manual: metadata.reason == .manual, dataChanged: metadata.dataChanged, hasMeaningfullyInteracted: hasMeaningfullyInteracted)
+        if metadata.navigationChanged {
+            loadNavigationAndCounts { [weak self] in self?.applySyncSnapshotRefresh(metadata, action: action) }
+            return
+        }
+        if metadata.dataChanged { reloadCounts(includeNavigationCounts: false) }
+        applySyncSnapshotRefresh(metadata, action: action)
+    }
+
+    private func applySyncSnapshotRefresh(_ metadata: SyncCompleted, action: SnapshotRefreshPolicy.Action) {
         switch action {
         case .replace:
             hasUnscopedNewDataSignal = false
@@ -560,9 +688,10 @@ enum IOSFeedIconPresentation {
                 switch mutation {
                 case .success:
                     self.markMeaningfulInteraction()
-                    self.loadNavigationAndCounts()
-                    self.loadVisibleArticles(resetSnapshot: true)
-                    self.requestScrollReset()
+                    self.loadNavigationAndCounts { [weak self] in
+                        self?.loadVisibleArticles(resetSnapshot: true)
+                        self?.requestScrollReset()
+                    }
                     completion(true)
                 case let .failure(error): self.errorMessage = error.localizedDescription
                     completion(false)
@@ -633,6 +762,7 @@ enum IOSFeedIconPresentation {
 
     private func reloadCounts(includeNavigationCounts: Bool = false) {
         guard let core else { return }
+        let request = readLifecycle.beginSelectionCount()
         let selectionQuery = query()
         let categoryQueries = includeNavigationCounts ? catalog.categories.map { (id: $0.id, query: query(scope: .category($0.id))) } : []
         let feedQueries = includeNavigationCounts ? catalog.feeds.map { (id: $0.id, query: query(scope: .feed($0.id))) } : []
@@ -649,12 +779,13 @@ enum IOSFeedIconPresentation {
                     return (selection, unread, starred, categories, feeds)
                 }
             }.value
-            guard let self else { return }
+            guard let self, self.readLifecycle.isCurrentSelectionCount(request) else { return }
             switch result {
             case let .success(counts):
                 selectionTotal = counts.0; unreadTotal = counts.1; starredTotal = counts.2
                 if includeNavigationCounts { categoryCounts = counts.3; feedCounts = counts.4 }
-            case let .failure(error): errorMessage = error.localizedDescription
+            case let .failure(error):
+                if readLifecycle.ownsError(request) { errorMessage = error.localizedDescription }
             }
         }
     }

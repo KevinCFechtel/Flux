@@ -392,3 +392,7 @@ not a deferred testing phase.
 7. Required capabilities may be isolated into implementation work packages, but
    CarPlay, Live Activities/Dynamic Island and the production migration path
    cannot be dropped from Phase D completion.
+8. Potentially blocking Rust Core work must not execute on `MainActor`.
+   `MainActor` owns native presentation inputs, request lifecycle, and state
+   publication; Core reads and result construction execute off-main and may only
+   publish while their presentation request remains current.
