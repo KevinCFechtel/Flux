@@ -59,6 +59,12 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSNavigationButtonPresentation.glyphSize, 22)
     }
 
+    func testNavigationBrandingUsesTheExistingFluxNewsTemplateAsset() {
+        XCTAssertEqual(IOSNavigationBranding.assetName, "FluxNewsTemplate")
+        XCTAssertEqual(IOSNavigationBranding.accessibilityLabel, "FluxNews")
+        XCTAssertTrue(IOSNavigationBranding.iconUsesSolidAccentColor)
+    }
+
     func testArticleListTitleUsesAllNewsSelectionCount() {
         XCTAssertEqual(ArticleListTitlePresentation.title(scope: .all, catalog: NavigationCatalog(categories: [], feeds: []), count: 123), "All News (123)")
     }

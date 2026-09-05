@@ -20,6 +20,12 @@ enum NewsNavigationSelection {
     }
 }
 
+enum IOSNavigationBranding {
+    static let assetName = "FluxNewsTemplate"
+    static let accessibilityLabel = "FluxNews"
+    static let iconUsesSolidAccentColor = true
+}
+
 struct NewsNavigationExpansionState: Equatable {
     private(set) var expandedCategoryIDs = Set<Int64>()
 
@@ -60,7 +66,6 @@ struct NewsNavigationView: View {
             if presentation == .sidebar { listContent.listStyle(.sidebar) }
             else { listContent.listStyle(.insetGrouped) }
         }
-        .navigationTitle("News")
         .toolbar { addToolbar }
         .sheet(item: $addDestination) { destination in NavigationStack { addView(destination) } }
         .sheet(item: $feedSettingsTarget) { target in NavigationStack { IOSFeedSettingsView(store: store, target: target) } }
@@ -70,6 +75,7 @@ struct NewsNavigationView: View {
 
     private var listContent: some View {
         List(selection: selection) {
+            brandingHeader
             Section("News") {
                 searchRow
                 scopeRow("All News", systemImage: "newspaper", scope: .all, count: store.unreadTotal)
@@ -95,6 +101,24 @@ struct NewsNavigationView: View {
                 }
             }
         }
+    }
+
+    private var brandingHeader: some View {
+        HStack(spacing: 9) {
+            Image(IOSNavigationBranding.assetName)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 34, height: 34)
+                .foregroundStyle(Color.accentColor)
+            Text(IOSNavigationBranding.accessibilityLabel)
+                .font(.largeTitle)
+                .fontWeight(.bold)
+                .foregroundStyle(.primary)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(IOSNavigationBranding.accessibilityLabel)
+        .listRowSeparator(.hidden)
     }
 
     private var selection: Binding<BrowserScope?> {
