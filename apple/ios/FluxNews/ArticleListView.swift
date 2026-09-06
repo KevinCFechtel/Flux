@@ -1,6 +1,43 @@
 import SwiftUI
 import UIKit
 
+enum IOSArticleScrollDirection: Equatable {
+    case forward
+    case backward
+}
+
+enum IOSArticleImagePrefetchPolicy {
+    static func candidateIDs(
+        orderedIDs: [Int64],
+        visibleIDs: [Int64],
+        imageIDs: Set<Int64>,
+        direction: IOSArticleScrollDirection,
+        excludedIDs: Set<Int64> = [],
+        limit: Int = 2,
+        searchHorizon: Int = 12
+    ) -> [Int64] {
+        guard limit > 0, searchHorizon > 0 else { return [] }
+        let positions = Dictionary(uniqueKeysWithValues: orderedIDs.enumerated().map { ($0.element, $0.offset) })
+        let visiblePositions = visibleIDs.compactMap { positions[$0] }
+        guard let anchor = direction == .forward ? visiblePositions.max() : visiblePositions.min() else { return [] }
+
+        let candidates: [Int64]
+        switch direction {
+        case .forward:
+            let end = min(orderedIDs.count, anchor + 1 + searchHorizon)
+            candidates = Array(orderedIDs[(anchor + 1)..<end])
+        case .backward:
+            let start = max(0, anchor - searchHorizon)
+            candidates = Array(orderedIDs[start..<anchor].reversed())
+        }
+
+        return candidates
+            .filter { imageIDs.contains($0) && !excludedIDs.contains($0) }
+            .prefix(limit)
+            .map { $0 }
+    }
+}
+
 /// iOS 18 visibility reports need not include every intermediate row. The ordered
 /// snapshot fills those gaps without using row geometry or exposure timing.
 struct IOSScrolloverOrderTracker {
@@ -11,6 +48,7 @@ struct IOSScrolloverOrderTracker {
     private var isUserScrolling = false
     private var hasForwardScrollInteraction = false
     private var lastVisibilityMoveWasForward = false
+    private(set) var lastVisibilityDirection: IOSArticleScrollDirection?
 
     mutating func updateSnapshot(_ ids: [Int64]) {
         guard ids != orderedIDs else { return }
@@ -22,6 +60,7 @@ struct IOSScrolloverOrderTracker {
         isUserScrolling = false
         hasForwardScrollInteraction = false
         lastVisibilityMoveWasForward = false
+        lastVisibilityDirection = nil
     }
 
     mutating func setUserScrolling(_ value: Bool) { isUserScrolling = value }
@@ -32,6 +71,7 @@ struct IOSScrolloverOrderTracker {
         isUserScrolling = false
         hasForwardScrollInteraction = false
         lastVisibilityMoveWasForward = false
+        lastVisibilityDirection = nil
     }
 
     mutating func releaseEmittedIDs() { emittedIDs.removeAll() }
@@ -43,7 +83,15 @@ struct IOSScrolloverOrderTracker {
         defer { previousLeadingArticleID = leadingID }
 
         guard isUserScrolling, enabled, let previousLeadingArticleID,
-              let previousPosition = positions[previousLeadingArticleID] else { return empty }
+              let previousPosition = positions[previousLeadingArticleID] else {
+            lastVisibilityDirection = nil
+            return empty
+        }
+        guard leadingPosition != previousPosition else {
+            lastVisibilityDirection = nil
+            return empty
+        }
+        lastVisibilityDirection = leadingPosition > previousPosition ? .forward : .backward
         guard leadingPosition > previousPosition else {
             lastVisibilityMoveWasForward = false
             return empty
@@ -355,6 +403,7 @@ enum IOSArticleListEmptyState: Equatable {
 
 struct ArticleListView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
     var store: NewsreaderStore
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
@@ -409,9 +458,12 @@ struct ArticleListView: View {
                                 scrolloverTracker.updateSnapshot(store.articles.map(\.id))
                             }
                                .onScrollTargetVisibilityChange(idType: Int64.self, threshold: scrolloverVisibilityThreshold) { visibleIDs in
-                                   let batch = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
-                                   if !batch.articleIDs.isEmpty { store.flushScrollover(batch) }
-                                   let terminalBatch = scrolloverTracker.receiveTerminalVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
+                                    let batch = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
+                                    if !batch.articleIDs.isEmpty { store.flushScrollover(batch) }
+                                    if let direction = scrolloverTracker.lastVisibilityDirection {
+                                        prefetchImages(visibleIDs: visibleIDs, direction: direction, availableWidth: proxy.size.width - horizontalInset * 2)
+                                    }
+                                    let terminalBatch = scrolloverTracker.receiveTerminalVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
                                    if !terminalBatch.articleIDs.isEmpty { store.flushScrollover(terminalBatch) }
                              }
                             .onScrollPhaseChange { _, phase in
@@ -440,6 +492,38 @@ struct ArticleListView: View {
            }
     }
 
+}
+
+private extension ArticleListView {
+    func prefetchImages(visibleIDs: [Int64], direction: IOSArticleScrollDirection, availableWidth: CGFloat) {
+        guard store.articlePresentationMode.showsArticleImage else { return }
+        let articles = store.articles
+        let imageIDs = Set(articles.compactMap { article in
+            article.imageUrl.flatMap(URL.init(string:)) == nil ? nil : article.id
+        })
+        let ids = IOSArticleImagePrefetchPolicy.candidateIDs(
+            orderedIDs: articles.map(\.id),
+            visibleIDs: visibleIDs,
+            imageIDs: imageIDs,
+            direction: direction
+        )
+        let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
+        for id in ids {
+            guard let article = articlesByID[id], let url = article.imageUrl.flatMap(URL.init(string:)) else { continue }
+            let targetSize: CGSize
+            if ArticlePresentationLayout.usesLandscapeVisual(mode: store.articlePresentationMode, availableWidth: availableWidth) {
+                let width = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
+                targetSize = CGSize(width: width, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: width))
+            } else {
+                let width = ArticlePresentationLayout.visualPortraitContentWidth(availableWidth)
+                targetSize = CGSize(width: width, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: width))
+            }
+            let request = ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale)
+            Task.detached(priority: .utility) {
+                _ = try? await ArticleImagePipeline.shared.image(for: request)
+            }
+        }
+    }
 }
 
 private struct ArticleListBottomOverlay: View {

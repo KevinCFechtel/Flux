@@ -397,6 +397,53 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleImageRequest(url: url, targetSize: CGSize(width: 128.1, height: 20), displayScale: 1).maxPixelDimension, 192)
     }
 
+    func testArticleImagePrefetchSelectsAtMostTwoImagesForwardAndSkipsTextOnlyArticles() {
+        XCTAssertEqual(
+            IOSArticleImagePrefetchPolicy.candidateIDs(
+                orderedIDs: [1, 2, 3, 4, 5, 6],
+                visibleIDs: [2],
+                imageIDs: [3, 5, 6],
+                direction: .forward
+            ),
+            [3, 5]
+        )
+    }
+
+    func testArticleImagePrefetchLooksBackwardFromTheLeadingVisibleArticle() {
+        XCTAssertEqual(
+            IOSArticleImagePrefetchPolicy.candidateIDs(
+                orderedIDs: [1, 2, 3, 4, 5],
+                visibleIDs: [4, 5],
+                imageIDs: [1, 2, 3],
+                direction: .backward
+            ),
+            [3, 2]
+        )
+    }
+
+    func testArticleImagePrefetchRespectsEdgesHorizonAndExcludedRequests() {
+        XCTAssertEqual(
+            IOSArticleImagePrefetchPolicy.candidateIDs(
+                orderedIDs: [1, 2, 3],
+                visibleIDs: [1],
+                imageIDs: [2, 3],
+                direction: .backward
+            ),
+            []
+        )
+        XCTAssertEqual(
+            IOSArticleImagePrefetchPolicy.candidateIDs(
+                orderedIDs: [1, 2, 3, 4, 5, 6],
+                visibleIDs: [1],
+                imageIDs: [2, 3, 4, 5, 6],
+                direction: .forward,
+                excludedIDs: [2],
+                searchHorizon: 3
+            ),
+            [3, 4]
+        )
+    }
+
     func testArticleImagePipelineUsesDecodedCacheAndSeparatesLargerRequests() async throws {
         let data = try imageData(width: 800, height: 400)
         let counter = ImageLoadCounter(data: data)

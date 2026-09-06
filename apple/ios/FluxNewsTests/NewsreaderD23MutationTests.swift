@@ -30,9 +30,23 @@ final class NewsreaderD23MutationTests: XCTestCase {
         var tracker = IOSScrolloverOrderTracker()
         tracker.updateSnapshot(Array(1...10).map(Int64.init))
         XCTAssertTrue(tracker.receiveVisibleIDs([1], enabled: true).articleIDs.isEmpty)
+        XCTAssertNil(tracker.lastVisibilityDirection)
         tracker.setUserScrolling(true)
         tracker.updateSnapshot(Array(20...30).map(Int64.init))
         XCTAssertTrue(tracker.receiveVisibleIDs([30], enabled: true).articleIDs.isEmpty)
+        XCTAssertNil(tracker.lastVisibilityDirection)
+    }
+
+    func testVisibilityDirectionTracksForwardAndBackwardMovementWithoutChangingScrolloverOutput() {
+        var tracker = IOSScrolloverOrderTracker()
+        tracker.updateSnapshot([1, 2, 3, 4])
+        _ = tracker.receiveVisibleIDs([1], enabled: true)
+        tracker.setUserScrolling(true)
+
+        XCTAssertEqual(tracker.receiveVisibleIDs([3], enabled: true).articleIDs, [1, 2])
+        XCTAssertEqual(tracker.lastVisibilityDirection, .forward)
+        XCTAssertTrue(tracker.receiveVisibleIDs([1], enabled: true).articleIDs.isEmpty)
+        XCTAssertEqual(tracker.lastVisibilityDirection, .backward)
     }
 
     func testTerminalScrolloverCompletesVisibleArticlesAfterForwardScroll() {
