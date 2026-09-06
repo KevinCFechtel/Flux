@@ -116,7 +116,7 @@ struct IOSAddFeedView: View {
                 case let .automatic(subscription): create(feedURL: subscription.url)
                 case .choose: candidates = subscriptions
                 }
-            case let .failure(error): self.error = error.localizedDescription
+            case let .failure(error): self.error = IOSErrorPresentation.message(for: error, context: .feedDiscovery)
             }
         }
     }
@@ -132,7 +132,7 @@ struct IOSAddFeedView: View {
             isWorking = false
             switch result {
             case .success: dismiss()
-            case let .failure(error): self.error = error.localizedDescription
+            case let .failure(error): self.error = IOSErrorPresentation.message(for: error, context: .feedCreation)
             }
         }
     }
@@ -167,7 +167,7 @@ struct IOSAddCategoryView: View {
             isWorking = false
             switch result {
             case .success: dismiss()
-            case let .failure(error): self.error = error.localizedDescription
+            case let .failure(error): self.error = IOSErrorPresentation.message(for: error, context: .categoryCreation)
             }
         }
     }
@@ -211,7 +211,7 @@ struct IOSFeedSettingsView: View {
             guard requestLifecycle.isCurrent(generation) else { return }
             switch result {
             case let .success(preferences): self.preferences = preferences; error = nil
-            case let .failure(error): self.error = error.localizedDescription
+            case let .failure(error): self.error = IOSErrorPresentation.message(for: error, context: .feedSettingsLoad)
             }
         }
     }
@@ -226,7 +226,7 @@ struct IOSFeedSettingsView: View {
             isSaving = false
             switch result {
             case .success: load()
-            case let .failure(error): self.error = error.localizedDescription
+            case let .failure(error): self.error = IOSErrorPresentation.message(for: error, context: .feedSettingsSave)
             }
         }
     }

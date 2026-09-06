@@ -29,6 +29,8 @@
 		A27 /* NavigationSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B29 /* NavigationSettingsView.swift */; };
 		A30 /* FeedManagementViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30 /* FeedManagementViews.swift */; };
 		A31 /* FluxNews/ArticleImagePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = B31 /* FluxNews/ArticleImagePipeline.swift */; };
+		A32 /* FluxNews/IOSErrorPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B32 /* FluxNews/IOSErrorPresentation.swift */; };
+		A33 /* FluxNewsTests/IOSErrorPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B33 /* FluxNewsTests/IOSErrorPresentationTests.swift */; };
 		A3 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3 /* ContentView.swift */; };
 		A4 /* flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4 /* flux_uniffi.swift */; };
 		A5 /* LegacyStateDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5 /* LegacyStateDiscovery.swift */; };
@@ -91,6 +93,8 @@
 		B29 /* NavigationSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationSettingsView.swift; sourceTree = "<group>"; };
 		B30 /* FeedManagementViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedManagementViews.swift; sourceTree = "<group>"; };
 		B31 /* FluxNews/ArticleImagePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/ArticleImagePipeline.swift; sourceTree = "<group>"; };
+		B32 /* FluxNews/IOSErrorPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSErrorPresentation.swift; sourceTree = "<group>"; };
+		B33 /* FluxNewsTests/IOSErrorPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/IOSErrorPresentationTests.swift; sourceTree = "<group>"; };
 		B3 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		B4 /* flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = flux_uniffi.swift; path = ../Build/Products/FluxUniFFI/Sources/flux_uniffi.swift; sourceTree = "<group>"; };
 		B5 /* LegacyStateDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyStateDiscovery.swift; sourceTree = "<group>"; };
@@ -154,6 +158,8 @@
 				B21 /* FluxNews/SearchView.swift */,
 				B22 /* FluxNewsTests/IOSSearchStoreTests.swift */,
 				B26 /* FluxNewsTests/AccountLifecycleTests.swift */,
+				B32 /* FluxNews/IOSErrorPresentation.swift */,
+				B33 /* FluxNewsTests/IOSErrorPresentationTests.swift */,
 				E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */,
 				E17F743230471C1900698DA5 /* Recovered References */,
 			);
@@ -327,6 +333,7 @@
 				A27 /* NavigationSettingsView.swift in Sources */,
 				A30 /* FeedManagementViews.swift in Sources */,
 				A31 /* FluxNews/ArticleImagePipeline.swift in Sources */,
+				A32 /* FluxNews/IOSErrorPresentation.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -340,6 +347,7 @@
 				A17 /* FluxNewsTests/ReaderRequestStateTests.swift in Sources */,
 				A20 /* FluxNewsTests/IOSSearchStoreTests.swift in Sources */,
 				A24 /* FluxNewsTests/AccountLifecycleTests.swift in Sources */,
+				A33 /* FluxNewsTests/IOSErrorPresentationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

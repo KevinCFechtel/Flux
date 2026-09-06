@@ -60,7 +60,7 @@ final class CoreBootstrapper: ObservableObject {
         } catch {
             guard generation == bootstrapGeneration else { return }
             state = .recoverableError(Self.safeMessage(for: error))
-            logger.error("Core startup failed: \(Self.safeMessage(for: error), privacy: .public)")
+            logger.error("Core startup failed: \(String(reflecting: error), privacy: .private)")
         }
     }
 
@@ -186,9 +186,7 @@ final class CoreBootstrapper: ObservableObject {
     }
 
     private static func safeMessage(for error: Error) -> String {
-        if let validation = error as? AccountValidationError { return IOSAccountValidationPresentation.message(for: IOSAccountValidationPresentation.failure(for: validation)) }
-        let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        return message.isEmpty ? "Flux could not start. Check the account configuration and try again." : message
+        IOSErrorPresentation.message(for: error, context: .startup)
     }
 }
 

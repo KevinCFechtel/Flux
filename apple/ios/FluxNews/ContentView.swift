@@ -417,7 +417,7 @@ struct ContentView: View {
                         return
                     }
                     browser = IOSBrowserURL(url: url)
-                case let .failure(error): actionError = error.localizedDescription
+                case let .failure(error): actionError = IOSErrorPresentation.message(for: error, context: .articleAction)
                 }
             }
         case .comments:
@@ -437,7 +437,7 @@ struct ContentView: View {
                 switch result {
                 case .success(.saved): actionConfirmation = "Saved to third-party service"
                 case .success(.noIntegrationConfigured): actionConfirmation = "No third-party integration is configured in Miniflux"
-                case let .failure(error): actionError = error.localizedDescription
+                case let .failure(error): actionError = IOSErrorPresentation.message(for: error, context: .articleAction)
                 }
             }
         }
@@ -464,7 +464,7 @@ struct ContentView: View {
                 switch result {
                 case .success(.saved): actionConfirmation = "Saved to third-party service"
                 case .success(.noIntegrationConfigured): actionConfirmation = "No third-party integration is configured in Miniflux"
-                case let .failure(error): actionError = error.localizedDescription
+                case let .failure(error): actionError = IOSErrorPresentation.message(for: error, context: .articleAction)
                 }
             }
         }
@@ -476,7 +476,7 @@ struct ContentView: View {
             case let .success(value):
                 guard let url = ArticleOpenRoutingPolicy.validWebURL(value) else { actionError = "Flux could not resolve a valid Miniflux entry URL."; return }
                 browser = IOSBrowserURL(url: url)
-            case let .failure(error): actionError = error.localizedDescription
+            case let .failure(error): actionError = IOSErrorPresentation.message(for: error, context: .articleAction)
             }
         }
     }
@@ -493,7 +493,7 @@ struct ContentView: View {
             readerIsLoading = false
             switch result {
             case let .success(document): readerDocument = document
-            case let .failure(error): readerErrorMessage = error.localizedDescription
+            case let .failure(error): readerErrorMessage = IOSErrorPresentation.message(for: error, context: .reader)
             }
         }
     }
@@ -510,7 +510,7 @@ struct ContentView: View {
             readerIsLoading = false
             switch result {
             case let .success(document): readerDocument = document
-            case let .failure(error): readerErrorMessage = error.localizedDescription
+            case let .failure(error): readerErrorMessage = IOSErrorPresentation.message(for: error, context: .reader)
             }
         }
     }

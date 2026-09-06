@@ -1,6 +1,10 @@
 import Foundation
 import Security
 
+private enum IOSKeychainError: Error {
+    case status(OSStatus)
+}
+
 struct IOSCustomHTTPHeader: Codable, Equatable, Identifiable, Sendable {
     var id: UUID
     var name: String
@@ -78,11 +82,7 @@ struct IOSKeychainCredentialStore: IOSCredentialStoreProtocol {
         guard status == errSecSuccess || status == errSecItemNotFound else { throw Self.error(status) }
     }
 
-    private static func error(_ status: OSStatus) -> NSError {
-        NSError(domain: NSOSStatusErrorDomain, code: Int(status), userInfo: [
-            NSLocalizedDescriptionKey: SecCopyErrorMessageString(status, nil) as String? ?? "Keychain error"
-        ])
-    }
+    private static func error(_ status: OSStatus) -> IOSKeychainError { .status(status) }
 }
 
 final class IOSMemoryCredentialStore: IOSCredentialStoreProtocol {

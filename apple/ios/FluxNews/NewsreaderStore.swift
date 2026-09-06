@@ -186,7 +186,7 @@ enum IOSSyncCountRefreshPolicy: Equatable {
         do {
             eventSubscription = try configuredCore.subscribeEvents(listener: IOSNewsreaderEventListener(store: self))
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = IOSErrorPresentation.message(for: error, context: .contentLoad)
         }
         let session = readLifecycle.session
         loadNavigationAndCounts { [weak self] in
@@ -262,7 +262,7 @@ enum IOSSyncCountRefreshPolicy: Equatable {
                 publishPending()
                 if readLifecycle.ownsError(request) { errorMessage = nil }
             case let .failure(error):
-                if readLifecycle.ownsError(request) { errorMessage = error.localizedDescription }
+                if readLifecycle.ownsError(request) { errorMessage = IOSErrorPresentation.message(for: error, context: .contentLoad) }
             }
             afterCompletion?()
         }
@@ -289,7 +289,7 @@ enum IOSSyncCountRefreshPolicy: Equatable {
                 if resetSnapshot { snapshotRevision &+= 1 }
                 if readLifecycle.ownsError(request) { errorMessage = nil }
             case let .failure(error):
-                if readLifecycle.ownsError(request) { errorMessage = error.localizedDescription }
+                if readLifecycle.ownsError(request) { errorMessage = IOSErrorPresentation.message(for: error, context: .contentLoad) }
             }
             isLoading = false
             if case .success = result { completion?() }
@@ -321,7 +321,7 @@ enum IOSSyncCountRefreshPolicy: Equatable {
         case let .success(metadata):
             handleSyncCompleted(metadata)
         case let .failure(error):
-            errorMessage = error.localizedDescription
+            errorMessage = IOSErrorPresentation.message(for: error, context: .sync)
             isSyncing = false
         }
     }
@@ -389,7 +389,7 @@ enum IOSSyncCountRefreshPolicy: Equatable {
     func loadReaderDocument(articleID: Int64, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
         let request = readerRequests.begin()
         guard let core else {
-            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            completion(.failure(IOSCoreError.notConfigured))
             return
         }
         Task { [weak self, core] in
@@ -401,7 +401,7 @@ enum IOSSyncCountRefreshPolicy: Equatable {
 
     func minifluxEntryURL(for article: ArticleSummary, completion: @escaping (Result<String, Error>) -> Void) {
         guard let core else {
-            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            completion(.failure(IOSCoreError.notConfigured))
             return
         }
         completion(.success(core.minifluxEntryUrl(articleId: article.id)))
@@ -409,7 +409,7 @@ enum IOSSyncCountRefreshPolicy: Equatable {
 
     func saveToService(_ article: ArticleSummary, completion: @escaping (Result<SaveToServiceResult, Error>) -> Void) {
         guard let core else {
-            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            completion(.failure(IOSCoreError.notConfigured))
             return
         }
         Task { [weak self, core] in
@@ -479,7 +479,7 @@ enum IOSSyncCountRefreshPolicy: Equatable {
             guard let self else { return }
             switch result {
             case .success: markMeaningfulInteraction(); updateVisibleRead(articleIDs, read: read); reloadCounts(includeNavigationCounts: true)
-            case let .failure(error): errorMessage = error.localizedDescription
+            case let .failure(error): errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
             }
         }
     }
@@ -495,7 +495,7 @@ enum IOSSyncCountRefreshPolicy: Equatable {
                 if !starred && scope == .starred { articles.removeAll { articleIDs.contains($0.id) } }
                 else { updateVisible(articleIDs) { $0.isStarred = starred } }
                 reloadCounts(includeNavigationCounts: true)
-            case let .failure(error): errorMessage = error.localizedDescription
+            case let .failure(error): errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
             }
         }
     }
@@ -532,8 +532,8 @@ enum IOSSyncCountRefreshPolicy: Equatable {
                 }
                 scrolloverDiagnostic("mutation success ids=\(ids)")
             case let .failure(error):
-                errorMessage = error.localizedDescription
-                scrolloverDiagnostic("mutation failure ids=\(ids) error=\(error.localizedDescription)")
+                errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
+                scrolloverDiagnosticError(ids: ids, error: error)
             }
             pendingScrolloverIDSet.subtract(ids)
             scrolloverMutationRunning = false
@@ -630,7 +630,7 @@ enum IOSSyncCountRefreshPolicy: Equatable {
             case .success:
                 updateVisibleRead(ids, read: false)
                 clearScrolloverUndoGroup(); reloadCounts(includeNavigationCounts: true)
-            case let .failure(error): errorMessage = error.localizedDescription
+            case let .failure(error): errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
             }
         }
     }
@@ -744,7 +744,7 @@ enum IOSSyncCountRefreshPolicy: Equatable {
         for index in articles.indices where ids.contains(articles[index].id) { change(&articles[index]) }
     }
 
-    private var unconfiguredError: NSError { NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"]) }
+    private var unconfiguredError: IOSCoreError { .notConfigured }
 
     private func markCurrentScopeArticlesRead(completion: @escaping (Bool) -> Void) {
         guard let core else { completion(false); return }
@@ -765,11 +765,11 @@ enum IOSSyncCountRefreshPolicy: Equatable {
                         self?.requestScrollReset()
                     }
                     completion(true)
-                case let .failure(error): self.errorMessage = error.localizedDescription
+                case let .failure(error): self.errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
                     completion(false)
                 }
             case let .failure(error):
-                self.errorMessage = error.localizedDescription
+                self.errorMessage = IOSErrorPresentation.message(for: error, context: .contentLoad)
                 completion(false)
             }
         }
@@ -778,6 +778,12 @@ enum IOSSyncCountRefreshPolicy: Equatable {
     private func scrolloverDiagnostic(_ message: String) {
 #if DEBUG
         Self.scrolloverDiagnosticLog.debug("\(message, privacy: .public)")
+#endif
+    }
+
+    private func scrolloverDiagnosticError(ids: [Int64], error: Error) {
+#if DEBUG
+        Self.scrolloverDiagnosticLog.debug("mutation failure ids=\(ids) error=\(String(reflecting: error), privacy: .private)")
 #endif
     }
 
@@ -859,7 +865,7 @@ enum IOSSyncCountRefreshPolicy: Equatable {
                 selectionTotal = counts.0; unreadTotal = counts.1; starredTotal = counts.2
                 if includeNavigationCounts { categoryCounts = counts.3; feedCounts = counts.4 }
             case let .failure(error):
-                if readLifecycle.ownsError(request) { errorMessage = error.localizedDescription }
+                if readLifecycle.ownsError(request) { errorMessage = IOSErrorPresentation.message(for: error, context: .contentLoad) }
             }
         }
     }

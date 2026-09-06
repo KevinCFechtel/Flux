@@ -117,7 +117,7 @@ final class AccountLifecycleTests: XCTestCase {
 
         await bootstrapper.start()
 
-        XCTAssertEqual(bootstrapper.state, .recoverableError("unreachable"))
+        XCTAssertEqual(bootstrapper.state, .recoverableError("FluxNews could not start. Check the account configuration and try again."))
         XCTAssertNotNil(bootstrapper.credentials)
     }
 

@@ -376,6 +376,12 @@ presentation for Sync/network, account/credential, and user-action failures.
 Raw Rust/UniFFI/internal errors must not be exposed directly to users.
 Loading, empty, syncing, and error states remain semantically distinct.
 
+The D4.4 error-presentation work is complete: native iOS error contexts now map
+technical failures to stable safe English messages, while typed account-validation
+messages remain preserved. Technical causes are restricted to diagnostics, and
+optional feed-icon and article-image failures remain silent. Wording freeze and
+English/German localization are still outstanding final D4.4 steps.
+
 Localization is the final D4.4 presentation step after user-facing wording and
 error messages are stable. The native iOS/iPadOS app must provide English and
 German localization covering release-relevant UI text, user-facing error

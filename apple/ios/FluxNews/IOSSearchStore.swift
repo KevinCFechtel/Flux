@@ -77,7 +77,7 @@ final class IOSSearchStore: ObservableObject {
                 self.total = page.total
                 self.paginationExhausted = page.articles.isEmpty || Int64(page.articles.count) >= page.total
                 self.results = IOSSearchPaginationPolicy.deduplicated(page.articles)
-            case let .failure(error): self.errorMessage = error.localizedDescription
+            case let .failure(error): self.errorMessage = IOSErrorPresentation.message(for: error, context: .search)
             }
         }
     }
@@ -122,7 +122,7 @@ final class IOSSearchStore: ObservableObject {
                 let updated = IOSSearchPaginationPolicy.deduplicated(self.results + page.articles)
                 self.paginationExhausted = page.articles.isEmpty || updated.count == self.results.count || Int64(updated.count) >= page.total
                 self.results = updated
-            case let .failure(error): self.errorMessage = error.localizedDescription
+            case let .failure(error): self.errorMessage = IOSErrorPresentation.message(for: error, context: .search)
             }
         }
     }
@@ -148,7 +148,7 @@ final class IOSSearchStore: ObservableObject {
     func openReader(_ article: ArticleSummary, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
         setRead(article, read: true)
         guard let core else {
-            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            completion(.failure(IOSCoreError.notConfigured))
             return
         }
         let requestGeneration = requestState.generation
@@ -161,7 +161,7 @@ final class IOSSearchStore: ObservableObject {
 
     func minifluxEntryURL(for article: ArticleSummary, completion: @escaping (Result<String, Error>) -> Void) {
         guard let core else {
-            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            completion(.failure(IOSCoreError.notConfigured))
             return
         }
         completion(.success(core.minifluxEntryUrl(articleId: article.id)))
@@ -169,7 +169,7 @@ final class IOSSearchStore: ObservableObject {
 
     func saveToService(_ article: ArticleSummary, completion: @escaping (Result<SaveToServiceResult, Error>) -> Void) {
         guard let core else {
-            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            completion(.failure(IOSCoreError.notConfigured))
             return
         }
         Task { [weak self, core] in
@@ -196,7 +196,7 @@ final class IOSSearchStore: ObservableObject {
                     if let starred { self.results[index].isStarred = starred }
                 }
                 if disposition == .localFirst { self.onLocalFirstMutation() }
-            case let .failure(error): self.errorMessage = error.localizedDescription
+            case let .failure(error): self.errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
             }
         }
     }
