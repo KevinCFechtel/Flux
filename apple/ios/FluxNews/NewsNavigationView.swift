@@ -136,7 +136,7 @@ struct NewsNavigationView: View {
     private func scopeRow(_ title: String, systemImage: String, scope: BrowserScope, count: UInt64) -> some View {
         Label { labelTitle(title, count: count) } icon: { Image(systemName: systemImage) }
             .tag(scope)
-        .accessibilityValue(count == 0 ? String(localized: "No unread articles") : count == 1 ? String(localized: "1 unread article") : String(format: String(localized: "%lld unread articles"), count))
+        .accessibilityValue(count == 0 ? String(localized: "No unread articles") : String(localized: "\(count) unread article"))
     }
 
     private func categoryRow(categoryID: Int64, title: String, count: UInt64) -> some View {

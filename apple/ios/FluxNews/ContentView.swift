@@ -583,15 +583,11 @@ enum ArticleListCounterPresentation {
         showArticleCount && !supportsNativeSubtitle
     }
 
-    static func expandedLabel(scope: BrowserScope, unreadOnly: Bool, count: UInt64) -> String {
+    static func expandedLabel(scope: BrowserScope, unreadOnly: Bool, count: UInt64, locale: Locale = .current) -> String {
         if unreadOnly && scope != .starred {
-            return count == 1
-                ? String(localized: "1 unread article")
-                : String(format: String(localized: "%lld unread articles"), count)
+            return String(localized: "\(Int(count)) unread article", locale: locale)
         }
-        return count == 1
-            ? String(localized: "1 article")
-            : String(format: String(localized: "%lld articles"), count)
+        return String(localized: "\(Int(count)) article", locale: locale)
     }
 }
 

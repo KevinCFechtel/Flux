@@ -136,10 +136,27 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     func testArticleListCounterUsesCurrentScopeAndFilterSemantics() {
-        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: true, count: 117), String(format: String(localized: "%lld unread articles"), 117))
-        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: false, count: 842), String(format: String(localized: "%lld articles"), 842))
-        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .starred, unreadOnly: true, count: 8), String(format: String(localized: "%lld articles"), 8))
+        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: true, count: 117), String(localized: "\(117) unread article"))
+        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: false, count: 842), String(localized: "\(842) article"))
+        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .starred, unreadOnly: true, count: 8), String(localized: "\(8) article"))
         XCTAssertEqual(ArticleListCounterPresentation.compactCount(1000), "1000")
+    }
+
+    func testArticleListCounterUsesEnglishAndGermanPluralVariations() {
+        let english = Locale(identifier: "en")
+        let appBundle = Bundle(identifier: "dev.kevincfechtel.fluxNews.nativeDev")!
+
+        XCTAssertEqual(String(localized: "\(1) article", bundle: appBundle, locale: english), "1 article")
+        XCTAssertEqual(String(localized: "\(2) article", bundle: appBundle, locale: english), "2 articles")
+    }
+
+    func testArticleListCounterUsesGermanPluralVariations() throws {
+        try XCTSkipUnless(Locale.current.language.languageCode?.identifier == "de")
+
+        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: false, count: 1), "1 Artikel")
+        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: false, count: 2), "2 Artikel")
+        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: true, count: 1), "1 ungelesener Artikel")
+        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: true, count: 2), "2 ungelesene Artikel")
     }
 
     @MainActor

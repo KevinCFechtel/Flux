@@ -573,9 +573,7 @@ private struct ScrolloverUndoPresentation: View {
 
     private var scrolloverUndoCountLabel: String {
         let count = store.scrolloverUndoIDs.count
-        return count == 1
-            ? String(localized: "1 article marked as read")
-            : String(format: String(localized: "%lld articles marked as read"), count)
+        return String(localized: "\(count) article marked as read")
     }
 }
 
