@@ -30,19 +30,28 @@ struct IOSScrolloverOrderTracker {
 
     mutating func releaseEmittedIDs() { emittedIDs.removeAll() }
 
-    mutating func receiveVisibleIDs(_ visibleIDs: [Int64], enabled: Bool) -> [Int64] {
+    mutating func receiveVisibleIDs(_ visibleIDs: [Int64], enabled: Bool) -> IOSScrolloverBatch {
+        let empty = IOSScrolloverBatch(articleIDs: [], undoEligible: false)
         guard let leadingID = visibleIDs.min(by: { positions[$0, default: .max] < positions[$1, default: .max] }),
-              let leadingPosition = positions[leadingID] else { return [] }
+              let leadingPosition = positions[leadingID] else { return empty }
         defer { previousLeadingArticleID = leadingID }
 
         guard isUserScrolling, enabled, let previousLeadingArticleID,
-              let previousPosition = positions[previousLeadingArticleID] else { return [] }
-        guard leadingPosition > previousPosition else { return [] }
+              let previousPosition = positions[previousLeadingArticleID] else { return empty }
+        guard leadingPosition > previousPosition else { return empty }
 
         let candidates = orderedIDs[previousPosition..<leadingPosition].filter { emittedIDs.insert($0).inserted }
-        return candidates
+        let skippedCount = leadingPosition - previousPosition - 1
+        return IOSScrolloverBatch(articleIDs: candidates, undoEligible: skippedCount >= minimumSkippedArticlesForUndo)
     }
 }
+
+struct IOSScrolloverBatch: Equatable {
+    let articleIDs: [Int64]
+    let undoEligible: Bool
+}
+
+private let minimumSkippedArticlesForUndo = 3
 
 enum IOSArticleMutation: Equatable {
     case read(Bool)
@@ -379,10 +388,10 @@ struct ArticleListView: View {
                             .onAppear {
                                 scrolloverTracker.updateSnapshot(store.articles.map(\.id))
                             }
-                             .onScrollTargetVisibilityChange(idType: Int64.self, threshold: scrolloverVisibilityThreshold) { visibleIDs in
-                                 let candidates = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
-                                 if !candidates.isEmpty { store.flushScrollover(candidates) }
-                            }
+                              .onScrollTargetVisibilityChange(idType: Int64.self, threshold: scrolloverVisibilityThreshold) { visibleIDs in
+                                  let batch = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
+                                  if !batch.articleIDs.isEmpty { store.flushScrollover(batch) }
+                             }
                             .onScrollPhaseChange { _, phase in
                                 switch phase {
                                  case .interacting:

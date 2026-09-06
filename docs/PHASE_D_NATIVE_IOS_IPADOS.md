@@ -155,8 +155,14 @@ Detection is ID/order-only, with no geometry, exposure duration, or per-row
 timer. Candidates enter one serialized, deduplicating Core bulk-mutation queue.
 The ordered detection snapshot rebases only when visible membership or ordering
 changes; a Scrollover read-state presentation update is not structural.
-Only successful writes join a rolling Undo group: a success extends its 4-second
-inactivity window without extending the 15-second maximum group lifetime. macOS
+All detected Scrollover candidates are still marked read, independently of Undo.
+Normal continuous scrolling and small forward jumps do not present Undo. Undo is
+an exceptional recovery mechanism for a larger forward skip: a single forward
+transition qualifies only when it contains at least 3 fully skipped articles.
+Only successfully changed articles from a qualifying batch join the rolling Undo
+group. A success extends its 4-second inactivity window without extending the
+15-second maximum group lifetime. Backward movement, initial baseline
+establishment, and structural rebaselining emit neither reads nor Undo. macOS
 retains its existing platform-specific frame integration.
 
 Visual article images are native iOS presentation infrastructure, not Core or
