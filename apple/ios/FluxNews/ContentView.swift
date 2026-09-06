@@ -174,7 +174,7 @@ struct ContentView: View {
         .alert("Unable to Open Article", isPresented: Binding(get: { articleOpenError != nil }, set: { if !$0 { articleOpenError = nil } })) {
             Button("OK", role: .cancel) { articleOpenError = nil }
         } message: { Text(articleOpenError ?? "") }
-        .alert("Article Action", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
+        .alert("Action Failed", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
             Button("OK", role: .cancel) { actionError = nil }
         } message: { Text(actionError ?? "") }
         .alert("Article Action", isPresented: Binding(get: { actionConfirmation != nil }, set: { if !$0 { actionConfirmation = nil } })) {
@@ -289,7 +289,7 @@ struct ContentView: View {
                             case .markAllRead:
                                 Button("Mark All as Read", role: .destructive) { presentMarkReadConfirmation(.read) }
                             case .markAllReadAndNext:
-                                Button("Mark All as Read & Next", role: .destructive) { presentMarkReadConfirmation(.readAndNext) }
+                                Button("Mark All as Read and Continue", role: .destructive) { presentMarkReadConfirmation(.readAndNext) }
                             case .settings:
                                 Divider()
                                 Button { settingsPresented = true } label: {
@@ -530,7 +530,7 @@ struct ContentView: View {
     }
 
     private var markReadDialogTitle: String {
-        markReadWorkflow == .readAndNext ? "Mark All as Read & Next" : "Mark All as Read"
+        markReadWorkflow == .readAndNext ? "Mark All as Read and Continue" : "Mark All as Read"
     }
 
     private var nextScope: BrowserScope? {

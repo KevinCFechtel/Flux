@@ -16,7 +16,7 @@ struct SearchView: View {
                 ProgressView("Searching")
             } else if let errorMessage = store.errorMessage, store.results.isEmpty {
                 ContentUnavailableView {
-                    Label("Unable to Search", systemImage: "exclamationmark.triangle")
+                    Label("Search Failed", systemImage: "exclamationmark.triangle")
                 } description: {
                     Text(errorMessage)
                 } actions: {

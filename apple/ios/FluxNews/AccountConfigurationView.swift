@@ -33,7 +33,7 @@ struct AccountConfigurationView: View {
                     .textContentType(.URL)
                     .keyboardType(.URL)
                     .autocorrectionDisabled()
-                SecureField("API key", text: $apiKey)
+                SecureField("API Key", text: $apiKey)
                     .textContentType(.password)
             }
             Section {
@@ -46,7 +46,7 @@ struct AccountConfigurationView: View {
                 }
                 .onDelete { headers.remove(atOffsets: $0) }
                 Button { headers.append(IOSCustomHTTPHeader()) } label: {
-                    Label("Add custom header", systemImage: "plus")
+                    Label("Add Header", systemImage: "plus")
                 }
             } header: { Text("Custom HTTP Headers") }
             if let message = bootstrapper.validationMessage {
@@ -97,7 +97,7 @@ struct StartupView: View {
         Group {
             switch bootstrapper.state {
             case .starting:
-                ProgressView("Starting FluxNews...")
+                ProgressView("Starting FluxNews…")
             case .accountRequired:
                 AccountConfigurationView(bootstrapper: bootstrapper, allowsRemoval: false)
             case let .recoverableError(message):

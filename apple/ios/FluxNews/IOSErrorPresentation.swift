@@ -31,9 +31,9 @@ enum IOSErrorPresentation {
         case .search: "Search could not be completed. Please try again."
         case .reader: "The article could not be loaded in Reader."
         case .articleAction: "The article could not be updated. Please try again."
-        case .feedDiscovery: "FluxNews could not search for feeds at this address."
-        case .feedCreation: "The feed could not be added."
-        case .categoryCreation: "The category could not be added."
+        case .feedDiscovery: "Could not discover feeds. Please try again."
+        case .feedCreation: "Could not add feed. Please try again."
+        case .categoryCreation: "Could not add category. Please try again."
         case .feedSettingsLoad: "Feed settings could not be loaded. Please try again."
         case .feedSettingsSave: "Feed settings could not be saved. Please try again."
         }

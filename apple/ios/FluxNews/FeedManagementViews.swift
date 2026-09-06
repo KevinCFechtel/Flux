@@ -68,7 +68,7 @@ struct IOSAddFeedView: View {
                 } header: {
                     Text("Add Feed")
                 } footer: {
-                    Text("Flux asks Miniflux to discover available subscriptions.")
+                    Text("Miniflux will look for available feeds at this address.")
                 }
             } else {
                 Section("Choose a Feed") {
@@ -88,7 +88,7 @@ struct IOSAddFeedView: View {
             }
             if let error { Section { Text(error).foregroundStyle(.red) } }
         }
-        .navigationTitle(candidates.isEmpty ? "Add Feed" : "Choose Feed")
+        .navigationTitle(candidates.isEmpty ? "Add Feed" : "Choose a Feed")
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {
