@@ -702,6 +702,27 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(lifecycle.isCurrentSelectionCount(count))
     }
 
+    func testArticleDataSyncRefreshesEveryCount() {
+        XCTAssertEqual(IOSSyncCountRefreshPolicy.resolve(dataChanged: true, navigationChanged: false), .allCounts)
+    }
+
+    func testNavigationSyncReloadsCatalogAndEveryCount() {
+        XCTAssertEqual(IOSSyncCountRefreshPolicy.resolve(dataChanged: false, navigationChanged: true), .navigationAndAllCounts)
+        XCTAssertEqual(IOSSyncCountRefreshPolicy.resolve(dataChanged: true, navigationChanged: true), .navigationAndAllCounts)
+    }
+
+    func testSyncWithoutDataOrNavigationChangesDoesNotRefreshCounts() {
+        XCTAssertEqual(IOSSyncCountRefreshPolicy.resolve(dataChanged: false, navigationChanged: false), .none)
+    }
+
+    func testCountCompletionAfterSelectionChangeCannotPublishAsCurrent() {
+        var lifecycle = IOSNewsreaderReadLifecycle()
+        let syncCount = lifecycle.beginSelectionCount()
+        _ = lifecycle.beginArticle()
+
+        XCTAssertFalse(lifecycle.isCurrentSelectionCount(syncCount))
+    }
+
     func testReaderDocumentNoticePreservesAllContentStates() {
         XCTAssertNil(ReaderDocumentNotice.text(simplified: false, truncated: false))
         XCTAssertEqual(ReaderDocumentNotice.text(simplified: true, truncated: false), "Some content was simplified")

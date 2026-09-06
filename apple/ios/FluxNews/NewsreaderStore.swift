@@ -84,6 +84,17 @@ private struct ArticleReadResult {
     let selectionTotal: UInt64
 }
 
+enum IOSSyncCountRefreshPolicy: Equatable {
+    case none
+    case allCounts
+    case navigationAndAllCounts
+
+    static func resolve(dataChanged: Bool, navigationChanged: Bool) -> Self {
+        if navigationChanged { return .navigationAndAllCounts }
+        return dataChanged ? .allCounts : .none
+    }
+}
+
 @MainActor
 @Observable final class NewsreaderStore {
 #if DEBUG
@@ -257,7 +268,7 @@ private struct ArticleReadResult {
         }
     }
 
-    func loadVisibleArticles(acknowledgePending: Bool = false, resetSnapshot: Bool = false) {
+    func loadVisibleArticles(acknowledgePending: Bool = false, resetSnapshot: Bool = false, completion: (() -> Void)? = nil) {
         guard let core else { return }
         let request = readLifecycle.beginArticle()
         let articleQuery = query()
@@ -281,6 +292,7 @@ private struct ArticleReadResult {
                 if readLifecycle.ownsError(request) { errorMessage = error.localizedDescription }
             }
             isLoading = false
+            if case .success = result { completion?() }
         }
     }
 
@@ -672,30 +684,37 @@ private struct ArticleReadResult {
         let action = SnapshotRefreshPolicy.action(manual: metadata.reason == .manual, dataChanged: metadata.dataChanged, hasMeaningfullyInteracted: hasMeaningfullyInteracted)
         if action == .replace { isLoading = true }
         isSyncing = false
-        if metadata.navigationChanged {
+        switch IOSSyncCountRefreshPolicy.resolve(dataChanged: metadata.dataChanged, navigationChanged: metadata.navigationChanged) {
+        case .navigationAndAllCounts:
             loadNavigationAndCounts { [weak self] in self?.applySyncSnapshotRefresh(metadata, action: action) }
             return
+        case .allCounts where action == .replace:
+            applySyncSnapshotRefresh(metadata, action: action) { [weak self] in self?.reloadCounts(includeNavigationCounts: true) }
+        case .allCounts:
+            reloadCounts(includeNavigationCounts: true)
+            applySyncSnapshotRefresh(metadata, action: action)
+        case .none:
+            applySyncSnapshotRefresh(metadata, action: action)
         }
-        if metadata.dataChanged { reloadCounts(includeNavigationCounts: false) }
-        applySyncSnapshotRefresh(metadata, action: action)
     }
 
-    private func applySyncSnapshotRefresh(_ metadata: SyncCompleted, action: SnapshotRefreshPolicy.Action) {
+    private func applySyncSnapshotRefresh(_ metadata: SyncCompleted, action: SnapshotRefreshPolicy.Action, afterSnapshot: (() -> Void)? = nil) {
         switch action {
         case .replace:
             hasUnscopedNewDataSignal = false
             if metadata.reason == .manual { acknowledgePendingForCurrentScope() }
-            replaceSnapshot(shouldResetScroll: metadata.reason == .manual)
+            replaceSnapshot(shouldResetScroll: metadata.reason == .manual, afterLoad: afterSnapshot)
         case .signalNewData:
             if metadata.newArticlesByFeed.isEmpty { hasUnscopedNewDataSignal = true }
+            afterSnapshot?()
         case .preserve:
-            break
+            afterSnapshot?()
         }
     }
 
-    private func replaceSnapshot(shouldResetScroll: Bool = false) {
+    private func replaceSnapshot(shouldResetScroll: Bool = false, afterLoad: (() -> Void)? = nil) {
         resetPresentationState(preserveLoading: true)
-        loadVisibleArticles(resetSnapshot: true)
+        loadVisibleArticles(resetSnapshot: true, completion: afterLoad)
         if shouldResetScroll { requestScrollReset() }
     }
 
