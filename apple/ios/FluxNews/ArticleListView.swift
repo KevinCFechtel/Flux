@@ -9,6 +9,8 @@ struct IOSScrolloverOrderTracker {
     private var previousLeadingArticleID: Int64?
     private var emittedIDs = Set<Int64>()
     private var isUserScrolling = false
+    private var hasForwardScrollInteraction = false
+    private var lastVisibilityMoveWasForward = false
 
     mutating func updateSnapshot(_ ids: [Int64]) {
         guard ids != orderedIDs else { return }
@@ -18,6 +20,8 @@ struct IOSScrolloverOrderTracker {
         previousLeadingArticleID = nil
         emittedIDs.removeAll()
         isUserScrolling = false
+        hasForwardScrollInteraction = false
+        lastVisibilityMoveWasForward = false
     }
 
     mutating func setUserScrolling(_ value: Bool) { isUserScrolling = value }
@@ -26,32 +30,48 @@ struct IOSScrolloverOrderTracker {
         previousLeadingArticleID = nil
         emittedIDs.removeAll()
         isUserScrolling = false
+        hasForwardScrollInteraction = false
+        lastVisibilityMoveWasForward = false
     }
 
     mutating func releaseEmittedIDs() { emittedIDs.removeAll() }
 
     mutating func receiveVisibleIDs(_ visibleIDs: [Int64], enabled: Bool) -> IOSScrolloverBatch {
-        let empty = IOSScrolloverBatch(articleIDs: [], undoEligible: false)
+        let empty = IOSScrolloverBatch(articleIDs: [])
         guard let leadingID = visibleIDs.min(by: { positions[$0, default: .max] < positions[$1, default: .max] }),
               let leadingPosition = positions[leadingID] else { return empty }
         defer { previousLeadingArticleID = leadingID }
 
         guard isUserScrolling, enabled, let previousLeadingArticleID,
               let previousPosition = positions[previousLeadingArticleID] else { return empty }
-        guard leadingPosition > previousPosition else { return empty }
+        guard leadingPosition > previousPosition else {
+            lastVisibilityMoveWasForward = false
+            return empty
+        }
 
         let candidates = orderedIDs[previousPosition..<leadingPosition].filter { emittedIDs.insert($0).inserted }
-        let skippedCount = leadingPosition - previousPosition - 1
-        return IOSScrolloverBatch(articleIDs: candidates, undoEligible: skippedCount >= minimumSkippedArticlesForUndo)
+        hasForwardScrollInteraction = true
+        lastVisibilityMoveWasForward = true
+        return IOSScrolloverBatch(articleIDs: candidates)
+    }
+
+    mutating func receiveTerminalVisibleIDs(_ visibleIDs: [Int64], enabled: Bool) -> IOSScrolloverBatch {
+        guard enabled, isUserScrolling, hasForwardScrollInteraction, lastVisibilityMoveWasForward,
+              let finalID = orderedIDs.last, visibleIDs.contains(finalID) else {
+            return IOSScrolloverBatch(articleIDs: [])
+        }
+        // The final target is visible only after this interaction has advanced the
+        // leading target, so complete the otherwise un-crossable terminal cards.
+        let candidates = visibleIDs
+            .filter { positions[$0] != nil && emittedIDs.insert($0).inserted }
+            .sorted { positions[$0, default: .max] < positions[$1, default: .max] }
+        return IOSScrolloverBatch(articleIDs: candidates)
     }
 }
 
 struct IOSScrolloverBatch: Equatable {
     let articleIDs: [Int64]
-    let undoEligible: Bool
 }
-
-private let minimumSkippedArticlesForUndo = 3
 
 enum IOSArticleMutation: Equatable {
     case read(Bool)
@@ -388,9 +408,11 @@ struct ArticleListView: View {
                             .onAppear {
                                 scrolloverTracker.updateSnapshot(store.articles.map(\.id))
                             }
-                              .onScrollTargetVisibilityChange(idType: Int64.self, threshold: scrolloverVisibilityThreshold) { visibleIDs in
-                                  let batch = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
-                                  if !batch.articleIDs.isEmpty { store.flushScrollover(batch) }
+                               .onScrollTargetVisibilityChange(idType: Int64.self, threshold: scrolloverVisibilityThreshold) { visibleIDs in
+                                   let batch = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
+                                   if !batch.articleIDs.isEmpty { store.flushScrollover(batch) }
+                                   let terminalBatch = scrolloverTracker.receiveTerminalVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
+                                   if !terminalBatch.articleIDs.isEmpty { store.flushScrollover(terminalBatch) }
                              }
                             .onScrollPhaseChange { _, phase in
                                 switch phase {
@@ -483,6 +505,8 @@ struct ArticlePresentationView: View, Equatable {
 
     private let swipeActionWidth: CGFloat = 76
     private let swipeRevealThreshold: CGFloat = 38
+    private let swipeActionGap: CGFloat = 5
+    private let swipeActionCornerRadius: CGFloat = 13
 
     // The list observes its snapshot, but Undo-only publications must not redraw
     // rows whose article and presentation inputs have not changed.
@@ -617,26 +641,29 @@ struct ArticlePresentationView: View, Equatable {
 
     @ViewBuilder
     private func swipeActionButtons(_ actions: [IOSArticleSwipeAction], direction: IOSSwipeDirection) -> some View {
-        ForEach(Array(actions.enumerated()), id: \.element) { index, action in
-            let isOuterAction = isOuterAction(index: index, actionCount: actions.count, direction: direction)
-            let buttonWidth = actionWidth(actionCount: actions.count, isOuterAction: isOuterAction)
-            Button {
-                horizontalOffset = 0
-                performSwipeAction(action)
-            } label: {
-                VStack(spacing: 4) {
-                    Image(systemName: action.systemImage)
-                    Text(action.accessibilityLabel)
-                        .font(.caption2)
+        HStack(spacing: 0) {
+            ForEach(Array(actions.enumerated()), id: \.element) { index, action in
+                let isOuterAction = isOuterAction(index: index, actionCount: actions.count, direction: direction)
+                let buttonWidth = actionWidth(actionCount: actions.count, isOuterAction: isOuterAction) - swipeActionGap
+                Button {
+                    horizontalOffset = 0
+                    performSwipeAction(action)
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: action.systemImage)
+                        Text(action.accessibilityLabel)
+                            .font(.caption2)
+                    }
+                    .frame(minWidth: buttonWidth, maxWidth: buttonWidth, maxHeight: .infinity)
+                    .foregroundStyle(.white)
+                    .background(action.tint)
+                    .scaleEffect(isOuterAction && isSwipeArmed(direction) ? 1.12 : 1)
+                    .animation(.easeOut(duration: 0.12), value: isSwipeArmed(direction))
                 }
-                .frame(minWidth: buttonWidth, maxWidth: buttonWidth, maxHeight: .infinity)
-                .foregroundStyle(.white)
-                .background(action.tint)
-                .scaleEffect(isOuterAction && isSwipeArmed(direction) ? 1.12 : 1)
-                .animation(.easeOut(duration: 0.12), value: isSwipeArmed(direction))
+                .accessibilityLabel(action.accessibilityLabel)
             }
-            .accessibilityLabel(action.accessibilityLabel)
         }
+        .clipShape(RoundedRectangle(cornerRadius: swipeActionCornerRadius, style: .continuous))
     }
 
     private func isOuterAction(index: Int, actionCount: Int, direction: IOSSwipeDirection) -> Bool {

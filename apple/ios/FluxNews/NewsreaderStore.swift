@@ -143,12 +143,12 @@ private struct ArticleReadResult {
     private var requestedFeedIcons = Set<IOSFeedIconKey>()
     private var unavailableFeedIcons = Set<IOSFeedIconKey>()
     private var scrolloverUndoTask: Task<Void, Never>?
-    private var scrolloverUndoOpenedAt: Date?
-    private var scrolloverUndoLastSuccessAt: Date?
+    private var scrolloverUndoOpenedAt: TimeInterval?
+    private var scrolloverUndoLastSuccessAt: TimeInterval?
+    private var recentSuccessfulScrolloverReads: [(id: Int64, time: TimeInterval)] = []
     private var scrolloverCountsPending = false
     private var pendingScrolloverIDs: [Int64] = []
     private var pendingScrolloverIDSet = Set<Int64>()
-    private var pendingScrolloverUndoEligibleIDSet = Set<Int64>()
     private var scrolloverMutationRunning = false
     private var scrolloverQueueGeneration: UInt64 = 0
     private var hasMeaningfullyInteracted = false
@@ -495,14 +495,12 @@ private struct ArticleReadResult {
             pendingScrolloverIDSet.insert(id)
             pendingScrolloverIDs.append(id)
         }
-        if batch.undoEligible { pendingScrolloverUndoEligibleIDSet.formUnion(ids) }
         drainScrolloverMutations()
     }
 
     private func drainScrolloverMutations() {
         guard !scrolloverMutationRunning, let core, !pendingScrolloverIDs.isEmpty else { return }
         let ids = pendingScrolloverIDs
-        let undoEligibleIDs = ids.filter { pendingScrolloverUndoEligibleIDSet.contains($0) }
         pendingScrolloverIDs = []
         scrolloverMutationRunning = true
         let generation = scrolloverQueueGeneration
@@ -514,7 +512,7 @@ private struct ArticleReadResult {
             case .success:
                 if generation == scrolloverQueueGeneration {
                     applySuccessfulScrolloverRead(ids)
-                    recordSuccessfulScrolloverUndo(undoEligibleIDs, now: .now)
+                    recordSuccessfulScrolloverUndo(ids)
                     scrolloverCountsPending = true
                 } else {
                     applySuccessfulScrolloverRead(ids)
@@ -526,7 +524,6 @@ private struct ArticleReadResult {
                 scrolloverDiagnostic("mutation failure ids=\(ids) error=\(error.localizedDescription)")
             }
             pendingScrolloverIDSet.subtract(ids)
-            pendingScrolloverUndoEligibleIDSet.subtract(ids)
             scrolloverMutationRunning = false
             if pendingScrolloverIDs.isEmpty && scrolloverCountsPending {
                 scrolloverCountsPending = false
@@ -536,16 +533,31 @@ private struct ArticleReadResult {
         }
     }
 
-    private func recordSuccessfulScrolloverUndo(_ ids: [Int64], now: Date = .now) {
+    private func recordSuccessfulScrolloverUndo(_ ids: [Int64], now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        guard !ids.isEmpty else { return }
+        if scrolloverUndoOpenedAt != nil {
+            appendSuccessfulScrolloverUndo(ids, now: now)
+            return
+        }
+        recentSuccessfulScrolloverReads.append(contentsOf: ids.map { (id: $0, time: now) })
+        recentSuccessfulScrolloverReads.removeAll { now - $0.time > Self.scrolloverUndoQualificationWindow }
+        guard recentSuccessfulScrolloverReads.count >= Self.minimumSuccessfulScrolloverReadsForUndo else { return }
+        let burstIDs = recentSuccessfulScrolloverReads.map(\.id)
+        recentSuccessfulScrolloverReads.removeAll()
+        scrolloverUndoOpenedAt = now
+        appendSuccessfulScrolloverUndo(burstIDs, now: now)
+    }
+
+    private func appendSuccessfulScrolloverUndo(_ ids: [Int64], now: TimeInterval) {
         let groupExpired: Bool
         if let openedAt = scrolloverUndoOpenedAt, let lastSuccessAt = scrolloverUndoLastSuccessAt {
-            groupExpired = now.timeIntervalSince(lastSuccessAt) >= Self.scrolloverUndoInactivityTimeout || now.timeIntervalSince(openedAt) >= Self.scrolloverUndoMaximumLifetime
+            groupExpired = now - lastSuccessAt >= Self.scrolloverUndoInactivityTimeout || now - openedAt >= Self.scrolloverUndoMaximumLifetime
         } else {
             groupExpired = scrolloverUndoOpenedAt != nil || scrolloverUndoLastSuccessAt != nil
         }
         if scrolloverUndoOpenedAt == nil || groupExpired {
             // A replacement group never presented an empty array to the tracker.
-            clearScrolloverUndoGroup(rearmTracker: false)
+            clearScrolloverUndoGroup(rearmTracker: false, clearQualification: false)
             scrolloverUndoOpenedAt = now
         }
         var seen = Set(scrolloverUndoIDs)
@@ -560,14 +572,16 @@ private struct ArticleReadResult {
 
     private static let scrolloverUndoInactivityTimeout: TimeInterval = 4
     private static let scrolloverUndoMaximumLifetime: TimeInterval = 15
+    private static let scrolloverUndoQualificationWindow: TimeInterval = 1
+    private static let minimumSuccessfulScrolloverReadsForUndo = 3
 
-    private func scheduleScrolloverUndoExpiry(now: Date = .now) {
+    private func scheduleScrolloverUndoExpiry(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         guard let openedAt = scrolloverUndoOpenedAt, let lastSuccessAt = scrolloverUndoLastSuccessAt else { return }
         scrolloverUndoTask?.cancel()
         scrolloverUndoTask = Task { [weak self] in
             let delay = min(
-                Self.scrolloverUndoInactivityTimeout - now.timeIntervalSince(lastSuccessAt),
-                Self.scrolloverUndoMaximumLifetime - now.timeIntervalSince(openedAt)
+                Self.scrolloverUndoInactivityTimeout - (now - lastSuccessAt),
+                Self.scrolloverUndoMaximumLifetime - (now - openedAt)
             )
             try? await Task.sleep(for: .seconds(max(0, delay)))
             guard !Task.isCancelled else { return }
@@ -575,22 +589,23 @@ private struct ArticleReadResult {
         }
     }
 
-    private func expireScrolloverUndoGroup(now: Date = .now) {
+    private func expireScrolloverUndoGroup(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
         guard let openedAt = scrolloverUndoOpenedAt, let lastSuccessAt = scrolloverUndoLastSuccessAt else { return }
-        if now.timeIntervalSince(openedAt) >= Self.scrolloverUndoMaximumLifetime || now.timeIntervalSince(lastSuccessAt) >= Self.scrolloverUndoInactivityTimeout {
+        if now - openedAt >= Self.scrolloverUndoMaximumLifetime || now - lastSuccessAt >= Self.scrolloverUndoInactivityTimeout {
             clearScrolloverUndoGroup()
         } else {
             scheduleScrolloverUndoExpiry(now: now)
         }
     }
 
-    private func clearScrolloverUndoGroup(rearmTracker: Bool = true) {
+    private func clearScrolloverUndoGroup(rearmTracker: Bool = true, clearQualification: Bool = true) {
         if rearmTracker && !scrolloverUndoIDs.isEmpty { scrolloverRearmRevision &+= 1 }
         scrolloverUndoTask?.cancel()
         scrolloverUndoTask = nil
         scrolloverUndoIDs = []
         scrolloverUndoOpenedAt = nil
         scrolloverUndoLastSuccessAt = nil
+        if clearQualification { recentSuccessfulScrolloverReads.removeAll() }
     }
 
     func undoScrollover() {
@@ -645,7 +660,6 @@ private struct ArticleReadResult {
         scrolloverCountsPending = false
         pendingScrolloverIDs = []
         pendingScrolloverIDSet = []
-        pendingScrolloverUndoEligibleIDSet = []
         scrolloverQueueGeneration &+= 1
     }
 
@@ -754,9 +768,10 @@ private struct ArticleReadResult {
     @MainActor
     func applyReadMutationForTesting(_ ids: [Int64], read: Bool) { markMeaningfulInteraction(); updateVisibleRead(ids, read: read) }
     @MainActor
-    func applyScrolloverMutationForTesting(_ ids: [Int64], undoEligible: Bool = true, now: Date = .now) {
-        applySuccessfulScrolloverRead(ids)
-        if undoEligible { recordSuccessfulScrolloverUndo(ids, now: now) }
+    func applyScrolloverMutationForTesting(_ ids: [Int64], now: TimeInterval = 0) {
+        let eligible = eligibleScrolloverIDs(ids)
+        applySuccessfulScrolloverRead(eligible)
+        recordSuccessfulScrolloverUndo(eligible, now: now)
     }
     @MainActor
     func applyScrolloverUndoForTesting() { updateVisibleRead(scrolloverUndoIDs, read: false); clearScrolloverUndoGroup() }
@@ -772,19 +787,13 @@ private struct ArticleReadResult {
         return eligible
     }
     @MainActor
-    func applyEligibleScrolloverMutationForTesting(_ ids: [Int64], now: Date = .now) {
-        let eligible = eligibleScrolloverIDs(ids)
-        applySuccessfulScrolloverRead(eligible)
-        recordSuccessfulScrolloverUndo(eligible, now: now)
-    }
-    @MainActor
     func beginScrolloverMutationForTesting() -> [Int64] {
         let ids = pendingScrolloverIDs
         pendingScrolloverIDs = []
         return ids
     }
     @MainActor
-    func expireScrolloverUndoGroupForTesting(now: Date) { expireScrolloverUndoGroup(now: now) }
+    func expireScrolloverUndoGroupForTesting(now: TimeInterval) { expireScrolloverUndoGroup(now: now) }
     @MainActor
     func applyStarredMutationForTesting(_ ids: [Int64], starred: Bool) {
         markMeaningfulInteraction()

@@ -12,7 +12,6 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertTrue(tracker.receiveVisibleIDs([1, 2], enabled: true).articleIDs.isEmpty)
         tracker.setUserScrolling(true)
         XCTAssertEqual(tracker.receiveVisibleIDs([2], enabled: true).articleIDs, [1])
-        XCTAssertFalse(tracker.receiveVisibleIDs([2], enabled: true).undoEligible)
     }
 
     func testSkippedAndLargeForwardJumpsUseTheOrderedRange() {
@@ -23,35 +22,50 @@ final class NewsreaderD23MutationTests: XCTestCase {
         tracker.setUserScrolling(true)
         let first = tracker.receiveVisibleIDs([35], enabled: true)
         XCTAssertEqual(first.articleIDs, Array(20..<35).map(Int64.init))
-        XCTAssertTrue(first.undoEligible)
         let second = tracker.receiveVisibleIDs([50], enabled: true)
         XCTAssertEqual(second.articleIDs, Array(35..<50).map(Int64.init))
-        XCTAssertTrue(second.undoEligible)
-    }
-
-    func testScrolloverUndoQualificationUsesOnlyFullySkippedArticles() {
-        func batch(from previous: Int64, to next: Int64) -> IOSScrolloverBatch {
-            var tracker = IOSScrolloverOrderTracker()
-            tracker.updateSnapshot(Array(10...20).map(Int64.init))
-            _ = tracker.receiveVisibleIDs([previous], enabled: true)
-            tracker.setUserScrolling(true)
-            return tracker.receiveVisibleIDs([next], enabled: true)
-        }
-
-        XCTAssertFalse(batch(from: 10, to: 11).undoEligible)
-        XCTAssertFalse(batch(from: 10, to: 12).undoEligible)
-        XCTAssertFalse(batch(from: 10, to: 13).undoEligible)
-        XCTAssertTrue(batch(from: 10, to: 14).undoEligible)
-        XCTAssertTrue(batch(from: 10, to: 18).undoEligible)
     }
 
     func testInitialBaselineAndStructuralRebaselineDoNotQualify() {
         var tracker = IOSScrolloverOrderTracker()
         tracker.updateSnapshot(Array(1...10).map(Int64.init))
-        XCTAssertFalse(tracker.receiveVisibleIDs([1], enabled: true).undoEligible)
+        XCTAssertTrue(tracker.receiveVisibleIDs([1], enabled: true).articleIDs.isEmpty)
         tracker.setUserScrolling(true)
         tracker.updateSnapshot(Array(20...30).map(Int64.init))
-        XCTAssertFalse(tracker.receiveVisibleIDs([30], enabled: true).undoEligible)
+        XCTAssertTrue(tracker.receiveVisibleIDs([30], enabled: true).articleIDs.isEmpty)
+    }
+
+    func testTerminalScrolloverCompletesVisibleArticlesAfterForwardScroll() {
+        var tracker = IOSScrolloverOrderTracker()
+        tracker.updateSnapshot([1, 2, 3, 4, 5])
+        _ = tracker.receiveVisibleIDs([1, 2], enabled: true)
+        tracker.setUserScrolling(true)
+        XCTAssertEqual(tracker.receiveVisibleIDs([3, 4], enabled: true).articleIDs, [1, 2])
+        XCTAssertTrue(tracker.receiveTerminalVisibleIDs([3, 4], enabled: true).articleIDs.isEmpty)
+        XCTAssertEqual(tracker.receiveVisibleIDs([5], enabled: true).articleIDs, [3, 4])
+        XCTAssertEqual(tracker.receiveTerminalVisibleIDs([5], enabled: true).articleIDs, [5])
+    }
+
+    func testTerminalScrolloverIgnoresInitialShortListAndStructuralRebaseline() {
+        var tracker = IOSScrolloverOrderTracker()
+        tracker.updateSnapshot([1, 2])
+        _ = tracker.receiveVisibleIDs([1, 2], enabled: true)
+        tracker.setUserScrolling(true)
+        XCTAssertTrue(tracker.receiveTerminalVisibleIDs([1, 2], enabled: true).articleIDs.isEmpty)
+        tracker.updateSnapshot([3, 4, 5])
+        tracker.setUserScrolling(true)
+        _ = tracker.receiveVisibleIDs([5], enabled: true)
+        XCTAssertTrue(tracker.receiveTerminalVisibleIDs([5], enabled: true).articleIDs.isEmpty)
+    }
+
+    func testTerminalScrolloverIgnoresBackwardMovementAtTheEnd() {
+        var tracker = IOSScrolloverOrderTracker()
+        tracker.updateSnapshot([1, 2, 3, 4, 5])
+        _ = tracker.receiveVisibleIDs([2], enabled: true)
+        tracker.setUserScrolling(true)
+        _ = tracker.receiveVisibleIDs([5], enabled: true)
+        _ = tracker.receiveVisibleIDs([3], enabled: true)
+        XCTAssertTrue(tracker.receiveTerminalVisibleIDs([5], enabled: true).articleIDs.isEmpty)
     }
 
     func testBackwardAndDuplicateVisibilityUpdatesDoNotEmit() {
@@ -69,17 +83,54 @@ final class NewsreaderD23MutationTests: XCTestCase {
     func testNormalScrolloverReadDoesNotCreateUndo() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setArticlesForTesting((1...4).map { article(Int64($0)) })
-        store.applyScrolloverMutationForTesting([1], undoEligible: false)
+        store.applyScrolloverMutationForTesting([1])
         XCTAssertTrue(store.articles[0].isRead)
         XCTAssertFalse(store.scrolloverUndoVisible)
         XCTAssertTrue(store.scrolloverUndoIDs.isEmpty)
     }
 
     @MainActor
+    func testScrolloverUndoQualifiesOnlyThreeSuccessfulReadsInRollingSecond() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting((1...6).map { article(Int64($0)) })
+        store.applyScrolloverMutationForTesting([1], now: 0)
+        XCTAssertTrue(store.scrolloverUndoIDs.isEmpty)
+        store.applyScrolloverMutationForTesting([2], now: 0.4)
+        XCTAssertTrue(store.scrolloverUndoIDs.isEmpty)
+        store.applyScrolloverMutationForTesting([3], now: 1.0)
+        XCTAssertEqual(store.scrolloverUndoIDs, [1, 2, 3])
+        store.applyScrolloverMutationForTesting([4], now: 1.5)
+        XCTAssertEqual(store.scrolloverUndoIDs, [1, 2, 3, 4])
+    }
+
+    @MainActor
+    func testSlowAndStaleSuccessfulScrolloverReadsDoNotQualifyUndo() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting((1...4).map { article(Int64($0)) })
+        store.applyScrolloverMutationForTesting([1], now: 0)
+        store.applyScrolloverMutationForTesting([2], now: 1.25)
+        store.applyScrolloverMutationForTesting([3], now: 2.4)
+        store.applyScrolloverMutationForTesting([4], now: 3.5)
+        XCTAssertTrue(store.scrolloverUndoIDs.isEmpty)
+    }
+
+    @MainActor
+    func testRejectedAndAlreadyReadScrolloverCandidatesDoNotQualifyUndo() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1, read: true), article(2), article(3), article(4)])
+        store.applyScrolloverMutationForTesting([1], now: 0)
+        store.applyScrolloverMutationForTesting([2], now: 0.2)
+        store.applyScrolloverMutationForTesting([2, 3], now: 0.4)
+        XCTAssertTrue(store.scrolloverUndoIDs.isEmpty)
+        store.applyScrolloverMutationForTesting([4], now: 0.6)
+        XCTAssertEqual(store.scrolloverUndoIDs, [2, 3, 4])
+    }
+
+    @MainActor
     func testQualifyingScrolloverUndoContainsOnlySuccessfullyChangedArticles() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setArticlesForTesting([article(1), article(2, read: true), article(3), article(4), article(5)])
-        store.applyEligibleScrolloverMutationForTesting([1, 2, 3, 4])
+        store.applyScrolloverMutationForTesting([1, 2, 3, 4])
         XCTAssertEqual(store.scrolloverUndoIDs, [1, 3, 4])
         XCTAssertTrue(store.articles.filter { [1, 2, 3, 4].contains($0.id) }.allSatisfy { $0.isRead })
         XCTAssertFalse(store.articles[4].isRead)
@@ -149,6 +200,19 @@ final class NewsreaderD23MutationTests: XCTestCase {
     }
 
     @MainActor
+    func testAlreadyReadTerminalCandidatesAreIgnoredAndRemainNonStructural() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.removeArticlesWhenMarkedRead = true
+        store.unreadOnly = true
+        store.setArticlesForTesting([article(1, read: true), article(2)])
+        let revision = store.snapshotRevision
+        store.applyScrolloverMutationForTesting([1, 2])
+        XCTAssertEqual(store.articles.map(\.id), [1, 2])
+        XCTAssertTrue(store.articles.allSatisfy(\.isRead))
+        XCTAssertEqual(store.snapshotRevision, revision)
+    }
+
+    @MainActor
     func testScrolloverEligibilityFiltersReadArticlesBeforeQueueing() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setArticlesForTesting([article(1, read: true), article(2), article(3, read: true), article(4)])
@@ -161,10 +225,11 @@ final class NewsreaderD23MutationTests: XCTestCase {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setArticlesForTesting([article(1, read: true), article(2), article(3, read: true), article(4)])
 
-        store.applyEligibleScrolloverMutationForTesting([1, 2, 3, 4])
+        store.setArticlesForTesting([article(1, read: true), article(2), article(3, read: true), article(4), article(5)])
+        store.applyScrolloverMutationForTesting([1, 2, 3, 4, 5])
 
-        XCTAssertEqual(store.scrolloverUndoIDs, [2, 4])
-        XCTAssertEqual(store.articles.map(\.isRead), [true, true, true, true])
+        XCTAssertEqual(store.scrolloverUndoIDs, [2, 4, 5])
+        XCTAssertEqual(store.articles.map(\.isRead), [true, true, true, true, true])
     }
 
     @MainActor
@@ -197,7 +262,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.removeArticlesWhenMarkedRead = true
         store.unreadOnly = true
         store.setArticlesForTesting([article(1), article(2), article(3)])
-        store.applyScrolloverMutationForTesting([1, 2])
+        store.applyScrolloverMutationForTesting([1, 2, 3])
 
         store.applyScrolloverUndoForTesting()
 
@@ -352,9 +417,9 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.removeArticlesWhenMarkedRead = true
         store.unreadOnly = true
         store.setArticlesForTesting((1...9).map { article(Int64($0)) })
-        let start = Date(timeIntervalSinceReferenceDate: 100)
+        let start: TimeInterval = 100
         store.applyScrolloverMutationForTesting([1, 2, 3, 4], now: start)
-        store.applyScrolloverMutationForTesting([4, 5, 6, 7, 8, 9], now: start.addingTimeInterval(3))
+        store.applyScrolloverMutationForTesting([4, 5, 6, 7, 8, 9], now: start + 3)
         XCTAssertEqual(store.articles.map(\.id), Array(1...9).map(Int64.init))
         store.applyScrolloverUndoForTesting()
         XCTAssertEqual(store.articles.map(\.id), Array(1...9).map(Int64.init))
@@ -364,16 +429,16 @@ final class NewsreaderD23MutationTests: XCTestCase {
     @MainActor
     func testAddingToAnActiveUndoGroupKeepsTrackerRearmRevisionStableAndCountLive() {
         let store = NewsreaderStore(defaults: UserDefaults())
-        store.setArticlesForTesting([article(1), article(2), article(3)])
+        store.setArticlesForTesting([article(1), article(2), article(3), article(4)])
         let revision = store.scrolloverRearmRevision
 
-        store.applyScrolloverMutationForTesting([1, 2])
+        store.applyScrolloverMutationForTesting([1, 2, 3])
         XCTAssertTrue(store.scrolloverUndoVisible)
-        XCTAssertEqual(store.scrolloverUndoIDs.count, 2)
+        XCTAssertEqual(store.scrolloverUndoIDs.count, 3)
         XCTAssertEqual(store.scrolloverRearmRevision, revision)
 
-        store.applyScrolloverMutationForTesting([3])
-        XCTAssertEqual(store.scrolloverUndoIDs.count, 3)
+        store.applyScrolloverMutationForTesting([4])
+        XCTAssertEqual(store.scrolloverUndoIDs.count, 4)
         XCTAssertEqual(store.scrolloverRearmRevision, revision)
     }
 
@@ -508,31 +573,31 @@ final class NewsreaderD23MutationTests: XCTestCase {
     @MainActor
     func testRollingUndoInactivityExtendsButHardLifetimeDoesNot() {
         let store = NewsreaderStore(defaults: UserDefaults())
-        store.setArticlesForTesting([article(1), article(2), article(3)])
-        let start = Date(timeIntervalSinceReferenceDate: 100)
+        store.setArticlesForTesting([article(1), article(2), article(3), article(4)])
+        let start: TimeInterval = 100
         let rearmRevision = store.scrolloverRearmRevision
-        store.applyScrolloverMutationForTesting([1, 2], now: start)
-        store.applyScrolloverMutationForTesting([3], now: start.addingTimeInterval(3.5))
-        store.expireScrolloverUndoGroupForTesting(now: start.addingTimeInterval(4.1))
-        XCTAssertEqual(store.scrolloverUndoIDs, [1, 2, 3])
+        store.applyScrolloverMutationForTesting([1, 2, 3], now: start)
+        store.applyScrolloverMutationForTesting([4], now: start + 3.5)
+        store.expireScrolloverUndoGroupForTesting(now: start + 4.1)
+        XCTAssertEqual(store.scrolloverUndoIDs, [1, 2, 3, 4])
         XCTAssertEqual(store.scrolloverRearmRevision, rearmRevision)
-        store.expireScrolloverUndoGroupForTesting(now: start.addingTimeInterval(15))
+        store.expireScrolloverUndoGroupForTesting(now: start + 15)
         XCTAssertTrue(store.scrolloverUndoIDs.isEmpty)
         XCTAssertEqual(store.scrolloverRearmRevision, rearmRevision + 1)
-        store.applyScrolloverMutationForTesting([1], now: start.addingTimeInterval(16))
-        XCTAssertEqual(store.scrolloverUndoIDs, [1])
+        store.applyScrolloverMutationForTesting([1], now: start + 16)
+        XCTAssertTrue(store.scrolloverUndoIDs.isEmpty)
         XCTAssertEqual(store.scrolloverRearmRevision, rearmRevision + 1)
     }
 
     @MainActor
     func testSuccessfulReadAfterInactivityStartsANewUndoGroupSynchronously() {
         let store = NewsreaderStore(defaults: UserDefaults())
-        store.setArticlesForTesting([article(1), article(2), article(3)])
-        let start = Date(timeIntervalSinceReferenceDate: 100)
-        store.applyScrolloverMutationForTesting([1, 2], now: start)
+        store.setArticlesForTesting([article(1), article(2), article(3), article(4)])
+        let start: TimeInterval = 100
+        store.applyScrolloverMutationForTesting([1, 2, 3], now: start)
         let rearmRevision = store.scrolloverRearmRevision
-        store.applyScrolloverMutationForTesting([3], now: start.addingTimeInterval(5))
-        XCTAssertEqual(store.scrolloverUndoIDs, [3])
+        store.applyScrolloverMutationForTesting([4], now: start + 5)
+        XCTAssertEqual(store.scrolloverUndoIDs, [4])
         XCTAssertEqual(store.scrolloverRearmRevision, rearmRevision)
     }
 
@@ -540,10 +605,10 @@ final class NewsreaderD23MutationTests: XCTestCase {
     func testExplicitReadMutationDoesNotAlterScrolloverUndo() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.unreadOnly = false
-        store.setArticlesForTesting([article(1), article(2), article(3)])
-        store.applyScrolloverMutationForTesting([1, 2])
-        store.applyReadMutationForTesting([3], read: true)
-        XCTAssertEqual(store.scrolloverUndoIDs, [1, 2])
+        store.setArticlesForTesting([article(1), article(2), article(3), article(4)])
+        store.applyScrolloverMutationForTesting([1, 2, 3])
+        store.applyReadMutationForTesting([4], read: true)
+        XCTAssertEqual(store.scrolloverUndoIDs, [1, 2, 3])
         XCTAssertTrue(store.scrolloverUndoVisible)
     }
 

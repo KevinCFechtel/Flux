@@ -139,7 +139,11 @@ than row geometry: the leading visible Article ID is compared against the
 current ordered article snapshot, and the forward crossed ID range is marked
 read. This remains correct when fast scrolling skips intermediate visibility
 reports. Initial visibility and snapshot replacement establish a baseline only;
-backward movement emits nothing. A 15% target-visibility threshold is used only
+backward movement emits nothing. When a genuine forward interaction reaches the
+final ordered target, the remaining visible articles complete Scrollover through
+the same non-structural read mutation path. This terminal completion cannot run
+from initial visibility, a rebaseline, or layout-only changes. A 15%
+target-visibility threshold is used only
 to reliably identify a leading target for variable-height cards, including cards
 too tall to become 50% visible. It is not a read-exposure threshold.
 
@@ -157,13 +161,19 @@ The ordered detection snapshot rebases only when visible membership or ordering
 changes; a Scrollover read-state presentation update is not structural.
 All detected Scrollover candidates are still marked read, independently of Undo.
 Normal continuous scrolling and small forward jumps do not present Undo. Undo is
-an exceptional recovery mechanism for a larger forward skip: a single forward
-transition qualifies only when it contains at least 3 fully skipped articles.
-Only successfully changed articles from a qualifying batch join the rolling Undo
-group. A success extends its 4-second inactivity window without extending the
-15-second maximum group lifetime. Backward movement, initial baseline
+an exceptional recovery mechanism: it activates only after at least 3 successful
+unread-to-read Scrollover mutations in a rolling one-second window. Visibility
+candidates, already-read rows, rejected candidates, failed mutations, and the
+former skipped-index qualification do not count. When the third success arrives,
+the qualifying burst is retained together for Undo; later successes follow the
+existing rolling group. A success extends its 4-second inactivity window without
+extending the 15-second maximum group lifetime. Backward movement, initial baseline
 establishment, and structural rebaselining emit neither reads nor Undo. macOS
 retains its existing platform-specific frame integration.
+
+Custom iOS swipe actions retain their existing interaction behavior while the
+revealed action treatment uses restrained rounded corners and a small visual gap
+from the article card.
 
 Visual article images are native iOS presentation infrastructure, not Core or
 sync state. They use display-sized ImageIO downsampling, normal HTTP response
