@@ -79,7 +79,7 @@ final class CoreBootstrapper: ObservableObject {
         validationDiagnostic = nil
         let proposed = IOSMinifluxCredentials(server: server.trimmingCharacters(in: .whitespacesAndNewlines), apiKey: apiKey, customHeaders: headers)
         guard !proposed.server.isEmpty, !proposed.apiKey.isEmpty else {
-            validationMessage = "Enter both a Miniflux server URL and API Key."
+            validationMessage = "Enter both a Miniflux server URL and API key."
             return
         }
         let validator = accountValidator

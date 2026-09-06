@@ -9,7 +9,7 @@ enum IOSAccountValidationPresentation {
         switch failure {
         case .invalidURL: "Enter a valid HTTP or HTTPS Miniflux server URL."
         case .network: "The Miniflux server could not be reached. Check the server URL and network connection."
-        case .unauthorized: "Miniflux rejected the API Key."
+        case .unauthorized: "Miniflux rejected the API key."
         case .incompatibleServer: "This server does not provide the required Miniflux endpoint."
         case .invalidResponse: "The Miniflux server returned an unexpected response."
         case .invalidCustomHeader: "Custom headers must have unique valid names and cannot replace FluxNews transport headers."

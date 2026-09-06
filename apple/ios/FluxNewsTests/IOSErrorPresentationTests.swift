@@ -30,7 +30,7 @@ final class IOSErrorPresentationTests: XCTestCase {
         XCTAssertEqual(IOSErrorPresentation.message(for: AccountValidationError.UnsupportedUrlScheme, context: .startup), "Enter a valid HTTP or HTTPS Miniflux server URL.")
         XCTAssertEqual(IOSErrorPresentation.message(for: AccountValidationError.Network, context: .startup), "The Miniflux server could not be reached. Check the server URL and network connection.")
         XCTAssertEqual(IOSErrorPresentation.message(for: AccountValidationError.ServerUnavailable, context: .startup), "The Miniflux server could not be reached. Check the server URL and network connection.")
-        XCTAssertEqual(IOSErrorPresentation.message(for: AccountValidationError.Unauthorized, context: .startup), "Miniflux rejected the API Key.")
+        XCTAssertEqual(IOSErrorPresentation.message(for: AccountValidationError.Unauthorized, context: .startup), "Miniflux rejected the API key.")
         XCTAssertEqual(IOSErrorPresentation.message(for: AccountValidationError.IncompatibleServer, context: .startup), "This server does not provide the required Miniflux endpoint.")
         XCTAssertEqual(IOSErrorPresentation.message(for: AccountValidationError.InvalidCustomHeader, context: .startup), "Custom headers must have unique valid names and cannot replace FluxNews transport headers.")
         XCTAssertEqual(IOSErrorPresentation.message(for: AccountValidationError.InvalidResponse, context: .startup), "The Miniflux server returned an unexpected response.")
