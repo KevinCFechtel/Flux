@@ -92,12 +92,12 @@ enum NewsNavigationLayout {
 
 enum IOSNavigationButtonPresentation {
     static let imageName = "FluxNewsTemplate"
-    static let accessibilityLabel = "Choose news scope"
+    static let accessibilityLabel = String(localized: "Choose news scope")
     static let glyphSize: CGFloat = 22
 }
 
 enum IOSReaderDismissalPresentation {
-    static let title = "Done"
+    static let title = String(localized: "Done")
 }
 
 enum IOSArticleNavigationPresentation {
@@ -258,24 +258,24 @@ struct ContentView: View {
                             .frame(width: 24, height: 24)
                     }
                     .disabled(newsreaderStore.isSyncing)
-                    .accessibilityLabel("Sync news")
+                    .accessibilityLabel(String(localized: "Sync news"))
                     .accessibilityValue(IOSSyncButtonPresentation.accessibilityValue(for: syncPresentation))
 
                     Menu {
                         Section("Show") {
                             Button { newsreaderStore.setUnreadOnly(true) } label: {
-                                filterMenuLabel("Unread Only", selected: newsreaderStore.unreadOnly)
+                                filterMenuLabel(String(localized: "Unread Only"), selected: newsreaderStore.unreadOnly)
                             }
                             Button { newsreaderStore.setUnreadOnly(false) } label: {
-                                filterMenuLabel("All Articles", selected: !newsreaderStore.unreadOnly)
+                                filterMenuLabel(String(localized: "All Articles"), selected: !newsreaderStore.unreadOnly)
                             }
                         }
                         Section("Sort") {
                             Button { newsreaderStore.setNewestFirst(true) } label: {
-                                filterMenuLabel("Newest First", selected: newsreaderStore.newestFirst)
+                                filterMenuLabel(String(localized: "Newest First"), selected: newsreaderStore.newestFirst)
                             }
                             Button { newsreaderStore.setNewestFirst(false) } label: {
-                                filterMenuLabel("Oldest First", selected: !newsreaderStore.newestFirst)
+                                filterMenuLabel(String(localized: "Oldest First"), selected: !newsreaderStore.newestFirst)
                             }
                         }
                     } label: {
@@ -300,7 +300,7 @@ struct ContentView: View {
                     } label: {
                         Label("More", systemImage: "ellipsis.circle")
                     }
-                    .accessibilityLabel("More")
+                    .accessibilityLabel(String(localized: "More"))
                     .accessibilityIdentifier("articleList.more")
                 }
             }
@@ -413,7 +413,7 @@ struct ContentView: View {
                 switch result {
                 case let .success(value):
                     guard let url = ArticleOpenRoutingPolicy.validWebURL(value) else {
-                        actionError = "Flux could not resolve a valid Miniflux entry URL."
+                         actionError = String(localized: "Flux could not resolve a valid Miniflux entry URL.")
                         return
                     }
                     browser = IOSBrowserURL(url: url)
@@ -425,18 +425,18 @@ struct ContentView: View {
             browser = IOSBrowserURL(url: url)
         case .copyLink:
             UIPasteboard.general.string = article.url
-            actionConfirmation = "Link copied"
+             actionConfirmation = String(localized: "Link copied")
         case .share:
             guard let url = IOSArticleContextMenuPolicy.originalURL(article.url) else {
-                actionError = "The article does not have a valid web URL."
+                 actionError = String(localized: "The article does not have a valid web URL.")
                 return
             }
             sharePayload = IOSSharePayload(items: [article.title, url])
         case .saveToService:
             newsreaderStore.saveToService(article) { result in
                 switch result {
-                case .success(.saved): actionConfirmation = "Saved to third-party service"
-                case .success(.noIntegrationConfigured): actionConfirmation = "No third-party integration is configured in Miniflux"
+                 case .success(.saved): actionConfirmation = String(localized: "Saved to third-party service")
+                 case .success(.noIntegrationConfigured): actionConfirmation = String(localized: "No third-party integration is configured in Miniflux")
                 case let .failure(error): actionError = IOSErrorPresentation.message(for: error, context: .articleAction)
                 }
             }
@@ -455,15 +455,15 @@ struct ContentView: View {
             browser = IOSBrowserURL(url: url)
         case .copyLink:
             UIPasteboard.general.string = article.url
-            actionConfirmation = "Link copied"
+             actionConfirmation = String(localized: "Link copied")
         case .share:
-            guard let url = IOSArticleContextMenuPolicy.originalURL(article.url) else { actionError = "The article does not have a valid web URL."; return }
+             guard let url = IOSArticleContextMenuPolicy.originalURL(article.url) else { actionError = String(localized: "The article does not have a valid web URL."); return }
             sharePayload = IOSSharePayload(items: [article.title, url])
         case .saveToService:
             searchStore.saveToService(article) { result in
                 switch result {
-                case .success(.saved): actionConfirmation = "Saved to third-party service"
-                case .success(.noIntegrationConfigured): actionConfirmation = "No third-party integration is configured in Miniflux"
+                 case .success(.saved): actionConfirmation = String(localized: "Saved to third-party service")
+                 case .success(.noIntegrationConfigured): actionConfirmation = String(localized: "No third-party integration is configured in Miniflux")
                 case let .failure(error): actionError = IOSErrorPresentation.message(for: error, context: .articleAction)
                 }
             }
@@ -474,7 +474,7 @@ struct ContentView: View {
         store.minifluxEntryURL(for: article) { result in
             switch result {
             case let .success(value):
-                guard let url = ArticleOpenRoutingPolicy.validWebURL(value) else { actionError = "Flux could not resolve a valid Miniflux entry URL."; return }
+                guard let url = ArticleOpenRoutingPolicy.validWebURL(value) else { actionError = String(localized: "Flux could not resolve a valid Miniflux entry URL."); return }
                 browser = IOSBrowserURL(url: url)
             case let .failure(error): actionError = IOSErrorPresentation.message(for: error, context: .articleAction)
             }
@@ -519,7 +519,7 @@ struct ContentView: View {
         switch destination {
         case .universalLink: break
         case .browser(let url): browser = IOSBrowserURL(url: url)
-        case .invalid: articleOpenError = "The article does not have a valid web URL."
+        case .invalid: articleOpenError = String(localized: "The article does not have a valid web URL.")
         }
     }
 
@@ -530,7 +530,7 @@ struct ContentView: View {
     }
 
     private var markReadDialogTitle: String {
-        markReadWorkflow == .readAndNext ? "Mark All as Read and Continue" : "Mark All as Read"
+        markReadWorkflow == .readAndNext ? String(localized: "Mark All as Read and Continue") : String(localized: "Mark All as Read")
     }
 
     private var nextScope: BrowserScope? {
@@ -563,12 +563,12 @@ enum ArticleListTitlePresentation {
 
     private static func scopeTitle(scope: BrowserScope, catalog: NavigationCatalog) -> String {
         switch scope {
-        case .all: "All News"
-        case .starred: "Starred"
-        case .category(let id): catalog.categories.first { $0.id == id }?.title ?? "Category"
-        case .feed(let id): catalog.feeds.first { $0.id == id }?.title ?? "Feed"
-        case .search: "Search"
-        case .listeningList: "Listening List"
+        case .all: String(localized: "All News")
+        case .starred: String(localized: "Starred")
+        case .category(let id): catalog.categories.first { $0.id == id }?.title ?? String(localized: "Category")
+        case .feed(let id): catalog.feeds.first { $0.id == id }?.title ?? String(localized: "Feed")
+        case .search: String(localized: "Search")
+        case .listeningList: String(localized: "Listening List")
         }
     }
 }
@@ -584,8 +584,14 @@ enum ArticleListCounterPresentation {
     }
 
     static func expandedLabel(scope: BrowserScope, unreadOnly: Bool, count: UInt64) -> String {
-        if unreadOnly && scope != .starred { return "\(count) unread" }
-        return "\(count) articles"
+        if unreadOnly && scope != .starred {
+            return count == 1
+                ? String(localized: "1 unread article")
+                : String(format: String(localized: "%lld unread articles"), count)
+        }
+        return count == 1
+            ? String(localized: "1 article")
+            : String(format: String(localized: "%lld articles"), count)
     }
 }
 
@@ -606,9 +612,9 @@ enum IOSSyncButtonPresentation {
 
     static func accessibilityValue(for state: State) -> String {
         switch state {
-        case .idle: "Ready"
-        case .syncing: "Syncing"
-        case .success: "Sync complete"
+        case .idle: String(localized: "Ready")
+        case .syncing: String(localized: "Syncing")
+        case .success: String(localized: "Sync complete")
         }
     }
 
@@ -705,7 +711,7 @@ extension ContentView {
 
     private func openOriginal(_ article: ArticleSummary) {
         guard let url = ArticleOpenRoutingPolicy.validWebURL(article.url) else {
-            readerErrorMessage = "The article does not have a valid web URL."
+            readerErrorMessage = String(localized: "The article does not have a valid web URL.")
             return
         }
         UIApplication.shared.open(url, options: [:])

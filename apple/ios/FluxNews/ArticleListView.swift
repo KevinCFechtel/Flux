@@ -150,10 +150,10 @@ enum IOSArticleSwipeAction: Hashable {
 
     var accessibilityLabel: String {
         switch self {
-        case .read: "Mark as Read"
-        case .unread: "Mark as Unread"
-        case .star: "Star"
-        case .unstar: "Unstar"
+        case .read: String(localized: "Mark as Read")
+        case .unread: String(localized: "Mark as Unread")
+        case .star: String(localized: "Star")
+        case .unstar: String(localized: "Unstar")
         }
     }
 
@@ -560,7 +560,7 @@ private struct ScrolloverUndoPresentation: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text("\(store.scrolloverUndoIDs.count) articles marked as read")
+            Text(scrolloverUndoCountLabel)
             Button("Undo") { store.undoScrollover() }
                 .buttonStyle(.borderless)
         }
@@ -569,6 +569,13 @@ private struct ScrolloverUndoPresentation: View {
         .padding(.vertical, 10)
         .background(.regularMaterial, in: Capsule())
         .padding(.bottom, 12)
+    }
+
+    private var scrolloverUndoCountLabel: String {
+        let count = store.scrolloverUndoIDs.count
+        return count == 1
+            ? String(localized: "1 article marked as read")
+            : String(format: String(localized: "%lld articles marked as read"), count)
     }
 }
 
@@ -634,14 +641,14 @@ struct ArticlePresentationView: View, Equatable {
         .accessibilityLabel(accessibilityLabel)
         .accessibilityValue(accessibilityValue)
         .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Opens the article")
+        .accessibilityHint(String(localized: "Opens the article"))
         .modifier(IOSArticleSwipeAccessibilityModifier(actions: swipeConfiguration.leading.actions + swipeConfiguration.trailing.actions, perform: performSwipeAction))
         .contextMenu {
             Button { onAction(.starred) } label: {
-                Label(article.isStarred ? "Unstar" : "Star", systemImage: article.isStarred ? "star.slash" : "star")
+                Label(article.isStarred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: article.isStarred ? "star.slash" : "star")
             }
             Button { onAction(.read) } label: {
-                Label(article.isRead ? "Mark as Unread" : "Mark as Read", systemImage: article.isRead ? "envelope" : "envelope.open")
+                Label(article.isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: article.isRead ? "envelope" : "envelope.open")
             }
             Divider()
             Button { onAction(.original) } label: { Label("Open Original", systemImage: "safari") }
@@ -851,7 +858,7 @@ struct ArticlePresentationView: View, Equatable {
                 if article.isStarred {
                     Image(systemName: "star.fill")
                         .foregroundStyle(.yellow)
-                        .accessibilityLabel("Starred")
+                        .accessibilityLabel(String(localized: "Starred"))
                 }
             }
             ViewThatFits(in: .horizontal) {
@@ -873,13 +880,16 @@ struct ArticlePresentationView: View, Equatable {
     }
 
     private var accessibilityLabel: String {
-        let state = article.isRead ? "Read" : "Unread"
-        let star = article.isStarred ? ", starred" : ""
+        let state = article.isRead ? String(localized: "Read") : String(localized: "Unread")
+        let star = article.isStarred ? String(localized: ", starred") : ""
         return "\(article.title), \(article.feedTitle), \(date), \(state)\(star)"
     }
 
     private var accessibilityValue: String {
-        article.isRead ? (article.isStarred ? "Read, starred" : "Read") : (article.isStarred ? "Unread, starred" : "Unread")
+        if article.isRead {
+            return article.isStarred ? String(localized: "Read, starred") : String(localized: "Read")
+        }
+        return article.isStarred ? String(localized: "Unread, starred") : String(localized: "Unread")
     }
 
     private var metadataRow: some View {
@@ -914,7 +924,7 @@ struct ArticlePresentationView: View, Equatable {
     private var commentsIndicator: some View {
         if IOSArticleContextMenuPolicy.commentsURL(article.commentsUrl) != nil {
             Image(systemName: "bubble.left")
-                .accessibilityLabel("Comments available")
+                .accessibilityLabel(String(localized: "Comments available"))
         }
     }
 

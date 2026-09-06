@@ -90,13 +90,13 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     func testIPhoneNavigationButtonUsesTheFluxTemplateAsset() {
         XCTAssertEqual(IOSNavigationButtonPresentation.imageName, "FluxNewsTemplate")
-        XCTAssertEqual(IOSNavigationButtonPresentation.accessibilityLabel, "Choose news scope")
+        XCTAssertEqual(IOSNavigationButtonPresentation.accessibilityLabel, String(localized: "Choose news scope"))
         XCTAssertEqual(IOSNavigationButtonPresentation.glyphSize, 22)
     }
 
     func testNavigationBrandingUsesTheExistingFluxNewsTemplateAsset() {
         XCTAssertEqual(IOSNavigationBranding.assetName, "FluxNewsTemplate")
-        XCTAssertEqual(IOSNavigationBranding.accessibilityLabel, "FluxNews")
+        XCTAssertEqual(IOSNavigationBranding.accessibilityLabel, String(localized: "FluxNews"))
         XCTAssertTrue(IOSNavigationBranding.iconUsesSolidAccentColor)
     }
 
@@ -107,7 +107,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     func testArticleListTitleDoesNotContainSelectionCount() {
-        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .all, catalog: NavigationCatalog(categories: [], feeds: [])), "All News")
+        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .all, catalog: NavigationCatalog(categories: [], feeds: [])), String(localized: "All News"))
     }
 
     func testArticleListTitleUsesCategorySelectionCount() {
@@ -121,7 +121,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     func testArticleListTitleUsesStarredSelectionCount() {
-        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .starred, catalog: NavigationCatalog(categories: [], feeds: [])), "Starred")
+        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .starred, catalog: NavigationCatalog(categories: [], feeds: [])), String(localized: "Starred"))
     }
 
     @MainActor
@@ -136,9 +136,9 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     func testArticleListCounterUsesCurrentScopeAndFilterSemantics() {
-        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: true, count: 117), "117 unread")
-        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: false, count: 842), "842 articles")
-        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .starred, unreadOnly: true, count: 8), "8 articles")
+        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: true, count: 117), String(format: String(localized: "%lld unread articles"), 117))
+        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: false, count: 842), String(format: String(localized: "%lld articles"), 842))
+        XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .starred, unreadOnly: true, count: 8), String(format: String(localized: "%lld articles"), 8))
         XCTAssertEqual(ArticleListCounterPresentation.compactCount(1000), "1000")
     }
 
@@ -157,7 +157,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(ArticleListCounterPresentation.isVisible(showArticleCount: store.showArticleCount))
         XCTAssertFalse(ArticleListCounterPresentation.usesNativeSubtitle(showArticleCount: store.showArticleCount, supportsNativeSubtitle: true))
         XCTAssertFalse(ArticleListCounterPresentation.usesToolbarFallback(showArticleCount: store.showArticleCount, supportsNativeSubtitle: false))
-        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .all, catalog: store.catalog), "All News")
+        XCTAssertEqual(ArticleListTitlePresentation.title(scope: .all, catalog: store.catalog), String(localized: "All News"))
         XCTAssertEqual(store.selectionTotal, 0)
 
         let reloaded = NewsreaderStore(defaults: defaults)
@@ -196,9 +196,9 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(for: .syncing, reduceMotion: false), 360)
         XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(for: .success, reduceMotion: false), 0)
         XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(for: .syncing, reduceMotion: true), 0)
-        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(for: .idle), "Ready")
-        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(for: .syncing), "Syncing")
-        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(for: .success), "Sync complete")
+        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(for: .idle), String(localized: "Ready"))
+        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(for: .syncing), String(localized: "Syncing"))
+        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(for: .success), String(localized: "Sync complete"))
     }
 
     func testSyncButtonSuccessTimeoutCannotOverwriteNewerSync() {
@@ -669,7 +669,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     func testReaderPresentationExposesTheExplicitDismissAction() {
-        XCTAssertEqual(IOSReaderDismissalPresentation.title, "Done")
+        XCTAssertEqual(IOSReaderDismissalPresentation.title, String(localized: "Done"))
     }
 
     func testReaderRequestStateRejectsStaleResponses() {

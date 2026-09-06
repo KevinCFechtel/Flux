@@ -7,12 +7,12 @@ enum IOSAccountValidationFailure {
 enum IOSAccountValidationPresentation {
     static func message(for failure: IOSAccountValidationFailure) -> String {
         switch failure {
-        case .invalidURL: "Enter a valid HTTP or HTTPS Miniflux server URL."
-        case .network: "The Miniflux server could not be reached. Check the server URL and network connection."
-        case .unauthorized: "Miniflux rejected the API key."
-        case .incompatibleServer: "This server does not provide the required Miniflux endpoint."
-        case .invalidResponse: "The Miniflux server returned an unexpected response."
-        case .invalidCustomHeader: "Custom headers must have unique valid names and cannot replace FluxNews transport headers."
+        case .invalidURL: String(localized: "Enter a valid HTTP or HTTPS Miniflux server URL.")
+        case .network: String(localized: "The Miniflux server could not be reached. Check the server URL and network connection.")
+        case .unauthorized: String(localized: "Miniflux rejected the API key.")
+        case .incompatibleServer: String(localized: "This server does not provide the required Miniflux endpoint.")
+        case .invalidResponse: String(localized: "The Miniflux server returned an unexpected response.")
+        case .invalidCustomHeader: String(localized: "Custom headers must have unique valid names and cannot replace FluxNews transport headers.")
         }
     }
 

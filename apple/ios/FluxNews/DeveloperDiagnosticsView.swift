@@ -14,11 +14,17 @@ struct DeveloperDiagnosticsView: View {
                 }
                 Section("Sandbox paths") { Text(bootstrapper.pathsDescription).font(.footnote.monospaced()).textSelection(.enabled) }
                 Section("Legacy migration feasibility") {
-                    ForEach(LegacyStateDiscovery.redactedSummary(legacyResult).sorted(by: { $0.key < $1.key }), id: \.key) { key, value in LabeledContent(key, value: value) }
+                    ForEach(LegacyStateDiscovery.redactedSummary(legacyResult).sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
+                        LabeledContent(localizedDiagnosticLabel(key), value: value)
+                    }
                     Text("Read-only discovery; no legacy data is imported or modified.").font(.footnote).foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Developer Diagnostics")
         }
+    }
+
+    private func localizedDiagnosticLabel(_ key: String) -> String {
+        String(localized: String.LocalizationValue(key))
     }
 }

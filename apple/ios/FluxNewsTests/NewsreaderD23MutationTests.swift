@@ -419,10 +419,10 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(IOSArticleSwipeAction.unread.mutation, .read(false))
         XCTAssertEqual(IOSArticleSwipeAction.star.mutation, .starred(true))
         XCTAssertEqual(IOSArticleSwipeAction.unstar.mutation, .starred(false))
-        XCTAssertEqual(IOSArticleSwipeAction.read.accessibilityLabel, "Mark as Read")
-        XCTAssertEqual(IOSArticleSwipeAction.unread.accessibilityLabel, "Mark as Unread")
-        XCTAssertEqual(IOSArticleSwipeAction.star.accessibilityLabel, "Star")
-        XCTAssertEqual(IOSArticleSwipeAction.unstar.accessibilityLabel, "Unstar")
+        XCTAssertEqual(IOSArticleSwipeAction.read.accessibilityLabel, String(localized: "Mark as Read"))
+        XCTAssertEqual(IOSArticleSwipeAction.unread.accessibilityLabel, String(localized: "Mark as Unread"))
+        XCTAssertEqual(IOSArticleSwipeAction.star.accessibilityLabel, String(localized: "Star"))
+        XCTAssertEqual(IOSArticleSwipeAction.unstar.accessibilityLabel, String(localized: "Unstar"))
     }
 
     @MainActor

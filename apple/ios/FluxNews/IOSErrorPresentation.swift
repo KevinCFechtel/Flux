@@ -25,17 +25,17 @@ enum IOSErrorPresentation {
         }
 
         return switch context {
-        case .startup: "FluxNews could not start. Check the account configuration and try again."
-        case .contentLoad: "Articles could not be loaded. Please try again."
-        case .sync: "News could not be synced. Please try again."
-        case .search: "Search could not be completed. Please try again."
-        case .reader: "The article could not be loaded in Reader."
-        case .articleAction: "The article could not be updated. Please try again."
-        case .feedDiscovery: "Could not discover feeds. Please try again."
-        case .feedCreation: "Could not add feed. Please try again."
-        case .categoryCreation: "Could not add category. Please try again."
-        case .feedSettingsLoad: "Feed settings could not be loaded. Please try again."
-        case .feedSettingsSave: "Feed settings could not be saved. Please try again."
+        case .startup: String(localized: "FluxNews could not start. Check the account configuration and try again.")
+        case .contentLoad: String(localized: "Articles could not be loaded. Please try again.")
+        case .sync: String(localized: "News could not be synced. Please try again.")
+        case .search: String(localized: "Search could not be completed. Please try again.")
+        case .reader: String(localized: "The article could not be loaded in Reader.")
+        case .articleAction: String(localized: "The article could not be updated. Please try again.")
+        case .feedDiscovery: String(localized: "Could not discover feeds. Please try again.")
+        case .feedCreation: String(localized: "Could not add feed. Please try again.")
+        case .categoryCreation: String(localized: "Could not add category. Please try again.")
+        case .feedSettingsLoad: String(localized: "Feed settings could not be loaded. Please try again.")
+        case .feedSettingsSave: String(localized: "Feed settings could not be saved. Please try again.")
         }
     }
 }

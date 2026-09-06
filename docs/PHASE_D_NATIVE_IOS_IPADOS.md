@@ -1,6 +1,6 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: D1-D3 COMPLETE / D4.1-D4.4 COMPLETE EXCEPT EN/DE LOCALIZATION / D4 OPEN / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D3 COMPLETE / D4 COMPLETE / ARCHITECTURE-FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
 > replaces the existing Flutter iOS/iPadOS client with a native Swift/SwiftUI
@@ -380,15 +380,24 @@ The D4.4 error-presentation work is complete: native iOS error contexts now map
 technical failures to stable safe English messages, while typed account-validation
 messages remain preserved. Technical causes are restricted to diagnostics, and
 optional feed-icon and article-image failures remain silent. The D4.4 English
-user-facing wording freeze is complete. English/German localization remains the
-final D4.4 step.
+user-facing wording freeze is complete.
 
 Localization is the final D4.4 presentation step after user-facing wording and
-error messages are stable. The native iOS/iPadOS app must provide English and
-German localization covering release-relevant UI text, user-facing error
-messages, accessibility text, counts/pluralization, Settings,
-Newsreader/navigation, Reader, and Search. D4 must not be marked
-complete/frozen until this localization pass is complete.
+error messages are stable. The native iOS/iPadOS app provides complete English
+and German localization through the native iOS String Catalog at
+`apple/ios/FluxNews/Localizable.xcstrings`. Shared terminology aligns with the
+native macOS application, including Feed, Category, API-Schlüssel, and the
+article/read/starred vocabulary. Release-visible errors, Settings,
+Newsreader/navigation, Reader, Search, and accessibility presentation are
+localized. User-facing dynamic counts use native localized substitutions and
+plural forms rather than concatenated fragments. Developer Diagnostics remains
+reachable in the release UI and its presentation labels and explanation are
+localized; paths, URLs, raw status values, revisions, and technical diagnostics
+remain unchanged by design.
+
+The English wording freeze is preserved, the English/German localization pass is
+complete, and the final localization audit found no unintended release-visible
+English-only strings. D4 is **COMPLETE / architecture-frozen**.
 
 For iOS Scrollover, D4.4 still requires real-device coverage of slow drags,
 fast flicks that skip rows, reverse-then-forward movement, Remove When Read,

@@ -117,7 +117,7 @@ final class AccountLifecycleTests: XCTestCase {
 
         await bootstrapper.start()
 
-        XCTAssertEqual(bootstrapper.state, .recoverableError("FluxNews could not start. Check the account configuration and try again."))
+        XCTAssertEqual(bootstrapper.state, .recoverableError(String(localized: "FluxNews could not start. Check the account configuration and try again.")))
         XCTAssertNotNil(bootstrapper.credentials)
     }
 
@@ -233,7 +233,7 @@ final class AccountLifecycleTests: XCTestCase {
 
         await bootstrapper.configure(server: "https://example.com", apiKey: "api-secret", headers: [IOSCustomHTTPHeader(name: "X-Test", value: "header-secret")])
 
-        XCTAssertEqual(bootstrapper.validationMessage, "The Miniflux server could not be reached. Check the server URL and network connection.")
+        XCTAssertEqual(bootstrapper.validationMessage, String(localized: "The Miniflux server could not be reached. Check the server URL and network connection."))
         XCTAssertEqual(bootstrapper.validationDiagnostic?.category, "TLS/certificate")
         XCTAssertEqual(bootstrapper.validationDiagnostic?.detail, "certificate verify failed")
         XCTAssertFalse(bootstrapper.validationDiagnostic?.detail.contains("api-secret") == true)
@@ -400,6 +400,6 @@ final class AccountLifecycleTests: XCTestCase {
         XCTAssertEqual(bootstrapper.credentials, previous)
         XCTAssertIdentical(bootstrapper.core, previousCore)
         XCTAssertEqual(bootstrapper.coreRevision, 1)
-        XCTAssertEqual(bootstrapper.validationMessage, "The account could not be activated. Your previous account is still active.")
+        XCTAssertEqual(bootstrapper.validationMessage, String(localized: "The account could not be activated. Your previous account is still active."))
     }
 }

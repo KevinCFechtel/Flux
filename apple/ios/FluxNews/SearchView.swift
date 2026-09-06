@@ -45,7 +45,7 @@ struct SearchView: View {
                                 }
                                 .padding()
                             } else if store.hasSearched {
-                                Text("Showing \(store.results.count) of \(store.total)")
+                                Text(String(format: String(localized: "Showing %lld of %lld"), store.results.count, store.total))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .padding(.bottom, 8)

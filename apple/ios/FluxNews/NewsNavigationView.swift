@@ -22,7 +22,7 @@ enum NewsNavigationSelection {
 
 enum IOSNavigationBranding {
     static let assetName = "FluxNewsTemplate"
-    static let accessibilityLabel = "FluxNews"
+    static let accessibilityLabel = String(localized: "FluxNews")
     static let iconUsesSolidAccentColor = true
 }
 
@@ -130,13 +130,13 @@ struct NewsNavigationView: View {
         NavigationVisibility.groups(categories: store.catalog.categories.map { .init(id: $0.id, title: $0.title) }, feeds: store.catalog.feeds.map { .init(id: $0.id, categoryID: $0.categoryId) }, hidingEmpty: store.hideEmptyNavigationEntries, counts: store.feedCounts)
     }
 
-    private func feedTitle(_ feedID: Int64) -> String { store.catalog.feeds.first { $0.id == feedID }?.title ?? "Feed" }
+    private func feedTitle(_ feedID: Int64) -> String { store.catalog.feeds.first { $0.id == feedID }?.title ?? String(localized: "Feed") }
     private var searchRow: some View { Button(action: onSearch) { Label("Search", systemImage: "magnifyingglass") }.accessibilityIdentifier("navigation.search") }
 
     private func scopeRow(_ title: String, systemImage: String, scope: BrowserScope, count: UInt64) -> some View {
         Label { labelTitle(title, count: count) } icon: { Image(systemName: systemImage) }
             .tag(scope)
-            .accessibilityValue(count > 0 ? "\(count) unread articles" : "No unread articles")
+        .accessibilityValue(count == 0 ? String(localized: "No unread articles") : count == 1 ? String(localized: "1 unread article") : String(format: String(localized: "%lld unread articles"), count))
     }
 
     private func categoryRow(categoryID: Int64, title: String, count: UInt64) -> some View {

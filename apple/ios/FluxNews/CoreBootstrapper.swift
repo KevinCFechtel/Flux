@@ -12,10 +12,10 @@ final class CoreBootstrapper: ObservableObject {
 
         var title: String {
             switch self {
-            case .starting: "Starting"
-            case .accountRequired: "Account required"
-            case .ready: "Ready"
-            case .recoverableError: "Recoverable startup error"
+            case .starting: String(localized: "Starting")
+            case .accountRequired: String(localized: "Account required")
+            case .ready: String(localized: "Ready")
+            case .recoverableError: String(localized: "Recoverable startup error")
             }
         }
     }
@@ -79,7 +79,7 @@ final class CoreBootstrapper: ObservableObject {
         validationDiagnostic = nil
         let proposed = IOSMinifluxCredentials(server: server.trimmingCharacters(in: .whitespacesAndNewlines), apiKey: apiKey, customHeaders: headers)
         guard !proposed.server.isEmpty, !proposed.apiKey.isEmpty else {
-            validationMessage = "Enter both a Miniflux server URL and API key."
+            validationMessage = String(localized: "Enter both a Miniflux server URL and API key.")
             return
         }
         let validator = accountValidator
@@ -96,7 +96,7 @@ final class CoreBootstrapper: ObservableObject {
                 return
             }
             guard let result = attempt.result else {
-                validationMessage = "The Miniflux server returned an unexpected response."
+                validationMessage = String(localized: "The Miniflux server returned an unexpected response.")
                 validationDiagnostic = nil
                 return
             }
@@ -110,7 +110,7 @@ final class CoreBootstrapper: ObservableObject {
                     if let previous { try? credentialStore.save(previous) } else { try? credentialStore.remove() }
                     throw error
                 }
-            } catch { validationMessage = "The account could not be activated. Your previous account is still active." }
+            } catch { validationMessage = String(localized: "The account could not be activated. Your previous account is still active.") }
         }
     }
 
@@ -128,11 +128,11 @@ final class CoreBootstrapper: ObservableObject {
             try credentialStore.remove()
             deactivate()
             state = .accountRequired
-        } catch { validationMessage = "The account could not be removed." }
+        } catch { validationMessage = String(localized: "The account could not be removed.") }
     }
 
     var pathsDescription: String {
-        guard let paths = try? CorePaths(createDirectories: false) else { return "Unavailable" }
+        guard let paths = try? CorePaths(createDirectories: false) else { return String(localized: "Unavailable") }
         return "Application Support: \(paths.persistentData.path)\nCaches: \(paths.cache.path)\nMedia: \(paths.media.path)"
     }
 
@@ -147,7 +147,7 @@ final class CoreBootstrapper: ObservableObject {
         core = configuredCore
         credentials = account
         coreRevision &+= 1
-        state = .ready("Initialized")
+        state = .ready(String(localized: "Initialized"))
         onCoreChanged?(configuredCore)
         return true
     }

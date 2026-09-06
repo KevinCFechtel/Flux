@@ -10,10 +10,10 @@ struct ArticlesSettingsView: View {
                 Text("Reader").tag(ClickOnNews.openDetailView)
             }
             Picker("Presentation", selection: Binding(get: { store.articlePresentationMode }, set: store.setArticlePresentationMode)) {
-                ForEach(ArticlePresentationMode.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+                ForEach(ArticlePresentationMode.allCases, id: \.self) { Text(String(localized: String.LocalizationValue($0.rawValue.capitalized))).tag($0) }
             }
             Picker("Preview lines", selection: Binding(get: { store.articlePreviewLines }, set: store.setArticlePreviewLines)) {
-                ForEach(ArticlePreviewLines.allCases, id: \.self) { Text("\($0.rawValue) lines").tag($0) }
+                ForEach(ArticlePreviewLines.allCases, id: \.self) { Text(String(format: String(localized: "%lld lines"), $0.rawValue)).tag($0) }
             }
             Toggle("Show article count", isOn: Binding(get: { store.showArticleCount }, set: store.setShowArticleCount))
             Toggle("Remove articles when read", isOn: Binding(get: { store.removeArticlesWhenMarkedRead }, set: store.setRemoveArticlesWhenMarkedRead))
