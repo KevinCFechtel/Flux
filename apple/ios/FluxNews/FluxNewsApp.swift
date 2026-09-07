@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct FluxNewsApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var bootstrapper = CoreBootstrapper()
     @State private var newsreaderStore = NewsreaderStore()
 
@@ -15,6 +16,11 @@ struct FluxNewsApp: App {
                         else { newsreaderStore.detach() }
                     }
                     await bootstrapper.start()
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase != .active {
+                        newsreaderStore.flushScrolloverPersistenceForLifecycle()
+                    }
                 }
         }
     }

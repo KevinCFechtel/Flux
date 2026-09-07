@@ -261,6 +261,21 @@ final class NewsreaderD23MutationTests: XCTestCase {
     }
 
     @MainActor
+    func testScrolloverNeverStructurallyRemovesRowsDuringActiveScrolling() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.removeArticlesWhenMarkedRead = true
+        store.unreadOnly = true
+        store.setArticlesForTesting([article(1), article(2)])
+        let structuralRevision = store.snapshotRevision
+        store.setScrolloverPresentationPhaseForTesting(.decelerating)
+
+        store.applyScrolloverMutationForTesting([1])
+
+        XCTAssertEqual(store.articles.map(\.id), [1, 2])
+        XCTAssertEqual(store.snapshotRevision, structuralRevision)
+    }
+
+    @MainActor
     func testSuccessfulScrolloverPresentationIsCoalescedWhileDeceleratingAndFlushedWhenIdle() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setArticlesForTesting([article(1), article(2), article(3)])
@@ -358,6 +373,39 @@ final class NewsreaderD23MutationTests: XCTestCase {
 
         XCTAssertEqual(store.enqueueScrolloverForTesting([1, 2]), [1, 2])
         XCTAssertEqual(store.beginScrolloverMutationForTesting(), [1, 2])
+    }
+
+    @MainActor
+    func testSlowScrolloverRemainsBufferedUntilAnIdleOrLifecycleFlush() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2)])
+        store.setScrolloverPresentationPhaseForTesting(.interacting)
+
+        XCTAssertEqual(store.enqueueScrolloverForTesting([1]), [1])
+        XCTAssertEqual(store.flushScrolloverPersistenceForTesting(), [1])
+        XCTAssertTrue(store.flushScrolloverPersistenceForTesting().isEmpty)
+    }
+
+    @MainActor
+    func testMultipleScrolloversShareOnePersistenceBatchAtTheBoundary() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2), article(3)])
+        store.setScrolloverPresentationPhaseForTesting(.interacting)
+
+        XCTAssertEqual(store.enqueueScrolloverForTesting([1]), [1])
+        XCTAssertEqual(store.enqueueScrolloverForTesting([2, 3]), [2, 3])
+        XCTAssertEqual(store.flushScrolloverPersistenceForTesting(), [1, 2, 3])
+    }
+
+    @MainActor
+    func testExplicitMutationRemovesConflictingBufferedScrollover() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2)])
+        XCTAssertEqual(store.enqueueScrolloverForTesting([1, 2]), [1, 2])
+
+        store.discardPendingScrolloverForTesting([1])
+
+        XCTAssertEqual(store.flushScrolloverPersistenceForTesting(), [2])
     }
 
     @MainActor

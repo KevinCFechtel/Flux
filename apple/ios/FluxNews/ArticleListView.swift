@@ -489,8 +489,8 @@ struct ArticleListView: View {
                                   ForEach(store.articles, id: \.id) { article in
                                         let rowState = store.rowPresentationState(for: article)
                                         let iconVariant = IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)
-                                        let feedIcon = store.feedIcons[IOSFeedIconKey(feedID: article.feedId, variant: iconVariant)]
-                                        ArticlePresentationView(article: article, rowState: rowState, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIconData: feedIcon, iconVariant: iconVariant, onRequestFeedIcon: { store.requestFeedIcon(article.feedId, variant: iconVariant) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { store.setRead(article, read: $0) }, onSetStarred: { store.setStarred(article, starred: $0) })
+                                         let feedIcon = store.feedIconPresentationState(for: article.feedId, variant: iconVariant)
+                                         ArticlePresentationView(article: article, rowState: rowState, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIcon: feedIcon, iconVariant: iconVariant, onRequestFeedIcon: { store.requestFeedIcon(article.feedId, variant: iconVariant) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { store.setRead(article, read: $0) }, onSetStarred: { store.setStarred(article, starred: $0) })
                                           .equatable()
                                  }
                               }
@@ -630,7 +630,7 @@ struct ArticlePresentationView: View, Equatable {
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
     let availableWidth: CGFloat
-    let feedIconData: Data?
+    let feedIcon: IOSFeedIconPresentationState
     let iconVariant: FeedIconVariant
     let onRequestFeedIcon: () -> Void
     let onTap: () -> Void
@@ -653,7 +653,7 @@ struct ArticlePresentationView: View, Equatable {
             lhs.mode == rhs.mode &&
             lhs.previewLines == rhs.previewLines &&
             lhs.availableWidth == rhs.availableWidth &&
-            lhs.feedIconData == rhs.feedIconData &&
+            lhs.feedIcon === rhs.feedIcon &&
             lhs.iconVariant == rhs.iconVariant
     }
 
@@ -945,7 +945,7 @@ struct ArticlePresentationView: View, Equatable {
     private var metadataRow: some View {
         HStack(spacing: 6) {
             unreadIndicator
-            FeedIconView(feedID: article.feedId, title: article.feedTitle, data: feedIconData, onRequest: onRequestFeedIcon)
+            FeedIconView(feedID: article.feedId, title: article.feedTitle, state: feedIcon, onRequest: onRequestFeedIcon)
             Text(article.feedTitle).font(.subheadline.weight(.medium))
             Text("•")
             Text(date)
@@ -960,7 +960,7 @@ struct ArticlePresentationView: View, Equatable {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 unreadIndicator
-                FeedIconView(feedID: article.feedId, title: article.feedTitle, data: feedIconData, onRequest: onRequestFeedIcon)
+                FeedIconView(feedID: article.feedId, title: article.feedTitle, state: feedIcon, onRequest: onRequestFeedIcon)
                 Text(article.feedTitle).font(.subheadline.weight(.medium))
                 commentsIndicator
             }
@@ -994,13 +994,13 @@ struct ArticlePresentationView: View, Equatable {
 struct FeedIconView: View {
     let feedID: Int64
     let title: String
-    let data: Data?
+    let state: IOSFeedIconPresentationState
     let onRequest: () -> Void
     var size: CGFloat = 22
 
     var body: some View {
         Group {
-            if let image = data.flatMap(UIImage.init(data:)) {
+            if let image = state.data.flatMap(UIImage.init(data:)) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()

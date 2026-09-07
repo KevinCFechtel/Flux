@@ -152,7 +152,7 @@ struct NewsNavigationView: View {
         let scope = feedID.map(BrowserScope.feed) ?? .all
         return HStack(spacing: 8) {
             if let feedID {
-                FeedIconView(feedID: feedID, title: title, data: store.feedIcons[IOSFeedIconKey(feedID: feedID, variant: iconVariant)], onRequest: { store.requestFeedIcon(feedID, variant: iconVariant) }, size: 16)
+                FeedIconView(feedID: feedID, title: title, state: store.feedIconPresentationState(for: feedID, variant: iconVariant), onRequest: { store.requestFeedIcon(feedID, variant: iconVariant) }, size: 16)
             }
             labelTitle(title, count: count)
         }

@@ -245,7 +245,6 @@ final class NewsreaderPresentationTests: XCTestCase {
             _ = store.errorMessage
             _ = store.articlePresentationMode
             _ = store.articlePreviewLines
-            _ = store.feedIcons
             _ = store.snapshotRevision
             _ = store.scrollResetRevision
             _ = store.markReadOnScrolloverEnabled
@@ -259,6 +258,24 @@ final class NewsreaderPresentationTests: XCTestCase {
         store.setSelectionTotalForTesting(3)
 
         XCTAssertFalse(articleListInvalidated.value)
+    }
+
+    @MainActor
+    func testFeedIconCompletionInvalidatesOnlyItsPresentationState() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let icon = store.feedIconPresentationState(for: 10, variant: .normal)
+        let otherIcon = store.feedIconPresentationState(for: 20, variant: .normal)
+        let otherInvalidated = ObservationFlag()
+
+        withObservationTracking {
+            _ = otherIcon.data
+        } onChange: {
+            MainActor.assumeIsolated { otherInvalidated.value = true }
+        }
+
+        icon.data = Data([1])
+
+        XCTAssertFalse(otherInvalidated.value)
     }
 
     @MainActor

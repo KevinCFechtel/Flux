@@ -154,7 +154,14 @@ including after scrolling becomes idle. The unread/read visual transition keeps
 the unread-indicator layout slot present and changes only its visual opacity, so
 it does not alter article-card geometry.
 
-iOS Scrollover keeps detection, Core mutation scheduling, and Undo separate.
+iOS Scrollover keeps detection, immediate row-local presentation, Core mutation
+scheduling, and Undo separate. Crossing an unread article changes only its row
+presentation immediately; while the scroll view is interacting or decelerating,
+the corresponding IDs accumulate in a deduplicated local buffer. The buffer is
+persisted through the existing Core bulk mutation API when scrolling becomes
+idle, with bounded and lifecycle/snapshot safety flushes. Active scrolling never
+requires a Core/SQLite operation for visual feedback and never structurally
+changes the article collection.
 Detection is ID/order-only, with no geometry, exposure duration, or per-row
 timer. Candidates enter one serialized, deduplicating Core bulk-mutation queue.
 The ordered detection snapshot rebases only when visible membership or ordering

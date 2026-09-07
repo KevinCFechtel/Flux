@@ -9,6 +9,11 @@ struct IOSFeedIconKey: Hashable {
     let variant: FeedIconVariant
 }
 
+@Observable final class IOSFeedIconPresentationState {
+    var data: Data?
+    var isUnavailable = false
+}
+
 enum IOSFeedIconPresentation {
     static func variant(isDark: Bool) -> FeedIconVariant { isDark ? .dark : .normal }
 }
@@ -163,7 +168,7 @@ private struct IOSPendingScrolloverPresentation {
     private(set) var selectionTotal: UInt64 = 0
     private(set) var categoryCounts: [Int64: UInt64] = [:]
     private(set) var feedCounts: [Int64: UInt64] = [:]
-    private(set) var feedIcons: [IOSFeedIconKey: Data] = [:]
+    @ObservationIgnored private var feedIconPresentationStates: [IOSFeedIconKey: IOSFeedIconPresentationState] = [:]
     private(set) var isLoading = false
     private(set) var isSyncing = false
     private(set) var errorMessage: String?
@@ -195,7 +200,6 @@ private struct IOSPendingScrolloverPresentation {
     private let defaults: UserDefaults
     private var pending = PendingNewData()
     private var requestedFeedIcons = Set<IOSFeedIconKey>()
-    private var unavailableFeedIcons = Set<IOSFeedIconKey>()
     private var scrolloverUndoTask: Task<Void, Never>?
     private var scrolloverUndoOpenedAt: TimeInterval?
     private var scrolloverUndoLastSuccessAt: TimeInterval?
@@ -205,6 +209,8 @@ private struct IOSPendingScrolloverPresentation {
     private var pendingScrolloverIDSet = Set<Int64>()
     @ObservationIgnored private var pendingScrolloverPresentationRevisions: [Int64: UInt64] = [:]
     private var scrolloverMutationRunning = false
+    private var runningScrolloverIDs = Set<Int64>()
+    private var scrolloverMutationTask: Task<Void, Never>?
     private var scrolloverQueueGeneration: UInt64 = 0
     private var scrolloverPresentationPhase: IOSScrolloverPresentationPhase = .idle
     private var pendingScrolloverPresentation: [IOSPendingScrolloverPresentation] = []
@@ -246,6 +252,7 @@ private struct IOSPendingScrolloverPresentation {
     }
 
     func detach() {
+        flushScrolloverPersistenceForLifecycle()
         readLifecycle.invalidateSession()
         eventSubscription = nil
         core = nil
@@ -256,7 +263,7 @@ private struct IOSPendingScrolloverPresentation {
         selectionTotal = 0
         categoryCounts = [:]
         feedCounts = [:]
-        feedIcons = [:]
+        feedIconPresentationStates = [:]
         isLoading = false
         isSyncing = false
         resetPresentationState()
@@ -342,9 +349,18 @@ private struct IOSPendingScrolloverPresentation {
         }
     }
 
+    func feedIconPresentationState(for feedID: Int64, variant: FeedIconVariant) -> IOSFeedIconPresentationState {
+        let key = IOSFeedIconKey(feedID: feedID, variant: variant)
+        if let state = feedIconPresentationStates[key] { return state }
+        let state = IOSFeedIconPresentationState()
+        feedIconPresentationStates[key] = state
+        return state
+    }
+
     func requestFeedIcon(_ feedID: Int64, variant: FeedIconVariant) {
         let key = IOSFeedIconKey(feedID: feedID, variant: variant)
-        guard feedIcons[key] == nil, !unavailableFeedIcons.contains(key), let core else { return }
+        let state = feedIconPresentationState(for: feedID, variant: variant)
+        guard state.data == nil, !state.isUnavailable, let core else { return }
         guard requestedFeedIcons.insert(key).inserted else { return }
         Task { [weak self, core] in
             let data = await Task.detached {
@@ -352,8 +368,9 @@ private struct IOSPendingScrolloverPresentation {
             }.value
             guard let self else { return }
             requestedFeedIcons.remove(key)
-            if let data { feedIcons[key] = Data(data) }
-            else { unavailableFeedIcons.insert(key) }
+            guard let state = feedIconPresentationStates[key] else { return }
+            if let data { state.data = Data(data) }
+            else { state.isUnavailable = true }
         }
     }
 
@@ -520,9 +537,14 @@ private struct IOSPendingScrolloverPresentation {
 
     func setRead(articleIDs: [Int64], read: Bool) {
         guard let core, !articleIDs.isEmpty else { return }
+        let conflictingScrolloverMutation = !runningScrolloverIDs.isDisjoint(with: articleIDs) ? scrolloverMutationTask : nil
+        flushConflictingScrolloverIDs(articleIDs)
         let revisions = optimisticallySetRead(articleIDs, read: read)
         let snapshotRevision = snapshotRevision
         Task { [weak self, core] in
+            if let conflictingScrolloverMutation {
+                await conflictingScrolloverMutation.value
+            }
             let result = await Task.detached { Result { try core.setReadStateBulk(articleIds: articleIDs, read: read) } }.value
             guard let self else { return }
             switch result {
@@ -561,6 +583,8 @@ private struct IOSPendingScrolloverPresentation {
     func flushScrollover(_ batch: IOSScrolloverBatch) {
         guard core != nil else { return }
         let ids = eligibleScrolloverIDs(batch.articleIDs)
+        guard !ids.isEmpty else { return }
+        scrolloverDiagnostic("detected count=\(ids.count)")
         for id in ids {
             if let state = rowPresentationStates[id] {
                 state.setRead(true)
@@ -569,15 +593,23 @@ private struct IOSPendingScrolloverPresentation {
             pendingScrolloverIDSet.insert(id)
             pendingScrolloverIDs.append(id)
         }
-        drainScrolloverMutations()
+        scrolloverDiagnostic("optimistic presentation count=\(ids.count)")
+        if pendingScrolloverIDs.count >= Self.maximumScrolloverMutationBatchSize {
+            drainScrolloverMutations()
+        }
     }
 
     func setScrolloverPresentationPhase(_ phase: IOSScrolloverPresentationPhase) {
         scrolloverPresentationPhase = phase
         if phase == .idle {
+            drainScrolloverMutations()
             flushPendingScrolloverPresentation()
             reloadScrolloverCountsIfReady()
         }
+    }
+
+    func flushScrolloverPersistenceForLifecycle() {
+        drainScrolloverMutations()
     }
 
     private func drainScrolloverMutations() {
@@ -585,15 +617,16 @@ private struct IOSPendingScrolloverPresentation {
         let ids = pendingScrolloverIDs
         pendingScrolloverIDs = []
         scrolloverMutationRunning = true
+        runningScrolloverIDs = Set(ids)
         let generation = scrolloverQueueGeneration
-        scrolloverDiagnostic("flush ids=\(ids)")
-        Task { [weak self, core] in
+        scrolloverDiagnostic("persistence flush count=\(ids.count)")
+        let task = Task { [weak self, core] in
             let result = await Task.detached { Result { try core.setReadStateBulk(articleIds: ids, read: true) } }.value
             guard let self else { return }
             switch result {
             case .success:
                 completeSuccessfulScrolloverMutation(ids, generation: generation)
-                scrolloverDiagnostic("mutation success ids=\(ids)")
+                scrolloverDiagnostic("persistence success count=\(ids.count)")
             case let .failure(error):
                 restoreScrolloverPresentation(ids, generation: generation)
                 if generation == scrolloverQueueGeneration {
@@ -604,9 +637,12 @@ private struct IOSPendingScrolloverPresentation {
             pendingScrolloverIDSet.subtract(ids)
             for id in ids { pendingScrolloverPresentationRevisions[id] = nil }
             scrolloverMutationRunning = false
+            runningScrolloverIDs = []
+            scrolloverMutationTask = nil
             reloadScrolloverCountsIfReady()
             drainScrolloverMutations()
         }
+        scrolloverMutationTask = task
     }
 
     private func completeSuccessfulScrolloverMutation(
@@ -765,6 +801,8 @@ private struct IOSPendingScrolloverPresentation {
     func markMeaningfulInteraction() { hasMeaningfullyInteracted = true }
 
     private func resetPresentationState(preserveLoading: Bool = false) {
+        // Do not discard local-first reads accepted during a moving snapshot.
+        drainScrolloverMutations()
         readLifecycle.invalidateArticle()
         if !preserveLoading { isLoading = false }
         hasMeaningfullyInteracted = false
@@ -835,6 +873,17 @@ private struct IOSPendingScrolloverPresentation {
     private func eligibleScrolloverIDs(_ ids: [Int64]) -> [Int64] {
         ids.filter { id in
             !pendingScrolloverIDSet.contains(id) && rowPresentationStates[id]?.isRead == false
+        }
+    }
+
+    private static let maximumScrolloverMutationBatchSize = 64
+
+    private func flushConflictingScrolloverIDs(_ ids: [Int64]) {
+        let conflicts = Set(ids)
+        pendingScrolloverIDs.removeAll { conflicts.contains($0) }
+        pendingScrolloverIDSet.subtract(conflicts)
+        for id in conflicts where !runningScrolloverIDs.contains(id) {
+            pendingScrolloverPresentationRevisions[id] = nil
         }
     }
 
@@ -991,6 +1040,14 @@ private struct IOSPendingScrolloverPresentation {
         pendingScrolloverIDs = []
         return ids
     }
+    @MainActor
+    func flushScrolloverPersistenceForTesting() -> [Int64] {
+        let ids = pendingScrolloverIDs
+        pendingScrolloverIDs = []
+        return ids
+    }
+    @MainActor
+    func discardPendingScrolloverForTesting(_ ids: [Int64]) { flushConflictingScrolloverIDs(ids) }
     @MainActor
     func failScrolloverMutationForTesting(_ ids: [Int64], generation: UInt64? = nil) {
         restoreScrolloverPresentation(ids, generation: generation ?? scrolloverQueueGeneration)
