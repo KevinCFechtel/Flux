@@ -2,6 +2,7 @@ import XCTest
 import ImageIO
 import Observation
 import UniformTypeIdentifiers
+import UIKit
 @testable import FluxNews
 
 final class NewsreaderPresentationTests: XCTestCase {
@@ -268,12 +269,12 @@ final class NewsreaderPresentationTests: XCTestCase {
         let otherInvalidated = ObservationFlag()
 
         withObservationTracking {
-            _ = otherIcon.data
+            _ = otherIcon.image
         } onChange: {
             MainActor.assumeIsolated { otherInvalidated.value = true }
         }
 
-        icon.data = Data([1])
+        icon.image = UIImage()
 
         XCTAssertFalse(otherInvalidated.value)
     }
@@ -295,6 +296,28 @@ final class NewsreaderPresentationTests: XCTestCase {
 
         XCTAssertFalse(articleListInvalidated.value)
         XCTAssertTrue(rowState.isRead)
+    }
+
+    @MainActor
+    func testRowStatusMutationsDoNotInvalidateImmutableRowContent() {
+        let article = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "https://example.com/comments", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: "https://example.com/image.jpg")
+        let rowState = ArticleRowPresentationState(article: article)
+        let invalidated = ObservationFlag()
+
+        withObservationTracking {
+            _ = rowState.content
+        } onChange: {
+            MainActor.assumeIsolated { invalidated.value = true }
+        }
+
+        rowState.setRead(true)
+        rowState.setStarred(true)
+
+        XCTAssertFalse(invalidated.value)
+        XCTAssertEqual(rowState.content.article, article)
+        XCTAssertEqual(rowState.content.imageURL, URL(string: "https://example.com/image.jpg"))
+        XCTAssertTrue(rowState.content.hasComments)
+        XCTAssertNotEqual(rowState.content.publishedDate, article.publishedAt)
     }
 
     func testScrolloverUndoFeedbackTriggersOnlyForNewlyVisiblePresentation() {

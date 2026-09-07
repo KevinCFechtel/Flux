@@ -162,6 +162,11 @@ persisted through the existing Core bulk mutation API when scrolling becomes
 idle, with bounded and lifecycle/snapshot safety flushes. Active scrolling never
 requires a Core/SQLite operation for visual feedback and never structurally
 changes the article collection.
+Row rendering keeps immutable article content separate from mutable read/starred
+presentation. A scrollover read mutation may invalidate its small status,
+accessibility, and interaction presentation views, but must not invalidate the
+row's image/preview/metadata-layout content subtree. Feed-icon presentation state
+exposes a prepared native image rather than decoding icon bytes from a view body.
 Detection is ID/order-only, with no geometry, exposure duration, or per-row
 timer. Candidates enter one serialized, deduplicating Core bulk-mutation queue.
 The ordered detection snapshot rebases only when visible membership or ordering

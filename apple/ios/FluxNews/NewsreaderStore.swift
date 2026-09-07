@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 #if DEBUG
 import OSLog
 #endif
@@ -10,7 +11,7 @@ struct IOSFeedIconKey: Hashable {
 }
 
 @Observable final class IOSFeedIconPresentationState {
-    var data: Data?
+    var image: UIImage?
     var isUnavailable = false
 }
 
@@ -114,12 +115,29 @@ private struct IOSPendingScrolloverPresentation {
     let completedAt: TimeInterval
 }
 
+struct ArticleRowContent: Equatable {
+    let article: ArticleSummary
+    let publishedDate: String
+    let imageURL: URL?
+    let hasComments: Bool
+
+    init(article: ArticleSummary) {
+        self.article = article
+        publishedDate = ISO8601DateFormatter().date(from: article.publishedAt)
+            .map { $0.formatted(date: .abbreviated, time: .shortened) } ?? article.publishedAt
+        imageURL = article.imageUrl.flatMap { $0.isEmpty ? nil : URL(string: $0) }
+        hasComments = IOSArticleContextMenuPolicy.commentsURL(article.commentsUrl) != nil
+    }
+}
+
 @Observable final class ArticleRowPresentationState {
+    private(set) var content: ArticleRowContent
     var isRead: Bool
     var isStarred: Bool
     private(set) var mutationRevision: UInt64 = 0
 
     init(article: ArticleSummary) {
+        content = ArticleRowContent(article: article)
         isRead = article.isRead
         isStarred = article.isStarred
     }
@@ -137,6 +155,7 @@ private struct IOSPendingScrolloverPresentation {
     }
 
     func reconcile(with article: ArticleSummary) {
+        if content.article != article { content = ArticleRowContent(article: article) }
         setRead(article.isRead)
         setStarred(article.isStarred)
     }
@@ -360,16 +379,17 @@ private struct IOSPendingScrolloverPresentation {
     func requestFeedIcon(_ feedID: Int64, variant: FeedIconVariant) {
         let key = IOSFeedIconKey(feedID: feedID, variant: variant)
         let state = feedIconPresentationState(for: feedID, variant: variant)
-        guard state.data == nil, !state.isUnavailable, let core else { return }
+        guard state.image == nil, !state.isUnavailable, let core else { return }
         guard requestedFeedIcons.insert(key).inserted else { return }
         Task { [weak self, core] in
-            let data = await Task.detached {
-                try? core.feedIcon(feedId: feedID, variant: variant)?.pngData
+            let image: UIImage? = await Task.detached { () -> UIImage? in
+                guard let data = try? core.feedIcon(feedId: feedID, variant: variant)?.pngData else { return nil }
+                return UIImage(data: Data(data))
             }.value
             guard let self else { return }
             requestedFeedIcons.remove(key)
             guard let state = feedIconPresentationStates[key] else { return }
-            if let data { state.data = Data(data) }
+            if let image { state.image = image }
             else { state.isUnavailable = true }
         }
     }

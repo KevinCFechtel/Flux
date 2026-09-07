@@ -490,7 +490,7 @@ struct ArticleListView: View {
                                         let rowState = store.rowPresentationState(for: article)
                                         let iconVariant = IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)
                                          let feedIcon = store.feedIconPresentationState(for: article.feedId, variant: iconVariant)
-                                         ArticlePresentationView(article: article, rowState: rowState, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIcon: feedIcon, iconVariant: iconVariant, onRequestFeedIcon: { store.requestFeedIcon(article.feedId, variant: iconVariant) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { store.setRead(article, read: $0) }, onSetStarred: { store.setStarred(article, starred: $0) })
+                                          ArticlePresentationView(content: rowState.content, rowState: rowState, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIcon: feedIcon, iconVariant: iconVariant, onRequestFeedIcon: { store.requestFeedIcon(article.feedId, variant: iconVariant) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { store.setRead(article, read: $0) }, onSetStarred: { store.setStarred(article, starred: $0) })
                                           .equatable()
                                  }
                               }
@@ -625,7 +625,7 @@ private struct ScrolloverUndoPresentation: View {
 }
 
 struct ArticlePresentationView: View, Equatable {
-    let article: ArticleSummary
+    let content: ArticleRowContent
     let rowState: ArticleRowPresentationState?
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
@@ -637,18 +637,8 @@ struct ArticlePresentationView: View, Equatable {
     let onAction: (IOSArticleContextAction) -> Void
     let onSetRead: (Bool) -> Void
     let onSetStarred: (Bool) -> Void
-    @State private var horizontalOffset: CGFloat = 0
-    @State private var swipeState: IOSArticleSwipeState = .closed
-
-    private let swipeActionWidth: CGFloat = 76
-    private let swipeRevealThreshold: CGFloat = 38
-    private let swipeActionGap: CGFloat = 5
-    private let swipeActionCornerRadius: CGFloat = 13
-
-    // The list observes its snapshot, but Undo-only publications must not redraw
-    // rows whose article and presentation inputs have not changed.
     static func == (lhs: ArticlePresentationView, rhs: ArticlePresentationView) -> Bool {
-        lhs.article == rhs.article &&
+        lhs.content == rhs.content &&
             lhs.rowState === rhs.rowState &&
             lhs.mode == rhs.mode &&
             lhs.previewLines == rhs.previewLines &&
@@ -658,94 +648,97 @@ struct ArticlePresentationView: View, Equatable {
     }
 
     var body: some View {
-        ZStack {
-            swipeActionBackground
-            Group {
-                switch mode {
-                case .visual: visual
-                case .compact: compact
-                }
+        ArticleRowStateInteractions(content: content, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon, onTap: onTap, onAction: onAction, onSetRead: onSetRead, onSetStarred: onSetStarred)
+    }
+}
+
+private struct ArticleRowStateInteractions: View {
+    let content: ArticleRowContent
+    let rowState: ArticleRowPresentationState?
+    let mode: ArticlePresentationMode
+    let previewLines: ArticlePreviewLines
+    let availableWidth: CGFloat
+    let feedIcon: IOSFeedIconPresentationState
+    let onRequestFeedIcon: () -> Void
+    let onTap: () -> Void
+    let onAction: (IOSArticleContextAction) -> Void
+    let onSetRead: (Bool) -> Void
+    let onSetStarred: (Bool) -> Void
+
+    var body: some View {
+        let isRead = rowState?.isRead ?? content.article.isRead
+        let isStarred = rowState?.isStarred ?? content.article.isStarred
+        ArticleRowSurface(content: content, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon, onTap: onTap, onSetRead: onSetRead, onSetStarred: onSetStarred)
+            .equatable()
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(content.article.title), \(content.article.feedTitle), \(content.publishedDate), \(isRead ? String(localized: "Read") : String(localized: "Unread"))\(isStarred ? String(localized: ", starred") : "")")
+            .accessibilityValue(isRead ? (isStarred ? String(localized: "Read, starred") : String(localized: "Read")) : (isStarred ? String(localized: "Unread, starred") : String(localized: "Unread")))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint(String(localized: "Opens the article"))
+            .modifier(IOSArticleSwipeAccessibilityModifier(actions: [isRead ? .unread : .read, isStarred ? .unstar : .star], perform: performSwipeAction))
+            .contextMenu {
+                Button { onSetStarred(!isStarred) } label: { Label(isStarred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: isStarred ? "star.slash" : "star") }
+                Button { onSetRead(!isRead) } label: { Label(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: isRead ? "envelope" : "envelope.open") }
+                Divider()
+                Button { onAction(.original) } label: { Label("Open Original", systemImage: "safari") }
+                Button { onAction(.reader) } label: { Label("Open in Reader", systemImage: "doc.text") }
+                Button { onAction(.miniflux) } label: { Label("Open in Miniflux", systemImage: "arrow.up.forward.app") }
+                if content.hasComments { Button { onAction(.comments) } label: { Label("Open Comments", systemImage: "bubble.left") } }
+                Button { onAction(.copyLink) } label: { Label("Copy Link", systemImage: "doc.on.doc") }
+                Button { onAction(.share) } label: { Label("Share", systemImage: "square.and.arrow.up") }
+                Divider()
+                Button { onAction(.saveToService) } label: { Label("Save to Third-Party Service", systemImage: "tray.and.arrow.down") }
             }
-            .contentShape(RoundedRectangle(cornerRadius: 16))
-            .onTapGesture(perform: onTap)
-            .frame(width: articleWidth, alignment: .leading)
-            .background(.background)
-            .offset(x: horizontalOffset)
-            .gesture(
-                IOSHorizontalArticleSwipeGesture(
-                    offset: $horizontalOffset,
-                    canBegin: canBeginSwipe,
-                    state: swipeStateForOffset,
-                    visibleOffset: visibleSwipeOffset,
-                    onStateChanged: updateSwipeState,
-                    onEnded: finishSwipe
-                )
-            )
+    }
+
+    private func performSwipeAction(_ action: IOSArticleSwipeAction) {
+        switch action.mutation {
+        case .read: onSetRead(!(rowState?.isRead ?? content.article.isRead))
+        case .starred: onSetStarred(!(rowState?.isStarred ?? content.article.isStarred))
+        }
+    }
+}
+
+private struct ArticleRowSurface: View, Equatable {
+    let content: ArticleRowContent
+    let rowState: ArticleRowPresentationState?
+    let mode: ArticlePresentationMode
+    let previewLines: ArticlePreviewLines
+    let availableWidth: CGFloat
+    let feedIcon: IOSFeedIconPresentationState
+    let onRequestFeedIcon: () -> Void
+    let onTap: () -> Void
+    let onSetRead: (Bool) -> Void
+    let onSetStarred: (Bool) -> Void
+    @State private var horizontalOffset: CGFloat = 0
+    @State private var swipeState: IOSArticleSwipeState = .closed
+    private let swipeActionWidth: CGFloat = 76
+    private let swipeRevealThreshold: CGFloat = 38
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.content == rhs.content && lhs.rowState === rhs.rowState && lhs.mode == rhs.mode && lhs.previewLines == rhs.previewLines && lhs.availableWidth == rhs.availableWidth && lhs.feedIcon === rhs.feedIcon
+    }
+
+    var body: some View {
+        ZStack {
+            ArticleSwipeActionBackground(rowState: rowState, fallbackRead: content.article.isRead, fallbackStarred: content.article.isStarred, horizontalOffset: horizontalOffset, swipeState: swipeState, onSetRead: onSetRead, onSetStarred: onSetStarred)
+            ArticleRowContentBody(content: content, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
+                .contentShape(RoundedRectangle(cornerRadius: 16))
+                .onTapGesture(perform: onTap)
+                .frame(width: articleWidth, alignment: .leading)
+                .background(.background)
+                .offset(x: horizontalOffset)
+                .gesture(IOSHorizontalArticleSwipeGesture(offset: $horizontalOffset, canBegin: { _, _ in true }, state: swipeStateForOffset, visibleOffset: visibleSwipeOffset, onStateChanged: updateSwipeState, onEnded: finishSwipe))
         }
         .frame(width: articleWidth, alignment: .leading)
         .clipped()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityValue(accessibilityValue)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint(String(localized: "Opens the article"))
-        .modifier(IOSArticleSwipeAccessibilityModifier(actions: swipeConfiguration.leading.actions + swipeConfiguration.trailing.actions, perform: performSwipeAction))
-        .contextMenu {
-            Button { onSetStarred(!isStarred) } label: {
-                Label(isStarred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: isStarred ? "star.slash" : "star")
-            }
-            Button { onSetRead(!isRead) } label: {
-                Label(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: isRead ? "envelope" : "envelope.open")
-            }
-            Divider()
-            Button { onAction(.original) } label: { Label("Open Original", systemImage: "safari") }
-            Button { onAction(.reader) } label: { Label("Open in Reader", systemImage: "doc.text") }
-            Button { onAction(.miniflux) } label: { Label("Open in Miniflux", systemImage: "arrow.up.forward.app") }
-            if IOSArticleContextMenuPolicy.commentsURL(article.commentsUrl) != nil {
-                Button { onAction(.comments) } label: { Label("Open Comments", systemImage: "bubble.left") }
-            }
-            Button { onAction(.copyLink) } label: { Label("Copy Link", systemImage: "doc.on.doc") }
-            Button { onAction(.share) } label: { Label("Share", systemImage: "square.and.arrow.up") }
-            Divider()
-            Button { onAction(.saveToService) } label: { Label("Save to Third-Party Service", systemImage: "tray.and.arrow.down") }
-        }
     }
 
-    private var swipeConfiguration: IOSArticleSwipeConfiguration {
-        .init(
-            leading: IOSArticleSwipeSideConfiguration(actions: [isRead ? .unread : .read]),
-            trailing: IOSArticleSwipeSideConfiguration(actions: [isStarred ? .unstar : .star])
-        )
-    }
-
-    private var fullSwipeDistance: CGFloat {
-        IOSArticleSwipeInteraction.fullSwipeDistance(actionWidth: swipeActionWidth)
-    }
-
-    private func swipeSide(for direction: IOSSwipeDirection) -> IOSArticleSwipeSideConfiguration {
-        direction == .right ? swipeConfiguration.leading : swipeConfiguration.trailing
-    }
-
-    private func canBeginSwipe(direction: IOSSwipeDirection, offset: CGFloat) -> Bool {
-        offset != 0 || !swipeSide(for: direction).actions.isEmpty
-    }
-
-    private func visibleSwipeOffset(_ effectiveOffset: CGFloat) -> CGFloat {
-        IOSArticleSwipeInteraction.visibleOffset(
-            effectiveOffset: effectiveOffset,
-            configuration: swipeConfiguration,
-            swipeActionWidth: fullSwipeDistance
-        )
-    }
-
-    private func swipeStateForOffset(_ effectiveOffset: CGFloat) -> IOSArticleSwipeState {
-        IOSArticleSwipeInteraction.state(
-            effectiveOffset: effectiveOffset,
-            configuration: swipeConfiguration,
-            fullSwipeDistance: fullSwipeDistance
-        )
-    }
-
+    private var articleWidth: CGFloat { ArticlePresentationLayout.boundedArticleWidth(availableWidth) }
+    private var swipeConfiguration: IOSArticleSwipeConfiguration { .init(leading: .init(actions: [.read]), trailing: .init(actions: [.star])) }
+    private var fullSwipeDistance: CGFloat { IOSArticleSwipeInteraction.fullSwipeDistance(actionWidth: swipeActionWidth) }
+    private func visibleSwipeOffset(_ offset: CGFloat) -> CGFloat { IOSArticleSwipeInteraction.visibleOffset(effectiveOffset: offset, configuration: swipeConfiguration, swipeActionWidth: fullSwipeDistance) }
+    private func swipeStateForOffset(_ offset: CGFloat) -> IOSArticleSwipeState { IOSArticleSwipeInteraction.state(effectiveOffset: offset, configuration: swipeConfiguration, fullSwipeDistance: fullSwipeDistance) }
     private func updateSwipeState(_ newState: IOSArticleSwipeState) {
         if IOSArticleSwipeInteraction.shouldTriggerArmedFeedback(from: swipeState, to: newState) {
             let feedback = UIImpactFeedbackGenerator(style: .medium)
@@ -765,158 +758,96 @@ struct ArticlePresentationView: View, Equatable {
         case .closed:
             horizontalOffset = 0
         case let .revealed(direction):
-            horizontalOffset = direction.sign * swipeActionWidth * CGFloat(swipeSide(for: direction).actions.count)
+            horizontalOffset = direction.sign * swipeActionWidth
         case let .fullSwipe(action):
             horizontalOffset = 0
-            performSwipeAction(action)
-        }
-    }
-
-    private var swipeActionBackground: some View {
-        HStack(spacing: 0) {
-            swipeActionButtons(swipeConfiguration.leading.actions, direction: .right)
-            Spacer(minLength: 0)
-            swipeActionButtons(Array(swipeConfiguration.trailing.actions.reversed()), direction: .left)
-        }
-    }
-
-    @ViewBuilder
-    private func swipeActionButtons(_ actions: [IOSArticleSwipeAction], direction: IOSSwipeDirection) -> some View {
-        HStack(spacing: 0) {
-            ForEach(Array(actions.enumerated()), id: \.element) { index, action in
-                let isOuterAction = isOuterAction(index: index, actionCount: actions.count, direction: direction)
-                let buttonWidth = actionWidth(actionCount: actions.count, isOuterAction: isOuterAction) - swipeActionGap
-                Button {
-                    horizontalOffset = 0
-                    performSwipeAction(action)
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: action.systemImage)
-                        Text(action.accessibilityLabel)
-                            .font(.caption2)
-                    }
-                    .frame(minWidth: buttonWidth, maxWidth: buttonWidth, maxHeight: .infinity)
-                    .foregroundStyle(.white)
-                    .background(action.tint)
-                    .scaleEffect(isOuterAction && isSwipeArmed(direction) ? 1.12 : 1)
-                    .animation(.easeOut(duration: 0.12), value: isSwipeArmed(direction))
-                }
-                .accessibilityLabel(action.accessibilityLabel)
+            switch action.mutation {
+            case .read: onSetRead(!(rowState?.isRead ?? content.article.isRead))
+            case .starred: onSetStarred(!(rowState?.isStarred ?? content.article.isStarred))
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: swipeActionCornerRadius, style: .continuous))
     }
+}
 
-    private func isOuterAction(index: Int, actionCount: Int, direction: IOSSwipeDirection) -> Bool {
-        if direction == .right { return index == actionCount - 1 }
-        return index == 0
+private struct ArticleSwipeActionBackground: View {
+    let rowState: ArticleRowPresentationState?
+    let fallbackRead: Bool
+    let fallbackStarred: Bool
+    let horizontalOffset: CGFloat
+    let swipeState: IOSArticleSwipeState
+    let onSetRead: (Bool) -> Void
+    let onSetStarred: (Bool) -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ArticleReadSwipeButton(rowState: rowState, fallback: fallbackRead, armed: swipeState == .fullSwipeArmed(.right), onSetRead: onSetRead)
+                .frame(width: max(76, horizontalOffset))
+            Spacer(minLength: 0)
+            ArticleStarSwipeButton(rowState: rowState, fallback: fallbackStarred, armed: swipeState == .fullSwipeArmed(.left), onSetStarred: onSetStarred)
+                .frame(width: max(76, -horizontalOffset))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
+}
 
-    private func actionWidth(actionCount: Int, isOuterAction: Bool) -> CGFloat {
-        guard isOuterAction else { return swipeActionWidth }
-        let progress = max(swipeActionWidth, abs(horizontalOffset))
-        let innerWidth = swipeActionWidth * CGFloat(max(0, actionCount - 1))
-        return max(swipeActionWidth, progress - innerWidth)
-    }
+private struct ArticleRowContentBody: View {
+    let content: ArticleRowContent
+    let rowState: ArticleRowPresentationState?
+    let mode: ArticlePresentationMode
+    let previewLines: ArticlePreviewLines
+    let availableWidth: CGFloat
+    let feedIcon: IOSFeedIconPresentationState
+    let onRequestFeedIcon: () -> Void
 
-    private func isSwipeArmed(_ direction: IOSSwipeDirection) -> Bool {
-        swipeState == .fullSwipeArmed(direction)
-    }
-
-    private func performSwipeAction(_ action: IOSArticleSwipeAction) {
-        switch action.mutation {
-        case let .read(value): onSetRead(value)
-        case let .starred(value): onSetStarred(value)
+    var body: some View {
+        switch mode {
+        case .visual:
+            if ArticlePresentationLayout.usesLandscapeVisual(mode: mode, availableWidth: availableWidth) {
+                landscapeVisual
+            } else {
+                portraitVisual
+            }
+        case .compact:
+            articleText
+                .padding(.vertical, 12)
+                .padding(.horizontal, 4)
+                .frame(width: contentWidth, alignment: .leading)
         }
     }
 
-    @ViewBuilder
-    private var visual: some View {
-        if ArticlePresentationLayout.usesLandscapeVisual(mode: mode, availableWidth: availableWidth) {
-            landscapeVisual
-        } else {
-            portraitVisual
-        }
-    }
-
+    private var articleWidth: CGFloat { ArticlePresentationLayout.boundedArticleWidth(availableWidth) }
+    private var contentWidth: CGFloat { ArticlePresentationLayout.articleContentWidth(articleWidth) }
+    private var portraitContentWidth: CGFloat { ArticlePresentationLayout.visualPortraitContentWidth(articleWidth) }
     private var portraitVisual: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let imageURL = article.imageUrl.flatMap(URL.init(string:)) {
-                ArticleImageView(
-                    url: imageURL,
-                    targetSize: CGSize(width: portraitContentWidth, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: portraitContentWidth))
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            if let imageURL = content.imageURL {
+                ArticleImageView(url: imageURL, targetSize: CGSize(width: portraitContentWidth, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: portraitContentWidth)))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            articleText
-                .frame(width: portraitContentWidth, alignment: .leading)
+            articleText.frame(width: portraitContentWidth, alignment: .leading)
         }
         .frame(width: portraitContentWidth, alignment: .leading)
     }
-
     private var landscapeVisual: some View {
         HStack(alignment: .top, spacing: 14) {
             let imageWidth = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
-            if let imageURL = article.imageUrl.flatMap(URL.init(string:)) {
-                ArticleImageView(
-                    url: imageURL,
-                    targetSize: CGSize(width: imageWidth, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: imageWidth))
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            if let imageURL = content.imageURL {
+                ArticleImageView(url: imageURL, targetSize: CGSize(width: imageWidth, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: imageWidth)))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            articleText
-                .frame(width: hasImage ? ArticlePresentationLayout.landscapeTextWidth(availableWidth: availableWidth, imageWidth: imageWidth, interColumnSpacing: 14) : contentWidth, alignment: .leading)
+            articleText.frame(width: content.imageURL == nil ? contentWidth : ArticlePresentationLayout.landscapeTextWidth(availableWidth: availableWidth, imageWidth: imageWidth, interColumnSpacing: 14), alignment: .leading)
         }
         .frame(width: contentWidth, alignment: .leading)
-        //.padding(12)
-        //.background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
-
-    private var compact: some View {
-        HStack(alignment: .top, spacing: 12) {
-            articleText
-        }
-        .frame(width: contentWidth, alignment: .leading)
-        .padding(.vertical, 12)
-        .padding(.horizontal, 4)
-    }
-
-    private var articleWidth: CGFloat {
-        ArticlePresentationLayout.boundedArticleWidth(availableWidth)
-    }
-
-    private var contentWidth: CGFloat {
-        ArticlePresentationLayout.articleContentWidth(articleWidth)
-    }
-
-    private var portraitContentWidth: CGFloat {
-        ArticlePresentationLayout.visualPortraitContentWidth(articleWidth)
-    }
-
-    private var hasImage: Bool {
-        article.imageUrl.flatMap(URL.init(string:)) != nil
-    }
-
     private var articleText: some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(article.title)
-                    .font(.headline)
-                    .foregroundStyle(isRead ? .secondary : .primary)
-                    .multilineTextAlignment(.leading)
-                Spacer(minLength: 0)
-                if isStarred {
-                    Image(systemName: "star.fill")
-                        .foregroundStyle(.yellow)
-                        .accessibilityLabel(String(localized: "Starred"))
-                }
-            }
+            ArticleTitlePresentation(title: content.article.title, rowState: rowState, fallbackRead: content.article.isRead, fallbackStarred: content.article.isStarred)
             ViewThatFits(in: .horizontal) {
-                metadataRow
-                metadataColumn
+                ArticleMetadataRow(content: content, rowState: rowState, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
+                ArticleMetadataColumn(content: content, rowState: rowState, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
             }
-            if !article.preview.isEmpty {
-                Text(article.preview)
+            if !content.article.preview.isEmpty {
+                Text(content.article.preview)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(previewLines.rawValue)
@@ -924,31 +855,44 @@ struct ArticlePresentationView: View, Equatable {
             }
         }
     }
+}
 
-    private var date: String {
-        ISO8601DateFormatter().date(from: article.publishedAt).map { $0.formatted(date: .abbreviated, time: .shortened) } ?? article.publishedAt
-    }
-
-    private var accessibilityLabel: String {
-        let state = isRead ? String(localized: "Read") : String(localized: "Unread")
-        let star = isStarred ? String(localized: ", starred") : ""
-        return "\(article.title), \(article.feedTitle), \(date), \(state)\(star)"
-    }
-
-    private var accessibilityValue: String {
-        if isRead {
-            return isStarred ? String(localized: "Read, starred") : String(localized: "Read")
+private struct ArticleTitlePresentation: View {
+    let title: String
+    let rowState: ArticleRowPresentationState?
+    let fallbackRead: Bool
+    let fallbackStarred: Bool
+    var body: some View {
+        let isRead = rowState?.isRead ?? fallbackRead
+        let isStarred = rowState?.isStarred ?? fallbackStarred
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(isRead ? .secondary : .primary)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+            if isStarred {
+                Image(systemName: "star.fill")
+                    .foregroundStyle(.yellow)
+                    .accessibilityLabel(String(localized: "Starred"))
+            }
         }
-        return isStarred ? String(localized: "Unread, starred") : String(localized: "Unread")
     }
+}
 
-    private var metadataRow: some View {
+private struct ArticleMetadataRow: View {
+    let content: ArticleRowContent
+    let rowState: ArticleRowPresentationState?
+    let feedIcon: IOSFeedIconPresentationState
+    let onRequestFeedIcon: () -> Void
+
+    var body: some View {
         HStack(spacing: 6) {
-            unreadIndicator
-            FeedIconView(feedID: article.feedId, title: article.feedTitle, state: feedIcon, onRequest: onRequestFeedIcon)
-            Text(article.feedTitle).font(.subheadline.weight(.medium))
+            ArticleUnreadIndicator(rowState: rowState, fallback: content.article.isRead)
+            FeedIconView(feedID: content.article.feedId, title: content.article.feedTitle, state: feedIcon, onRequest: onRequestFeedIcon)
+            Text(content.article.feedTitle).font(.subheadline.weight(.medium))
             Text("•")
-            Text(date)
+            Text(content.publishedDate)
             commentsIndicator
         }
         .foregroundStyle(.secondary)
@@ -956,39 +900,85 @@ struct ArticlePresentationView: View, Equatable {
         .lineLimit(1)
     }
 
-    private var metadataColumn: some View {
+    @ViewBuilder private var commentsIndicator: some View {
+        if content.hasComments { Image(systemName: "bubble.left").accessibilityLabel(String(localized: "Comments available")) }
+    }
+}
+
+private struct ArticleMetadataColumn: View {
+    let content: ArticleRowContent
+    let rowState: ArticleRowPresentationState?
+    let feedIcon: IOSFeedIconPresentationState
+    let onRequestFeedIcon: () -> Void
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                unreadIndicator
-                FeedIconView(feedID: article.feedId, title: article.feedTitle, state: feedIcon, onRequest: onRequestFeedIcon)
-                Text(article.feedTitle).font(.subheadline.weight(.medium))
-                commentsIndicator
+                ArticleUnreadIndicator(rowState: rowState, fallback: content.article.isRead)
+                FeedIconView(feedID: content.article.feedId, title: content.article.feedTitle, state: feedIcon, onRequest: onRequestFeedIcon)
+                Text(content.article.feedTitle).font(.subheadline.weight(.medium))
+                if content.hasComments { Image(systemName: "bubble.left").accessibilityLabel(String(localized: "Comments available")) }
             }
-            Text(date)
+            Text(content.publishedDate)
         }
         .foregroundStyle(.secondary)
         .font(.caption)
     }
+}
 
-    @ViewBuilder
-    private var commentsIndicator: some View {
-        if IOSArticleContextMenuPolicy.commentsURL(article.commentsUrl) != nil {
-            Image(systemName: "bubble.left")
-                .accessibilityLabel(String(localized: "Comments available"))
-        }
-    }
+private struct ArticleUnreadIndicator: View {
+    let rowState: ArticleRowPresentationState?
+    let fallback: Bool
 
-    @ViewBuilder
-    private var unreadIndicator: some View {
+    var body: some View {
         Circle()
             .fill(Color.accentColor)
             .frame(width: 6, height: 6)
-            .opacity(ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: isRead))
+            .opacity(ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: rowState?.isRead ?? fallback))
             .accessibilityHidden(true)
     }
+}
 
-    private var isRead: Bool { rowState?.isRead ?? article.isRead }
-    private var isStarred: Bool { rowState?.isStarred ?? article.isStarred }
+private struct ArticleReadSwipeButton: View {
+    let rowState: ArticleRowPresentationState?
+    let fallback: Bool
+    let armed: Bool
+    let onSetRead: (Bool) -> Void
+
+    var body: some View {
+        let isRead = rowState?.isRead ?? fallback
+        Button { onSetRead(!isRead) } label: {
+            swipeLabel(systemImage: isRead ? "envelope" : "envelope.open", title: isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), tint: .blue, armed: armed)
+        }
+        .accessibilityLabel(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"))
+    }
+}
+
+private struct ArticleStarSwipeButton: View {
+    let rowState: ArticleRowPresentationState?
+    let fallback: Bool
+    let armed: Bool
+    let onSetStarred: (Bool) -> Void
+
+    var body: some View {
+        let isStarred = rowState?.isStarred ?? fallback
+        Button { onSetStarred(!isStarred) } label: {
+            swipeLabel(systemImage: isStarred ? "star.slash" : "star", title: isStarred ? String(localized: "Unstar") : String(localized: "Star"), tint: .orange, armed: armed)
+        }
+        .accessibilityLabel(isStarred ? String(localized: "Unstar") : String(localized: "Star"))
+    }
+}
+
+private func swipeLabel(systemImage: String, title: String, tint: Color, armed: Bool) -> some View {
+    VStack(spacing: 4) {
+        Image(systemName: systemImage)
+        Text(title).font(.caption2)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .foregroundStyle(.white)
+    .background(tint)
+    .scaleEffect(armed ? 1.12 : 1)
+    .animation(.easeOut(duration: 0.12), value: armed)
 }
 
 struct FeedIconView: View {
@@ -1000,7 +990,7 @@ struct FeedIconView: View {
 
     var body: some View {
         Group {
-            if let image = state.data.flatMap(UIImage.init(data:)) {
+            if let image = state.image {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
