@@ -486,10 +486,11 @@ struct ArticleListView: View {
                             availableWidth: proxy.size.width - horizontalInset * 2) ? 20 : 26
                                ScrollView {
                                LazyVStack(spacing: articleSpacing) {
-                                 ForEach(store.articles, id: \.id) { article in
-                                       let iconVariant = IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)
-                                       let feedIcon = store.feedIcons[IOSFeedIconKey(feedID: article.feedId, variant: iconVariant)]
-                                       ArticlePresentationView(article: article, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIconData: feedIcon, iconVariant: iconVariant, onRequestFeedIcon: { store.requestFeedIcon(article.feedId, variant: iconVariant) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { article, read in store.setRead(article, read: read) }, onSetStarred: { article, starred in store.setStarred(article, starred: starred) })
+                                  ForEach(store.articles, id: \.id) { article in
+                                        let rowState = store.rowPresentationState(for: article)
+                                        let iconVariant = IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)
+                                        let feedIcon = store.feedIcons[IOSFeedIconKey(feedID: article.feedId, variant: iconVariant)]
+                                        ArticlePresentationView(article: article, rowState: rowState, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIconData: feedIcon, iconVariant: iconVariant, onRequestFeedIcon: { store.requestFeedIcon(article.feedId, variant: iconVariant) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { store.setRead(article, read: $0) }, onSetStarred: { store.setStarred(article, starred: $0) })
                                           .equatable()
                                  }
                               }
@@ -625,6 +626,7 @@ private struct ScrolloverUndoPresentation: View {
 
 struct ArticlePresentationView: View, Equatable {
     let article: ArticleSummary
+    let rowState: ArticleRowPresentationState?
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
     let availableWidth: CGFloat
@@ -633,8 +635,8 @@ struct ArticlePresentationView: View, Equatable {
     let onRequestFeedIcon: () -> Void
     let onTap: () -> Void
     let onAction: (IOSArticleContextAction) -> Void
-    let onSetRead: (ArticleSummary, Bool) -> Void
-    let onSetStarred: (ArticleSummary, Bool) -> Void
+    let onSetRead: (Bool) -> Void
+    let onSetStarred: (Bool) -> Void
     @State private var horizontalOffset: CGFloat = 0
     @State private var swipeState: IOSArticleSwipeState = .closed
 
@@ -647,6 +649,7 @@ struct ArticlePresentationView: View, Equatable {
     // rows whose article and presentation inputs have not changed.
     static func == (lhs: ArticlePresentationView, rhs: ArticlePresentationView) -> Bool {
         lhs.article == rhs.article &&
+            lhs.rowState === rhs.rowState &&
             lhs.mode == rhs.mode &&
             lhs.previewLines == rhs.previewLines &&
             lhs.availableWidth == rhs.availableWidth &&
@@ -688,11 +691,11 @@ struct ArticlePresentationView: View, Equatable {
         .accessibilityHint(String(localized: "Opens the article"))
         .modifier(IOSArticleSwipeAccessibilityModifier(actions: swipeConfiguration.leading.actions + swipeConfiguration.trailing.actions, perform: performSwipeAction))
         .contextMenu {
-            Button { onAction(.starred) } label: {
-                Label(article.isStarred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: article.isStarred ? "star.slash" : "star")
+            Button { onSetStarred(!isStarred) } label: {
+                Label(isStarred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: isStarred ? "star.slash" : "star")
             }
-            Button { onAction(.read) } label: {
-                Label(article.isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: article.isRead ? "envelope" : "envelope.open")
+            Button { onSetRead(!isRead) } label: {
+                Label(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: isRead ? "envelope" : "envelope.open")
             }
             Divider()
             Button { onAction(.original) } label: { Label("Open Original", systemImage: "safari") }
@@ -709,7 +712,10 @@ struct ArticlePresentationView: View, Equatable {
     }
 
     private var swipeConfiguration: IOSArticleSwipeConfiguration {
-        .default(for: article)
+        .init(
+            leading: IOSArticleSwipeSideConfiguration(actions: [isRead ? .unread : .read]),
+            trailing: IOSArticleSwipeSideConfiguration(actions: [isStarred ? .unstar : .star])
+        )
     }
 
     private var fullSwipeDistance: CGFloat {
@@ -819,8 +825,8 @@ struct ArticlePresentationView: View, Equatable {
 
     private func performSwipeAction(_ action: IOSArticleSwipeAction) {
         switch action.mutation {
-        case let .read(value): onSetRead(article, value)
-        case let .starred(value): onSetStarred(article, value)
+        case let .read(value): onSetRead(value)
+        case let .starred(value): onSetStarred(value)
         }
     }
 
@@ -896,10 +902,10 @@ struct ArticlePresentationView: View, Equatable {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(article.title)
                     .font(.headline)
-                    .foregroundStyle(article.isRead ? .secondary : .primary)
+                    .foregroundStyle(isRead ? .secondary : .primary)
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
-                if article.isStarred {
+                if isStarred {
                     Image(systemName: "star.fill")
                         .foregroundStyle(.yellow)
                         .accessibilityLabel(String(localized: "Starred"))
@@ -924,16 +930,16 @@ struct ArticlePresentationView: View, Equatable {
     }
 
     private var accessibilityLabel: String {
-        let state = article.isRead ? String(localized: "Read") : String(localized: "Unread")
-        let star = article.isStarred ? String(localized: ", starred") : ""
+        let state = isRead ? String(localized: "Read") : String(localized: "Unread")
+        let star = isStarred ? String(localized: ", starred") : ""
         return "\(article.title), \(article.feedTitle), \(date), \(state)\(star)"
     }
 
     private var accessibilityValue: String {
-        if article.isRead {
-            return article.isStarred ? String(localized: "Read, starred") : String(localized: "Read")
+        if isRead {
+            return isStarred ? String(localized: "Read, starred") : String(localized: "Read")
         }
-        return article.isStarred ? String(localized: "Unread, starred") : String(localized: "Unread")
+        return isStarred ? String(localized: "Unread, starred") : String(localized: "Unread")
     }
 
     private var metadataRow: some View {
@@ -977,9 +983,12 @@ struct ArticlePresentationView: View, Equatable {
         Circle()
             .fill(Color.accentColor)
             .frame(width: 6, height: 6)
-            .opacity(ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: article.isRead))
+            .opacity(ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: isRead))
             .accessibilityHidden(true)
     }
+
+    private var isRead: Bool { rowState?.isRead ?? article.isRead }
+    private var isStarred: Bool { rowState?.isStarred ?? article.isStarred }
 }
 
 struct FeedIconView: View {

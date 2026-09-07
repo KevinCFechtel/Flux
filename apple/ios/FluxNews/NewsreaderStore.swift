@@ -109,6 +109,34 @@ private struct IOSPendingScrolloverPresentation {
     let completedAt: TimeInterval
 }
 
+@Observable final class ArticleRowPresentationState {
+    var isRead: Bool
+    var isStarred: Bool
+    private(set) var mutationRevision: UInt64 = 0
+
+    init(article: ArticleSummary) {
+        isRead = article.isRead
+        isStarred = article.isStarred
+    }
+
+    func setRead(_ value: Bool) {
+        guard isRead != value else { return }
+        isRead = value
+        mutationRevision &+= 1
+    }
+
+    func setStarred(_ value: Bool) {
+        guard isStarred != value else { return }
+        isStarred = value
+        mutationRevision &+= 1
+    }
+
+    func reconcile(with article: ArticleSummary) {
+        setRead(article.isRead)
+        setStarred(article.isStarred)
+    }
+}
+
 @MainActor
 @Observable final class NewsreaderStore {
 #if DEBUG
@@ -128,6 +156,7 @@ private struct IOSPendingScrolloverPresentation {
     }
 
     private(set) var articles: [ArticleSummary] = []
+    @ObservationIgnored private var rowPresentationStates: [Int64: ArticleRowPresentationState] = [:]
     private(set) var catalog = NavigationCatalog(categories: [], feeds: [])
     private(set) var unreadTotal: UInt64 = 0
     private(set) var starredTotal: UInt64 = 0
@@ -174,6 +203,7 @@ private struct IOSPendingScrolloverPresentation {
     private var scrolloverCountsPending = false
     private var pendingScrolloverIDs: [Int64] = []
     private var pendingScrolloverIDSet = Set<Int64>()
+    @ObservationIgnored private var pendingScrolloverPresentationRevisions: [Int64: UInt64] = [:]
     private var scrolloverMutationRunning = false
     private var scrolloverQueueGeneration: UInt64 = 0
     private var scrolloverPresentationPhase: IOSScrolloverPresentationPhase = .idle
@@ -219,7 +249,7 @@ private struct IOSPendingScrolloverPresentation {
         readLifecycle.invalidateSession()
         eventSubscription = nil
         core = nil
-        articles = []
+        replaceArticles([])
         catalog = NavigationCatalog(categories: [], feeds: [])
         unreadTotal = 0
         starredTotal = 0
@@ -299,7 +329,7 @@ private struct IOSPendingScrolloverPresentation {
             guard let self, self.readLifecycle.isCurrentArticle(request), self.readLifecycle.isCurrentSelectionCount(request) else { return }
             switch result {
             case let .success(value):
-                articles = value.articles
+                replaceArticles(value.articles)
                 selectionTotal = value.selectionTotal
                 if acknowledgePending { acknowledgePendingForCurrentScope() }
                 if resetSnapshot { snapshotRevision &+= 1 }
@@ -490,28 +520,40 @@ private struct IOSPendingScrolloverPresentation {
 
     func setRead(articleIDs: [Int64], read: Bool) {
         guard let core, !articleIDs.isEmpty else { return }
+        let revisions = optimisticallySetRead(articleIDs, read: read)
+        let snapshotRevision = snapshotRevision
         Task { [weak self, core] in
             let result = await Task.detached { Result { try core.setReadStateBulk(articleIds: articleIDs, read: read) } }.value
             guard let self else { return }
             switch result {
-            case .success: markMeaningfulInteraction(); updateVisibleRead(articleIDs, read: read); reloadCounts(includeNavigationCounts: true)
-            case let .failure(error): errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
+            case .success:
+                markMeaningfulInteraction()
+                if snapshotRevision == self.snapshotRevision && read && ArticleListPresentationPolicy.removesMarkedReadArticle(removeWhenMarkedRead: removeArticlesWhenMarkedRead, unreadOnly: unreadOnly, scope: scope) {
+                    removeVisibleArticles(articleIDs)
+                }
+                reloadCounts(includeNavigationCounts: true)
+            case let .failure(error):
+                restoreReadPresentation(articleIDs, revisions: revisions, snapshotRevision: snapshotRevision)
+                errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
             }
         }
     }
 
     func setStarred(articleIDs: [Int64], starred: Bool) {
         guard let core, !articleIDs.isEmpty else { return }
+        let revisions = optimisticallySetStarred(articleIDs, starred: starred)
+        let snapshotRevision = snapshotRevision
         Task { [weak self, core] in
             let result = await Task.detached { Result { try core.setStarredStateBulk(articleIds: articleIDs, starred: starred) } }.value
             guard let self else { return }
             switch result {
             case .success:
                 markMeaningfulInteraction()
-                if !starred && scope == .starred { articles.removeAll { articleIDs.contains($0.id) } }
-                else { updateVisible(articleIDs) { $0.isStarred = starred } }
+                if snapshotRevision == self.snapshotRevision && !starred && scope == .starred { removeVisibleArticles(articleIDs) }
                 reloadCounts(includeNavigationCounts: true)
-            case let .failure(error): errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
+            case let .failure(error):
+                restoreStarredPresentation(articleIDs, revisions: revisions, snapshotRevision: snapshotRevision)
+                errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
             }
         }
     }
@@ -520,6 +562,10 @@ private struct IOSPendingScrolloverPresentation {
         guard core != nil else { return }
         let ids = eligibleScrolloverIDs(batch.articleIDs)
         for id in ids {
+            if let state = rowPresentationStates[id] {
+                state.setRead(true)
+                pendingScrolloverPresentationRevisions[id] = state.mutationRevision
+            }
             pendingScrolloverIDSet.insert(id)
             pendingScrolloverIDs.append(id)
         }
@@ -549,10 +595,14 @@ private struct IOSPendingScrolloverPresentation {
                 completeSuccessfulScrolloverMutation(ids, generation: generation)
                 scrolloverDiagnostic("mutation success ids=\(ids)")
             case let .failure(error):
-                errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
+                restoreScrolloverPresentation(ids, generation: generation)
+                if generation == scrolloverQueueGeneration {
+                    errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
+                }
                 scrolloverDiagnosticError(ids: ids, error: error)
             }
             pendingScrolloverIDSet.subtract(ids)
+            for id in ids { pendingScrolloverPresentationRevisions[id] = nil }
             scrolloverMutationRunning = false
             reloadScrolloverCountsIfReady()
             drainScrolloverMutations()
@@ -585,7 +635,6 @@ private struct IOSPendingScrolloverPresentation {
     }
 
     private func publishSuccessfulScrolloverMutation(_ result: IOSPendingScrolloverPresentation) {
-        applySuccessfulScrolloverRead(result.ids)
         recordSuccessfulScrolloverUndo(result.ids, now: result.completedAt)
     }
 
@@ -690,7 +739,7 @@ private struct IOSPendingScrolloverPresentation {
 
     func accumulateNewData(_ additions: [(feedID: Int64, count: UInt32)]) { pending.accumulate(additions); publishPending() }
     func adoptVisibleSnapshot() { acknowledgePendingForCurrentScope(); hasUnscopedNewDataSignal = false; resetPresentationState(); replaceSnapshot(shouldResetScroll: true) }
-    func resetVisibleSnapshot() { articles = []; selectionTotal = 0; resetPresentationState() }
+    func resetVisibleSnapshot() { replaceArticles([]); selectionTotal = 0; resetPresentationState() }
 
     private func acknowledgePendingForCurrentScope() {
         switch scope {
@@ -725,7 +774,9 @@ private struct IOSPendingScrolloverPresentation {
         scrolloverCountsPending = false
         pendingScrolloverIDs = []
         pendingScrolloverIDSet = []
+        pendingScrolloverPresentationRevisions = [:]
         pendingScrolloverPresentation = []
+        for article in articles { rowPresentationStates[article.id]?.reconcile(with: article) }
         scrolloverPresentationPhase = .idle
         scrolloverQueueGeneration &+= 1
     }
@@ -774,29 +825,83 @@ private struct IOSPendingScrolloverPresentation {
     }
 
     private func updateVisibleRead(_ ids: [Int64], read: Bool, removeFromVisibleList: Bool = true) {
-        let ids = Set(ids)
         let removesReadArticles = ArticleListPresentationPolicy.removesMarkedReadArticle(removeWhenMarkedRead: removeArticlesWhenMarkedRead, unreadOnly: unreadOnly, scope: scope)
         if read && removeFromVisibleList && removesReadArticles {
-            updateVisible(Array(ids)) { $0.isRead = true }
-            articles.removeAll { ids.contains($0.id) }
-            snapshotRevision &+= 1
-        } else { updateVisible(Array(ids)) { $0.isRead = read } }
-    }
-
-    // Scrollover is a presentation-only read-state update: it never changes list membership.
-    private func applySuccessfulScrolloverRead(_ ids: [Int64]) {
-        updateVisible(ids) { $0.isRead = true }
+            _ = optimisticallySetRead(ids, read: true)
+            removeVisibleArticles(ids)
+        } else { _ = optimisticallySetRead(ids, read: read) }
     }
 
     private func eligibleScrolloverIDs(_ ids: [Int64]) -> [Int64] {
         ids.filter { id in
-            !pendingScrolloverIDSet.contains(id) && articles.contains { $0.id == id && !$0.isRead }
+            !pendingScrolloverIDSet.contains(id) && rowPresentationStates[id]?.isRead == false
         }
     }
 
-    private func updateVisible(_ ids: [Int64], _ change: (inout ArticleSummary) -> Void) {
+    private func replaceArticles(_ value: [ArticleSummary]) {
+        articles = value
+        let currentIDs = Set(value.map(\.id))
+        rowPresentationStates = rowPresentationStates.filter { currentIDs.contains($0.key) }
+        for article in value {
+            if let state = rowPresentationStates[article.id] {
+                state.reconcile(with: article)
+            } else {
+                rowPresentationStates[article.id] = ArticleRowPresentationState(article: article)
+            }
+        }
+    }
+
+    func rowPresentationState(for article: ArticleSummary) -> ArticleRowPresentationState {
+        if let state = rowPresentationStates[article.id] { return state }
+        let state = ArticleRowPresentationState(article: article)
+        rowPresentationStates[article.id] = state
+        return state
+    }
+
+    private func optimisticallySetRead(_ ids: [Int64], read: Bool) -> [Int64: UInt64] {
+        var revisions: [Int64: UInt64] = [:]
+        for id in ids where rowPresentationStates[id] != nil {
+            rowPresentationStates[id]?.setRead(read)
+            revisions[id] = rowPresentationStates[id]?.mutationRevision
+        }
+        return revisions
+    }
+
+    private func optimisticallySetStarred(_ ids: [Int64], starred: Bool) -> [Int64: UInt64] {
+        var revisions: [Int64: UInt64] = [:]
+        for id in ids where rowPresentationStates[id] != nil {
+            rowPresentationStates[id]?.setStarred(starred)
+            revisions[id] = rowPresentationStates[id]?.mutationRevision
+        }
+        return revisions
+    }
+
+    private func restoreReadPresentation(_ ids: [Int64], revisions: [Int64: UInt64], snapshotRevision: UInt64) {
+        guard self.snapshotRevision == snapshotRevision else { return }
+        for id in ids where rowPresentationStates[id]?.mutationRevision == revisions[id] {
+            if let article = articles.first(where: { $0.id == id }) { rowPresentationStates[id]?.setRead(article.isRead) }
+        }
+    }
+
+    private func restoreStarredPresentation(_ ids: [Int64], revisions: [Int64: UInt64], snapshotRevision: UInt64) {
+        guard self.snapshotRevision == snapshotRevision else { return }
+        for id in ids where rowPresentationStates[id]?.mutationRevision == revisions[id] {
+            if let article = articles.first(where: { $0.id == id }) { rowPresentationStates[id]?.setStarred(article.isStarred) }
+        }
+    }
+
+    private func restoreScrolloverPresentation(_ ids: [Int64], generation: UInt64) {
+        guard generation == scrolloverQueueGeneration else { return }
+        for id in ids where rowPresentationStates[id]?.mutationRevision == pendingScrolloverPresentationRevisions[id] {
+            if let article = articles.first(where: { $0.id == id }) { rowPresentationStates[id]?.setRead(article.isRead) }
+        }
+    }
+
+    private func removeVisibleArticles(_ ids: [Int64]) {
         let ids = Set(ids)
-        for index in articles.indices where ids.contains(articles[index].id) { change(&articles[index]) }
+        guard articles.contains(where: { ids.contains($0.id) }) else { return }
+        replaceArticles(articles.filter { !ids.contains($0.id) })
+        snapshotRevision &+= 1
     }
 
     private var unconfiguredError: IOSCoreError { .notConfigured }
@@ -844,12 +949,13 @@ private struct IOSPendingScrolloverPresentation {
 
     // Narrow seam for deterministic iOS mutation-state tests without a live Core.
     @MainActor
-    func setArticlesForTesting(_ value: [ArticleSummary]) { articles = value }
+    func setArticlesForTesting(_ value: [ArticleSummary]) { replaceArticles(value) }
     @MainActor
     func applyReadMutationForTesting(_ ids: [Int64], read: Bool) { markMeaningfulInteraction(); updateVisibleRead(ids, read: read) }
     @MainActor
     func applyScrolloverMutationForTesting(_ ids: [Int64], now: TimeInterval = 0) {
         let eligible = eligibleScrolloverIDs(ids)
+        _ = optimisticallySetRead(eligible, read: true)
         completeSuccessfulScrolloverMutation(eligible, generation: scrolloverQueueGeneration, completedAt: now)
     }
     @MainActor
@@ -871,6 +977,10 @@ private struct IOSPendingScrolloverPresentation {
     @MainActor
     func enqueueScrolloverForTesting(_ ids: [Int64]) -> [Int64] {
         let eligible = eligibleScrolloverIDs(ids)
+        for id in eligible {
+            rowPresentationStates[id]?.setRead(true)
+            pendingScrolloverPresentationRevisions[id] = rowPresentationStates[id]?.mutationRevision
+        }
         pendingScrolloverIDSet.formUnion(eligible)
         pendingScrolloverIDs.append(contentsOf: eligible)
         return eligible
@@ -882,12 +992,20 @@ private struct IOSPendingScrolloverPresentation {
         return ids
     }
     @MainActor
+    func failScrolloverMutationForTesting(_ ids: [Int64], generation: UInt64? = nil) {
+        restoreScrolloverPresentation(ids, generation: generation ?? scrolloverQueueGeneration)
+        for id in ids {
+            pendingScrolloverIDSet.remove(id)
+            pendingScrolloverPresentationRevisions[id] = nil
+        }
+    }
+    @MainActor
     func expireScrolloverUndoGroupForTesting(now: TimeInterval) { expireScrolloverUndoGroup(now: now) }
     @MainActor
     func applyStarredMutationForTesting(_ ids: [Int64], starred: Bool) {
         markMeaningfulInteraction()
-        if !starred && scope == .starred { articles.removeAll { ids.contains($0.id) } }
-        else { updateVisible(ids) { $0.isStarred = starred } }
+        _ = optimisticallySetStarred(ids, starred: starred)
+        if !starred && scope == .starred { removeVisibleArticles(ids) }
     }
     @MainActor
     func completeSyncForTesting(_ metadata: SyncCompleted) { handleSyncCompleted(metadata) }
@@ -903,6 +1021,12 @@ private struct IOSPendingScrolloverPresentation {
     func setCatalogForTesting(_ value: NavigationCatalog) { catalog = value }
     @MainActor
     func setSelectionTotalForTesting(_ value: UInt64) { selectionTotal = value }
+    @MainActor
+    func rowPresentationStateForTesting(_ id: Int64) -> ArticleRowPresentationState? { rowPresentationStates[id] }
+    @MainActor
+    func isArticleReadForTesting(_ id: Int64) -> Bool? { rowPresentationStates[id]?.isRead }
+    @MainActor
+    func isArticleStarredForTesting(_ id: Int64) -> Bool? { rowPresentationStates[id]?.isStarred }
 
     private func reloadCounts(includeNavigationCounts: Bool = false) {
         guard let core else { return }

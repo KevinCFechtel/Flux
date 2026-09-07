@@ -262,7 +262,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testArticleListDependenciesInvalidateForScrolloverReadStateChange() {
+    func testRowReadStateDoesNotInvalidateTheStructuralArticleSnapshot() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setArticlesForTesting([.init(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "", imageUrl: nil)])
         let articleListInvalidated = ObservationFlag()
@@ -273,10 +273,11 @@ final class NewsreaderPresentationTests: XCTestCase {
             MainActor.assumeIsolated { articleListInvalidated.value = true }
         }
 
-        store.applyScrolloverMutationForTesting([1])
+        let rowState = store.rowPresentationStateForTesting(1)!
+        rowState.setRead(true)
 
-        XCTAssertTrue(articleListInvalidated.value)
-        XCTAssertTrue(store.articles[0].isRead)
+        XCTAssertFalse(articleListInvalidated.value)
+        XCTAssertTrue(rowState.isRead)
     }
 
     func testScrolloverUndoFeedbackTriggersOnlyForNewlyVisiblePresentation() {

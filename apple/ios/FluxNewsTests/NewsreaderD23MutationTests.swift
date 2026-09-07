@@ -6,6 +6,11 @@ final class NewsreaderD23MutationTests: XCTestCase {
         ArticleSummary(id: id, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article \(id)", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: read, isStarred: starred, preview: "Preview", imageUrl: nil)
     }
 
+    @MainActor
+    private func readStates(_ store: NewsreaderStore) -> [Bool] {
+        store.articles.compactMap { store.isArticleReadForTesting($0.id) }
+    }
+
     func testInitialVisibleTargetsEstablishABaseline() {
         var tracker = IOSScrolloverOrderTracker()
         tracker.updateSnapshot([1, 2, 3])
@@ -98,9 +103,52 @@ final class NewsreaderD23MutationTests: XCTestCase {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setArticlesForTesting((1...4).map { article(Int64($0)) })
         store.applyScrolloverMutationForTesting([1])
-        XCTAssertTrue(store.articles[0].isRead)
+        XCTAssertEqual(store.isArticleReadForTesting(1), true)
         XCTAssertFalse(store.scrolloverUndoVisible)
         XCTAssertTrue(store.scrolloverUndoIDs.isEmpty)
+    }
+
+    @MainActor
+    func testScrolloverAcceptanceImmediatelyUpdatesOnlyTheCrossedRow() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2), article(3)])
+        let structuralRevision = store.snapshotRevision
+        let unchangedRow = store.rowPresentationStateForTesting(2)!
+
+        XCTAssertEqual(store.enqueueScrolloverForTesting([1]), [1])
+
+        XCTAssertEqual(store.isArticleReadForTesting(1), true)
+        XCTAssertEqual(store.isArticleReadForTesting(2), false)
+        XCTAssertEqual(store.snapshotRevision, structuralRevision)
+        XCTAssertTrue(store.rowPresentationStateForTesting(2) === unchangedRow)
+    }
+
+    @MainActor
+    func testScrolloverFailureRestoresOptimisticRowPresentation() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2)])
+        XCTAssertEqual(store.enqueueScrolloverForTesting([1]), [1])
+        XCTAssertEqual(store.isArticleReadForTesting(1), true)
+
+        store.failScrolloverMutationForTesting([1])
+
+        XCTAssertEqual(store.isArticleReadForTesting(1), false)
+        XCTAssertEqual(store.articles.map(\.id), [1, 2])
+    }
+
+    @MainActor
+    func testSnapshotReconciliationReusesAndReconcilesRowStates() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2)])
+        let retained = store.rowPresentationStateForTesting(2)!
+        _ = store.enqueueScrolloverForTesting([2])
+
+        store.setArticlesForTesting([article(2, read: false), article(3, starred: true)])
+
+        XCTAssertTrue(store.rowPresentationStateForTesting(2) === retained)
+        XCTAssertEqual(store.isArticleReadForTesting(2), false)
+        XCTAssertNil(store.rowPresentationStateForTesting(1))
+        XCTAssertEqual(store.isArticleStarredForTesting(3), true)
     }
 
     @MainActor
@@ -146,8 +194,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.setArticlesForTesting([article(1), article(2, read: true), article(3), article(4), article(5)])
         store.applyScrolloverMutationForTesting([1, 2, 3, 4])
         XCTAssertEqual(store.scrolloverUndoIDs, [1, 3, 4])
-        XCTAssertTrue(store.articles.filter { [1, 2, 3, 4].contains($0.id) }.allSatisfy { $0.isRead })
-        XCTAssertFalse(store.articles[4].isRead)
+        XCTAssertEqual(readStates(store), [true, true, true, true, false])
     }
 
     func testCandidatesAreIndependentOfReadStateAndStructuralSnapshotsRebaseline() {
@@ -179,7 +226,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.unreadOnly = false
         store.setArticlesForTesting([article(1)])
         store.applyReadMutationForTesting([1], read: true)
-        XCTAssertTrue(store.articles[0].isRead)
+        XCTAssertEqual(store.isArticleReadForTesting(1), true)
     }
 
     @MainActor
@@ -188,7 +235,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.unreadOnly = false
         store.setArticlesForTesting([article(1, read: true)])
         store.applyReadMutationForTesting([1], read: false)
-        XCTAssertFalse(store.articles[0].isRead)
+        XCTAssertEqual(store.isArticleReadForTesting(1), false)
     }
 
     @MainActor
@@ -210,7 +257,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.applyScrolloverMutationForTesting([1])
 
         XCTAssertEqual(store.articles.map(\.id), [1, 2])
-        XCTAssertTrue(store.articles[0].isRead)
+        XCTAssertEqual(store.isArticleReadForTesting(1), true)
     }
 
     @MainActor
@@ -223,9 +270,9 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.completeSuccessfulScrolloverMutationForTesting([2], now: 0.2)
 
         XCTAssertEqual(store.pendingScrolloverPresentationIDsForTesting, [1, 2])
-        XCTAssertTrue(store.articles.allSatisfy { !$0.isRead })
+        XCTAssertEqual(readStates(store), [false, false, false])
         store.setScrolloverPresentationPhaseForTesting(.idle)
-        XCTAssertTrue(store.articles.prefix(2).allSatisfy(\.isRead))
+        XCTAssertEqual(readStates(store), [false, false, false])
         XCTAssertEqual(store.pendingScrolloverPresentationIDsForTesting, [])
     }
 
@@ -239,7 +286,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.setScrolloverPresentationPhaseForTesting(.idle)
         store.completeSuccessfulScrolloverMutationForTesting([2, 3], now: 0.2)
 
-        XCTAssertTrue(store.articles.allSatisfy(\.isRead))
+        XCTAssertEqual(readStates(store), [false, false, false])
         XCTAssertEqual(store.scrolloverUndoIDs, [1, 2, 3])
         XCTAssertEqual(store.pendingScrolloverPresentationIDsForTesting, [])
     }
@@ -249,12 +296,14 @@ final class NewsreaderD23MutationTests: XCTestCase {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setArticlesForTesting([article(1), article(2)])
         store.setScrolloverPresentationPhaseForTesting(.interacting)
+        XCTAssertEqual(store.enqueueScrolloverForTesting([1]), [1])
+        XCTAssertEqual(store.isArticleReadForTesting(1), true)
         store.completeSuccessfulScrolloverMutationForTesting([1], now: 0)
 
         store.rebaselineScrolloverPresentationForTesting()
 
         XCTAssertTrue(store.pendingScrolloverPresentationIDsForTesting.isEmpty)
-        XCTAssertFalse(store.articles[0].isRead)
+        XCTAssertEqual(store.isArticleReadForTesting(1), false)
     }
 
     @MainActor
@@ -266,7 +315,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         let revision = store.snapshotRevision
         store.applyScrolloverMutationForTesting([1, 2])
         XCTAssertEqual(store.articles.map(\.id), [1, 2])
-        XCTAssertTrue(store.articles.allSatisfy(\.isRead))
+        XCTAssertEqual(readStates(store), [true, true])
         XCTAssertEqual(store.snapshotRevision, revision)
     }
 
@@ -287,7 +336,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.applyScrolloverMutationForTesting([1, 2, 3, 4, 5])
 
         XCTAssertEqual(store.scrolloverUndoIDs, [2, 4, 5])
-        XCTAssertEqual(store.articles.map(\.isRead), [true, true, true, true, true])
+        XCTAssertEqual(readStates(store), [true, true, true, true, true])
     }
 
     @MainActor
@@ -321,7 +370,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.applyScrolloverMutationForTesting([2, 3])
 
         XCTAssertEqual(store.articles.map(\.id), [1, 2, 3, 4])
-        XCTAssertTrue(store.articles.prefix(3).allSatisfy(\.isRead))
+        XCTAssertEqual(readStates(store), [true, true, true, false])
     }
 
     @MainActor
@@ -335,7 +384,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.applyScrolloverUndoForTesting()
 
         XCTAssertEqual(store.articles.map(\.id), [1, 2, 3])
-        XCTAssertTrue(store.articles.allSatisfy { !$0.isRead })
+        XCTAssertEqual(readStates(store), [false, false, false])
     }
 
     @MainActor
@@ -343,7 +392,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setArticlesForTesting([article(1)])
         store.applyStarredMutationForTesting([1], starred: true)
-        XCTAssertTrue(store.articles[0].isStarred)
+        XCTAssertEqual(store.isArticleStarredForTesting(1), true)
     }
 
     @MainActor
@@ -351,7 +400,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setArticlesForTesting([article(1, starred: true)])
         store.applyStarredMutationForTesting([1], starred: false)
-        XCTAssertFalse(store.articles[0].isStarred)
+        XCTAssertEqual(store.isArticleStarredForTesting(1), false)
     }
 
     @MainActor
