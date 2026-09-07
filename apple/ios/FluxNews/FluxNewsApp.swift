@@ -8,6 +8,7 @@ struct FluxNewsApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(bootstrapper: bootstrapper, newsreaderStore: newsreaderStore)
+                .tint(Color("FluxAccent"))
                 .task {
                     bootstrapper.onCoreChanged = { core in
                         if let core { newsreaderStore.attach(to: core) }
