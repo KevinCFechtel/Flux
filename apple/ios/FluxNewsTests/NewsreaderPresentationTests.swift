@@ -414,6 +414,17 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleImageRequest(url: url, targetSize: CGSize(width: 128.1, height: 20), displayScale: 1).maxPixelDimension, 192)
     }
 
+    func testPrefetchMetadataReusesAnUnchangedStructuralSnapshot() {
+        func article(_ id: Int64, imageURL: String? = nil) -> ArticleSummary {
+            ArticleSummary(id: id, feedId: 1, categoryId: 1, feedTitle: "Feed", title: "Article", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "", imageUrl: imageURL)
+        }
+        var metadata = IOSArticleImagePrefetchMetadata()
+        XCTAssertTrue(metadata.update(articles: [article(1), article(2, imageURL: "https://example.com/2.jpg")]))
+        XCTAssertFalse(metadata.update(articles: [article(1), article(2, imageURL: "https://example.com/changed.jpg")]))
+        XCTAssertEqual(metadata.candidateIDs(visibleIDs: [1], direction: .forward), [2])
+        XCTAssertTrue(metadata.update(articles: [article(2, imageURL: "https://example.com/2.jpg"), article(1)]))
+    }
+
     func testArticleImagePrefetchSelectsAtMostTwoImagesForwardAndSkipsTextOnlyArticles() {
         XCTAssertEqual(
             IOSArticleImagePrefetchPolicy.candidateIDs(

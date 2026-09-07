@@ -16,25 +16,70 @@ enum IOSArticleImagePrefetchPolicy {
         limit: Int = 2,
         searchHorizon: Int = 12
     ) -> [Int64] {
+        IOSArticleImagePrefetchMetadata(orderedIDs: orderedIDs, imageIDs: imageIDs)
+            .candidateIDs(visibleIDs: visibleIDs, direction: direction, excludedIDs: excludedIDs, limit: limit, searchHorizon: searchHorizon)
+    }
+}
+
+/// Derived only with a structural article snapshot, never from a visibility update.
+struct IOSArticleImagePrefetchMetadata {
+    private(set) var orderedIDs: [Int64] = []
+    private var positions: [Int64: Int] = [:]
+    private var imageIDs = Set<Int64>()
+    private var imageURLs: [Int64: URL] = [:]
+
+    init() {}
+
+    init(orderedIDs: [Int64], imageIDs: Set<Int64>) {
+        self.orderedIDs = orderedIDs
+        positions = Dictionary(uniqueKeysWithValues: orderedIDs.enumerated().map { ($0.element, $0.offset) })
+        self.imageIDs = imageIDs
+    }
+
+    mutating func update(articles: [ArticleSummary]) -> Bool {
+        let ids = articles.map(\.id)
+        guard ids != orderedIDs else { return false }
+        orderedIDs = ids
+        positions = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset) })
+        imageURLs = Dictionary(uniqueKeysWithValues: articles.compactMap { article in
+            article.imageUrl.flatMap(URL.init(string:)).map { (article.id, $0) }
+        })
+        imageIDs = Set(imageURLs.keys)
+        return true
+    }
+
+    func imageURL(for id: Int64) -> URL? { imageURLs[id] }
+
+    func candidateIDs(
+        visibleIDs: [Int64],
+        direction: IOSArticleScrollDirection,
+        excludedIDs: Set<Int64> = [],
+        limit: Int = 2,
+        searchHorizon: Int = 12
+    ) -> [Int64] {
         guard limit > 0, searchHorizon > 0 else { return [] }
-        let positions = Dictionary(uniqueKeysWithValues: orderedIDs.enumerated().map { ($0.element, $0.offset) })
-        let visiblePositions = visibleIDs.compactMap { positions[$0] }
-        guard let anchor = direction == .forward ? visiblePositions.max() : visiblePositions.min() else { return [] }
-
-        let candidates: [Int64]
-        switch direction {
-        case .forward:
-            let end = min(orderedIDs.count, anchor + 1 + searchHorizon)
-            candidates = Array(orderedIDs[(anchor + 1)..<end])
-        case .backward:
-            let start = max(0, anchor - searchHorizon)
-            candidates = Array(orderedIDs[start..<anchor].reversed())
+        var anchor: Int?
+        for id in visibleIDs {
+            guard let position = positions[id] else { continue }
+            if let current = anchor {
+                anchor = direction == .forward ? max(current, position) : min(current, position)
+            } else {
+                anchor = position
+            }
         }
+        guard let anchor else { return [] }
 
-        return candidates
-            .filter { imageIDs.contains($0) && !excludedIDs.contains($0) }
-            .prefix(limit)
-            .map { $0 }
+        var result: [Int64] = []
+        for offset in 1...searchHorizon {
+            let position = direction == .forward ? anchor + offset : anchor - offset
+            guard orderedIDs.indices.contains(position) else { break }
+            let id = orderedIDs[position]
+            if imageIDs.contains(id) && !excludedIDs.contains(id) {
+                result.append(id)
+                if result.count == limit { break }
+            }
+        }
+        return result
     }
 }
 
@@ -408,6 +453,7 @@ struct ArticleListView: View {
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
     @State private var scrolloverTracker = IOSScrolloverOrderTracker()
+    @State private var imagePrefetchMetadata = IOSArticleImagePrefetchMetadata()
     // 15% admits a target that is only barely visible, so tall cards still give
     // the ordered tracker a reliable leading target. It is not a read threshold.
     private let scrolloverVisibilityThreshold: CGFloat = 0.15
@@ -454,31 +500,36 @@ struct ArticleListView: View {
                                .id(store.scrollResetRevision)
                                .refreshable { await store.syncManually() }
                             .scrollIndicators(.hidden)
-                            .onAppear {
-                                scrolloverTracker.updateSnapshot(store.articles.map(\.id))
-                            }
+                             .onAppear {
+                                 rebuildPrefetchMetadata()
+                             }
                                .onScrollTargetVisibilityChange(idType: Int64.self, threshold: scrolloverVisibilityThreshold) { visibleIDs in
                                     let batch = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
                                     if !batch.articleIDs.isEmpty { store.flushScrollover(batch) }
                                     if let direction = scrolloverTracker.lastVisibilityDirection {
-                                        prefetchImages(visibleIDs: visibleIDs, direction: direction, availableWidth: proxy.size.width - horizontalInset * 2)
+                                         prefetchImages(visibleIDs: visibleIDs, direction: direction, availableWidth: proxy.size.width - horizontalInset * 2)
                                     }
                                     let terminalBatch = scrolloverTracker.receiveTerminalVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
                                    if !terminalBatch.articleIDs.isEmpty { store.flushScrollover(terminalBatch) }
                              }
                             .onScrollPhaseChange { _, phase in
                                 switch phase {
-                                 case .interacting:
-                                   scrolloverTracker.setUserScrolling(true)
-                                   store.markMeaningfulInteraction()
-                                 case .idle:
-                                   scrolloverTracker.setUserScrolling(false)
+                                  case .interacting:
+                                    scrolloverTracker.setUserScrolling(true)
+                                    store.setScrolloverPresentationPhase(.interacting)
+                                    store.markMeaningfulInteraction()
+                                  case .decelerating:
+                                    scrolloverTracker.setUserScrolling(true)
+                                    store.setScrolloverPresentationPhase(.decelerating)
+                                  case .idle:
+                                    scrolloverTracker.setUserScrolling(false)
+                                    store.setScrolloverPresentationPhase(.idle)
                                  default:
                                    break
                                 }
                             }
-                             .onChange(of: store.snapshotRevision) { _, _ in
-                                 scrolloverTracker.updateSnapshot(store.articles.map(\.id))
+                              .onChange(of: store.snapshotRevision) { _, _ in
+                                  rebuildPrefetchMetadata()
                              }
                               .onChange(of: store.scrolloverRearmRevision) { _, _ in
                                   scrolloverTracker.releaseEmittedIDs()
@@ -497,19 +548,9 @@ struct ArticleListView: View {
 private extension ArticleListView {
     func prefetchImages(visibleIDs: [Int64], direction: IOSArticleScrollDirection, availableWidth: CGFloat) {
         guard store.articlePresentationMode.showsArticleImage else { return }
-        let articles = store.articles
-        let imageIDs = Set(articles.compactMap { article in
-            article.imageUrl.flatMap(URL.init(string:)) == nil ? nil : article.id
-        })
-        let ids = IOSArticleImagePrefetchPolicy.candidateIDs(
-            orderedIDs: articles.map(\.id),
-            visibleIDs: visibleIDs,
-            imageIDs: imageIDs,
-            direction: direction
-        )
-        let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
+        let ids = imagePrefetchMetadata.candidateIDs(visibleIDs: visibleIDs, direction: direction)
         for id in ids {
-            guard let article = articlesByID[id], let url = article.imageUrl.flatMap(URL.init(string:)) else { continue }
+            guard let url = imagePrefetchMetadata.imageURL(for: id) else { continue }
             let targetSize: CGSize
             if ArticlePresentationLayout.usesLandscapeVisual(mode: store.articlePresentationMode, availableWidth: availableWidth) {
                 let width = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
@@ -523,6 +564,11 @@ private extension ArticleListView {
                 _ = try? await ArticleImagePipeline.shared.image(for: request)
             }
         }
+    }
+
+    func rebuildPrefetchMetadata() {
+        _ = imagePrefetchMetadata.update(articles: store.articles)
+        scrolloverTracker.updateSnapshot(imagePrefetchMetadata.orderedIDs)
     }
 }
 

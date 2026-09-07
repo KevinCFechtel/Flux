@@ -214,6 +214,50 @@ final class NewsreaderD23MutationTests: XCTestCase {
     }
 
     @MainActor
+    func testSuccessfulScrolloverPresentationIsCoalescedWhileDeceleratingAndFlushedWhenIdle() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2), article(3)])
+        store.setScrolloverPresentationPhaseForTesting(.decelerating)
+
+        store.completeSuccessfulScrolloverMutationForTesting([1], now: 0)
+        store.completeSuccessfulScrolloverMutationForTesting([2], now: 0.2)
+
+        XCTAssertEqual(store.pendingScrolloverPresentationIDsForTesting, [1, 2])
+        XCTAssertTrue(store.articles.allSatisfy { !$0.isRead })
+        store.setScrolloverPresentationPhaseForTesting(.idle)
+        XCTAssertTrue(store.articles.prefix(2).allSatisfy(\.isRead))
+        XCTAssertEqual(store.pendingScrolloverPresentationIDsForTesting, [])
+    }
+
+    @MainActor
+    func testScrolloverCompletionRacingIdleTransitionPublishesEachSuccessOnce() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2), article(3)])
+        store.setScrolloverPresentationPhaseForTesting(.interacting)
+        store.completeSuccessfulScrolloverMutationForTesting([1], now: 0)
+
+        store.setScrolloverPresentationPhaseForTesting(.idle)
+        store.completeSuccessfulScrolloverMutationForTesting([2, 3], now: 0.2)
+
+        XCTAssertTrue(store.articles.allSatisfy(\.isRead))
+        XCTAssertEqual(store.scrolloverUndoIDs, [1, 2, 3])
+        XCTAssertEqual(store.pendingScrolloverPresentationIDsForTesting, [])
+    }
+
+    @MainActor
+    func testStructuralRebaselineDiscardsDeferredScrolloverPresentation() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2)])
+        store.setScrolloverPresentationPhaseForTesting(.interacting)
+        store.completeSuccessfulScrolloverMutationForTesting([1], now: 0)
+
+        store.rebaselineScrolloverPresentationForTesting()
+
+        XCTAssertTrue(store.pendingScrolloverPresentationIDsForTesting.isEmpty)
+        XCTAssertFalse(store.articles[0].isRead)
+    }
+
+    @MainActor
     func testAlreadyReadTerminalCandidatesAreIgnoredAndRemainNonStructural() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.removeArticlesWhenMarkedRead = true
@@ -255,6 +299,16 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(store.enqueueScrolloverForTesting([1, 2, 3]), [3])
         XCTAssertEqual(store.beginScrolloverMutationForTesting(), [1, 2, 3])
         XCTAssertTrue(store.enqueueScrolloverForTesting([1, 2, 3]).isEmpty)
+    }
+
+    @MainActor
+    func testScrolloverPersistenceQueueRemainsActiveWhileDecelerating() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2)])
+        store.setScrolloverPresentationPhaseForTesting(.decelerating)
+
+        XCTAssertEqual(store.enqueueScrolloverForTesting([1, 2]), [1, 2])
+        XCTAssertEqual(store.beginScrolloverMutationForTesting(), [1, 2])
     }
 
     @MainActor

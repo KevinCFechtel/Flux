@@ -95,6 +95,20 @@ enum IOSSyncCountRefreshPolicy: Equatable {
     }
 }
 
+enum IOSScrolloverPresentationPhase: Equatable {
+    case interacting
+    case decelerating
+    case idle
+
+    var isScrolling: Bool { self != .idle }
+}
+
+private struct IOSPendingScrolloverPresentation {
+    let ids: [Int64]
+    let generation: UInt64
+    let completedAt: TimeInterval
+}
+
 @MainActor
 @Observable final class NewsreaderStore {
 #if DEBUG
@@ -162,6 +176,8 @@ enum IOSSyncCountRefreshPolicy: Equatable {
     private var pendingScrolloverIDSet = Set<Int64>()
     private var scrolloverMutationRunning = false
     private var scrolloverQueueGeneration: UInt64 = 0
+    private var scrolloverPresentationPhase: IOSScrolloverPresentationPhase = .idle
+    private var pendingScrolloverPresentation: [IOSPendingScrolloverPresentation] = []
     private var hasMeaningfullyInteracted = false
     private var readerRequests = ReaderRequestState()
     private var readLifecycle = IOSNewsreaderReadLifecycle()
@@ -510,6 +526,14 @@ enum IOSSyncCountRefreshPolicy: Equatable {
         drainScrolloverMutations()
     }
 
+    func setScrolloverPresentationPhase(_ phase: IOSScrolloverPresentationPhase) {
+        scrolloverPresentationPhase = phase
+        if phase == .idle {
+            flushPendingScrolloverPresentation()
+            reloadScrolloverCountsIfReady()
+        }
+    }
+
     private func drainScrolloverMutations() {
         guard !scrolloverMutationRunning, let core, !pendingScrolloverIDs.isEmpty else { return }
         let ids = pendingScrolloverIDs
@@ -522,14 +546,7 @@ enum IOSSyncCountRefreshPolicy: Equatable {
             guard let self else { return }
             switch result {
             case .success:
-                if generation == scrolloverQueueGeneration {
-                    applySuccessfulScrolloverRead(ids)
-                    recordSuccessfulScrolloverUndo(ids)
-                    scrolloverCountsPending = true
-                } else {
-                    applySuccessfulScrolloverRead(ids)
-                    scrolloverCountsPending = true
-                }
+                completeSuccessfulScrolloverMutation(ids, generation: generation)
                 scrolloverDiagnostic("mutation success ids=\(ids)")
             case let .failure(error):
                 errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
@@ -537,12 +554,48 @@ enum IOSSyncCountRefreshPolicy: Equatable {
             }
             pendingScrolloverIDSet.subtract(ids)
             scrolloverMutationRunning = false
-            if pendingScrolloverIDs.isEmpty && scrolloverCountsPending {
-                scrolloverCountsPending = false
-                reloadCounts(includeNavigationCounts: true)
-            }
+            reloadScrolloverCountsIfReady()
             drainScrolloverMutations()
         }
+    }
+
+    private func completeSuccessfulScrolloverMutation(
+        _ ids: [Int64],
+        generation: UInt64,
+        completedAt: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) {
+        // A new structural snapshot owns its presentation state; stale Core
+        // completions remain persisted but cannot publish into that snapshot.
+        guard generation == scrolloverQueueGeneration else { return }
+        scrolloverCountsPending = true
+        let result = IOSPendingScrolloverPresentation(ids: ids, generation: generation, completedAt: completedAt)
+        if scrolloverPresentationPhase.isScrolling {
+            pendingScrolloverPresentation.append(result)
+        } else {
+            publishSuccessfulScrolloverMutation(result)
+        }
+    }
+
+    private func flushPendingScrolloverPresentation() {
+        let pending = pendingScrolloverPresentation
+        pendingScrolloverPresentation = []
+        for result in pending where result.generation == scrolloverQueueGeneration {
+            publishSuccessfulScrolloverMutation(result)
+        }
+    }
+
+    private func publishSuccessfulScrolloverMutation(_ result: IOSPendingScrolloverPresentation) {
+        applySuccessfulScrolloverRead(result.ids)
+        recordSuccessfulScrolloverUndo(result.ids, now: result.completedAt)
+    }
+
+    private func reloadScrolloverCountsIfReady() {
+        guard scrolloverPresentationPhase == .idle,
+              !scrolloverMutationRunning,
+              pendingScrolloverIDs.isEmpty,
+              scrolloverCountsPending else { return }
+        scrolloverCountsPending = false
+        reloadCounts(includeNavigationCounts: true)
     }
 
     private func recordSuccessfulScrolloverUndo(_ ids: [Int64], now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
@@ -672,6 +725,8 @@ enum IOSSyncCountRefreshPolicy: Equatable {
         scrolloverCountsPending = false
         pendingScrolloverIDs = []
         pendingScrolloverIDSet = []
+        pendingScrolloverPresentation = []
+        scrolloverPresentationPhase = .idle
         scrolloverQueueGeneration &+= 1
     }
 
@@ -795,9 +850,18 @@ enum IOSSyncCountRefreshPolicy: Equatable {
     @MainActor
     func applyScrolloverMutationForTesting(_ ids: [Int64], now: TimeInterval = 0) {
         let eligible = eligibleScrolloverIDs(ids)
-        applySuccessfulScrolloverRead(eligible)
-        recordSuccessfulScrolloverUndo(eligible, now: now)
+        completeSuccessfulScrolloverMutation(eligible, generation: scrolloverQueueGeneration, completedAt: now)
     }
+    @MainActor
+    func setScrolloverPresentationPhaseForTesting(_ phase: IOSScrolloverPresentationPhase) { setScrolloverPresentationPhase(phase) }
+    @MainActor
+    func completeSuccessfulScrolloverMutationForTesting(_ ids: [Int64], now: TimeInterval = 0) {
+        completeSuccessfulScrolloverMutation(ids, generation: scrolloverQueueGeneration, completedAt: now)
+    }
+    @MainActor
+    var pendingScrolloverPresentationIDsForTesting: [Int64] { pendingScrolloverPresentation.flatMap(\.ids) }
+    @MainActor
+    func rebaselineScrolloverPresentationForTesting() { resetPresentationState() }
     @MainActor
     func applyScrolloverUndoForTesting() { updateVisibleRead(scrolloverUndoIDs, read: false); clearScrolloverUndoGroup() }
     @MainActor
