@@ -1,7 +1,22 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    ", starred" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : ", markiert"
+          }
+        }
+      }
+    },
+    "·" : {
+
+    },
     "%lld article" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "variations" : {
@@ -42,6 +57,7 @@
       }
     },
     "%lld article marked as read" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "variations" : {
@@ -82,6 +98,7 @@
       }
     },
     "%lld lines" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -92,6 +109,7 @@
       }
     },
     "%lld unread article" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "variations" : {
@@ -131,37 +149,11 @@
         }
       }
     },
-    ", starred" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : ", markiert"
-          }
-        }
-      }
-    },
-    "API Key" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "API-Schlüssel"
-          }
-        }
-      }
-    },
-    "API key" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "API-Schlüssel"
-          }
-        }
-      }
+    "•" : {
+
     },
     "Account" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -182,6 +174,7 @@
       }
     },
     "Account required" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -192,6 +185,7 @@
       }
     },
     "Action Failed" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -202,6 +196,7 @@
       }
     },
     "Add" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -212,6 +207,7 @@
       }
     },
     "Add Category" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -232,6 +228,7 @@
       }
     },
     "Add Header" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -242,6 +239,7 @@
       }
     },
     "All Articles" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -261,7 +259,30 @@
         }
       }
     },
+    "API key" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "API-Schlüssel"
+          }
+        }
+      }
+    },
+    "API Key" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "API-Schlüssel"
+          }
+        }
+      }
+    },
     "App Group" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -272,6 +293,7 @@
       }
     },
     "Article Action" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -282,6 +304,7 @@
       }
     },
     "Articles" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -292,6 +315,7 @@
       }
     },
     "Articles could not be loaded. Please try again." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -302,6 +326,7 @@
       }
     },
     "Base URL" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -312,6 +337,7 @@
       }
     },
     "Cancel" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -332,6 +358,7 @@
       }
     },
     "Category name" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -342,6 +369,7 @@
       }
     },
     "Choose a Feed" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -352,6 +380,7 @@
       }
     },
     "Choose news scope" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -362,6 +391,7 @@
       }
     },
     "Clear" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -372,6 +402,7 @@
       }
     },
     "Comments available" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -382,6 +413,7 @@
       }
     },
     "Compact" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -392,6 +424,7 @@
       }
     },
     "Compatible settings" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -402,6 +435,7 @@
       }
     },
     "Connection Diagnostics" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -412,6 +446,7 @@
       }
     },
     "Continue" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -422,6 +457,7 @@
       }
     },
     "Copy Link" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -432,6 +468,7 @@
       }
     },
     "Could not add category. Please try again." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -442,6 +479,7 @@
       }
     },
     "Could not add feed. Please try again." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -452,11 +490,34 @@
       }
     },
     "Could not discover feeds. Please try again." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Feeds konnten nicht gefunden werden. Bitte versuchen Sie es erneut."
+          }
+        }
+      }
+    },
+    "Custom headers" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Benutzerdefinierte Header"
+          }
+        }
+      }
+    },
+    "Custom headers must have unique valid names and cannot replace FluxNews transport headers." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Benutzerdefinierte Header müssen eindeutige gültige Namen haben und dürfen keine FluxNews-Transport-Header ersetzen."
           }
         }
       }
@@ -471,27 +532,8 @@
         }
       }
     },
-    "Custom headers" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Benutzerdefinierte Header"
-          }
-        }
-      }
-    },
-    "Custom headers must have unique valid names and cannot replace FluxNews transport headers." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Benutzerdefinierte Header müssen eindeutige gültige Namen haben und dürfen keine FluxNews-Transport-Header ersetzen."
-          }
-        }
-      }
-    },
     "Detail Rendering" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -502,6 +544,7 @@
       }
     },
     "Developer Diagnostics" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -512,6 +555,7 @@
       }
     },
     "Done" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -522,6 +566,7 @@
       }
     },
     "Download metadata" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -532,6 +577,7 @@
       }
     },
     "Enter a valid HTTP or HTTPS Miniflux server URL." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -542,6 +588,7 @@
       }
     },
     "Enter both a Miniflux server URL and API key." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -561,7 +608,8 @@
         }
       }
     },
-    "Feed Settings" : {
+    "Feed preferences" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -571,7 +619,8 @@
         }
       }
     },
-    "Feed preferences" : {
+    "Feed Settings" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -582,6 +631,7 @@
       }
     },
     "Feed settings could not be loaded. Please try again." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -592,6 +642,7 @@
       }
     },
     "Feed settings could not be saved. Please try again." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -602,6 +653,7 @@
       }
     },
     "Feeds" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -612,6 +664,7 @@
       }
     },
     "Filter and Sort" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -622,6 +675,7 @@
       }
     },
     "Flux could not resolve a valid Miniflux entry URL." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -632,6 +686,7 @@
       }
     },
     "FluxNews" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -642,6 +697,7 @@
       }
     },
     "FluxNews could not start" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -652,6 +708,7 @@
       }
     },
     "FluxNews could not start. Check the account configuration and try again." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -662,6 +719,7 @@
       }
     },
     "Header name" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -672,6 +730,7 @@
       }
     },
     "Header value" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -682,6 +741,7 @@
       }
     },
     "Hide empty feeds" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -692,6 +752,7 @@
       }
     },
     "Initialized" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -702,6 +763,7 @@
       }
     },
     "Keychain credentials" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -712,6 +774,7 @@
       }
     },
     "Legacy cache" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -722,6 +785,7 @@
       }
     },
     "Legacy database" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -732,6 +796,7 @@
       }
     },
     "Legacy downloads" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -742,6 +807,7 @@
       }
     },
     "Legacy migration feasibility" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -752,6 +818,7 @@
       }
     },
     "Link copied" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -762,6 +829,7 @@
       }
     },
     "Listening List" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -772,6 +840,7 @@
       }
     },
     "Loading article..." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -782,6 +851,7 @@
       }
     },
     "Loading articles" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -792,6 +862,7 @@
       }
     },
     "Mark All as Read" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -802,6 +873,7 @@
       }
     },
     "Mark All as Read and Continue" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -812,6 +884,7 @@
       }
     },
     "Mark as Read" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -822,6 +895,7 @@
       }
     },
     "Mark as Unread" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -832,6 +906,7 @@
       }
     },
     "Mark read on scrollover" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -852,6 +927,7 @@
       }
     },
     "Miniflux Account" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -862,6 +938,7 @@
       }
     },
     "Miniflux did not find a subscription for this URL." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -872,6 +949,7 @@
       }
     },
     "Miniflux rejected the API key." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -882,6 +960,7 @@
       }
     },
     "Miniflux server returned an unexpected response." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -902,6 +981,7 @@
       }
     },
     "More" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -912,6 +992,7 @@
       }
     },
     "Navigation" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -922,6 +1003,7 @@
       }
     },
     "New articles available" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -932,6 +1014,7 @@
       }
     },
     "Newest First" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -942,6 +1025,7 @@
       }
     },
     "News" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -952,6 +1036,7 @@
       }
     },
     "News could not be synced. Please try again." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -962,6 +1047,7 @@
       }
     },
     "News syncing…" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -971,17 +1057,8 @@
         }
       }
     },
-    "No News" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Keine Nachrichten"
-          }
-        }
-      }
-    },
     "No article selected" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -991,7 +1068,19 @@
         }
       }
     },
+    "No News" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Nachrichten"
+          }
+        }
+      }
+    },
     "No results" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1002,6 +1091,7 @@
       }
     },
     "No third-party integration is configured in Miniflux" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1012,6 +1102,7 @@
       }
     },
     "No unread articles" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1022,6 +1113,7 @@
       }
     },
     "OK" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1032,6 +1124,7 @@
       }
     },
     "Oldest First" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1041,27 +1134,8 @@
         }
       }
     },
-    "Open Comments" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Kommentare öffnen"
-          }
-        }
-      }
-    },
-    "Open Original" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Original öffnen"
-          }
-        }
-      }
-    },
     "Open article" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1071,7 +1145,19 @@
         }
       }
     },
+    "Open Comments" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kommentare öffnen"
+          }
+        }
+      }
+    },
     "Open in Miniflux" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1082,6 +1168,7 @@
       }
     },
     "Open in Reader" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1091,7 +1178,19 @@
         }
       }
     },
+    "Open Original" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Original öffnen"
+          }
+        }
+      }
+    },
     "Opens the article" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1112,6 +1211,7 @@
       }
     },
     "Playback progress" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1122,6 +1222,7 @@
       }
     },
     "Presentation" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1132,6 +1233,7 @@
       }
     },
     "Preview lines" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1142,6 +1244,7 @@
       }
     },
     "Production identity" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1152,21 +1255,12 @@
       }
     },
     "Read" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Gelesen"
-          }
-        }
-      }
-    },
-    "Read, starred" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Gelesen, markiert"
           }
         }
       }
@@ -1177,6 +1271,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nur lesbare Ermittlung; es werden keine Legacy-Daten importiert oder geändert."
+          }
+        }
+      }
+    },
+    "Read, starred" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gelesen, markiert"
           }
         }
       }
@@ -1192,6 +1297,7 @@
       }
     },
     "Ready" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1202,6 +1308,7 @@
       }
     },
     "Recoverable startup error" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1212,6 +1319,7 @@
       }
     },
     "Remove Account" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1222,6 +1330,7 @@
       }
     },
     "Remove articles when read" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1232,6 +1341,7 @@
       }
     },
     "Remove this account?" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1262,6 +1372,7 @@
       }
     },
     "Retry" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1272,6 +1383,7 @@
       }
     },
     "Rust Core" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1282,6 +1394,7 @@
       }
     },
     "Sandbox paths" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1292,6 +1405,7 @@
       }
     },
     "Save to Third-Party Service" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1302,6 +1416,7 @@
       }
     },
     "Saved to third-party service" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1312,6 +1427,7 @@
       }
     },
     "Search" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1321,7 +1437,19 @@
         }
       }
     },
+    "Search could not be completed. Please try again." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Suche konnte nicht abgeschlossen werden. Bitte versuchen Sie es erneut."
+          }
+        }
+      }
+    },
     "Search Failed" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1332,6 +1460,7 @@
       }
     },
     "Search Miniflux" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1342,6 +1471,7 @@
       }
     },
     "Search Results" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1351,17 +1481,8 @@
         }
       }
     },
-    "Search could not be completed. Please try again." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Die Suche konnte nicht abgeschlossen werden. Bitte versuchen Sie es erneut."
-          }
-        }
-      }
-    },
     "Searching" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1372,6 +1493,7 @@
       }
     },
     "Server URL" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1382,6 +1504,7 @@
       }
     },
     "Set Up FluxNews" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1392,6 +1515,7 @@
       }
     },
     "Settings" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1402,6 +1526,7 @@
       }
     },
     "Share" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1412,6 +1537,7 @@
       }
     },
     "Show" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1422,6 +1548,7 @@
       }
     },
     "Show article count" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1432,6 +1559,7 @@
       }
     },
     "Showing %lld of %lld" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1442,6 +1570,7 @@
       }
     },
     "Smoke test" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1452,6 +1581,7 @@
       }
     },
     "Sort" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1462,6 +1592,7 @@
       }
     },
     "Star" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1482,6 +1613,7 @@
       }
     },
     "Starting" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1492,6 +1624,7 @@
       }
     },
     "Starting FluxNews…" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1502,6 +1635,7 @@
       }
     },
     "Startup category" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1512,6 +1646,7 @@
       }
     },
     "Startup feed" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1522,6 +1657,7 @@
       }
     },
     "Startup scope" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1532,6 +1668,7 @@
       }
     },
     "Status" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1542,6 +1679,7 @@
       }
     },
     "Sync complete" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1552,6 +1690,7 @@
       }
     },
     "Sync news" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1562,6 +1701,7 @@
       }
     },
     "Syncing" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1581,27 +1721,8 @@
         }
       }
     },
-    "The Miniflux server could not be reached. Check the server URL and network connection." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Der Miniflux-Server konnte nicht erreicht werden. Überprüfen Sie die Server-URL und die Netzwerkverbindung."
-          }
-        }
-      }
-    },
-    "The Miniflux server returned an unexpected response." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Der Miniflux-Server hat eine unerwartete Antwort zurückgegeben."
-          }
-        }
-      }
-    },
     "The account could not be activated. Your previous account is still active." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1612,6 +1733,7 @@
       }
     },
     "The account could not be removed." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1622,6 +1744,7 @@
       }
     },
     "The article could not be loaded in Reader." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1632,6 +1755,7 @@
       }
     },
     "The article could not be updated. Please try again." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1642,6 +1766,7 @@
       }
     },
     "The article does not have a valid web URL." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1651,7 +1776,30 @@
         }
       }
     },
+    "The Miniflux server could not be reached. Check the server URL and network connection." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Miniflux-Server konnte nicht erreicht werden. Überprüfen Sie die Server-URL und die Netzwerkverbindung."
+          }
+        }
+      }
+    },
+    "The Miniflux server returned an unexpected response." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Miniflux-Server hat eine unerwartete Antwort zurückgegeben."
+          }
+        }
+      }
+    },
     "This server does not provide the required Miniflux endpoint." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1662,6 +1810,7 @@
       }
     },
     "Truncate Detail" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1671,7 +1820,19 @@
         }
       }
     },
+    "Unable to load article" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Artikel kann nicht geladen werden"
+          }
+        }
+      }
+    },
     "Unable to Load Articles" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1682,6 +1843,7 @@
       }
     },
     "Unable to Open Article" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1691,17 +1853,8 @@
         }
       }
     },
-    "Unable to load article" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Artikel kann nicht geladen werden"
-          }
-        }
-      }
-    },
     "Unavailable" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1712,6 +1865,7 @@
       }
     },
     "Undo" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1722,6 +1876,7 @@
       }
     },
     "Unexpected" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1732,6 +1887,7 @@
       }
     },
     "Unread" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1742,6 +1898,7 @@
       }
     },
     "Unread Only" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1752,6 +1909,7 @@
       }
     },
     "Unread, starred" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1762,6 +1920,7 @@
       }
     },
     "Unstar" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1792,6 +1951,7 @@
       }
     },
     "Visual" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1800,12 +1960,6 @@
           }
         }
       }
-    },
-    "https://example.com" : {
-
-    },
-    "•" : {
-
     }
   },
   "version" : "1.0"
