@@ -151,9 +151,14 @@ struct IOSScrolloverOrderTracker {
         // in a fast jump are already past the semantic crossing and remain
         // gap-filled from this ordered segment.
         let adjacentMove = leadingPosition == previousPosition + 1
-        var candidateIDs = orderedIDs[previousPosition..<leadingPosition].filter { !adjacentMove || $0 != previousLeadingArticleID }
-        if let deferredLeadingArticleID { candidateIDs.append(deferredLeadingArticleID) }
-        let candidates = orderedIDs.filter { candidateIDs.contains($0) && emittedIDs.insert($0).inserted }
+        var candidates: [Int64] = []
+        if let deferredLeadingArticleID, emittedIDs.insert(deferredLeadingArticleID).inserted {
+            candidates.append(deferredLeadingArticleID)
+        }
+        for id in orderedIDs[previousPosition..<leadingPosition] {
+            guard !adjacentMove || id != previousLeadingArticleID else { continue }
+            if emittedIDs.insert(id).inserted { candidates.append(id) }
+        }
         deferredLeadingArticleID = adjacentMove ? previousLeadingArticleID : nil
         hasForwardScrollInteraction = true
         lastVisibilityMoveWasForward = true
@@ -653,6 +658,7 @@ struct ArticlePresentationView: View, Equatable {
     let onSetStarred: (Bool) -> Void
     static func == (lhs: ArticlePresentationView, rhs: ArticlePresentationView) -> Bool {
         lhs.content == rhs.content &&
+            (lhs.rowState != nil || rhs.rowState != nil || (lhs.fallbackRead == rhs.fallbackRead && lhs.fallbackStarred == rhs.fallbackStarred)) &&
             lhs.rowState === rhs.rowState &&
             lhs.mode == rhs.mode &&
             lhs.previewLines == rhs.previewLines &&
@@ -734,7 +740,9 @@ private struct ArticleRowSurface: View, Equatable {
     private let swipeRevealThreshold: CGFloat = 38
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.content == rhs.content && lhs.rowState === rhs.rowState && lhs.mode == rhs.mode && lhs.previewLines == rhs.previewLines && lhs.availableWidth == rhs.availableWidth && lhs.feedIcon === rhs.feedIcon
+        lhs.content == rhs.content &&
+            (lhs.rowState != nil || rhs.rowState != nil || (lhs.fallbackRead == rhs.fallbackRead && lhs.fallbackStarred == rhs.fallbackStarred)) &&
+            lhs.rowState === rhs.rowState && lhs.mode == rhs.mode && lhs.previewLines == rhs.previewLines && lhs.availableWidth == rhs.availableWidth && lhs.feedIcon === rhs.feedIcon
     }
 
     var body: some View {

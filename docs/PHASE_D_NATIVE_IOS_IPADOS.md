@@ -171,10 +171,14 @@ accessibility, and interaction presentation views, but must not invalidate the
 row's image/preview/metadata-layout content subtree. Feed-icon presentation state
 exposes a prepared native image rather than decoding icon bytes from a view body.
 Detection is ID/order-only, with no geometry, exposure duration, or per-row
-timer. Candidates enter one serialized, deduplicating Core bulk-mutation queue.
+timer. Candidate generation remains local to the deferred and crossed ordered-ID
+range, not to the size of the complete article snapshot. Candidates enter one
+serialized, deduplicating Core bulk-mutation queue.
 The ordered detection snapshot rebases only when visible membership or ordering
 changes; a Scrollover read-state presentation update is not structural.
 All detected Scrollover candidates are still marked read, independently of Undo.
+Fallback-only article presentation paths include their read/starred fallback state
+in equality so status updates remain visible without changing the row-state path.
 Normal continuous scrolling and small forward jumps do not present Undo. Undo is
 an exceptional recovery mechanism: it activates only after at least 3 successful
 unread-to-read Scrollover mutations in a rolling one-second window. Visibility

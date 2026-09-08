@@ -32,6 +32,18 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(second.articleIDs, Array(35..<50).map(Int64.init))
     }
 
+    func testLargeSnapshotKeepsCandidateGenerationLocalToTheCrossing() {
+        var tracker = IOSScrolloverOrderTracker()
+        let ids = Array(0..<8_000).map(Int64.init)
+        tracker.updateSnapshot(ids)
+        _ = tracker.receiveVisibleIDs([100], enabled: true)
+        tracker.setUserScrolling(true)
+
+        XCTAssertTrue(tracker.receiveVisibleIDs([101], enabled: true).articleIDs.isEmpty)
+        XCTAssertEqual(tracker.receiveVisibleIDs([102], enabled: true).articleIDs, [100])
+        XCTAssertEqual(tracker.receiveVisibleIDs([200], enabled: true).articleIDs, Array(101..<200).map(Int64.init))
+    }
+
     func testInitialBaselineAndStructuralRebaselineDoNotQualify() {
         var tracker = IOSScrolloverOrderTracker()
         tracker.updateSnapshot(Array(1...10).map(Int64.init))

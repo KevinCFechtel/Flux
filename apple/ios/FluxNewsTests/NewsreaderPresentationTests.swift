@@ -354,6 +354,45 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(state.content.article.title, "Updated")
     }
 
+    func testFallbackReadChangeInvalidatesPresentationWithoutRowState() {
+        let article = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
+        let unread = makePresentation(article: article, fallbackRead: false, fallbackStarred: false, rowState: nil)
+        let read = makePresentation(article: article, fallbackRead: true, fallbackStarred: false, rowState: nil)
+
+        XCTAssertFalse(unread == read)
+    }
+
+    func testFallbackStarredChangeInvalidatesPresentationWithoutRowState() {
+        let article = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
+        let unstarred = makePresentation(article: article, fallbackRead: false, fallbackStarred: false, rowState: nil)
+        let starred = makePresentation(article: article, fallbackRead: false, fallbackStarred: true, rowState: nil)
+
+        XCTAssertFalse(unstarred == starred)
+    }
+
+    func testRowStatePresentationIgnoresFallbackStatusChanges() {
+        let article = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
+        let state = ArticleRowPresentationState(article: article)
+        let feedIcon = IOSFeedIconPresentationState()
+        let first = makePresentation(article: article, fallbackRead: false, fallbackStarred: false, rowState: state, feedIcon: feedIcon)
+        let second = makePresentation(article: article, fallbackRead: true, fallbackStarred: true, rowState: state, feedIcon: feedIcon)
+
+        XCTAssertTrue(first == second)
+    }
+
+    func testImmutableContentChangeInvalidatesStaticPresentation() {
+        let original = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
+        let updated = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Updated", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
+        let first = makePresentation(article: original, fallbackRead: false, fallbackStarred: false, rowState: nil)
+        let second = makePresentation(article: updated, fallbackRead: false, fallbackStarred: false, rowState: nil)
+
+        XCTAssertFalse(first == second)
+    }
+
+    private func makePresentation(article: ArticleSummary, fallbackRead: Bool, fallbackStarred: Bool, rowState: ArticleRowPresentationState?, feedIcon: IOSFeedIconPresentationState? = nil) -> ArticlePresentationView {
+        ArticlePresentationView(content: ArticleRowContent(article: article), fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: .compact, previewLines: .standard, availableWidth: 320, feedIcon: feedIcon ?? IOSFeedIconPresentationState(), iconVariant: .normal, onRequestFeedIcon: {}, onTap: {}, onAction: { _ in }, onSetRead: { _ in }, onSetStarred: { _ in })
+    }
+
     func testScrolloverUndoFeedbackTriggersOnlyForNewlyVisiblePresentation() {
         XCTAssertFalse(ScrolloverUndoPresentationPolicy.shouldTriggerFeedback(previouslyVisible: false, currentlyVisible: false))
         XCTAssertTrue(ScrolloverUndoPresentationPolicy.shouldTriggerFeedback(previouslyVisible: false, currentlyVisible: true))
