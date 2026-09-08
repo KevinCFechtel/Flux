@@ -93,6 +93,7 @@ struct IOSScrolloverOrderTracker {
     private var isUserScrolling = false
     private var hasForwardScrollInteraction = false
     private var lastVisibilityMoveWasForward = false
+    private var deferredLeadingArticleID: Int64?
     private(set) var lastVisibilityDirection: IOSArticleScrollDirection?
 
     mutating func updateSnapshot(_ ids: [Int64]) {
@@ -105,6 +106,7 @@ struct IOSScrolloverOrderTracker {
         isUserScrolling = false
         hasForwardScrollInteraction = false
         lastVisibilityMoveWasForward = false
+        deferredLeadingArticleID = nil
         lastVisibilityDirection = nil
     }
 
@@ -116,6 +118,7 @@ struct IOSScrolloverOrderTracker {
         isUserScrolling = false
         hasForwardScrollInteraction = false
         lastVisibilityMoveWasForward = false
+        deferredLeadingArticleID = nil
         lastVisibilityDirection = nil
     }
 
@@ -139,10 +142,19 @@ struct IOSScrolloverOrderTracker {
         lastVisibilityDirection = leadingPosition > previousPosition ? .forward : .backward
         guard leadingPosition > previousPosition else {
             lastVisibilityMoveWasForward = false
+            deferredLeadingArticleID = nil
             return empty
         }
 
-        let candidates = orderedIDs[previousPosition..<leadingPosition].filter { emittedIDs.insert($0).inserted }
+        // Keep the immediately preceding leading card as a semantic crossing
+        // candidate until the following target is reported. Intermediate IDs
+        // in a fast jump are already past the semantic crossing and remain
+        // gap-filled from this ordered segment.
+        let adjacentMove = leadingPosition == previousPosition + 1
+        var candidateIDs = orderedIDs[previousPosition..<leadingPosition].filter { !adjacentMove || $0 != previousLeadingArticleID }
+        if let deferredLeadingArticleID { candidateIDs.append(deferredLeadingArticleID) }
+        let candidates = orderedIDs.filter { candidateIDs.contains($0) && emittedIDs.insert($0).inserted }
+        deferredLeadingArticleID = adjacentMove ? previousLeadingArticleID : nil
         hasForwardScrollInteraction = true
         lastVisibilityMoveWasForward = true
         return IOSScrolloverBatch(articleIDs: candidates)
@@ -490,7 +502,7 @@ struct ArticleListView: View {
                                         let rowState = store.rowPresentationState(for: article)
                                         let iconVariant = IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)
                                          let feedIcon = store.feedIconPresentationState(for: article.feedId, variant: iconVariant)
-                                          ArticlePresentationView(content: rowState.content, rowState: rowState, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIcon: feedIcon, iconVariant: iconVariant, onRequestFeedIcon: { store.requestFeedIcon(article.feedId, variant: iconVariant) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { store.setRead(article, read: $0) }, onSetStarred: { store.setStarred(article, starred: $0) })
+                                          ArticlePresentationView(content: rowState.content, fallbackRead: article.isRead, fallbackStarred: article.isStarred, rowState: rowState, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIcon: feedIcon, iconVariant: iconVariant, onRequestFeedIcon: { store.requestFeedIcon(article.feedId, variant: iconVariant) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { store.setRead(article, read: $0) }, onSetStarred: { store.setStarred(article, starred: $0) })
                                           .equatable()
                                  }
                               }
@@ -626,6 +638,8 @@ private struct ScrolloverUndoPresentation: View {
 
 struct ArticlePresentationView: View, Equatable {
     let content: ArticleRowContent
+    let fallbackRead: Bool
+    let fallbackStarred: Bool
     let rowState: ArticleRowPresentationState?
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
@@ -648,12 +662,14 @@ struct ArticlePresentationView: View, Equatable {
     }
 
     var body: some View {
-        ArticleRowStateInteractions(content: content, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon, onTap: onTap, onAction: onAction, onSetRead: onSetRead, onSetStarred: onSetStarred)
+        ArticleRowStateInteractions(content: content, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon, onTap: onTap, onAction: onAction, onSetRead: onSetRead, onSetStarred: onSetStarred)
     }
 }
 
 private struct ArticleRowStateInteractions: View {
     let content: ArticleRowContent
+    let fallbackRead: Bool
+    let fallbackStarred: Bool
     let rowState: ArticleRowPresentationState?
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
@@ -666,9 +682,9 @@ private struct ArticleRowStateInteractions: View {
     let onSetStarred: (Bool) -> Void
 
     var body: some View {
-        let isRead = rowState?.isRead ?? content.article.isRead
-        let isStarred = rowState?.isStarred ?? content.article.isStarred
-        ArticleRowSurface(content: content, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon, onTap: onTap, onSetRead: onSetRead, onSetStarred: onSetStarred)
+        let isRead = rowState?.isRead ?? fallbackRead
+        let isStarred = rowState?.isStarred ?? fallbackStarred
+        ArticleRowSurface(content: content, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon, onTap: onTap, onSetRead: onSetRead, onSetStarred: onSetStarred)
             .equatable()
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(content.article.title), \(content.article.feedTitle), \(content.publishedDate), \(isRead ? String(localized: "Read") : String(localized: "Unread"))\(isStarred ? String(localized: ", starred") : "")")
@@ -693,14 +709,16 @@ private struct ArticleRowStateInteractions: View {
 
     private func performSwipeAction(_ action: IOSArticleSwipeAction) {
         switch action.mutation {
-        case .read: onSetRead(!(rowState?.isRead ?? content.article.isRead))
-        case .starred: onSetStarred(!(rowState?.isStarred ?? content.article.isStarred))
+        case .read: onSetRead(!(rowState?.isRead ?? fallbackRead))
+        case .starred: onSetStarred(!(rowState?.isStarred ?? fallbackStarred))
         }
     }
 }
 
 private struct ArticleRowSurface: View, Equatable {
     let content: ArticleRowContent
+    let fallbackRead: Bool
+    let fallbackStarred: Bool
     let rowState: ArticleRowPresentationState?
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
@@ -721,8 +739,8 @@ private struct ArticleRowSurface: View, Equatable {
 
     var body: some View {
         ZStack {
-            ArticleSwipeActionBackground(rowState: rowState, fallbackRead: content.article.isRead, fallbackStarred: content.article.isStarred, horizontalOffset: horizontalOffset, swipeState: swipeState, onSetRead: onSetRead, onSetStarred: onSetStarred)
-            ArticleRowContentBody(content: content, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
+            ArticleSwipeActionBackground(rowState: rowState, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, horizontalOffset: horizontalOffset, swipeState: swipeState, onSetRead: onSetRead, onSetStarred: onSetStarred)
+            ArticleRowContentBody(content: content, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
                 .contentShape(RoundedRectangle(cornerRadius: 16))
                 .onTapGesture(perform: onTap)
                 .frame(width: articleWidth, alignment: .leading)
@@ -762,8 +780,8 @@ private struct ArticleRowSurface: View, Equatable {
         case let .fullSwipe(action):
             horizontalOffset = 0
             switch action.mutation {
-            case .read: onSetRead(!(rowState?.isRead ?? content.article.isRead))
-            case .starred: onSetStarred(!(rowState?.isStarred ?? content.article.isStarred))
+            case .read: onSetRead(!(rowState?.isRead ?? fallbackRead))
+            case .starred: onSetStarred(!(rowState?.isStarred ?? fallbackStarred))
             }
         }
     }
@@ -792,6 +810,8 @@ private struct ArticleSwipeActionBackground: View {
 
 private struct ArticleRowContentBody: View {
     let content: ArticleRowContent
+    let fallbackRead: Bool
+    let fallbackStarred: Bool
     let rowState: ArticleRowPresentationState?
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
@@ -841,10 +861,10 @@ private struct ArticleRowContentBody: View {
     }
     private var articleText: some View {
         VStack(alignment: .leading, spacing: 7) {
-            ArticleTitlePresentation(title: content.article.title, rowState: rowState, fallbackRead: content.article.isRead, fallbackStarred: content.article.isStarred)
+            ArticleTitlePresentation(title: content.article.title, rowState: rowState, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred)
             ViewThatFits(in: .horizontal) {
-                ArticleMetadataRow(content: content, rowState: rowState, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
-                ArticleMetadataColumn(content: content, rowState: rowState, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
+                ArticleMetadataRow(content: content, fallbackRead: fallbackRead, rowState: rowState, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
+                ArticleMetadataColumn(content: content, fallbackRead: fallbackRead, rowState: rowState, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
             }
             if !content.article.preview.isEmpty {
                 Text(content.article.preview)
@@ -882,13 +902,14 @@ private struct ArticleTitlePresentation: View {
 
 private struct ArticleMetadataRow: View {
     let content: ArticleRowContent
+    let fallbackRead: Bool
     let rowState: ArticleRowPresentationState?
     let feedIcon: IOSFeedIconPresentationState
     let onRequestFeedIcon: () -> Void
 
     var body: some View {
         HStack(spacing: 6) {
-            ArticleUnreadIndicator(rowState: rowState, fallback: content.article.isRead)
+            ArticleUnreadIndicator(rowState: rowState, fallback: fallbackRead)
             FeedIconView(feedID: content.article.feedId, title: content.article.feedTitle, state: feedIcon, onRequest: onRequestFeedIcon)
             Text(content.article.feedTitle).font(.subheadline.weight(.medium))
             Text("•")
@@ -907,6 +928,7 @@ private struct ArticleMetadataRow: View {
 
 private struct ArticleMetadataColumn: View {
     let content: ArticleRowContent
+    let fallbackRead: Bool
     let rowState: ArticleRowPresentationState?
     let feedIcon: IOSFeedIconPresentationState
     let onRequestFeedIcon: () -> Void
@@ -914,7 +936,7 @@ private struct ArticleMetadataColumn: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                ArticleUnreadIndicator(rowState: rowState, fallback: content.article.isRead)
+                ArticleUnreadIndicator(rowState: rowState, fallback: fallbackRead)
                 FeedIconView(feedID: content.article.feedId, title: content.article.feedTitle, state: feedIcon, onRequest: onRequestFeedIcon)
                 Text(content.article.feedTitle).font(.subheadline.weight(.medium))
                 if content.hasComments { Image(systemName: "bubble.left").accessibilityLabel(String(localized: "Comments available")) }

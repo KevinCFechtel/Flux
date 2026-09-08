@@ -314,10 +314,44 @@ final class NewsreaderPresentationTests: XCTestCase {
         rowState.setStarred(true)
 
         XCTAssertFalse(invalidated.value)
-        XCTAssertEqual(rowState.content.article, article)
+        XCTAssertEqual(rowState.content.article, ArticleRowArticle(article: article))
         XCTAssertEqual(rowState.content.imageURL, URL(string: "https://example.com/image.jpg"))
         XCTAssertTrue(rowState.content.hasComments)
         XCTAssertNotEqual(rowState.content.publishedDate, article.publishedAt)
+    }
+
+    @MainActor
+    func testReadOnlySnapshotReconciliationKeepsImmutableContent() {
+        let original = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
+        let state = ArticleRowPresentationState(article: original)
+        let content = state.content
+
+        state.reconcile(with: ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: true, isStarred: false, preview: "Preview", imageUrl: nil))
+
+        XCTAssertEqual(state.content, content)
+        XCTAssertTrue(state.isRead)
+    }
+
+    @MainActor
+    func testStarredOnlySnapshotReconciliationKeepsImmutableContent() {
+        let original = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
+        let state = ArticleRowPresentationState(article: original)
+        let content = state.content
+
+        state.reconcile(with: ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: true, preview: "Preview", imageUrl: nil))
+
+        XCTAssertEqual(state.content, content)
+        XCTAssertTrue(state.isStarred)
+    }
+
+    @MainActor
+    func testImmutableSnapshotReconciliationUpdatesContent() {
+        let original = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
+        let state = ArticleRowPresentationState(article: original)
+
+        state.reconcile(with: ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Updated", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil))
+
+        XCTAssertEqual(state.content.article.title, "Updated")
     }
 
     func testScrolloverUndoFeedbackTriggersOnlyForNewlyVisiblePresentation() {

@@ -115,15 +115,43 @@ private struct IOSPendingScrolloverPresentation {
     let completedAt: TimeInterval
 }
 
+struct ArticleRowArticle: Equatable {
+    let id: Int64
+    let feedId: Int64
+    let categoryId: Int64
+    let feedTitle: String
+    let title: String
+    let url: String
+    let commentsUrl: String
+    let publishedAt: String
+    let preview: String
+    let imageUrl: String?
+
+    init(article: ArticleSummary) {
+        id = article.id
+        feedId = article.feedId
+        categoryId = article.categoryId
+        feedTitle = article.feedTitle
+        title = article.title
+        url = article.url
+        commentsUrl = article.commentsUrl
+        publishedAt = article.publishedAt
+        preview = article.preview
+        imageUrl = article.imageUrl
+    }
+}
+
 struct ArticleRowContent: Equatable {
-    let article: ArticleSummary
+    let article: ArticleRowArticle
     let publishedDate: String
     let imageURL: URL?
     let hasComments: Bool
 
+    private static let dateFormatter = ISO8601DateFormatter()
+
     init(article: ArticleSummary) {
-        self.article = article
-        publishedDate = ISO8601DateFormatter().date(from: article.publishedAt)
+        self.article = ArticleRowArticle(article: article)
+        publishedDate = Self.dateFormatter.date(from: article.publishedAt)
             .map { $0.formatted(date: .abbreviated, time: .shortened) } ?? article.publishedAt
         imageURL = article.imageUrl.flatMap { $0.isEmpty ? nil : URL(string: $0) }
         hasComments = IOSArticleContextMenuPolicy.commentsURL(article.commentsUrl) != nil
@@ -155,7 +183,7 @@ struct ArticleRowContent: Equatable {
     }
 
     func reconcile(with article: ArticleSummary) {
-        if content.article != article { content = ArticleRowContent(article: article) }
+        if content.article != ArticleRowArticle(article: article) { content = ArticleRowContent(article: article) }
         setRead(article.isRead)
         setStarred(article.isStarred)
     }

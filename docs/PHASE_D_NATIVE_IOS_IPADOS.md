@@ -136,13 +136,16 @@ regular-width iPad and a sheet/full-screen presentation on compact width/iPhone.
 Native swipe actions and Mark-as-Read-on-Scrollover are retained. iOS uses the
 iOS 18 `scrollTargetLayout`, scroll phase, and target-visibility APIs rather
 than row geometry: the leading visible Article ID is compared against the
-current ordered article snapshot, and the forward crossed ID range is marked
-read. This remains correct when fast scrolling skips intermediate visibility
-reports. Initial visibility and snapshot replacement establish a baseline only;
-backward movement emits nothing. When a genuine forward interaction reaches the
-final ordered target, the remaining visible articles complete Scrollover through
-the same non-structural read mutation path. This terminal completion cannot run
-from initial visibility, a rebaseline, or layout-only changes. A 15%
+ current ordered article snapshot, and the semantic forward crossing ID range is
+ marked read. Visibility/leading-target detection and semantic read crossing are
+ distinct: an adjacent leading transition defers the prior leading card until
+ the following transition, while fast jumps still fill their omitted ordered
+ range. This remains correct when fast scrolling skips intermediate visibility
+ reports. Initial visibility and snapshot replacement establish a baseline only;
+ backward movement emits nothing. When a genuine forward interaction reaches the
+ final ordered target, the remaining visible articles complete Scrollover through
+ the same non-structural read mutation path. This terminal completion cannot run
+ from initial visibility, a rebaseline, or layout-only changes. A 15%
 target-visibility threshold is used only
 to reliably identify a leading target for variable-height cards, including cards
 too tall to become 50% visible. It is not a read-exposure threshold.

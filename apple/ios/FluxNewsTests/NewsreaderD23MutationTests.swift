@@ -16,7 +16,8 @@ final class NewsreaderD23MutationTests: XCTestCase {
         tracker.updateSnapshot([1, 2, 3])
         XCTAssertTrue(tracker.receiveVisibleIDs([1, 2], enabled: true).articleIDs.isEmpty)
         tracker.setUserScrolling(true)
-        XCTAssertEqual(tracker.receiveVisibleIDs([2], enabled: true).articleIDs, [1])
+        XCTAssertTrue(tracker.receiveVisibleIDs([2], enabled: true).articleIDs.isEmpty)
+        XCTAssertEqual(tracker.receiveVisibleIDs([3], enabled: true).articleIDs, [1])
     }
 
     func testSkippedAndLargeForwardJumpsUseTheOrderedRange() {
