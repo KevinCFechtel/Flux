@@ -289,7 +289,10 @@ struct ArticleListView: View {
                 ContentUnavailableView("No News", systemImage: "newspaper")
             } else {
                 GeometryReader { proxy in
-                    let horizontalInset: CGFloat = proxy.size.width > 700 ? 28 : 16
+                    let rowMetrics = ArticleListRowMetrics(
+                        mode: store.articlePresentationMode,
+                        containerWidth: proxy.size.width
+                    )
 
                     List {
                         ForEach(store.articles, id: \.id) { article in
@@ -304,7 +307,7 @@ struct ArticleListView: View {
                                 rowState: rowState,
                                 mode: store.articlePresentationMode,
                                 previewLines: store.articlePreviewLines,
-                                availableWidth: proxy.size.width - horizontalInset * 2,
+                                availableWidth: rowMetrics.availableWidth,
                                 feedIcon: feedIcon,
                                 iconVariant: iconVariant,
                                 onRequestFeedIcon: { store.requestFeedIcon(article.feedId, variant: iconVariant) },
@@ -314,12 +317,12 @@ struct ArticleListView: View {
                                 onSetStarred: { store.setStarred(article, starred: $0) }
                             )
                             .equatable()
-                            .padding(.horizontal, horizontalInset)
-                            .padding(.vertical, 2)
+                            .padding(.horizontal, rowMetrics.horizontalInset)
+                            .padding(.vertical, rowMetrics.outerVerticalPadding)
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .onScrollVisibilityChange(threshold: scrolloverVisibilityThreshold) { isVisible in
-                                receiveListVisibility(articleID: article.id, isVisible: isVisible, availableWidth: proxy.size.width - horizontalInset * 2)
+                                receiveListVisibility(articleID: article.id, isVisible: isVisible, availableWidth: rowMetrics.availableWidth)
                             }
                             .onGeometryChange(for: Bool.self, of: { geometry in
                                 // The scroll-view coordinate space has a viewport origin of
@@ -336,7 +339,7 @@ struct ArticleListView: View {
                             })
                             .onDisappear {
                                 store.updateScrolloverPresentationVisibility(articleID: article.id, isVisible: false)
-                                receiveListVisibility(articleID: article.id, isVisible: false, availableWidth: proxy.size.width - horizontalInset * 2)
+                                receiveListVisibility(articleID: article.id, isVisible: false, availableWidth: rowMetrics.availableWidth)
                             }
                         }.listRowSeparator(.hidden)
                     }
@@ -379,6 +382,24 @@ struct ArticleListView: View {
            }
     }
 
+}
+
+private struct ArticleListRowMetrics {
+    let horizontalInset: CGFloat
+    let outerVerticalPadding: CGFloat
+    let availableWidth: CGFloat
+
+    init(mode: ArticlePresentationMode, containerWidth: CGFloat) {
+        switch mode {
+        case .compact:
+            horizontalInset = containerWidth > 700 ? 28 : 10
+            outerVerticalPadding = 0
+        case .visual:
+            horizontalInset = containerWidth > 700 ? 28 : 16
+            outerVerticalPadding = 2
+        }
+        availableWidth = max(0, containerWidth - horizontalInset * 2)
+    }
 }
 
 private extension ArticleListView {
@@ -631,9 +652,9 @@ private struct ArticleRowContentBody: View {
             }
         case .compact:
             articleText
-                .padding(.vertical, 8)
-                .padding(.horizontal, 4)
-                .frame(width: contentWidth, alignment: .leading)
+                .padding(.vertical, ArticleRowContentLayout.compactVerticalPadding)
+                .padding(.horizontal, ArticleRowContentLayout.compactHorizontalPadding)
+                .frame(width: articleWidth, alignment: .leading)
         }
     }
 
@@ -677,6 +698,11 @@ private struct ArticleRowContentBody: View {
             }
         }
     }
+}
+
+private enum ArticleRowContentLayout {
+    static let compactHorizontalPadding: CGFloat = 3
+    static let compactVerticalPadding: CGFloat = 6
 }
 
 private struct ArticleTitlePresentation: View {
