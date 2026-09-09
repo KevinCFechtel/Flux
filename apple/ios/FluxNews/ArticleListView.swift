@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 enum IOSArticleScrollDirection: Equatable {
     case forward
@@ -313,7 +312,6 @@ struct ArticleListView: View {
                             .padding(.horizontal, horizontalInset)
                             .padding(.vertical, articleSpacing / 2)
                             .listRowInsets(EdgeInsets())
-                            .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
                             .onScrollVisibilityChange(threshold: scrolloverVisibilityThreshold) { isVisible in
                                 receiveListVisibility(articleID: article.id, isVisible: isVisible, availableWidth: proxy.size.width - horizontalInset * 2)
@@ -324,6 +322,7 @@ struct ArticleListView: View {
                         }
                     }
                     .listStyle(.plain)
+                    .listRowSeparator(.hidden, edges: .all)
                     .scrollContentBackground(.hidden)
                     .id(store.scrollResetRevision)
                     .refreshable { await store.syncManually() }
@@ -567,7 +566,6 @@ private struct ArticleRowSurface: View, Equatable {
             .contentShape(RoundedRectangle(cornerRadius: 16))
             .onTapGesture(perform: onTap)
             .frame(width: articleWidth, alignment: .leading)
-            .background(.background)
     }
 
     private var articleWidth: CGFloat { ArticlePresentationLayout.boundedArticleWidth(availableWidth) }
