@@ -310,7 +310,7 @@ struct ArticleListView: View {
                             )
                             .equatable()
                             .padding(.horizontal, horizontalInset)
-                            .padding(.vertical, articleSpacing / 2)
+                            .padding(.vertical,  2)
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .onScrollVisibilityChange(threshold: scrolloverVisibilityThreshold) { isVisible in
