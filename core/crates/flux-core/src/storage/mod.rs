@@ -2698,6 +2698,23 @@ impl Store {
         tx.commit().map_err(sql_error)?;
         Ok(deleted == 1)
     }
+    /// Removes one obsolete remote delivery intent without changing local playback or its remote baseline.
+    pub fn discard_media_progress(
+        &self,
+        pending: &PendingMediaProgressMutation,
+    ) -> Result<bool, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let deleted = connection
+            .execute(
+                "DELETE FROM pending_media_progress_mutations WHERE enclosure_id=?1 AND progression_seconds=?2 AND revision=?3",
+                params![pending.enclosure_id, pending.progression_seconds, pending.revision],
+            )
+            .map_err(sql_error)?;
+        Ok(deleted == 1)
+    }
     pub fn acknowledge(&self, pending: &PendingMutation) -> Result<bool, CoreError> {
         let mut connection = self
             .connection

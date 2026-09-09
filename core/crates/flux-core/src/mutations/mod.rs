@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::MediaProgressCapability;
 use crate::domain::{CoreError, CoreEvent, MutationField};
 use crate::miniflux::RemoteSource;
 use crate::storage::Store;
@@ -14,6 +15,7 @@ pub(crate) struct DeliveryResult {
 pub(crate) fn deliver_pending(
     remote: &dyn RemoteSource,
     store: &Store,
+    media_progress_capability: MediaProgressCapability,
     emit: &dyn Fn(CoreEvent),
 ) -> Result<DeliveryResult, CoreError> {
     let mut result = DeliveryResult::default();
@@ -30,12 +32,31 @@ pub(crate) fn deliver_pending(
         });
     }
     for pending in store.pending_media_progress_mutations()? {
-        remote.set_media_progression(pending.enclosure_id, pending.progression_seconds)?;
-        store.acknowledge_media_progress(&pending)?;
-        result.count += 1;
-        result
-            .media_progress
-            .insert(pending.enclosure_id, pending.progression_seconds);
+        match media_progress_capability {
+            MediaProgressCapability::Unsupported => {
+                // The local checkpoint remains authoritative; only its unsupported remote intent is obsolete.
+                store.discard_media_progress(&pending)?;
+            }
+            MediaProgressCapability::Unknown => {}
+            MediaProgressCapability::Supported => {
+                match remote
+                    .set_media_progression(pending.enclosure_id, pending.progression_seconds)
+                {
+                    Ok(()) => {
+                        store.acknowledge_media_progress(&pending)?;
+                        result.count += 1;
+                        result
+                            .media_progress
+                            .insert(pending.enclosure_id, pending.progression_seconds);
+                    }
+                    Err(error) if matches!(error.http_status(), Some(404 | 410)) => {
+                        // A gone enclosure cannot accept progress, but it must not remove local playback.
+                        store.discard_media_progress(&pending)?;
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+        }
     }
     Ok(result)
 }

@@ -1218,9 +1218,13 @@ impl FluxCore {
         }
     }
     fn deliver_pending(&self) -> Result<mutations::DeliveryResult, CoreError> {
-        mutations::deliver_pending(self.remote.as_ref(), self.store.as_ref(), &|event| {
-            self.emit(event)
-        })
+        let media_progress_capability = self.media_progress_capability();
+        mutations::deliver_pending(
+            self.remote.as_ref(),
+            self.store.as_ref(),
+            media_progress_capability,
+            &|event| self.emit(event),
+        )
         .inspect(|_| {
             self.clear_backoff().ok();
         })
@@ -1360,6 +1364,13 @@ mod tests {
     struct PhaseLoggingSource {
         inner: Mutex<MutationSource>,
         fail_fetch: Mutex<bool>,
+    }
+    struct MediaProgressSource {
+        snapshot: RemoteSnapshot,
+        fetch_calls: AtomicUsize,
+        media_calls: Mutex<Vec<i64>>,
+        media_results: Mutex<HashMap<i64, Result<(), CoreError>>>,
+        capabilities: Mutex<Result<Vec<miniflux::MinifluxCapability>, CoreError>>,
     }
     impl CoreEventListener for ReentrantListener {
         fn on_event(&self, event: CoreEvent) {
@@ -1539,6 +1550,30 @@ mod tests {
             Ok(())
         }
     }
+    impl RemoteSource for MediaProgressSource {
+        fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError> {
+            self.fetch_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.snapshot.clone())
+        }
+        fn set_read_state(&self, _: &[i64], _: bool) -> Result<(), CoreError> {
+            Ok(())
+        }
+        fn set_starred_state(&self, _: i64, _: bool) -> Result<(), CoreError> {
+            Ok(())
+        }
+        fn set_media_progression(&self, enclosure_id: i64, _: u64) -> Result<(), CoreError> {
+            self.media_calls.lock().unwrap().push(enclosure_id);
+            self.media_results
+                .lock()
+                .unwrap()
+                .get(&enclosure_id)
+                .cloned()
+                .unwrap_or(Ok(()))
+        }
+        fn miniflux_capabilities(&self) -> Result<Vec<miniflux::MinifluxCapability>, CoreError> {
+            self.capabilities.lock().unwrap().clone()
+        }
+    }
     fn search_result() -> SearchArticlesResult {
         SearchArticlesResult {
             total: 1,
@@ -1688,6 +1723,226 @@ mod tests {
         core.sync(SyncReason::Manual).unwrap();
         source.inner.lock().unwrap().log.lock().unwrap().clear();
         (core, source)
+    }
+    fn media_progress_core(
+        temp: &TempDir,
+        capabilities: Result<Vec<miniflux::MinifluxCapability>, CoreError>,
+    ) -> (Arc<FluxCore>, Arc<MediaProgressSource>) {
+        let mut remote_snapshot = snapshot();
+        remote_snapshot.enclosures = vec![
+            Enclosure {
+                id: 101,
+                article_id: 1,
+                url: "https://cdn.test/101.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+            Enclosure {
+                id: 102,
+                article_id: 1,
+                url: "https://cdn.test/102.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+        ];
+        let source = Arc::new(MediaProgressSource {
+            snapshot: remote_snapshot,
+            fetch_calls: AtomicUsize::new(0),
+            media_calls: Mutex::new(Vec::new()),
+            media_results: Mutex::new(HashMap::new()),
+            capabilities: Mutex::new(capabilities),
+        });
+        let core = Arc::new(FluxCore::with_remote(config(temp), source.clone()).unwrap());
+        (core, source)
+    }
+
+    #[test]
+    fn media_progress_delivery_acknowledges_mutations_and_preserves_playback() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = media_progress_core(
+            &temp,
+            Ok(vec![miniflux::MinifluxCapability::MediaProgressSync]),
+        );
+        core.sync(SyncReason::Manual).unwrap();
+        core.checkpoint_playback(101, 12_000, None).unwrap();
+
+        let completed = core.sync(SyncReason::Manual).unwrap();
+
+        assert_eq!(completed.mutations_delivered, 1);
+        assert!(
+            core.store
+                .pending_media_progress_mutations()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            core.playback_state(101).unwrap().unwrap().position_ms,
+            12_000
+        );
+        assert_eq!(*source.media_calls.lock().unwrap(), vec![101]);
+        assert_eq!(source.fetch_calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn missing_media_progress_target_is_discarded_without_blocking_later_delivery_or_sync() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = media_progress_core(
+            &temp,
+            Ok(vec![miniflux::MinifluxCapability::MediaProgressSync]),
+        );
+        core.sync(SyncReason::Manual).unwrap();
+        core.checkpoint_playback(101, 12_000, None).unwrap();
+        core.checkpoint_playback(102, 24_000, None).unwrap();
+        source.media_results.lock().unwrap().insert(
+            101,
+            Err(
+                CoreError::invalid_configuration("Miniflux returned HTTP 404")
+                    .with_http_status(404),
+            ),
+        );
+
+        let completed = core.sync(SyncReason::Manual).unwrap();
+
+        assert_eq!(completed.mutations_delivered, 1);
+        assert!(
+            core.store
+                .pending_media_progress_mutations()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            core.playback_state(101).unwrap().unwrap().position_ms,
+            12_000
+        );
+        assert_eq!(*source.media_calls.lock().unwrap(), vec![101, 102]);
+        assert_eq!(source.fetch_calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn server_failure_keeps_media_progress_pending() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = media_progress_core(
+            &temp,
+            Ok(vec![miniflux::MinifluxCapability::MediaProgressSync]),
+        );
+        core.sync(SyncReason::Manual).unwrap();
+        core.checkpoint_playback(101, 12_000, None).unwrap();
+        source.media_results.lock().unwrap().insert(
+            101,
+            Err(
+                CoreError::server_transient("Miniflux server returned HTTP 500")
+                    .with_http_status(500),
+            ),
+        );
+
+        assert_eq!(
+            core.sync(SyncReason::Manual).unwrap_err().kind,
+            CoreErrorKind::ServerTransient
+        );
+        assert_eq!(
+            core.store.pending_media_progress_mutations().unwrap().len(),
+            1
+        );
+        assert_eq!(source.fetch_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn rate_limit_keeps_media_progress_pending() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = media_progress_core(
+            &temp,
+            Ok(vec![miniflux::MinifluxCapability::MediaProgressSync]),
+        );
+        core.sync(SyncReason::Manual).unwrap();
+        core.checkpoint_playback(101, 12_000, None).unwrap();
+        source.media_results.lock().unwrap().insert(
+            101,
+            Err(
+                CoreError::server_transient("Miniflux server returned HTTP 429")
+                    .with_http_status(429),
+            ),
+        );
+
+        assert_eq!(
+            core.sync(SyncReason::Manual).unwrap_err().kind,
+            CoreErrorKind::ServerTransient
+        );
+        assert_eq!(
+            core.store.pending_media_progress_mutations().unwrap().len(),
+            1
+        );
+    }
+
+    #[test]
+    fn connectivity_and_authentication_failures_keep_media_progress_pending() {
+        for error in [
+            CoreError::connectivity("offline"),
+            CoreError::authentication("Miniflux rejected credentials").with_http_status(401),
+        ] {
+            let temp = TempDir::new().unwrap();
+            let (core, source) = media_progress_core(
+                &temp,
+                Ok(vec![miniflux::MinifluxCapability::MediaProgressSync]),
+            );
+            core.sync(SyncReason::Manual).unwrap();
+            core.checkpoint_playback(101, 12_000, None).unwrap();
+            let expected_kind = error.kind.clone();
+            source.media_results.lock().unwrap().insert(101, Err(error));
+
+            assert_eq!(
+                core.sync(SyncReason::Manual).unwrap_err().kind,
+                expected_kind
+            );
+            assert_eq!(
+                core.store.pending_media_progress_mutations().unwrap().len(),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_media_progress_discards_remote_intents_without_touching_playback() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = media_progress_core(&temp, Ok(Vec::new()));
+        core.sync(SyncReason::Manual).unwrap();
+        core.store
+            .checkpoint_playback(101, 12_000, None, "2026-01-01T00:00:00Z", true)
+            .unwrap();
+
+        core.sync(SyncReason::Manual).unwrap();
+
+        assert!(source.media_calls.lock().unwrap().is_empty());
+        assert!(
+            core.store
+                .pending_media_progress_mutations()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            core.playback_state(101).unwrap().unwrap().position_ms,
+            12_000
+        );
+    }
+
+    #[test]
+    fn unknown_media_progress_capability_retains_pending_intents() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = media_progress_core(&temp, Err(CoreError::connectivity("offline")));
+        core.sync(SyncReason::Manual).unwrap();
+        core.store
+            .checkpoint_playback(101, 12_000, None, "2026-01-01T00:00:00Z", true)
+            .unwrap();
+
+        core.sync(SyncReason::Manual).unwrap();
+
+        assert!(source.media_calls.lock().unwrap().is_empty());
+        assert_eq!(
+            core.store.pending_media_progress_mutations().unwrap().len(),
+            1
+        );
+        assert_eq!(source.fetch_calls.load(Ordering::SeqCst), 2);
     }
 
     #[test]

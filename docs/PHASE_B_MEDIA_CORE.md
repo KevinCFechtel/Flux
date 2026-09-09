@@ -240,6 +240,7 @@ MediaProgressMutation
 - Completion writes the duration.
 - Restart writes `0`.
 - Do not create undeliverable remote mutations when the server does not support media progression.
+- A permanently unavailable remote enclosure must not poison normal synchronization: discard only its matching pending remote-progress intent, keep local playback state intact, and continue normal synchronization. Temporary delivery failures and unknown capability state retain the pending intent for retry.
 
 Expose server capability conceptually as:
 

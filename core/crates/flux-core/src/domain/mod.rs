@@ -823,6 +823,7 @@ pub enum CoreErrorKind {
 pub struct CoreError {
     pub kind: CoreErrorKind,
     pub message: String,
+    http_status: Option<u16>,
 }
 
 impl CoreError {
@@ -830,43 +831,57 @@ impl CoreError {
         Self {
             kind: CoreErrorKind::Connectivity,
             message: message.into(),
+            http_status: None,
         }
     }
     pub fn authentication(message: impl Into<String>) -> Self {
         Self {
             kind: CoreErrorKind::Authentication,
             message: message.into(),
+            http_status: None,
         }
     }
     pub fn invalid_configuration(message: impl Into<String>) -> Self {
         Self {
             kind: CoreErrorKind::InvalidConfiguration,
             message: message.into(),
+            http_status: None,
         }
     }
     pub fn server_transient(message: impl Into<String>) -> Self {
         Self {
             kind: CoreErrorKind::ServerTransient,
             message: message.into(),
+            http_status: None,
         }
     }
     pub fn persistence(message: impl Into<String>) -> Self {
         Self {
             kind: CoreErrorKind::Persistence,
             message: message.into(),
+            http_status: None,
         }
     }
     pub fn data(message: impl Into<String>) -> Self {
         Self {
             kind: CoreErrorKind::Data,
             message: message.into(),
+            http_status: None,
         }
     }
     pub fn internal(message: impl Into<String>) -> Self {
         Self {
             kind: CoreErrorKind::Internal,
             message: message.into(),
+            http_status: None,
         }
+    }
+    pub(crate) fn with_http_status(mut self, status: u16) -> Self {
+        self.http_status = Some(status);
+        self
+    }
+    pub(crate) fn http_status(&self) -> Option<u16> {
+        self.http_status
     }
 }
 impl fmt::Display for CoreError {

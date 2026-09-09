@@ -450,7 +450,7 @@ impl MinifluxClient {
         {
             Ok(response) => response,
             Err(error) => {
-                tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
+                log_request_failure(&path, &error, started.elapsed());
                 return Err(error);
             }
         };
@@ -485,7 +485,7 @@ impl MinifluxClient {
                 Ok(())
             }
             Err(error) => {
-                tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
+                log_request_failure(path, &error, started.elapsed());
                 Err(error)
             }
         }
@@ -536,8 +536,9 @@ impl MinifluxClient {
                 let error = CoreError::data(format!(
                     "Miniflux returned unexpected HTTP {}",
                     response.status()
-                ));
-                tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
+                ))
+                .with_http_status(response.status());
+                log_request_failure(&path, &error, started.elapsed());
                 Err(error)
             }
             Err(ureq::Error::Status(400, response)) => {
@@ -545,8 +546,9 @@ impl MinifluxClient {
                     .map(|body| body.error_message != "no third-party integration enabled")
                     .unwrap_or(true);
                 if configured {
-                    let error = CoreError::invalid_configuration("Miniflux returned HTTP 400");
-                    tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
+                    let error = CoreError::invalid_configuration("Miniflux returned HTTP 400")
+                        .with_http_status(400);
+                    log_request_failure(&path, &error, started.elapsed());
                     Err(error)
                 } else {
                     tracing::debug!(target: "miniflux", "request completed without configured integration endpoint={} elapsed_ms={}", path, started.elapsed().as_millis());
@@ -555,7 +557,7 @@ impl MinifluxClient {
             }
             Err(error) => {
                 let error = map_http_error(error);
-                tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
+                log_request_failure(&path, &error, started.elapsed());
                 Err(error)
             }
         }
@@ -582,7 +584,7 @@ impl MinifluxClient {
         {
             Ok(response) => response,
             Err(error) => {
-                tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
+                log_request_failure(path, &error, started.elapsed());
                 return Err(error);
             }
         };
@@ -590,8 +592,9 @@ impl MinifluxClient {
             let error = CoreError::data(format!(
                 "Miniflux returned unexpected HTTP {}",
                 response.status()
-            ));
-            tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, started.elapsed().as_millis());
+            ))
+            .with_http_status(response.status());
+            log_request_failure(path, &error, started.elapsed());
             return Err(error);
         }
         let decoded = serde_json::from_reader(response.into_reader())
@@ -1094,16 +1097,25 @@ impl RemoteSource for MinifluxClient {
 
 fn map_http_error(error: ureq::Error) -> CoreError {
     match error {
-        ureq::Error::Status(401, _) | ureq::Error::Status(403, _) => {
-            CoreError::authentication("Miniflux rejected credentials")
+        ureq::Error::Status(status @ (401 | 403), _) => {
+            CoreError::authentication("Miniflux rejected credentials").with_http_status(status)
         }
         ureq::Error::Status(status, _) if status == 429 || status >= 500 => {
             CoreError::server_transient(format!("Miniflux server returned HTTP {status}"))
+                .with_http_status(status)
         }
         ureq::Error::Status(status, _) => {
             CoreError::invalid_configuration(format!("Miniflux returned HTTP {status}"))
+                .with_http_status(status)
         }
         other => CoreError::connectivity(format!("Miniflux request failed: {other}")),
+    }
+}
+fn log_request_failure(path: &str, error: &CoreError, elapsed: std::time::Duration) {
+    if let Some(status) = error.http_status() {
+        tracing::warn!(target: "miniflux", "request failed endpoint={} status={} kind={:?} elapsed_ms={}", path, status, error.kind, elapsed.as_millis());
+    } else {
+        tracing::warn!(target: "miniflux", "request failed endpoint={} kind={:?} elapsed_ms={}", path, error.kind, elapsed.as_millis());
     }
 }
 fn map_account_validation_error(error: &ureq::Error) -> AccountValidationError {
@@ -1585,6 +1597,21 @@ mod tests {
                 AccountValidationError::InvalidUrl
             );
         }
+    }
+
+    #[test]
+    fn media_progress_http_errors_retain_status_for_delivery_and_diagnostics() {
+        let (address, worker) = version_server(404, "");
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        let error = client.set_media_progression(15986615, 12).unwrap_err();
+
+        assert_eq!(
+            error.kind,
+            crate::domain::CoreErrorKind::InvalidConfiguration
+        );
+        assert_eq!(error.http_status(), Some(404));
+        assert_eq!(worker.join().unwrap().0, "/v1/enclosures/15986615");
     }
 
     #[test]
