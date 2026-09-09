@@ -287,8 +287,7 @@ struct ArticleListView: View {
                     ) ? 20 : 26
 
                     List {
-                        Section {
-                          ForEach(store.articles, id: \.id) { article in
+                        ForEach(store.articles, id: \.id) { article in
                             let rowState = store.rowPresentationState(for: article)
                             let iconVariant = IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)
                             let feedIcon = store.feedIconPresentationState(for: article.feedId, variant: iconVariant)
@@ -322,9 +321,7 @@ struct ArticleListView: View {
                             .onDisappear {
                                 receiveListVisibility(articleID: article.id, isVisible: false, availableWidth: proxy.size.width - horizontalInset * 2)
                             }
-                        }
-                      }
-                      .listSectionSeparator(.hidden, edges: .all)
+                        }.listRowSeparator(.hidden)
                     }
                     .listStyle(.plain)
                     .listRowSeparatorTint(.clear, edges: .all)
