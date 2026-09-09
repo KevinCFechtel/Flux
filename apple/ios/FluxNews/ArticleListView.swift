@@ -314,6 +314,7 @@ struct ArticleListView: View {
                             .padding(.vertical, articleSpacing / 2)
                             .listRowInsets(EdgeInsets())
                             .listRowSeparator(.hidden, edges: .all)
+                            .listRowSeparatorTint(.clear, edges: .all)
                             .listRowBackground(Color.clear)
                             .onScrollVisibilityChange(threshold: scrolloverVisibilityThreshold) { isVisible in
                                 receiveListVisibility(articleID: article.id, isVisible: isVisible, availableWidth: proxy.size.width - horizontalInset * 2)
