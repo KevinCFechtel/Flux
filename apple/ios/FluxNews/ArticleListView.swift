@@ -701,8 +701,8 @@ private struct ArticleRowContentBody: View {
 }
 
 private enum ArticleRowContentLayout {
-    static let compactHorizontalPadding: CGFloat = 3
-    static let compactVerticalPadding: CGFloat = 6
+    static let compactHorizontalPadding: CGFloat = 1
+    static let compactVerticalPadding: CGFloat = 2
 }
 
 private struct ArticleTitlePresentation: View {
