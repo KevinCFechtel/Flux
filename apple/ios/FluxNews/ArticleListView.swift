@@ -281,10 +281,6 @@ struct ArticleListView: View {
             } else {
                 GeometryReader { proxy in
                     let horizontalInset: CGFloat = proxy.size.width > 700 ? 28 : 16
-                    let articleSpacing: CGFloat = ArticlePresentationLayout.usesLandscapeVisual(
-                        mode: store.articlePresentationMode,
-                        availableWidth: proxy.size.width - horizontalInset * 2
-                    ) ? 20 : 26
 
                     List {
                         ForEach(store.articles, id: \.id) { article in
@@ -310,7 +306,7 @@ struct ArticleListView: View {
                             )
                             .equatable()
                             .padding(.horizontal, horizontalInset)
-                            .padding(.vertical,  2)
+                            .padding(.vertical, 2)
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .onScrollVisibilityChange(threshold: scrolloverVisibilityThreshold) { isVisible in
@@ -553,6 +549,7 @@ private struct ArticleRowSurface: View, Equatable {
     let feedIcon: IOSFeedIconPresentationState
     let onRequestFeedIcon: () -> Void
     let onTap: () -> Void
+    @State private var measuredWidth: CGFloat = 0
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.content == rhs.content &&
@@ -561,13 +558,33 @@ private struct ArticleRowSurface: View, Equatable {
     }
 
     var body: some View {
-        ArticleRowContentBody(content: content, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
+        ArticleRowContentBody(content: content, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: resolvedWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
             .contentShape(RoundedRectangle(cornerRadius: 16))
             .onTapGesture(perform: onTap)
-            .frame(width: articleWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .preference(key: ArticleRowWidthPreferenceKey.self, value: proxy.size.width)
+                }
+            }
+            .onPreferenceChange(ArticleRowWidthPreferenceKey.self) { width in
+                guard width > 0, abs(width - measuredWidth) > 0.5 else { return }
+                measuredWidth = width
+            }
     }
 
-    private var articleWidth: CGFloat { ArticlePresentationLayout.boundedArticleWidth(availableWidth) }
+    private var resolvedWidth: CGFloat {
+        measuredWidth > 0 ? measuredWidth : availableWidth
+    }
+}
+
+private struct ArticleRowWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
 }
 
 private struct ArticleRowContentBody: View {
@@ -591,7 +608,7 @@ private struct ArticleRowContentBody: View {
             }
         case .compact:
             articleText
-                .padding(.vertical, 12)
+                .padding(.vertical, 8)
                 .padding(.horizontal, 4)
                 .frame(width: contentWidth, alignment: .leading)
         }
