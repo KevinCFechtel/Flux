@@ -1056,6 +1056,29 @@ impl Store {
         }
         Ok(())
     }
+    /// Records that an article can no longer be recovered remotely while retaining its local media.
+    pub fn mark_article_enclosures_remote_absent(&self, article_id: i64) -> Result<(), CoreError> {
+        self.connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .execute(
+                "UPDATE enclosures SET remote_present=0 WHERE article_id=?1",
+                [article_id],
+            )
+            .map_err(sql_error)?;
+        Ok(())
+    }
+    pub fn article_has_remote_present_enclosure(&self, article_id: i64) -> Result<bool, CoreError> {
+        self.connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM enclosures WHERE article_id=?1 AND remote_present=1)",
+                [article_id],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)
+    }
 
     pub fn save_media(&self, enclosure_id: i64, added_at: &str) -> Result<bool, CoreError> {
         let mut connection = self

@@ -92,6 +92,7 @@ MediaKind
 - Multiple enclosures per article must be fully supported.
 - A remotely removed enclosure may remain locally if durable media state still depends on it.
 - Persist a minimal remote-presence semantic such as `remote_present`.
+- Definitive remote deletion of an article or enclosure must not poison synchronization or destroy locally protected playback/download state; retained local media records its remote absence and may outlive the originating Miniflux resource.
 
 A normal remote enclosure does not exist independently of its article. If local media state still requires the enclosure, the associated article must be protected from article cleanup.
 

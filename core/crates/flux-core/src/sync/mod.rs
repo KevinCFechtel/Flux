@@ -44,6 +44,7 @@ pub fn run(
         .collect::<HashSet<_>>();
     let mut fetched_protected_articles = HashSet::new();
     let protected_requirements = store.protected_playback_requirements()?;
+    let download_requirements = store.protected_download_requirements()?;
     for article_id in store.protected_playback_article_ids()? {
         let article_needs_enclosures = protected_requirements
             .iter()
@@ -54,29 +55,38 @@ pub fn run(
                     .iter()
                     .any(|enclosure| enclosure.id == *enclosure_id)
             });
-        if (!known_articles.contains(&article_id) || article_needs_enclosures)
+        let article_missing = !known_articles.contains(&article_id);
+        if ((article_missing && store.article_has_remote_present_enclosure(article_id)?)
+            || (!article_missing && article_needs_enclosures))
             && fetched_protected_articles.insert(article_id)
         {
             fetch_protected_article(
                 remote,
+                store,
                 article_id,
-                "playback",
+                protected_fetch_reason(article_id, &protected_requirements, &download_requirements),
                 &mut snapshot,
                 &mut known_articles,
                 &mut known_enclosures,
             )?;
         }
     }
-    let download_requirements = store.protected_download_requirements()?;
     for (article_id, enclosure_id) in &download_requirements {
         let article_missing = !known_articles.contains(article_id);
         let enclosure_missing = !known_enclosures.contains(enclosure_id);
-        if article_missing || enclosure_missing {
+        if (article_missing && store.article_has_remote_present_enclosure(*article_id)?)
+            || (!article_missing && enclosure_missing)
+        {
             if fetched_protected_articles.insert(*article_id) {
                 fetch_protected_article(
                     remote,
+                    store,
                     *article_id,
-                    "download",
+                    protected_fetch_reason(
+                        *article_id,
+                        &protected_requirements,
+                        &download_requirements,
+                    ),
                     &mut snapshot,
                     &mut known_articles,
                     &mut known_enclosures,
@@ -161,6 +171,7 @@ pub fn run(
 
 fn fetch_protected_article(
     remote: &dyn RemoteSource,
+    store: &Store,
     article_id: i64,
     reason: &str,
     snapshot: &mut crate::miniflux::RemoteSnapshot,
@@ -173,12 +184,46 @@ fn fetch_protected_article(
         article_id,
         reason
     );
-    let protected = remote.fetch_article_by_id(article_id)?;
+    let protected = match remote.fetch_article_by_id(article_id) {
+        Ok(protected) => protected,
+        Err(error) if matches!(error.http_status(), Some(404 | 410)) => {
+            store.mark_article_enclosures_remote_absent(article_id)?;
+            tracing::info!(
+                target: "sync",
+                "protected fetch unavailable article_id={} reason={} status={}",
+                article_id,
+                reason,
+                error.http_status().unwrap_or_default()
+            );
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
     known_articles.insert(protected.article.id);
     known_enclosures.extend(protected.enclosures.iter().map(|enclosure| enclosure.id));
     snapshot.articles.push(protected.article);
     snapshot.enclosures.extend(protected.enclosures);
     Ok(())
+}
+
+fn protected_fetch_reason(
+    article_id: i64,
+    playback_requirements: &[(i64, i64)],
+    download_requirements: &[(i64, i64)],
+) -> &'static str {
+    match (
+        playback_requirements
+            .iter()
+            .any(|(required_article_id, _)| *required_article_id == article_id),
+        download_requirements
+            .iter()
+            .any(|(required_article_id, _)| *required_article_id == article_id),
+    ) {
+        (true, true) => "playback+download",
+        (true, false) => "playback",
+        (false, true) => "download",
+        (false, false) => "unknown",
+    }
 }
 
 #[cfg(test)]
@@ -189,6 +234,10 @@ mod tests {
     use tempfile::TempDir;
 
     struct ProtectedFetchFailure;
+    struct ProtectedRecoveryRemote {
+        response: Result<crate::miniflux::RemoteSavedMediaArticle, CoreError>,
+        fetch_calls: std::sync::atomic::AtomicUsize,
+    }
 
     impl RemoteSource for ProtectedFetchFailure {
         fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError> {
@@ -218,6 +267,116 @@ mod tests {
         ) -> Result<crate::miniflux::RemoteSavedMediaArticle, CoreError> {
             Err(CoreError::server_transient("protected fetch failed"))
         }
+    }
+    impl RemoteSource for ProtectedRecoveryRemote {
+        fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError> {
+            Ok(RemoteSnapshot {
+                categories: vec![Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                feeds: vec![Feed {
+                    id: 2,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                articles: Vec::new(),
+                enclosures: Vec::new(),
+            })
+        }
+        fn set_read_state(&self, _: &[i64], _: bool) -> Result<(), CoreError> {
+            Ok(())
+        }
+        fn set_starred_state(&self, _: i64, _: bool) -> Result<(), CoreError> {
+            Ok(())
+        }
+        fn fetch_article_by_id(
+            &self,
+            _: i64,
+        ) -> Result<crate::miniflux::RemoteSavedMediaArticle, CoreError> {
+            self.fetch_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.response.clone()
+        }
+    }
+
+    fn protected_article() -> Article {
+        Article {
+            id: 9,
+            feed_id: 2,
+            title: "Protected".into(),
+            url: "https://example.test/9".into(),
+            comments_url: String::new(),
+            published_at: "2020-01-01T00:00:00Z".into(),
+            is_read: true,
+            is_starred: false,
+            raw_html_content: String::new(),
+            preview: String::new(),
+            image_url: None,
+        }
+    }
+
+    fn protected_enclosure() -> Enclosure {
+        Enclosure {
+            id: 90,
+            article_id: 9,
+            url: "https://example.test/90.mp3".into(),
+            mime_type: "audio/mpeg".into(),
+            size_bytes: None,
+            remote_media_progression_seconds: 0,
+        }
+    }
+
+    fn protected_store(temp: &TempDir, playback: bool, downloaded: bool) -> Store {
+        let data = temp.path().join("data");
+        let cache = temp.path().join("cache");
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::create_dir_all(&media).unwrap();
+        let store = Store::open(&data, &cache, &media).unwrap();
+        store
+            .reconcile_with_enclosures(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 2,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                &[protected_article()],
+                &[protected_enclosure()],
+            )
+            .unwrap();
+        if playback {
+            store
+                .checkpoint_playback(90, 1_000, None, "2026-01-01T00:00:00Z", false)
+                .unwrap();
+        }
+        if downloaded {
+            store
+                .request_download(90, crate::domain::DownloadOrigin::Manual)
+                .unwrap();
+            store
+                .download_finished(90, "downloads/90.mp3", 1024)
+                .unwrap();
+        }
+        store
+    }
+
+    fn run_protected_recovery(
+        remote: &ProtectedRecoveryRemote,
+        store: &Store,
+    ) -> Result<SyncData, CoreError> {
+        run(
+            remote,
+            store,
+            ReadArticleRetention::Days30,
+            SyncReason::Manual,
+            HashMap::new(),
+        )
     }
 
     #[test]
@@ -282,6 +441,129 @@ mod tests {
             crate::domain::CoreErrorKind::ServerTransient
         );
         assert!(store.last_successful_sync_at().unwrap().is_none());
+    }
+
+    #[test]
+    fn protected_playback_fetch_successfully_restores_missing_remote_article() {
+        let temp = TempDir::new().unwrap();
+        let store = protected_store(&temp, true, false);
+        let remote = ProtectedRecoveryRemote {
+            response: Ok(crate::miniflux::RemoteSavedMediaArticle {
+                article: protected_article(),
+                enclosures: vec![protected_enclosure()],
+            }),
+            fetch_calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+
+        run_protected_recovery(&remote, &store).unwrap();
+
+        assert_eq!(
+            remote.fetch_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        assert!(store.enclosure(90).unwrap().unwrap().remote_present);
+        assert!(store.playback_state(90).unwrap().is_some());
+    }
+
+    #[test]
+    fn terminally_missing_protected_playback_is_retained_and_not_refetched() {
+        for status in [404, 410] {
+            let temp = TempDir::new().unwrap();
+            let store = protected_store(&temp, true, false);
+            let remote = ProtectedRecoveryRemote {
+                response: Err(CoreError::invalid_configuration(format!(
+                    "Miniflux returned HTTP {status}"
+                ))
+                .with_http_status(status)),
+                fetch_calls: std::sync::atomic::AtomicUsize::new(0),
+            };
+
+            run_protected_recovery(&remote, &store).unwrap();
+            run_protected_recovery(&remote, &store).unwrap();
+
+            assert_eq!(
+                remote.fetch_calls.load(std::sync::atomic::Ordering::SeqCst),
+                1
+            );
+            assert!(!store.enclosure(90).unwrap().unwrap().remote_present);
+            assert_eq!(
+                store.playback_state(90).unwrap().unwrap().position_ms,
+                1_000
+            );
+            assert!(store.last_successful_sync_at().unwrap().is_some());
+        }
+    }
+
+    #[test]
+    fn terminally_missing_protected_download_retains_local_file_reference() {
+        let temp = TempDir::new().unwrap();
+        let store = protected_store(&temp, false, true);
+        let remote = ProtectedRecoveryRemote {
+            response: Err(
+                CoreError::invalid_configuration("Miniflux returned HTTP 404")
+                    .with_http_status(404),
+            ),
+            fetch_calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+
+        run_protected_recovery(&remote, &store).unwrap();
+
+        assert!(!store.enclosure(90).unwrap().unwrap().remote_present);
+        let download = store.media_download(90).unwrap().unwrap();
+        assert_eq!(download.state, crate::domain::DownloadState::Downloaded);
+        assert_eq!(download.local_file.as_deref(), Some("downloads/90.mp3"));
+    }
+
+    #[test]
+    fn terminally_missing_article_with_playback_and_download_is_fetched_once_and_retained() {
+        let temp = TempDir::new().unwrap();
+        let store = protected_store(&temp, true, true);
+        let remote = ProtectedRecoveryRemote {
+            response: Err(
+                CoreError::invalid_configuration("Miniflux returned HTTP 404")
+                    .with_http_status(404),
+            ),
+            fetch_calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+
+        run_protected_recovery(&remote, &store).unwrap();
+
+        assert_eq!(
+            remote.fetch_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        assert!(store.playback_state(90).unwrap().is_some());
+        assert_eq!(
+            store.media_download(90).unwrap().unwrap().state,
+            crate::domain::DownloadState::Downloaded
+        );
+    }
+
+    #[test]
+    fn non_terminal_protected_fetch_failures_remain_sync_failures() {
+        for error in [
+            CoreError::server_transient("Miniflux server returned HTTP 500").with_http_status(500),
+            CoreError::server_transient("Miniflux server returned HTTP 429").with_http_status(429),
+            CoreError::connectivity("offline"),
+            CoreError::authentication("Miniflux rejected credentials").with_http_status(401),
+            CoreError::authentication("Miniflux rejected credentials").with_http_status(403),
+            CoreError::invalid_configuration("Miniflux returned HTTP 400").with_http_status(400),
+        ] {
+            let temp = TempDir::new().unwrap();
+            let store = protected_store(&temp, true, false);
+            let expected_kind = error.kind.clone();
+            let remote = ProtectedRecoveryRemote {
+                response: Err(error),
+                fetch_calls: std::sync::atomic::AtomicUsize::new(0),
+            };
+
+            assert_eq!(
+                run_protected_recovery(&remote, &store).unwrap_err().kind,
+                expected_kind
+            );
+            assert!(store.enclosure(90).unwrap().unwrap().remote_present);
+            assert!(store.last_successful_sync_at().unwrap().is_none());
+        }
     }
 
     #[test]
