@@ -322,7 +322,6 @@ struct ArticleListView: View {
                         }.listRowSeparator(.hidden)
                     }
                     .listStyle(.plain)
-                    .listRowSeparatorTint(.clear, edges: .all)
                     .scrollContentBackground(.hidden)
                     .id(store.scrollResetRevision)
                     .refreshable { await store.syncManually() }
