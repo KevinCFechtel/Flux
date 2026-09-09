@@ -133,22 +133,23 @@ link and falls back to the in-app browser. The internal Reader is an explicitly
 configured exception and is temporary presentation, preferably an inspector on
 regular-width iPad and a sheet/full-screen presentation on compact width/iPhone.
 
-Native swipe actions and Mark-as-Read-on-Scrollover are retained. iOS uses the
-iOS 18 `scrollTargetLayout`, scroll phase, and target-visibility APIs rather
-than row geometry: the leading visible Article ID is compared against the
- current ordered article snapshot, and the semantic forward crossing ID range is
- marked read. Visibility/leading-target detection and semantic read crossing are
- distinct: an adjacent leading transition defers the prior leading card until
- the following transition, while fast jumps still fill their omitted ordered
- range. This remains correct when fast scrolling skips intermediate visibility
- reports. Initial visibility and snapshot replacement establish a baseline only;
- backward movement emits nothing. When a genuine forward interaction reaches the
- final ordered target, the remaining visible articles complete Scrollover through
- the same non-structural read mutation path. This terminal completion cannot run
- from initial visibility, a rebaseline, or layout-only changes. A 15%
-target-visibility threshold is used only
-to reliably identify a leading target for variable-height cards, including cards
-too tall to become 50% visible. It is not a read-exposure threshold.
+The native iOS/iPadOS Article Timeline uses a SwiftUI `List`. Timeline row
+actions use system-native swipe actions: leading Read/Unread and trailing
+Star/Unstar invoke the existing optimistic mutations and allow the platform's
+standard full-swipe behavior. The same mutation paths remain available from the
+context menu.
+
+Mark-as-Read-on-Scrollover treats List visibility solely as an interchangeable
+presentation-layer sensor over stable Article IDs. Each List row reports iOS 18
+`onScrollVisibilityChange` at a 15% threshold; a small coordinator maintains
+the currently visible IDs and orders them by the structural article snapshot.
+This threshold only identifies a leading target for variable-height cards,
+including cards too tall to become 50% visible. It is not a read-exposure
+threshold. Visibility is then passed to `IOSScrolloverOrderTracker`, which is
+independent of the scroll container and remains the sole authority for initial
+baselines, forward/backward crossing, deferred leading cards, gap filling,
+terminal completion, emitted IDs, and structural rebaselining. No timing,
+exposure-duration, or per-row geometry logic participates in Scrollover.
 
 Remove When Read applies to explicit/manual read actions, including swipe and
 context-menu actions. It does not apply to Mark-as-Read-on-Scrollover:
@@ -157,14 +158,15 @@ including after scrolling becomes idle. The unread/read visual transition keeps
 the unread-indicator layout slot present and changes only its visual opacity, so
 it does not alter article-card geometry.
 
-iOS Scrollover keeps detection, immediate row-local presentation, Core mutation
-scheduling, and Undo separate. Crossing an unread article changes only its row
-presentation immediately; while the scroll view is interacting or decelerating,
-the corresponding IDs accumulate in a deduplicated local buffer. The buffer is
-persisted through the existing Core bulk mutation API when scrolling becomes
-idle, with bounded and lifecycle/snapshot safety flushes. Active scrolling never
-requires a Core/SQLite operation for visual feedback and never structurally
-changes the article collection.
+iOS Scrollover keeps visibility sensing, semantic detection, immediate row-local
+presentation, Core mutation scheduling, and Undo separate. Crossing an unread
+article changes only its row presentation immediately; while the List is
+interacting or decelerating, the corresponding IDs accumulate in a deduplicated
+local buffer. `NewsreaderStore` persists that buffer through the existing Core
+bulk mutation API when scrolling becomes idle, with bounded and
+lifecycle/snapshot safety flushes. Active scrolling never requires a
+Core/SQLite operation for visual feedback and never structurally changes the
+article collection.
 Row rendering keeps immutable article content separate from mutable read/starred
 presentation. A scrollover read mutation may invalidate its small status,
 accessibility, and interaction presentation views, but must not invalidate the
@@ -189,10 +191,6 @@ existing rolling group. A success extends its 4-second inactivity window without
 extending the 15-second maximum group lifetime. Backward movement, initial baseline
 establishment, and structural rebaselining emit neither reads nor Undo. macOS
 retains its existing platform-specific frame integration.
-
-Custom iOS swipe actions retain their existing interaction behavior while the
-revealed action treatment uses restrained rounded corners and a small visual gap
-from the article card.
 
 Visual article images are native iOS presentation infrastructure, not Core or
 sync state. They use display-sized ImageIO downsampling, normal HTTP response

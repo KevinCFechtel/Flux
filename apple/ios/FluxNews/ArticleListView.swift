@@ -183,246 +183,30 @@ struct IOSScrolloverBatch: Equatable {
     let articleIDs: [Int64]
 }
 
-enum IOSArticleMutation: Equatable {
-    case read(Bool)
-    case starred(Bool)
-}
+/// List-row visibility is a sensor only. The tracker remains the crossing authority.
+struct IOSListVisibilityCoordinator {
+    private var orderedIDs: [Int64] = []
+    private var visibleIDs = Set<Int64>()
 
-enum IOSSwipeDirection: Equatable {
-    case right
-    case left
+    mutating func updateSnapshot(_ ids: [Int64]) -> [Int64] {
+        guard ids != orderedIDs else { return orderedVisibleIDs }
+        orderedIDs = ids
+        visibleIDs.formIntersection(Set(ids))
+        return orderedVisibleIDs
+    }
 
-    var sign: CGFloat { self == .right ? 1 : -1 }
-}
-
-enum IOSArticleSwipeAction: Hashable {
-    case read
-    case unread
-    case star
-    case unstar
-
-    var mutation: IOSArticleMutation {
-        switch self {
-        case .read: .read(true)
-        case .unread: .read(false)
-        case .star: .starred(true)
-        case .unstar: .starred(false)
+    mutating func receiveVisibility(articleID: Int64, isVisible: Bool) -> [Int64]? {
+        guard orderedIDs.contains(articleID) else { return nil }
+        if isVisible {
+            guard visibleIDs.insert(articleID).inserted else { return nil }
+        } else {
+            guard visibleIDs.remove(articleID) != nil else { return nil }
         }
+        return orderedVisibleIDs
     }
 
-    var accessibilityLabel: String {
-        switch self {
-        case .read: String(localized: "Mark as Read")
-        case .unread: String(localized: "Mark as Unread")
-        case .star: String(localized: "Star")
-        case .unstar: String(localized: "Unstar")
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .read: "envelope.open"
-        case .unread: "envelope"
-        case .star: "star"
-        case .unstar: "star.slash"
-        }
-    }
-
-    var tint: Color {
-        switch self {
-        case .read, .unread: .accentColor
-        case .star, .unstar: .orange
-        }
-    }
-}
-
-struct IOSArticleSwipeSideConfiguration: Equatable {
-    // Visual order is inner-to-outer. The outer action is the Full Swipe action.
-    let actions: [IOSArticleSwipeAction]
-
-    var fullSwipeAction: IOSArticleSwipeAction? { actions.last }
-
-}
-
-struct IOSArticleSwipeConfiguration: Equatable {
-    let leading: IOSArticleSwipeSideConfiguration
-    let trailing: IOSArticleSwipeSideConfiguration
-
-    static func `default`(for article: ArticleSummary) -> Self {
-        Self(
-            leading: IOSArticleSwipeSideConfiguration(actions: [article.isRead ? .unread : .read]),
-            trailing: IOSArticleSwipeSideConfiguration(actions: [article.isStarred ? .unstar : .star])
-        )
-    }
-}
-
-enum IOSArticleSwipeEndState: Equatable {
-    case closed
-    case revealed(IOSSwipeDirection)
-    case fullSwipe(IOSArticleSwipeAction)
-}
-
-enum IOSArticleSwipeState: Equatable {
-    case closed
-    case dragging(IOSSwipeDirection)
-    case fullSwipeArmed(IOSSwipeDirection)
-}
-
-enum IOSArticleSwipeInteraction {
-    static func fullSwipeDistance(actionWidth: CGFloat) -> CGFloat {
-        actionWidth * 2.5
-    }
-
-    static func shouldTriggerArmedFeedback(from oldState: IOSArticleSwipeState, to newState: IOSArticleSwipeState) -> Bool {
-        guard oldState != newState else { return false }
-        if case .fullSwipeArmed = newState { return true }
-        return false
-    }
-
-    static func effectiveOffset(startOffset: CGFloat, rawTranslation: CGFloat) -> CGFloat {
-        startOffset + rawTranslation
-    }
-
-    static func state(
-        effectiveOffset: CGFloat,
-        configuration: IOSArticleSwipeConfiguration,
-        fullSwipeDistance: CGFloat
-    ) -> IOSArticleSwipeState {
-        guard effectiveOffset != 0 else { return .closed }
-        let direction: IOSSwipeDirection = effectiveOffset > 0 ? .right : .left
-        let side = side(for: direction, configuration: configuration)
-        guard !side.actions.isEmpty else { return .closed }
-        return abs(effectiveOffset) >= fullSwipeDistance ? .fullSwipeArmed(direction) : .dragging(direction)
-    }
-
-    static func visibleOffset(
-        effectiveOffset: CGFloat,
-        configuration: IOSArticleSwipeConfiguration,
-        swipeActionWidth: CGFloat
-    ) -> CGFloat {
-        guard effectiveOffset != 0 else { return 0 }
-        let direction: IOSSwipeDirection = effectiveOffset > 0 ? .right : .left
-        let side = side(for: direction, configuration: configuration)
-        guard !side.actions.isEmpty else { return 0 }
-        let revealDistance = swipeActionWidth * CGFloat(side.actions.count)
-        return min(revealDistance, max(-revealDistance, effectiveOffset))
-    }
-
-    static func endState(
-        effectiveOffset: CGFloat,
-        configuration: IOSArticleSwipeConfiguration,
-        revealThreshold: CGFloat,
-        fullSwipeDistance: CGFloat
-    ) -> IOSArticleSwipeEndState {
-        guard effectiveOffset != 0 else { return .closed }
-        let direction: IOSSwipeDirection = effectiveOffset > 0 ? .right : .left
-        let side = side(for: direction, configuration: configuration)
-        guard !side.actions.isEmpty else { return .closed }
-        if state(effectiveOffset: effectiveOffset, configuration: configuration, fullSwipeDistance: fullSwipeDistance) == .fullSwipeArmed(direction), let action = side.fullSwipeAction {
-            return .fullSwipe(action)
-        }
-        return abs(effectiveOffset) >= revealThreshold ? .revealed(direction) : .closed
-    }
-
-    private static func side(for direction: IOSSwipeDirection, configuration: IOSArticleSwipeConfiguration) -> IOSArticleSwipeSideConfiguration {
-        direction == .right ? configuration.leading : configuration.trailing
-    }
-}
-
-@available(iOS 18.0, *)
-private struct IOSHorizontalArticleSwipeGesture: UIGestureRecognizerRepresentable {
-    @Binding var offset: CGFloat
-    let canBegin: (IOSSwipeDirection, CGFloat) -> Bool
-    let state: (CGFloat) -> IOSArticleSwipeState
-    let visibleOffset: (CGFloat) -> CGFloat
-    let onStateChanged: (IOSArticleSwipeState) -> Void
-    let onEnded: (CGFloat) -> Void
-
-    func makeCoordinator(converter: Self.CoordinateSpaceConverter) -> Coordinator { Coordinator(self) }
-
-    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
-        let recognizer = UIPanGestureRecognizer()
-        recognizer.minimumNumberOfTouches = 1
-        recognizer.maximumNumberOfTouches = 1
-        recognizer.delegate = context.coordinator
-        return recognizer
-    }
-
-    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
-        context.coordinator.parent = self
-        recognizer.delegate = context.coordinator
-    }
-
-    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
-        context.coordinator.handlePan(recognizer)
-    }
-
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var parent: IOSHorizontalArticleSwipeGesture
-        private var startOffset: CGFloat = 0
-
-        init(_ parent: IOSHorizontalArticleSwipeGesture) { self.parent = parent }
-
-        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
-            let velocity = pan.velocity(in: pan.view)
-            guard abs(velocity.x) >= 24, abs(velocity.x) > abs(velocity.y) * 1.25 else { return false }
-            return parent.canBegin(velocity.x >= 0 ? .right : .left, parent.offset)
-        }
-
-        func handlePan(_ recognizer: UIPanGestureRecognizer) {
-            let translation = recognizer.translation(in: recognizer.view)
-            switch recognizer.state {
-            case .began:
-                startOffset = parent.offset
-                parent.onStateChanged(.closed)
-            case .changed:
-                let effectiveOffset = IOSArticleSwipeInteraction.effectiveOffset(startOffset: startOffset, rawTranslation: translation.x)
-                parent.onStateChanged(parent.state(effectiveOffset))
-                parent.offset = parent.visibleOffset(effectiveOffset)
-            case .ended:
-                parent.onEnded(IOSArticleSwipeInteraction.effectiveOffset(startOffset: startOffset, rawTranslation: translation.x))
-                reset()
-            case .cancelled, .failed:
-                parent.offset = startOffset
-                parent.onStateChanged(.closed)
-                reset()
-            default:
-                break
-            }
-        }
-
-        private func reset() { startOffset = 0 }
-    }
-}
-
-private struct IOSArticleSwipeAccessibilityModifier: ViewModifier {
-    let actions: [IOSArticleSwipeAction]
-    let perform: (IOSArticleSwipeAction) -> Void
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        switch actions.count {
-        case 0:
-            content
-        case 1:
-            content.accessibilityAction(named: actions[0].accessibilityLabel) { perform(actions[0]) }
-        case 2:
-            content
-                .accessibilityAction(named: actions[0].accessibilityLabel) { perform(actions[0]) }
-                .accessibilityAction(named: actions[1].accessibilityLabel) { perform(actions[1]) }
-        case 3:
-            content
-                .accessibilityAction(named: actions[0].accessibilityLabel) { perform(actions[0]) }
-                .accessibilityAction(named: actions[1].accessibilityLabel) { perform(actions[1]) }
-                .accessibilityAction(named: actions[2].accessibilityLabel) { perform(actions[2]) }
-        default:
-            content
-                .accessibilityAction(named: actions[0].accessibilityLabel) { perform(actions[0]) }
-                .accessibilityAction(named: actions[1].accessibilityLabel) { perform(actions[1]) }
-                .accessibilityAction(named: actions[2].accessibilityLabel) { perform(actions[2]) }
-                .accessibilityAction(named: actions[3].accessibilityLabel) { perform(actions[3]) }
-        }
+    private var orderedVisibleIDs: [Int64] {
+        orderedIDs.filter { visibleIDs.contains($0) }
     }
 }
 
@@ -470,6 +254,7 @@ struct ArticleListView: View {
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
     @State private var scrolloverTracker = IOSScrolloverOrderTracker()
+    @State private var listVisibility = IOSListVisibilityCoordinator()
     @State private var imagePrefetchMetadata = IOSArticleImagePrefetchMetadata()
     // 15% admits a target that is only barely visible, so tall cards still give
     // the ordered tracker a reliable leading target. It is not a read threshold.
@@ -525,12 +310,17 @@ struct ArticleListView: View {
                                 onSetStarred: { store.setStarred(article, starred: $0) }
                             )
                             .equatable()
-                            .id(article.id)
                             .padding(.horizontal, horizontalInset)
                             .padding(.vertical, articleSpacing / 2)
                             .listRowInsets(EdgeInsets())
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
+                            .onScrollVisibilityChange(threshold: scrolloverVisibilityThreshold) { isVisible in
+                                receiveListVisibility(articleID: article.id, isVisible: isVisible, availableWidth: proxy.size.width - horizontalInset * 2)
+                            }
+                            .onDisappear {
+                                receiveListVisibility(articleID: article.id, isVisible: false, availableWidth: proxy.size.width - horizontalInset * 2)
+                            }
                         }
                     }
                     .listStyle(.plain)
@@ -540,15 +330,6 @@ struct ArticleListView: View {
                     .scrollIndicators(.hidden)
                     .onAppear {
                         rebuildPrefetchMetadata()
-                    }
-                    .onScrollTargetVisibilityChange(idType: Int64.self, threshold: scrolloverVisibilityThreshold) { visibleIDs in
-                        let batch = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
-                        if !batch.articleIDs.isEmpty { store.flushScrollover(batch) }
-                        if let direction = scrolloverTracker.lastVisibilityDirection {
-                            prefetchImages(visibleIDs: visibleIDs, direction: direction, availableWidth: proxy.size.width - horizontalInset * 2)
-                        }
-                        let terminalBatch = scrolloverTracker.receiveTerminalVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
-                        if !terminalBatch.articleIDs.isEmpty { store.flushScrollover(terminalBatch) }
                     }
                     .onScrollPhaseChange { _, phase in
                         switch phase {
@@ -584,6 +365,21 @@ struct ArticleListView: View {
 }
 
 private extension ArticleListView {
+    func receiveListVisibility(articleID: Int64, isVisible: Bool, availableWidth: CGFloat) {
+        guard let visibleIDs = listVisibility.receiveVisibility(articleID: articleID, isVisible: isVisible) else { return }
+        receiveVisibleIDs(visibleIDs, availableWidth: availableWidth)
+    }
+
+    func receiveVisibleIDs(_ visibleIDs: [Int64], availableWidth: CGFloat) {
+        let batch = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
+        if !batch.articleIDs.isEmpty { store.flushScrollover(batch) }
+        if let direction = scrolloverTracker.lastVisibilityDirection {
+            prefetchImages(visibleIDs: visibleIDs, direction: direction, availableWidth: availableWidth)
+        }
+        let terminalBatch = scrolloverTracker.receiveTerminalVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
+        if !terminalBatch.articleIDs.isEmpty { store.flushScrollover(terminalBatch) }
+    }
+
     func prefetchImages(visibleIDs: [Int64], direction: IOSArticleScrollDirection, availableWidth: CGFloat) {
         guard store.articlePresentationMode.showsArticleImage else { return }
         let ids = imagePrefetchMetadata.candidateIDs(visibleIDs: visibleIDs, direction: direction)
@@ -607,6 +403,8 @@ private extension ArticleListView {
     func rebuildPrefetchMetadata() {
         _ = imagePrefetchMetadata.update(articles: store.articles)
         scrolloverTracker.updateSnapshot(imagePrefetchMetadata.orderedIDs)
+        let visibleIDs = listVisibility.updateSnapshot(imagePrefetchMetadata.orderedIDs)
+        _ = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
     }
 }
 
@@ -710,14 +508,25 @@ private struct ArticleRowStateInteractions: View {
     var body: some View {
         let isRead = rowState?.isRead ?? fallbackRead
         let isStarred = rowState?.isStarred ?? fallbackStarred
-        ArticleRowSurface(content: content, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon, onTap: onTap, onSetRead: onSetRead, onSetStarred: onSetStarred)
+        ArticleRowSurface(content: content, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon, onTap: onTap)
             .equatable()
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(content.article.title), \(content.article.feedTitle), \(content.publishedDate), \(isRead ? String(localized: "Read") : String(localized: "Unread"))\(isStarred ? String(localized: ", starred") : "")")
             .accessibilityValue(isRead ? (isStarred ? String(localized: "Read, starred") : String(localized: "Read")) : (isStarred ? String(localized: "Unread, starred") : String(localized: "Unread")))
             .accessibilityAddTraits(.isButton)
             .accessibilityHint(String(localized: "Opens the article"))
-            .modifier(IOSArticleSwipeAccessibilityModifier(actions: [isRead ? .unread : .read, isStarred ? .unstar : .star], perform: performSwipeAction))
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                Button { onSetRead(!isRead) } label: {
+                    Label(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: isRead ? "envelope" : "envelope.open")
+                }
+                .tint(.accentColor)
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                Button { onSetStarred(!isStarred) } label: {
+                    Label(isStarred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: isStarred ? "star.slash" : "star")
+                }
+                .tint(.orange)
+            }
             .contextMenu {
                 Button { onSetStarred(!isStarred) } label: { Label(isStarred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: isStarred ? "star.slash" : "star") }
                 Button { onSetRead(!isRead) } label: { Label(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: isRead ? "envelope" : "envelope.open") }
@@ -733,12 +542,6 @@ private struct ArticleRowStateInteractions: View {
             }
     }
 
-    private func performSwipeAction(_ action: IOSArticleSwipeAction) {
-        switch action.mutation {
-        case .read: onSetRead(!(rowState?.isRead ?? fallbackRead))
-        case .starred: onSetStarred(!(rowState?.isStarred ?? fallbackStarred))
-        }
-    }
 }
 
 private struct ArticleRowSurface: View, Equatable {
@@ -752,12 +555,6 @@ private struct ArticleRowSurface: View, Equatable {
     let feedIcon: IOSFeedIconPresentationState
     let onRequestFeedIcon: () -> Void
     let onTap: () -> Void
-    let onSetRead: (Bool) -> Void
-    let onSetStarred: (Bool) -> Void
-    @State private var horizontalOffset: CGFloat = 0
-    @State private var swipeState: IOSArticleSwipeState = .closed
-    private let swipeActionWidth: CGFloat = 76
-    private let swipeRevealThreshold: CGFloat = 38
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.content == rhs.content &&
@@ -766,74 +563,14 @@ private struct ArticleRowSurface: View, Equatable {
     }
 
     var body: some View {
-        ZStack {
-            ArticleSwipeActionBackground(rowState: rowState, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, horizontalOffset: horizontalOffset, swipeState: swipeState, onSetRead: onSetRead, onSetStarred: onSetStarred)
-            ArticleRowContentBody(content: content, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
-                .contentShape(RoundedRectangle(cornerRadius: 16))
-                .onTapGesture(perform: onTap)
-                .frame(width: articleWidth, alignment: .leading)
-                .background(.background)
-                .offset(x: horizontalOffset)
-                .gesture(IOSHorizontalArticleSwipeGesture(offset: $horizontalOffset, canBegin: { _, _ in true }, state: swipeStateForOffset, visibleOffset: visibleSwipeOffset, onStateChanged: updateSwipeState, onEnded: finishSwipe))
-        }
-        .frame(width: articleWidth, alignment: .leading)
-        .clipped()
+        ArticleRowContentBody(content: content, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
+            .contentShape(RoundedRectangle(cornerRadius: 16))
+            .onTapGesture(perform: onTap)
+            .frame(width: articleWidth, alignment: .leading)
+            .background(.background)
     }
 
     private var articleWidth: CGFloat { ArticlePresentationLayout.boundedArticleWidth(availableWidth) }
-    private var swipeConfiguration: IOSArticleSwipeConfiguration { .init(leading: .init(actions: [.read]), trailing: .init(actions: [.star])) }
-    private var fullSwipeDistance: CGFloat { IOSArticleSwipeInteraction.fullSwipeDistance(actionWidth: swipeActionWidth) }
-    private func visibleSwipeOffset(_ offset: CGFloat) -> CGFloat { IOSArticleSwipeInteraction.visibleOffset(effectiveOffset: offset, configuration: swipeConfiguration, swipeActionWidth: fullSwipeDistance) }
-    private func swipeStateForOffset(_ offset: CGFloat) -> IOSArticleSwipeState { IOSArticleSwipeInteraction.state(effectiveOffset: offset, configuration: swipeConfiguration, fullSwipeDistance: fullSwipeDistance) }
-    private func updateSwipeState(_ newState: IOSArticleSwipeState) {
-        if IOSArticleSwipeInteraction.shouldTriggerArmedFeedback(from: swipeState, to: newState) {
-            let feedback = UIImpactFeedbackGenerator(style: .medium)
-            feedback.prepare()
-            feedback.impactOccurred()
-        }
-        swipeState = newState
-    }
-
-    private func finishSwipe(effectiveOffset: CGFloat) {
-        switch IOSArticleSwipeInteraction.endState(
-            effectiveOffset: effectiveOffset,
-            configuration: swipeConfiguration,
-            revealThreshold: swipeRevealThreshold,
-            fullSwipeDistance: fullSwipeDistance
-        ) {
-        case .closed:
-            horizontalOffset = 0
-        case let .revealed(direction):
-            horizontalOffset = direction.sign * swipeActionWidth
-        case let .fullSwipe(action):
-            horizontalOffset = 0
-            switch action.mutation {
-            case .read: onSetRead(!(rowState?.isRead ?? fallbackRead))
-            case .starred: onSetStarred(!(rowState?.isStarred ?? fallbackStarred))
-            }
-        }
-    }
-}
-
-private struct ArticleSwipeActionBackground: View {
-    let rowState: ArticleRowPresentationState?
-    let fallbackRead: Bool
-    let fallbackStarred: Bool
-    let horizontalOffset: CGFloat
-    let swipeState: IOSArticleSwipeState
-    let onSetRead: (Bool) -> Void
-    let onSetStarred: (Bool) -> Void
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ArticleReadSwipeButton(rowState: rowState, fallback: fallbackRead, armed: swipeState == .fullSwipeArmed(.right), onSetRead: onSetRead)
-                .frame(width: max(76, horizontalOffset))
-            Spacer(minLength: 0)
-            ArticleStarSwipeButton(rowState: rowState, fallback: fallbackStarred, armed: swipeState == .fullSwipeArmed(.left), onSetStarred: onSetStarred)
-                .frame(width: max(76, -horizontalOffset))
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-    }
 }
 
 private struct ArticleRowContentBody: View {
@@ -987,48 +724,6 @@ private struct ArticleUnreadIndicator: View {
             .opacity(ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: rowState?.isRead ?? fallback))
             .accessibilityHidden(true)
     }
-}
-
-private struct ArticleReadSwipeButton: View {
-    let rowState: ArticleRowPresentationState?
-    let fallback: Bool
-    let armed: Bool
-    let onSetRead: (Bool) -> Void
-
-    var body: some View {
-        let isRead = rowState?.isRead ?? fallback
-        Button { onSetRead(!isRead) } label: {
-            swipeLabel(systemImage: isRead ? "envelope" : "envelope.open", title: isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), tint: .blue, armed: armed)
-        }
-        .accessibilityLabel(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"))
-    }
-}
-
-private struct ArticleStarSwipeButton: View {
-    let rowState: ArticleRowPresentationState?
-    let fallback: Bool
-    let armed: Bool
-    let onSetStarred: (Bool) -> Void
-
-    var body: some View {
-        let isStarred = rowState?.isStarred ?? fallback
-        Button { onSetStarred(!isStarred) } label: {
-            swipeLabel(systemImage: isStarred ? "star.slash" : "star", title: isStarred ? String(localized: "Unstar") : String(localized: "Star"), tint: .orange, armed: armed)
-        }
-        .accessibilityLabel(isStarred ? String(localized: "Unstar") : String(localized: "Star"))
-    }
-}
-
-private func swipeLabel(systemImage: String, title: String, tint: Color, armed: Bool) -> some View {
-    VStack(spacing: 4) {
-        Image(systemName: systemImage)
-        Text(title).font(.caption2)
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .foregroundStyle(.white)
-    .background(tint)
-    .scaleEffect(armed ? 1.12 : 1)
-    .animation(.easeOut(duration: 0.12), value: armed)
 }
 
 struct FeedIconView: View {

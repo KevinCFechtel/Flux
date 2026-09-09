@@ -473,120 +473,57 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(store.articles.map(\.id), [2])
     }
 
-    func testSwipeConfigurationSupportsZeroOneAndTwoActions() {
-        let empty = IOSArticleSwipeSideConfiguration(actions: [])
-        let one = IOSArticleSwipeSideConfiguration(actions: [.read])
-        let two = IOSArticleSwipeSideConfiguration(actions: [.unread, .star])
+    func testListVisibilityOrdersIDsBySnapshotRatherThanCallbackOrder() {
+        var visibility = IOSListVisibilityCoordinator()
+        _ = visibility.updateSnapshot([10, 20, 30])
 
-        XCTAssertNil(empty.fullSwipeAction)
-        XCTAssertEqual(one.fullSwipeAction, .read)
-        XCTAssertEqual(two.fullSwipeAction, .star)
+        XCTAssertEqual(visibility.receiveVisibility(articleID: 30, isVisible: true), [30])
+        XCTAssertEqual(visibility.receiveVisibility(articleID: 10, isVisible: true), [10, 30])
     }
 
-    func testSwipeConfigurationKeepsTheOuterVisualActionAsFullSwipe() {
-        let leading = IOSArticleSwipeSideConfiguration(actions: [.star, .read])
-        let trailing = IOSArticleSwipeSideConfiguration(actions: [.unread, .unstar])
-        let configuration = IOSArticleSwipeConfiguration(leading: leading, trailing: trailing)
+    func testListVisibilityCallbackOrderAndDuplicatesAreIdempotent() {
+        var first = IOSListVisibilityCoordinator()
+        var second = IOSListVisibilityCoordinator()
+        _ = first.updateSnapshot([10, 20, 30])
+        _ = second.updateSnapshot([10, 20, 30])
 
-        XCTAssertEqual(configuration.leading.actions, [.star, .read])
-        XCTAssertEqual(configuration.leading.fullSwipeAction, .read)
-        XCTAssertEqual(configuration.trailing.actions, [.unread, .unstar])
-        XCTAssertEqual(configuration.trailing.fullSwipeAction, .unstar)
+        _ = first.receiveVisibility(articleID: 30, isVisible: true)
+        let firstOutput = first.receiveVisibility(articleID: 10, isVisible: true)
+        _ = second.receiveVisibility(articleID: 10, isVisible: true)
+        let secondOutput = second.receiveVisibility(articleID: 30, isVisible: true)
+
+        XCTAssertEqual(firstOutput, secondOutput)
+        XCTAssertNil(first.receiveVisibility(articleID: 10, isVisible: true))
+        XCTAssertEqual(first.receiveVisibility(articleID: 10, isVisible: false), [30])
+        XCTAssertNil(first.receiveVisibility(articleID: 10, isVisible: false))
     }
 
-    func testPartialSwipeRevealsWithoutCommittingAMutation() {
-        let configuration = IOSArticleSwipeConfiguration(
-            leading: IOSArticleSwipeSideConfiguration(actions: [.read]),
-            trailing: IOSArticleSwipeSideConfiguration(actions: [.star])
-        )
+    func testListVisibilitySnapshotReconciliationRemovesStaleRows() {
+        var visibility = IOSListVisibilityCoordinator()
+        _ = visibility.updateSnapshot([10, 20, 30])
+        _ = visibility.receiveVisibility(articleID: 10, isVisible: true)
+        _ = visibility.receiveVisibility(articleID: 20, isVisible: true)
 
-        XCTAssertEqual(
-            IOSArticleSwipeInteraction.endState(effectiveOffset: 80, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300),
-            .revealed(.right)
-        )
-        XCTAssertEqual(
-            IOSArticleSwipeInteraction.endState(effectiveOffset: -20, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300),
-            .closed
-        )
+        XCTAssertEqual(visibility.updateSnapshot([20, 30, 40]), [20])
+        XCTAssertNil(visibility.receiveVisibility(articleID: 10, isVisible: false))
+        XCTAssertEqual(visibility.receiveVisibility(articleID: 40, isVisible: true), [20, 40])
     }
 
-    func testDeliberateFullSwipeCommitsOnlyTheOuterAction() {
-        let configuration = IOSArticleSwipeConfiguration(
-            leading: IOSArticleSwipeSideConfiguration(actions: [.star, .read]),
-            trailing: IOSArticleSwipeSideConfiguration(actions: [.unread, .unstar])
-        )
+    func testListVisibilityOnlySuppliesOrderedInputToTheExistingTracker() {
+        var visibility = IOSListVisibilityCoordinator()
+        var tracker = IOSScrolloverOrderTracker()
+        let ids: [Int64] = [10, 20, 30]
+        _ = visibility.updateSnapshot(ids)
+        tracker.updateSnapshot(ids)
+        _ = visibility.receiveVisibility(articleID: 10, isVisible: true).map { tracker.receiveVisibleIDs($0, enabled: true) }
+        tracker.setUserScrolling(true)
 
-        XCTAssertEqual(
-            IOSArticleSwipeInteraction.endState(effectiveOffset: 300, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300),
-            .fullSwipe(.read)
-        )
-        XCTAssertEqual(
-            IOSArticleSwipeInteraction.endState(effectiveOffset: -300, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300),
-            .fullSwipe(.unstar)
-        )
-    }
-
-    func testSwipeUsesEffectiveOffsetToCloseBeforeRevealingTheOppositeSide() {
-        let configuration = IOSArticleSwipeConfiguration(
-            leading: IOSArticleSwipeSideConfiguration(actions: [.read]),
-            trailing: IOSArticleSwipeSideConfiguration(actions: [.star])
-        )
-
-        XCTAssertEqual(IOSArticleSwipeInteraction.effectiveOffset(startOffset: 76, rawTranslation: -40), 36)
-        XCTAssertEqual(IOSArticleSwipeInteraction.visibleOffset(effectiveOffset: 36, configuration: configuration, swipeActionWidth: 76), 36)
-        XCTAssertEqual(IOSArticleSwipeInteraction.effectiveOffset(startOffset: 76, rawTranslation: -76), 0)
-        XCTAssertEqual(IOSArticleSwipeInteraction.endState(effectiveOffset: 0, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300), .closed)
-        XCTAssertEqual(IOSArticleSwipeInteraction.effectiveOffset(startOffset: 76, rawTranslation: -120), -44)
-        XCTAssertEqual(IOSArticleSwipeInteraction.endState(effectiveOffset: -44, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300), .revealed(.left))
-    }
-
-    func testSwipeMirrorsReversalFromTrailingToLeading() {
-        let configuration = IOSArticleSwipeConfiguration(
-            leading: IOSArticleSwipeSideConfiguration(actions: [.read]),
-            trailing: IOSArticleSwipeSideConfiguration(actions: [.star])
-        )
-
-        XCTAssertEqual(IOSArticleSwipeInteraction.effectiveOffset(startOffset: -76, rawTranslation: 40), -36)
-        XCTAssertEqual(IOSArticleSwipeInteraction.effectiveOffset(startOffset: -76, rawTranslation: 76), 0)
-        XCTAssertEqual(IOSArticleSwipeInteraction.effectiveOffset(startOffset: -76, rawTranslation: 120), 44)
-        XCTAssertEqual(IOSArticleSwipeInteraction.endState(effectiveOffset: 44, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300), .revealed(.right))
-    }
-
-    func testFullSwipeArmingUsesRawEffectiveProgressRatherThanVisibleOffset() {
-        let configuration = IOSArticleSwipeConfiguration(
-            leading: IOSArticleSwipeSideConfiguration(actions: [.star, .read]),
-            trailing: IOSArticleSwipeSideConfiguration(actions: [.unstar])
-        )
-
-        XCTAssertEqual(IOSArticleSwipeInteraction.visibleOffset(effectiveOffset: 300, configuration: configuration, swipeActionWidth: 190), 300)
-        XCTAssertEqual(IOSArticleSwipeInteraction.state(effectiveOffset: 299, configuration: configuration, fullSwipeDistance: 300), .dragging(.right))
-        XCTAssertEqual(IOSArticleSwipeInteraction.state(effectiveOffset: 300, configuration: configuration, fullSwipeDistance: 300), .fullSwipeArmed(.right))
-        XCTAssertEqual(IOSArticleSwipeInteraction.state(effectiveOffset: 250, configuration: configuration, fullSwipeDistance: 300), .dragging(.right))
-        XCTAssertEqual(IOSArticleSwipeInteraction.endState(effectiveOffset: 250, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300), .revealed(.right))
-        XCTAssertEqual(IOSArticleSwipeInteraction.endState(effectiveOffset: 300, configuration: configuration, revealThreshold: 38, fullSwipeDistance: 300), .fullSwipe(.read))
-    }
-
-    func testFullSwipeDistanceIsActionBasedAndIndependentOfArticleWidth() {
-        XCTAssertEqual(IOSArticleSwipeInteraction.fullSwipeDistance(actionWidth: 76), 190)
-        XCTAssertLessThan(IOSArticleSwipeInteraction.fullSwipeDistance(actionWidth: 76), 390 * 0.85)
-    }
-
-    func testArmedFeedbackTriggersOnlyWhenEnteringArmedState() {
-        XCTAssertTrue(IOSArticleSwipeInteraction.shouldTriggerArmedFeedback(from: .dragging(.right), to: .fullSwipeArmed(.right)))
-        XCTAssertFalse(IOSArticleSwipeInteraction.shouldTriggerArmedFeedback(from: .fullSwipeArmed(.right), to: .fullSwipeArmed(.right)))
-        XCTAssertFalse(IOSArticleSwipeInteraction.shouldTriggerArmedFeedback(from: .fullSwipeArmed(.right), to: .dragging(.right)))
-        XCTAssertTrue(IOSArticleSwipeInteraction.shouldTriggerArmedFeedback(from: .dragging(.right), to: .fullSwipeArmed(.right)))
-    }
-
-    func testSwipeActionsRouteToExistingArticleMutationsAndExposeAccessibilityLabels() {
-        XCTAssertEqual(IOSArticleSwipeAction.read.mutation, .read(true))
-        XCTAssertEqual(IOSArticleSwipeAction.unread.mutation, .read(false))
-        XCTAssertEqual(IOSArticleSwipeAction.star.mutation, .starred(true))
-        XCTAssertEqual(IOSArticleSwipeAction.unstar.mutation, .starred(false))
-        XCTAssertEqual(IOSArticleSwipeAction.read.accessibilityLabel, String(localized: "Mark as Read"))
-        XCTAssertEqual(IOSArticleSwipeAction.unread.accessibilityLabel, String(localized: "Mark as Unread"))
-        XCTAssertEqual(IOSArticleSwipeAction.star.accessibilityLabel, String(localized: "Star"))
-        XCTAssertEqual(IOSArticleSwipeAction.unstar.accessibilityLabel, String(localized: "Unstar"))
+        _ = visibility.receiveVisibility(articleID: 20, isVisible: true)
+        let visible = visibility.receiveVisibility(articleID: 10, isVisible: false)!
+        XCTAssertTrue(tracker.receiveVisibleIDs(visible, enabled: true).articleIDs.isEmpty)
+        _ = visibility.receiveVisibility(articleID: 30, isVisible: true)
+        let advanced = visibility.receiveVisibility(articleID: 20, isVisible: false)!
+        XCTAssertEqual(tracker.receiveVisibleIDs(advanced, enabled: true).articleIDs, [10])
     }
 
     @MainActor
