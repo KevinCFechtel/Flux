@@ -77,9 +77,9 @@ struct NewsNavigationView: View {
         List(selection: selection) {
             brandingHeader
             Section("News") {
-                searchRow
                 scopeRow("All News", systemImage: "newspaper", scope: .all, count: store.unreadTotal)
                 scopeRow("Starred", systemImage: "star", scope: .starred, count: store.starredTotal)
+                searchRow
                 if presentation == .sheet { scopeRow("Listening List", systemImage: "headphones", scope: .listeningList, count: 0) }
             }
             Section("Feeds") {
@@ -136,10 +136,14 @@ struct NewsNavigationView: View {
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.tint)
+                    .frame(width: 32, alignment: .leading)
                 Text("Search")
                     .foregroundStyle(.primary)
+                Spacer()
             }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .accessibilityIdentifier("navigation.search")
     }
     private func scopeRow(_ title: String, systemImage: String, scope: BrowserScope, count: UInt64) -> some View {
