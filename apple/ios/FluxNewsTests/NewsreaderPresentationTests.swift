@@ -586,6 +586,20 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testPrefetchCoordinatorCoalescesRequestsUntilTheSnapshotChanges() {
+        let url = URL(string: "https://example.com/image.jpg")!
+        let request = ArticleImageRequest(url: url, targetSize: CGSize(width: 100, height: 50), displayScale: 2)
+        let secondRequest = ArticleImageRequest(url: URL(string: "https://example.com/second.jpg")!, targetSize: CGSize(width: 100, height: 50), displayScale: 2)
+        let coordinator = IOSArticleImagePrefetchCoordinator()
+
+        XCTAssertEqual(coordinator.accept([request, secondRequest]), [request, secondRequest])
+        XCTAssertTrue(coordinator.accept([secondRequest, request]).isEmpty)
+
+        coordinator.reset()
+
+        XCTAssertEqual(coordinator.accept([request]), [request])
+    }
+
     func testArticleImagePipelineUsesDecodedCacheAndSeparatesLargerRequests() async throws {
         let data = try imageData(width: 800, height: 400)
         let counter = ImageLoadCounter(data: data)
@@ -633,6 +647,20 @@ final class NewsreaderPresentationTests: XCTestCase {
 
         _ = try await first
         _ = try await second
+        let calls = await gate.callCount()
+        XCTAssertEqual(calls, 1)
+    }
+
+    func testArticleImagePipelinePrefetchBatchesDuplicateRequests() async throws {
+        let gate = ImageLoadGate(data: try imageData(width: 800, height: 400))
+        let pipeline = ArticleImagePipeline { _ in try await gate.load() }
+        let request = ArticleImageRequest(url: URL(string: "https://example.com/image.jpg")!, targetSize: CGSize(width: 200, height: 100), displayScale: 1)
+
+        let prefetch = Task { await pipeline.prefetch([request, request]) }
+        await gate.waitUntilStarted()
+        await gate.release()
+        await prefetch.value
+
         let calls = await gate.callCount()
         XCTAssertEqual(calls, 1)
     }

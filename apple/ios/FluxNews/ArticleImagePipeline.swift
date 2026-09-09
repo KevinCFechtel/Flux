@@ -83,6 +83,16 @@ actor ArticleImagePipeline {
         }
     }
 
+    func prefetch(_ requests: [ArticleImageRequest]) async {
+        await withTaskGroup(of: Void.self) { group in
+            for request in requests {
+                group.addTask {
+                    _ = try? await self.image(for: request)
+                }
+            }
+        }
+    }
+
     func removeAllCachedImages() {
         cache.storage.removeAllObjects()
     }

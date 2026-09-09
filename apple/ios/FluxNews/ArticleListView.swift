@@ -82,6 +82,19 @@ struct IOSArticleImagePrefetchMetadata {
     }
 }
 
+/// Retains requests already handed to the pipeline without invalidating the list.
+final class IOSArticleImagePrefetchCoordinator {
+    private var submittedRequests = Set<ArticleImageRequest>()
+
+    func accept(_ requests: [ArticleImageRequest]) -> [ArticleImageRequest] {
+        requests.filter { submittedRequests.insert($0).inserted }
+    }
+
+    func reset() {
+        submittedRequests.removeAll(keepingCapacity: true)
+    }
+}
+
 /// iOS 18 visibility reports need not include every intermediate row. The ordered
 /// snapshot fills those gaps without using row geometry or exposure timing.
 struct IOSScrolloverOrderTracker {
@@ -257,6 +270,7 @@ struct ArticleListView: View {
     @State private var scrolloverTracker = IOSScrolloverOrderTracker()
     @State private var listVisibility = IOSListVisibilityCoordinator()
     @State private var imagePrefetchMetadata = IOSArticleImagePrefetchMetadata()
+    @State private var imagePrefetchCoordinator = IOSArticleImagePrefetchCoordinator()
     // 15% admits a target that is only barely visible, so tall cards still give
     // the ordered tracker a reliable leading target. It is not a read threshold.
     private let scrolloverVisibilityThreshold: CGFloat = 0.15
@@ -407,25 +421,30 @@ private extension ArticleListView {
     func prefetchImages(visibleIDs: [Int64], direction: IOSArticleScrollDirection, availableWidth: CGFloat) {
         guard store.articlePresentationMode.showsArticleImage else { return }
         let ids = imagePrefetchMetadata.candidateIDs(visibleIDs: visibleIDs, direction: direction)
-        for id in ids {
-            guard let url = imagePrefetchMetadata.imageURL(for: id) else { continue }
-            let targetSize: CGSize
-            if ArticlePresentationLayout.usesLandscapeVisual(mode: store.articlePresentationMode, availableWidth: availableWidth) {
-                let width = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
-                targetSize = CGSize(width: width, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: width))
-            } else {
-                let width = ArticlePresentationLayout.visualPortraitContentWidth(availableWidth)
-                targetSize = CGSize(width: width, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: width))
+        let targetSize: CGSize
+        if ArticlePresentationLayout.usesLandscapeVisual(mode: store.articlePresentationMode, availableWidth: availableWidth) {
+            let width = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
+            targetSize = CGSize(width: width, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: width))
+        } else {
+            let width = ArticlePresentationLayout.visualPortraitContentWidth(availableWidth)
+            targetSize = CGSize(width: width, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: width))
+        }
+        let requests = ids.compactMap { id in
+            imagePrefetchMetadata.imageURL(for: id).map {
+                ArticleImageRequest(url: $0, targetSize: targetSize, displayScale: displayScale)
             }
-            let request = ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale)
-            Task.detached(priority: .utility) {
-                _ = try? await ArticleImagePipeline.shared.image(for: request)
-            }
+        }
+        let newRequests = imagePrefetchCoordinator.accept(requests)
+        guard !newRequests.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            await ArticleImagePipeline.shared.prefetch(newRequests)
         }
     }
 
     func rebuildPrefetchMetadata() {
-        _ = imagePrefetchMetadata.update(articles: store.articles)
+        if imagePrefetchMetadata.update(articles: store.articles) {
+            imagePrefetchCoordinator.reset()
+        }
         scrolloverTracker.updateSnapshot(imagePrefetchMetadata.orderedIDs)
         let visibleIDs = listVisibility.updateSnapshot(imagePrefetchMetadata.orderedIDs)
         _ = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
@@ -579,7 +598,6 @@ private struct ArticleRowSurface: View, Equatable {
     let feedIcon: IOSFeedIconPresentationState
     let onRequestFeedIcon: () -> Void
     let onTap: () -> Void
-    @State private var measuredWidth: CGFloat = 0
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.content == rhs.content &&
@@ -588,32 +606,10 @@ private struct ArticleRowSurface: View, Equatable {
     }
 
     var body: some View {
-        ArticleRowContentBody(content: content, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: resolvedWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
+        ArticleRowContentBody(content: content, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
             .contentShape(RoundedRectangle(cornerRadius: 16))
             .onTapGesture(perform: onTap)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                GeometryReader { proxy in
-                    Color.clear
-                        .preference(key: ArticleRowWidthPreferenceKey.self, value: proxy.size.width)
-                }
-            }
-            .onPreferenceChange(ArticleRowWidthPreferenceKey.self) { width in
-                guard width > 0, abs(width - measuredWidth) > 0.5 else { return }
-                measuredWidth = width
-            }
-    }
-
-    private var resolvedWidth: CGFloat {
-        measuredWidth > 0 ? measuredWidth : availableWidth
-    }
-}
-
-private struct ArticleRowWidthPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 

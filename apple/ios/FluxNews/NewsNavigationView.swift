@@ -131,8 +131,17 @@ struct NewsNavigationView: View {
     }
 
     private func feedTitle(_ feedID: Int64) -> String { store.catalog.feeds.first { $0.id == feedID }?.title ?? String(localized: "Feed") }
-    private var searchRow: some View { Button(action: onSearch) { Label("Search", systemImage: "magnifyingglass") }.accessibilityIdentifier("navigation.search") }
-
+    private var searchRow: some View {
+        Button(action: onSearch) {
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.tint)
+                Text("Search")
+                    .foregroundStyle(.primary)
+            }
+        }
+        .accessibilityIdentifier("navigation.search")
+    }
     private func scopeRow(_ title: String, systemImage: String, scope: BrowserScope, count: UInt64) -> some View {
         Label { labelTitle(title, count: count) } icon: { Image(systemName: systemImage) }
             .tag(scope)
