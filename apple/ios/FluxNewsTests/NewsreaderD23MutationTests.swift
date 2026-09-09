@@ -122,7 +122,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
     }
 
     @MainActor
-    func testScrolloverAcceptanceImmediatelyUpdatesOnlyTheCrossedRow() {
+    func testReadyScrolloverPresentationUpdatesOnlyTheCrossedRow() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setArticlesForTesting([article(1), article(2), article(3)])
         let structuralRevision = store.snapshotRevision
@@ -271,6 +271,111 @@ final class NewsreaderD23MutationTests: XCTestCase {
 
         XCTAssertEqual(store.articles.map(\.id), [1, 2])
         XCTAssertEqual(store.isArticleReadForTesting(1), true)
+    }
+
+    @MainActor
+    func testCrossedVisibleScrolloverIsQueuedWithoutInvalidatingItsRowPresentation() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2)])
+
+        XCTAssertEqual(store.acceptScrolloverForTesting([1], visibleIDs: [1, 2]), [1])
+        XCTAssertEqual(store.flushScrolloverPersistenceForTesting(), [1])
+        XCTAssertEqual(readStates(store), [false, false])
+    }
+
+    @MainActor
+    func testCrossedScrolloverPublishesReadWhenItLeavesTheVisibleSet() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2)])
+        _ = store.acceptScrolloverForTesting([1], visibleIDs: [1, 2])
+
+        store.updateScrolloverVisibleIDsForTesting([2])
+
+        XCTAssertEqual(readStates(store), [true, false])
+    }
+
+    @MainActor
+    func testPersistenceCompletionDoesNotPublishUntilTheCrossedRowLeavesVisibility() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1)])
+        _ = store.acceptScrolloverForTesting([1], visibleIDs: [1])
+
+        store.completeSuccessfulScrolloverMutationForTesting([1])
+        XCTAssertEqual(store.isArticleReadForTesting(1), false)
+        store.updateScrolloverVisibleIDsForTesting([])
+
+        XCTAssertEqual(store.isArticleReadForTesting(1), true)
+    }
+
+    @MainActor
+    func testScrolloverPublishesOnlyCrossedRowsThatAreNoLongerVisible() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2), article(3)])
+
+        _ = store.acceptScrolloverForTesting([1, 2, 3], visibleIDs: [2])
+
+        XCTAssertEqual(readStates(store), [true, false, true])
+        store.updateScrolloverVisibleIDsForTesting([])
+        XCTAssertEqual(readStates(store), [true, true, true])
+    }
+
+    @MainActor
+    func testGapFilledScrolloverPublishesImmediatelyOnlyWhenNotVisible() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(10), article(20), article(30)])
+
+        _ = store.acceptScrolloverForTesting([10, 20, 30], visibleIDs: [20])
+
+        XCTAssertEqual(readStates(store), [true, false, true])
+    }
+
+    @MainActor
+    func testIdleDoesNotPublishACrossedRowThatRemainsVisible() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1)])
+        _ = store.acceptScrolloverForTesting([1], visibleIDs: [1])
+
+        store.setScrolloverPresentationPhaseForTesting(.idle)
+
+        XCTAssertEqual(store.isArticleReadForTesting(1), false)
+    }
+
+    @MainActor
+    func testScrolloverPersistenceFailureRestoresPublishedPresentation() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1)])
+        _ = store.acceptScrolloverForTesting([1], visibleIDs: [])
+        XCTAssertEqual(store.isArticleReadForTesting(1), true)
+
+        store.failScrolloverMutationForTesting([1])
+
+        XCTAssertEqual(store.isArticleReadForTesting(1), false)
+    }
+
+    @MainActor
+    func testStaleScrolloverFailureCannotMutateANewSnapshotPresentation() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1)])
+        let generation = store.scrolloverQueueGenerationForTesting
+        _ = store.acceptScrolloverForTesting([1], visibleIDs: [])
+        store.rebaselineScrolloverPresentationForTesting()
+        store.setArticlesForTesting([article(1, read: true)])
+
+        store.failScrolloverMutationForTesting([1], generation: generation)
+
+        XCTAssertEqual(store.isArticleReadForTesting(1), true)
+    }
+
+    @MainActor
+    func testSnapshotResetClearsStillVisiblePendingScrolloverPresentation() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1)])
+        _ = store.acceptScrolloverForTesting([1], visibleIDs: [1])
+
+        store.rebaselineScrolloverPresentationForTesting()
+        store.updateScrolloverVisibleIDsForTesting([])
+
+        XCTAssertEqual(store.isArticleReadForTesting(1), false)
     }
 
     @MainActor
@@ -507,6 +612,18 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(visibility.updateSnapshot([20, 30, 40]), [20])
         XCTAssertNil(visibility.receiveVisibility(articleID: 10, isVisible: false))
         XCTAssertEqual(visibility.receiveVisibility(articleID: 40, isVisible: true), [20, 40])
+    }
+
+    func testListVisibilityLargeSnapshotOrdersOnlyTheVisibleRows() {
+        var visibility = IOSListVisibilityCoordinator()
+        let ids = Array(0..<8_000).map(Int64.init)
+        _ = visibility.updateSnapshot(ids)
+
+        _ = visibility.receiveVisibility(articleID: 7_999, isVisible: true)
+        _ = visibility.receiveVisibility(articleID: 17, isVisible: true)
+        _ = visibility.receiveVisibility(articleID: 4_000, isVisible: true)
+
+        XCTAssertEqual(visibility.receiveVisibility(articleID: 123, isVisible: true), [17, 123, 4_000, 7_999])
     }
 
     func testListVisibilityOnlySuppliesOrderedInputToTheExistingTracker() {

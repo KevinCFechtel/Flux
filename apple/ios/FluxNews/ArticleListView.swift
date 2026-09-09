@@ -185,17 +185,19 @@ struct IOSScrolloverBatch: Equatable {
 /// List-row visibility is a sensor only. The tracker remains the crossing authority.
 struct IOSListVisibilityCoordinator {
     private var orderedIDs: [Int64] = []
+    private var positions: [Int64: Int] = [:]
     private var visibleIDs = Set<Int64>()
 
     mutating func updateSnapshot(_ ids: [Int64]) -> [Int64] {
         guard ids != orderedIDs else { return orderedVisibleIDs }
         orderedIDs = ids
-        visibleIDs.formIntersection(Set(ids))
+        positions = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset) })
+        visibleIDs = Set(visibleIDs.filter { positions[$0] != nil })
         return orderedVisibleIDs
     }
 
     mutating func receiveVisibility(articleID: Int64, isVisible: Bool) -> [Int64]? {
-        guard orderedIDs.contains(articleID) else { return nil }
+        guard positions[articleID] != nil else { return nil }
         if isVisible {
             guard visibleIDs.insert(articleID).inserted else { return nil }
         } else {
@@ -205,7 +207,7 @@ struct IOSListVisibilityCoordinator {
     }
 
     private var orderedVisibleIDs: [Int64] {
-        orderedIDs.filter { visibleIDs.contains($0) }
+        visibleIDs.sorted { positions[$0, default: .max] < positions[$1, default: .max] }
     }
 }
 
@@ -365,6 +367,7 @@ private extension ArticleListView {
     }
 
     func receiveVisibleIDs(_ visibleIDs: [Int64], availableWidth: CGFloat) {
+        store.updateScrolloverVisibleIDs(visibleIDs)
         let batch = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
         if !batch.articleIDs.isEmpty { store.flushScrollover(batch) }
         if let direction = scrolloverTracker.lastVisibilityDirection {
@@ -398,6 +401,7 @@ private extension ArticleListView {
         _ = imagePrefetchMetadata.update(articles: store.articles)
         scrolloverTracker.updateSnapshot(imagePrefetchMetadata.orderedIDs)
         let visibleIDs = listVisibility.updateSnapshot(imagePrefetchMetadata.orderedIDs)
+        store.updateScrolloverVisibleIDs(visibleIDs)
         _ = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
     }
 }
