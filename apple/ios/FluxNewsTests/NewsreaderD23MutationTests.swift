@@ -649,17 +649,6 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(visibility.receiveVisibility(articleID: 123, isVisible: true), [17, 123, 4_000, 7_999])
     }
 
-    func testPresentationVisibilityRequiresANonEmptyViewportIntersection() {
-        XCTAssertTrue(IOSScrolloverPresentationVisibility.intersectsViewport(
-            rowBounds: CGRect(x: 0, y: 10, width: 100, height: 20),
-            viewportBounds: CGRect(x: 0, y: 0, width: 100, height: 20)
-        ))
-        XCTAssertFalse(IOSScrolloverPresentationVisibility.intersectsViewport(
-            rowBounds: CGRect(x: 0, y: 20, width: 100, height: 20),
-            viewportBounds: CGRect(x: 0, y: 0, width: 100, height: 20)
-        ))
-    }
-
     func testListVisibilityOnlySuppliesOrderedInputToTheExistingTracker() {
         var visibility = IOSListVisibilityCoordinator()
         var tracker = IOSScrolloverOrderTracker()

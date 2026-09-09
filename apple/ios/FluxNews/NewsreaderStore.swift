@@ -660,9 +660,9 @@ struct ArticleRowContent: Equatable {
 
     func updateScrolloverPresentationVisibility(articleID: Int64, isVisible: Bool) {
         if isVisible {
-            actuallyVisibleScrolloverArticleIDs.insert(articleID)
+            guard actuallyVisibleScrolloverArticleIDs.insert(articleID).inserted else { return }
         } else {
-            actuallyVisibleScrolloverArticleIDs.remove(articleID)
+            guard actuallyVisibleScrolloverArticleIDs.remove(articleID) != nil else { return }
             publishReadyScrolloverReadPresentation()
         }
     }

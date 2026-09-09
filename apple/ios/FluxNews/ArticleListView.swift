@@ -211,13 +211,6 @@ struct IOSListVisibilityCoordinator {
     }
 }
 
-enum IOSScrolloverPresentationVisibility {
-    static func intersectsViewport(rowBounds: CGRect, viewportBounds: CGRect?) -> Bool {
-        guard let viewportBounds else { return false }
-        return !rowBounds.intersection(viewportBounds).isEmpty
-    }
-}
-
 enum IOSArticleContextAction: Equatable {
     case starred
     case read
@@ -267,6 +260,9 @@ struct ArticleListView: View {
     // 15% admits a target that is only barely visible, so tall cards still give
     // the ordered tracker a reliable leading target. It is not a read threshold.
     private let scrolloverVisibilityThreshold: CGFloat = 0.15
+    // A zero threshold is SwiftUI's native any-visible sensor. It keeps deferred
+    // read presentation off rows that still intersect the scroll viewport.
+    private let scrolloverPresentationVisibilityThreshold: CGFloat = 0
 
     var body: some View {
         let emptyState = IOSArticleListEmptyState.resolve(
@@ -324,19 +320,9 @@ struct ArticleListView: View {
                             .onScrollVisibilityChange(threshold: scrolloverVisibilityThreshold) { isVisible in
                                 receiveListVisibility(articleID: article.id, isVisible: isVisible, availableWidth: rowMetrics.availableWidth)
                             }
-                            .onGeometryChange(for: Bool.self, of: { geometry in
-                                // The scroll-view coordinate space has a viewport origin of
-                                // zero; bounds(of:) supplies its current size.
-                                let viewportBounds = geometry.bounds(of: .scrollView).map {
-                                    CGRect(origin: .zero, size: $0.size)
-                                }
-                                return IOSScrolloverPresentationVisibility.intersectsViewport(
-                                    rowBounds: geometry.frame(in: .scrollView),
-                                    viewportBounds: viewportBounds
-                                )
-                            }, action: { isActuallyVisible in
+                            .onScrollVisibilityChange(threshold: scrolloverPresentationVisibilityThreshold) { isActuallyVisible in
                                 store.updateScrolloverPresentationVisibility(articleID: article.id, isVisible: isActuallyVisible)
-                            })
+                            }
                             .onDisappear {
                                 store.updateScrolloverPresentationVisibility(articleID: article.id, isVisible: false)
                                 receiveListVisibility(articleID: article.id, isVisible: false, availableWidth: rowMetrics.availableWidth)
