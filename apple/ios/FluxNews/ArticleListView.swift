@@ -287,7 +287,8 @@ struct ArticleListView: View {
                     ) ? 20 : 26
 
                     List {
-                        ForEach(store.articles, id: \.id) { article in
+                        Section {
+                          ForEach(store.articles, id: \.id) { article in
                             let rowState = store.rowPresentationState(for: article)
                             let iconVariant = IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)
                             let feedIcon = store.feedIconPresentationState(for: article.feedId, variant: iconVariant)
@@ -321,13 +322,14 @@ struct ArticleListView: View {
                                 receiveListVisibility(articleID: article.id, isVisible: false, availableWidth: proxy.size.width - horizontalInset * 2)
                             }
                         }
+                      }
+                      .listSectionSeparator(.hidden, edges: .all)
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
                     .id(store.scrollResetRevision)
                     .refreshable { await store.syncManually() }
                     .scrollIndicators(.hidden)
-                    .listSectionSeparator(.hidden, edges: .all)
                     .onAppear {
                         rebuildPrefetchMetadata()
                     }
