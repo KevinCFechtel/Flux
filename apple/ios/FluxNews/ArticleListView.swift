@@ -312,6 +312,7 @@ struct ArticleListView: View {
                             .padding(.horizontal, horizontalInset)
                             .padding(.vertical, articleSpacing / 2)
                             .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden, edges: .all)
                             .listRowBackground(Color.clear)
                             .onScrollVisibilityChange(threshold: scrolloverVisibilityThreshold) { isVisible in
                                 receiveListVisibility(articleID: article.id, isVisible: isVisible, availableWidth: proxy.size.width - horizontalInset * 2)
@@ -322,11 +323,11 @@ struct ArticleListView: View {
                         }
                     }
                     .listStyle(.plain)
-                    .listRowSeparator(.hidden, edges: .all)
                     .scrollContentBackground(.hidden)
                     .id(store.scrollResetRevision)
                     .refreshable { await store.syncManually() }
                     .scrollIndicators(.hidden)
+                    .listSectionSeparator(.hidden, edges: .all)
                     .onAppear {
                         rebuildPrefetchMetadata()
                     }
