@@ -495,65 +495,85 @@ struct ArticleListView: View {
             } else if case .noNews = emptyState {
                 ContentUnavailableView("No News", systemImage: "newspaper")
             } else {
-                    GeometryReader { proxy in
-                        let horizontalInset: CGFloat = proxy.size.width > 700 ? 28 : 16
-                        let articleSpacing: CGFloat =
-                          ArticlePresentationLayout.usesLandscapeVisual(
-                            mode: store.articlePresentationMode,
-                            availableWidth: proxy.size.width - horizontalInset * 2) ? 20 : 26
-                               ScrollView {
-                               LazyVStack(spacing: articleSpacing) {
-                                  ForEach(store.articles, id: \.id) { article in
-                                        let rowState = store.rowPresentationState(for: article)
-                                        let iconVariant = IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)
-                                         let feedIcon = store.feedIconPresentationState(for: article.feedId, variant: iconVariant)
-                                          ArticlePresentationView(content: rowState.content, fallbackRead: article.isRead, fallbackStarred: article.isStarred, rowState: rowState, mode: store.articlePresentationMode, previewLines: store.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIcon: feedIcon, iconVariant: iconVariant, onRequestFeedIcon: { store.requestFeedIcon(article.feedId, variant: iconVariant) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { store.setRead(article, read: $0) }, onSetStarred: { store.setStarred(article, starred: $0) })
-                                          .equatable()
-                                 }
-                              }
-                              .scrollTargetLayout()
-                              .padding(.horizontal, horizontalInset)
-                              .padding(.vertical, 12)
-                           }
-                               .id(store.scrollResetRevision)
-                               .refreshable { await store.syncManually() }
-                            .scrollIndicators(.hidden)
-                             .onAppear {
-                                 rebuildPrefetchMetadata()
-                             }
-                               .onScrollTargetVisibilityChange(idType: Int64.self, threshold: scrolloverVisibilityThreshold) { visibleIDs in
-                                    let batch = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
-                                    if !batch.articleIDs.isEmpty { store.flushScrollover(batch) }
-                                    if let direction = scrolloverTracker.lastVisibilityDirection {
-                                         prefetchImages(visibleIDs: visibleIDs, direction: direction, availableWidth: proxy.size.width - horizontalInset * 2)
-                                    }
-                                    let terminalBatch = scrolloverTracker.receiveTerminalVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
-                                   if !terminalBatch.articleIDs.isEmpty { store.flushScrollover(terminalBatch) }
-                             }
-                            .onScrollPhaseChange { _, phase in
-                                switch phase {
-                                  case .interacting:
-                                    scrolloverTracker.setUserScrolling(true)
-                                    store.setScrolloverPresentationPhase(.interacting)
-                                    store.markMeaningfulInteraction()
-                                  case .decelerating:
-                                    scrolloverTracker.setUserScrolling(true)
-                                    store.setScrolloverPresentationPhase(.decelerating)
-                                  case .idle:
-                                    scrolloverTracker.setUserScrolling(false)
-                                    store.setScrolloverPresentationPhase(.idle)
-                                 default:
-                                   break
-                                }
-                            }
-                              .onChange(of: store.snapshotRevision) { _, _ in
-                                  rebuildPrefetchMetadata()
-                             }
-                              .onChange(of: store.scrolloverRearmRevision) { _, _ in
-                                  scrolloverTracker.releaseEmittedIDs()
-                              }
-                   }
-                 }
+                GeometryReader { proxy in
+                    let horizontalInset: CGFloat = proxy.size.width > 700 ? 28 : 16
+                    let articleSpacing: CGFloat = ArticlePresentationLayout.usesLandscapeVisual(
+                        mode: store.articlePresentationMode,
+                        availableWidth: proxy.size.width - horizontalInset * 2
+                    ) ? 20 : 26
+
+                    List {
+                        ForEach(store.articles, id: \.id) { article in
+                            let rowState = store.rowPresentationState(for: article)
+                            let iconVariant = IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)
+                            let feedIcon = store.feedIconPresentationState(for: article.feedId, variant: iconVariant)
+
+                            ArticlePresentationView(
+                                content: rowState.content,
+                                fallbackRead: article.isRead,
+                                fallbackStarred: article.isStarred,
+                                rowState: rowState,
+                                mode: store.articlePresentationMode,
+                                previewLines: store.articlePreviewLines,
+                                availableWidth: proxy.size.width - horizontalInset * 2,
+                                feedIcon: feedIcon,
+                                iconVariant: iconVariant,
+                                onRequestFeedIcon: { store.requestFeedIcon(article.feedId, variant: iconVariant) },
+                                onTap: { onArticleTap(article) },
+                                onAction: { onArticleAction(article, $0) },
+                                onSetRead: { store.setRead(article, read: $0) },
+                                onSetStarred: { store.setStarred(article, starred: $0) }
+                            )
+                            .equatable()
+                            .id(article.id)
+                            .padding(.horizontal, horizontalInset)
+                            .padding(.vertical, articleSpacing / 2)
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                        }
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .id(store.scrollResetRevision)
+                    .refreshable { await store.syncManually() }
+                    .scrollIndicators(.hidden)
+                    .onAppear {
+                        rebuildPrefetchMetadata()
+                    }
+                    .onScrollTargetVisibilityChange(idType: Int64.self, threshold: scrolloverVisibilityThreshold) { visibleIDs in
+                        let batch = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
+                        if !batch.articleIDs.isEmpty { store.flushScrollover(batch) }
+                        if let direction = scrolloverTracker.lastVisibilityDirection {
+                            prefetchImages(visibleIDs: visibleIDs, direction: direction, availableWidth: proxy.size.width - horizontalInset * 2)
+                        }
+                        let terminalBatch = scrolloverTracker.receiveTerminalVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
+                        if !terminalBatch.articleIDs.isEmpty { store.flushScrollover(terminalBatch) }
+                    }
+                    .onScrollPhaseChange { _, phase in
+                        switch phase {
+                        case .interacting:
+                            scrolloverTracker.setUserScrolling(true)
+                            store.setScrolloverPresentationPhase(.interacting)
+                            store.markMeaningfulInteraction()
+                        case .decelerating:
+                            scrolloverTracker.setUserScrolling(true)
+                            store.setScrolloverPresentationPhase(.decelerating)
+                        case .idle:
+                            scrolloverTracker.setUserScrolling(false)
+                            store.setScrolloverPresentationPhase(.idle)
+                        default:
+                            break
+                        }
+                    }
+                    .onChange(of: store.snapshotRevision) { _, _ in
+                        rebuildPrefetchMetadata()
+                    }
+                    .onChange(of: store.scrolloverRearmRevision) { _, _ in
+                        scrolloverTracker.releaseEmittedIDs()
+                    }
+                }
+            }
         }
         .background(.background)
         .overlay(alignment: .bottom) {
