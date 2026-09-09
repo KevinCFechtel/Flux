@@ -257,7 +257,7 @@ struct ArticleRowContent: Equatable {
     // These revisions protect only rows whose deferred read presentation was
     // actually published before a failed Core mutation.
     @ObservationIgnored private var publishedScrolloverPresentationRevisions: [Int64: UInt64] = [:]
-    private var scrolloverVisibleIDs = Set<Int64>()
+    private var actuallyVisibleScrolloverArticleIDs = Set<Int64>()
     private var pendingScrolloverReadPresentationIDs = Set<Int64>()
     private var scrolloverMutationRunning = false
     private var runningScrolloverIDs = Set<Int64>()
@@ -658,9 +658,13 @@ struct ArticleRowContent: Equatable {
         }
     }
 
-    func updateScrolloverVisibleIDs(_ ids: [Int64]) {
-        scrolloverVisibleIDs = Set(ids)
-        publishReadyScrolloverReadPresentation()
+    func updateScrolloverPresentationVisibility(articleID: Int64, isVisible: Bool) {
+        if isVisible {
+            actuallyVisibleScrolloverArticleIDs.insert(articleID)
+        } else {
+            actuallyVisibleScrolloverArticleIDs.remove(articleID)
+            publishReadyScrolloverReadPresentation()
+        }
     }
 
     func flushScrolloverPersistenceForLifecycle() {
@@ -730,7 +734,7 @@ struct ArticleRowContent: Equatable {
     }
 
     private func publishReadyScrolloverReadPresentation() {
-        let ids = pendingScrolloverReadPresentationIDs.subtracting(scrolloverVisibleIDs)
+        let ids = pendingScrolloverReadPresentationIDs.subtracting(actuallyVisibleScrolloverArticleIDs)
         guard !ids.isEmpty else { return }
         pendingScrolloverReadPresentationIDs.subtract(ids)
         for id in ids {
@@ -879,7 +883,7 @@ struct ArticleRowContent: Equatable {
         pendingScrolloverIDs = []
         pendingScrolloverIDSet = []
         publishedScrolloverPresentationRevisions = [:]
-        scrolloverVisibleIDs = []
+        actuallyVisibleScrolloverArticleIDs = []
         pendingScrolloverReadPresentationIDs = []
         pendingSuccessfulScrolloverUndoPresentation = []
         for article in articles { rowPresentationStates[article.id]?.reconcile(with: article) }
@@ -960,6 +964,8 @@ struct ArticleRowContent: Equatable {
         articles = value
         let currentIDs = Set(value.map(\.id))
         rowPresentationStates = rowPresentationStates.filter { currentIDs.contains($0.key) }
+        actuallyVisibleScrolloverArticleIDs.formIntersection(currentIDs)
+        pendingScrolloverReadPresentationIDs.formIntersection(currentIDs)
         for article in value {
             if let state = rowPresentationStates[article.id] {
                 state.reconcile(with: article)
@@ -1080,7 +1086,9 @@ struct ArticleRowContent: Equatable {
     @MainActor
     func setScrolloverPresentationPhaseForTesting(_ phase: IOSScrolloverPresentationPhase) { setScrolloverPresentationPhase(phase) }
     @MainActor
-    func updateScrolloverVisibleIDsForTesting(_ ids: [Int64]) { updateScrolloverVisibleIDs(ids) }
+    func updateScrolloverPresentationVisibilityForTesting(articleID: Int64, isVisible: Bool) {
+        updateScrolloverPresentationVisibility(articleID: articleID, isVisible: isVisible)
+    }
     @MainActor
     func completeSuccessfulScrolloverMutationForTesting(_ ids: [Int64], now: TimeInterval = 0) {
         completeSuccessfulScrolloverMutation(ids, generation: scrolloverQueueGeneration, completedAt: now)
@@ -1099,11 +1107,13 @@ struct ArticleRowContent: Equatable {
     func eligibleScrolloverIDsForTesting(_ ids: [Int64]) -> [Int64] { eligibleScrolloverIDs(ids) }
     @MainActor
     func enqueueScrolloverForTesting(_ ids: [Int64]) -> [Int64] {
-        acceptScrolloverForTesting(ids, visibleIDs: [])
+        acceptScrolloverForTesting(ids, actuallyVisibleIDs: [])
     }
     @MainActor
-    func acceptScrolloverForTesting(_ ids: [Int64], visibleIDs: [Int64]) -> [Int64] {
-        updateScrolloverVisibleIDs(visibleIDs)
+    func acceptScrolloverForTesting(_ ids: [Int64], actuallyVisibleIDs: [Int64]) -> [Int64] {
+        for id in actuallyVisibleIDs {
+            updateScrolloverPresentationVisibility(articleID: id, isVisible: true)
+        }
         let eligible = eligibleScrolloverIDs(ids)
         pendingScrolloverReadPresentationIDs.formUnion(eligible)
         pendingScrolloverIDSet.formUnion(eligible)
