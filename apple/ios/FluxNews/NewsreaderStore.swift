@@ -633,7 +633,7 @@ struct ArticleRowContent: Equatable {
         }
     }
 
-    func flushScrollover(_ batch: IOSScrolloverBatch) {
+    func flushScrollover(_ batch: IOSScrolloverBatch, presentationPolicy: IOSScrolloverPresentationPolicy) {
         guard core != nil else { return }
         let ids = eligibleScrolloverIDs(batch.articleIDs)
         guard !ids.isEmpty else { return }
@@ -643,7 +643,12 @@ struct ArticleRowContent: Equatable {
             pendingScrolloverIDSet.insert(id)
             pendingScrolloverIDs.append(id)
         }
-        publishReadyScrolloverReadPresentation()
+        switch presentationPolicy {
+        case .normal:
+            publishReadyScrolloverReadPresentation()
+        case .terminal:
+            publishScrolloverReadPresentation(ids)
+        }
         if pendingScrolloverIDs.count >= Self.maximumScrolloverMutationBatchSize {
             drainScrolloverMutations()
         }
@@ -736,6 +741,10 @@ struct ArticleRowContent: Equatable {
     private func publishReadyScrolloverReadPresentation() {
         let ids = pendingScrolloverReadPresentationIDs.subtracting(actuallyVisibleScrolloverArticleIDs)
         guard !ids.isEmpty else { return }
+        publishScrolloverReadPresentation(Array(ids))
+    }
+
+    private func publishScrolloverReadPresentation(_ ids: [Int64]) {
         pendingScrolloverReadPresentationIDs.subtract(ids)
         for id in ids {
             guard let state = rowPresentationStates[id], !state.isRead else { continue }
@@ -1110,7 +1119,11 @@ struct ArticleRowContent: Equatable {
         acceptScrolloverForTesting(ids, actuallyVisibleIDs: [])
     }
     @MainActor
-    func acceptScrolloverForTesting(_ ids: [Int64], actuallyVisibleIDs: [Int64]) -> [Int64] {
+    func acceptScrolloverForTesting(
+        _ ids: [Int64],
+        actuallyVisibleIDs: [Int64],
+        presentationPolicy: IOSScrolloverPresentationPolicy = .normal
+    ) -> [Int64] {
         for id in actuallyVisibleIDs {
             updateScrolloverPresentationVisibility(articleID: id, isVisible: true)
         }
@@ -1118,7 +1131,12 @@ struct ArticleRowContent: Equatable {
         pendingScrolloverReadPresentationIDs.formUnion(eligible)
         pendingScrolloverIDSet.formUnion(eligible)
         pendingScrolloverIDs.append(contentsOf: eligible)
-        publishReadyScrolloverReadPresentation()
+        switch presentationPolicy {
+        case .normal:
+            publishReadyScrolloverReadPresentation()
+        case .terminal:
+            publishScrolloverReadPresentation(eligible)
+        }
         return eligible
     }
     @MainActor

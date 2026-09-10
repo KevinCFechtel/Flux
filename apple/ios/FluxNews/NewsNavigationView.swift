@@ -133,15 +133,13 @@ struct NewsNavigationView: View {
     private func feedTitle(_ feedID: Int64) -> String { store.catalog.feeds.first { $0.id == feedID }?.title ?? String(localized: "Feed") }
     private var searchRow: some View {
         Button(action: onSearch) {
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.tint)
-                    .frame(width: 32, alignment: .leading)
+            Label {
                 Text("Search")
                     .foregroundStyle(.primary)
-                Spacer()
+            } icon: {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.tint)
             }
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("navigation.search")

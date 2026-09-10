@@ -78,6 +78,30 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(tracker.receiveTerminalVisibleIDs([5], enabled: true).articleIDs, [5])
     }
 
+    func testTerminalScrolloverCompletesSeveralTrailingRowsThatRemainVisible() {
+        var tracker = IOSScrolloverOrderTracker()
+        tracker.updateSnapshot([1, 2, 3, 4, 5])
+        _ = tracker.receiveVisibleIDs([1, 2], enabled: true)
+        tracker.setUserScrolling(true)
+
+        XCTAssertEqual(tracker.receiveVisibleIDs([3, 4, 5], enabled: true).articleIDs, [1, 2])
+        XCTAssertEqual(tracker.receiveTerminalVisibleIDs([3, 4, 5], enabled: true).articleIDs, [3, 4, 5])
+    }
+
+    func testTerminalScrolloverRetainsTrailingCandidatesAcrossStaggeredVisibilityCallbacks() {
+        var tracker = IOSScrolloverOrderTracker()
+        tracker.updateSnapshot([1, 2, 3, 4, 5])
+        _ = tracker.receiveVisibleIDs([1, 2], enabled: true)
+        tracker.setUserScrolling(true)
+
+        XCTAssertTrue(tracker.receiveVisibleIDs([1, 2, 5], enabled: true).articleIDs.isEmpty)
+        XCTAssertTrue(tracker.receiveTerminalVisibleIDs([1, 2, 5], enabled: true).articleIDs.isEmpty)
+        XCTAssertTrue(tracker.receiveVisibleIDs([2, 5], enabled: true).articleIDs.isEmpty)
+        XCTAssertEqual(tracker.receiveTerminalVisibleIDs([2, 5], enabled: true).articleIDs, [2, 5])
+        XCTAssertEqual(tracker.receiveVisibleIDs([5], enabled: true).articleIDs, [1, 3, 4])
+        XCTAssertTrue(tracker.receiveTerminalVisibleIDs([5], enabled: true).articleIDs.isEmpty)
+    }
+
     func testTerminalScrolloverIgnoresInitialShortListAndStructuralRebaseline() {
         var tracker = IOSScrolloverOrderTracker()
         tracker.updateSnapshot([1, 2])
@@ -316,6 +340,39 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.updateScrolloverPresentationVisibilityForTesting(articleID: 1, isVisible: false)
 
         XCTAssertEqual(store.isArticleReadForTesting(1), true)
+    }
+
+    @MainActor
+    func testTerminalScrolloverPublishesAndPersistsVisibleTrailingRows() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2), article(3), article(4), article(5)])
+
+        XCTAssertEqual(
+            store.acceptScrolloverForTesting(
+                [3, 4, 5],
+                actuallyVisibleIDs: [3, 4, 5],
+                presentationPolicy: .terminal
+            ),
+            [3, 4, 5]
+        )
+        XCTAssertEqual(readStates(store), [false, false, true, true, true])
+        XCTAssertEqual(store.flushScrolloverPersistenceForTesting(), [3, 4, 5])
+    }
+
+    @MainActor
+    func testTerminalScrolloverFailureRestoresVisibleTrailingRows() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2), article(3), article(4), article(5)])
+        _ = store.acceptScrolloverForTesting(
+            [3, 4, 5],
+            actuallyVisibleIDs: [3, 4, 5],
+            presentationPolicy: .terminal
+        )
+        XCTAssertEqual(readStates(store), [false, false, true, true, true])
+
+        store.failScrolloverMutationForTesting([3, 4, 5])
+
+        XCTAssertEqual(readStates(store), [false, false, false, false, false])
     }
 
     @MainActor

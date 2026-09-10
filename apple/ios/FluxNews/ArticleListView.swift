@@ -195,6 +195,11 @@ struct IOSScrolloverBatch: Equatable {
     let articleIDs: [Int64]
 }
 
+enum IOSScrolloverPresentationPolicy {
+    case normal
+    case terminal
+}
+
 /// List-row visibility is a sensor only. The tracker remains the crossing authority.
 struct IOSListVisibilityCoordinator {
     private var orderedIDs: [Int64] = []
@@ -410,12 +415,12 @@ private extension ArticleListView {
 
     func receiveVisibleIDs(_ visibleIDs: [Int64], availableWidth: CGFloat) {
         let batch = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
-        if !batch.articleIDs.isEmpty { store.flushScrollover(batch) }
+        if !batch.articleIDs.isEmpty { store.flushScrollover(batch, presentationPolicy: .normal) }
         if let direction = scrolloverTracker.lastVisibilityDirection {
             prefetchImages(visibleIDs: visibleIDs, direction: direction, availableWidth: availableWidth)
         }
         let terminalBatch = scrolloverTracker.receiveTerminalVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
-        if !terminalBatch.articleIDs.isEmpty { store.flushScrollover(terminalBatch) }
+        if !terminalBatch.articleIDs.isEmpty { store.flushScrollover(terminalBatch, presentationPolicy: .terminal) }
     }
 
     func prefetchImages(visibleIDs: [Int64], direction: IOSArticleScrollDirection, availableWidth: CGFloat) {
