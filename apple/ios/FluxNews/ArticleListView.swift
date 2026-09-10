@@ -195,11 +195,6 @@ struct IOSScrolloverBatch: Equatable {
     let articleIDs: [Int64]
 }
 
-enum IOSScrolloverPresentationPolicy {
-    case normal
-    case terminal
-}
-
 /// List-row visibility is a sensor only. The tracker remains the crossing authority.
 struct IOSListVisibilityCoordinator {
     private var orderedIDs: [Int64] = []
@@ -279,9 +274,6 @@ struct ArticleListView: View {
     // 15% admits a target that is only barely visible, so tall cards still give
     // the ordered tracker a reliable leading target. It is not a read threshold.
     private let scrolloverVisibilityThreshold: CGFloat = 0.15
-    // A zero threshold is SwiftUI's native any-visible sensor. It keeps deferred
-    // read presentation off rows that still intersect the scroll viewport.
-    private let scrolloverPresentationVisibilityThreshold: CGFloat = 0
 
     var body: some View {
         let emptyState = IOSArticleListEmptyState.resolve(
@@ -339,11 +331,7 @@ struct ArticleListView: View {
                             .onScrollVisibilityChange(threshold: scrolloverVisibilityThreshold) { isVisible in
                                 receiveListVisibility(articleID: article.id, isVisible: isVisible, availableWidth: rowMetrics.availableWidth)
                             }
-                            .onScrollVisibilityChange(threshold: scrolloverPresentationVisibilityThreshold) { isActuallyVisible in
-                                store.updateScrolloverPresentationVisibility(articleID: article.id, isVisible: isActuallyVisible)
-                            }
                             .onDisappear {
-                                store.updateScrolloverPresentationVisibility(articleID: article.id, isVisible: false)
                                 receiveListVisibility(articleID: article.id, isVisible: false, availableWidth: rowMetrics.availableWidth)
                             }
                         }.listRowSeparator(.hidden)
@@ -415,12 +403,13 @@ private extension ArticleListView {
 
     func receiveVisibleIDs(_ visibleIDs: [Int64], availableWidth: CGFloat) {
         let batch = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
-        if !batch.articleIDs.isEmpty { store.flushScrollover(batch, presentationPolicy: .normal) }
         if let direction = scrolloverTracker.lastVisibilityDirection {
+            store.receiveScrolloverDirection(direction)
             prefetchImages(visibleIDs: visibleIDs, direction: direction, availableWidth: availableWidth)
         }
+        if !batch.articleIDs.isEmpty { store.flushScrollover(batch) }
         let terminalBatch = scrolloverTracker.receiveTerminalVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
-        if !terminalBatch.articleIDs.isEmpty { store.flushScrollover(terminalBatch, presentationPolicy: .terminal) }
+        if !terminalBatch.articleIDs.isEmpty { store.flushScrollover(terminalBatch) }
     }
 
     func prefetchImages(visibleIDs: [Int64], direction: IOSArticleScrollDirection, availableWidth: CGFloat) {

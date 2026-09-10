@@ -257,8 +257,9 @@ struct ArticleRowContent: Equatable {
     // These revisions protect only rows whose deferred read presentation was
     // actually published before a failed Core mutation.
     @ObservationIgnored private var publishedScrolloverPresentationRevisions: [Int64: UInt64] = [:]
-    private var actuallyVisibleScrolloverArticleIDs = Set<Int64>()
     private var pendingScrolloverReadPresentationIDs = Set<Int64>()
+    // A forward-qualified group is published once when its motion reverses or idles.
+    private var hasForwardPendingScrolloverPresentation = false
     private var scrolloverMutationRunning = false
     private var runningScrolloverIDs = Set<Int64>()
     private var scrolloverMutationTask: Task<Void, Never>?
@@ -633,7 +634,7 @@ struct ArticleRowContent: Equatable {
         }
     }
 
-    func flushScrollover(_ batch: IOSScrolloverBatch, presentationPolicy: IOSScrolloverPresentationPolicy) {
+    func flushScrollover(_ batch: IOSScrolloverBatch) {
         guard core != nil else { return }
         let ids = eligibleScrolloverIDs(batch.articleIDs)
         guard !ids.isEmpty else { return }
@@ -643,32 +644,24 @@ struct ArticleRowContent: Equatable {
             pendingScrolloverIDSet.insert(id)
             pendingScrolloverIDs.append(id)
         }
-        switch presentationPolicy {
-        case .normal:
-            publishReadyScrolloverReadPresentation()
-        case .terminal:
-            publishScrolloverReadPresentation(ids)
-        }
+        hasForwardPendingScrolloverPresentation = true
         if pendingScrolloverIDs.count >= Self.maximumScrolloverMutationBatchSize {
             drainScrolloverMutations()
         }
     }
 
+    func receiveScrolloverDirection(_ direction: IOSArticleScrollDirection) {
+        guard direction == .backward, hasForwardPendingScrolloverPresentation else { return }
+        publishPendingScrolloverReadPresentation()
+    }
+
     func setScrolloverPresentationPhase(_ phase: IOSScrolloverPresentationPhase) {
         scrolloverPresentationPhase = phase
         if phase == .idle {
+            publishPendingScrolloverReadPresentation()
             drainScrolloverMutations()
             flushPendingSuccessfulScrolloverUndoPresentation()
             reloadScrolloverCountsIfReady()
-        }
-    }
-
-    func updateScrolloverPresentationVisibility(articleID: Int64, isVisible: Bool) {
-        if isVisible {
-            guard actuallyVisibleScrolloverArticleIDs.insert(articleID).inserted else { return }
-        } else {
-            guard actuallyVisibleScrolloverArticleIDs.remove(articleID) != nil else { return }
-            publishReadyScrolloverReadPresentation()
         }
     }
 
@@ -738,10 +731,10 @@ struct ArticleRowContent: Equatable {
         recordSuccessfulScrolloverUndo(result.ids, now: result.completedAt)
     }
 
-    private func publishReadyScrolloverReadPresentation() {
-        let ids = pendingScrolloverReadPresentationIDs.subtracting(actuallyVisibleScrolloverArticleIDs)
-        guard !ids.isEmpty else { return }
-        publishScrolloverReadPresentation(Array(ids))
+    private func publishPendingScrolloverReadPresentation() {
+        hasForwardPendingScrolloverPresentation = false
+        guard !pendingScrolloverReadPresentationIDs.isEmpty else { return }
+        publishScrolloverReadPresentation(Array(pendingScrolloverReadPresentationIDs))
     }
 
     private func publishScrolloverReadPresentation(_ ids: [Int64]) {
@@ -892,8 +885,8 @@ struct ArticleRowContent: Equatable {
         pendingScrolloverIDs = []
         pendingScrolloverIDSet = []
         publishedScrolloverPresentationRevisions = [:]
-        actuallyVisibleScrolloverArticleIDs = []
         pendingScrolloverReadPresentationIDs = []
+        hasForwardPendingScrolloverPresentation = false
         pendingSuccessfulScrolloverUndoPresentation = []
         for article in articles { rowPresentationStates[article.id]?.reconcile(with: article) }
         scrolloverPresentationPhase = .idle
@@ -973,7 +966,6 @@ struct ArticleRowContent: Equatable {
         articles = value
         let currentIDs = Set(value.map(\.id))
         rowPresentationStates = rowPresentationStates.filter { currentIDs.contains($0.key) }
-        actuallyVisibleScrolloverArticleIDs.formIntersection(currentIDs)
         pendingScrolloverReadPresentationIDs.formIntersection(currentIDs)
         for article in value {
             if let state = rowPresentationStates[article.id] {
@@ -1095,15 +1087,13 @@ struct ArticleRowContent: Equatable {
     @MainActor
     func setScrolloverPresentationPhaseForTesting(_ phase: IOSScrolloverPresentationPhase) { setScrolloverPresentationPhase(phase) }
     @MainActor
-    func updateScrolloverPresentationVisibilityForTesting(articleID: Int64, isVisible: Bool) {
-        updateScrolloverPresentationVisibility(articleID: articleID, isVisible: isVisible)
-    }
+    func receiveScrolloverDirectionForTesting(_ direction: IOSArticleScrollDirection) { receiveScrolloverDirection(direction) }
     @MainActor
     func completeSuccessfulScrolloverMutationForTesting(_ ids: [Int64], now: TimeInterval = 0) {
         completeSuccessfulScrolloverMutation(ids, generation: scrolloverQueueGeneration, completedAt: now)
     }
     @MainActor
-    var pendingScrolloverPresentationIDsForTesting: [Int64] { pendingSuccessfulScrolloverUndoPresentation.flatMap(\.ids) }
+    var pendingScrolloverPresentationIDsForTesting: [Int64] { pendingScrolloverReadPresentationIDs.sorted() }
     @MainActor
     func rebaselineScrolloverPresentationForTesting() { resetPresentationState() }
     @MainActor
@@ -1116,27 +1106,15 @@ struct ArticleRowContent: Equatable {
     func eligibleScrolloverIDsForTesting(_ ids: [Int64]) -> [Int64] { eligibleScrolloverIDs(ids) }
     @MainActor
     func enqueueScrolloverForTesting(_ ids: [Int64]) -> [Int64] {
-        acceptScrolloverForTesting(ids, actuallyVisibleIDs: [])
+        acceptScrolloverForTesting(ids)
     }
     @MainActor
-    func acceptScrolloverForTesting(
-        _ ids: [Int64],
-        actuallyVisibleIDs: [Int64],
-        presentationPolicy: IOSScrolloverPresentationPolicy = .normal
-    ) -> [Int64] {
-        for id in actuallyVisibleIDs {
-            updateScrolloverPresentationVisibility(articleID: id, isVisible: true)
-        }
+    func acceptScrolloverForTesting(_ ids: [Int64]) -> [Int64] {
         let eligible = eligibleScrolloverIDs(ids)
         pendingScrolloverReadPresentationIDs.formUnion(eligible)
         pendingScrolloverIDSet.formUnion(eligible)
         pendingScrolloverIDs.append(contentsOf: eligible)
-        switch presentationPolicy {
-        case .normal:
-            publishReadyScrolloverReadPresentation()
-        case .terminal:
-            publishScrolloverReadPresentation(eligible)
-        }
+        if !eligible.isEmpty { hasForwardPendingScrolloverPresentation = true }
         return eligible
     }
     @MainActor
