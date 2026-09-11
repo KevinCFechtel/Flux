@@ -537,7 +537,7 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
 }
 
 @MainActor
-private final class IOSUIKitArticleTimelineController: UIViewController, UICollectionViewDelegate, UICollectionViewDataSourcePrefetching {
+final class IOSUIKitArticleTimelineController: UIViewController, UICollectionViewDelegate, UICollectionViewDataSourcePrefetching {
     private enum Section: Hashable { case main }
 
     var onArticleTap: ((ArticleSummary) -> Void)?
