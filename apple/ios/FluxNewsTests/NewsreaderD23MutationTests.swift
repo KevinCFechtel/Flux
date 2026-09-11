@@ -19,6 +19,160 @@ final class NewsreaderD23MutationTests: XCTestCase {
         )
     }
 
+    private func uikitGeometry(
+        y: CGFloat,
+        frames: [Int64: CGRect],
+        contentHeight: CGFloat = 400,
+        viewportHeight: CGFloat = 100,
+        generation: UInt64 = 0
+    ) -> IOSUIKitScrolloverGeometrySample {
+        .init(
+            contentOffsetY: y,
+            effectiveTop: y,
+            effectiveBottom: y + viewportHeight,
+            contentHeight: contentHeight,
+            rowFrames: frames,
+            layoutGeneration: generation
+        )
+    }
+
+    func testUIKitForwardCrossingEmitsExactlyOnce() {
+        let tracker = IOSUIKitScrolloverGeometryTracker()
+        let frames: [Int64: CGRect] = [1: .init(x: 0, y: 0, width: 320, height: 20)]
+        tracker.updateSnapshot([1])
+        tracker.setPhase(.interacting)
+        _ = tracker.receive(uikitGeometry(y: 0, frames: frames), enabled: true)
+
+        XCTAssertEqual(tracker.receive(uikitGeometry(y: 20, frames: frames), enabled: true).batch.articleIDs, [1])
+        XCTAssertTrue(tracker.receive(uikitGeometry(y: 21, frames: frames), enabled: true).batch.articleIDs.isEmpty)
+    }
+
+    func testUIKitBackwardCrossingDoesNotEmit() {
+        let tracker = IOSUIKitScrolloverGeometryTracker()
+        let frames: [Int64: CGRect] = [1: .init(x: 0, y: 0, width: 320, height: 20)]
+        tracker.updateSnapshot([1])
+        tracker.setPhase(.interacting)
+        _ = tracker.receive(uikitGeometry(y: 20, frames: frames), enabled: true)
+
+        let result = tracker.receive(uikitGeometry(y: 0, frames: frames), enabled: true)
+        XCTAssertEqual(result.direction, .backward)
+        XCTAssertTrue(result.batch.articleIDs.isEmpty)
+    }
+
+    func testUIKitForwardBackwardForwardOnlyEmitsTheLegitimateCrossing() {
+        let tracker = IOSUIKitScrolloverGeometryTracker()
+        let frames: [Int64: CGRect] = [1: .init(x: 0, y: 0, width: 320, height: 20)]
+        tracker.updateSnapshot([1])
+        tracker.setPhase(.interacting)
+        _ = tracker.receive(uikitGeometry(y: 0, frames: frames), enabled: true)
+        XCTAssertTrue(tracker.receive(uikitGeometry(y: 10, frames: frames), enabled: true).batch.articleIDs.isEmpty)
+        XCTAssertTrue(tracker.receive(uikitGeometry(y: 5, frames: frames), enabled: true).batch.articleIDs.isEmpty)
+
+        XCTAssertEqual(tracker.receive(uikitGeometry(y: 20, frames: frames), enabled: true).batch.articleIDs, [1])
+    }
+
+    func testUIKitSlowSubPointMovementStillCrosses() {
+        let tracker = IOSUIKitScrolloverGeometryTracker()
+        let frames: [Int64: CGRect] = [1: .init(x: 0, y: 0, width: 320, height: 1)]
+        tracker.updateSnapshot([1])
+        tracker.setPhase(.interacting)
+        _ = tracker.receive(uikitGeometry(y: 0, frames: frames), enabled: true)
+        _ = tracker.receive(uikitGeometry(y: 0.25, frames: frames), enabled: true)
+        _ = tracker.receive(uikitGeometry(y: 0.5, frames: frames), enabled: true)
+        _ = tracker.receive(uikitGeometry(y: 0.75, frames: frames), enabled: true)
+
+        XCTAssertEqual(tracker.receive(uikitGeometry(y: 1, frames: frames), enabled: true).batch.articleIDs, [1])
+    }
+
+    func testUIKitLayoutGenerationChangeSuppressesFalseCrossingAndRebaselines() {
+        let tracker = IOSUIKitScrolloverGeometryTracker()
+        let frames: [Int64: CGRect] = [1: .init(x: 0, y: 0, width: 320, height: 40)]
+        tracker.updateSnapshot([1])
+        tracker.setPhase(.interacting)
+        _ = tracker.receive(uikitGeometry(y: 0, frames: frames), enabled: true)
+
+        XCTAssertTrue(tracker.receive(uikitGeometry(y: 20, frames: frames, generation: 1), enabled: true).batch.articleIDs.isEmpty)
+        XCTAssertEqual(tracker.receive(uikitGeometry(y: 40, frames: frames, generation: 1), enabled: true).batch.articleIDs, [1])
+    }
+
+    func testUIKitInitialBottomAndProgrammaticMovementEmitNothing() {
+        let tracker = IOSUIKitScrolloverGeometryTracker()
+        let frames: [Int64: CGRect] = [1: .init(x: 0, y: 100, width: 320, height: 100)]
+        tracker.updateSnapshot([1])
+        tracker.setPhase(.interacting)
+        XCTAssertTrue(tracker.receive(uikitGeometry(y: 100, frames: frames, contentHeight: 200), enabled: true).batch.articleIDs.isEmpty)
+        tracker.setPhase(.idle)
+
+        XCTAssertTrue(tracker.receive(uikitGeometry(y: 200, frames: frames, contentHeight: 300), enabled: true).batch.articleIDs.isEmpty)
+    }
+
+    func testUIKitBottomCompletionRequiresPriorObservedTrailingRowAndForwardArrival() {
+        let tracker = IOSUIKitScrolloverGeometryTracker()
+        let frames: [Int64: CGRect] = [1: .init(x: 0, y: 100, width: 320, height: 100)]
+        tracker.updateSnapshot([1])
+        tracker.setPhase(.decelerating)
+        _ = tracker.receive(uikitGeometry(y: 80, frames: frames, contentHeight: 200), enabled: true)
+
+        XCTAssertEqual(tracker.receive(uikitGeometry(y: 100, frames: frames, contentHeight: 200), enabled: true).batch.articleIDs, [1])
+    }
+
+    func testUIKitExplicitUnreadRearmsForANewCrossing() {
+        let tracker = IOSUIKitScrolloverGeometryTracker()
+        let frames: [Int64: CGRect] = [1: .init(x: 0, y: 0, width: 320, height: 20)]
+        tracker.updateSnapshot([1])
+        tracker.setPhase(.interacting)
+        _ = tracker.receive(uikitGeometry(y: 0, frames: frames), enabled: true)
+        XCTAssertEqual(tracker.receive(uikitGeometry(y: 20, frames: frames), enabled: true).batch.articleIDs, [1])
+        tracker.rearm([1])
+        _ = tracker.receive(uikitGeometry(y: 0, frames: frames), enabled: true)
+
+        XCTAssertEqual(tracker.receive(uikitGeometry(y: 20, frames: frames), enabled: true).batch.articleIDs, [1])
+    }
+
+    func testUIKitDisabledScrolloverDoesNotEmitOrLeakIntoTheNextGesture() {
+        let tracker = IOSUIKitScrolloverGeometryTracker()
+        let frames: [Int64: CGRect] = [1: .init(x: 0, y: 0, width: 320, height: 20)]
+        tracker.updateSnapshot([1])
+        tracker.setPhase(.interacting)
+        _ = tracker.receive(uikitGeometry(y: 0, frames: frames), enabled: true)
+        XCTAssertTrue(tracker.receive(uikitGeometry(y: 20, frames: frames), enabled: false).batch.articleIDs.isEmpty)
+        tracker.setPhase(.idle)
+        tracker.setPhase(.interacting)
+
+        XCTAssertTrue(tracker.receive(uikitGeometry(y: 40, frames: frames), enabled: true).batch.articleIDs.isEmpty)
+    }
+
+    func testUIKitGeometryRetentionIsBoundedAcrossLongFeeds() {
+        let tracker = IOSUIKitScrolloverGeometryTracker()
+        tracker.updateSnapshot((1...8_000).map(Int64.init))
+        tracker.setPhase(.interacting)
+        for offset in stride(from: 0, through: 1_000, by: 10) {
+            let frames = Dictionary(uniqueKeysWithValues: (0..<10).map { index in
+                let id = Int64(offset + index + 1)
+                return (id, CGRect(x: 0, y: CGFloat(offset + index) * 10, width: 320, height: 10))
+            })
+            _ = tracker.receive(uikitGeometry(y: CGFloat(offset) * 10, frames: frames, contentHeight: 100_000), enabled: true)
+        }
+        XCTAssertLessThanOrEqual(tracker.retainedGeometryCount, 96)
+    }
+
+    func testUIKitStructuralSnapshotChangeResetsGeometrySafely() {
+        let tracker = IOSUIKitScrolloverGeometryTracker()
+        let firstFrames: [Int64: CGRect] = [1: .init(x: 0, y: 0, width: 320, height: 20)]
+        tracker.updateSnapshot([1])
+        tracker.setPhase(.interacting)
+        _ = tracker.receive(uikitGeometry(y: 0, frames: firstFrames), enabled: true)
+        tracker.updateSnapshot([2])
+        let secondFrames: [Int64: CGRect] = [2: .init(x: 0, y: 0, width: 320, height: 20)]
+
+        XCTAssertTrue(tracker.receive(uikitGeometry(y: 20, frames: secondFrames), enabled: true).batch.articleIDs.isEmpty)
+    }
+
+    func testUIKitStatusOnlyChangesDoNotRequireStructuralSnapshotReplacement() {
+        XCTAssertFalse(IOSUIKitTimelineSnapshotPolicy.requiresStructuralUpdate(previousIDs: [1, 2], newIDs: [1, 2]))
+        XCTAssertTrue(IOSUIKitTimelineSnapshotPolicy.requiresStructuralUpdate(previousIDs: [1, 2], newIDs: [2, 1]))
+    }
+
     func testVisibleRowCrossingAboveDuringForwardScrollEmitsOnce() {
         let controller = IOSScrolloverGeometryController()
         controller.updateSnapshot([1])
