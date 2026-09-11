@@ -299,8 +299,6 @@ final class IOSUIKitScrolloverGeometryTracker {
     private var orderedIDs: [Int64] = []
     private var positions: [Int64: Int] = [:]
     private var emittedIDs = Set<Int64>()
-    // This set is limited to the retained viewport window. A row must be here
-    // before its forward crossing can qualify; newly arrived rows are never inferred.
     private var observedVisibleIDs = Set<Int64>()
     private var retainedFrames: [Int64: CGRect] = [:]
     private var previousSample: IOSUIKitScrolloverGeometrySample?
@@ -349,8 +347,6 @@ final class IOSUIKitScrolloverGeometryTracker {
             return .init(direction: nil, batch: .init(articleIDs: []))
         }
 
-        // UIKit may self-invalidate a list layout without an explicit controller
-        // callback. Changed frames cannot be compared across a movement baseline.
         guard !hasMaterialLayoutChange(from: previous, to: sample) else {
             rebaseline(with: sample, enabled: enabled)
             return .init(direction: nil, batch: .init(articleIDs: []))
@@ -376,8 +372,6 @@ final class IOSUIKitScrolloverGeometryTracker {
 
             let atBottom = isAtBottom(sample)
             if !wasAtBottom, atBottom {
-                // Terminal completion is only for trailing rows which were
-                // actually visible before the current bottom-arrival sample.
                 candidates.formUnion(visibleIDs.intersection(observedVisibleIDs))
             }
             wasAtBottom = atBottom
@@ -569,16 +563,20 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
     private let refreshControl = UIRefreshControl()
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
 
+    private static func makeListLayout() -> UICollectionViewLayout {
+        var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+        configuration.showsSeparators = false
+        configuration.backgroundColor = .clear
+        return UICollectionViewCompositionalLayout.list(using: configuration)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .clear
 
-        var layoutConfiguration = UICollectionLayoutListConfiguration(appearance: .plain)
-        layoutConfiguration.showsSeparators = false
-        layoutConfiguration.backgroundColor = .clear
         collectionView = UICollectionView(
             frame: .zero,
-            collectionViewLayout: UICollectionViewCompositionalLayout.list(using: layoutConfiguration)
+            collectionViewLayout: Self.makeListLayout()
         )
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         collectionView.backgroundColor = .clear
@@ -592,7 +590,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _) in
             self.invalidateScrolloverGeometry()
-            self.collectionView.collectionViewLayout.invalidateLayout()
+            self.collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
         }
         view.addSubview(collectionView)
         NSLayoutConstraint.activate([
@@ -624,7 +622,10 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
             configure(cell, item: item)
             cell.setNeedsLayout()
         }
-        collectionView.collectionViewLayout.invalidateLayout()
+        // A compositional list caches estimated self-sizing heights. Rotation and
+        // split-view changes alter both image dimensions and text wrapping, so a
+        // fresh layout is safer than carrying stale estimates across widths.
+        collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
     }
 
     func update(
@@ -958,13 +959,17 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
             switch mode {
             case .compact:
                 horizontalInset = containerWidth > 700 ? 28 : 10
-                outerVerticalPadding = 6
             case .visual:
                 horizontalInset = containerWidth > 700 ? 28 : 16
-                outerVerticalPadding = 8
             }
             availableWidth = max(0, containerWidth - horizontalInset * 2)
             isLandscapeVisual = ArticlePresentationLayout.usesLandscapeVisual(mode: mode, availableWidth: availableWidth)
+            switch mode {
+            case .compact:
+                outerVerticalPadding = 6
+            case .visual:
+                outerVerticalPadding = isLandscapeVisual ? 8 : 10
+            }
         }
 
         func imageSize(hasImage: Bool) -> CGSize {
