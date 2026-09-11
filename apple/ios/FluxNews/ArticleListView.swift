@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum IOSArticleScrollDirection: Equatable {
     case forward
@@ -105,8 +106,6 @@ enum IOSArticleRowViewportRegion: Equatable {
     case below
 
     static func resolve(frame: CGRect, viewportHeight: CGFloat) -> Self {
-        // `.scrollView` expresses row frames against the scroll viewport, whose
-        // origin is the effective upper boundary used by Scrollover.
         if frame.maxY <= 0 { return .above }
         if frame.minY >= viewportHeight { return .below }
         return .visible
@@ -124,9 +123,8 @@ struct IOSArticleScrollGeometry: Equatable {
     let containerSize: CGSize
 }
 
-/// Non-observable geometry sensor for one stable List snapshot. Row frames are
-/// reduced to viewport regions before reaching this controller; no continuous
-/// geometry is published into SwiftUI state.
+/// Historical SwiftUI/List sensor retained through U2 so its regression tests stay
+/// intact while the production renderer moves to UIKit. U3 replaces this sensor.
 final class IOSScrolloverGeometryController {
     private static let geometryTolerance: CGFloat = 0.5
 
@@ -216,8 +214,6 @@ final class IOSScrolloverGeometryController {
            hasForwardInteraction,
            !wasAtBottom,
            atBottom {
-            // Terminal rows cannot cross the upper boundary. A real forward
-            // arrival at the content bottom completes only observed visible rows.
             terminalCompletionActive = true
             candidates.formUnion(visibleIDs)
         }
@@ -243,8 +239,6 @@ final class IOSScrolloverGeometryController {
         rowSizes[articleID] = state.size
         let previous = rowRegions.updateValue(state.region, forKey: articleID)
         var candidates = Set<Int64>()
-        // Only a measured visible row is qualified. A below-to-above jump has
-        // no observed exposure and must not manufacture a read intent.
         if enabled,
            phase.isScrolling,
            previous == .visible,
@@ -311,15 +305,729 @@ enum IOSArticleListEmptyState: Equatable {
     }
 }
 
+private struct IOSUIKitArticleTimelineItem {
+    let article: ArticleSummary
+    let content: ArticleRowContent
+    var isRead: Bool
+    var isStarred: Bool
+    let feedIconImage: UIImage?
+}
+
+@MainActor
+private struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
+    let items: [IOSUIKitArticleTimelineItem]
+    let mode: ArticlePresentationMode
+    let previewLines: ArticlePreviewLines
+    let iconVariant: FeedIconVariant
+    let scrollResetRevision: UInt64
+    let onArticleTap: (ArticleSummary) -> Void
+    let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
+    let onSetRead: (ArticleSummary, Bool) -> Void
+    let onSetStarred: (ArticleSummary, Bool) -> Void
+    let onRequestFeedIcon: (Int64, FeedIconVariant) -> Void
+    let onRefresh: () async -> Void
+    let onMeaningfulInteraction: () -> Void
+
+    func makeUIViewController(context: Context) -> IOSUIKitArticleTimelineController {
+        let controller = IOSUIKitArticleTimelineController()
+        update(controller)
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: IOSUIKitArticleTimelineController, context: Context) {
+        update(uiViewController)
+    }
+
+    private func update(_ controller: IOSUIKitArticleTimelineController) {
+        controller.onArticleTap = onArticleTap
+        controller.onArticleAction = onArticleAction
+        controller.onSetRead = onSetRead
+        controller.onSetStarred = onSetStarred
+        controller.onRequestFeedIcon = onRequestFeedIcon
+        controller.onRefresh = onRefresh
+        controller.onMeaningfulInteraction = onMeaningfulInteraction
+        controller.update(
+            items: items,
+            mode: mode,
+            previewLines: previewLines,
+            iconVariant: iconVariant,
+            scrollResetRevision: scrollResetRevision
+        )
+    }
+}
+
+@MainActor
+private final class IOSUIKitArticleTimelineController: UIViewController, UICollectionViewDelegate, UICollectionViewDataSourcePrefetching {
+    private enum Section: Hashable { case main }
+
+    var onArticleTap: ((ArticleSummary) -> Void)?
+    var onArticleAction: ((ArticleSummary, IOSArticleContextAction) -> Void)?
+    var onSetRead: ((ArticleSummary, Bool) -> Void)?
+    var onSetStarred: ((ArticleSummary, Bool) -> Void)?
+    var onRequestFeedIcon: ((Int64, FeedIconVariant) -> Void)?
+    var onRefresh: (() async -> Void)?
+    var onMeaningfulInteraction: (() -> Void)?
+
+    private var collectionView: UICollectionView!
+    private var dataSource: UICollectionViewDiffableDataSource<Section, Int64>!
+    private var orderedIDs: [Int64] = []
+    private var itemsByID: [Int64: IOSUIKitArticleTimelineItem] = [:]
+    private var mode: ArticlePresentationMode = .visual
+    private var previewLines: ArticlePreviewLines = .standard
+    private var iconVariant: FeedIconVariant = .normal
+    private var scrollResetRevision: UInt64?
+    private var lastLayoutWidth: CGFloat = 0
+    private var prefetchTasks: [Int64: Task<Void, Never>] = [:]
+    private let refreshControl = UIRefreshControl()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+
+        var layoutConfiguration = UICollectionLayoutListConfiguration(appearance: .plain)
+        layoutConfiguration.showsSeparators = false
+        layoutConfiguration.backgroundColor = .clear
+        collectionView = UICollectionView(
+            frame: .zero,
+            collectionViewLayout: UICollectionViewCompositionalLayout.list(using: layoutConfiguration)
+        )
+        collectionView.translatesAutoresizingMaskIntoConstraints = false
+        collectionView.backgroundColor = .clear
+        collectionView.showsVerticalScrollIndicator = false
+        collectionView.alwaysBounceVertical = true
+        collectionView.delegate = self
+        collectionView.prefetchDataSource = self
+        collectionView.register(IOSUIKitArticleCell.self, forCellWithReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier)
+        collectionView.refreshControl = refreshControl
+        refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
+        view.addSubview(collectionView)
+        NSLayoutConstraint.activate([
+            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            collectionView.topAnchor.constraint(equalTo: view.topAnchor),
+            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+
+        dataSource = UICollectionViewDiffableDataSource<Section, Int64>(collectionView: collectionView) { [weak self] collectionView, indexPath, id in
+            guard let self,
+                  let cell = collectionView.dequeueReusableCell(withReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier, for: indexPath) as? IOSUIKitArticleCell,
+                  let item = self.itemsByID[id]
+            else { return nil }
+            self.configure(cell, item: item)
+            return cell
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let width = collectionView.bounds.width
+        guard width > 0, abs(width - lastLayoutWidth) > 0.5 else { return }
+        lastLayoutWidth = width
+        cancelAllPrefetch()
+        for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
+            guard let id = cell.representedArticleID, let item = itemsByID[id] else { continue }
+            configure(cell, item: item)
+        }
+        collectionView.collectionViewLayout.invalidateLayout()
+    }
+
+    func update(
+        items: [IOSUIKitArticleTimelineItem],
+        mode newMode: ArticlePresentationMode,
+        previewLines newPreviewLines: ArticlePreviewLines,
+        iconVariant newIconVariant: FeedIconVariant,
+        scrollResetRevision newScrollResetRevision: UInt64
+    ) {
+        loadViewIfNeeded()
+
+        let previousItems = itemsByID
+        let newIDs = items.map { $0.article.id }
+        let structureChanged = newIDs != orderedIDs
+        let layoutInputsChanged = mode != newMode || previewLines != newPreviewLines
+        let iconVariantChanged = iconVariant != newIconVariant
+        let resetChanged = scrollResetRevision != nil && scrollResetRevision != newScrollResetRevision
+
+        mode = newMode
+        previewLines = newPreviewLines
+        iconVariant = newIconVariant
+        scrollResetRevision = newScrollResetRevision
+        orderedIDs = newIDs
+        itemsByID = Dictionary(uniqueKeysWithValues: items.map { ($0.article.id, $0) })
+
+        if structureChanged {
+            var snapshot = NSDiffableDataSourceSnapshot<Section, Int64>()
+            snapshot.appendSections([.main])
+            snapshot.appendItems(newIDs)
+            dataSource.apply(snapshot, animatingDifferences: false)
+        }
+
+        var needsLayoutInvalidation = layoutInputsChanged
+        for indexPath in collectionView.indexPathsForVisibleItems {
+            guard let id = dataSource.itemIdentifier(for: indexPath),
+                  let cell = collectionView.cellForItem(at: indexPath) as? IOSUIKitArticleCell,
+                  let newItem = itemsByID[id]
+            else { continue }
+            guard let oldItem = previousItems[id] else {
+                configure(cell, item: newItem)
+                needsLayoutInvalidation = true
+                continue
+            }
+
+            if layoutInputsChanged || oldItem.content != newItem.content {
+                configure(cell, item: newItem)
+                needsLayoutInvalidation = true
+            } else {
+                if oldItem.isRead != newItem.isRead || oldItem.isStarred != newItem.isStarred {
+                    cell.updateStatus(isRead: newItem.isRead, isStarred: newItem.isStarred)
+                }
+                if iconVariantChanged || !sameImage(oldItem.feedIconImage, newItem.feedIconImage) {
+                    cell.updateFeedIcon(image: newItem.feedIconImage, title: newItem.content.article.feedTitle)
+                    onRequestFeedIcon?(newItem.content.article.feedId, iconVariant)
+                }
+            }
+        }
+
+        if needsLayoutInvalidation {
+            cancelAllPrefetch()
+            collectionView.collectionViewLayout.invalidateLayout()
+        }
+        if resetChanged {
+            collectionView.setContentOffset(CGPoint(x: 0, y: -collectionView.adjustedContentInset.top), animated: false)
+        }
+    }
+
+    private func configure(_ cell: IOSUIKitArticleCell, item: IOSUIKitArticleTimelineItem) {
+        let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: collectionView.bounds.width)
+        cell.configure(
+            item: item,
+            mode: mode,
+            previewLines: previewLines,
+            metrics: metrics,
+            displayScale: view.traitCollection.displayScale
+        )
+        onRequestFeedIcon?(item.content.article.feedId, iconVariant)
+    }
+
+    private func sameImage(_ lhs: UIImage?, _ rhs: UIImage?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil): true
+        case let (lhs?, rhs?): lhs === rhs
+        default: false
+        }
+    }
+
+    @objc private func refreshTriggered() {
+        guard let onRefresh else {
+            refreshControl.endRefreshing()
+            return
+        }
+        Task { @MainActor [weak self] in
+            await onRefresh()
+            self?.refreshControl.endRefreshing()
+        }
+    }
+
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        defer { collectionView.deselectItem(at: indexPath, animated: true) }
+        guard let id = dataSource.itemIdentifier(for: indexPath), let item = itemsByID[id] else { return }
+        onArticleTap?(item.article)
+    }
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        onMeaningfulInteraction?()
+    }
+
+    func collectionView(_ collectionView: UICollectionView, leadingSwipeActionsConfigurationForItemAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard let id = dataSource.itemIdentifier(for: indexPath), let item = itemsByID[id] else { return nil }
+        let newValue = !item.isRead
+        let action = UIContextualAction(style: .normal, title: newValue ? String(localized: "Mark as Read") : String(localized: "Mark as Unread")) { [weak self] _, _, completion in
+            self?.setRead(id: id, value: newValue)
+            completion(true)
+        }
+        action.image = UIImage(systemName: newValue ? "envelope.open" : "envelope")
+        action.backgroundColor = .tintColor
+        let configuration = UISwipeActionsConfiguration(actions: [action])
+        configuration.performsFirstActionWithFullSwipe = true
+        return configuration
+    }
+
+    func collectionView(_ collectionView: UICollectionView, trailingSwipeActionsConfigurationForItemAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard let id = dataSource.itemIdentifier(for: indexPath), let item = itemsByID[id] else { return nil }
+        let newValue = !item.isStarred
+        let action = UIContextualAction(style: .normal, title: newValue ? String(localized: "Star") : String(localized: "Unstar")) { [weak self] _, _, completion in
+            self?.setStarred(id: id, value: newValue)
+            completion(true)
+        }
+        action.image = UIImage(systemName: newValue ? "star" : "star.slash")
+        action.backgroundColor = .systemOrange
+        let configuration = UISwipeActionsConfiguration(actions: [action])
+        configuration.performsFirstActionWithFullSwipe = true
+        return configuration
+    }
+
+    func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
+        guard let id = dataSource.itemIdentifier(for: indexPath), let item = itemsByID[id] else { return nil }
+        return UIContextMenuConfiguration(identifier: NSNumber(value: id), previewProvider: nil) { [weak self] _ in
+            guard let self, let current = self.itemsByID[id] else { return nil }
+            var actions: [UIMenuElement] = [
+                UIAction(title: current.isStarred ? String(localized: "Unstar") : String(localized: "Star"), image: UIImage(systemName: current.isStarred ? "star.slash" : "star")) { [weak self] _ in
+                    self?.setStarred(id: id, value: !current.isStarred)
+                },
+                UIAction(title: current.isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), image: UIImage(systemName: current.isRead ? "envelope" : "envelope.open")) { [weak self] _ in
+                    self?.setRead(id: id, value: !current.isRead)
+                },
+                UIMenu(options: .displayInline, children: self.contextNavigationActions(for: item)),
+                UIMenu(options: .displayInline, children: [
+                    UIAction(title: String(localized: "Save to Third-Party Service"), image: UIImage(systemName: "tray.and.arrow.down")) { [weak self] _ in
+                        self?.onArticleAction?(item.article, .saveToService)
+                    }
+                ])
+            ]
+            actions.removeAll { element in
+                if let menu = element as? UIMenu { return menu.children.isEmpty }
+                return false
+            }
+            return UIMenu(children: actions)
+        }
+    }
+
+    private func contextNavigationActions(for item: IOSUIKitArticleTimelineItem) -> [UIMenuElement] {
+        var actions: [UIMenuElement] = [
+            UIAction(title: String(localized: "Open Original"), image: UIImage(systemName: "safari")) { [weak self] _ in self?.onArticleAction?(item.article, .original) },
+            UIAction(title: String(localized: "Open in Reader"), image: UIImage(systemName: "doc.text")) { [weak self] _ in self?.onArticleAction?(item.article, .reader) },
+            UIAction(title: String(localized: "Open in Miniflux"), image: UIImage(systemName: "arrow.up.forward.app")) { [weak self] _ in self?.onArticleAction?(item.article, .miniflux) },
+        ]
+        if item.content.hasComments {
+            actions.append(UIAction(title: String(localized: "Open Comments"), image: UIImage(systemName: "bubble.left")) { [weak self] _ in self?.onArticleAction?(item.article, .comments) })
+        }
+        actions.append(contentsOf: [
+            UIAction(title: String(localized: "Copy Link"), image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in self?.onArticleAction?(item.article, .copyLink) },
+            UIAction(title: String(localized: "Share"), image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in self?.onArticleAction?(item.article, .share) },
+        ])
+        return actions
+    }
+
+    private func setRead(id: Int64, value: Bool) {
+        guard var item = itemsByID[id] else { return }
+        item.isRead = value
+        itemsByID[id] = item
+        if let indexPath = dataSource.indexPath(for: id), let cell = collectionView.cellForItem(at: indexPath) as? IOSUIKitArticleCell {
+            cell.updateStatus(isRead: value, isStarred: item.isStarred)
+        }
+        onSetRead?(item.article, value)
+    }
+
+    private func setStarred(id: Int64, value: Bool) {
+        guard var item = itemsByID[id] else { return }
+        item.isStarred = value
+        itemsByID[id] = item
+        if let indexPath = dataSource.indexPath(for: id), let cell = collectionView.cellForItem(at: indexPath) as? IOSUIKitArticleCell {
+            cell.updateStatus(isRead: item.isRead, isStarred: value)
+        }
+        onSetStarred?(item.article, value)
+    }
+
+    func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
+        guard mode.showsArticleImage else { return }
+        for indexPath in indexPaths {
+            guard let id = dataSource.itemIdentifier(for: indexPath), prefetchTasks[id] == nil,
+                  let item = itemsByID[id], let request = imageRequest(for: item)
+            else { continue }
+            prefetchTasks[id] = Task {
+                _ = try? await ArticleImagePipeline.shared.image(for: request)
+            }
+        }
+    }
+
+    func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
+        for indexPath in indexPaths {
+            guard let id = dataSource.itemIdentifier(for: indexPath) else { continue }
+            prefetchTasks.removeValue(forKey: id)?.cancel()
+        }
+    }
+
+    private func imageRequest(for item: IOSUIKitArticleTimelineItem) -> ArticleImageRequest? {
+        guard mode.showsArticleImage, let url = item.content.imageURL else { return nil }
+        let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: collectionView.bounds.width)
+        let targetSize = metrics.imageSize(hasImage: true)
+        guard targetSize.width > 0, targetSize.height > 0 else { return nil }
+        return ArticleImageRequest(url: url, targetSize: targetSize, displayScale: view.traitCollection.displayScale)
+    }
+
+    private func cancelAllPrefetch() {
+        for task in prefetchTasks.values { task.cancel() }
+        prefetchTasks.removeAll(keepingCapacity: true)
+    }
+
+    deinit {
+        for task in prefetchTasks.values { task.cancel() }
+    }
+}
+
+@MainActor
+private final class IOSUIKitArticleCell: UICollectionViewCell {
+    static let reuseIdentifier = "IOSUIKitArticleCell"
+
+    struct Metrics {
+        let mode: ArticlePresentationMode
+        let containerWidth: CGFloat
+        let horizontalInset: CGFloat
+        let outerVerticalPadding: CGFloat
+        let availableWidth: CGFloat
+        let isLandscapeVisual: Bool
+
+        init(mode: ArticlePresentationMode, containerWidth: CGFloat) {
+            self.mode = mode
+            self.containerWidth = containerWidth
+            switch mode {
+            case .compact:
+                horizontalInset = containerWidth > 700 ? 28 : 10
+                outerVerticalPadding = 2
+            case .visual:
+                horizontalInset = containerWidth > 700 ? 28 : 16
+                outerVerticalPadding = 2
+            }
+            availableWidth = max(0, containerWidth - horizontalInset * 2)
+            isLandscapeVisual = ArticlePresentationLayout.usesLandscapeVisual(mode: mode, availableWidth: availableWidth)
+        }
+
+        func imageSize(hasImage: Bool) -> CGSize {
+            guard hasImage, mode.showsArticleImage else { return .zero }
+            if isLandscapeVisual {
+                let width = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
+                return CGSize(width: width, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: width))
+            }
+            let width = ArticlePresentationLayout.visualPortraitContentWidth(availableWidth)
+            return CGSize(width: width, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: width))
+        }
+    }
+
+    private let rootStack = UIStackView()
+    private let textStack = UIStackView()
+    private let titleRow = UIStackView()
+    private let titleLabel = UILabel()
+    private let starImageView = UIImageView(image: UIImage(systemName: "star.fill"))
+    private let metadataStack = UIStackView()
+    private let metadataPrimaryStack = UIStackView()
+    private let unreadIndicator = UIView()
+    private let feedIconContainer = UIView()
+    private let feedIconImageView = UIImageView()
+    private let feedIconFallbackLabel = UILabel()
+    private let feedTitleLabel = UILabel()
+    private let metadataBulletLabel = UILabel()
+    private let dateLabel = UILabel()
+    private let commentsImageView = UIImageView(image: UIImage(systemName: "bubble.left"))
+    private let previewLabel = UILabel()
+    private let articleImageView = UIImageView()
+    private let imagePlaceholder = UIImageView(image: UIImage(systemName: "photo"))
+
+    private var imageWidthConstraint: NSLayoutConstraint?
+    private var imageHeightConstraint: NSLayoutConstraint?
+    private var imageTask: Task<Void, Never>?
+    private var representedImageRequest: ArticleImageRequest?
+    private var currentTitle = ""
+    private var currentFeedTitle = ""
+    private var currentPublishedDate = ""
+    private var currentIsRead = false
+    private var currentIsStarred = false
+    private(set) var representedArticleID: Int64?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        contentView.backgroundColor = .clear
+        contentView.preservesSuperviewLayoutMargins = false
+
+        rootStack.translatesAutoresizingMaskIntoConstraints = false
+        rootStack.spacing = 12
+        rootStack.alignment = .fill
+        contentView.addSubview(rootStack)
+        NSLayoutConstraint.activate([
+            rootStack.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
+            rootStack.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+            rootStack.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor),
+            rootStack.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor),
+        ])
+
+        textStack.axis = .vertical
+        textStack.spacing = 7
+        textStack.alignment = .fill
+
+        titleRow.axis = .horizontal
+        titleRow.spacing = 8
+        titleRow.alignment = .firstBaseline
+        titleLabel.font = .preferredFont(forTextStyle: .headline)
+        titleLabel.adjustsFontForContentSizeCategory = true
+        titleLabel.numberOfLines = 0
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        starImageView.tintColor = .systemYellow
+        starImageView.setContentHuggingPriority(.required, for: .horizontal)
+        starImageView.setContentCompressionResistancePriority(.required, for: .horizontal)
+        titleRow.addArrangedSubview(titleLabel)
+        titleRow.addArrangedSubview(starImageView)
+
+        metadataStack.axis = .horizontal
+        metadataStack.spacing = 5
+        metadataStack.alignment = .center
+        metadataPrimaryStack.axis = .horizontal
+        metadataPrimaryStack.spacing = 6
+        metadataPrimaryStack.alignment = .center
+
+        unreadIndicator.translatesAutoresizingMaskIntoConstraints = false
+        unreadIndicator.backgroundColor = .tintColor
+        unreadIndicator.layer.cornerRadius = 3
+        NSLayoutConstraint.activate([
+            unreadIndicator.widthAnchor.constraint(equalToConstant: 6),
+            unreadIndicator.heightAnchor.constraint(equalToConstant: 6),
+        ])
+
+        feedIconContainer.translatesAutoresizingMaskIntoConstraints = false
+        feedIconContainer.clipsToBounds = true
+        feedIconContainer.layer.cornerRadius = 11
+        NSLayoutConstraint.activate([
+            feedIconContainer.widthAnchor.constraint(equalToConstant: 22),
+            feedIconContainer.heightAnchor.constraint(equalToConstant: 22),
+        ])
+        feedIconImageView.translatesAutoresizingMaskIntoConstraints = false
+        feedIconImageView.contentMode = .scaleAspectFit
+        feedIconFallbackLabel.translatesAutoresizingMaskIntoConstraints = false
+        feedIconFallbackLabel.font = .preferredFont(forTextStyle: .caption2).bold()
+        feedIconFallbackLabel.adjustsFontForContentSizeCategory = true
+        feedIconFallbackLabel.textAlignment = .center
+        feedIconFallbackLabel.textColor = .white
+        feedIconContainer.addSubview(feedIconImageView)
+        feedIconContainer.addSubview(feedIconFallbackLabel)
+        NSLayoutConstraint.activate([
+            feedIconImageView.leadingAnchor.constraint(equalTo: feedIconContainer.leadingAnchor),
+            feedIconImageView.trailingAnchor.constraint(equalTo: feedIconContainer.trailingAnchor),
+            feedIconImageView.topAnchor.constraint(equalTo: feedIconContainer.topAnchor),
+            feedIconImageView.bottomAnchor.constraint(equalTo: feedIconContainer.bottomAnchor),
+            feedIconFallbackLabel.leadingAnchor.constraint(equalTo: feedIconContainer.leadingAnchor),
+            feedIconFallbackLabel.trailingAnchor.constraint(equalTo: feedIconContainer.trailingAnchor),
+            feedIconFallbackLabel.topAnchor.constraint(equalTo: feedIconContainer.topAnchor),
+            feedIconFallbackLabel.bottomAnchor.constraint(equalTo: feedIconContainer.bottomAnchor),
+        ])
+
+        feedTitleLabel.font = .preferredFont(forTextStyle: .subheadline).bold()
+        feedTitleLabel.adjustsFontForContentSizeCategory = true
+        feedTitleLabel.textColor = .secondaryLabel
+        feedTitleLabel.lineBreakMode = .byTruncatingTail
+        feedTitleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        commentsImageView.tintColor = .secondaryLabel
+        commentsImageView.setContentHuggingPriority(.required, for: .horizontal)
+        metadataPrimaryStack.addArrangedSubview(unreadIndicator)
+        metadataPrimaryStack.addArrangedSubview(feedIconContainer)
+        metadataPrimaryStack.addArrangedSubview(feedTitleLabel)
+        metadataPrimaryStack.addArrangedSubview(commentsImageView)
+
+        metadataBulletLabel.text = "•"
+        metadataBulletLabel.textColor = .secondaryLabel
+        metadataBulletLabel.font = .preferredFont(forTextStyle: .caption)
+        metadataBulletLabel.adjustsFontForContentSizeCategory = true
+        dateLabel.font = .preferredFont(forTextStyle: .caption)
+        dateLabel.adjustsFontForContentSizeCategory = true
+        dateLabel.textColor = .secondaryLabel
+        dateLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        metadataStack.addArrangedSubview(metadataPrimaryStack)
+        metadataStack.addArrangedSubview(metadataBulletLabel)
+        metadataStack.addArrangedSubview(dateLabel)
+
+        previewLabel.font = .preferredFont(forTextStyle: .subheadline)
+        previewLabel.adjustsFontForContentSizeCategory = true
+        previewLabel.textColor = .secondaryLabel
+        previewLabel.numberOfLines = 3
+
+        textStack.addArrangedSubview(titleRow)
+        textStack.addArrangedSubview(metadataStack)
+        textStack.addArrangedSubview(previewLabel)
+
+        articleImageView.translatesAutoresizingMaskIntoConstraints = false
+        articleImageView.contentMode = .scaleAspectFill
+        articleImageView.clipsToBounds = true
+        articleImageView.layer.cornerRadius = 12
+        articleImageView.backgroundColor = .tertiarySystemFill
+        imagePlaceholder.translatesAutoresizingMaskIntoConstraints = false
+        imagePlaceholder.tintColor = .secondaryLabel
+        imagePlaceholder.contentMode = .center
+        articleImageView.addSubview(imagePlaceholder)
+        NSLayoutConstraint.activate([
+            imagePlaceholder.centerXAnchor.constraint(equalTo: articleImageView.centerXAnchor),
+            imagePlaceholder.centerYAnchor.constraint(equalTo: articleImageView.centerYAnchor),
+        ])
+
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+        accessibilityHint = String(localized: "Opens the article")
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        imageTask?.cancel()
+        imageTask = nil
+        representedImageRequest = nil
+        representedArticleID = nil
+        articleImageView.image = nil
+        imagePlaceholder.isHidden = false
+    }
+
+    func configure(
+        item: IOSUIKitArticleTimelineItem,
+        mode: ArticlePresentationMode,
+        previewLines: ArticlePreviewLines,
+        metrics: Metrics,
+        displayScale: CGFloat
+    ) {
+        representedArticleID = item.article.id
+        currentTitle = item.content.article.title
+        currentFeedTitle = item.content.article.feedTitle
+        currentPublishedDate = item.content.publishedDate
+        titleLabel.text = currentTitle
+        feedTitleLabel.text = currentFeedTitle
+        dateLabel.text = currentPublishedDate
+        previewLabel.text = item.content.article.preview
+        previewLabel.isHidden = item.content.article.preview.isEmpty
+        previewLabel.numberOfLines = previewLines.rawValue
+        commentsImageView.isHidden = !item.content.hasComments
+
+        let useColumnMetadata = metrics.availableWidth < 370
+        metadataStack.axis = useColumnMetadata ? .vertical : .horizontal
+        metadataStack.alignment = useColumnMetadata ? .leading : .center
+        metadataStack.spacing = useColumnMetadata ? 3 : 5
+        metadataBulletLabel.isHidden = useColumnMetadata
+
+        contentView.directionalLayoutMargins = NSDirectionalEdgeInsets(
+            top: metrics.outerVerticalPadding,
+            leading: metrics.horizontalInset,
+            bottom: metrics.outerVerticalPadding,
+            trailing: metrics.horizontalInset
+        )
+
+        rootStack.removeArrangedSubviews()
+        imageWidthConstraint?.isActive = false
+        imageHeightConstraint?.isActive = false
+        imageWidthConstraint = nil
+        imageHeightConstraint = nil
+
+        let imageSize = metrics.imageSize(hasImage: item.content.imageURL != nil)
+        if mode == .compact || item.content.imageURL == nil {
+            rootStack.axis = .vertical
+            rootStack.spacing = 0
+            rootStack.alignment = .fill
+            rootStack.addArrangedSubview(textStack)
+            articleImageView.isHidden = true
+        } else if metrics.isLandscapeVisual {
+            rootStack.axis = .horizontal
+            rootStack.spacing = 14
+            rootStack.alignment = .top
+            rootStack.addArrangedSubview(articleImageView)
+            rootStack.addArrangedSubview(textStack)
+            articleImageView.isHidden = false
+            imageWidthConstraint = articleImageView.widthAnchor.constraint(equalToConstant: imageSize.width)
+            imageHeightConstraint = articleImageView.heightAnchor.constraint(equalToConstant: imageSize.height)
+            imageWidthConstraint?.isActive = true
+            imageHeightConstraint?.isActive = true
+        } else {
+            rootStack.axis = .vertical
+            rootStack.spacing = 12
+            rootStack.alignment = .fill
+            rootStack.addArrangedSubview(articleImageView)
+            rootStack.addArrangedSubview(textStack)
+            articleImageView.isHidden = false
+            imageHeightConstraint = articleImageView.heightAnchor.constraint(equalTo: articleImageView.widthAnchor, multiplier: 1 / ArticlePresentationLayout.portraitImageAspectRatio)
+            imageHeightConstraint?.isActive = true
+        }
+
+        updateFeedIcon(image: item.feedIconImage, title: item.content.article.feedTitle)
+        updateStatus(isRead: item.isRead, isStarred: item.isStarred)
+        configureArticleImage(url: item.content.imageURL, targetSize: imageSize, displayScale: displayScale)
+    }
+
+    func updateStatus(isRead: Bool, isStarred: Bool) {
+        currentIsRead = isRead
+        currentIsStarred = isStarred
+        titleLabel.textColor = isRead ? .secondaryLabel : .label
+        unreadIndicator.alpha = ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: isRead)
+        starImageView.isHidden = !isStarred
+        updateAccessibility()
+    }
+
+    func updateFeedIcon(image: UIImage?, title: String) {
+        if let image {
+            feedIconImageView.image = image
+            feedIconImageView.isHidden = false
+            feedIconFallbackLabel.isHidden = true
+            feedIconContainer.backgroundColor = .clear
+        } else {
+            feedIconImageView.image = nil
+            feedIconImageView.isHidden = true
+            feedIconFallbackLabel.isHidden = false
+            feedIconFallbackLabel.text = title.prefix(1).uppercased()
+            feedIconContainer.backgroundColor = .tintColor
+        }
+    }
+
+    private func configureArticleImage(url: URL?, targetSize: CGSize, displayScale: CGFloat) {
+        imageTask?.cancel()
+        imageTask = nil
+        representedImageRequest = nil
+        guard let url, targetSize.width > 0, targetSize.height > 0 else {
+            articleImageView.image = nil
+            imagePlaceholder.isHidden = false
+            return
+        }
+
+        let request = ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale)
+        representedImageRequest = request
+        if let cachedImage = ArticleImagePipeline.shared.cachedImage(for: request) {
+            articleImageView.image = UIImage(cgImage: cachedImage, scale: displayScale, orientation: .up)
+            imagePlaceholder.isHidden = true
+            return
+        }
+
+        articleImageView.image = nil
+        imagePlaceholder.isHidden = false
+        imageTask = Task { @MainActor [weak self] in
+            do {
+                let loadedImage = try await ArticleImagePipeline.shared.image(for: request)
+                guard !Task.isCancelled, let self, self.representedImageRequest == request else { return }
+                self.articleImageView.image = UIImage(cgImage: loadedImage, scale: displayScale, orientation: .up)
+                self.imagePlaceholder.isHidden = true
+            } catch {
+                guard let self, self.representedImageRequest == request else { return }
+                self.articleImageView.image = nil
+                self.imagePlaceholder.isHidden = false
+            }
+        }
+    }
+
+    private func updateAccessibility() {
+        accessibilityLabel = "\(currentTitle), \(currentFeedTitle), \(currentPublishedDate), \(currentIsRead ? String(localized: "Read") : String(localized: "Unread"))\(currentIsStarred ? String(localized: ", starred") : "")"
+        accessibilityValue = currentIsRead
+            ? (currentIsStarred ? String(localized: "Read, starred") : String(localized: "Read"))
+            : (currentIsStarred ? String(localized: "Unread, starred") : String(localized: "Unread"))
+    }
+}
+
+private extension UIStackView {
+    func removeArrangedSubviews() {
+        for view in arrangedSubviews {
+            removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+    }
+}
+
 struct ArticleListView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.displayScale) private var displayScale
     var store: NewsreaderStore
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
-    @State private var scrolloverController = IOSScrolloverGeometryController()
-    @State private var imagePrefetchMetadata = IOSArticleImagePrefetchMetadata()
-    @State private var imagePrefetchCoordinator = IOSArticleImagePrefetchCoordinator()
 
     var body: some View {
         let emptyState = IOSArticleListEmptyState.resolve(
@@ -328,6 +1036,7 @@ struct ArticleListView: View {
             errorMessage: store.errorMessage,
             hasArticles: !store.articles.isEmpty
         )
+        let iconVariant = IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)
 
         Group {
             if case let .error(message) = emptyState {
@@ -341,174 +1050,41 @@ struct ArticleListView: View {
             } else if case .noNews = emptyState {
                 ContentUnavailableView("No News", systemImage: "newspaper")
             } else {
-                GeometryReader { proxy in
-                    let rowMetrics = ArticleListRowMetrics(
-                        mode: store.articlePresentationMode,
-                        containerWidth: proxy.size.width
-                    )
-
-                    List {
-                        ForEach(store.articles, id: \.id) { article in
-                            let rowState = store.rowPresentationState(for: article)
-                            let iconVariant = IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)
-                            let feedIcon = store.feedIconPresentationState(for: article.feedId, variant: iconVariant)
-
-                            ArticlePresentationView(
-                                content: rowState.content,
-                                fallbackRead: article.isRead,
-                                fallbackStarred: article.isStarred,
-                                rowState: rowState,
-                                mode: store.articlePresentationMode,
-                                previewLines: store.articlePreviewLines,
-                                availableWidth: rowMetrics.availableWidth,
-                                feedIcon: feedIcon,
-                                iconVariant: iconVariant,
-                                onRequestFeedIcon: { store.requestFeedIcon(article.feedId, variant: iconVariant) },
-                                onTap: { onArticleTap(article) },
-                                onAction: { onArticleAction(article, $0) },
-                                onSetRead: { store.setRead(article, read: $0) },
-                                onSetStarred: { store.setStarred(article, starred: $0) }
-                            )
-                            .equatable()
-                            .padding(.horizontal, rowMetrics.horizontalInset)
-                            .padding(.vertical, rowMetrics.outerVerticalPadding)
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                            .onGeometryChange(for: IOSArticleRowGeometryState.self, of: { geometry in
-                                let frame = geometry.frame(in: .scrollView)
-                                return IOSArticleRowGeometryState(
-                                    region: IOSArticleRowViewportRegion.resolve(
-                                        frame: frame,
-                                        viewportHeight: proxy.size.height
-                                    ),
-                                    size: frame.size
-                                )
-                            }) { _, state in
-                                receiveRowGeometry(articleID: article.id, state: state)
-                            }
-                        }.listRowSeparator(.hidden)
-                    }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .id(store.scrollResetRevision)
-                    .refreshable { await store.syncManually() }
-                    .scrollIndicators(.hidden)
-                    .onAppear {
-                        rebuildPrefetchMetadata()
-                    }
-                    .onScrollPhaseChange { _, phase in
-                        switch phase {
-                        case .interacting:
-                            scrolloverController.setPhase(.interacting)
-                            store.setScrolloverPresentationPhase(.interacting)
-                            store.markMeaningfulInteraction()
-                        case .decelerating:
-                            scrolloverController.setPhase(.decelerating)
-                            store.setScrolloverPresentationPhase(.decelerating)
-                        case .idle:
-                            scrolloverController.setPhase(.idle)
-                            store.setScrolloverPresentationPhase(.idle)
-                        default:
-                            break
-                        }
-                    }
-                    .onScrollGeometryChange(for: IOSArticleScrollGeometry.self, of: { geometry in
-                        IOSArticleScrollGeometry(
-                            visibleRect: geometry.visibleRect,
-                            contentSize: geometry.contentSize,
-                            containerSize: geometry.containerSize
-                        )
-                    }) { _, geometry in
-                        receiveScrollGeometry(geometry, availableWidth: rowMetrics.availableWidth)
-                    }
-                    .onChange(of: store.snapshotRevision) { _, _ in
-                        rebuildPrefetchMetadata()
-                    }
-                    .onChange(of: store.scrollResetRevision) { _, _ in
-                        scrolloverController.rebaseline()
-                    }
-                    .onChange(of: proxy.size.width) { _, _ in
-                        scrolloverController.rebaseline()
-                    }
-                    .onChange(of: store.scrolloverRearmRevision) { _, _ in
-                        scrolloverController.releaseEmittedIDs()
-                    }
-                }
+                IOSUIKitArticleTimelineView(
+                    items: timelineItems(iconVariant: iconVariant),
+                    mode: store.articlePresentationMode,
+                    previewLines: store.articlePreviewLines,
+                    iconVariant: iconVariant,
+                    scrollResetRevision: store.scrollResetRevision,
+                    onArticleTap: onArticleTap,
+                    onArticleAction: onArticleAction,
+                    onSetRead: { article, read in store.setRead(article, read: read) },
+                    onSetStarred: { article, starred in store.setStarred(article, starred: starred) },
+                    onRequestFeedIcon: { feedID, variant in store.requestFeedIcon(feedID, variant: variant) },
+                    onRefresh: { await store.syncManually() },
+                    onMeaningfulInteraction: { store.markMeaningfulInteraction() }
+                )
+                .ignoresSafeArea(.container, edges: .bottom)
             }
         }
         .background(.background)
         .overlay(alignment: .bottom) {
-              ArticleListBottomOverlay(store: store)
-           }
-    }
-
-}
-
-private struct ArticleListRowMetrics {
-    let horizontalInset: CGFloat
-    let outerVerticalPadding: CGFloat
-    let availableWidth: CGFloat
-
-    init(mode: ArticlePresentationMode, containerWidth: CGFloat) {
-        switch mode {
-        case .compact:
-            horizontalInset = containerWidth > 700 ? 28 : 10
-            outerVerticalPadding = 0
-        case .visual:
-            horizontalInset = containerWidth > 700 ? 28 : 16
-            outerVerticalPadding = 2
-        }
-        availableWidth = max(0, containerWidth - horizontalInset * 2)
-    }
-}
-
-private extension ArticleListView {
-    func receiveScrollGeometry(_ geometry: IOSArticleScrollGeometry, availableWidth: CGFloat) {
-        let update = scrolloverController.receiveScrollGeometry(geometry, enabled: store.markReadOnScrolloverEnabled)
-        if let direction = update.direction {
-            store.receiveScrolloverDirection(direction)
-            prefetchImages(visibleIDs: scrolloverController.visibleIDs, direction: direction, availableWidth: availableWidth)
-        }
-        if !update.batch.articleIDs.isEmpty { store.flushScrollover(update.batch) }
-    }
-
-    func receiveRowGeometry(articleID: Int64, state: IOSArticleRowGeometryState) {
-        let batch = scrolloverController.receiveRowGeometry(
-            articleID: articleID,
-            state: state,
-            enabled: store.markReadOnScrolloverEnabled
-        )
-        if !batch.articleIDs.isEmpty { store.flushScrollover(batch) }
-    }
-
-    func prefetchImages(visibleIDs: [Int64], direction: IOSArticleScrollDirection, availableWidth: CGFloat) {
-        guard store.articlePresentationMode.showsArticleImage else { return }
-        let ids = imagePrefetchMetadata.candidateIDs(visibleIDs: visibleIDs, direction: direction)
-        let targetSize: CGSize
-        if ArticlePresentationLayout.usesLandscapeVisual(mode: store.articlePresentationMode, availableWidth: availableWidth) {
-            let width = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
-            targetSize = CGSize(width: width, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: width))
-        } else {
-            let width = ArticlePresentationLayout.visualPortraitContentWidth(availableWidth)
-            targetSize = CGSize(width: width, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: width))
-        }
-        let requests = ids.compactMap { id in
-            imagePrefetchMetadata.imageURL(for: id).map {
-                ArticleImageRequest(url: $0, targetSize: targetSize, displayScale: displayScale)
-            }
-        }
-        let newRequests = imagePrefetchCoordinator.accept(requests)
-        guard !newRequests.isEmpty else { return }
-        Task.detached(priority: .utility) {
-            await ArticleImagePipeline.shared.prefetch(newRequests)
+            ArticleListBottomOverlay(store: store)
         }
     }
 
-    func rebuildPrefetchMetadata() {
-        if imagePrefetchMetadata.update(articles: store.articles) {
-            imagePrefetchCoordinator.reset()
+    private func timelineItems(iconVariant: FeedIconVariant) -> [IOSUIKitArticleTimelineItem] {
+        store.articles.map { article in
+            let rowState = store.rowPresentationState(for: article)
+            let feedIcon = store.feedIconPresentationState(for: article.feedId, variant: iconVariant)
+            return IOSUIKitArticleTimelineItem(
+                article: article,
+                content: rowState.content,
+                isRead: rowState.isRead,
+                isStarred: rowState.isStarred,
+                feedIconImage: feedIcon.image
+            )
         }
-        scrolloverController.updateSnapshot(imagePrefetchMetadata.orderedIDs)
     }
 }
 
@@ -578,6 +1154,7 @@ struct ArticlePresentationView: View, Equatable {
     let onAction: (IOSArticleContextAction) -> Void
     let onSetRead: (Bool) -> Void
     let onSetStarred: (Bool) -> Void
+
     static func == (lhs: ArticlePresentationView, rhs: ArticlePresentationView) -> Bool {
         lhs.content == rhs.content &&
             (lhs.rowState != nil || rhs.rowState != nil || (lhs.fallbackRead == rhs.fallbackRead && lhs.fallbackStarred == rhs.fallbackStarred)) &&
@@ -590,7 +1167,21 @@ struct ArticlePresentationView: View, Equatable {
     }
 
     var body: some View {
-        ArticleRowStateInteractions(content: content, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon, onTap: onTap, onAction: onAction, onSetRead: onSetRead, onSetStarred: onSetStarred)
+        ArticleRowStateInteractions(
+            content: content,
+            fallbackRead: fallbackRead,
+            fallbackStarred: fallbackStarred,
+            rowState: rowState,
+            mode: mode,
+            previewLines: previewLines,
+            availableWidth: availableWidth,
+            feedIcon: feedIcon,
+            onRequestFeedIcon: onRequestFeedIcon,
+            onTap: onTap,
+            onAction: onAction,
+            onSetRead: onSetRead,
+            onSetStarred: onSetStarred
+        )
     }
 }
 
@@ -612,40 +1203,50 @@ private struct ArticleRowStateInteractions: View {
     var body: some View {
         let isRead = rowState?.isRead ?? fallbackRead
         let isStarred = rowState?.isStarred ?? fallbackStarred
-        ArticleRowSurface(content: content, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon, onTap: onTap)
-            .equatable()
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(content.article.title), \(content.article.feedTitle), \(content.publishedDate), \(isRead ? String(localized: "Read") : String(localized: "Unread"))\(isStarred ? String(localized: ", starred") : "")")
-            .accessibilityValue(isRead ? (isStarred ? String(localized: "Read, starred") : String(localized: "Read")) : (isStarred ? String(localized: "Unread, starred") : String(localized: "Unread")))
-            .accessibilityAddTraits(.isButton)
-            .accessibilityHint(String(localized: "Opens the article"))
-            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                Button { onSetRead(!isRead) } label: {
-                    Label(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: isRead ? "envelope" : "envelope.open")
-                }
-                .tint(.accentColor)
+        ArticleRowSurface(
+            content: content,
+            fallbackRead: fallbackRead,
+            fallbackStarred: fallbackStarred,
+            rowState: rowState,
+            mode: mode,
+            previewLines: previewLines,
+            availableWidth: availableWidth,
+            feedIcon: feedIcon,
+            onRequestFeedIcon: onRequestFeedIcon,
+            onTap: onTap
+        )
+        .equatable()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(content.article.title), \(content.article.feedTitle), \(content.publishedDate), \(isRead ? String(localized: "Read") : String(localized: "Unread"))\(isStarred ? String(localized: ", starred") : "")")
+        .accessibilityValue(isRead ? (isStarred ? String(localized: "Read, starred") : String(localized: "Read")) : (isStarred ? String(localized: "Unread, starred") : String(localized: "Unread")))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(String(localized: "Opens the article"))
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button { onSetRead(!isRead) } label: {
+                Label(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: isRead ? "envelope" : "envelope.open")
             }
-            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                Button { onSetStarred(!isStarred) } label: {
-                    Label(isStarred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: isStarred ? "star.slash" : "star")
-                }
-                .tint(.orange)
+            .tint(.accentColor)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button { onSetStarred(!isStarred) } label: {
+                Label(isStarred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: isStarred ? "star.slash" : "star")
             }
-            .contextMenu {
-                Button { onSetStarred(!isStarred) } label: { Label(isStarred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: isStarred ? "star.slash" : "star") }
-                Button { onSetRead(!isRead) } label: { Label(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: isRead ? "envelope" : "envelope.open") }
-                Divider()
-                Button { onAction(.original) } label: { Label("Open Original", systemImage: "safari") }
-                Button { onAction(.reader) } label: { Label("Open in Reader", systemImage: "doc.text") }
-                Button { onAction(.miniflux) } label: { Label("Open in Miniflux", systemImage: "arrow.up.forward.app") }
-                if content.hasComments { Button { onAction(.comments) } label: { Label("Open Comments", systemImage: "bubble.left") } }
-                Button { onAction(.copyLink) } label: { Label("Copy Link", systemImage: "doc.on.doc") }
-                Button { onAction(.share) } label: { Label("Share", systemImage: "square.and.arrow.up") }
-                Divider()
-                Button { onAction(.saveToService) } label: { Label("Save to Third-Party Service", systemImage: "tray.and.arrow.down") }
-            }
+            .tint(.orange)
+        }
+        .contextMenu {
+            Button { onSetStarred(!isStarred) } label: { Label(isStarred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: isStarred ? "star.slash" : "star") }
+            Button { onSetRead(!isRead) } label: { Label(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: isRead ? "envelope" : "envelope.open") }
+            Divider()
+            Button { onAction(.original) } label: { Label("Open Original", systemImage: "safari") }
+            Button { onAction(.reader) } label: { Label("Open in Reader", systemImage: "doc.text") }
+            Button { onAction(.miniflux) } label: { Label("Open in Miniflux", systemImage: "arrow.up.forward.app") }
+            if content.hasComments { Button { onAction(.comments) } label: { Label("Open Comments", systemImage: "bubble.left") } }
+            Button { onAction(.copyLink) } label: { Label("Copy Link", systemImage: "doc.on.doc") }
+            Button { onAction(.share) } label: { Label("Share", systemImage: "square.and.arrow.up") }
+            Divider()
+            Button { onAction(.saveToService) } label: { Label("Save to Third-Party Service", systemImage: "tray.and.arrow.down") }
+        }
     }
-
 }
 
 private struct ArticleRowSurface: View, Equatable {
@@ -667,10 +1268,20 @@ private struct ArticleRowSurface: View, Equatable {
     }
 
     var body: some View {
-        ArticleRowContentBody(content: content, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: mode, previewLines: previewLines, availableWidth: availableWidth, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
-            .contentShape(RoundedRectangle(cornerRadius: 16))
-            .onTapGesture(perform: onTap)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        ArticleRowContentBody(
+            content: content,
+            fallbackRead: fallbackRead,
+            fallbackStarred: fallbackStarred,
+            rowState: rowState,
+            mode: mode,
+            previewLines: previewLines,
+            availableWidth: availableWidth,
+            feedIcon: feedIcon,
+            onRequestFeedIcon: onRequestFeedIcon
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 16))
+        .onTapGesture(perform: onTap)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -704,6 +1315,7 @@ private struct ArticleRowContentBody: View {
     private var articleWidth: CGFloat { ArticlePresentationLayout.boundedArticleWidth(availableWidth) }
     private var contentWidth: CGFloat { ArticlePresentationLayout.articleContentWidth(articleWidth) }
     private var portraitContentWidth: CGFloat { ArticlePresentationLayout.visualPortraitContentWidth(articleWidth) }
+
     private var portraitVisual: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let imageURL = content.imageURL {
@@ -714,6 +1326,7 @@ private struct ArticleRowContentBody: View {
         }
         .frame(width: portraitContentWidth, alignment: .leading)
     }
+
     private var landscapeVisual: some View {
         HStack(alignment: .top, spacing: 14) {
             let imageWidth = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
@@ -725,6 +1338,7 @@ private struct ArticleRowContentBody: View {
         }
         .frame(width: contentWidth, alignment: .leading)
     }
+
     private var articleText: some View {
         VStack(alignment: .leading, spacing: 7) {
             ArticleTitlePresentation(title: content.article.title, rowState: rowState, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred)
@@ -753,6 +1367,7 @@ private struct ArticleTitlePresentation: View {
     let rowState: ArticleRowPresentationState?
     let fallbackRead: Bool
     let fallbackStarred: Bool
+
     var body: some View {
         let isRead = rowState?.isRead ?? fallbackRead
         let isStarred = rowState?.isStarred ?? fallbackStarred
