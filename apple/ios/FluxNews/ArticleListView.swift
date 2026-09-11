@@ -571,7 +571,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = .clear
 
         var layoutConfiguration = UICollectionLayoutListConfiguration(appearance: .plain)
         layoutConfiguration.showsSeparators = false
@@ -582,6 +582,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         )
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         collectionView.backgroundColor = .clear
+        collectionView.contentInsetAdjustmentBehavior = .automatic
         collectionView.showsVerticalScrollIndicator = false
         collectionView.alwaysBounceVertical = true
         collectionView.delegate = self
@@ -621,6 +622,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
             guard let id = cell.representedArticleID, let item = itemsByID[id] else { continue }
             configure(cell, item: item)
+            cell.setNeedsLayout()
         }
         collectionView.collectionViewLayout.invalidateLayout()
     }
@@ -750,10 +752,12 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { sampleScrolloverGeometry() }
         setScrolloverPhase(decelerate ? .decelerating : .idle)
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        sampleScrolloverGeometry()
         setScrolloverPhase(.idle)
     }
 
@@ -954,10 +958,10 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
             switch mode {
             case .compact:
                 horizontalInset = containerWidth > 700 ? 28 : 10
-                outerVerticalPadding = 2
+                outerVerticalPadding = 6
             case .visual:
                 horizontalInset = containerWidth > 700 ? 28 : 16
-                outerVerticalPadding = 2
+                outerVerticalPadding = 8
             }
             availableWidth = max(0, containerWidth - horizontalInset * 2)
             isLandscapeVisual = ArticlePresentationLayout.usesLandscapeVisual(mode: mode, availableWidth: availableWidth)
@@ -1013,6 +1017,7 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         rootStack.translatesAutoresizingMaskIntoConstraints = false
         rootStack.spacing = 12
         rootStack.alignment = .fill
+        rootStack.distribution = .fill
         contentView.addSubview(rootStack)
         NSLayoutConstraint.activate([
             rootStack.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
@@ -1024,6 +1029,7 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         textStack.axis = .vertical
         textStack.spacing = 7
         textStack.alignment = .fill
+        textStack.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
         titleRow.axis = .horizontal
         titleRow.spacing = 8
@@ -1120,6 +1126,9 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         articleImageView.clipsToBounds = true
         articleImageView.layer.cornerRadius = 12
         articleImageView.backgroundColor = .tertiarySystemFill
+        articleImageView.setContentHuggingPriority(.required, for: .vertical)
+        articleImageView.setContentCompressionResistancePriority(.required, for: .vertical)
+        articleImageView.setContentCompressionResistancePriority(.required, for: .horizontal)
         imagePlaceholder.translatesAutoresizingMaskIntoConstraints = false
         imagePlaceholder.tintColor = .secondaryLabel
         imagePlaceholder.contentMode = .center
@@ -1136,6 +1145,18 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func preferredLayoutAttributesFitting(_ layoutAttributes: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes {
+        guard let attributes = layoutAttributes.copy() as? UICollectionViewLayoutAttributes else { return layoutAttributes }
+        let targetSize = CGSize(width: layoutAttributes.size.width, height: UIView.layoutFittingCompressedSize.height)
+        let fittedSize = contentView.systemLayoutSizeFitting(
+            targetSize,
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        attributes.size.height = ceil(fittedSize.height)
+        return attributes
     }
 
     override func prepareForReuse() {
@@ -1202,6 +1223,8 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
             articleImageView.isHidden = false
             imageWidthConstraint = articleImageView.widthAnchor.constraint(equalToConstant: imageSize.width)
             imageHeightConstraint = articleImageView.heightAnchor.constraint(equalToConstant: imageSize.height)
+            imageWidthConstraint?.priority = .required
+            imageHeightConstraint?.priority = .required
             imageWidthConstraint?.isActive = true
             imageHeightConstraint?.isActive = true
         } else {
@@ -1212,12 +1235,14 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
             rootStack.addArrangedSubview(textStack)
             articleImageView.isHidden = false
             imageHeightConstraint = articleImageView.heightAnchor.constraint(equalTo: articleImageView.widthAnchor, multiplier: 1 / ArticlePresentationLayout.portraitImageAspectRatio)
+            imageHeightConstraint?.priority = .required
             imageHeightConstraint?.isActive = true
         }
 
         updateFeedIcon(image: item.feedIconImage, title: item.content.article.feedTitle)
         updateStatus(isRead: item.isRead, isStarred: item.isStarred)
         configureArticleImage(url: item.content.imageURL, targetSize: imageSize, displayScale: displayScale)
+        contentView.setNeedsLayout()
     }
 
     func updateStatus(isRead: Bool, isStarred: Bool) {
@@ -1340,7 +1365,7 @@ struct ArticleListView: View {
                     onScrolloverDirection: { store.receiveScrolloverDirection($0) },
                     onScrolloverPhase: { store.setScrolloverPresentationPhase($0) }
                 )
-                .ignoresSafeArea(.container, edges: .bottom)
+                .ignoresSafeArea(.container, edges: [.top, .bottom])
             }
         }
         .background(.background)
