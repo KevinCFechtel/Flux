@@ -968,7 +968,7 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
             case .compact:
                 outerVerticalPadding = 6
             case .visual:
-                outerVerticalPadding = isLandscapeVisual ? 8 : 10
+                outerVerticalPadding = isLandscapeVisual ? 13 : 15
             }
         }
 
