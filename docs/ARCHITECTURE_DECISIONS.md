@@ -12,10 +12,10 @@
 Flux uses one shared Rust core for business/background responsibilities
 and native clients for macOS, iOS, and Android.
 
-macOS is the current native reference client. Future iOS/iPadOS clients use
-Swift/SwiftUI and future Android clients use Kotlin/Jetpack Compose; all consume
-the shared Rust Core through UniFFI. This does not prescribe either platform's
-UI design.
+macOS is the current native reference client. The iOS/iPadOS client uses Swift,
+with a SwiftUI app shell and a UIKit Article Timeline as specified in section
+4.1. Future Android clients use Kotlin/Jetpack Compose. All consume the shared
+Rust Core through UniFFI; platform presentation follows the decisions below.
 
 The former Go core is retired. No new work should preserve Go
 compatibility or build transitional Go/Rust parity unless explicitly
@@ -139,6 +139,58 @@ On foreground → background, flush transient UI work that must become
 durable, currently including pending scrollover batches and playback
 checkpoints. This transition does not itself force a sync.
 
+### 4.1 iOS/iPadOS UIKit Article Timeline
+
+**Accepted on 2026-09-11; implementation and device acceptance are pending.**
+
+The unpublished native iOS/iPadOS client replaces the existing Flutter
+FluxNews app. For its central Article Timeline, long-term scrolling performance,
+predictable layout, and direct control of updates take priority over preserving
+the current SwiftUI implementation or minimizing the replacement effort.
+
+The selected target is an owned UIKit view controller containing a
+`UICollectionView`, embedded in the SwiftUI shell. Article cells use native
+UIKit views and reusable cell instances. Use a collection-view list
+configuration to retain system swipe actions and customizable cell content.
+The production Timeline must not use SwiftUI `List`, `ScrollView`/`LazyVStack`,
+or SwiftUI-hosted article cells through `UIHostingConfiguration` or per-cell
+`UIHostingController`. SwiftUI remains appropriate for navigation, Settings,
+Reader/Search presentation, sheets, and the rest of the app.
+
+This architecture is selected. An exploratory comparison or proof that the
+old `List` is the dominant bottleneck is not a prerequisite for implementation.
+UIKit is not a measured performance guarantee: correctness tests and focused
+real-device performance acceptance remain required for the new implementation.
+
+The UIKit controller owns scroll observation, current resolved cell geometry,
+and bounded tracking of currently/recently visible article IDs. Scrollover
+work per scroll event depends on that bounded set, not on the complete article
+snapshot or the history of visited rows. It must not depend on separately
+ordered SwiftUI row/scroll callbacks or cell disappearance alone.
+
+Use stable article IDs for structural snapshots. A status-only read/starred update
+must not rebuild the snapshot, reconfigure the complete article cell, change
+its height, or remeasure its text/image content. Update the relevant status,
+accessibility, and interaction state by ID. Images use prepared, display-sized
+data and bounded caching; image completion must be safe under cell reuse.
+Explicit manual actions that remove an article under the existing product
+rules perform a separate structural update; Scrollover never removes rows.
+
+Accepted mutation work belongs to the account/Core session, independently of
+the view and its presentation snapshot. Preserve origin presentation generation
+and per-article mutation ordering when enqueuing work. View/scope changes must
+not discard accepted writes; obsolete feedback must not modify a newer view or
+overwrite a newer explicit Read/Unread/Undo action. Core calls remain off the
+main thread. Rust owns durable state and delivery; do not add a Swift database
+or another Miniflux client.
+
+The detailed iOS behavior contract is in
+[Phase D](PHASE_D_NATIVE_IOS_IPADOS.md#iosipados-article-timeline--uikit).
+[UIKit Timeline implementation handoff](IOS_UIKIT_TIMELINE_IMPLEMENTATION.md)
+records the rationale, work packages, and acceptance cases. This is a bounded
+amendment to the iOS Timeline, not a reopening of frozen Core/macOS architecture
+or the Flutter production-data migration contract.
+
 ## 5. Mutations and bulk semantics
 
 A mutation is successful for normal offline-first use once it is safely
@@ -152,11 +204,12 @@ Opening an article always marks it read. Opening an article's comments
 URL does **not** mark the article read. Read/unread and starred are
 explicit reversible domain states.
 
-Scrollover Undo is native presentation state, not a dedicated core
-operation. The native client retains only the most recently flushed
-Scrollover batch and may undo it by issuing the normal exact-ID bulk
-unread mutation for that batch. There is no multi-batch Undo history in
-the core.
+Scrollover Undo is native presentation state, not a dedicated core operation.
+macOS retains its existing most-recent-batch behavior. iOS/iPadOS retains one
+active rolling group of successful mutations, with qualification and expiry as
+specified in Phase D. Both use the normal exact-ID bulk unread operation.
+There is no multi-batch Undo history in the core. The UIKit Timeline amendment
+preserves the existing iOS Undo product rules.
 
 ### Delivery policy
 

@@ -1,5 +1,17 @@
 # Flux: flüssiges Scrollen mit Mark as Read on Scrollover
 
+> **Historische Analyse; Architekturentscheidung am 11.09.2026 ersetzt.**
+> Verbindlich sind jetzt [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md),
+> der [Phase-D-Vertrag](PHASE_D_NATIVE_IOS_IPADOS.md) und die daraus abgeleitete
+> [UIKit-Übergabedatei](IOS_UIKIT_TIMELINE_IMPLEMENTATION.md).
+> Die UIKit-Timeline mit nativen UIKit-Zellen ist beschlossen. Die unten
+> vorgeschlagene vorgelagerte Vergleichsmessung, weitere Optimierung der alten
+> SwiftUI-List und optionale Wiederverwendung gehosteter SwiftUI-Timeline-Zellen
+> sind keine aktuellen Umsetzungsvorgaben. Fehlerbefunde und Prüfideen bleiben
+> historische Belege für den jeweils genannten Commit. Der folgende Text wurde
+> als Analyse dieses früheren Stands erhalten; seine offenen Produktfragen sind
+> anhand des aktuellen Vertrags zu beantworten.
+
 Analyse vom 10. September 2026. Grundlage ist der vollständig gelesene relevante Ausführungspfad im Repository `KevinCFechtel/Flux`, festgehalten auf Commit [`be3e2837285e95b7ba3a16af2c1738c8727e4208`](https://github.com/KevinCFechtel/Flux/commit/be3e2837285e95b7ba3a16af2c1738c8727e4208), „Implement new scroll logic“. Untersucht wurden die iOS-Timeline, Zeilendarstellung, Bildpipeline, Navigation, Lebenszyklus, Mutationstests, UniFFI-Anbindung, Rust-Persistenz und Ereigniszustellung sowie die relevante macOS-Implementierung und Architekturverträge. Der minimale iOS-Stand ist 18.0.
 
 **Empfehlung:** Die Timeline braucht eine von der View-Aktualisierung unabhängige Erkennung echter Grenzübertritte und eine vom Listenlebenszyklus unabhängige Mutationswarteschlange. Für diese frei gestaltete, bildreiche News-Liste bevorzuge ich eine eigene `UICollectionView` innerhalb der SwiftUI-App: Sie erlaubt die direkte Kontrolle über Scrollbewegung, tatsächliche Zellgeometrie, Wiederverwendung und gezielte Statusänderungen. Diese Architekturentscheidung begründet sich mit Kontrolle und nachvollziehbarem Verhalten; sie ist noch kein gemessener Geschwindigkeitsgewinn. Die unten beschriebenen Fehlerkorrekturen und eine Ausgangsmessung gehören vor eine Migration. Falls die bestehende SwiftUI-List danach die Anforderungen erfüllt, ist ein Wechsel aus Performancegründen nicht erforderlich.

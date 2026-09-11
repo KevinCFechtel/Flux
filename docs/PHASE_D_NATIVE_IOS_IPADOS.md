@@ -1,14 +1,22 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: D1-D3 COMPLETE / D4 COMPLETE / ARCHITECTURE-FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D4 BASELINE COMPLETE / UIKIT TIMELINE AMENDMENT ACCEPTED, IMPLEMENTATION PENDING / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
-> replaces the existing Flutter iOS/iPadOS client with a native Swift/SwiftUI
-> client over the existing Rust Core and UniFFI boundary. The current native
-> macOS implementation is the primary native reference. Flutter is only a
+> replaces the existing Flutter iOS/iPadOS client with a native Swift client:
+> a SwiftUI shell and a UIKit Article Timeline over the existing Rust Core and
+> UniFFI boundary. The current native macOS implementation is the primary native
+> reference. Flutter is only a
 > behavioral reference for mobile-only capabilities and the legacy migration
 > source; it is not a parity checklist and intentionally removed behavior must
 > not be reintroduced without a product decision.
+>
+> On 2026-09-11, the owner approved replacing the Article Timeline with an owned
+> `UICollectionView` and native UIKit cells. Only the previous Timeline renderer,
+> geometry integration, and associated mutation scheduling are reopened. The
+> remaining completed architecture and product rules stay frozen. The contract
+> amendment is complete; its implementation and device acceptance are not.
+> See [implementation handoff](IOS_UIKIT_TIMELINE_IMPLEMENTATION.md).
 
 ## 1. Goal and non-goals
 
@@ -22,7 +30,7 @@ SQLite persistence, sync/reconciliation, offline mutations, article/Reader
 processing, search, notification candidates, widget projection, media domain,
 playback progress, download intent/state, policies and retention.
 
-The native Apple client owns SwiftUI presentation, navigation, gestures,
+The native Apple client owns SwiftUI/UIKit presentation, navigation, gestures,
 visible snapshots, platform settings, Keychain access, browser/share behavior,
 BGTaskScheduler execution, URLSession transfers, WidgetKit presentation,
 UNUserNotificationCenter delivery, AVPlayer/AVAudioSession execution, Now
@@ -133,24 +141,57 @@ link and falls back to the in-app browser. The internal Reader is an explicitly
 configured exception and is temporary presentation, preferably an inspector on
 regular-width iPad and a sheet/full-screen presentation on compact width/iPhone.
 
-The native iOS/iPadOS Article Timeline uses a SwiftUI `List`. Timeline row
-actions use system-native swipe actions: leading Read/Unread and trailing
-Star/Unstar invoke the existing optimistic mutations and allow the platform's
-standard full-swipe behavior. The same mutation paths remain available from the
-context menu.
+### iOS/iPadOS Article Timeline — UIKit
 
-Mark-as-Read-on-Scrollover uses an iOS 18 public-API geometry sensor over stable
-Article IDs. `onScrollGeometryChange` supplies actual `visibleRect` movement for
-forward/backward direction. Each materialized row reduces its frame in the
-scroll-view coordinate space to `above`, `visible`, or `below` with
-`onGeometryChange`; raw row positions are never retained in observable view
-state. The non-observable geometry controller emits an ID only when an observed
-visible row becomes completely above the effective upper boundary during a
-user-originated forward interaction or deceleration. Snapshot, layout, size,
-and reset changes explicitly rebaseline the controller without emitting reads.
-At a genuine forward arrival at the content bottom, it may complete observed
-visible trailing rows that cannot physically cross the upper boundary. An
-initially short list, reset, or backward arrival never triggers that completion.
+The target Article Timeline is an owned UIKit view controller containing a
+`UICollectionView`, embedded through a narrow bridge in the SwiftUI app shell.
+Use stable Article IDs and a collection-view list configuration with native
+UIKit article cells. Compact and visual modes, portrait/landscape image slots,
+preview-line choices, Dynamic Type, VoiceOver, and the current iPhone/iPad
+presentation remain supported. Cell structure and content sizing are reused
+when their layout inputs have not changed.
+
+The Timeline must not use SwiftUI `List`, `ScrollView`/`LazyVStack`, or hosted
+SwiftUI article cells as its production renderer. Navigation, Settings, Reader,
+Search, sheets, and other surfaces may continue using SwiftUI. Use public UIKit
+APIs; do not take over the internal delegate of a SwiftUI control through
+introspection. Retire the old Timeline path after the replacement is integrated.
+
+Timeline actions use system-native swipe actions: leading Read/Unread and
+trailing Star/Unstar invoke the existing optimistic mutations and allow the
+platform's standard full-swipe behavior. Preserve context menus, pull-to-refresh,
+article routing, native Large Title/scroll-edge behavior, semantic scope resets,
+and iPad navigation. Actions identify articles by stable ID, never a captured
+index path or a cell reference that may have been reused.
+
+Mark-as-Read-on-Scrollover uses actual UIKit scroll movement and resolved cell
+frames in one coordinate system, including effective viewport insets and
+occlusion. A non-observable detector consumes a coherent layout/movement sample
+from the controller. It emits an ID only when an observed visible unread row
+becomes completely above the effective upper boundary during a user-originated
+forward interaction or deceleration. Preparation/prefetch, `willDisplay`, or
+`didEndDisplaying` alone does not prove a valid crossing. Unseen rows skipped by
+a fast movement must not be manufactured as read candidates.
+
+Candidate processing is bounded by currently/recently visible rows, not the
+complete snapshot or accumulated history. Preserve enough prior resolved
+geometry to recognize a just-exited row after reuse. Direction reversals must
+not lose qualified crossings through stale callback order; small movements
+must accumulate rather than disappear under a per-sample tolerance. No exposure
+timers, fixed delays, or SwiftUI row/scroll callback ordering may determine a
+read crossing.
+
+Snapshot, layout, size, inset, and reset changes establish a fresh geometric
+baseline without emitting reads. Keep actual interaction/deceleration state
+separate from baseline validity so a layout change cannot silently disable the
+rest of an ongoing gesture. Programmatic movement and scroll-anchor correction
+do not qualify reads. A genuine forward arrival at the content bottom may
+complete observed visible trailing rows that cannot cross the upper boundary.
+This completion belongs only to that arrival and valid layout; leaving the
+bottom, reversing direction, ending the interaction, or changing the baseline
+disarms it. Initial short lists and initial/reset/backward arrivals do not
+complete rows. The layout and viewport used to decide bottom arrival must be
+consistent with those used to identify the trailing visible rows.
 
 Remove When Read applies to explicit/manual read actions, including swipe and
 context-menu actions. It does not apply to Mark-as-Read-on-Scrollover:
@@ -159,28 +200,44 @@ including after scrolling becomes idle. The unread/read visual transition keeps
 the unread-indicator layout slot present and changes only its visual opacity, so
 it does not alter article-card geometry.
 
-iOS Scrollover keeps geometry sensing, semantic detection, deferred row-local
-presentation, Core mutation scheduling, and Undo separate. While the List is
-interacting or decelerating, crossed IDs accumulate in a deduplicated local
-buffer. `NewsreaderStore` persists that buffer through the existing Core
-bulk mutation API when scrolling becomes idle, with bounded and
-lifecycle/snapshot safety flushes. Active scrolling never requires a
-Core/SQLite operation for visual feedback and never structurally changes the
-article collection.
-Row rendering keeps immutable article content separate from mutable read/starred
-presentation. A scrollover read mutation may invalidate its small status,
-accessibility, and interaction presentation views, but must not invalidate the
-row's image/preview/metadata-layout content subtree. Feed-icon presentation state
-exposes a prepared native image rather than decoding icon bytes from a view body.
-Detection uses actual scroll and row geometry, with no timing/exposure-duration
-heuristics or per-row timers. Candidate generation is local to row-region
-transitions and currently materialized visible rows, never to the complete
-article snapshot. Candidates enter one serialized, deduplicating Core
-bulk-mutation queue. A Scrollover read-state presentation update is not
-structural.
+iOS Scrollover keeps sensing, detection, cell status, Core scheduling, and Undo
+separate. Accept an ID into a deduplicated native intent buffer with a local
+status overlay; rendering must not wait for Core. A fully exited row requires
+no visible update. A visible/reappearing cell obtains the latest status by ID
+and updates only its status, accessibility, and interaction state. Status-only
+read/starred changes must not apply a full diffable snapshot, reload the Timeline,
+reconfigure all cell content, invalidate text/image layout, or change row height.
+An explicit manual action that removes an article under the existing rules is
+a separate structural update; it must not turn ordinary Scrollover into removal.
+
+One serialized mutation worker belongs to the account/Core session rather than
+the Timeline view or its presentation snapshot. Reuse the current Core bulk
+operation, with an actual maximum of 64 IDs per call, deduplication, ordered
+continuation, and a bounded maximum wait before attempting to drain a small
+buffer. Idle and lifecycle transitions request additional flushes; continuous
+scrolling alone must not defer local persistence indefinitely. Batching time
+controls persistence scheduling, never exposure qualification. Blocking UniFFI
+calls execute off-main without synchronously waiting on the UI thread.
+
+Capture origin presentation generation and per-article read-intent ordering at
+enqueue time, and preserve them when splitting/coalescing batches. A scope,
+filter, snapshot, or view change preserves accepted writes but invalidates old
+presentation feedback. Newer explicit Read/Unread/Undo actions must win over
+older automatic writes and completions. An account/session boundary must never
+send old IDs to a new Core; session shutdown and foreground-to-background
+handling must explicitly account for pending local persistence. Starting a Task
+is not proof of a durable flush, and an uncommitted write cannot be guaranteed
+after abrupt process termination. Rust remains the only durable state owner.
+Explicit Unread/Undo re-arms the affected article for a new genuine qualified
+crossing; a status callback or rebaseline alone must not immediately read it again.
+
+Counts and Undo publish independently of structural list snapshots and avoid
+scroll-frequency work. Ignored Core events must be filtered before creating
+main-thread tasks. Feed icons and article images arrive as prepared images;
+decoding, network access, and synchronous Core queries are not cell/scroll work.
 All detected Scrollover candidates are still marked read, independently of Undo.
-Fallback-only article presentation paths include their read/starred fallback state
-in equality so status updates remain visible without changing the row-state path.
+Existing SwiftUI fallback presentation outside this Timeline retains correct
+read/starred equality and updates, including Search results.
 Normal continuous scrolling and small forward jumps do not present Undo. Undo is
 an exceptional recovery mechanism: it activates only after at least 3 successful
 unread-to-read Scrollover mutations in a rolling one-second window. Visibility
@@ -199,6 +256,17 @@ success presentation remain inside the existing fixed portrait or landscape
 image slots and must not change article-card geometry. Recreating an article
 image view reuses an already-decoded memory-cache image synchronously so
 snapshot refreshes do not regress to a placeholder frame.
+Reuse this pipeline from UIKit with ID/request-safe completion and bounded,
+cancellable prefetching. Planning must respond to changes in the relevant
+visible/prefetch window or target size, not rescan visited rows on every pixel
+of movement. A prefetch cancellation must not cancel an image still required by
+a visible cell or another consumer.
+
+This renderer decision is accepted without requiring a preliminary
+SwiftUI-versus-UIKit benchmark or optimization of the old renderer. Focused
+device profiling is acceptance of the new implementation. The implementation
+sequence and regression matrix are in
+[IOS_UIKIT_TIMELINE_IMPLEMENTATION.md](IOS_UIKIT_TIMELINE_IMPLEMENTATION.md).
 
 The native bottom Sync control keeps the same `arrow.clockwise` symbol and
 stable toolbar geometry across idle, syncing, success, and failure states;
@@ -314,6 +382,11 @@ Remove When Read, pull-to-refresh, native swipe actions, Scrollover/Undo and
 stable snapshot/pending-new-data behavior. Extract proven shared Apple code only
 where this creates actual reuse.
 
+The original D2 baseline is complete. The accepted UIKit Timeline amendment in
+section 5 replaces its renderer and Scrollover integration; implementation is
+pending and tracked separately in the implementation handoff. D2 product
+behavior is preserved by that work.
+
 ### D3 — Article Interaction, Reader & Search
 
 Implement existing open routing, in-app browser, temporary Reader presentation,
@@ -414,12 +487,17 @@ remain unchanged by design.
 
 The English wording freeze is preserved, the English/German localization pass is
 complete, and the final localization audit found no unintended release-visible
-English-only strings. D4 is **COMPLETE / architecture-frozen**.
+English-only strings. The original D4 baseline is **COMPLETE / architecture-frozen**;
+the accepted UIKit Timeline amendment reopens only the renderer/integration and
+its relevant D4.4 validation. It does not reopen Settings, wording, localization,
+or unrelated phase architecture.
 
 For iOS Scrollover, D4.4 still requires real-device coverage of slow drags,
 fast flicks that skip rows, reverse-then-forward movement, Remove When Read,
 Dynamic Type, rotation/safe-area changes, and the rolling Undo window on both
-iPhone and iPad.
+iPhone and iPad. Run these cases on the new UIKit Timeline, including long feeds
+and cell reuse. Record actual correctness and device-performance evidence before
+marking the amendment complete; documentation approval is not runtime acceptance.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 
