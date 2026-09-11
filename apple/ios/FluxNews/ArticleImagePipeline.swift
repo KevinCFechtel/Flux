@@ -183,3 +183,10 @@ struct ArticleImageView: View {
         .accessibilityHidden(true)
     }
 }
+
+extension UIFont {
+    func bold() -> UIFont {
+        let descriptor = fontDescriptor.withSymbolicTraits(.traitBold) ?? fontDescriptor
+        return UIFont(descriptor: descriptor, size: pointSize)
+    }
+}
