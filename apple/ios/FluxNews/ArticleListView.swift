@@ -1053,9 +1053,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
                   let item = renderedItem(for: id), let request = imageRequest(for: item)
             else { continue }
             prefetchTasks[id] = Task { [weak self] in
-                _ = try? await ArticleImagePipeline.shared.image(for: request)
-                guard !Task.isCancelled else { return }
-                self?.prefetchTasks[id] = nil
+                defer { self?.prefetchTasks[id] = nil }
+                _ = try? await ArticleImagePipeline.shared.prefetch(request)
             }
         }
     }
@@ -1240,6 +1239,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     private var currentLayoutVariant: IOSUIKitArticleCellLayoutVariant?
     private var imageTask: Task<Void, Never>?
     private var representedImageRequest: ArticleImageRequest?
+    private var imageBindingGeneration: UInt64 = 0
     private var sizingContentKey: IOSUIKitArticleCellSizingContentKey?
     private var sizingMode: ArticlePresentationMode = .visual
     private var sizingPreviewLines: ArticlePreviewLines = .standard
@@ -1471,8 +1471,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        imageTask?.cancel()
-        imageTask = nil
+        invalidateImageBinding()
         representedImageRequest = nil
         representedArticleID = nil
         sizingContentKey = nil
@@ -1598,8 +1597,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     }
 
     private func configureArticleImage(url: URL?, targetSize: CGSize, displayScale: CGFloat) {
-        imageTask?.cancel()
-        imageTask = nil
+        invalidateImageBinding()
         representedImageRequest = nil
         guard let url, targetSize.width > 0, targetSize.height > 0 else {
             articleImageView.image = nil
@@ -1608,6 +1606,8 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         }
 
         let request = ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale)
+        let bindingGeneration = imageBindingGeneration
+        guard let articleID = representedArticleID else { return }
         representedImageRequest = request
         if let cachedImage = ArticleImagePipeline.shared.cachedImage(for: request) {
             articleImageView.image = UIImage(cgImage: cachedImage, scale: displayScale, orientation: .up)
@@ -1620,15 +1620,31 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         imageTask = Task { @MainActor [weak self] in
             do {
                 let loadedImage = try await ArticleImagePipeline.shared.image(for: request)
-                guard !Task.isCancelled, let self, self.representedImageRequest == request else { return }
+                guard !Task.isCancelled,
+                      let self,
+                      self.imageBindingGeneration == bindingGeneration,
+                      self.representedArticleID == articleID,
+                      self.representedImageRequest == request
+                else { return }
                 self.articleImageView.image = UIImage(cgImage: loadedImage, scale: displayScale, orientation: .up)
                 self.imagePlaceholder.isHidden = true
             } catch {
-                guard let self, self.representedImageRequest == request else { return }
+                guard !Task.isCancelled,
+                      let self,
+                      self.imageBindingGeneration == bindingGeneration,
+                      self.representedArticleID == articleID,
+                      self.representedImageRequest == request
+                else { return }
                 self.articleImageView.image = nil
                 self.imagePlaceholder.isHidden = false
             }
         }
+    }
+
+    private func invalidateImageBinding() {
+        imageBindingGeneration &+= 1
+        imageTask?.cancel()
+        imageTask = nil
     }
 
     private func updateAccessibility() {

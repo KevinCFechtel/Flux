@@ -768,6 +768,46 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(calls, 1)
     }
 
+    func testArticleImagePipelineBoundsWorkAndPrioritizesVisibleRequests() async throws {
+        let gate = PrioritizedImageLoadGate(data: try imageData(width: 800, height: 400))
+        let pipeline = ArticleImagePipeline { url in try await gate.load(url: url) }
+        let requests = (0...4).map {
+            ArticleImageRequest(
+                url: URL(string: "https://example.com/\($0).jpg")!,
+                targetSize: CGSize(width: 200, height: 100),
+                displayScale: 1
+            )
+        }
+
+        let activePrefetches = requests.prefix(3).map { request in
+            Task { try await pipeline.prefetch(request) }
+        }
+        await gate.waitUntilStarted(count: 3)
+        let queuedPrefetch = Task { try await pipeline.prefetch(requests[3]) }
+        let visible = Task { try await pipeline.image(for: requests[4]) }
+        await Task.yield()
+
+        let saturated = await pipeline.metrics()
+        XCTAssertEqual(saturated.activeOperations, ArticleImagePipeline.maximumConcurrentOperations)
+        XCTAssertEqual(saturated.queuedVisibleRequests, 1)
+        XCTAssertEqual(saturated.queuedPrefetchRequests, 1)
+        XCTAssertEqual(saturated.trackedRequests, 5)
+
+        await gate.releaseOne()
+        await gate.waitUntilStarted(count: 4)
+        let startedURLs = await gate.startedURLs()
+        XCTAssertEqual(startedURLs.last, requests[4].url)
+
+        await gate.releaseAll()
+        await gate.waitUntilStarted(count: 5)
+        await gate.releaseAll()
+        for task in activePrefetches { _ = try await task.value }
+        _ = try await queuedPrefetch.value
+        _ = try await visible.value
+        let completed = await pipeline.metrics()
+        XCTAssertEqual(completed.trackedRequests, 0)
+    }
+
     func testArticleImagePipelineDownsamplesAndFailsSafely() async throws {
         let data = try imageData(width: 800, height: 400)
         let image = try ArticleImagePipeline.downsample(data: data, maxPixelDimension: 128)
@@ -1116,4 +1156,43 @@ private actor ImageLoadGate {
     }
 
     func callCount() -> Int { calls }
+}
+
+private actor PrioritizedImageLoadGate {
+    private let data: Data
+    private var urls: [URL] = []
+    private var startWaiters: [Int: CheckedContinuation<Void, Never>] = [:]
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    init(data: Data) { self.data = data }
+
+    func load(url: URL) async throws -> Data {
+        urls.append(url)
+        resumeStartWaiters()
+        await withCheckedContinuation { releaseWaiters.append($0) }
+        return data
+    }
+
+    func waitUntilStarted(count: Int) async {
+        guard urls.count < count else { return }
+        await withCheckedContinuation { startWaiters[count] = $0 }
+    }
+
+    func releaseOne() {
+        guard !releaseWaiters.isEmpty else { return }
+        releaseWaiters.removeFirst().resume()
+    }
+
+    func releaseAll() {
+        let waiters = releaseWaiters
+        releaseWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+
+    func startedURLs() -> [URL] { urls }
+
+    private func resumeStartWaiters() {
+        let readyCounts = startWaiters.keys.filter { urls.count >= $0 }
+        for count in readyCounts { startWaiters.removeValue(forKey: count)?.resume() }
+    }
 }

@@ -1,6 +1,6 @@
 # U3.6 — UIKit Timeline Rendering Performance Repair
 
-> **Status: U3.6.1, U3.6.2, AND U3.6.3 COMPLETE; U3.6.4 PENDING**
+> **Status: U3.6.1, U3.6.2, U3.6.3, AND U3.6.4 COMPLETE**
 >
 > Baseline: `main` at `2dbec0d3fc0368b15d04ff679fd79dc5e6bcdfc7`.
 >
@@ -287,6 +287,25 @@ U3.6.4 is limited to execution policy and consumer correctness:
 - cache and request bookkeeping remain bounded.
 
 Do not change image completion into a row-height/layout event.
+
+### U3.6.4 implementation
+
+`ArticleImagePipeline` now retains one job per normalized request with individual
+consumer continuations. It starts at most three loader/downsampling operations,
+drains visible requests before queued prefetch, and promotes a queued prefetch
+when a visible consumer joins it. A cancelled consumer is removed independently;
+only an operation with no remaining consumers is cancelled. The decoded cache and
+request key remain unchanged. Pending metadata is capped at 48 visible requests
+and 32 speculative requests; visible admission evicts speculative work first.
+
+`IOSUIKitArticleCell` advances a local image-binding generation for every image
+configuration and reuse. Both success and failure verify that generation, article
+ID, request identity, and task cancellation before changing the image view. The
+collection prefetch callbacks use the pipeline's explicit prefetch demand.
+
+Tests cover the three-operation bound, visible-before-prefetch dispatch, shared
+consumer cancellation, duplicate request coalescing, cache behavior, and ImageIO
+downsampling.
 
 ## 7. Explicitly outside U3.6
 
