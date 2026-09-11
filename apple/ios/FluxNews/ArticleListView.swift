@@ -473,7 +473,7 @@ enum IOSArticleListEmptyState: Equatable {
     }
 }
 
-private struct IOSUIKitArticleTimelineItem {
+struct IOSUIKitArticleTimelineItem {
     let article: ArticleSummary
     let content: ArticleRowContent
     var isRead: Bool
@@ -482,19 +482,21 @@ private struct IOSUIKitArticleTimelineItem {
 }
 
 @MainActor
-private struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
+struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
     let items: [IOSUIKitArticleTimelineItem]
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
     let iconVariant: FeedIconVariant
     let scrollResetRevision: UInt64
     let markReadOnScrolloverEnabled: Bool
+    let showsRefreshControl: Bool
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
     let onSetRead: (ArticleSummary, Bool) -> Void
     let onSetStarred: (ArticleSummary, Bool) -> Void
     let onRequestFeedIcon: (Int64, FeedIconVariant) -> Void
     let onRefresh: () async -> Void
+    let onApproachingEnd: (() -> Void)?
     let onMeaningfulInteraction: () -> Void
     let onScrolloverBatch: (IOSScrolloverBatch) -> Void
     let onScrolloverDirection: (IOSArticleScrollDirection) -> Void
@@ -517,6 +519,7 @@ private struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
         controller.onSetStarred = onSetStarred
         controller.onRequestFeedIcon = onRequestFeedIcon
         controller.onRefresh = onRefresh
+        controller.onApproachingEnd = onApproachingEnd
         controller.onMeaningfulInteraction = onMeaningfulInteraction
         controller.onScrolloverBatch = onScrolloverBatch
         controller.onScrolloverDirection = onScrolloverDirection
@@ -527,7 +530,8 @@ private struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
             previewLines: previewLines,
             iconVariant: iconVariant,
             scrollResetRevision: scrollResetRevision,
-            markReadOnScrolloverEnabled: markReadOnScrolloverEnabled
+            markReadOnScrolloverEnabled: markReadOnScrolloverEnabled,
+            showsRefreshControl: showsRefreshControl
         )
     }
 }
@@ -542,6 +546,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
     var onSetStarred: ((ArticleSummary, Bool) -> Void)?
     var onRequestFeedIcon: ((Int64, FeedIconVariant) -> Void)?
     var onRefresh: (() async -> Void)?
+    var onApproachingEnd: (() -> Void)?
     var onMeaningfulInteraction: (() -> Void)?
     var onScrolloverBatch: ((IOSScrolloverBatch) -> Void)?
     var onScrolloverDirection: ((IOSArticleScrollDirection) -> Void)?
@@ -556,6 +561,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
     private var iconVariant: FeedIconVariant = .normal
     private var scrollResetRevision: UInt64?
     private var markReadOnScrolloverEnabled = false
+    private var showsRefreshControl = true
     private var scrolloverPhase: IOSScrolloverPresentationPhase = .idle
     private var scrolloverLayoutGeneration: UInt64 = 0
     private var lastLayoutWidth: CGFloat = 0
@@ -586,7 +592,6 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         collectionView.delegate = self
         collectionView.prefetchDataSource = self
         collectionView.register(IOSUIKitArticleCell.self, forCellWithReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier)
-        collectionView.refreshControl = refreshControl
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _) in
             self.invalidateScrolloverGeometry()
@@ -622,9 +627,6 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
             configure(cell, item: item)
             cell.setNeedsLayout()
         }
-        // A compositional list caches estimated self-sizing heights. Rotation and
-        // split-view changes alter both image dimensions and text wrapping, so a
-        // fresh layout is safer than carrying stale estimates across widths.
         collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
     }
 
@@ -634,7 +636,8 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         previewLines newPreviewLines: ArticlePreviewLines,
         iconVariant newIconVariant: FeedIconVariant,
         scrollResetRevision newScrollResetRevision: UInt64,
-        markReadOnScrolloverEnabled newMarkReadOnScrolloverEnabled: Bool
+        markReadOnScrolloverEnabled newMarkReadOnScrolloverEnabled: Bool,
+        showsRefreshControl newShowsRefreshControl: Bool
     ) {
         loadViewIfNeeded()
 
@@ -654,6 +657,8 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         iconVariant = newIconVariant
         scrollResetRevision = newScrollResetRevision
         markReadOnScrolloverEnabled = newMarkReadOnScrolloverEnabled
+        showsRefreshControl = newShowsRefreshControl
+        collectionView.refreshControl = showsRefreshControl ? refreshControl : nil
         orderedIDs = newIDs
         itemsByID = Dictionary(uniqueKeysWithValues: items.map { ($0.article.id, $0) })
 
@@ -725,7 +730,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
     }
 
     @objc private func refreshTriggered() {
-        guard let onRefresh else {
+        guard showsRefreshControl, let onRefresh else {
             refreshControl.endRefreshing()
             return
         }
@@ -739,6 +744,11 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         defer { collectionView.deselectItem(at: indexPath, animated: true) }
         guard let id = dataSource.itemIdentifier(for: indexPath), let item = itemsByID[id] else { return }
         onArticleTap?(item.article)
+    }
+
+    func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        guard !orderedIDs.isEmpty, indexPath.item >= max(0, orderedIDs.count - 5) else { return }
+        onApproachingEnd?()
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
@@ -779,7 +789,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
     }
 
     private func sampleScrolloverGeometry() {
-        guard collectionView.bounds.height > 0 else { return }
+        guard markReadOnScrolloverEnabled, collectionView.bounds.height > 0 else { return }
 
         let effectiveTop = collectionView.contentOffset.y + collectionView.adjustedContentInset.top
         let effectiveBottom = collectionView.contentOffset.y + collectionView.bounds.height - collectionView.adjustedContentInset.bottom
@@ -806,7 +816,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
             rowFrames: rowFrames,
             layoutGeneration: scrolloverLayoutGeneration
         )
-        let result = scrolloverGeometryTracker.receive(sample, enabled: markReadOnScrolloverEnabled)
+        let result = scrolloverGeometryTracker.receive(sample, enabled: true)
         if let direction = result.direction { onScrolloverDirection?(direction) }
         if !result.batch.articleIDs.isEmpty { onScrolloverBatch?(result.batch) }
     }
@@ -1359,12 +1369,14 @@ struct ArticleListView: View {
                     iconVariant: iconVariant,
                     scrollResetRevision: store.scrollResetRevision,
                     markReadOnScrolloverEnabled: store.markReadOnScrolloverEnabled,
+                    showsRefreshControl: true,
                     onArticleTap: onArticleTap,
                     onArticleAction: onArticleAction,
                     onSetRead: { article, read in store.setRead(article, read: read) },
                     onSetStarred: { article, starred in store.setStarred(article, starred: starred) },
                     onRequestFeedIcon: { feedID, variant in store.requestFeedIcon(feedID, variant: variant) },
                     onRefresh: { await store.syncManually() },
+                    onApproachingEnd: nil,
                     onMeaningfulInteraction: { store.markMeaningfulInteraction() },
                     onScrolloverBatch: { store.flushScrollover($0) },
                     onScrolloverDirection: { store.receiveScrolloverDirection($0) },
