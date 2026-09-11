@@ -568,6 +568,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private var prefetchTasks: [Int64: Task<Void, Never>] = [:]
     private let refreshControl = UIRefreshControl()
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
+    private let articleHeightCache = IOSUIKitArticleCellHeightCache(capacity: 512)
 
     private static func makeListLayout() -> UICollectionViewLayout {
         var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
@@ -594,6 +595,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         collectionView.register(IOSUIKitArticleCell.self, forCellWithReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier)
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _) in
+            self.articleHeightCache.removeAll()
             self.invalidateScrolloverGeometry()
             self.collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
         }
@@ -628,6 +630,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             cell.setNeedsLayout()
         }
         collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
+    }
+
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        articleHeightCache.removeAll()
     }
 
     func update(
@@ -711,6 +718,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     private func configure(_ cell: IOSUIKitArticleCell, item: IOSUIKitArticleTimelineItem) {
         let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: collectionView.bounds.width)
+        cell.heightCache = articleHeightCache
         cell.configure(
             item: item,
             mode: mode,
@@ -951,8 +959,83 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 }
 
+enum IOSUIKitArticleCellLayoutVariant: Hashable {
+    case compact
+    case visualTextOnly
+    case visualPortrait
+    case visualLandscape
+}
+
+struct IOSUIKitArticleCellSizingContentKey: Hashable {
+    let articleID: Int64
+    let title: String
+    let feedTitle: String
+    let publishedDate: String
+    let preview: String
+    let imageURL: String?
+    let hasComments: Bool
+
+    init(item: IOSUIKitArticleTimelineItem) {
+        articleID = item.article.id
+        title = item.content.article.title
+        feedTitle = item.content.article.feedTitle
+        publishedDate = item.content.publishedDate
+        preview = item.content.article.preview
+        imageURL = item.content.imageURL?.absoluteString
+        hasComments = item.content.hasComments
+    }
+}
+
+struct IOSUIKitArticleCellMeasurementKey: Hashable {
+    let content: IOSUIKitArticleCellSizingContentKey
+    let availableWidthPixels: Int
+    let displayScaleHundredths: Int
+    let variant: IOSUIKitArticleCellLayoutVariant
+    let previewLineCount: Int
+    let contentSizeCategory: String
+    let localeIdentifier: String
+    let isRightToLeft: Bool
+}
+
+final class IOSUIKitArticleCellHeightCache {
+    let capacity: Int
+    private var values: [IOSUIKitArticleCellMeasurementKey: CGFloat] = [:]
+    private var slots: [IOSUIKitArticleCellMeasurementKey] = []
+    private var nextEvictionIndex = 0
+
+    init(capacity: Int) {
+        self.capacity = max(1, capacity)
+        values.reserveCapacity(self.capacity)
+        slots.reserveCapacity(self.capacity)
+    }
+
+    var count: Int { values.count }
+
+    func height(for key: IOSUIKitArticleCellMeasurementKey) -> CGFloat? {
+        values[key]
+    }
+
+    func insert(_ height: CGFloat, for key: IOSUIKitArticleCellMeasurementKey) {
+        if values.updateValue(height, forKey: key) != nil { return }
+        if slots.count < capacity {
+            slots.append(key)
+            return
+        }
+        let evicted = slots[nextEvictionIndex]
+        values.removeValue(forKey: evicted)
+        slots[nextEvictionIndex] = key
+        nextEvictionIndex = (nextEvictionIndex + 1) % capacity
+    }
+
+    func removeAll() {
+        values.removeAll(keepingCapacity: true)
+        slots.removeAll(keepingCapacity: true)
+        nextEvictionIndex = 0
+    }
+}
+
 @MainActor
-private final class IOSUIKitArticleCell: UICollectionViewCell {
+final class IOSUIKitArticleCell: UICollectionViewCell {
     static let reuseIdentifier = "IOSUIKitArticleCell"
 
     struct Metrics {
@@ -991,9 +1074,18 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
             let width = ArticlePresentationLayout.visualPortraitContentWidth(availableWidth)
             return CGSize(width: width, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: width))
         }
+
+        func layoutVariant(hasImage: Bool) -> IOSUIKitArticleCellLayoutVariant {
+            switch mode {
+            case .compact:
+                return .compact
+            case .visual:
+                guard hasImage else { return .visualTextOnly }
+                return isLandscapeVisual ? .visualLandscape : .visualPortrait
+            }
+        }
     }
 
-    private let rootStack = UIStackView()
     private let textStack = UIStackView()
     private let titleRow = UIStackView()
     private let titleLabel = UILabel()
@@ -1012,16 +1104,30 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
     private let articleImageView = UIImageView()
     private let imagePlaceholder = UIImageView(image: UIImage(systemName: "photo"))
 
-    private var imageWidthConstraint: NSLayoutConstraint?
-    private var imageHeightConstraint: NSLayoutConstraint?
+    private var textOnlyConstraints: [NSLayoutConstraint] = []
+    private var portraitConstraints: [NSLayoutConstraint] = []
+    private var landscapeConstraints: [NSLayoutConstraint] = []
+    private var activeLayoutConstraints: [NSLayoutConstraint] = []
+    private var portraitImageAspectConstraint: NSLayoutConstraint!
+    private var landscapeImageWidthConstraint: NSLayoutConstraint!
+    private var landscapeImageHeightConstraint: NSLayoutConstraint!
+    private var currentLayoutVariant: IOSUIKitArticleCellLayoutVariant?
     private var imageTask: Task<Void, Never>?
     private var representedImageRequest: ArticleImageRequest?
+    private var sizingContentKey: IOSUIKitArticleCellSizingContentKey?
+    private var sizingMode: ArticlePresentationMode = .visual
+    private var sizingPreviewLines: ArticlePreviewLines = .standard
+    private var sizingDisplayScale: CGFloat = 2
     private var currentTitle = ""
     private var currentFeedTitle = ""
     private var currentPublishedDate = ""
     private var currentIsRead = false
     private var currentIsStarred = false
+
+    weak var heightCache: IOSUIKitArticleCellHeightCache?
     private(set) var representedArticleID: Int64?
+    private(set) var layoutVariantRevision: UInt64 = 0
+    private(set) var measurementSolveCount = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1029,18 +1135,7 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         contentView.backgroundColor = .clear
         contentView.preservesSuperviewLayoutMargins = false
 
-        rootStack.translatesAutoresizingMaskIntoConstraints = false
-        rootStack.spacing = 12
-        rootStack.alignment = .fill
-        rootStack.distribution = .fill
-        contentView.addSubview(rootStack)
-        NSLayoutConstraint.activate([
-            rootStack.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
-            rootStack.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
-            rootStack.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor),
-            rootStack.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor),
-        ])
-
+        textStack.translatesAutoresizingMaskIntoConstraints = false
         textStack.axis = .vertical
         textStack.spacing = 7
         textStack.alignment = .fill
@@ -1054,6 +1149,8 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         titleLabel.numberOfLines = 0
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         starImageView.tintColor = .systemYellow
+        starImageView.alpha = 0
+        starImageView.isAccessibilityElement = false
         starImageView.setContentHuggingPriority(.required, for: .horizontal)
         starImageView.setContentCompressionResistancePriority(.required, for: .horizontal)
         titleRow.addArrangedSubview(titleLabel)
@@ -1141,6 +1238,7 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         articleImageView.clipsToBounds = true
         articleImageView.layer.cornerRadius = 12
         articleImageView.backgroundColor = .tertiarySystemFill
+        articleImageView.isHidden = true
         articleImageView.setContentHuggingPriority(.required, for: .vertical)
         articleImageView.setContentCompressionResistancePriority(.required, for: .vertical)
         articleImageView.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -1153,6 +1251,10 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
             imagePlaceholder.centerYAnchor.constraint(equalTo: articleImageView.centerYAnchor),
         ])
 
+        contentView.addSubview(textStack)
+        contentView.addSubview(articleImageView)
+        preparePermanentLayoutConstraints()
+
         isAccessibilityElement = true
         accessibilityTraits = .button
         accessibilityHint = String(localized: "Opens the article")
@@ -1162,15 +1264,82 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         fatalError("init(coder:) has not been implemented")
     }
 
+    private func preparePermanentLayoutConstraints() {
+        let margins = contentView.layoutMarginsGuide
+        portraitImageAspectConstraint = articleImageView.heightAnchor.constraint(
+            equalTo: articleImageView.widthAnchor,
+            multiplier: 1 / ArticlePresentationLayout.portraitImageAspectRatio
+        )
+        landscapeImageWidthConstraint = articleImageView.widthAnchor.constraint(equalToConstant: 1)
+        landscapeImageHeightConstraint = articleImageView.heightAnchor.constraint(equalToConstant: 1)
+
+        textOnlyConstraints = [
+            textStack.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            textStack.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textStack.topAnchor.constraint(equalTo: margins.topAnchor),
+            textStack.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
+        ]
+        portraitConstraints = [
+            articleImageView.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            articleImageView.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            articleImageView.topAnchor.constraint(equalTo: margins.topAnchor),
+            portraitImageAspectConstraint,
+            textStack.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            textStack.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textStack.topAnchor.constraint(equalTo: articleImageView.bottomAnchor, constant: 12),
+            textStack.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
+        ]
+        landscapeConstraints = [
+            articleImageView.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            articleImageView.topAnchor.constraint(equalTo: margins.topAnchor),
+            landscapeImageWidthConstraint,
+            landscapeImageHeightConstraint,
+            articleImageView.bottomAnchor.constraint(lessThanOrEqualTo: margins.bottomAnchor),
+            textStack.leadingAnchor.constraint(equalTo: articleImageView.trailingAnchor, constant: 14),
+            textStack.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textStack.topAnchor.constraint(equalTo: margins.topAnchor),
+            textStack.bottomAnchor.constraint(lessThanOrEqualTo: margins.bottomAnchor),
+        ]
+    }
+
     override func preferredLayoutAttributesFitting(_ layoutAttributes: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes {
         guard let attributes = layoutAttributes.copy() as? UICollectionViewLayoutAttributes else { return layoutAttributes }
-        let targetSize = CGSize(width: layoutAttributes.size.width, height: UIView.layoutFittingCompressedSize.height)
+        guard let sizingContentKey else {
+            return measuredAttributes(attributes, cacheKey: nil)
+        }
+
+        let metrics = Metrics(mode: sizingMode, containerWidth: layoutAttributes.size.width)
+        let hasImage = sizingContentKey.imageURL != nil && sizingMode.showsArticleImage
+        let variant = metrics.layoutVariant(hasImage: hasImage)
+        applyLayout(metrics: metrics, variant: variant)
+        let key = measurementKey(
+            content: sizingContentKey,
+            metrics: metrics,
+            variant: variant,
+            previewLines: sizingPreviewLines,
+            displayScale: sizingDisplayScale
+        )
+        if let cachedHeight = heightCache?.height(for: key) {
+            attributes.size.height = cachedHeight
+            return attributes
+        }
+        return measuredAttributes(attributes, cacheKey: key)
+    }
+
+    private func measuredAttributes(
+        _ attributes: UICollectionViewLayoutAttributes,
+        cacheKey: IOSUIKitArticleCellMeasurementKey?
+    ) -> UICollectionViewLayoutAttributes {
+        let targetSize = CGSize(width: attributes.size.width, height: UIView.layoutFittingCompressedSize.height)
         let fittedSize = contentView.systemLayoutSizeFitting(
             targetSize,
             withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         )
-        attributes.size.height = ceil(fittedSize.height)
+        let height = ceil(fittedSize.height)
+        attributes.size.height = height
+        measurementSolveCount += 1
+        if let cacheKey { heightCache?.insert(height, for: cacheKey) }
         return attributes
     }
 
@@ -1180,6 +1349,7 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         imageTask = nil
         representedImageRequest = nil
         representedArticleID = nil
+        sizingContentKey = nil
         articleImageView.image = nil
         imagePlaceholder.isHidden = false
     }
@@ -1192,6 +1362,10 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         displayScale: CGFloat
     ) {
         representedArticleID = item.article.id
+        sizingContentKey = IOSUIKitArticleCellSizingContentKey(item: item)
+        sizingMode = mode
+        sizingPreviewLines = previewLines
+        sizingDisplayScale = displayScale
         currentTitle = item.content.article.title
         currentFeedTitle = item.content.article.feedTitle
         currentPublishedDate = item.content.publishedDate
@@ -1203,56 +1377,9 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         previewLabel.numberOfLines = previewLines.rawValue
         commentsImageView.isHidden = !item.content.hasComments
 
-        let useColumnMetadata = metrics.availableWidth < 370
-        metadataStack.axis = useColumnMetadata ? .vertical : .horizontal
-        metadataStack.alignment = useColumnMetadata ? .leading : .center
-        metadataStack.spacing = useColumnMetadata ? 3 : 5
-        metadataBulletLabel.isHidden = useColumnMetadata
-
-        contentView.directionalLayoutMargins = NSDirectionalEdgeInsets(
-            top: metrics.outerVerticalPadding,
-            leading: metrics.horizontalInset,
-            bottom: metrics.outerVerticalPadding,
-            trailing: metrics.horizontalInset
-        )
-
-        rootStack.removeArrangedSubviews()
-        imageWidthConstraint?.isActive = false
-        imageHeightConstraint?.isActive = false
-        imageWidthConstraint = nil
-        imageHeightConstraint = nil
-
-        let imageSize = metrics.imageSize(hasImage: item.content.imageURL != nil)
-        if mode == .compact || item.content.imageURL == nil {
-            rootStack.axis = .vertical
-            rootStack.spacing = 0
-            rootStack.alignment = .fill
-            rootStack.addArrangedSubview(textStack)
-            articleImageView.isHidden = true
-        } else if metrics.isLandscapeVisual {
-            rootStack.axis = .horizontal
-            rootStack.spacing = 14
-            rootStack.alignment = .top
-            rootStack.addArrangedSubview(articleImageView)
-            rootStack.addArrangedSubview(textStack)
-            articleImageView.isHidden = false
-            imageWidthConstraint = articleImageView.widthAnchor.constraint(equalToConstant: imageSize.width)
-            imageHeightConstraint = articleImageView.heightAnchor.constraint(equalToConstant: imageSize.height)
-            imageWidthConstraint?.priority = .required
-            imageHeightConstraint?.priority = .required
-            imageWidthConstraint?.isActive = true
-            imageHeightConstraint?.isActive = true
-        } else {
-            rootStack.axis = .vertical
-            rootStack.spacing = 12
-            rootStack.alignment = .fill
-            rootStack.addArrangedSubview(articleImageView)
-            rootStack.addArrangedSubview(textStack)
-            articleImageView.isHidden = false
-            imageHeightConstraint = articleImageView.heightAnchor.constraint(equalTo: articleImageView.widthAnchor, multiplier: 1 / ArticlePresentationLayout.portraitImageAspectRatio)
-            imageHeightConstraint?.priority = .required
-            imageHeightConstraint?.isActive = true
-        }
+        let hasImage = mode.showsArticleImage && item.content.imageURL != nil
+        let imageSize = metrics.imageSize(hasImage: hasImage)
+        applyLayout(metrics: metrics, variant: metrics.layoutVariant(hasImage: hasImage))
 
         updateFeedIcon(image: item.feedIconImage, title: item.content.article.feedTitle)
         updateStatus(isRead: item.isRead, isStarred: item.isStarred)
@@ -1260,12 +1387,72 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         contentView.setNeedsLayout()
     }
 
+    private func applyLayout(metrics: Metrics, variant: IOSUIKitArticleCellLayoutVariant) {
+        contentView.directionalLayoutMargins = NSDirectionalEdgeInsets(
+            top: metrics.outerVerticalPadding,
+            leading: metrics.horizontalInset,
+            bottom: metrics.outerVerticalPadding,
+            trailing: metrics.horizontalInset
+        )
+
+        let useColumnMetadata = metrics.availableWidth < 370
+        metadataStack.axis = useColumnMetadata ? .vertical : .horizontal
+        metadataStack.alignment = useColumnMetadata ? .leading : .center
+        metadataStack.spacing = useColumnMetadata ? 3 : 5
+        metadataBulletLabel.isHidden = useColumnMetadata
+
+        if variant == .visualLandscape {
+            let imageSize = metrics.imageSize(hasImage: true)
+            landscapeImageWidthConstraint.constant = imageSize.width
+            landscapeImageHeightConstraint.constant = imageSize.height
+        }
+
+        guard currentLayoutVariant != variant else {
+            articleImageView.isHidden = variant == .compact || variant == .visualTextOnly
+            return
+        }
+
+        NSLayoutConstraint.deactivate(activeLayoutConstraints)
+        switch variant {
+        case .compact, .visualTextOnly:
+            activeLayoutConstraints = textOnlyConstraints
+        case .visualPortrait:
+            activeLayoutConstraints = portraitConstraints
+        case .visualLandscape:
+            activeLayoutConstraints = landscapeConstraints
+        }
+        NSLayoutConstraint.activate(activeLayoutConstraints)
+        currentLayoutVariant = variant
+        layoutVariantRevision &+= 1
+        articleImageView.isHidden = variant == .compact || variant == .visualTextOnly
+    }
+
+    private func measurementKey(
+        content: IOSUIKitArticleCellSizingContentKey,
+        metrics: Metrics,
+        variant: IOSUIKitArticleCellLayoutVariant,
+        previewLines: ArticlePreviewLines,
+        displayScale: CGFloat
+    ) -> IOSUIKitArticleCellMeasurementKey {
+        IOSUIKitArticleCellMeasurementKey(
+            content: content,
+            availableWidthPixels: Int((metrics.availableWidth * displayScale).rounded()),
+            displayScaleHundredths: Int((displayScale * 100).rounded()),
+            variant: variant,
+            previewLineCount: previewLines.rawValue,
+            contentSizeCategory: traitCollection.preferredContentSizeCategory.rawValue,
+            localeIdentifier: Locale.current.identifier,
+            isRightToLeft: effectiveUserInterfaceLayoutDirection == .rightToLeft
+        )
+    }
+
     func updateStatus(isRead: Bool, isStarred: Bool) {
         currentIsRead = isRead
         currentIsStarred = isStarred
         titleLabel.textColor = isRead ? .secondaryLabel : .label
         unreadIndicator.alpha = ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: isRead)
-        starImageView.isHidden = !isStarred
+        // Reserve the star's arranged-subview slot so status changes cannot change title width or row height.
+        starImageView.alpha = isStarred ? 1 : 0
         updateAccessibility()
     }
 
@@ -1323,15 +1510,6 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         accessibilityValue = currentIsRead
             ? (currentIsStarred ? String(localized: "Read, starred") : String(localized: "Read"))
             : (currentIsStarred ? String(localized: "Unread, starred") : String(localized: "Unread"))
-    }
-}
-
-private extension UIStackView {
-    func removeArrangedSubviews() {
-        for view in arrangedSubviews {
-            removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
     }
 }
 
