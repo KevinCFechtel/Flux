@@ -37,11 +37,31 @@ private final class ArticleImageCache: @unchecked Sendable {
 actor ArticleImagePipeline {
     typealias Loader = @Sendable (URL) async throws -> Data
 
+    enum Demand: Equatable, Sendable { case visible, prefetch }
+
+    struct Metrics: Equatable, Sendable {
+        let activeOperations: Int
+        let queuedVisibleRequests: Int
+        let queuedPrefetchRequests: Int
+        let trackedRequests: Int
+    }
+
+    private struct Job {
+        var waiters: [UUID: CheckedContinuation<CGImage, Error>] = [:]
+        var operation: Task<CGImage, Error>?
+    }
+
     static let shared = ArticleImagePipeline()
+    static let maximumConcurrentOperations = 3
+    private static let maximumQueuedVisibleRequests = 48
+    private static let maximumQueuedPrefetchRequests = 32
 
     private nonisolated let cache: ArticleImageCache
     private let loader: Loader
-    private var inFlight: [ArticleImageRequest: Task<CGImage, Error>] = [:]
+    private var jobs: [ArticleImageRequest: Job] = [:]
+    private var visibleQueue: [ArticleImageRequest] = []
+    private var prefetchQueue: [ArticleImageRequest] = []
+    private var activeOperationCount = 0
 
     init(loader: Loader? = nil) {
         self.loader = loader ?? { url in try await Self.loadData(from: url) }
@@ -53,48 +73,168 @@ actor ArticleImagePipeline {
         cache.image(for: request.cacheKey)
     }
 
-    func image(for request: ArticleImageRequest) async throws -> CGImage {
+    func image(for request: ArticleImageRequest, demand: Demand = .visible) async throws -> CGImage {
         let cacheKey = request.cacheKey
         if let image = cache.image(for: cacheKey) {
             return image
         }
 
-        let task: Task<CGImage, Error>
-        if let existing = inFlight[request] {
-            task = existing
-        } else {
-            let loader = loader
-            task = Task {
-                let data = try await loader(request.url)
-                return try Self.downsample(data: data, maxPixelDimension: request.maxPixelDimension)
+        let consumerID = UUID()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                attach(consumerID: consumerID, to: request, demand: demand, continuation: continuation)
             }
-            inFlight[request] = task
-        }
-
-        do {
-            let image = try await task.value
-            cache.insert(image, for: cacheKey)
-            inFlight[request] = nil
-            try Task.checkCancellation()
-            return image
-        } catch {
-            inFlight[request] = nil
-            throw error
+        } onCancel: {
+            Task { await self.cancel(consumerID: consumerID, for: request) }
         }
     }
 
+    func prefetch(_ request: ArticleImageRequest) async throws -> CGImage {
+        try await image(for: request, demand: .prefetch)
+    }
+
     func prefetch(_ requests: [ArticleImageRequest]) async {
-        await withTaskGroup(of: Void.self) { group in
-            for request in requests {
-                group.addTask {
-                    _ = try? await self.image(for: request)
-                }
-            }
+        for request in Set(requests) {
+            _ = try? await prefetch(request)
         }
+    }
+
+    func metrics() -> Metrics {
+        .init(
+            activeOperations: activeOperationCount,
+            queuedVisibleRequests: visibleQueue.count,
+            queuedPrefetchRequests: prefetchQueue.count,
+            trackedRequests: jobs.count
+        )
     }
 
     func removeAllCachedImages() {
         cache.storage.removeAllObjects()
+    }
+
+    private func attach(
+        consumerID: UUID,
+        to request: ArticleImageRequest,
+        demand: Demand,
+        continuation: CheckedContinuation<CGImage, Error>
+    ) {
+        guard !Task.isCancelled else {
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        if let cached = cache.image(for: request.cacheKey) {
+            continuation.resume(returning: cached)
+            return
+        }
+
+        if var job = jobs[request] {
+            job.waiters[consumerID] = continuation
+            jobs[request] = job
+            if demand == .visible { promote(request) }
+        } else {
+            if !canQueue(demand) {
+                continuation.resume(throwing: CancellationError())
+                return
+            }
+            var job = Job()
+            job.waiters[consumerID] = continuation
+            jobs[request] = job
+            switch demand {
+            case .visible: visibleQueue.append(request)
+            case .prefetch: prefetchQueue.append(request)
+            }
+        }
+        startAvailableOperations()
+    }
+
+    private func canQueue(_ demand: Demand) -> Bool {
+        switch demand {
+        case .prefetch:
+            return prefetchQueue.count < Self.maximumQueuedPrefetchRequests
+        case .visible:
+            while visibleQueue.count >= Self.maximumQueuedVisibleRequests,
+                  let request = prefetchQueue.first {
+                prefetchQueue.removeFirst()
+                cancelQueuedPrefetch(request)
+            }
+            return visibleQueue.count < Self.maximumQueuedVisibleRequests
+        }
+    }
+
+    private func cancelQueuedPrefetch(_ request: ArticleImageRequest) {
+        guard let job = jobs.removeValue(forKey: request) else { return }
+        for continuation in job.waiters.values {
+            continuation.resume(throwing: CancellationError())
+        }
+    }
+
+    private func promote(_ request: ArticleImageRequest) {
+        guard jobs[request]?.operation == nil,
+              let index = prefetchQueue.firstIndex(of: request) else { return }
+        prefetchQueue.remove(at: index)
+        if !visibleQueue.contains(request) { visibleQueue.append(request) }
+    }
+
+    private func cancel(consumerID: UUID, for request: ArticleImageRequest) {
+        guard var job = jobs[request], let continuation = job.waiters.removeValue(forKey: consumerID) else { return }
+        continuation.resume(throwing: CancellationError())
+        guard job.waiters.isEmpty else {
+            jobs[request] = job
+            return
+        }
+
+        if let operation = job.operation {
+            jobs[request] = job
+            operation.cancel()
+        } else {
+            jobs[request] = nil
+            visibleQueue.removeAll { $0 == request }
+            prefetchQueue.removeAll { $0 == request }
+        }
+    }
+
+    private func startAvailableOperations() {
+        while activeOperationCount < Self.maximumConcurrentOperations,
+              let request = nextQueuedRequest(),
+              var job = jobs[request] {
+            guard !job.waiters.isEmpty else {
+                jobs[request] = nil
+                continue
+            }
+            let loader = loader
+            let operation = Task.detached(priority: .utility) {
+                let data = try await loader(request.url)
+                return try Self.downsample(data: data, maxPixelDimension: request.maxPixelDimension)
+            }
+            job.operation = operation
+            jobs[request] = job
+            activeOperationCount += 1
+            Task { [weak self] in
+                let result: Result<CGImage, Error>
+                do { result = .success(try await operation.value) }
+                catch { result = .failure(error) }
+                await self?.complete(request: request, result: result)
+            }
+        }
+    }
+
+    private func nextQueuedRequest() -> ArticleImageRequest? {
+        if !visibleQueue.isEmpty { return visibleQueue.removeFirst() }
+        if !prefetchQueue.isEmpty { return prefetchQueue.removeFirst() }
+        return nil
+    }
+
+    private func complete(request: ArticleImageRequest, result: Result<CGImage, Error>) {
+        guard let job = jobs.removeValue(forKey: request) else { return }
+        activeOperationCount -= 1
+        if case let .success(image) = result { cache.insert(image, for: request.cacheKey) }
+        for continuation in job.waiters.values {
+            switch result {
+            case let .success(image): continuation.resume(returning: image)
+            case let .failure(error): continuation.resume(throwing: error)
+            }
+        }
+        startAvailableOperations()
     }
 
     private static let session: URLSession = {

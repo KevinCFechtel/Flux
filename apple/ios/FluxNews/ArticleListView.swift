@@ -289,6 +289,30 @@ struct IOSUIKitScrolloverGeometryResult: Equatable {
     let batch: IOSScrolloverBatch
 }
 
+/// Resolved frames captured from real collection-view cells. This is deliberately
+/// smaller than the tracker's crossing window: it bridges lifecycle callback order
+/// without becoming a second geometry cache for the complete collection.
+struct IOSUIKitResolvedScrolloverFrameStore {
+    static let capacity = 96
+    private var framesByID: [Int64: CGRect] = [:]
+
+    var frames: [Int64: CGRect] { framesByID }
+    var count: Int { framesByID.count }
+
+    mutating func record(articleID: Int64, frame: CGRect, viewportTop: CGFloat) {
+        framesByID[articleID] = frame
+        guard framesByID.count > Self.capacity else { return }
+        let retained = framesByID
+            .sorted { abs($0.value.midY - viewportTop) < abs($1.value.midY - viewportTop) }
+            .prefix(Self.capacity)
+        framesByID = Dictionary(uniqueKeysWithValues: retained.map { ($0.key, $0.value) })
+    }
+
+    mutating func removeAll() {
+        framesByID.removeAll(keepingCapacity: true)
+    }
+}
+
 /// Non-observable, bounded geometry detector owned by the UIKit Timeline.
 /// It only emits IDs that were actually observed in the viewport during a user-driven
 /// interaction and then crossed the effective upper viewport boundary while moving forward.
@@ -473,17 +497,85 @@ enum IOSArticleListEmptyState: Equatable {
     }
 }
 
+struct IOSUIKitArticleTimelineStructuralItem {
+    let article: ArticleSummary
+    let content: ArticleRowContent
+}
+
+struct IOSUIKitArticlePresentationState: Equatable {
+    let isRead: Bool
+    let isStarred: Bool
+    let revision: UInt64
+}
+
+struct IOSUIKitArticlePresentationDelta {
+    let articleID: Int64
+    let state: IOSUIKitArticlePresentationState
+    let rearmScrollover: Bool
+}
+
+struct IOSUIKitFeedIconPresentationDelta {
+    let key: IOSFeedIconKey
+    let image: UIImage?
+    let revision: UInt64
+}
+
+/// Owned by the presentation layer, not SwiftUI observation. It retains current
+/// mutable state so a later cell binding never needs a complete row reconstruction.
+@MainActor
+final class IOSUIKitArticleTimelinePresentationBridge {
+    private weak var controller: IOSUIKitArticleTimelineController?
+    private var articleStates: [Int64: IOSUIKitArticlePresentationState] = [:]
+    private var feedIcons: [IOSFeedIconKey: IOSUIKitFeedIconPresentationDelta] = [:]
+
+    func attach(_ controller: IOSUIKitArticleTimelineController, appliesArticleState: Bool = true) {
+        self.controller = controller
+        if appliesArticleState { controller.applyPresentationBridgeState(self) }
+    }
+
+    func replaceArticleStates(_ states: [Int64: IOSUIKitArticlePresentationState]) {
+        articleStates = states
+    }
+
+    func publishArticle(_ delta: IOSUIKitArticlePresentationDelta) {
+        guard delta.state.revision >= articleStates[delta.articleID]?.revision ?? 0 else { return }
+        articleStates[delta.articleID] = delta.state
+        controller?.applyArticlePresentation(delta)
+    }
+
+    func publishFeedIcon(_ delta: IOSUIKitFeedIconPresentationDelta) {
+        guard delta.revision >= feedIcons[delta.key]?.revision ?? 0 else { return }
+        feedIcons[delta.key] = delta
+        controller?.applyFeedIconPresentation(delta)
+    }
+
+    func articleState(for id: Int64, fallback: ArticleSummary) -> IOSUIKitArticlePresentationState {
+        articleStates[id] ?? .init(isRead: fallback.isRead, isStarred: fallback.isStarred, revision: 0)
+    }
+
+    func feedIcon(for feedID: Int64, variant: FeedIconVariant) -> UIImage? {
+        feedIcons[.init(feedID: feedID, variant: variant)]?.image
+    }
+}
+
+struct IOSUIKitArticleTimelineStructuralState {
+    let items: [IOSUIKitArticleTimelineStructuralItem]
+    let revision: UInt64
+}
+
 struct IOSUIKitArticleTimelineItem {
     let article: ArticleSummary
     let content: ArticleRowContent
-    var isRead: Bool
-    var isStarred: Bool
+    let isRead: Bool
+    let isStarred: Bool
     let feedIconImage: UIImage?
 }
 
 @MainActor
 struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
-    let items: [IOSUIKitArticleTimelineItem]
+    let structuralState: IOSUIKitArticleTimelineStructuralState
+    let presentationBridge: IOSUIKitArticleTimelinePresentationBridge
+    let feedIconPresentationBridge: IOSUIKitArticleTimelinePresentationBridge
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
     let iconVariant: FeedIconVariant
@@ -525,7 +617,9 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
         controller.onScrolloverDirection = onScrolloverDirection
         controller.onScrolloverPhase = onScrolloverPhase
         controller.update(
-            items: items,
+            structuralState: structuralState,
+            presentationBridge: presentationBridge,
+            feedIconPresentationBridge: feedIconPresentationBridge,
             mode: mode,
             previewLines: previewLines,
             iconVariant: iconVariant,
@@ -555,7 +649,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Int64>!
     private var orderedIDs: [Int64] = []
-    private var itemsByID: [Int64: IOSUIKitArticleTimelineItem] = [:]
+    private var itemsByID: [Int64: IOSUIKitArticleTimelineStructuralItem] = [:]
+    private var presentationByID: [Int64: IOSUIKitArticlePresentationState] = [:]
+    private weak var presentationBridge: IOSUIKitArticleTimelinePresentationBridge?
+    private weak var feedIconPresentationBridge: IOSUIKitArticleTimelinePresentationBridge?
+    private var structuralRevision: UInt64?
     private var mode: ArticlePresentationMode = .visual
     private var previewLines: ArticlePreviewLines = .standard
     private var iconVariant: FeedIconVariant = .normal
@@ -564,10 +662,17 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private var showsRefreshControl = true
     private var scrolloverPhase: IOSScrolloverPresentationPhase = .idle
     private var scrolloverLayoutGeneration: UInt64 = 0
+    private var resolvedScrolloverFrames = IOSUIKitResolvedScrolloverFrameStore()
     private var lastLayoutWidth: CGFloat = 0
     private var prefetchTasks: [Int64: Task<Void, Never>] = [:]
     private let refreshControl = UIRefreshControl()
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
+    private let articleHeightCache = IOSUIKitArticleCellHeightCache(capacity: 512)
+    private(set) var structuralReconciliationCount = 0
+    private(set) var structuralSnapshotApplicationCount = 0
+    private(set) var articlePresentationApplicationCount = 0
+    private(set) var feedIconPresentationApplicationCount = 0
+    private(set) var scrolloverRearmCount = 0
 
     private static func makeListLayout() -> UICollectionViewLayout {
         var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
@@ -594,6 +699,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         collectionView.register(IOSUIKitArticleCell.self, forCellWithReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier)
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _) in
+            self.articleHeightCache.removeAll()
             self.invalidateScrolloverGeometry()
             self.collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
         }
@@ -608,7 +714,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         dataSource = UICollectionViewDiffableDataSource<Section, Int64>(collectionView: collectionView) { [weak self] collectionView, indexPath, id in
             guard let self,
                   let cell = collectionView.dequeueReusableCell(withReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier, for: indexPath) as? IOSUIKitArticleCell,
-                  let item = self.itemsByID[id]
+                  let item = self.renderedItem(for: id)
             else { return nil }
             self.configure(cell, item: item)
             return cell
@@ -623,15 +729,22 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         cancelAllPrefetch()
         invalidateScrolloverGeometry()
         for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
-            guard let id = cell.representedArticleID, let item = itemsByID[id] else { continue }
+            guard let id = cell.representedArticleID, let item = renderedItem(for: id) else { continue }
             configure(cell, item: item)
             cell.setNeedsLayout()
         }
         collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
     }
 
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        articleHeightCache.removeAll()
+    }
+
     func update(
-        items: [IOSUIKitArticleTimelineItem],
+        structuralState: IOSUIKitArticleTimelineStructuralState,
+        presentationBridge newPresentationBridge: IOSUIKitArticleTimelinePresentationBridge,
+        feedIconPresentationBridge newFeedIconPresentationBridge: IOSUIKitArticleTimelinePresentationBridge,
         mode newMode: ArticlePresentationMode,
         previewLines newPreviewLines: ArticlePreviewLines,
         iconVariant newIconVariant: FeedIconVariant,
@@ -641,16 +754,10 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     ) {
         loadViewIfNeeded()
 
-        let previousItems = itemsByID
-        let newIDs = items.map { $0.article.id }
-        let structureChanged = IOSUIKitTimelineSnapshotPolicy.requiresStructuralUpdate(previousIDs: orderedIDs, newIDs: newIDs)
+        let structuralChanged = structuralRevision != structuralState.revision
         let layoutInputsChanged = mode != newMode || previewLines != newPreviewLines
         let iconVariantChanged = iconVariant != newIconVariant
         let resetChanged = scrollResetRevision != nil && scrollResetRevision != newScrollResetRevision
-        let explicitlyUnreadIDs = items.compactMap { item -> Int64? in
-            guard previousItems[item.article.id]?.isRead == true, !item.isRead else { return nil }
-            return item.article.id
-        }
 
         mode = newMode
         previewLines = newPreviewLines
@@ -659,44 +766,41 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         markReadOnScrolloverEnabled = newMarkReadOnScrolloverEnabled
         showsRefreshControl = newShowsRefreshControl
         collectionView.refreshControl = showsRefreshControl ? refreshControl : nil
-        orderedIDs = newIDs
-        itemsByID = Dictionary(uniqueKeysWithValues: items.map { ($0.article.id, $0) })
+        if presentationBridge !== newPresentationBridge {
+            presentationBridge = newPresentationBridge
+            newPresentationBridge.attach(self)
+        }
+        if feedIconPresentationBridge !== newFeedIconPresentationBridge {
+            feedIconPresentationBridge = newFeedIconPresentationBridge
+            newFeedIconPresentationBridge.attach(self, appliesArticleState: false)
+        }
 
-        if structureChanged {
+        if structuralChanged {
+            structuralReconciliationCount &+= 1
+            let newIDs = structuralState.items.map(\.article.id)
+            orderedIDs = newIDs
+            itemsByID = Dictionary(uniqueKeysWithValues: structuralState.items.map { ($0.article.id, $0) })
+            presentationByID = Dictionary(uniqueKeysWithValues: structuralState.items.map {
+                ($0.article.id, newPresentationBridge.articleState(for: $0.article.id, fallback: $0.article))
+            })
+            structuralRevision = structuralState.revision
             scrolloverGeometryTracker.updateSnapshot(newIDs)
             invalidateScrolloverGeometry()
             var snapshot = NSDiffableDataSourceSnapshot<Section, Int64>()
             snapshot.appendSections([.main])
             snapshot.appendItems(newIDs)
             dataSource.apply(snapshot, animatingDifferences: false)
+            structuralSnapshotApplicationCount &+= 1
         }
-        if !explicitlyUnreadIDs.isEmpty { scrolloverGeometryTracker.rearm(explicitlyUnreadIDs) }
         if layoutInputsChanged { invalidateScrolloverGeometry() }
 
         var needsLayoutInvalidation = layoutInputsChanged
-        for indexPath in collectionView.indexPathsForVisibleItems {
-            guard let id = dataSource.itemIdentifier(for: indexPath),
-                  let cell = collectionView.cellForItem(at: indexPath) as? IOSUIKitArticleCell,
-                  let newItem = itemsByID[id]
-            else { continue }
-            guard let oldItem = previousItems[id] else {
-                configure(cell, item: newItem)
-                needsLayoutInvalidation = true
-                continue
+        if structuralChanged || layoutInputsChanged || iconVariantChanged {
+            for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
+                guard let id = cell.representedArticleID, let item = renderedItem(for: id) else { continue }
+                configure(cell, item: item)
             }
-
-            if layoutInputsChanged || oldItem.content != newItem.content {
-                configure(cell, item: newItem)
-                needsLayoutInvalidation = true
-            } else {
-                if oldItem.isRead != newItem.isRead || oldItem.isStarred != newItem.isStarred {
-                    cell.updateStatus(isRead: newItem.isRead, isStarred: newItem.isStarred)
-                }
-                if iconVariantChanged || !sameImage(oldItem.feedIconImage, newItem.feedIconImage) {
-                    cell.updateFeedIcon(image: newItem.feedIconImage, title: newItem.content.article.feedTitle)
-                    onRequestFeedIcon?(newItem.content.article.feedId, iconVariant)
-                }
-            }
+            needsLayoutInvalidation = structuralChanged || layoutInputsChanged
         }
 
         if needsLayoutInvalidation {
@@ -709,8 +813,15 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         }
     }
 
+    private func renderedItem(for id: Int64) -> IOSUIKitArticleTimelineItem? {
+        guard let item = itemsByID[id] else { return nil }
+        let presentation = presentationByID[id] ?? presentationBridge?.articleState(for: id, fallback: item.article) ?? .init(isRead: item.article.isRead, isStarred: item.article.isStarred, revision: 0)
+        return .init(article: item.article, content: item.content, isRead: presentation.isRead, isStarred: presentation.isStarred, feedIconImage: feedIconPresentationBridge?.feedIcon(for: item.article.feedId, variant: iconVariant))
+    }
+
     private func configure(_ cell: IOSUIKitArticleCell, item: IOSUIKitArticleTimelineItem) {
         let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: collectionView.bounds.width)
+        cell.heightCache = articleHeightCache
         cell.configure(
             item: item,
             mode: mode,
@@ -721,11 +832,32 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         onRequestFeedIcon?(item.content.article.feedId, iconVariant)
     }
 
-    private func sameImage(_ lhs: UIImage?, _ rhs: UIImage?) -> Bool {
-        switch (lhs, rhs) {
-        case (nil, nil): true
-        case let (lhs?, rhs?): lhs === rhs
-        default: false
+    func applyPresentationBridgeState(_ bridge: IOSUIKitArticleTimelinePresentationBridge) {
+        for id in orderedIDs where itemsByID[id] != nil {
+            presentationByID[id] = bridge.articleState(for: id, fallback: itemsByID[id]!.article)
+        }
+    }
+
+    func applyArticlePresentation(_ delta: IOSUIKitArticlePresentationDelta) {
+        guard let current = presentationByID[delta.articleID], delta.state.revision >= current.revision else { return }
+        articlePresentationApplicationCount &+= 1
+        presentationByID[delta.articleID] = delta.state
+        if delta.rearmScrollover {
+            scrolloverGeometryTracker.rearm([delta.articleID])
+            scrolloverRearmCount &+= 1
+        }
+        guard let indexPath = dataSource.indexPath(for: delta.articleID),
+              let cell = collectionView.cellForItem(at: indexPath) as? IOSUIKitArticleCell else { return }
+        cell.updateStatus(isRead: delta.state.isRead, isStarred: delta.state.isStarred)
+    }
+
+    func applyFeedIconPresentation(_ delta: IOSUIKitFeedIconPresentationDelta) {
+        guard delta.key.variant == iconVariant else { return }
+        feedIconPresentationApplicationCount &+= 1
+        for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
+            guard let id = cell.representedArticleID,
+                  let item = itemsByID[id], item.article.feedId == delta.key.feedID else { continue }
+            cell.updateFeedIcon(image: delta.image, title: item.content.article.feedTitle)
         }
     }
 
@@ -742,13 +874,20 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         defer { collectionView.deselectItem(at: indexPath, animated: true) }
-        guard let id = dataSource.itemIdentifier(for: indexPath), let item = itemsByID[id] else { return }
+        guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return }
         onArticleTap?(item.article)
     }
 
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        recordResolvedScrolloverFrame(for: cell)
         guard !orderedIDs.isEmpty, indexPath.item >= max(0, orderedIDs.count - 5) else { return }
         onApproachingEnd?()
+    }
+
+    func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        // Keep the resolved frame briefly so either lifecycle/scroll callback order
+        // can still prove a crossing using the same content-coordinate geometry.
+        recordResolvedScrolloverFrame(for: cell)
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
@@ -785,7 +924,24 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     private func invalidateScrolloverGeometry() {
         scrolloverLayoutGeneration &+= 1
+        resolvedScrolloverFrames.removeAll()
         scrolloverGeometryTracker.invalidateGeometry()
+    }
+
+    private func recordResolvedScrolloverFrame(for cell: UICollectionViewCell) {
+        guard let articleCell = cell as? IOSUIKitArticleCell,
+              let articleID = articleCell.representedArticleID else { return }
+        resolvedScrolloverFrames.record(
+            articleID: articleID,
+            frame: articleCell.frame,
+            viewportTop: collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+        )
+    }
+
+    private func refreshResolvedVisibleScrolloverFrames() {
+        for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
+            recordResolvedScrolloverFrame(for: cell)
+        }
     }
 
     private func sampleScrolloverGeometry() {
@@ -793,27 +949,16 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
         let effectiveTop = collectionView.contentOffset.y + collectionView.adjustedContentInset.top
         let effectiveBottom = collectionView.contentOffset.y + collectionView.bounds.height - collectionView.adjustedContentInset.bottom
-        let viewportHeight = max(1, effectiveBottom - effectiveTop)
-        let sensingRect = CGRect(
-            x: collectionView.bounds.minX,
-            y: max(0, effectiveTop - viewportHeight),
-            width: collectionView.bounds.width,
-            height: viewportHeight * 3
-        )
-        let attributes = collectionView.collectionViewLayout.layoutAttributesForElements(in: sensingRect) ?? []
-        var rowFrames: [Int64: CGRect] = [:]
-        rowFrames.reserveCapacity(attributes.count)
-        for attribute in attributes where attribute.representedElementCategory == .cell {
-            guard let id = dataSource.itemIdentifier(for: attribute.indexPath) else { continue }
-            rowFrames[id] = attribute.frame
-        }
+        // `visibleCells` are UIKit-resolved geometry. The retained source covers a
+        // cell whose didEndDisplaying arrives on either side of this scroll callback.
+        refreshResolvedVisibleScrolloverFrames()
 
         let sample = IOSUIKitScrolloverGeometrySample(
             contentOffsetY: collectionView.contentOffset.y,
             effectiveTop: effectiveTop,
             effectiveBottom: effectiveBottom,
             contentHeight: collectionView.contentSize.height,
-            rowFrames: rowFrames,
+            rowFrames: resolvedScrolloverFrames.frames,
             layoutGeneration: scrolloverLayoutGeneration
         )
         let result = scrolloverGeometryTracker.receive(sample, enabled: true)
@@ -822,7 +967,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     func collectionView(_ collectionView: UICollectionView, leadingSwipeActionsConfigurationForItemAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        guard let id = dataSource.itemIdentifier(for: indexPath), let item = itemsByID[id] else { return nil }
+        guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
         let newValue = !item.isRead
         let action = UIContextualAction(style: .normal, title: newValue ? String(localized: "Mark as Read") : String(localized: "Mark as Unread")) { [weak self] _, _, completion in
             self?.setRead(id: id, value: newValue)
@@ -836,7 +981,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     func collectionView(_ collectionView: UICollectionView, trailingSwipeActionsConfigurationForItemAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        guard let id = dataSource.itemIdentifier(for: indexPath), let item = itemsByID[id] else { return nil }
+        guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
         let newValue = !item.isStarred
         let action = UIContextualAction(style: .normal, title: newValue ? String(localized: "Star") : String(localized: "Unstar")) { [weak self] _, _, completion in
             self?.setStarred(id: id, value: newValue)
@@ -850,9 +995,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
-        guard let id = dataSource.itemIdentifier(for: indexPath), let item = itemsByID[id] else { return nil }
+        guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
         return UIContextMenuConfiguration(identifier: NSNumber(value: id), previewProvider: nil) { [weak self] _ in
-            guard let self, let current = self.itemsByID[id] else { return nil }
+            guard let self, let current = self.renderedItem(for: id) else { return nil }
             var actions: [UIMenuElement] = [
                 UIAction(title: current.isStarred ? String(localized: "Unstar") : String(localized: "Star"), image: UIImage(systemName: current.isStarred ? "star.slash" : "star")) { [weak self] _ in
                     self?.setStarred(id: id, value: !current.isStarred)
@@ -892,23 +1037,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func setRead(id: Int64, value: Bool) {
-        guard var item = itemsByID[id] else { return }
-        item.isRead = value
-        itemsByID[id] = item
-        if !value { scrolloverGeometryTracker.rearm([id]) }
-        if let indexPath = dataSource.indexPath(for: id), let cell = collectionView.cellForItem(at: indexPath) as? IOSUIKitArticleCell {
-            cell.updateStatus(isRead: value, isStarred: item.isStarred)
-        }
+        guard let item = renderedItem(for: id) else { return }
         onSetRead?(item.article, value)
     }
 
     private func setStarred(id: Int64, value: Bool) {
-        guard var item = itemsByID[id] else { return }
-        item.isStarred = value
-        itemsByID[id] = item
-        if let indexPath = dataSource.indexPath(for: id), let cell = collectionView.cellForItem(at: indexPath) as? IOSUIKitArticleCell {
-            cell.updateStatus(isRead: item.isRead, isStarred: value)
-        }
+        guard let item = renderedItem(for: id) else { return }
         onSetStarred?(item.article, value)
     }
 
@@ -916,12 +1050,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         guard mode.showsArticleImage else { return }
         for indexPath in indexPaths {
             guard let id = dataSource.itemIdentifier(for: indexPath), prefetchTasks[id] == nil,
-                  let item = itemsByID[id], let request = imageRequest(for: item)
+                  let item = renderedItem(for: id), let request = imageRequest(for: item)
             else { continue }
             prefetchTasks[id] = Task { [weak self] in
-                _ = try? await ArticleImagePipeline.shared.image(for: request)
-                guard !Task.isCancelled else { return }
-                self?.prefetchTasks[id] = nil
+                defer { self?.prefetchTasks[id] = nil }
+                _ = try? await ArticleImagePipeline.shared.prefetch(request)
             }
         }
     }
@@ -951,8 +1084,83 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 }
 
+enum IOSUIKitArticleCellLayoutVariant: Hashable {
+    case compact
+    case visualTextOnly
+    case visualPortrait
+    case visualLandscape
+}
+
+struct IOSUIKitArticleCellSizingContentKey: Hashable {
+    let articleID: Int64
+    let title: String
+    let feedTitle: String
+    let publishedDate: String
+    let preview: String
+    let imageURL: String?
+    let hasComments: Bool
+
+    init(item: IOSUIKitArticleTimelineItem) {
+        articleID = item.article.id
+        title = item.content.article.title
+        feedTitle = item.content.article.feedTitle
+        publishedDate = item.content.publishedDate
+        preview = item.content.article.preview
+        imageURL = item.content.imageURL?.absoluteString
+        hasComments = item.content.hasComments
+    }
+}
+
+struct IOSUIKitArticleCellMeasurementKey: Hashable {
+    let content: IOSUIKitArticleCellSizingContentKey
+    let availableWidthPixels: Int
+    let displayScaleHundredths: Int
+    let variant: IOSUIKitArticleCellLayoutVariant
+    let previewLineCount: Int
+    let contentSizeCategory: String
+    let localeIdentifier: String
+    let isRightToLeft: Bool
+}
+
+final class IOSUIKitArticleCellHeightCache {
+    let capacity: Int
+    private var values: [IOSUIKitArticleCellMeasurementKey: CGFloat] = [:]
+    private var slots: [IOSUIKitArticleCellMeasurementKey] = []
+    private var nextEvictionIndex = 0
+
+    init(capacity: Int) {
+        self.capacity = max(1, capacity)
+        values.reserveCapacity(self.capacity)
+        slots.reserveCapacity(self.capacity)
+    }
+
+    var count: Int { values.count }
+
+    func height(for key: IOSUIKitArticleCellMeasurementKey) -> CGFloat? {
+        values[key]
+    }
+
+    func insert(_ height: CGFloat, for key: IOSUIKitArticleCellMeasurementKey) {
+        if values.updateValue(height, forKey: key) != nil { return }
+        if slots.count < capacity {
+            slots.append(key)
+            return
+        }
+        let evicted = slots[nextEvictionIndex]
+        values.removeValue(forKey: evicted)
+        slots[nextEvictionIndex] = key
+        nextEvictionIndex = (nextEvictionIndex + 1) % capacity
+    }
+
+    func removeAll() {
+        values.removeAll(keepingCapacity: true)
+        slots.removeAll(keepingCapacity: true)
+        nextEvictionIndex = 0
+    }
+}
+
 @MainActor
-private final class IOSUIKitArticleCell: UICollectionViewCell {
+final class IOSUIKitArticleCell: UICollectionViewCell {
     static let reuseIdentifier = "IOSUIKitArticleCell"
 
     struct Metrics {
@@ -991,9 +1199,18 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
             let width = ArticlePresentationLayout.visualPortraitContentWidth(availableWidth)
             return CGSize(width: width, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: width))
         }
+
+        func layoutVariant(hasImage: Bool) -> IOSUIKitArticleCellLayoutVariant {
+            switch mode {
+            case .compact:
+                return .compact
+            case .visual:
+                guard hasImage else { return .visualTextOnly }
+                return isLandscapeVisual ? .visualLandscape : .visualPortrait
+            }
+        }
     }
 
-    private let rootStack = UIStackView()
     private let textStack = UIStackView()
     private let titleRow = UIStackView()
     private let titleLabel = UILabel()
@@ -1012,16 +1229,31 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
     private let articleImageView = UIImageView()
     private let imagePlaceholder = UIImageView(image: UIImage(systemName: "photo"))
 
-    private var imageWidthConstraint: NSLayoutConstraint?
-    private var imageHeightConstraint: NSLayoutConstraint?
+    private var textOnlyConstraints: [NSLayoutConstraint] = []
+    private var portraitConstraints: [NSLayoutConstraint] = []
+    private var landscapeConstraints: [NSLayoutConstraint] = []
+    private var activeLayoutConstraints: [NSLayoutConstraint] = []
+    private var portraitImageAspectConstraint: NSLayoutConstraint!
+    private var landscapeImageWidthConstraint: NSLayoutConstraint!
+    private var landscapeImageHeightConstraint: NSLayoutConstraint!
+    private var currentLayoutVariant: IOSUIKitArticleCellLayoutVariant?
     private var imageTask: Task<Void, Never>?
     private var representedImageRequest: ArticleImageRequest?
+    private var imageBindingGeneration: UInt64 = 0
+    private var sizingContentKey: IOSUIKitArticleCellSizingContentKey?
+    private var sizingMode: ArticlePresentationMode = .visual
+    private var sizingPreviewLines: ArticlePreviewLines = .standard
+    private var sizingDisplayScale: CGFloat = 2
     private var currentTitle = ""
     private var currentFeedTitle = ""
     private var currentPublishedDate = ""
     private var currentIsRead = false
     private var currentIsStarred = false
+
+    weak var heightCache: IOSUIKitArticleCellHeightCache?
     private(set) var representedArticleID: Int64?
+    private(set) var layoutVariantRevision: UInt64 = 0
+    private(set) var measurementSolveCount = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1029,18 +1261,7 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         contentView.backgroundColor = .clear
         contentView.preservesSuperviewLayoutMargins = false
 
-        rootStack.translatesAutoresizingMaskIntoConstraints = false
-        rootStack.spacing = 12
-        rootStack.alignment = .fill
-        rootStack.distribution = .fill
-        contentView.addSubview(rootStack)
-        NSLayoutConstraint.activate([
-            rootStack.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
-            rootStack.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
-            rootStack.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor),
-            rootStack.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor),
-        ])
-
+        textStack.translatesAutoresizingMaskIntoConstraints = false
         textStack.axis = .vertical
         textStack.spacing = 7
         textStack.alignment = .fill
@@ -1054,6 +1275,8 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         titleLabel.numberOfLines = 0
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         starImageView.tintColor = .systemYellow
+        starImageView.alpha = 0
+        starImageView.isAccessibilityElement = false
         starImageView.setContentHuggingPriority(.required, for: .horizontal)
         starImageView.setContentCompressionResistancePriority(.required, for: .horizontal)
         titleRow.addArrangedSubview(titleLabel)
@@ -1141,6 +1364,7 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         articleImageView.clipsToBounds = true
         articleImageView.layer.cornerRadius = 12
         articleImageView.backgroundColor = .tertiarySystemFill
+        articleImageView.isHidden = true
         articleImageView.setContentHuggingPriority(.required, for: .vertical)
         articleImageView.setContentCompressionResistancePriority(.required, for: .vertical)
         articleImageView.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -1153,6 +1377,10 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
             imagePlaceholder.centerYAnchor.constraint(equalTo: articleImageView.centerYAnchor),
         ])
 
+        contentView.addSubview(textStack)
+        contentView.addSubview(articleImageView)
+        preparePermanentLayoutConstraints()
+
         isAccessibilityElement = true
         accessibilityTraits = .button
         accessibilityHint = String(localized: "Opens the article")
@@ -1162,24 +1390,91 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         fatalError("init(coder:) has not been implemented")
     }
 
+    private func preparePermanentLayoutConstraints() {
+        let margins = contentView.layoutMarginsGuide
+        portraitImageAspectConstraint = articleImageView.heightAnchor.constraint(
+            equalTo: articleImageView.widthAnchor,
+            multiplier: 1 / ArticlePresentationLayout.portraitImageAspectRatio
+        )
+        landscapeImageWidthConstraint = articleImageView.widthAnchor.constraint(equalToConstant: 1)
+        landscapeImageHeightConstraint = articleImageView.heightAnchor.constraint(equalToConstant: 1)
+
+        textOnlyConstraints = [
+            textStack.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            textStack.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textStack.topAnchor.constraint(equalTo: margins.topAnchor),
+            textStack.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
+        ]
+        portraitConstraints = [
+            articleImageView.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            articleImageView.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            articleImageView.topAnchor.constraint(equalTo: margins.topAnchor),
+            portraitImageAspectConstraint,
+            textStack.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            textStack.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textStack.topAnchor.constraint(equalTo: articleImageView.bottomAnchor, constant: 12),
+            textStack.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
+        ]
+        landscapeConstraints = [
+            articleImageView.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            articleImageView.topAnchor.constraint(equalTo: margins.topAnchor),
+            landscapeImageWidthConstraint,
+            landscapeImageHeightConstraint,
+            articleImageView.bottomAnchor.constraint(lessThanOrEqualTo: margins.bottomAnchor),
+            textStack.leadingAnchor.constraint(equalTo: articleImageView.trailingAnchor, constant: 14),
+            textStack.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textStack.topAnchor.constraint(equalTo: margins.topAnchor),
+            textStack.bottomAnchor.constraint(lessThanOrEqualTo: margins.bottomAnchor),
+        ]
+    }
+
     override func preferredLayoutAttributesFitting(_ layoutAttributes: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes {
         guard let attributes = layoutAttributes.copy() as? UICollectionViewLayoutAttributes else { return layoutAttributes }
-        let targetSize = CGSize(width: layoutAttributes.size.width, height: UIView.layoutFittingCompressedSize.height)
+        guard let sizingContentKey else {
+            return measuredAttributes(attributes, cacheKey: nil)
+        }
+
+        let metrics = Metrics(mode: sizingMode, containerWidth: layoutAttributes.size.width)
+        let hasImage = sizingContentKey.imageURL != nil && sizingMode.showsArticleImage
+        let variant = metrics.layoutVariant(hasImage: hasImage)
+        applyLayout(metrics: metrics, variant: variant)
+        let key = measurementKey(
+            content: sizingContentKey,
+            metrics: metrics,
+            variant: variant,
+            previewLines: sizingPreviewLines,
+            displayScale: sizingDisplayScale
+        )
+        if let cachedHeight = heightCache?.height(for: key) {
+            attributes.size.height = cachedHeight
+            return attributes
+        }
+        return measuredAttributes(attributes, cacheKey: key)
+    }
+
+    private func measuredAttributes(
+        _ attributes: UICollectionViewLayoutAttributes,
+        cacheKey: IOSUIKitArticleCellMeasurementKey?
+    ) -> UICollectionViewLayoutAttributes {
+        let targetSize = CGSize(width: attributes.size.width, height: UIView.layoutFittingCompressedSize.height)
         let fittedSize = contentView.systemLayoutSizeFitting(
             targetSize,
             withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         )
-        attributes.size.height = ceil(fittedSize.height)
+        let height = ceil(fittedSize.height)
+        attributes.size.height = height
+        measurementSolveCount += 1
+        if let cacheKey { heightCache?.insert(height, for: cacheKey) }
         return attributes
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        imageTask?.cancel()
-        imageTask = nil
+        invalidateImageBinding()
         representedImageRequest = nil
         representedArticleID = nil
+        sizingContentKey = nil
         articleImageView.image = nil
         imagePlaceholder.isHidden = false
     }
@@ -1192,6 +1487,10 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         displayScale: CGFloat
     ) {
         representedArticleID = item.article.id
+        sizingContentKey = IOSUIKitArticleCellSizingContentKey(item: item)
+        sizingMode = mode
+        sizingPreviewLines = previewLines
+        sizingDisplayScale = displayScale
         currentTitle = item.content.article.title
         currentFeedTitle = item.content.article.feedTitle
         currentPublishedDate = item.content.publishedDate
@@ -1203,56 +1502,9 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         previewLabel.numberOfLines = previewLines.rawValue
         commentsImageView.isHidden = !item.content.hasComments
 
-        let useColumnMetadata = metrics.availableWidth < 370
-        metadataStack.axis = useColumnMetadata ? .vertical : .horizontal
-        metadataStack.alignment = useColumnMetadata ? .leading : .center
-        metadataStack.spacing = useColumnMetadata ? 3 : 5
-        metadataBulletLabel.isHidden = useColumnMetadata
-
-        contentView.directionalLayoutMargins = NSDirectionalEdgeInsets(
-            top: metrics.outerVerticalPadding,
-            leading: metrics.horizontalInset,
-            bottom: metrics.outerVerticalPadding,
-            trailing: metrics.horizontalInset
-        )
-
-        rootStack.removeArrangedSubviews()
-        imageWidthConstraint?.isActive = false
-        imageHeightConstraint?.isActive = false
-        imageWidthConstraint = nil
-        imageHeightConstraint = nil
-
-        let imageSize = metrics.imageSize(hasImage: item.content.imageURL != nil)
-        if mode == .compact || item.content.imageURL == nil {
-            rootStack.axis = .vertical
-            rootStack.spacing = 0
-            rootStack.alignment = .fill
-            rootStack.addArrangedSubview(textStack)
-            articleImageView.isHidden = true
-        } else if metrics.isLandscapeVisual {
-            rootStack.axis = .horizontal
-            rootStack.spacing = 14
-            rootStack.alignment = .top
-            rootStack.addArrangedSubview(articleImageView)
-            rootStack.addArrangedSubview(textStack)
-            articleImageView.isHidden = false
-            imageWidthConstraint = articleImageView.widthAnchor.constraint(equalToConstant: imageSize.width)
-            imageHeightConstraint = articleImageView.heightAnchor.constraint(equalToConstant: imageSize.height)
-            imageWidthConstraint?.priority = .required
-            imageHeightConstraint?.priority = .required
-            imageWidthConstraint?.isActive = true
-            imageHeightConstraint?.isActive = true
-        } else {
-            rootStack.axis = .vertical
-            rootStack.spacing = 12
-            rootStack.alignment = .fill
-            rootStack.addArrangedSubview(articleImageView)
-            rootStack.addArrangedSubview(textStack)
-            articleImageView.isHidden = false
-            imageHeightConstraint = articleImageView.heightAnchor.constraint(equalTo: articleImageView.widthAnchor, multiplier: 1 / ArticlePresentationLayout.portraitImageAspectRatio)
-            imageHeightConstraint?.priority = .required
-            imageHeightConstraint?.isActive = true
-        }
+        let hasImage = mode.showsArticleImage && item.content.imageURL != nil
+        let imageSize = metrics.imageSize(hasImage: hasImage)
+        applyLayout(metrics: metrics, variant: metrics.layoutVariant(hasImage: hasImage))
 
         updateFeedIcon(image: item.feedIconImage, title: item.content.article.feedTitle)
         updateStatus(isRead: item.isRead, isStarred: item.isStarred)
@@ -1260,12 +1512,72 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         contentView.setNeedsLayout()
     }
 
+    private func applyLayout(metrics: Metrics, variant: IOSUIKitArticleCellLayoutVariant) {
+        contentView.directionalLayoutMargins = NSDirectionalEdgeInsets(
+            top: metrics.outerVerticalPadding,
+            leading: metrics.horizontalInset,
+            bottom: metrics.outerVerticalPadding,
+            trailing: metrics.horizontalInset
+        )
+
+        let useColumnMetadata = metrics.availableWidth < 370
+        metadataStack.axis = useColumnMetadata ? .vertical : .horizontal
+        metadataStack.alignment = useColumnMetadata ? .leading : .center
+        metadataStack.spacing = useColumnMetadata ? 3 : 5
+        metadataBulletLabel.isHidden = useColumnMetadata
+
+        if variant == .visualLandscape {
+            let imageSize = metrics.imageSize(hasImage: true)
+            landscapeImageWidthConstraint.constant = imageSize.width
+            landscapeImageHeightConstraint.constant = imageSize.height
+        }
+
+        guard currentLayoutVariant != variant else {
+            articleImageView.isHidden = variant == .compact || variant == .visualTextOnly
+            return
+        }
+
+        NSLayoutConstraint.deactivate(activeLayoutConstraints)
+        switch variant {
+        case .compact, .visualTextOnly:
+            activeLayoutConstraints = textOnlyConstraints
+        case .visualPortrait:
+            activeLayoutConstraints = portraitConstraints
+        case .visualLandscape:
+            activeLayoutConstraints = landscapeConstraints
+        }
+        NSLayoutConstraint.activate(activeLayoutConstraints)
+        currentLayoutVariant = variant
+        layoutVariantRevision &+= 1
+        articleImageView.isHidden = variant == .compact || variant == .visualTextOnly
+    }
+
+    private func measurementKey(
+        content: IOSUIKitArticleCellSizingContentKey,
+        metrics: Metrics,
+        variant: IOSUIKitArticleCellLayoutVariant,
+        previewLines: ArticlePreviewLines,
+        displayScale: CGFloat
+    ) -> IOSUIKitArticleCellMeasurementKey {
+        IOSUIKitArticleCellMeasurementKey(
+            content: content,
+            availableWidthPixels: Int((metrics.availableWidth * displayScale).rounded()),
+            displayScaleHundredths: Int((displayScale * 100).rounded()),
+            variant: variant,
+            previewLineCount: previewLines.rawValue,
+            contentSizeCategory: traitCollection.preferredContentSizeCategory.rawValue,
+            localeIdentifier: Locale.current.identifier,
+            isRightToLeft: effectiveUserInterfaceLayoutDirection == .rightToLeft
+        )
+    }
+
     func updateStatus(isRead: Bool, isStarred: Bool) {
         currentIsRead = isRead
         currentIsStarred = isStarred
         titleLabel.textColor = isRead ? .secondaryLabel : .label
         unreadIndicator.alpha = ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: isRead)
-        starImageView.isHidden = !isStarred
+        // Reserve the star's arranged-subview slot so status changes cannot change title width or row height.
+        starImageView.alpha = isStarred ? 1 : 0
         updateAccessibility()
     }
 
@@ -1285,8 +1597,7 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
     }
 
     private func configureArticleImage(url: URL?, targetSize: CGSize, displayScale: CGFloat) {
-        imageTask?.cancel()
-        imageTask = nil
+        invalidateImageBinding()
         representedImageRequest = nil
         guard let url, targetSize.width > 0, targetSize.height > 0 else {
             articleImageView.image = nil
@@ -1295,6 +1606,8 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         }
 
         let request = ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale)
+        let bindingGeneration = imageBindingGeneration
+        guard let articleID = representedArticleID else { return }
         representedImageRequest = request
         if let cachedImage = ArticleImagePipeline.shared.cachedImage(for: request) {
             articleImageView.image = UIImage(cgImage: cachedImage, scale: displayScale, orientation: .up)
@@ -1307,15 +1620,31 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         imageTask = Task { @MainActor [weak self] in
             do {
                 let loadedImage = try await ArticleImagePipeline.shared.image(for: request)
-                guard !Task.isCancelled, let self, self.representedImageRequest == request else { return }
+                guard !Task.isCancelled,
+                      let self,
+                      self.imageBindingGeneration == bindingGeneration,
+                      self.representedArticleID == articleID,
+                      self.representedImageRequest == request
+                else { return }
                 self.articleImageView.image = UIImage(cgImage: loadedImage, scale: displayScale, orientation: .up)
                 self.imagePlaceholder.isHidden = true
             } catch {
-                guard let self, self.representedImageRequest == request else { return }
+                guard !Task.isCancelled,
+                      let self,
+                      self.imageBindingGeneration == bindingGeneration,
+                      self.representedArticleID == articleID,
+                      self.representedImageRequest == request
+                else { return }
                 self.articleImageView.image = nil
                 self.imagePlaceholder.isHidden = false
             }
         }
+    }
+
+    private func invalidateImageBinding() {
+        imageBindingGeneration &+= 1
+        imageTask?.cancel()
+        imageTask = nil
     }
 
     private func updateAccessibility() {
@@ -1323,15 +1652,6 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         accessibilityValue = currentIsRead
             ? (currentIsStarred ? String(localized: "Read, starred") : String(localized: "Read"))
             : (currentIsStarred ? String(localized: "Unread, starred") : String(localized: "Unread"))
-    }
-}
-
-private extension UIStackView {
-    func removeArrangedSubviews() {
-        for view in arrangedSubviews {
-            removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
     }
 }
 
@@ -1363,7 +1683,9 @@ struct ArticleListView: View {
                 ContentUnavailableView("No News", systemImage: "newspaper")
             } else {
                 IOSUIKitArticleTimelineView(
-                    items: timelineItems(iconVariant: iconVariant),
+                    structuralState: store.timelineStructuralState,
+                    presentationBridge: store.timelinePresentationBridge,
+                    feedIconPresentationBridge: store.timelinePresentationBridge,
                     mode: store.articlePresentationMode,
                     previewLines: store.articlePreviewLines,
                     iconVariant: iconVariant,
@@ -1391,19 +1713,6 @@ struct ArticleListView: View {
         }
     }
 
-    private func timelineItems(iconVariant: FeedIconVariant) -> [IOSUIKitArticleTimelineItem] {
-        store.articles.map { article in
-            let rowState = store.rowPresentationState(for: article)
-            let feedIcon = store.feedIconPresentationState(for: article.feedId, variant: iconVariant)
-            return IOSUIKitArticleTimelineItem(
-                article: article,
-                content: rowState.content,
-                isRead: rowState.isRead,
-                isStarred: rowState.isStarred,
-                feedIconImage: feedIcon.image
-            )
-        }
-    }
 }
 
 private struct ArticleListBottomOverlay: View {

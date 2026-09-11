@@ -13,6 +13,12 @@ struct IOSFeedIconKey: Hashable {
 @Observable final class IOSFeedIconPresentationState {
     var image: UIImage?
     var isUnavailable = false
+    private(set) var revision: UInt64 = 0
+
+    func setImage(_ image: UIImage?) {
+        self.image = image
+        revision &+= 1
+    }
 }
 
 enum IOSFeedIconPresentation {
@@ -215,6 +221,8 @@ struct ArticleRowContent: Equatable {
     }
 
     private(set) var articles: [ArticleSummary] = []
+    private(set) var timelineStructuralState = IOSUIKitArticleTimelineStructuralState(items: [], revision: 0)
+    let timelinePresentationBridge = IOSUIKitArticleTimelinePresentationBridge()
     @ObservationIgnored private var rowPresentationStates: [Int64: ArticleRowPresentationState] = [:]
     private(set) var catalog = NavigationCatalog(categories: [], feeds: [])
     private(set) var unreadTotal: UInt64 = 0
@@ -434,7 +442,10 @@ struct ArticleRowContent: Equatable {
             guard let self else { return }
             requestedFeedIcons.remove(key)
             guard let state = feedIconPresentationStates[key] else { return }
-            if let image { state.image = image }
+            if let image {
+                state.setImage(image)
+                timelinePresentationBridge.publishFeedIcon(.init(key: key, image: image, revision: state.revision))
+            }
             else { state.isUnavailable = true }
         }
     }
@@ -758,6 +769,7 @@ struct ArticleRowContent: Equatable {
             guard let state = rowPresentationStates[id], !state.isRead else { continue }
             state.setRead(true)
             publishedScrolloverPresentationRevisions[id] = state.mutationRevision
+            publishArticlePresentation(id)
         }
     }
 
@@ -997,6 +1009,16 @@ struct ArticleRowContent: Equatable {
                 rowPresentationStates[article.id] = ArticleRowPresentationState(article: article)
             }
         }
+        let states = Dictionary(uniqueKeysWithValues: value.compactMap { article in
+            rowPresentationStates[article.id].map { (article.id, IOSUIKitArticlePresentationState(isRead: $0.isRead, isStarred: $0.isStarred, revision: $0.mutationRevision)) }
+        })
+        timelinePresentationBridge.replaceArticleStates(states)
+        timelineStructuralState = .init(
+            items: value.compactMap { article in
+                rowPresentationStates[article.id].map { .init(article: article, content: $0.content) }
+            },
+            revision: timelineStructuralState.revision &+ 1
+        )
     }
 
     func rowPresentationState(for article: ArticleSummary) -> ArticleRowPresentationState {
@@ -1006,11 +1028,22 @@ struct ArticleRowContent: Equatable {
         return state
     }
 
+    private func publishArticlePresentation(_ id: Int64, rearmScrollover: Bool = false) {
+        guard let state = rowPresentationStates[id] else { return }
+        timelinePresentationBridge.publishArticle(.init(
+            articleID: id,
+            state: .init(isRead: state.isRead, isStarred: state.isStarred, revision: state.mutationRevision),
+            rearmScrollover: rearmScrollover
+        ))
+    }
+
     private func optimisticallySetRead(_ ids: [Int64], read: Bool) -> [Int64: UInt64] {
         var revisions: [Int64: UInt64] = [:]
         for id in ids where rowPresentationStates[id] != nil {
+            let previous = rowPresentationStates[id]?.isRead
             rowPresentationStates[id]?.setRead(read)
             revisions[id] = rowPresentationStates[id]?.mutationRevision
+            if previous != read { publishArticlePresentation(id, rearmScrollover: !read) }
         }
         return revisions
     }
@@ -1018,8 +1051,10 @@ struct ArticleRowContent: Equatable {
     private func optimisticallySetStarred(_ ids: [Int64], starred: Bool) -> [Int64: UInt64] {
         var revisions: [Int64: UInt64] = [:]
         for id in ids where rowPresentationStates[id] != nil {
+            let previous = rowPresentationStates[id]?.isStarred
             rowPresentationStates[id]?.setStarred(starred)
             revisions[id] = rowPresentationStates[id]?.mutationRevision
+            if previous != starred { publishArticlePresentation(id) }
         }
         return revisions
     }
@@ -1027,14 +1062,20 @@ struct ArticleRowContent: Equatable {
     private func restoreReadPresentation(_ ids: [Int64], revisions: [Int64: UInt64], snapshotRevision: UInt64) {
         guard self.snapshotRevision == snapshotRevision else { return }
         for id in ids where rowPresentationStates[id]?.mutationRevision == revisions[id] {
-            if let article = articles.first(where: { $0.id == id }) { rowPresentationStates[id]?.setRead(article.isRead) }
+            if let article = articles.first(where: { $0.id == id }) {
+                rowPresentationStates[id]?.setRead(article.isRead)
+                publishArticlePresentation(id, rearmScrollover: !article.isRead)
+            }
         }
     }
 
     private func restoreStarredPresentation(_ ids: [Int64], revisions: [Int64: UInt64], snapshotRevision: UInt64) {
         guard self.snapshotRevision == snapshotRevision else { return }
         for id in ids where rowPresentationStates[id]?.mutationRevision == revisions[id] {
-            if let article = articles.first(where: { $0.id == id }) { rowPresentationStates[id]?.setStarred(article.isStarred) }
+            if let article = articles.first(where: { $0.id == id }) {
+                rowPresentationStates[id]?.setStarred(article.isStarred)
+                publishArticlePresentation(id)
+            }
         }
     }
 
@@ -1042,7 +1083,10 @@ struct ArticleRowContent: Equatable {
         guard presentationGeneration == scrolloverPresentationGeneration else { return }
         pendingScrolloverReadPresentationIDs.subtract(ids)
         for id in ids where rowPresentationStates[id]?.mutationRevision == publishedScrolloverPresentationRevisions[id] {
-            if let article = articles.first(where: { $0.id == id }) { rowPresentationStates[id]?.setRead(article.isRead) }
+            if let article = articles.first(where: { $0.id == id }) {
+                rowPresentationStates[id]?.setRead(article.isRead)
+                publishArticlePresentation(id, rearmScrollover: !article.isRead)
+            }
         }
     }
 

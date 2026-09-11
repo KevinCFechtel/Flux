@@ -72,7 +72,9 @@ private struct SearchResultsContent: View {
                 ContentUnavailableView.search(text: store.submittedQuery)
             } else {
                 IOSUIKitArticleTimelineView(
-                    items: timelineItems(iconVariant: iconVariant),
+                    structuralState: store.timelineStructuralState,
+                    presentationBridge: store.timelinePresentationBridge,
+                    feedIconPresentationBridge: newsreaderStore.timelinePresentationBridge,
                     mode: newsreaderStore.articlePresentationMode,
                     previewLines: newsreaderStore.articlePreviewLines,
                     iconVariant: iconVariant,
@@ -99,16 +101,4 @@ private struct SearchResultsContent: View {
         .background(.background)
     }
 
-    private func timelineItems(iconVariant: FeedIconVariant) -> [IOSUIKitArticleTimelineItem] {
-        store.results.map { article in
-            let feedIcon = newsreaderStore.feedIconPresentationState(for: article.feedId, variant: iconVariant)
-            return IOSUIKitArticleTimelineItem(
-                article: article,
-                content: ArticleRowContent(article: article),
-                isRead: article.isRead,
-                isStarred: article.isStarred,
-                feedIconImage: feedIcon.image
-            )
-        }
-    }
 }

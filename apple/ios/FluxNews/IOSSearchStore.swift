@@ -37,6 +37,8 @@ final class IOSSearchStore: ObservableObject {
     @Published var query = ""
     @Published private(set) var submittedQuery = ""
     @Published private(set) var results: [ArticleSummary] = []
+    private(set) var timelineStructuralState = IOSUIKitArticleTimelineStructuralState(items: [], revision: 0)
+    let timelinePresentationBridge = IOSUIKitArticleTimelinePresentationBridge()
     @Published private(set) var total: Int64 = 0
     @Published private(set) var hasSearched = false
     @Published private(set) var isSearching = false
@@ -58,7 +60,7 @@ final class IOSSearchStore: ObservableObject {
         let requestGeneration = requestState.begin()
         let pageSize = pageSize
         submittedQuery = value
-        results = []
+        replaceResults([])
         total = 0
         hasSearched = true
         isSearching = true
@@ -76,7 +78,7 @@ final class IOSSearchStore: ObservableObject {
             case let .success(page):
                 self.total = page.total
                 self.paginationExhausted = page.articles.isEmpty || Int64(page.articles.count) >= page.total
-                self.results = IOSSearchPaginationPolicy.deduplicated(page.articles)
+                self.replaceResults(IOSSearchPaginationPolicy.deduplicated(page.articles))
             case let .failure(error): self.errorMessage = IOSErrorPresentation.message(for: error, context: .search)
             }
         }
@@ -86,7 +88,7 @@ final class IOSSearchStore: ObservableObject {
         requestState.invalidate()
         query = ""
         submittedQuery = ""
-        results = []
+        replaceResults([])
         total = 0
         hasSearched = false
         isSearching = false
@@ -121,7 +123,7 @@ final class IOSSearchStore: ObservableObject {
                 self.total = page.total
                 let updated = IOSSearchPaginationPolicy.deduplicated(self.results + page.articles)
                 self.paginationExhausted = page.articles.isEmpty || updated.count == self.results.count || Int64(updated.count) >= page.total
-                self.results = updated
+                self.replaceResults(updated)
             case let .failure(error): self.errorMessage = IOSErrorPresentation.message(for: error, context: .search)
             }
         }
@@ -191,14 +193,30 @@ final class IOSSearchStore: ObservableObject {
             guard let self else { return }
             switch result {
             case let .success(disposition):
-                for index in self.results.indices where self.results[index].id == articleID {
-                    if let read { self.results[index].isRead = read }
-                    if let starred { self.results[index].isStarred = starred }
-                }
+                guard let article = self.results.first(where: { $0.id == articleID }) else { return }
+                let current = self.timelinePresentationBridge.articleState(for: articleID, fallback: article)
+                self.timelinePresentationBridge.publishArticle(.init(
+                    articleID: articleID,
+                    state: .init(isRead: read ?? current.isRead, isStarred: starred ?? current.isStarred, revision: current.revision &+ 1),
+                    rearmScrollover: false
+                ))
                 if disposition == .localFirst { self.onLocalFirstMutation() }
             case let .failure(error): self.errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
             }
         }
+    }
+
+    private func replaceResults(_ value: [ArticleSummary]) {
+        results = value
+        let states = Dictionary(uniqueKeysWithValues: value.map { article in
+            let existing = timelinePresentationBridge.articleState(for: article.id, fallback: article)
+            return (article.id, existing.revision == 0 ? IOSUIKitArticlePresentationState(isRead: article.isRead, isStarred: article.isStarred, revision: 0) : existing)
+        })
+        timelinePresentationBridge.replaceArticleStates(states)
+        timelineStructuralState = .init(
+            items: value.map { .init(article: $0, content: ArticleRowContent(article: $0)) },
+            revision: timelineStructuralState.revision &+ 1
+        )
     }
 
 }

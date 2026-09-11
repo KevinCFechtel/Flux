@@ -389,6 +389,103 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(first == second)
     }
 
+    @MainActor
+    func testTargetedReadAndStarredDeltasDoNotReconcileStructuralTimelineInput() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+        let structuralCount = controller.structuralReconciliationCount
+        let snapshotCount = controller.structuralSnapshotApplicationCount
+
+        bridge.publishArticle(.init(articleID: 1, state: .init(isRead: true, isStarred: false, revision: 1), rearmScrollover: false))
+        bridge.publishArticle(.init(articleID: 1, state: .init(isRead: true, isStarred: true, revision: 2), rearmScrollover: false))
+
+        XCTAssertEqual(controller.structuralReconciliationCount, structuralCount)
+        XCTAssertEqual(controller.structuralSnapshotApplicationCount, snapshotCount)
+        XCTAssertEqual(controller.articlePresentationApplicationCount, 2)
+    }
+
+    @MainActor
+    func testFeedIconDeltaDoesNotApplyStructuralSnapshot() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+        let structuralCount = controller.structuralReconciliationCount
+        let snapshotCount = controller.structuralSnapshotApplicationCount
+
+        bridge.publishFeedIcon(.init(key: .init(feedID: 10, variant: .normal), image: UIImage(), revision: 1))
+
+        XCTAssertEqual(controller.structuralReconciliationCount, structuralCount)
+        XCTAssertEqual(controller.structuralSnapshotApplicationCount, snapshotCount)
+        XCTAssertEqual(controller.feedIconPresentationApplicationCount, 1)
+    }
+
+    @MainActor
+    func testExplicitUnreadDeltaRearmsOnlyTargetedScrolloverArticle() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+
+        bridge.publishArticle(.init(articleID: 1, state: .init(isRead: false, isStarred: false, revision: 1), rearmScrollover: true))
+
+        XCTAssertEqual(controller.scrolloverRearmCount, 1)
+        XCTAssertEqual(controller.structuralReconciliationCount, 1)
+    }
+
+    @MainActor
+    func testBridgeRejectsStalePresentationAndRetainsLatestOffscreenState() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let article = timelineArticle(id: 1)
+        bridge.publishArticle(.init(articleID: 1, state: .init(isRead: true, isStarred: true, revision: 2), rearmScrollover: false))
+        bridge.publishArticle(.init(articleID: 1, state: .init(isRead: false, isStarred: false, revision: 1), rearmScrollover: true))
+
+        XCTAssertEqual(bridge.articleState(for: 1, fallback: article), .init(isRead: true, isStarred: true, revision: 2))
+    }
+
+    @MainActor
+    func testStructuralOrderChangeAppliesAnotherSnapshot() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+        let firstSnapshots = controller.structuralSnapshotApplicationCount
+        let articles = [timelineArticle(id: 2), timelineArticle(id: 1)]
+        controller.update(
+            structuralState: timelineStructuralState(articles, revision: 2),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+        XCTAssertEqual(controller.structuralSnapshotApplicationCount, firstSnapshots + 1)
+    }
+
+    @MainActor
+    private func makeTimelineController(bridge: IOSUIKitArticleTimelinePresentationBridge) -> IOSUIKitArticleTimelineController {
+        let controller = IOSUIKitArticleTimelineController()
+        let articles = [timelineArticle(id: 1), timelineArticle(id: 2)]
+        bridge.replaceArticleStates(Dictionary(uniqueKeysWithValues: articles.map { ($0.id, .init(isRead: $0.isRead, isStarred: $0.isStarred, revision: 0)) }))
+        controller.update(
+            structuralState: timelineStructuralState(articles, revision: 1),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+        return controller
+    }
+
+    private func timelineStructuralState(_ articles: [ArticleSummary], revision: UInt64) -> IOSUIKitArticleTimelineStructuralState {
+        .init(items: articles.map { .init(article: $0, content: ArticleRowContent(article: $0)) }, revision: revision)
+    }
+
+    private func timelineArticle(id: Int64) -> ArticleSummary {
+        .init(id: id, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article \(id)", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
+    }
+
     private func makePresentation(article: ArticleSummary, fallbackRead: Bool, fallbackStarred: Bool, rowState: ArticleRowPresentationState?, feedIcon: IOSFeedIconPresentationState? = nil) -> ArticlePresentationView {
         ArticlePresentationView(content: ArticleRowContent(article: article), fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: .compact, previewLines: .standard, availableWidth: 320, feedIcon: feedIcon ?? IOSFeedIconPresentationState(), iconVariant: .normal, onRequestFeedIcon: {}, onTap: {}, onAction: { _ in }, onSetRead: { _ in }, onSetStarred: { _ in })
     }
@@ -669,6 +766,46 @@ final class NewsreaderPresentationTests: XCTestCase {
 
         let calls = await gate.callCount()
         XCTAssertEqual(calls, 1)
+    }
+
+    func testArticleImagePipelineBoundsWorkAndPrioritizesVisibleRequests() async throws {
+        let gate = PrioritizedImageLoadGate(data: try imageData(width: 800, height: 400))
+        let pipeline = ArticleImagePipeline { url in try await gate.load(url: url) }
+        let requests = (0...4).map {
+            ArticleImageRequest(
+                url: URL(string: "https://example.com/\($0).jpg")!,
+                targetSize: CGSize(width: 200, height: 100),
+                displayScale: 1
+            )
+        }
+
+        let activePrefetches = requests.prefix(3).map { request in
+            Task { try await pipeline.prefetch(request) }
+        }
+        await gate.waitUntilStarted(count: 3)
+        let queuedPrefetch = Task { try await pipeline.prefetch(requests[3]) }
+        let visible = Task { try await pipeline.image(for: requests[4]) }
+        await Task.yield()
+
+        let saturated = await pipeline.metrics()
+        XCTAssertEqual(saturated.activeOperations, ArticleImagePipeline.maximumConcurrentOperations)
+        XCTAssertEqual(saturated.queuedVisibleRequests, 1)
+        XCTAssertEqual(saturated.queuedPrefetchRequests, 1)
+        XCTAssertEqual(saturated.trackedRequests, 5)
+
+        await gate.releaseOne()
+        await gate.waitUntilStarted(count: 4)
+        let startedURLs = await gate.startedURLs()
+        XCTAssertEqual(startedURLs.last, requests[4].url)
+
+        await gate.releaseAll()
+        await gate.waitUntilStarted(count: 5)
+        await gate.releaseAll()
+        for task in activePrefetches { _ = try await task.value }
+        _ = try await queuedPrefetch.value
+        _ = try await visible.value
+        let completed = await pipeline.metrics()
+        XCTAssertEqual(completed.trackedRequests, 0)
     }
 
     func testArticleImagePipelineDownsamplesAndFailsSafely() async throws {
@@ -1019,4 +1156,43 @@ private actor ImageLoadGate {
     }
 
     func callCount() -> Int { calls }
+}
+
+private actor PrioritizedImageLoadGate {
+    private let data: Data
+    private var urls: [URL] = []
+    private var startWaiters: [Int: CheckedContinuation<Void, Never>] = [:]
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    init(data: Data) { self.data = data }
+
+    func load(url: URL) async throws -> Data {
+        urls.append(url)
+        resumeStartWaiters()
+        await withCheckedContinuation { releaseWaiters.append($0) }
+        return data
+    }
+
+    func waitUntilStarted(count: Int) async {
+        guard urls.count < count else { return }
+        await withCheckedContinuation { startWaiters[count] = $0 }
+    }
+
+    func releaseOne() {
+        guard !releaseWaiters.isEmpty else { return }
+        releaseWaiters.removeFirst().resume()
+    }
+
+    func releaseAll() {
+        let waiters = releaseWaiters
+        releaseWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+
+    func startedURLs() -> [URL] { urls }
+
+    private func resumeStartWaiters() {
+        let readyCounts = startWaiters.keys.filter { urls.count >= $0 }
+        for count in readyCounts { startWaiters.removeValue(forKey: count)?.resume() }
+    }
 }
