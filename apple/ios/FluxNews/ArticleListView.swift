@@ -293,14 +293,15 @@ struct IOSUIKitScrolloverGeometryResult: Equatable {
 /// It only emits IDs that were actually observed in the viewport during a user-driven
 /// interaction and then crossed the effective upper viewport boundary while moving forward.
 final class IOSUIKitScrolloverGeometryTracker {
-    private static let movementEpsilon: CGFloat = 0.01
     private static let bottomTolerance: CGFloat = 0.5
     private static let maximumRetainedGeometryCount = 96
 
     private var orderedIDs: [Int64] = []
     private var positions: [Int64: Int] = [:]
     private var emittedIDs = Set<Int64>()
-    private var qualifiedVisibleIDs = Set<Int64>()
+    // This set is limited to the retained viewport window. A row must be here
+    // before its forward crossing can qualify; newly arrived rows are never inferred.
+    private var observedVisibleIDs = Set<Int64>()
     private var retainedFrames: [Int64: CGRect] = [:]
     private var previousSample: IOSUIKitScrolloverGeometrySample?
     private var phase: IOSScrolloverPresentationPhase = .idle
@@ -313,14 +314,14 @@ final class IOSUIKitScrolloverGeometryTracker {
         orderedIDs = ids
         positions = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset) })
         emittedIDs.removeAll()
-        qualifiedVisibleIDs.removeAll()
+        observedVisibleIDs.removeAll()
         invalidateGeometry()
     }
 
     func setPhase(_ newPhase: IOSScrolloverPresentationPhase) {
         phase = newPhase
         if newPhase == .idle {
-            qualifiedVisibleIDs.removeAll(keepingCapacity: true)
+            observedVisibleIDs.removeAll(keepingCapacity: true)
             invalidateGeometry()
         }
     }
@@ -329,10 +330,6 @@ final class IOSUIKitScrolloverGeometryTracker {
         retainedFrames.removeAll(keepingCapacity: true)
         previousSample = nil
         wasAtBottom = false
-    }
-
-    func releaseEmittedIDs() {
-        emittedIDs.removeAll(keepingCapacity: true)
     }
 
     func rearm(_ ids: some Sequence<Int64>) {
@@ -348,28 +345,28 @@ final class IOSUIKitScrolloverGeometryTracker {
 
         guard let previous = previousSample,
               previous.layoutGeneration == sample.layoutGeneration else {
-            previousSample = sample
-            wasAtBottom = isAtBottom(sample)
-            seedVisibleRows(from: sample, enabled: enabled)
+            rebaseline(with: sample, enabled: enabled)
+            return .init(direction: nil, batch: .init(articleIDs: []))
+        }
+
+        // UIKit may self-invalidate a list layout without an explicit controller
+        // callback. Changed frames cannot be compared across a movement baseline.
+        guard !hasMaterialLayoutChange(from: previous, to: sample) else {
+            rebaseline(with: sample, enabled: enabled)
             return .init(direction: nil, batch: .init(articleIDs: []))
         }
 
         let delta = sample.contentOffsetY - previous.contentOffsetY
         let direction: IOSArticleScrollDirection?
-        if delta > Self.movementEpsilon { direction = .forward }
-        else if delta < -Self.movementEpsilon { direction = .backward }
+        if delta > 0 { direction = .forward }
+        else if delta < 0 { direction = .backward }
         else { direction = nil }
 
         let visibleIDs = visibleIDs(in: sample)
-        if enabled {
-            qualifiedVisibleIDs.formUnion(visibleIDs)
-        } else {
-            qualifiedVisibleIDs.removeAll(keepingCapacity: true)
-        }
 
         var candidates = Set<Int64>()
         if enabled, direction == .forward {
-            for id in qualifiedVisibleIDs where !emittedIDs.contains(id) {
+            for id in observedVisibleIDs where !emittedIDs.contains(id) {
                 guard let frame = sample.rowFrames[id] ?? retainedFrames[id] else { continue }
                 if previous.effectiveTop < frame.maxY,
                    sample.effectiveTop >= frame.maxY {
@@ -379,7 +376,9 @@ final class IOSUIKitScrolloverGeometryTracker {
 
             let atBottom = isAtBottom(sample)
             if !wasAtBottom, atBottom {
-                candidates.formUnion(visibleIDs)
+                // Terminal completion is only for trailing rows which were
+                // actually visible before the current bottom-arrival sample.
+                candidates.formUnion(visibleIDs.intersection(observedVisibleIDs))
             }
             wasAtBottom = atBottom
         } else {
@@ -387,7 +386,12 @@ final class IOSUIKitScrolloverGeometryTracker {
         }
 
         retainBoundedGeometry(sample.rowFrames, viewportTop: sample.effectiveTop)
-        qualifiedVisibleIDs.formIntersection(Set(retainedFrames.keys).union(visibleIDs))
+        if enabled {
+            observedVisibleIDs.formUnion(visibleIDs)
+        } else {
+            observedVisibleIDs.removeAll(keepingCapacity: true)
+        }
+        observedVisibleIDs.formIntersection(Set(retainedFrames.keys).union(visibleIDs))
         previousSample = sample
 
         let ids = candidates
@@ -396,11 +400,14 @@ final class IOSUIKitScrolloverGeometryTracker {
         return .init(direction: direction, batch: .init(articleIDs: ids))
     }
 
-    private func seedVisibleRows(from sample: IOSUIKitScrolloverGeometrySample, enabled: Bool) {
+    private func rebaseline(with sample: IOSUIKitScrolloverGeometrySample, enabled: Bool) {
         let visible = visibleIDs(in: sample)
-        if enabled { qualifiedVisibleIDs.formUnion(visible) }
+        observedVisibleIDs.removeAll(keepingCapacity: true)
+        if enabled { observedVisibleIDs.formUnion(visible) }
         retainBoundedGeometry(sample.rowFrames, viewportTop: sample.effectiveTop)
-        qualifiedVisibleIDs.formIntersection(Set(retainedFrames.keys).union(visible))
+        observedVisibleIDs.formIntersection(Set(retainedFrames.keys).union(visible))
+        previousSample = sample
+        wasAtBottom = isAtBottom(sample)
     }
 
     private func visibleIDs(in sample: IOSUIKitScrolloverGeometrySample) -> Set<Int64> {
@@ -412,6 +419,17 @@ final class IOSUIKitScrolloverGeometryTracker {
 
     private func isAtBottom(_ sample: IOSUIKitScrolloverGeometrySample) -> Bool {
         sample.effectiveBottom >= sample.contentHeight - Self.bottomTolerance
+    }
+
+    private func hasMaterialLayoutChange(
+        from previous: IOSUIKitScrolloverGeometrySample,
+        to sample: IOSUIKitScrolloverGeometrySample
+    ) -> Bool {
+        for (id, oldFrame) in previous.rowFrames {
+            guard let newFrame = sample.rowFrames[id], oldFrame != newFrame else { continue }
+            return true
+        }
+        return false
     }
 
     private func retainBoundedGeometry(_ frames: [Int64: CGRect], viewportTop: CGFloat) {
@@ -477,7 +495,6 @@ private struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
     let iconVariant: FeedIconVariant
     let scrollResetRevision: UInt64
     let markReadOnScrolloverEnabled: Bool
-    let scrolloverRearmRevision: UInt64
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
     let onSetRead: (ArticleSummary, Bool) -> Void
@@ -516,8 +533,7 @@ private struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
             previewLines: previewLines,
             iconVariant: iconVariant,
             scrollResetRevision: scrollResetRevision,
-            markReadOnScrolloverEnabled: markReadOnScrolloverEnabled,
-            scrolloverRearmRevision: scrolloverRearmRevision
+            markReadOnScrolloverEnabled: markReadOnScrolloverEnabled
         )
     }
 }
@@ -545,7 +561,6 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
     private var previewLines: ArticlePreviewLines = .standard
     private var iconVariant: FeedIconVariant = .normal
     private var scrollResetRevision: UInt64?
-    private var scrolloverRearmRevision: UInt64?
     private var markReadOnScrolloverEnabled = false
     private var scrolloverPhase: IOSScrolloverPresentationPhase = .idle
     private var scrolloverLayoutGeneration: UInt64 = 0
@@ -574,6 +589,10 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         collectionView.register(IOSUIKitArticleCell.self, forCellWithReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier)
         collectionView.refreshControl = refreshControl
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _) in
+            self.invalidateScrolloverGeometry()
+            self.collectionView.collectionViewLayout.invalidateLayout()
+        }
         view.addSubview(collectionView)
         NSLayoutConstraint.activate([
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -606,21 +625,13 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         collectionView.collectionViewLayout.invalidateLayout()
     }
 
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        guard previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory else { return }
-        invalidateScrolloverGeometry()
-        collectionView?.collectionViewLayout.invalidateLayout()
-    }
-
     func update(
         items: [IOSUIKitArticleTimelineItem],
         mode newMode: ArticlePresentationMode,
         previewLines newPreviewLines: ArticlePreviewLines,
         iconVariant newIconVariant: FeedIconVariant,
         scrollResetRevision newScrollResetRevision: UInt64,
-        markReadOnScrolloverEnabled newMarkReadOnScrolloverEnabled: Bool,
-        scrolloverRearmRevision newScrolloverRearmRevision: UInt64
+        markReadOnScrolloverEnabled newMarkReadOnScrolloverEnabled: Bool
     ) {
         loadViewIfNeeded()
 
@@ -630,7 +641,6 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         let layoutInputsChanged = mode != newMode || previewLines != newPreviewLines
         let iconVariantChanged = iconVariant != newIconVariant
         let resetChanged = scrollResetRevision != nil && scrollResetRevision != newScrollResetRevision
-        let rearmChanged = scrolloverRearmRevision != nil && scrolloverRearmRevision != newScrolloverRearmRevision
         let explicitlyUnreadIDs = items.compactMap { item -> Int64? in
             guard previousItems[item.article.id]?.isRead == true, !item.isRead else { return nil }
             return item.article.id
@@ -640,7 +650,6 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         previewLines = newPreviewLines
         iconVariant = newIconVariant
         scrollResetRevision = newScrollResetRevision
-        scrolloverRearmRevision = newScrolloverRearmRevision
         markReadOnScrolloverEnabled = newMarkReadOnScrolloverEnabled
         orderedIDs = newIDs
         itemsByID = Dictionary(uniqueKeysWithValues: items.map { ($0.article.id, $0) })
@@ -653,7 +662,6 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
             snapshot.appendItems(newIDs)
             dataSource.apply(snapshot, animatingDifferences: false)
         }
-        if rearmChanged { scrolloverGeometryTracker.releaseEmittedIDs() }
         if !explicitlyUnreadIDs.isEmpty { scrolloverGeometryTracker.rearm(explicitlyUnreadIDs) }
         if layoutInputsChanged { invalidateScrolloverGeometry() }
 
@@ -767,7 +775,6 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
 
     private func sampleScrolloverGeometry() {
         guard collectionView.bounds.height > 0 else { return }
-        collectionView.layoutIfNeeded()
 
         let effectiveTop = collectionView.contentOffset.y + collectionView.adjustedContentInset.top
         let effectiveBottom = collectionView.contentOffset.y + collectionView.bounds.height - collectionView.adjustedContentInset.bottom
@@ -1322,7 +1329,6 @@ struct ArticleListView: View {
                     iconVariant: iconVariant,
                     scrollResetRevision: store.scrollResetRevision,
                     markReadOnScrolloverEnabled: store.markReadOnScrolloverEnabled,
-                    scrolloverRearmRevision: store.scrolloverRearmRevision,
                     onArticleTap: onArticleTap,
                     onArticleAction: onArticleAction,
                     onSetRead: { article, read in store.setRead(article, read: read) },
