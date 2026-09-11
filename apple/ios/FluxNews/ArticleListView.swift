@@ -142,7 +142,7 @@ struct IOSScrolloverOrderTracker {
               let leadingPosition = positions[leadingID] else { return empty }
         defer { previousLeadingArticleID = leadingID }
 
-        guard isUserScrolling, enabled, let previousLeadingArticleID,
+        guard isUserScrolling, let previousLeadingArticleID,
               let previousPosition = positions[previousLeadingArticleID] else {
             lastVisibilityDirection = nil
             return empty
@@ -152,6 +152,8 @@ struct IOSScrolloverOrderTracker {
             return empty
         }
         lastVisibilityDirection = leadingPosition > previousPosition ? .forward : .backward
+        // Direction drives image prefetch independently of the read setting.
+        guard enabled else { return empty }
         guard leadingPosition > previousPosition else {
             lastVisibilityMoveWasForward = false
             deferredLeadingArticleID = nil

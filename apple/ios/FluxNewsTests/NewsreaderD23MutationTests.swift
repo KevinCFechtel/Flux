@@ -67,6 +67,18 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(tracker.lastVisibilityDirection, .backward)
     }
 
+    func testDisabledScrolloverStillReportsDirectionWithoutReadCandidates() {
+        var tracker = IOSScrolloverOrderTracker()
+        tracker.updateSnapshot([1, 2, 3, 4])
+        _ = tracker.receiveVisibleIDs([1], enabled: false)
+        tracker.setUserScrolling(true)
+
+        XCTAssertTrue(tracker.receiveVisibleIDs([3], enabled: false).articleIDs.isEmpty)
+        XCTAssertEqual(tracker.lastVisibilityDirection, .forward)
+        XCTAssertTrue(tracker.receiveVisibleIDs([1], enabled: false).articleIDs.isEmpty)
+        XCTAssertEqual(tracker.lastVisibilityDirection, .backward)
+    }
+
     func testTerminalScrolloverCompletesVisibleArticlesAfterForwardScroll() {
         var tracker = IOSScrolloverOrderTracker()
         tracker.updateSnapshot([1, 2, 3, 4, 5])
@@ -410,6 +422,20 @@ final class NewsreaderD23MutationTests: XCTestCase {
     }
 
     @MainActor
+    func testStaleScrolloverSuccessCannotUpdateANewerSnapshotPresentation() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1)])
+        let generation = store.scrolloverQueueGenerationForTesting
+
+        store.rebaselineScrolloverPresentationForTesting()
+        store.setArticlesForTesting([article(1, read: true)])
+        store.completeSuccessfulScrolloverMutationForTesting([1], generation: generation)
+
+        XCTAssertEqual(store.isArticleReadForTesting(1), true)
+        XCTAssertTrue(store.scrolloverUndoIDsForTesting.isEmpty)
+    }
+
+    @MainActor
     func testScrolloverNeverStructurallyRemovesRowsDuringActiveScrolling() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.removeArticlesWhenMarkedRead = true
@@ -513,6 +539,60 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(store.enqueueScrolloverForTesting([1, 2, 3]), [3])
         XCTAssertEqual(store.beginScrolloverMutationForTesting(), [1, 2, 3])
         XCTAssertTrue(store.enqueueScrolloverForTesting([1, 2, 3]).isEmpty)
+    }
+
+    @MainActor
+    func testPresentationResetKeepsQueuedPersistenceAfterRunningBatch() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2)])
+
+        XCTAssertEqual(store.enqueueScrolloverForTesting([1]), [1])
+        XCTAssertEqual(store.beginScrolloverMutationForTesting(), [1])
+        XCTAssertEqual(store.enqueueScrolloverForTesting([2]), [2])
+
+        store.rebaselineScrolloverPresentationForTesting()
+
+        XCTAssertEqual(store.pendingScrolloverIDsForTesting, [2])
+        XCTAssertEqual(store.flushScrolloverPersistenceForTesting(), [2])
+    }
+
+    @MainActor
+    func testScrolloverBatchesAreBoundedAndContinueInFIFOOrder() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let maximum = NewsreaderStore.maximumScrolloverMutationBatchSizeForTesting
+        let ids = Array(1...(maximum * 2 + 3)).map(Int64.init)
+        store.setArticlesForTesting(ids.map { article($0) })
+
+        XCTAssertEqual(store.enqueueScrolloverForTesting(ids), ids)
+        let first = store.beginScrolloverMutationForTesting()
+        let second = store.beginScrolloverMutationForTesting()
+        let third = store.beginScrolloverMutationForTesting()
+
+        XCTAssertEqual(first.count, maximum)
+        XCTAssertEqual(second.count, maximum)
+        XCTAssertEqual(third.count, 3)
+        XCTAssertEqual(first + second + third, ids)
+        XCTAssertTrue(store.pendingScrolloverIDsForTesting.isEmpty)
+    }
+
+    @MainActor
+    func testDetachedSessionDropsQueuedScrolloverWork() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setArticlesForTesting([article(1), article(2)])
+        _ = store.enqueueScrolloverForTesting([1, 2])
+        let session = store.scrolloverSessionGenerationForTesting
+
+        store.invalidateScrolloverSessionForTesting()
+
+        XCTAssertGreaterThan(store.scrolloverSessionGenerationForTesting, session)
+        XCTAssertTrue(store.pendingScrolloverIDsForTesting.isEmpty)
+    }
+
+    func testEventRoutingFiltersIgnoredEventsBeforeMainActorDispatch() {
+        XCTAssertFalse(IOSNewsreaderEventRoutingPolicy.shouldDispatchSyncCompleted(reason: nil))
+        XCTAssertFalse(IOSNewsreaderEventRoutingPolicy.shouldDispatchSyncCompleted(reason: .manual))
+        XCTAssertTrue(IOSNewsreaderEventRoutingPolicy.shouldDispatchSyncCompleted(reason: .background))
+        XCTAssertTrue(IOSNewsreaderEventRoutingPolicy.shouldDispatchSyncCompleted(reason: .periodic))
     }
 
     @MainActor

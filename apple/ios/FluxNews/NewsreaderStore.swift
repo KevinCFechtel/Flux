@@ -109,6 +109,13 @@ enum IOSScrolloverPresentationPhase: Equatable {
     var isScrolling: Bool { self != .idle }
 }
 
+enum IOSNewsreaderEventRoutingPolicy {
+    static func shouldDispatchSyncCompleted(reason: SyncReason?) -> Bool {
+        guard let reason else { return false }
+        return reason != .manual
+    }
+}
+
 private struct IOSPendingScrolloverUndoPresentation {
     let ids: [Int64]
     let generation: UInt64
@@ -263,7 +270,10 @@ struct ArticleRowContent: Equatable {
     private var scrolloverMutationRunning = false
     private var runningScrolloverIDs = Set<Int64>()
     private var scrolloverMutationTask: Task<Void, Never>?
-    private var scrolloverQueueGeneration: UInt64 = 0
+    // Presentation resets rebaseline UI feedback only. Accepted persistence work
+    // remains owned by this Core session until a real detach invalidates it.
+    private var scrolloverPresentationGeneration: UInt64 = 0
+    private var scrolloverSessionGeneration: UInt64 = 0
     private var scrolloverPresentationPhase: IOSScrolloverPresentationPhase = .idle
     // Successful mutations are still coalesced for the existing Undo behavior.
     private var pendingSuccessfulScrolloverUndoPresentation: [IOSPendingScrolloverUndoPresentation] = []
@@ -306,6 +316,7 @@ struct ArticleRowContent: Equatable {
 
     func detach() {
         flushScrolloverPersistenceForLifecycle()
+        invalidateScrolloverSession()
         readLifecycle.invalidateSession()
         eventSubscription = nil
         core = nil
@@ -671,22 +682,26 @@ struct ArticleRowContent: Equatable {
 
     private func drainScrolloverMutations() {
         guard !scrolloverMutationRunning, let core, !pendingScrolloverIDs.isEmpty else { return }
-        let ids = pendingScrolloverIDs
-        pendingScrolloverIDs = []
+        let ids = Array(pendingScrolloverIDs.prefix(Self.maximumScrolloverMutationBatchSize))
+        pendingScrolloverIDs.removeFirst(ids.count)
         scrolloverMutationRunning = true
         runningScrolloverIDs = Set(ids)
-        let generation = scrolloverQueueGeneration
+        let presentationGeneration = scrolloverPresentationGeneration
+        let sessionGeneration = scrolloverSessionGeneration
         scrolloverDiagnostic("persistence flush count=\(ids.count)")
         let task = Task { [weak self, core] in
             let result = await Task.detached { Result { try core.setReadStateBulk(articleIds: ids, read: true) } }.value
             guard let self else { return }
+            // A detached Core must never complete into, or continue work for, a
+            // newly attached Core session.
+            guard sessionGeneration == self.scrolloverSessionGeneration else { return }
             switch result {
             case .success:
-                completeSuccessfulScrolloverMutation(ids, generation: generation)
+                completeSuccessfulScrolloverMutation(ids, presentationGeneration: presentationGeneration)
                 scrolloverDiagnostic("persistence success count=\(ids.count)")
             case let .failure(error):
-                restoreScrolloverPresentation(ids, generation: generation)
-                if generation == scrolloverQueueGeneration {
+                restoreScrolloverPresentation(ids, presentationGeneration: presentationGeneration)
+                if presentationGeneration == scrolloverPresentationGeneration {
                     errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
                 }
                 scrolloverDiagnosticError(ids: ids, error: error)
@@ -704,14 +719,14 @@ struct ArticleRowContent: Equatable {
 
     private func completeSuccessfulScrolloverMutation(
         _ ids: [Int64],
-        generation: UInt64,
+        presentationGeneration: UInt64,
         completedAt: TimeInterval = ProcessInfo.processInfo.systemUptime
     ) {
         // A new structural snapshot owns its presentation state; stale Core
         // completions remain persisted but cannot publish into that snapshot.
-        guard generation == scrolloverQueueGeneration else { return }
+        guard presentationGeneration == scrolloverPresentationGeneration else { return }
         scrolloverCountsPending = true
-        let result = IOSPendingScrolloverUndoPresentation(ids: ids, generation: generation, completedAt: completedAt)
+        let result = IOSPendingScrolloverUndoPresentation(ids: ids, generation: presentationGeneration, completedAt: completedAt)
         if scrolloverPresentationPhase.isScrolling {
             pendingSuccessfulScrolloverUndoPresentation.append(result)
         } else {
@@ -722,7 +737,7 @@ struct ArticleRowContent: Equatable {
     private func flushPendingSuccessfulScrolloverUndoPresentation() {
         let pending = pendingSuccessfulScrolloverUndoPresentation
         pendingSuccessfulScrolloverUndoPresentation = []
-        for result in pending where result.generation == scrolloverQueueGeneration {
+        for result in pending where result.generation == scrolloverPresentationGeneration {
             publishSuccessfulScrolloverMutation(result)
         }
     }
@@ -873,7 +888,8 @@ struct ArticleRowContent: Equatable {
     func markMeaningfulInteraction() { hasMeaningfullyInteracted = true }
 
     private func resetPresentationState(preserveLoading: Bool = false) {
-        // Do not discard local-first reads accepted during a moving snapshot.
+        // Request persistence before rebaselining, but retain queued work when
+        // another batch already owns the worker.
         drainScrolloverMutations()
         readLifecycle.invalidateArticle()
         if !preserveLoading { isLoading = false }
@@ -882,15 +898,22 @@ struct ArticleRowContent: Equatable {
         // The structural snapshot change independently clears tracker emissions.
         clearScrolloverUndoGroup(rearmTracker: false)
         scrolloverCountsPending = false
-        pendingScrolloverIDs = []
-        pendingScrolloverIDSet = []
         publishedScrolloverPresentationRevisions = [:]
         pendingScrolloverReadPresentationIDs = []
         hasForwardPendingScrolloverPresentation = false
         pendingSuccessfulScrolloverUndoPresentation = []
         for article in articles { rowPresentationStates[article.id]?.reconcile(with: article) }
         scrolloverPresentationPhase = .idle
-        scrolloverQueueGeneration &+= 1
+        scrolloverPresentationGeneration &+= 1
+    }
+
+    private func invalidateScrolloverSession() {
+        scrolloverSessionGeneration &+= 1
+        pendingScrolloverIDs = []
+        pendingScrolloverIDSet = []
+        runningScrolloverIDs = []
+        scrolloverMutationRunning = false
+        scrolloverMutationTask = nil
     }
 
     fileprivate func handleSyncCompleted(_ metadata: SyncCompleted) {
@@ -1015,8 +1038,8 @@ struct ArticleRowContent: Equatable {
         }
     }
 
-    private func restoreScrolloverPresentation(_ ids: [Int64], generation: UInt64) {
-        guard generation == scrolloverQueueGeneration else { return }
+    private func restoreScrolloverPresentation(_ ids: [Int64], presentationGeneration: UInt64) {
+        guard presentationGeneration == scrolloverPresentationGeneration else { return }
         pendingScrolloverReadPresentationIDs.subtract(ids)
         for id in ids where rowPresentationStates[id]?.mutationRevision == publishedScrolloverPresentationRevisions[id] {
             if let article = articles.first(where: { $0.id == id }) { rowPresentationStates[id]?.setRead(article.isRead) }
@@ -1082,22 +1105,22 @@ struct ArticleRowContent: Equatable {
     func applyScrolloverMutationForTesting(_ ids: [Int64], now: TimeInterval = 0) {
         let eligible = eligibleScrolloverIDs(ids)
         _ = optimisticallySetRead(eligible, read: true)
-        completeSuccessfulScrolloverMutation(eligible, generation: scrolloverQueueGeneration, completedAt: now)
+        completeSuccessfulScrolloverMutation(eligible, presentationGeneration: scrolloverPresentationGeneration, completedAt: now)
     }
     @MainActor
     func setScrolloverPresentationPhaseForTesting(_ phase: IOSScrolloverPresentationPhase) { setScrolloverPresentationPhase(phase) }
     @MainActor
     func receiveScrolloverDirectionForTesting(_ direction: IOSArticleScrollDirection) { receiveScrolloverDirection(direction) }
     @MainActor
-    func completeSuccessfulScrolloverMutationForTesting(_ ids: [Int64], now: TimeInterval = 0) {
-        completeSuccessfulScrolloverMutation(ids, generation: scrolloverQueueGeneration, completedAt: now)
+    func completeSuccessfulScrolloverMutationForTesting(_ ids: [Int64], generation: UInt64? = nil, now: TimeInterval = 0) {
+        completeSuccessfulScrolloverMutation(ids, presentationGeneration: generation ?? scrolloverPresentationGeneration, completedAt: now)
     }
     @MainActor
     var pendingScrolloverPresentationIDsForTesting: [Int64] { pendingScrolloverReadPresentationIDs.sorted() }
     @MainActor
     func rebaselineScrolloverPresentationForTesting() { resetPresentationState() }
     @MainActor
-    var scrolloverQueueGenerationForTesting: UInt64 { scrolloverQueueGeneration }
+    var scrolloverQueueGenerationForTesting: UInt64 { scrolloverPresentationGeneration }
     @MainActor
     func applyScrolloverUndoForTesting() { updateVisibleRead(scrolloverUndoIDs, read: false); clearScrolloverUndoGroup() }
     @MainActor
@@ -1119,21 +1142,21 @@ struct ArticleRowContent: Equatable {
     }
     @MainActor
     func beginScrolloverMutationForTesting() -> [Int64] {
-        let ids = pendingScrolloverIDs
-        pendingScrolloverIDs = []
+        let ids = Array(pendingScrolloverIDs.prefix(Self.maximumScrolloverMutationBatchSize))
+        pendingScrolloverIDs.removeFirst(ids.count)
         return ids
     }
     @MainActor
     func flushScrolloverPersistenceForTesting() -> [Int64] {
-        let ids = pendingScrolloverIDs
-        pendingScrolloverIDs = []
+        let ids = Array(pendingScrolloverIDs.prefix(Self.maximumScrolloverMutationBatchSize))
+        pendingScrolloverIDs.removeFirst(ids.count)
         return ids
     }
     @MainActor
     func discardPendingScrolloverForTesting(_ ids: [Int64]) { flushConflictingScrolloverIDs(ids) }
     @MainActor
     func failScrolloverMutationForTesting(_ ids: [Int64], generation: UInt64? = nil) {
-        restoreScrolloverPresentation(ids, generation: generation ?? scrolloverQueueGeneration)
+        restoreScrolloverPresentation(ids, presentationGeneration: generation ?? scrolloverPresentationGeneration)
         for id in ids {
             pendingScrolloverIDSet.remove(id)
             publishedScrolloverPresentationRevisions[id] = nil
@@ -1167,6 +1190,14 @@ struct ArticleRowContent: Equatable {
     func isArticleReadForTesting(_ id: Int64) -> Bool? { rowPresentationStates[id]?.isRead }
     @MainActor
     func isArticleStarredForTesting(_ id: Int64) -> Bool? { rowPresentationStates[id]?.isStarred }
+    @MainActor
+    static var maximumScrolloverMutationBatchSizeForTesting: Int { maximumScrolloverMutationBatchSize }
+    @MainActor
+    var pendingScrolloverIDsForTesting: [Int64] { pendingScrolloverIDs }
+    @MainActor
+    func invalidateScrolloverSessionForTesting() { invalidateScrolloverSession() }
+    @MainActor
+    var scrolloverSessionGenerationForTesting: UInt64 { scrolloverSessionGeneration }
 
     private func reloadCounts(includeNavigationCounts: Bool = false) {
         guard let core else { return }
@@ -1207,9 +1238,11 @@ private final class IOSNewsreaderEventListener: EventListener, @unchecked Sendab
     init(store: NewsreaderStore) { self.store = store }
 
     func onEvent(event: CoreEvent) {
+        guard case let .syncCompleted(metadata) = event,
+              IOSNewsreaderEventRoutingPolicy.shouldDispatchSyncCompleted(reason: metadata.reason) else { return }
         Task { @MainActor [weak store] in
             guard let store else { return }
-            if case let .syncCompleted(metadata) = event, metadata.reason != .manual { store.handleSyncCompleted(metadata) }
+            store.handleSyncCompleted(metadata)
         }
     }
 }
