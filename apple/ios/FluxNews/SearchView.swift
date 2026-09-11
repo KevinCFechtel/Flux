@@ -67,12 +67,14 @@ struct SearchView: View {
         .onSubmit(of: .search) { store.submit() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                if store.hasSearched || !store.query.isEmpty {
-                    Button("Clear") { store.clear() }
-                }
+                Button("Clear") { store.clear() }
+                    .disabled(!store.hasSearched && store.query.isEmpty)
             }
         }
-        .onAppear { searchFieldFocused = true }
+        .task {
+            await Task.yield()
+            searchFieldFocused = true
+        }
         .onDisappear { store.invalidate() }
     }
 }
