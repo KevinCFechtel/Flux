@@ -139,17 +139,18 @@ Star/Unstar invoke the existing optimistic mutations and allow the platform's
 standard full-swipe behavior. The same mutation paths remain available from the
 context menu.
 
-Mark-as-Read-on-Scrollover treats List visibility solely as an interchangeable
-presentation-layer sensor over stable Article IDs. Each List row reports iOS 18
-`onScrollVisibilityChange` at a 15% threshold; a small coordinator maintains
-the currently visible IDs and orders them by the structural article snapshot.
-This threshold only identifies a leading target for variable-height cards,
-including cards too tall to become 50% visible. It is not a read-exposure
-threshold. Visibility is then passed to `IOSScrolloverOrderTracker`, which is
-independent of the scroll container and remains the sole authority for initial
-baselines, forward/backward crossing, deferred leading cards, gap filling,
-terminal completion, emitted IDs, and structural rebaselining. No timing,
-exposure-duration, or per-row geometry logic participates in Scrollover.
+Mark-as-Read-on-Scrollover uses an iOS 18 public-API geometry sensor over stable
+Article IDs. `onScrollGeometryChange` supplies actual `visibleRect` movement for
+forward/backward direction. Each materialized row reduces its frame in the
+scroll-view coordinate space to `above`, `visible`, or `below` with
+`onGeometryChange`; raw row positions are never retained in observable view
+state. The non-observable geometry controller emits an ID only when an observed
+visible row becomes completely above the effective upper boundary during a
+user-originated forward interaction or deceleration. Snapshot, layout, size,
+and reset changes explicitly rebaseline the controller without emitting reads.
+At a genuine forward arrival at the content bottom, it may complete observed
+visible trailing rows that cannot physically cross the upper boundary. An
+initially short list, reset, or backward arrival never triggers that completion.
 
 Remove When Read applies to explicit/manual read actions, including swipe and
 context-menu actions. It does not apply to Mark-as-Read-on-Scrollover:
@@ -158,11 +159,10 @@ including after scrolling becomes idle. The unread/read visual transition keeps
 the unread-indicator layout slot present and changes only its visual opacity, so
 it does not alter article-card geometry.
 
-iOS Scrollover keeps visibility sensing, semantic detection, immediate row-local
-presentation, Core mutation scheduling, and Undo separate. Crossing an unread
-article changes only its row presentation immediately; while the List is
-interacting or decelerating, the corresponding IDs accumulate in a deduplicated
-local buffer. `NewsreaderStore` persists that buffer through the existing Core
+iOS Scrollover keeps geometry sensing, semantic detection, deferred row-local
+presentation, Core mutation scheduling, and Undo separate. While the List is
+interacting or decelerating, crossed IDs accumulate in a deduplicated local
+buffer. `NewsreaderStore` persists that buffer through the existing Core
 bulk mutation API when scrolling becomes idle, with bounded and
 lifecycle/snapshot safety flushes. Active scrolling never requires a
 Core/SQLite operation for visual feedback and never structurally changes the
@@ -172,12 +172,12 @@ presentation. A scrollover read mutation may invalidate its small status,
 accessibility, and interaction presentation views, but must not invalidate the
 row's image/preview/metadata-layout content subtree. Feed-icon presentation state
 exposes a prepared native image rather than decoding icon bytes from a view body.
-Detection is ID/order-only, with no geometry, exposure duration, or per-row
-timer. Candidate generation remains local to the deferred and crossed ordered-ID
-range, not to the size of the complete article snapshot. Candidates enter one
-serialized, deduplicating Core bulk-mutation queue.
-The ordered detection snapshot rebases only when visible membership or ordering
-changes; a Scrollover read-state presentation update is not structural.
+Detection uses actual scroll and row geometry, with no timing/exposure-duration
+heuristics or per-row timers. Candidate generation is local to row-region
+transitions and currently materialized visible rows, never to the complete
+article snapshot. Candidates enter one serialized, deduplicating Core
+bulk-mutation queue. A Scrollover read-state presentation update is not
+structural.
 All detected Scrollover candidates are still marked read, independently of Undo.
 Fallback-only article presentation paths include their read/starred fallback state
 in equality so status updates remain visible without changing the row-state path.

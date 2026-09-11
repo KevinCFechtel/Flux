@@ -95,134 +95,182 @@ final class IOSArticleImagePrefetchCoordinator {
     }
 }
 
-/// iOS 18 visibility reports need not include every intermediate row. The ordered
-/// snapshot fills those gaps without using row geometry or exposure timing.
-struct IOSScrolloverOrderTracker {
-    private var orderedIDs: [Int64] = []
-    private var positions: [Int64: Int] = [:]
-    private var previousLeadingArticleID: Int64?
-    private var emittedIDs = Set<Int64>()
-    private var isUserScrolling = false
-    private var hasForwardScrollInteraction = false
-    private var lastVisibilityMoveWasForward = false
-    private var deferredLeadingArticleID: Int64?
-    private(set) var lastVisibilityDirection: IOSArticleScrollDirection?
-
-    mutating func updateSnapshot(_ ids: [Int64]) {
-        guard ids != orderedIDs else { return }
-        orderedIDs = ids
-        positions = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset) })
-        // A changed ordering can be a sync/filter/layout snapshot, not a scroll.
-        previousLeadingArticleID = nil
-        emittedIDs.removeAll()
-        isUserScrolling = false
-        hasForwardScrollInteraction = false
-        lastVisibilityMoveWasForward = false
-        deferredLeadingArticleID = nil
-        lastVisibilityDirection = nil
-    }
-
-    mutating func setUserScrolling(_ value: Bool) { isUserScrolling = value }
-
-    mutating func reset() {
-        previousLeadingArticleID = nil
-        emittedIDs.removeAll()
-        isUserScrolling = false
-        hasForwardScrollInteraction = false
-        lastVisibilityMoveWasForward = false
-        deferredLeadingArticleID = nil
-        lastVisibilityDirection = nil
-    }
-
-    mutating func releaseEmittedIDs() { emittedIDs.removeAll() }
-
-    mutating func receiveVisibleIDs(_ visibleIDs: [Int64], enabled: Bool) -> IOSScrolloverBatch {
-        let empty = IOSScrolloverBatch(articleIDs: [])
-        guard let leadingID = visibleIDs.min(by: { positions[$0, default: .max] < positions[$1, default: .max] }),
-              let leadingPosition = positions[leadingID] else { return empty }
-        defer { previousLeadingArticleID = leadingID }
-
-        guard isUserScrolling, let previousLeadingArticleID,
-              let previousPosition = positions[previousLeadingArticleID] else {
-            lastVisibilityDirection = nil
-            return empty
-        }
-        guard leadingPosition != previousPosition else {
-            lastVisibilityDirection = nil
-            return empty
-        }
-        lastVisibilityDirection = leadingPosition > previousPosition ? .forward : .backward
-        // Direction drives image prefetch independently of the read setting.
-        guard enabled else { return empty }
-        guard leadingPosition > previousPosition else {
-            lastVisibilityMoveWasForward = false
-            deferredLeadingArticleID = nil
-            return empty
-        }
-
-        // Keep the immediately preceding leading card as a semantic crossing
-        // candidate until the following target is reported. Intermediate IDs
-        // in a fast jump are already past the semantic crossing and remain
-        // gap-filled from this ordered segment.
-        let adjacentMove = leadingPosition == previousPosition + 1
-        var candidates: [Int64] = []
-        if let deferredLeadingArticleID, emittedIDs.insert(deferredLeadingArticleID).inserted {
-            candidates.append(deferredLeadingArticleID)
-        }
-        for id in orderedIDs[previousPosition..<leadingPosition] {
-            guard !adjacentMove || id != previousLeadingArticleID else { continue }
-            if emittedIDs.insert(id).inserted { candidates.append(id) }
-        }
-        deferredLeadingArticleID = adjacentMove ? previousLeadingArticleID : nil
-        hasForwardScrollInteraction = true
-        lastVisibilityMoveWasForward = true
-        return IOSScrolloverBatch(articleIDs: candidates)
-    }
-
-    mutating func receiveTerminalVisibleIDs(_ visibleIDs: [Int64], enabled: Bool) -> IOSScrolloverBatch {
-        guard enabled, isUserScrolling, hasForwardScrollInteraction, lastVisibilityMoveWasForward,
-              let finalID = orderedIDs.last, visibleIDs.contains(finalID) else {
-            return IOSScrolloverBatch(articleIDs: [])
-        }
-        // The final target is visible only after this interaction has advanced the
-        // leading target, so complete the otherwise un-crossable terminal cards.
-        let candidates = visibleIDs
-            .filter { positions[$0] != nil && emittedIDs.insert($0).inserted }
-            .sorted { positions[$0, default: .max] < positions[$1, default: .max] }
-        return IOSScrolloverBatch(articleIDs: candidates)
-    }
-}
-
 struct IOSScrolloverBatch: Equatable {
     let articleIDs: [Int64]
 }
 
-/// List-row visibility is a sensor only. The tracker remains the crossing authority.
-struct IOSListVisibilityCoordinator {
+enum IOSArticleRowViewportRegion: Equatable {
+    case above
+    case visible
+    case below
+
+    static func resolve(frame: CGRect, viewportHeight: CGFloat) -> Self {
+        // `.scrollView` expresses row frames against the scroll viewport, whose
+        // origin is the effective upper boundary used by Scrollover.
+        if frame.maxY <= 0 { return .above }
+        if frame.minY >= viewportHeight { return .below }
+        return .visible
+    }
+}
+
+struct IOSArticleRowGeometryState: Equatable {
+    let region: IOSArticleRowViewportRegion
+    let size: CGSize
+}
+
+struct IOSArticleScrollGeometry: Equatable {
+    let visibleRect: CGRect
+    let contentSize: CGSize
+    let containerSize: CGSize
+}
+
+/// Non-observable geometry sensor for one stable List snapshot. Row frames are
+/// reduced to viewport regions before reaching this controller; no continuous
+/// geometry is published into SwiftUI state.
+final class IOSScrolloverGeometryController {
+    private static let geometryTolerance: CGFloat = 0.5
+
     private var orderedIDs: [Int64] = []
     private var positions: [Int64: Int] = [:]
-    private var visibleIDs = Set<Int64>()
+    private var rowRegions: [Int64: IOSArticleRowViewportRegion] = [:]
+    private var rowSizes: [Int64: CGSize] = [:]
+    private var emittedIDs = Set<Int64>()
+    private var pendingCrossingIDs = Set<Int64>()
+    private var previousGeometry: IOSArticleScrollGeometry?
+    private var phase: IOSScrolloverPresentationPhase = .idle
+    private var lastDirection: IOSArticleScrollDirection?
+    private var hasForwardInteraction = false
+    private var wasAtBottom = false
+    private var terminalCompletionActive = false
 
-    mutating func updateSnapshot(_ ids: [Int64]) -> [Int64] {
-        guard ids != orderedIDs else { return orderedVisibleIDs }
+    var visibleIDs: [Int64] {
+        rowRegions.compactMap { $0.value == .visible ? $0.key : nil }
+            .sorted { positions[$0, default: .max] < positions[$1, default: .max] }
+    }
+
+    func updateSnapshot(_ ids: [Int64]) {
+        guard ids != orderedIDs else { return }
         orderedIDs = ids
         positions = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset) })
-        visibleIDs = Set(visibleIDs.filter { positions[$0] != nil })
-        return orderedVisibleIDs
+        emittedIDs.removeAll()
+        rebaseline()
     }
 
-    mutating func receiveVisibility(articleID: Int64, isVisible: Bool) -> [Int64]? {
-        guard positions[articleID] != nil else { return nil }
-        if isVisible {
-            guard visibleIDs.insert(articleID).inserted else { return nil }
-        } else {
-            guard visibleIDs.remove(articleID) != nil else { return nil }
+    func rebaseline() {
+        rowRegions = [:]
+        rowSizes = [:]
+        pendingCrossingIDs = []
+        previousGeometry = nil
+        phase = .idle
+        lastDirection = nil
+        hasForwardInteraction = false
+        wasAtBottom = false
+        terminalCompletionActive = false
+    }
+
+    func releaseEmittedIDs() { emittedIDs.removeAll() }
+
+    func setPhase(_ phase: IOSScrolloverPresentationPhase) {
+        self.phase = phase
+        if phase == .idle {
+            lastDirection = nil
+            hasForwardInteraction = false
+            terminalCompletionActive = false
+            pendingCrossingIDs = []
         }
-        return orderedVisibleIDs
     }
 
-    private var orderedVisibleIDs: [Int64] {
-        visibleIDs.sorted { positions[$0, default: .max] < positions[$1, default: .max] }
+    func receiveScrollGeometry(_ geometry: IOSArticleScrollGeometry, enabled: Bool) -> (direction: IOSArticleScrollDirection?, batch: IOSScrolloverBatch) {
+        if !enabled { pendingCrossingIDs = [] }
+        guard let previousGeometry else {
+            self.previousGeometry = geometry
+            wasAtBottom = isAtBottom(geometry)
+            return (nil, .init(articleIDs: []))
+        }
+        guard previousGeometry.containerSize == geometry.containerSize else {
+            rebaseline()
+            self.previousGeometry = geometry
+            wasAtBottom = isAtBottom(geometry)
+            return (nil, .init(articleIDs: []))
+        }
+
+        self.previousGeometry = geometry
+        let delta = geometry.visibleRect.minY - previousGeometry.visibleRect.minY
+        let direction: IOSArticleScrollDirection?
+        if delta > Self.geometryTolerance { direction = .forward }
+        else if delta < -Self.geometryTolerance { direction = .backward }
+        else { direction = nil }
+
+        guard let direction, phase.isScrolling else { return (nil, .init(articleIDs: [])) }
+        lastDirection = direction
+        if direction == .forward { hasForwardInteraction = true }
+        else { pendingCrossingIDs = [] }
+
+        var candidates = Set<Int64>()
+        if direction == .forward, enabled { candidates.formUnion(pendingCrossingIDs) }
+        pendingCrossingIDs.subtract(candidates)
+
+        let atBottom = isAtBottom(geometry)
+        if enabled,
+           direction == .forward,
+           hasForwardInteraction,
+           !wasAtBottom,
+           atBottom {
+            // Terminal rows cannot cross the upper boundary. A real forward
+            // arrival at the content bottom completes only observed visible rows.
+            terminalCompletionActive = true
+            candidates.formUnion(visibleIDs)
+        }
+        wasAtBottom = atBottom
+        return (direction, batch(from: candidates))
+    }
+
+    func receiveRowRegion(articleID: Int64, region: IOSArticleRowViewportRegion, enabled: Bool) -> IOSScrolloverBatch {
+        receiveRowGeometry(articleID: articleID, state: .init(region: region, size: .zero), enabled: enabled)
+    }
+
+    func receiveRowGeometry(articleID: Int64, state: IOSArticleRowGeometryState, enabled: Bool) -> IOSScrolloverBatch {
+        guard positions[articleID] != nil else { return .init(articleIDs: []) }
+        if let previousSize = rowSizes[articleID],
+           previousSize != .zero,
+           (abs(previousSize.width - state.size.width) > Self.geometryTolerance ||
+               abs(previousSize.height - state.size.height) > Self.geometryTolerance) {
+            rebaseline()
+            rowSizes[articleID] = state.size
+            rowRegions[articleID] = state.region
+            return .init(articleIDs: [])
+        }
+        rowSizes[articleID] = state.size
+        let previous = rowRegions.updateValue(state.region, forKey: articleID)
+        var candidates = Set<Int64>()
+        // Only a measured visible row is qualified. A below-to-above jump has
+        // no observed exposure and must not manufacture a read intent.
+        if enabled,
+           phase.isScrolling,
+           previous == .visible,
+           state.region == .above,
+           lastDirection != .backward {
+            pendingCrossingIDs.insert(articleID)
+        }
+        if enabled,
+           phase.isScrolling,
+           lastDirection == .forward {
+            candidates.formUnion(pendingCrossingIDs)
+            pendingCrossingIDs.subtract(candidates)
+            if terminalCompletionActive, state.region == .visible { candidates.insert(articleID) }
+        }
+        return batch(from: candidates)
+    }
+
+    private func isAtBottom(_ geometry: IOSArticleScrollGeometry) -> Bool {
+        geometry.visibleRect.maxY >= geometry.contentSize.height - Self.geometryTolerance
+    }
+
+    private func batch(from candidates: Set<Int64>) -> IOSScrolloverBatch {
+        let ids = candidates
+            .filter { emittedIDs.insert($0).inserted }
+            .sorted { positions[$0, default: .max] < positions[$1, default: .max] }
+        return .init(articleIDs: ids)
     }
 }
 
@@ -269,13 +317,9 @@ struct ArticleListView: View {
     var store: NewsreaderStore
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
-    @State private var scrolloverTracker = IOSScrolloverOrderTracker()
-    @State private var listVisibility = IOSListVisibilityCoordinator()
+    @State private var scrolloverController = IOSScrolloverGeometryController()
     @State private var imagePrefetchMetadata = IOSArticleImagePrefetchMetadata()
     @State private var imagePrefetchCoordinator = IOSArticleImagePrefetchCoordinator()
-    // 15% admits a target that is only barely visible, so tall cards still give
-    // the ordered tracker a reliable leading target. It is not a read threshold.
-    private let scrolloverVisibilityThreshold: CGFloat = 0.15
 
     var body: some View {
         let emptyState = IOSArticleListEmptyState.resolve(
@@ -330,11 +374,17 @@ struct ArticleListView: View {
                             .padding(.vertical, rowMetrics.outerVerticalPadding)
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
-                            .onScrollVisibilityChange(threshold: scrolloverVisibilityThreshold) { isVisible in
-                                receiveListVisibility(articleID: article.id, isVisible: isVisible, availableWidth: rowMetrics.availableWidth)
-                            }
-                            .onDisappear {
-                                receiveListVisibility(articleID: article.id, isVisible: false, availableWidth: rowMetrics.availableWidth)
+                            .onGeometryChange(for: IOSArticleRowGeometryState.self, of: { geometry in
+                                let frame = geometry.frame(in: .scrollView)
+                                return IOSArticleRowGeometryState(
+                                    region: IOSArticleRowViewportRegion.resolve(
+                                        frame: frame,
+                                        viewportHeight: proxy.size.height
+                                    ),
+                                    size: frame.size
+                                )
+                            }) { _, state in
+                                receiveRowGeometry(articleID: article.id, state: state)
                             }
                         }.listRowSeparator(.hidden)
                     }
@@ -349,24 +399,39 @@ struct ArticleListView: View {
                     .onScrollPhaseChange { _, phase in
                         switch phase {
                         case .interacting:
-                            scrolloverTracker.setUserScrolling(true)
+                            scrolloverController.setPhase(.interacting)
                             store.setScrolloverPresentationPhase(.interacting)
                             store.markMeaningfulInteraction()
                         case .decelerating:
-                            scrolloverTracker.setUserScrolling(true)
+                            scrolloverController.setPhase(.decelerating)
                             store.setScrolloverPresentationPhase(.decelerating)
                         case .idle:
-                            scrolloverTracker.setUserScrolling(false)
+                            scrolloverController.setPhase(.idle)
                             store.setScrolloverPresentationPhase(.idle)
                         default:
                             break
                         }
                     }
+                    .onScrollGeometryChange(for: IOSArticleScrollGeometry.self, of: { geometry in
+                        IOSArticleScrollGeometry(
+                            visibleRect: geometry.visibleRect,
+                            contentSize: geometry.contentSize,
+                            containerSize: geometry.containerSize
+                        )
+                    }) { _, geometry in
+                        receiveScrollGeometry(geometry, availableWidth: rowMetrics.availableWidth)
+                    }
                     .onChange(of: store.snapshotRevision) { _, _ in
                         rebuildPrefetchMetadata()
                     }
+                    .onChange(of: store.scrollResetRevision) { _, _ in
+                        scrolloverController.rebaseline()
+                    }
+                    .onChange(of: proxy.size.width) { _, _ in
+                        scrolloverController.rebaseline()
+                    }
                     .onChange(of: store.scrolloverRearmRevision) { _, _ in
-                        scrolloverTracker.releaseEmittedIDs()
+                        scrolloverController.releaseEmittedIDs()
                     }
                 }
             }
@@ -398,20 +463,22 @@ private struct ArticleListRowMetrics {
 }
 
 private extension ArticleListView {
-    func receiveListVisibility(articleID: Int64, isVisible: Bool, availableWidth: CGFloat) {
-        guard let visibleIDs = listVisibility.receiveVisibility(articleID: articleID, isVisible: isVisible) else { return }
-        receiveVisibleIDs(visibleIDs, availableWidth: availableWidth)
+    func receiveScrollGeometry(_ geometry: IOSArticleScrollGeometry, availableWidth: CGFloat) {
+        let update = scrolloverController.receiveScrollGeometry(geometry, enabled: store.markReadOnScrolloverEnabled)
+        if let direction = update.direction {
+            store.receiveScrolloverDirection(direction)
+            prefetchImages(visibleIDs: scrolloverController.visibleIDs, direction: direction, availableWidth: availableWidth)
+        }
+        if !update.batch.articleIDs.isEmpty { store.flushScrollover(update.batch) }
     }
 
-    func receiveVisibleIDs(_ visibleIDs: [Int64], availableWidth: CGFloat) {
-        let batch = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
-        if let direction = scrolloverTracker.lastVisibilityDirection {
-            store.receiveScrolloverDirection(direction)
-            prefetchImages(visibleIDs: visibleIDs, direction: direction, availableWidth: availableWidth)
-        }
+    func receiveRowGeometry(articleID: Int64, state: IOSArticleRowGeometryState) {
+        let batch = scrolloverController.receiveRowGeometry(
+            articleID: articleID,
+            state: state,
+            enabled: store.markReadOnScrolloverEnabled
+        )
         if !batch.articleIDs.isEmpty { store.flushScrollover(batch) }
-        let terminalBatch = scrolloverTracker.receiveTerminalVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
-        if !terminalBatch.articleIDs.isEmpty { store.flushScrollover(terminalBatch) }
     }
 
     func prefetchImages(visibleIDs: [Int64], direction: IOSArticleScrollDirection, availableWidth: CGFloat) {
@@ -441,9 +508,7 @@ private extension ArticleListView {
         if imagePrefetchMetadata.update(articles: store.articles) {
             imagePrefetchCoordinator.reset()
         }
-        scrolloverTracker.updateSnapshot(imagePrefetchMetadata.orderedIDs)
-        let visibleIDs = listVisibility.updateSnapshot(imagePrefetchMetadata.orderedIDs)
-        _ = scrolloverTracker.receiveVisibleIDs(visibleIDs, enabled: store.markReadOnScrolloverEnabled)
+        scrolloverController.updateSnapshot(imagePrefetchMetadata.orderedIDs)
     }
 }
 

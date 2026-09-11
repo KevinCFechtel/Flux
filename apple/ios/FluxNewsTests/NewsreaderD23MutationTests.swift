@@ -11,140 +11,199 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.articles.compactMap { store.isArticleReadForTesting($0.id) }
     }
 
-    func testInitialVisibleTargetsEstablishABaseline() {
-        var tracker = IOSScrolloverOrderTracker()
-        tracker.updateSnapshot([1, 2, 3])
-        XCTAssertTrue(tracker.receiveVisibleIDs([1, 2], enabled: true).articleIDs.isEmpty)
-        tracker.setUserScrolling(true)
-        XCTAssertTrue(tracker.receiveVisibleIDs([2], enabled: true).articleIDs.isEmpty)
-        XCTAssertEqual(tracker.receiveVisibleIDs([3], enabled: true).articleIDs, [1])
+    private func geometry(y: CGFloat, contentHeight: CGFloat = 1_000, viewportHeight: CGFloat = 100) -> IOSArticleScrollGeometry {
+        IOSArticleScrollGeometry(
+            visibleRect: .init(x: 0, y: y, width: 320, height: viewportHeight),
+            contentSize: .init(width: 320, height: contentHeight),
+            containerSize: .init(width: 320, height: viewportHeight)
+        )
     }
 
-    func testSkippedAndLargeForwardJumpsUseTheOrderedRange() {
-        var tracker = IOSScrolloverOrderTracker()
-        let ids = Array(0...50).map(Int64.init)
-        tracker.updateSnapshot(ids)
-        _ = tracker.receiveVisibleIDs([20], enabled: true)
-        tracker.setUserScrolling(true)
-        let first = tracker.receiveVisibleIDs([35], enabled: true)
-        XCTAssertEqual(first.articleIDs, Array(20..<35).map(Int64.init))
-        let second = tracker.receiveVisibleIDs([50], enabled: true)
-        XCTAssertEqual(second.articleIDs, Array(35..<50).map(Int64.init))
+    func testVisibleRowCrossingAboveDuringForwardScrollEmitsOnce() {
+        let controller = IOSScrolloverGeometryController()
+        controller.updateSnapshot([1])
+        _ = controller.receiveScrollGeometry(geometry(y: 0), enabled: true)
+        _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: true)
+        controller.setPhase(.interacting)
+        XCTAssertEqual(controller.receiveScrollGeometry(geometry(y: 20), enabled: true).direction, .forward)
+        XCTAssertEqual(controller.receiveRowRegion(articleID: 1, region: .above, enabled: true).articleIDs, [1])
+        XCTAssertTrue(controller.receiveRowRegion(articleID: 1, region: .above, enabled: true).articleIDs.isEmpty)
     }
 
-    func testLargeSnapshotKeepsCandidateGenerationLocalToTheCrossing() {
-        var tracker = IOSScrolloverOrderTracker()
-        let ids = Array(0..<8_000).map(Int64.init)
-        tracker.updateSnapshot(ids)
-        _ = tracker.receiveVisibleIDs([100], enabled: true)
-        tracker.setUserScrolling(true)
-
-        XCTAssertTrue(tracker.receiveVisibleIDs([101], enabled: true).articleIDs.isEmpty)
-        XCTAssertEqual(tracker.receiveVisibleIDs([102], enabled: true).articleIDs, [100])
-        XCTAssertEqual(tracker.receiveVisibleIDs([200], enabled: true).articleIDs, Array(101..<200).map(Int64.init))
+    func testSlowSingleRowCrossingDoesNotRequireAnotherRowCallback() {
+        let controller = IOSScrolloverGeometryController()
+        controller.updateSnapshot([1, 2])
+        _ = controller.receiveScrollGeometry(geometry(y: 0), enabled: true)
+        _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: true)
+        controller.setPhase(.interacting)
+        _ = controller.receiveScrollGeometry(geometry(y: 1), enabled: true)
+        XCTAssertEqual(controller.receiveRowRegion(articleID: 1, region: .above, enabled: true).articleIDs, [1])
     }
 
-    func testInitialBaselineAndStructuralRebaselineDoNotQualify() {
-        var tracker = IOSScrolloverOrderTracker()
-        tracker.updateSnapshot(Array(1...10).map(Int64.init))
-        XCTAssertTrue(tracker.receiveVisibleIDs([1], enabled: true).articleIDs.isEmpty)
-        XCTAssertNil(tracker.lastVisibilityDirection)
-        tracker.setUserScrolling(true)
-        tracker.updateSnapshot(Array(20...30).map(Int64.init))
-        XCTAssertTrue(tracker.receiveVisibleIDs([30], enabled: true).articleIDs.isEmpty)
-        XCTAssertNil(tracker.lastVisibilityDirection)
+    func testMultipleObservedCrossingsEmitOnlyObservedRows() {
+        let controller = IOSScrolloverGeometryController()
+        controller.updateSnapshot([1, 2, 3, 4])
+        _ = controller.receiveScrollGeometry(geometry(y: 0), enabled: true)
+        _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: true)
+        _ = controller.receiveRowRegion(articleID: 3, region: .visible, enabled: true)
+        controller.setPhase(.decelerating)
+        _ = controller.receiveScrollGeometry(geometry(y: 200), enabled: true)
+        XCTAssertEqual(controller.receiveRowRegion(articleID: 1, region: .above, enabled: true).articleIDs, [1])
+        XCTAssertEqual(controller.receiveRowRegion(articleID: 3, region: .above, enabled: true).articleIDs, [3])
+        XCTAssertTrue(controller.receiveRowRegion(articleID: 2, region: .above, enabled: true).articleIDs.isEmpty)
     }
 
-    func testVisibilityDirectionTracksForwardAndBackwardMovementWithoutChangingScrolloverOutput() {
-        var tracker = IOSScrolloverOrderTracker()
-        tracker.updateSnapshot([1, 2, 3, 4])
-        _ = tracker.receiveVisibleIDs([1], enabled: true)
-        tracker.setUserScrolling(true)
+    func testGeometryAndRowCallbackOrderingProduceTheSameCrossing() {
+        let first = IOSScrolloverGeometryController()
+        let second = IOSScrolloverGeometryController()
+        for controller in [first, second] {
+            controller.updateSnapshot([1])
+            _ = controller.receiveScrollGeometry(geometry(y: 0), enabled: true)
+            _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: true)
+            controller.setPhase(.interacting)
+        }
+        let firstRow = first.receiveRowRegion(articleID: 1, region: .above, enabled: true)
+        let firstScroll = first.receiveScrollGeometry(geometry(y: 20), enabled: true)
+        let secondScroll = second.receiveScrollGeometry(geometry(y: 20), enabled: true)
+        let secondRow = second.receiveRowRegion(articleID: 1, region: .above, enabled: true)
 
-        XCTAssertEqual(tracker.receiveVisibleIDs([3], enabled: true).articleIDs, [1, 2])
-        XCTAssertEqual(tracker.lastVisibilityDirection, .forward)
-        XCTAssertTrue(tracker.receiveVisibleIDs([1], enabled: true).articleIDs.isEmpty)
-        XCTAssertEqual(tracker.lastVisibilityDirection, .backward)
+        XCTAssertEqual(firstRow.articleIDs + firstScroll.batch.articleIDs, [1])
+        XCTAssertEqual(secondScroll.batch.articleIDs + secondRow.articleIDs, [1])
     }
 
-    func testDisabledScrolloverStillReportsDirectionWithoutReadCandidates() {
-        var tracker = IOSScrolloverOrderTracker()
-        tracker.updateSnapshot([1, 2, 3, 4])
-        _ = tracker.receiveVisibleIDs([1], enabled: false)
-        tracker.setUserScrolling(true)
-
-        XCTAssertTrue(tracker.receiveVisibleIDs([3], enabled: false).articleIDs.isEmpty)
-        XCTAssertEqual(tracker.lastVisibilityDirection, .forward)
-        XCTAssertTrue(tracker.receiveVisibleIDs([1], enabled: false).articleIDs.isEmpty)
-        XCTAssertEqual(tracker.lastVisibilityDirection, .backward)
+    func testBackwardAndIdleGeometryCannotQualifyACrossing() {
+        let controller = IOSScrolloverGeometryController()
+        controller.updateSnapshot([1])
+        _ = controller.receiveScrollGeometry(geometry(y: 20), enabled: true)
+        _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: true)
+        controller.setPhase(.interacting)
+        _ = controller.receiveScrollGeometry(geometry(y: 10), enabled: true)
+        XCTAssertTrue(controller.receiveRowRegion(articleID: 1, region: .above, enabled: true).articleIDs.isEmpty)
+        controller.rebaseline()
+        _ = controller.receiveScrollGeometry(geometry(y: 20), enabled: true)
+        _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: true)
+        XCTAssertTrue(controller.receiveRowRegion(articleID: 1, region: .above, enabled: true).articleIDs.isEmpty)
     }
 
-    func testTerminalScrolloverCompletesVisibleArticlesAfterForwardScroll() {
-        var tracker = IOSScrolloverOrderTracker()
-        tracker.updateSnapshot([1, 2, 3, 4, 5])
-        _ = tracker.receiveVisibleIDs([1, 2], enabled: true)
-        tracker.setUserScrolling(true)
-        XCTAssertEqual(tracker.receiveVisibleIDs([3, 4], enabled: true).articleIDs, [1, 2])
-        XCTAssertTrue(tracker.receiveTerminalVisibleIDs([3, 4], enabled: true).articleIDs.isEmpty)
-        XCTAssertEqual(tracker.receiveVisibleIDs([5], enabled: true).articleIDs, [3, 4])
-        XCTAssertEqual(tracker.receiveTerminalVisibleIDs([5], enabled: true).articleIDs, [5])
+    func testBackwardReturnThenNewForwardCrossingQualifies() {
+        let controller = IOSScrolloverGeometryController()
+        controller.updateSnapshot([1])
+        _ = controller.receiveScrollGeometry(geometry(y: 20), enabled: true)
+        _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: true)
+        controller.setPhase(.interacting)
+        _ = controller.receiveScrollGeometry(geometry(y: 10), enabled: true)
+        XCTAssertTrue(controller.receiveRowRegion(articleID: 1, region: .above, enabled: true).articleIDs.isEmpty)
+        _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: true)
+        _ = controller.receiveScrollGeometry(geometry(y: 20), enabled: true)
+        XCTAssertEqual(controller.receiveRowRegion(articleID: 1, region: .above, enabled: true).articleIDs, [1])
     }
 
-    func testTerminalScrolloverCompletesSeveralTrailingRowsThatRemainVisible() {
-        var tracker = IOSScrolloverOrderTracker()
-        tracker.updateSnapshot([1, 2, 3, 4, 5])
-        _ = tracker.receiveVisibleIDs([1, 2], enabled: true)
-        tracker.setUserScrolling(true)
-
-        XCTAssertEqual(tracker.receiveVisibleIDs([3, 4, 5], enabled: true).articleIDs, [1, 2])
-        XCTAssertEqual(tracker.receiveTerminalVisibleIDs([3, 4, 5], enabled: true).articleIDs, [3, 4, 5])
+    func testInitialRowGeometryAndStructuralRebaselineDoNotEmit() {
+        let controller = IOSScrolloverGeometryController()
+        controller.updateSnapshot([1])
+        _ = controller.receiveScrollGeometry(geometry(y: 20), enabled: true)
+        controller.setPhase(.interacting)
+        XCTAssertTrue(controller.receiveRowRegion(articleID: 1, region: .above, enabled: true).articleIDs.isEmpty)
+        controller.rebaseline()
+        _ = controller.receiveScrollGeometry(geometry(y: 20), enabled: true)
+        controller.setPhase(.interacting)
+        XCTAssertTrue(controller.receiveRowRegion(articleID: 1, region: .above, enabled: true).articleIDs.isEmpty)
     }
 
-    func testTerminalScrolloverRetainsTrailingCandidatesAcrossStaggeredVisibilityCallbacks() {
-        var tracker = IOSScrolloverOrderTracker()
-        tracker.updateSnapshot([1, 2, 3, 4, 5])
-        _ = tracker.receiveVisibleIDs([1, 2], enabled: true)
-        tracker.setUserScrolling(true)
+    func testRowSizeChangeRebaselinesWithoutARead() {
+        let controller = IOSScrolloverGeometryController()
+        controller.updateSnapshot([1])
+        _ = controller.receiveScrollGeometry(geometry(y: 0), enabled: true)
+        _ = controller.receiveRowGeometry(
+            articleID: 1,
+            state: .init(region: .visible, size: .init(width: 320, height: 80)),
+            enabled: true
+        )
+        controller.setPhase(.interacting)
+        _ = controller.receiveScrollGeometry(geometry(y: 20), enabled: true)
 
-        XCTAssertTrue(tracker.receiveVisibleIDs([1, 2, 5], enabled: true).articleIDs.isEmpty)
-        XCTAssertTrue(tracker.receiveTerminalVisibleIDs([1, 2, 5], enabled: true).articleIDs.isEmpty)
-        XCTAssertTrue(tracker.receiveVisibleIDs([2, 5], enabled: true).articleIDs.isEmpty)
-        XCTAssertEqual(tracker.receiveTerminalVisibleIDs([2, 5], enabled: true).articleIDs, [2, 5])
-        XCTAssertEqual(tracker.receiveVisibleIDs([5], enabled: true).articleIDs, [1, 3, 4])
-        XCTAssertTrue(tracker.receiveTerminalVisibleIDs([5], enabled: true).articleIDs.isEmpty)
+        XCTAssertTrue(controller.receiveRowGeometry(
+            articleID: 1,
+            state: .init(region: .above, size: .init(width: 320, height: 120)),
+            enabled: true
+        ).articleIDs.isEmpty)
     }
 
-    func testTerminalScrolloverIgnoresInitialShortListAndStructuralRebaseline() {
-        var tracker = IOSScrolloverOrderTracker()
-        tracker.updateSnapshot([1, 2])
-        _ = tracker.receiveVisibleIDs([1, 2], enabled: true)
-        tracker.setUserScrolling(true)
-        XCTAssertTrue(tracker.receiveTerminalVisibleIDs([1, 2], enabled: true).articleIDs.isEmpty)
-        tracker.updateSnapshot([3, 4, 5])
-        tracker.setUserScrolling(true)
-        _ = tracker.receiveVisibleIDs([5], enabled: true)
-        XCTAssertTrue(tracker.receiveTerminalVisibleIDs([5], enabled: true).articleIDs.isEmpty)
+    func testForwardBottomArrivalCompletesObservedTrailingRowsOnly() {
+        let controller = IOSScrolloverGeometryController()
+        controller.updateSnapshot([1, 2, 3])
+        _ = controller.receiveScrollGeometry(geometry(y: 0), enabled: true)
+        _ = controller.receiveRowRegion(articleID: 2, region: .visible, enabled: true)
+        _ = controller.receiveRowRegion(articleID: 3, region: .visible, enabled: true)
+        controller.setPhase(.decelerating)
+
+        XCTAssertEqual(controller.receiveScrollGeometry(geometry(y: 900), enabled: true).batch.articleIDs, [2, 3])
     }
 
-    func testTerminalScrolloverIgnoresBackwardMovementAtTheEnd() {
-        var tracker = IOSScrolloverOrderTracker()
-        tracker.updateSnapshot([1, 2, 3, 4, 5])
-        _ = tracker.receiveVisibleIDs([2], enabled: true)
-        tracker.setUserScrolling(true)
-        _ = tracker.receiveVisibleIDs([5], enabled: true)
-        _ = tracker.receiveVisibleIDs([3], enabled: true)
-        XCTAssertTrue(tracker.receiveTerminalVisibleIDs([5], enabled: true).articleIDs.isEmpty)
+    func testInitialOrRebaselinedBottomDoesNotCompleteRows() {
+        let controller = IOSScrolloverGeometryController()
+        controller.updateSnapshot([1, 2])
+        _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: true)
+        _ = controller.receiveRowRegion(articleID: 2, region: .visible, enabled: true)
+        controller.setPhase(.interacting)
+        XCTAssertTrue(controller.receiveScrollGeometry(geometry(y: 0, contentHeight: 100), enabled: true).batch.articleIDs.isEmpty)
+        controller.rebaseline()
+        _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: true)
+        XCTAssertTrue(controller.receiveScrollGeometry(geometry(y: 900), enabled: true).batch.articleIDs.isEmpty)
     }
 
-    func testBackwardAndDuplicateVisibilityUpdatesDoNotEmit() {
-        var tracker = IOSScrolloverOrderTracker()
-        tracker.updateSnapshot([1, 2, 3, 4, 5])
-        _ = tracker.receiveVisibleIDs([2], enabled: true)
-        tracker.setUserScrolling(true)
-        XCTAssertEqual(tracker.receiveVisibleIDs([4], enabled: true).articleIDs, [2, 3])
-        XCTAssertTrue(tracker.receiveVisibleIDs([1], enabled: true).articleIDs.isEmpty)
-        XCTAssertEqual(tracker.receiveVisibleIDs([5], enabled: true).articleIDs, [1, 4])
-        XCTAssertTrue(tracker.receiveVisibleIDs([5], enabled: true).articleIDs.isEmpty)
+    func testBackwardMovementAtTheBottomDoesNotCompleteRows() {
+        let controller = IOSScrolloverGeometryController()
+        controller.updateSnapshot([1, 2])
+        _ = controller.receiveScrollGeometry(geometry(y: 900), enabled: true)
+        _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: true)
+        controller.setPhase(.decelerating)
+
+        let update = controller.receiveScrollGeometry(geometry(y: 800), enabled: true)
+
+        XCTAssertEqual(update.direction, .backward)
+        XCTAssertTrue(update.batch.articleIDs.isEmpty)
+    }
+
+    func testDisabledScrolloverRetainsGeometryDirectionAndVisibleRows() {
+        let controller = IOSScrolloverGeometryController()
+        controller.updateSnapshot([1, 2])
+        _ = controller.receiveScrollGeometry(geometry(y: 0), enabled: false)
+        _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: false)
+        controller.setPhase(.interacting)
+
+        XCTAssertEqual(controller.receiveScrollGeometry(geometry(y: 20), enabled: false).direction, .forward)
+        XCTAssertEqual(controller.visibleIDs, [1])
+        XCTAssertTrue(controller.receiveRowRegion(articleID: 1, region: .above, enabled: false).articleIDs.isEmpty)
+        XCTAssertTrue(controller.visibleIDs.isEmpty)
+    }
+
+    func testDisabledOrIdleCrossingCannotLeakIntoANewInteraction() {
+        let controller = IOSScrolloverGeometryController()
+        controller.updateSnapshot([1])
+        _ = controller.receiveScrollGeometry(geometry(y: 0), enabled: true)
+        _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: true)
+        controller.setPhase(.interacting)
+        _ = controller.receiveScrollGeometry(geometry(y: 20), enabled: false)
+        XCTAssertTrue(controller.receiveRowRegion(articleID: 1, region: .above, enabled: false).articleIDs.isEmpty)
+
+        controller.setPhase(.idle)
+        controller.setPhase(.interacting)
+        XCTAssertTrue(controller.receiveScrollGeometry(geometry(y: 40), enabled: true).batch.articleIDs.isEmpty)
+    }
+
+    func testExplicitRearmPermitsAnotherGenuineCrossing() {
+        let controller = IOSScrolloverGeometryController()
+        controller.updateSnapshot([1])
+        _ = controller.receiveScrollGeometry(geometry(y: 0), enabled: true)
+        _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: true)
+        controller.setPhase(.interacting)
+        _ = controller.receiveScrollGeometry(geometry(y: 20), enabled: true)
+        XCTAssertEqual(controller.receiveRowRegion(articleID: 1, region: .above, enabled: true).articleIDs, [1])
+        controller.releaseEmittedIDs()
+        _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: true)
+        _ = controller.receiveScrollGeometry(geometry(y: 40), enabled: true)
+        XCTAssertEqual(controller.receiveRowRegion(articleID: 1, region: .above, enabled: true).articleIDs, [1])
     }
 
     @MainActor
@@ -245,29 +304,6 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.applyScrolloverMutationForTesting([1, 2, 3, 4])
         XCTAssertEqual(store.scrolloverUndoIDs, [1, 3, 4])
         XCTAssertEqual(readStates(store), [true, true, true, true, false])
-    }
-
-    func testCandidatesAreIndependentOfReadStateAndStructuralSnapshotsRebaseline() {
-        var tracker = IOSScrolloverOrderTracker()
-        tracker.updateSnapshot([1, 2, 3, 4])
-        _ = tracker.receiveVisibleIDs([1], enabled: true)
-        tracker.setUserScrolling(true)
-        XCTAssertEqual(tracker.receiveVisibleIDs([4], enabled: true).articleIDs, [1, 2, 3])
-        tracker.updateSnapshot([9, 1, 2, 3, 4])
-        XCTAssertTrue(tracker.receiveVisibleIDs([4], enabled: true).articleIDs.isEmpty)
-        tracker.setUserScrolling(true)
-        XCTAssertTrue(tracker.receiveVisibleIDs([4], enabled: true).articleIDs.isEmpty)
-    }
-
-    func testReleasedScrolloverIDsCanBeEmittedAfterUndo() {
-        var tracker = IOSScrolloverOrderTracker()
-        tracker.updateSnapshot([1, 2, 3, 4])
-        _ = tracker.receiveVisibleIDs([1], enabled: true)
-        tracker.setUserScrolling(true)
-        XCTAssertEqual(tracker.receiveVisibleIDs([4], enabled: true).articleIDs, [1, 2, 3])
-        tracker.releaseEmittedIDs()
-        XCTAssertTrue(tracker.receiveVisibleIDs([1], enabled: true).articleIDs.isEmpty)
-        XCTAssertEqual(tracker.receiveVisibleIDs([4], enabled: true).articleIDs, [1, 2, 3])
     }
 
     @MainActor
@@ -690,71 +726,6 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(store.articles.map(\.id), [2])
     }
 
-    func testListVisibilityOrdersIDsBySnapshotRatherThanCallbackOrder() {
-        var visibility = IOSListVisibilityCoordinator()
-        _ = visibility.updateSnapshot([10, 20, 30])
-
-        XCTAssertEqual(visibility.receiveVisibility(articleID: 30, isVisible: true), [30])
-        XCTAssertEqual(visibility.receiveVisibility(articleID: 10, isVisible: true), [10, 30])
-    }
-
-    func testListVisibilityCallbackOrderAndDuplicatesAreIdempotent() {
-        var first = IOSListVisibilityCoordinator()
-        var second = IOSListVisibilityCoordinator()
-        _ = first.updateSnapshot([10, 20, 30])
-        _ = second.updateSnapshot([10, 20, 30])
-
-        _ = first.receiveVisibility(articleID: 30, isVisible: true)
-        let firstOutput = first.receiveVisibility(articleID: 10, isVisible: true)
-        _ = second.receiveVisibility(articleID: 10, isVisible: true)
-        let secondOutput = second.receiveVisibility(articleID: 30, isVisible: true)
-
-        XCTAssertEqual(firstOutput, secondOutput)
-        XCTAssertNil(first.receiveVisibility(articleID: 10, isVisible: true))
-        XCTAssertEqual(first.receiveVisibility(articleID: 10, isVisible: false), [30])
-        XCTAssertNil(first.receiveVisibility(articleID: 10, isVisible: false))
-    }
-
-    func testListVisibilitySnapshotReconciliationRemovesStaleRows() {
-        var visibility = IOSListVisibilityCoordinator()
-        _ = visibility.updateSnapshot([10, 20, 30])
-        _ = visibility.receiveVisibility(articleID: 10, isVisible: true)
-        _ = visibility.receiveVisibility(articleID: 20, isVisible: true)
-
-        XCTAssertEqual(visibility.updateSnapshot([20, 30, 40]), [20])
-        XCTAssertNil(visibility.receiveVisibility(articleID: 10, isVisible: false))
-        XCTAssertEqual(visibility.receiveVisibility(articleID: 40, isVisible: true), [20, 40])
-    }
-
-    func testListVisibilityLargeSnapshotOrdersOnlyTheVisibleRows() {
-        var visibility = IOSListVisibilityCoordinator()
-        let ids = Array(0..<8_000).map(Int64.init)
-        _ = visibility.updateSnapshot(ids)
-
-        _ = visibility.receiveVisibility(articleID: 7_999, isVisible: true)
-        _ = visibility.receiveVisibility(articleID: 17, isVisible: true)
-        _ = visibility.receiveVisibility(articleID: 4_000, isVisible: true)
-
-        XCTAssertEqual(visibility.receiveVisibility(articleID: 123, isVisible: true), [17, 123, 4_000, 7_999])
-    }
-
-    func testListVisibilityOnlySuppliesOrderedInputToTheExistingTracker() {
-        var visibility = IOSListVisibilityCoordinator()
-        var tracker = IOSScrolloverOrderTracker()
-        let ids: [Int64] = [10, 20, 30]
-        _ = visibility.updateSnapshot(ids)
-        tracker.updateSnapshot(ids)
-        _ = visibility.receiveVisibility(articleID: 10, isVisible: true).map { tracker.receiveVisibleIDs($0, enabled: true) }
-        tracker.setUserScrolling(true)
-
-        _ = visibility.receiveVisibility(articleID: 20, isVisible: true)
-        let visible = visibility.receiveVisibility(articleID: 10, isVisible: false)!
-        XCTAssertTrue(tracker.receiveVisibleIDs(visible, enabled: true).articleIDs.isEmpty)
-        _ = visibility.receiveVisibility(articleID: 30, isVisible: true)
-        let advanced = visibility.receiveVisibility(articleID: 20, isVisible: false)!
-        XCTAssertEqual(tracker.receiveVisibleIDs(advanced, enabled: true).articleIDs, [10])
-    }
-
     @MainActor
     func testRollingUndoAggregatesDeduplicatesAndRestoresAllReads() {
         let store = NewsreaderStore(defaults: UserDefaults())
@@ -790,20 +761,23 @@ final class NewsreaderD23MutationTests: XCTestCase {
     func testUndoClearRearmsTrackerAndPermitsLaterScrolloverCandidates() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setArticlesForTesting([article(1), article(2), article(3), article(4)])
-        var tracker = IOSScrolloverOrderTracker()
-        tracker.updateSnapshot([1, 2, 3, 4])
-        _ = tracker.receiveVisibleIDs([1], enabled: true)
-        tracker.setUserScrolling(true)
-        XCTAssertEqual(tracker.receiveVisibleIDs([4], enabled: true).articleIDs, [1, 2, 3])
+        let controller = IOSScrolloverGeometryController()
+        controller.updateSnapshot([1, 2, 3, 4])
+        _ = controller.receiveScrollGeometry(geometry(y: 0), enabled: true)
+        _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: true)
+        controller.setPhase(.interacting)
+        _ = controller.receiveScrollGeometry(geometry(y: 20), enabled: true)
+        XCTAssertEqual(controller.receiveRowRegion(articleID: 1, region: .above, enabled: true).articleIDs, [1])
 
         store.applyScrolloverMutationForTesting([1, 2, 3])
         let revision = store.scrolloverRearmRevision
         store.applyScrolloverUndoForTesting()
         XCTAssertEqual(store.scrolloverRearmRevision, revision + 1)
 
-        tracker.releaseEmittedIDs()
-        XCTAssertTrue(tracker.receiveVisibleIDs([1], enabled: true).articleIDs.isEmpty)
-        XCTAssertEqual(tracker.receiveVisibleIDs([4], enabled: true).articleIDs, [1, 2, 3])
+        controller.releaseEmittedIDs()
+        _ = controller.receiveRowRegion(articleID: 1, region: .visible, enabled: true)
+        _ = controller.receiveScrollGeometry(geometry(y: 40), enabled: true)
+        XCTAssertEqual(controller.receiveRowRegion(articleID: 1, region: .above, enabled: true).articleIDs, [1])
     }
 
     @MainActor
