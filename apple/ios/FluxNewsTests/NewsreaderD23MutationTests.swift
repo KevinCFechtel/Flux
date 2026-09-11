@@ -156,6 +156,32 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertLessThanOrEqual(tracker.retainedGeometryCount, 96)
     }
 
+    func testResolvedFrameSourceRetainsExitedCellForEitherCallbackOrder() {
+        var source = IOSUIKitResolvedScrolloverFrameStore()
+        let tracker = IOSUIKitScrolloverGeometryTracker()
+        let frame = CGRect(x: 0, y: 0, width: 320, height: 20)
+        tracker.updateSnapshot([1])
+        tracker.setPhase(.interacting)
+
+        // `willDisplay`/a prior visible-cell refresh established resolved geometry.
+        source.record(articleID: 1, frame: frame, viewportTop: 0)
+        _ = tracker.receive(uikitGeometry(y: 0, frames: source.frames), enabled: true)
+        // `didEndDisplaying` may arrive before the scroll callback; it preserves
+        // the same resolved frame rather than requiring a layout lookup.
+        source.record(articleID: 1, frame: frame, viewportTop: 20)
+
+        XCTAssertEqual(tracker.receive(uikitGeometry(y: 20, frames: source.frames), enabled: true).batch.articleIDs, [1])
+    }
+
+    func testResolvedFrameSourceIsBoundedIndependentlyOfLoadedArticles() {
+        var source = IOSUIKitResolvedScrolloverFrameStore()
+        for id in 1...8_000 {
+            source.record(articleID: Int64(id), frame: .init(x: 0, y: CGFloat(id) * 10, width: 320, height: 10), viewportTop: CGFloat(id) * 10)
+        }
+
+        XCTAssertLessThanOrEqual(source.count, IOSUIKitResolvedScrolloverFrameStore.capacity)
+    }
+
     func testUIKitStructuralSnapshotChangeResetsGeometrySafely() {
         let tracker = IOSUIKitScrolloverGeometryTracker()
         let firstFrames: [Int64: CGRect] = [1: .init(x: 0, y: 0, width: 320, height: 20)]

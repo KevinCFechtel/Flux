@@ -289,6 +289,30 @@ struct IOSUIKitScrolloverGeometryResult: Equatable {
     let batch: IOSScrolloverBatch
 }
 
+/// Resolved frames captured from real collection-view cells. This is deliberately
+/// smaller than the tracker's crossing window: it bridges lifecycle callback order
+/// without becoming a second geometry cache for the complete collection.
+struct IOSUIKitResolvedScrolloverFrameStore {
+    static let capacity = 96
+    private var framesByID: [Int64: CGRect] = [:]
+
+    var frames: [Int64: CGRect] { framesByID }
+    var count: Int { framesByID.count }
+
+    mutating func record(articleID: Int64, frame: CGRect, viewportTop: CGFloat) {
+        framesByID[articleID] = frame
+        guard framesByID.count > Self.capacity else { return }
+        let retained = framesByID
+            .sorted { abs($0.value.midY - viewportTop) < abs($1.value.midY - viewportTop) }
+            .prefix(Self.capacity)
+        framesByID = Dictionary(uniqueKeysWithValues: retained.map { ($0.key, $0.value) })
+    }
+
+    mutating func removeAll() {
+        framesByID.removeAll(keepingCapacity: true)
+    }
+}
+
 /// Non-observable, bounded geometry detector owned by the UIKit Timeline.
 /// It only emits IDs that were actually observed in the viewport during a user-driven
 /// interaction and then crossed the effective upper viewport boundary while moving forward.
@@ -638,6 +662,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private var showsRefreshControl = true
     private var scrolloverPhase: IOSScrolloverPresentationPhase = .idle
     private var scrolloverLayoutGeneration: UInt64 = 0
+    private var resolvedScrolloverFrames = IOSUIKitResolvedScrolloverFrameStore()
     private var lastLayoutWidth: CGFloat = 0
     private var prefetchTasks: [Int64: Task<Void, Never>] = [:]
     private let refreshControl = UIRefreshControl()
@@ -854,8 +879,15 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        recordResolvedScrolloverFrame(for: cell)
         guard !orderedIDs.isEmpty, indexPath.item >= max(0, orderedIDs.count - 5) else { return }
         onApproachingEnd?()
+    }
+
+    func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        // Keep the resolved frame briefly so either lifecycle/scroll callback order
+        // can still prove a crossing using the same content-coordinate geometry.
+        recordResolvedScrolloverFrame(for: cell)
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
@@ -892,7 +924,24 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     private func invalidateScrolloverGeometry() {
         scrolloverLayoutGeneration &+= 1
+        resolvedScrolloverFrames.removeAll()
         scrolloverGeometryTracker.invalidateGeometry()
+    }
+
+    private func recordResolvedScrolloverFrame(for cell: UICollectionViewCell) {
+        guard let articleCell = cell as? IOSUIKitArticleCell,
+              let articleID = articleCell.representedArticleID else { return }
+        resolvedScrolloverFrames.record(
+            articleID: articleID,
+            frame: articleCell.frame,
+            viewportTop: collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+        )
+    }
+
+    private func refreshResolvedVisibleScrolloverFrames() {
+        for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
+            recordResolvedScrolloverFrame(for: cell)
+        }
     }
 
     private func sampleScrolloverGeometry() {
@@ -900,27 +949,16 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
         let effectiveTop = collectionView.contentOffset.y + collectionView.adjustedContentInset.top
         let effectiveBottom = collectionView.contentOffset.y + collectionView.bounds.height - collectionView.adjustedContentInset.bottom
-        let viewportHeight = max(1, effectiveBottom - effectiveTop)
-        let sensingRect = CGRect(
-            x: collectionView.bounds.minX,
-            y: max(0, effectiveTop - viewportHeight),
-            width: collectionView.bounds.width,
-            height: viewportHeight * 3
-        )
-        let attributes = collectionView.collectionViewLayout.layoutAttributesForElements(in: sensingRect) ?? []
-        var rowFrames: [Int64: CGRect] = [:]
-        rowFrames.reserveCapacity(attributes.count)
-        for attribute in attributes where attribute.representedElementCategory == .cell {
-            guard let id = dataSource.itemIdentifier(for: attribute.indexPath) else { continue }
-            rowFrames[id] = attribute.frame
-        }
+        // `visibleCells` are UIKit-resolved geometry. The retained source covers a
+        // cell whose didEndDisplaying arrives on either side of this scroll callback.
+        refreshResolvedVisibleScrolloverFrames()
 
         let sample = IOSUIKitScrolloverGeometrySample(
             contentOffsetY: collectionView.contentOffset.y,
             effectiveTop: effectiveTop,
             effectiveBottom: effectiveBottom,
             contentHeight: collectionView.contentSize.height,
-            rowFrames: rowFrames,
+            rowFrames: resolvedScrolloverFrames.frames,
             layoutGeneration: scrolloverLayoutGeneration
         )
         let result = scrolloverGeometryTracker.receive(sample, enabled: true)

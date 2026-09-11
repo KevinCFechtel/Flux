@@ -1,6 +1,6 @@
 # U3.6 — UIKit Timeline Rendering Performance Repair
 
-> **Status: U3.6.1 AND U3.6.2 COMPLETE; U3.6.3 AND U3.6.4 PENDING**
+> **Status: U3.6.1, U3.6.2, AND U3.6.3 COMPLETE; U3.6.4 PENDING**
 >
 > Baseline: `main` at `2dbec0d3fc0368b15d04ff679fd79dc5e6bcdfc7`.
 >
@@ -235,6 +235,35 @@ Required implementation properties:
 
 Do not replace the crossing model with exposure timing, debounce, `willDisplay`
 semantics or a skipped-index heuristic.
+
+### U3.6.3 implementation
+
+U3.6.3 is complete. The controller records `IOSUIKitArticleCell.frame` values
+from `willDisplay`, `didEndDisplaying`, and the already-resolved bounded
+`collectionView.visibleCells` set. Cell frames, offsets, adjusted viewport
+bounds, and content height all remain in collection-view content coordinates.
+`scrollViewDidScroll` refreshes only that visible cell set and passes the
+resolved source to the existing tracker; it does not ask the collection layout
+for attributes or force layout.
+
+`IOSUIKitResolvedScrolloverFrameStore` holds at most 96 source frames, retaining
+the frames nearest the effective upper boundary. The tracker retains its existing
+96-frame crossing window, for an explicit maximum of 192 retained frame records
+across source and tracker. Both are explicitly bounded independently of loaded
+article count. Recording `didEndDisplaying` preserves a just-exited resolved
+frame, while refreshing `visibleCells` covers the converse callback order; the
+tracker consequently evaluates either ordering against the same retained frame.
+
+Width, Dynamic Type, insets, structural snapshots, and presentation layout input
+continue to advance the controller layout generation and clear both resolved
+source and tracker baseline. The next valid sample rebaselines during the current
+interaction. Terminal completion remains in the tracker and still requires an
+observed visible row plus a forward transition into bottom.
+
+Regression tests cover the resolved source's callback-order retention and bound;
+the established production tracker tests continue to cover forward/backward and
+reversal behavior, sub-point movement, rearming, generation transitions, bottom
+completion, initial-bottom safety, disabled state, and long-feed boundedness.
 
 ## 6. U3.6.4 — Image scheduling and consumer safety
 
