@@ -1,6 +1,6 @@
 # iOS UIKit Timeline — Decision and Implementation Handoff
 
-> **Decision accepted: 2026-09-11. Implementation: NOT STARTED by this amendment.**
+> **Decision accepted: 2026-09-11. U2 Native Timeline: COMPLETE. U3-U5: PENDING.**
 >
 > Build the Article Timeline using an owned `UICollectionView` and native UIKit
 > article cells. This is the selected architecture, not a proposal to benchmark
@@ -218,7 +218,7 @@ do not defer correctness until the final package.
 | Package | Scope and completion gate | Status at this amendment |
 |---|---|---|
 | U1 — Contract | Record UIKit container/native cells, rationale, boundaries, behavior, and this handoff. | COMPLETE — documentation only |
-| U2 — Native Timeline | Implement the owned controller, bridge, native reusable cells, stable ID snapshots, sizing, image consumers, system swipes/context menus/refresh, and existing shell integration. Register sources and preserve Search dependencies. | PENDING |
+| U2 — Native Timeline | Implement the owned controller, bridge, native reusable cells, stable ID snapshots, sizing, image consumers, system swipes/context menus/refresh, and existing shell integration. Register sources and preserve Search dependencies. | COMPLETE — validated Debug simulator build/XCTest baseline. Status-only read/starred changes target matching visible native cells by stable ID without a structural snapshot; structural membership/order changes use diffable snapshots. The UIKit Timeline intentionally has no production Scrollover detector yet. |
 | U3 — Geometry and status | Implement the coherent UIKit detector and targeted status path. Connect it to existing mutation entry points; cover the geometry regression cases below and stable heights/membership. | PENDING |
 | U4 — Session mutation worker | Complete queue lifetime, origin attribution, bounded drains, explicit-action ordering, lifecycle and failure handling using a controllably blocked real writer path in tests. | PENDING |
 | U5 — Cleanup and acceptance | Remove superseded Timeline code, verify complete interaction/localization/accessibility behavior, run native checks and focused device traces, record actual remaining limitations. | PENDING |
@@ -229,6 +229,15 @@ requests one package, implement that package and its validation without silently
 expanding to unrelated phases. Temporary work-in-progress on a branch is not a
 supported production fallback. Do not mark the amendment complete until the
 replacement and required acceptance are complete.
+
+### U2 baseline
+
+The production Timeline now has the owned UIKit collection-view baseline before
+U3: scrolling, native cell reuse, image consumers/prefetching, and ordinary
+article interactions operate without Scrollover sensing. The legacy
+`IOSScrolloverGeometryController` remains only as temporary regression-test
+reference and does not drive this UICollectionView. U3 must add its new UIKit
+geometry detector without coupling it to the retired SwiftUI callback path.
 
 ## 6. Required regression cases
 

@@ -21,6 +21,12 @@ enum IOSArticleImagePrefetchPolicy {
     }
 }
 
+enum IOSUIKitTimelineSnapshotPolicy {
+    static func requiresStructuralUpdate(previousIDs: [Int64], newIDs: [Int64]) -> Bool {
+        previousIDs != newIDs
+    }
+}
+
 /// Derived only with a structural article snapshot, never from a visibility update.
 struct IOSArticleImagePrefetchMetadata {
     private(set) var orderedIDs: [Int64] = []
@@ -442,7 +448,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
 
         let previousItems = itemsByID
         let newIDs = items.map { $0.article.id }
-        let structureChanged = newIDs != orderedIDs
+        let structureChanged = IOSUIKitTimelineSnapshotPolicy.requiresStructuralUpdate(previousIDs: orderedIDs, newIDs: newIDs)
         let layoutInputsChanged = mode != newMode || previewLines != newPreviewLines
         let iconVariantChanged = iconVariant != newIconVariant
         let resetChanged = scrollResetRevision != nil && scrollResetRevision != newScrollResetRevision
@@ -633,8 +639,10 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
             guard let id = dataSource.itemIdentifier(for: indexPath), prefetchTasks[id] == nil,
                   let item = itemsByID[id], let request = imageRequest(for: item)
             else { continue }
-            prefetchTasks[id] = Task {
+            prefetchTasks[id] = Task { [weak self] in
                 _ = try? await ArticleImagePipeline.shared.image(for: request)
+                guard !Task.isCancelled else { return }
+                self?.prefetchTasks[id] = nil
             }
         }
     }
@@ -823,9 +831,9 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
 
         metadataBulletLabel.text = "•"
         metadataBulletLabel.textColor = .secondaryLabel
-        metadataBulletLabel.font = .preferredFont(forTextStyle: .caption)
+        metadataBulletLabel.font = UIFont.preferredFont(forTextStyle: .caption1)
         metadataBulletLabel.adjustsFontForContentSizeCategory = true
-        dateLabel.font = .preferredFont(forTextStyle: .caption)
+        dateLabel.font = UIFont.preferredFont(forTextStyle: .caption1)
         dateLabel.adjustsFontForContentSizeCategory = true
         dateLabel.textColor = .secondaryLabel
         dateLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
