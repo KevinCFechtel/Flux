@@ -966,7 +966,7 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
             isLandscapeVisual = ArticlePresentationLayout.usesLandscapeVisual(mode: mode, availableWidth: availableWidth)
             switch mode {
             case .compact:
-                outerVerticalPadding = 6
+                outerVerticalPadding = 11
             case .visual:
                 outerVerticalPadding = isLandscapeVisual ? 13 : 15
             }
