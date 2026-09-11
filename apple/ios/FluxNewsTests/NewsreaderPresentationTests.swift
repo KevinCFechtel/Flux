@@ -481,6 +481,12 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticlePresentationMode(rawValue: "compact"), .compact)
     }
 
+    func testUIKitTimelineUsesStructuralSnapshotsOnlyForMembershipOrOrderChanges() {
+        XCTAssertFalse(IOSUIKitTimelineSnapshotPolicy.requiresStructuralUpdate(previousIDs: [1, 2, 3], newIDs: [1, 2, 3]))
+        XCTAssertTrue(IOSUIKitTimelineSnapshotPolicy.requiresStructuralUpdate(previousIDs: [1, 2, 3], newIDs: [1, 3, 2]))
+        XCTAssertTrue(IOSUIKitTimelineSnapshotPolicy.requiresStructuralUpdate(previousIDs: [1, 2, 3], newIDs: [1, 2]))
+    }
+
     @MainActor
     func testManualSyncWithoutAttachedCoreIsIgnoredAndPreservesScope() async {
         let store = NewsreaderStore(defaults: UserDefaults())
