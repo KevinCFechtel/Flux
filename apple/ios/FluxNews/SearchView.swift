@@ -1,6 +1,49 @@
 import SwiftUI
 
 struct SearchView: View {
+    @ObservedObject var store: IOSSearchStore
+    var newsreaderStore: NewsreaderStore
+    let onArticleTap: (ArticleSummary) -> Void
+    let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
+    let onSetRead: (ArticleSummary, Bool) -> Void
+    let onSetStarred: (ArticleSummary, Bool) -> Void
+    @State private var searchInterfacePresented = true
+
+    var body: some View {
+        SearchResultsContent(
+            store: store,
+            newsreaderStore: newsreaderStore,
+            onArticleTap: onArticleTap,
+            onArticleAction: onArticleAction,
+            onSetRead: onSetRead,
+            onSetStarred: onSetStarred
+        )
+        .navigationTitle(store.hasSearched ? "Search Results" : "Search")
+        .navigationBarTitleDisplayMode(.large)
+        .searchable(
+            text: $store.query,
+            isPresented: $searchInterfacePresented,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Search Miniflux"
+        )
+        .onSubmit(of: .search) { store.submit() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Clear") {
+                    store.clear()
+                    searchInterfacePresented = true
+                }
+                .disabled(!store.hasSearched && store.query.isEmpty)
+            }
+        }
+        .onAppear {
+            searchInterfacePresented = true
+        }
+        .onDisappear { store.invalidate() }
+    }
+}
+
+private struct SearchResultsContent: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var store: IOSSearchStore
     var newsreaderStore: NewsreaderStore
@@ -54,17 +97,6 @@ struct SearchView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.background)
-        .navigationTitle(store.hasSearched ? "Search Results" : "Search")
-        .navigationBarTitleDisplayMode(.large)
-        .searchable(text: $store.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search Miniflux")
-        .onSubmit(of: .search) { store.submit() }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Clear") { store.clear() }
-                    .disabled(!store.hasSearched && store.query.isEmpty)
-            }
-        }
-        .onDisappear { store.invalidate() }
     }
 
     private func timelineItems(iconVariant: FeedIconVariant) -> [IOSUIKitArticleTimelineItem] {
