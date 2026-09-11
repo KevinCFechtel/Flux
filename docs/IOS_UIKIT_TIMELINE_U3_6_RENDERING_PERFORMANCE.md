@@ -1,6 +1,6 @@
 # U3.6 — UIKit Timeline Rendering Performance Repair
 
-> **Status: ACCEPTED / IMPLEMENTATION PENDING**
+> **Status: U3.6.1 AND U3.6.2 COMPLETE; U3.6.3 AND U3.6.4 PENDING**
 >
 > Baseline: `main` at `2dbec0d3fc0368b15d04ff679fd79dc5e6bcdfc7`.
 >
@@ -178,6 +178,36 @@ Required properties:
   observes the same status/icon correctness rules;
 - no duplicate Swift durable/domain truth is introduced. Rust/Core and existing
   store semantics remain authoritative.
+
+### U3.6.2 implementation
+
+U3.6.2 is complete. `NewsreaderStore` constructs
+`IOSUIKitArticleTimelineStructuralState` only when `replaceArticles` adopts a
+new Core snapshot. The state contains ordered immutable article/content records
+and a monotonic structural revision; it is the sole input that lets the UIKit
+controller rebuild its ID map or apply a diffable snapshot. Presentation-mode
+and preview-line changes remain explicit layout inputs, not status snapshots.
+
+`IOSUIKitArticleTimelinePresentationBridge` is a MainActor-owned, retained
+overlay between the stores and the controller. Article deltas carry an article
+ID, read/starred values, and the row mutation revision. The bridge stores the
+newest state by ID and rejects lower revisions before forwarding it. The
+controller applies the state only to the matching bound cell; later
+configuration resolves its retained latest state, which covers offscreen and
+reused cells without height invalidation. Explicit unread deltas additionally
+carry a targeted Scrollover rearm flag, eliminating the former whole-item scan.
+
+Feed-icon completions publish a feed-ID/variant/image/revision delta through the
+same bridge. The controller updates only bound cells whose prepared structural
+feed ID matches and resolves the retained icon when a cell later binds. Search
+owns its result structural state and status bridge, while it attaches the shared
+Newsreader feed-icon bridge, so it continues to use the same UIKit renderer
+without Timeline Scrollover behavior.
+
+Production controller counters are covered by XCTest to assert that targeted
+read, starred, unread-rearm, and icon deltas do not cause structural
+reconciliation or a diffable snapshot. These are bridge-work contract tests,
+not a device performance measurement.
 
 ## 5. U3.6.3 — Resolved visible-frame Scrollover sampling
 

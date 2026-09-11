@@ -389,6 +389,103 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(first == second)
     }
 
+    @MainActor
+    func testTargetedReadAndStarredDeltasDoNotReconcileStructuralTimelineInput() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+        let structuralCount = controller.structuralReconciliationCount
+        let snapshotCount = controller.structuralSnapshotApplicationCount
+
+        bridge.publishArticle(.init(articleID: 1, state: .init(isRead: true, isStarred: false, revision: 1), rearmScrollover: false))
+        bridge.publishArticle(.init(articleID: 1, state: .init(isRead: true, isStarred: true, revision: 2), rearmScrollover: false))
+
+        XCTAssertEqual(controller.structuralReconciliationCount, structuralCount)
+        XCTAssertEqual(controller.structuralSnapshotApplicationCount, snapshotCount)
+        XCTAssertEqual(controller.articlePresentationApplicationCount, 2)
+    }
+
+    @MainActor
+    func testFeedIconDeltaDoesNotApplyStructuralSnapshot() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+        let structuralCount = controller.structuralReconciliationCount
+        let snapshotCount = controller.structuralSnapshotApplicationCount
+
+        bridge.publishFeedIcon(.init(key: .init(feedID: 10, variant: .normal), image: UIImage(), revision: 1))
+
+        XCTAssertEqual(controller.structuralReconciliationCount, structuralCount)
+        XCTAssertEqual(controller.structuralSnapshotApplicationCount, snapshotCount)
+        XCTAssertEqual(controller.feedIconPresentationApplicationCount, 1)
+    }
+
+    @MainActor
+    func testExplicitUnreadDeltaRearmsOnlyTargetedScrolloverArticle() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+
+        bridge.publishArticle(.init(articleID: 1, state: .init(isRead: false, isStarred: false, revision: 1), rearmScrollover: true))
+
+        XCTAssertEqual(controller.scrolloverRearmCount, 1)
+        XCTAssertEqual(controller.structuralReconciliationCount, 1)
+    }
+
+    @MainActor
+    func testBridgeRejectsStalePresentationAndRetainsLatestOffscreenState() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let article = timelineArticle(id: 1)
+        bridge.publishArticle(.init(articleID: 1, state: .init(isRead: true, isStarred: true, revision: 2), rearmScrollover: false))
+        bridge.publishArticle(.init(articleID: 1, state: .init(isRead: false, isStarred: false, revision: 1), rearmScrollover: true))
+
+        XCTAssertEqual(bridge.articleState(for: 1, fallback: article), .init(isRead: true, isStarred: true, revision: 2))
+    }
+
+    @MainActor
+    func testStructuralOrderChangeAppliesAnotherSnapshot() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+        let firstSnapshots = controller.structuralSnapshotApplicationCount
+        let articles = [timelineArticle(id: 2), timelineArticle(id: 1)]
+        controller.update(
+            structuralState: timelineStructuralState(articles, revision: 2),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+        XCTAssertEqual(controller.structuralSnapshotApplicationCount, firstSnapshots + 1)
+    }
+
+    @MainActor
+    private func makeTimelineController(bridge: IOSUIKitArticleTimelinePresentationBridge) -> IOSUIKitArticleTimelineController {
+        let controller = IOSUIKitArticleTimelineController()
+        let articles = [timelineArticle(id: 1), timelineArticle(id: 2)]
+        bridge.replaceArticleStates(Dictionary(uniqueKeysWithValues: articles.map { ($0.id, .init(isRead: $0.isRead, isStarred: $0.isStarred, revision: 0)) }))
+        controller.update(
+            structuralState: timelineStructuralState(articles, revision: 1),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+        return controller
+    }
+
+    private func timelineStructuralState(_ articles: [ArticleSummary], revision: UInt64) -> IOSUIKitArticleTimelineStructuralState {
+        .init(items: articles.map { .init(article: $0, content: ArticleRowContent(article: $0)) }, revision: revision)
+    }
+
+    private func timelineArticle(id: Int64) -> ArticleSummary {
+        .init(id: id, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article \(id)", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
+    }
+
     private func makePresentation(article: ArticleSummary, fallbackRead: Bool, fallbackStarred: Bool, rowState: ArticleRowPresentationState?, feedIcon: IOSFeedIconPresentationState? = nil) -> ArticlePresentationView {
         ArticlePresentationView(content: ArticleRowContent(article: article), fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: .compact, previewLines: .standard, availableWidth: 320, feedIcon: feedIcon ?? IOSFeedIconPresentationState(), iconVariant: .normal, onRequestFeedIcon: {}, onTap: {}, onAction: { _ in }, onSetRead: { _ in }, onSetStarred: { _ in })
     }

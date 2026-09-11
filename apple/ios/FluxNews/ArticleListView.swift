@@ -473,17 +473,85 @@ enum IOSArticleListEmptyState: Equatable {
     }
 }
 
+struct IOSUIKitArticleTimelineStructuralItem {
+    let article: ArticleSummary
+    let content: ArticleRowContent
+}
+
+struct IOSUIKitArticlePresentationState: Equatable {
+    let isRead: Bool
+    let isStarred: Bool
+    let revision: UInt64
+}
+
+struct IOSUIKitArticlePresentationDelta {
+    let articleID: Int64
+    let state: IOSUIKitArticlePresentationState
+    let rearmScrollover: Bool
+}
+
+struct IOSUIKitFeedIconPresentationDelta {
+    let key: IOSFeedIconKey
+    let image: UIImage?
+    let revision: UInt64
+}
+
+/// Owned by the presentation layer, not SwiftUI observation. It retains current
+/// mutable state so a later cell binding never needs a complete row reconstruction.
+@MainActor
+final class IOSUIKitArticleTimelinePresentationBridge {
+    private weak var controller: IOSUIKitArticleTimelineController?
+    private var articleStates: [Int64: IOSUIKitArticlePresentationState] = [:]
+    private var feedIcons: [IOSFeedIconKey: IOSUIKitFeedIconPresentationDelta] = [:]
+
+    func attach(_ controller: IOSUIKitArticleTimelineController, appliesArticleState: Bool = true) {
+        self.controller = controller
+        if appliesArticleState { controller.applyPresentationBridgeState(self) }
+    }
+
+    func replaceArticleStates(_ states: [Int64: IOSUIKitArticlePresentationState]) {
+        articleStates = states
+    }
+
+    func publishArticle(_ delta: IOSUIKitArticlePresentationDelta) {
+        guard delta.state.revision >= articleStates[delta.articleID]?.revision ?? 0 else { return }
+        articleStates[delta.articleID] = delta.state
+        controller?.applyArticlePresentation(delta)
+    }
+
+    func publishFeedIcon(_ delta: IOSUIKitFeedIconPresentationDelta) {
+        guard delta.revision >= feedIcons[delta.key]?.revision ?? 0 else { return }
+        feedIcons[delta.key] = delta
+        controller?.applyFeedIconPresentation(delta)
+    }
+
+    func articleState(for id: Int64, fallback: ArticleSummary) -> IOSUIKitArticlePresentationState {
+        articleStates[id] ?? .init(isRead: fallback.isRead, isStarred: fallback.isStarred, revision: 0)
+    }
+
+    func feedIcon(for feedID: Int64, variant: FeedIconVariant) -> UIImage? {
+        feedIcons[.init(feedID: feedID, variant: variant)]?.image
+    }
+}
+
+struct IOSUIKitArticleTimelineStructuralState {
+    let items: [IOSUIKitArticleTimelineStructuralItem]
+    let revision: UInt64
+}
+
 struct IOSUIKitArticleTimelineItem {
     let article: ArticleSummary
     let content: ArticleRowContent
-    var isRead: Bool
-    var isStarred: Bool
+    let isRead: Bool
+    let isStarred: Bool
     let feedIconImage: UIImage?
 }
 
 @MainActor
 struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
-    let items: [IOSUIKitArticleTimelineItem]
+    let structuralState: IOSUIKitArticleTimelineStructuralState
+    let presentationBridge: IOSUIKitArticleTimelinePresentationBridge
+    let feedIconPresentationBridge: IOSUIKitArticleTimelinePresentationBridge
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
     let iconVariant: FeedIconVariant
@@ -525,7 +593,9 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
         controller.onScrolloverDirection = onScrolloverDirection
         controller.onScrolloverPhase = onScrolloverPhase
         controller.update(
-            items: items,
+            structuralState: structuralState,
+            presentationBridge: presentationBridge,
+            feedIconPresentationBridge: feedIconPresentationBridge,
             mode: mode,
             previewLines: previewLines,
             iconVariant: iconVariant,
@@ -555,7 +625,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Int64>!
     private var orderedIDs: [Int64] = []
-    private var itemsByID: [Int64: IOSUIKitArticleTimelineItem] = [:]
+    private var itemsByID: [Int64: IOSUIKitArticleTimelineStructuralItem] = [:]
+    private var presentationByID: [Int64: IOSUIKitArticlePresentationState] = [:]
+    private weak var presentationBridge: IOSUIKitArticleTimelinePresentationBridge?
+    private weak var feedIconPresentationBridge: IOSUIKitArticleTimelinePresentationBridge?
+    private var structuralRevision: UInt64?
     private var mode: ArticlePresentationMode = .visual
     private var previewLines: ArticlePreviewLines = .standard
     private var iconVariant: FeedIconVariant = .normal
@@ -569,6 +643,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private let refreshControl = UIRefreshControl()
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
     private let articleHeightCache = IOSUIKitArticleCellHeightCache(capacity: 512)
+    private(set) var structuralReconciliationCount = 0
+    private(set) var structuralSnapshotApplicationCount = 0
+    private(set) var articlePresentationApplicationCount = 0
+    private(set) var feedIconPresentationApplicationCount = 0
+    private(set) var scrolloverRearmCount = 0
 
     private static func makeListLayout() -> UICollectionViewLayout {
         var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
@@ -610,7 +689,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         dataSource = UICollectionViewDiffableDataSource<Section, Int64>(collectionView: collectionView) { [weak self] collectionView, indexPath, id in
             guard let self,
                   let cell = collectionView.dequeueReusableCell(withReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier, for: indexPath) as? IOSUIKitArticleCell,
-                  let item = self.itemsByID[id]
+                  let item = self.renderedItem(for: id)
             else { return nil }
             self.configure(cell, item: item)
             return cell
@@ -625,7 +704,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         cancelAllPrefetch()
         invalidateScrolloverGeometry()
         for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
-            guard let id = cell.representedArticleID, let item = itemsByID[id] else { continue }
+            guard let id = cell.representedArticleID, let item = renderedItem(for: id) else { continue }
             configure(cell, item: item)
             cell.setNeedsLayout()
         }
@@ -638,7 +717,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     func update(
-        items: [IOSUIKitArticleTimelineItem],
+        structuralState: IOSUIKitArticleTimelineStructuralState,
+        presentationBridge newPresentationBridge: IOSUIKitArticleTimelinePresentationBridge,
+        feedIconPresentationBridge newFeedIconPresentationBridge: IOSUIKitArticleTimelinePresentationBridge,
         mode newMode: ArticlePresentationMode,
         previewLines newPreviewLines: ArticlePreviewLines,
         iconVariant newIconVariant: FeedIconVariant,
@@ -648,16 +729,10 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     ) {
         loadViewIfNeeded()
 
-        let previousItems = itemsByID
-        let newIDs = items.map { $0.article.id }
-        let structureChanged = IOSUIKitTimelineSnapshotPolicy.requiresStructuralUpdate(previousIDs: orderedIDs, newIDs: newIDs)
+        let structuralChanged = structuralRevision != structuralState.revision
         let layoutInputsChanged = mode != newMode || previewLines != newPreviewLines
         let iconVariantChanged = iconVariant != newIconVariant
         let resetChanged = scrollResetRevision != nil && scrollResetRevision != newScrollResetRevision
-        let explicitlyUnreadIDs = items.compactMap { item -> Int64? in
-            guard previousItems[item.article.id]?.isRead == true, !item.isRead else { return nil }
-            return item.article.id
-        }
 
         mode = newMode
         previewLines = newPreviewLines
@@ -666,44 +741,41 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         markReadOnScrolloverEnabled = newMarkReadOnScrolloverEnabled
         showsRefreshControl = newShowsRefreshControl
         collectionView.refreshControl = showsRefreshControl ? refreshControl : nil
-        orderedIDs = newIDs
-        itemsByID = Dictionary(uniqueKeysWithValues: items.map { ($0.article.id, $0) })
+        if presentationBridge !== newPresentationBridge {
+            presentationBridge = newPresentationBridge
+            newPresentationBridge.attach(self)
+        }
+        if feedIconPresentationBridge !== newFeedIconPresentationBridge {
+            feedIconPresentationBridge = newFeedIconPresentationBridge
+            newFeedIconPresentationBridge.attach(self, appliesArticleState: false)
+        }
 
-        if structureChanged {
+        if structuralChanged {
+            structuralReconciliationCount &+= 1
+            let newIDs = structuralState.items.map(\.article.id)
+            orderedIDs = newIDs
+            itemsByID = Dictionary(uniqueKeysWithValues: structuralState.items.map { ($0.article.id, $0) })
+            presentationByID = Dictionary(uniqueKeysWithValues: structuralState.items.map {
+                ($0.article.id, newPresentationBridge.articleState(for: $0.article.id, fallback: $0.article))
+            })
+            structuralRevision = structuralState.revision
             scrolloverGeometryTracker.updateSnapshot(newIDs)
             invalidateScrolloverGeometry()
             var snapshot = NSDiffableDataSourceSnapshot<Section, Int64>()
             snapshot.appendSections([.main])
             snapshot.appendItems(newIDs)
             dataSource.apply(snapshot, animatingDifferences: false)
+            structuralSnapshotApplicationCount &+= 1
         }
-        if !explicitlyUnreadIDs.isEmpty { scrolloverGeometryTracker.rearm(explicitlyUnreadIDs) }
         if layoutInputsChanged { invalidateScrolloverGeometry() }
 
         var needsLayoutInvalidation = layoutInputsChanged
-        for indexPath in collectionView.indexPathsForVisibleItems {
-            guard let id = dataSource.itemIdentifier(for: indexPath),
-                  let cell = collectionView.cellForItem(at: indexPath) as? IOSUIKitArticleCell,
-                  let newItem = itemsByID[id]
-            else { continue }
-            guard let oldItem = previousItems[id] else {
-                configure(cell, item: newItem)
-                needsLayoutInvalidation = true
-                continue
+        if structuralChanged || layoutInputsChanged || iconVariantChanged {
+            for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
+                guard let id = cell.representedArticleID, let item = renderedItem(for: id) else { continue }
+                configure(cell, item: item)
             }
-
-            if layoutInputsChanged || oldItem.content != newItem.content {
-                configure(cell, item: newItem)
-                needsLayoutInvalidation = true
-            } else {
-                if oldItem.isRead != newItem.isRead || oldItem.isStarred != newItem.isStarred {
-                    cell.updateStatus(isRead: newItem.isRead, isStarred: newItem.isStarred)
-                }
-                if iconVariantChanged || !sameImage(oldItem.feedIconImage, newItem.feedIconImage) {
-                    cell.updateFeedIcon(image: newItem.feedIconImage, title: newItem.content.article.feedTitle)
-                    onRequestFeedIcon?(newItem.content.article.feedId, iconVariant)
-                }
-            }
+            needsLayoutInvalidation = structuralChanged || layoutInputsChanged
         }
 
         if needsLayoutInvalidation {
@@ -714,6 +786,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             invalidateScrolloverGeometry()
             collectionView.setContentOffset(CGPoint(x: 0, y: -collectionView.adjustedContentInset.top), animated: false)
         }
+    }
+
+    private func renderedItem(for id: Int64) -> IOSUIKitArticleTimelineItem? {
+        guard let item = itemsByID[id] else { return nil }
+        let presentation = presentationByID[id] ?? presentationBridge?.articleState(for: id, fallback: item.article) ?? .init(isRead: item.article.isRead, isStarred: item.article.isStarred, revision: 0)
+        return .init(article: item.article, content: item.content, isRead: presentation.isRead, isStarred: presentation.isStarred, feedIconImage: feedIconPresentationBridge?.feedIcon(for: item.article.feedId, variant: iconVariant))
     }
 
     private func configure(_ cell: IOSUIKitArticleCell, item: IOSUIKitArticleTimelineItem) {
@@ -729,11 +807,32 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         onRequestFeedIcon?(item.content.article.feedId, iconVariant)
     }
 
-    private func sameImage(_ lhs: UIImage?, _ rhs: UIImage?) -> Bool {
-        switch (lhs, rhs) {
-        case (nil, nil): true
-        case let (lhs?, rhs?): lhs === rhs
-        default: false
+    func applyPresentationBridgeState(_ bridge: IOSUIKitArticleTimelinePresentationBridge) {
+        for id in orderedIDs where itemsByID[id] != nil {
+            presentationByID[id] = bridge.articleState(for: id, fallback: itemsByID[id]!.article)
+        }
+    }
+
+    func applyArticlePresentation(_ delta: IOSUIKitArticlePresentationDelta) {
+        guard let current = presentationByID[delta.articleID], delta.state.revision >= current.revision else { return }
+        articlePresentationApplicationCount &+= 1
+        presentationByID[delta.articleID] = delta.state
+        if delta.rearmScrollover {
+            scrolloverGeometryTracker.rearm([delta.articleID])
+            scrolloverRearmCount &+= 1
+        }
+        guard let indexPath = dataSource.indexPath(for: delta.articleID),
+              let cell = collectionView.cellForItem(at: indexPath) as? IOSUIKitArticleCell else { return }
+        cell.updateStatus(isRead: delta.state.isRead, isStarred: delta.state.isStarred)
+    }
+
+    func applyFeedIconPresentation(_ delta: IOSUIKitFeedIconPresentationDelta) {
+        guard delta.key.variant == iconVariant else { return }
+        feedIconPresentationApplicationCount &+= 1
+        for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
+            guard let id = cell.representedArticleID,
+                  let item = itemsByID[id], item.article.feedId == delta.key.feedID else { continue }
+            cell.updateFeedIcon(image: delta.image, title: item.content.article.feedTitle)
         }
     }
 
@@ -750,7 +849,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         defer { collectionView.deselectItem(at: indexPath, animated: true) }
-        guard let id = dataSource.itemIdentifier(for: indexPath), let item = itemsByID[id] else { return }
+        guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return }
         onArticleTap?(item.article)
     }
 
@@ -830,7 +929,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     func collectionView(_ collectionView: UICollectionView, leadingSwipeActionsConfigurationForItemAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        guard let id = dataSource.itemIdentifier(for: indexPath), let item = itemsByID[id] else { return nil }
+        guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
         let newValue = !item.isRead
         let action = UIContextualAction(style: .normal, title: newValue ? String(localized: "Mark as Read") : String(localized: "Mark as Unread")) { [weak self] _, _, completion in
             self?.setRead(id: id, value: newValue)
@@ -844,7 +943,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     func collectionView(_ collectionView: UICollectionView, trailingSwipeActionsConfigurationForItemAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        guard let id = dataSource.itemIdentifier(for: indexPath), let item = itemsByID[id] else { return nil }
+        guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
         let newValue = !item.isStarred
         let action = UIContextualAction(style: .normal, title: newValue ? String(localized: "Star") : String(localized: "Unstar")) { [weak self] _, _, completion in
             self?.setStarred(id: id, value: newValue)
@@ -858,9 +957,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
-        guard let id = dataSource.itemIdentifier(for: indexPath), let item = itemsByID[id] else { return nil }
+        guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
         return UIContextMenuConfiguration(identifier: NSNumber(value: id), previewProvider: nil) { [weak self] _ in
-            guard let self, let current = self.itemsByID[id] else { return nil }
+            guard let self, let current = self.renderedItem(for: id) else { return nil }
             var actions: [UIMenuElement] = [
                 UIAction(title: current.isStarred ? String(localized: "Unstar") : String(localized: "Star"), image: UIImage(systemName: current.isStarred ? "star.slash" : "star")) { [weak self] _ in
                     self?.setStarred(id: id, value: !current.isStarred)
@@ -900,23 +999,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func setRead(id: Int64, value: Bool) {
-        guard var item = itemsByID[id] else { return }
-        item.isRead = value
-        itemsByID[id] = item
-        if !value { scrolloverGeometryTracker.rearm([id]) }
-        if let indexPath = dataSource.indexPath(for: id), let cell = collectionView.cellForItem(at: indexPath) as? IOSUIKitArticleCell {
-            cell.updateStatus(isRead: value, isStarred: item.isStarred)
-        }
+        guard let item = renderedItem(for: id) else { return }
         onSetRead?(item.article, value)
     }
 
     private func setStarred(id: Int64, value: Bool) {
-        guard var item = itemsByID[id] else { return }
-        item.isStarred = value
-        itemsByID[id] = item
-        if let indexPath = dataSource.indexPath(for: id), let cell = collectionView.cellForItem(at: indexPath) as? IOSUIKitArticleCell {
-            cell.updateStatus(isRead: item.isRead, isStarred: value)
-        }
+        guard let item = renderedItem(for: id) else { return }
         onSetStarred?(item.article, value)
     }
 
@@ -924,7 +1012,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         guard mode.showsArticleImage else { return }
         for indexPath in indexPaths {
             guard let id = dataSource.itemIdentifier(for: indexPath), prefetchTasks[id] == nil,
-                  let item = itemsByID[id], let request = imageRequest(for: item)
+                  let item = renderedItem(for: id), let request = imageRequest(for: item)
             else { continue }
             prefetchTasks[id] = Task { [weak self] in
                 _ = try? await ArticleImagePipeline.shared.image(for: request)
@@ -1541,7 +1629,9 @@ struct ArticleListView: View {
                 ContentUnavailableView("No News", systemImage: "newspaper")
             } else {
                 IOSUIKitArticleTimelineView(
-                    items: timelineItems(iconVariant: iconVariant),
+                    structuralState: store.timelineStructuralState,
+                    presentationBridge: store.timelinePresentationBridge,
+                    feedIconPresentationBridge: store.timelinePresentationBridge,
                     mode: store.articlePresentationMode,
                     previewLines: store.articlePreviewLines,
                     iconVariant: iconVariant,
@@ -1569,19 +1659,6 @@ struct ArticleListView: View {
         }
     }
 
-    private func timelineItems(iconVariant: FeedIconVariant) -> [IOSUIKitArticleTimelineItem] {
-        store.articles.map { article in
-            let rowState = store.rowPresentationState(for: article)
-            let feedIcon = store.feedIconPresentationState(for: article.feedId, variant: iconVariant)
-            return IOSUIKitArticleTimelineItem(
-                article: article,
-                content: rowState.content,
-                isRead: rowState.isRead,
-                isStarred: rowState.isStarred,
-                feedIconImage: feedIcon.image
-            )
-        }
-    }
 }
 
 private struct ArticleListBottomOverlay: View {
