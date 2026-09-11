@@ -23,7 +23,6 @@ struct SearchView: View {
         .searchable(
             text: $store.query,
             isPresented: $searchInterfacePresented,
-            placement: .navigationBarDrawer(displayMode: .always),
             prompt: "Search Miniflux"
         )
         .onSubmit(of: .search) { store.submit() }
