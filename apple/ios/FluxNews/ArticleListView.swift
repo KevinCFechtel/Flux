@@ -299,8 +299,6 @@ final class IOSUIKitScrolloverGeometryTracker {
     private var orderedIDs: [Int64] = []
     private var positions: [Int64: Int] = [:]
     private var emittedIDs = Set<Int64>()
-    // This set is limited to the retained viewport window. A row must be here
-    // before its forward crossing can qualify; newly arrived rows are never inferred.
     private var observedVisibleIDs = Set<Int64>()
     private var retainedFrames: [Int64: CGRect] = [:]
     private var previousSample: IOSUIKitScrolloverGeometrySample?
@@ -349,8 +347,6 @@ final class IOSUIKitScrolloverGeometryTracker {
             return .init(direction: nil, batch: .init(articleIDs: []))
         }
 
-        // UIKit may self-invalidate a list layout without an explicit controller
-        // callback. Changed frames cannot be compared across a movement baseline.
         guard !hasMaterialLayoutChange(from: previous, to: sample) else {
             rebaseline(with: sample, enabled: enabled)
             return .init(direction: nil, batch: .init(articleIDs: []))
@@ -376,8 +372,6 @@ final class IOSUIKitScrolloverGeometryTracker {
 
             let atBottom = isAtBottom(sample)
             if !wasAtBottom, atBottom {
-                // Terminal completion is only for trailing rows which were
-                // actually visible before the current bottom-arrival sample.
                 candidates.formUnion(visibleIDs.intersection(observedVisibleIDs))
             }
             wasAtBottom = atBottom
@@ -479,7 +473,7 @@ enum IOSArticleListEmptyState: Equatable {
     }
 }
 
-private struct IOSUIKitArticleTimelineItem {
+struct IOSUIKitArticleTimelineItem {
     let article: ArticleSummary
     let content: ArticleRowContent
     var isRead: Bool
@@ -488,19 +482,21 @@ private struct IOSUIKitArticleTimelineItem {
 }
 
 @MainActor
-private struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
+struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
     let items: [IOSUIKitArticleTimelineItem]
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
     let iconVariant: FeedIconVariant
     let scrollResetRevision: UInt64
     let markReadOnScrolloverEnabled: Bool
+    let showsRefreshControl: Bool
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
     let onSetRead: (ArticleSummary, Bool) -> Void
     let onSetStarred: (ArticleSummary, Bool) -> Void
     let onRequestFeedIcon: (Int64, FeedIconVariant) -> Void
     let onRefresh: () async -> Void
+    let onApproachingEnd: (() -> Void)?
     let onMeaningfulInteraction: () -> Void
     let onScrolloverBatch: (IOSScrolloverBatch) -> Void
     let onScrolloverDirection: (IOSArticleScrollDirection) -> Void
@@ -523,6 +519,7 @@ private struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
         controller.onSetStarred = onSetStarred
         controller.onRequestFeedIcon = onRequestFeedIcon
         controller.onRefresh = onRefresh
+        controller.onApproachingEnd = onApproachingEnd
         controller.onMeaningfulInteraction = onMeaningfulInteraction
         controller.onScrolloverBatch = onScrolloverBatch
         controller.onScrolloverDirection = onScrolloverDirection
@@ -533,13 +530,14 @@ private struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
             previewLines: previewLines,
             iconVariant: iconVariant,
             scrollResetRevision: scrollResetRevision,
-            markReadOnScrolloverEnabled: markReadOnScrolloverEnabled
+            markReadOnScrolloverEnabled: markReadOnScrolloverEnabled,
+            showsRefreshControl: showsRefreshControl
         )
     }
 }
 
 @MainActor
-private final class IOSUIKitArticleTimelineController: UIViewController, UICollectionViewDelegate, UICollectionViewDataSourcePrefetching {
+final class IOSUIKitArticleTimelineController: UIViewController, UICollectionViewDelegate, UICollectionViewDataSourcePrefetching {
     private enum Section: Hashable { case main }
 
     var onArticleTap: ((ArticleSummary) -> Void)?
@@ -548,6 +546,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
     var onSetStarred: ((ArticleSummary, Bool) -> Void)?
     var onRequestFeedIcon: ((Int64, FeedIconVariant) -> Void)?
     var onRefresh: (() async -> Void)?
+    var onApproachingEnd: (() -> Void)?
     var onMeaningfulInteraction: (() -> Void)?
     var onScrolloverBatch: ((IOSScrolloverBatch) -> Void)?
     var onScrolloverDirection: ((IOSArticleScrollDirection) -> Void)?
@@ -562,6 +561,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
     private var iconVariant: FeedIconVariant = .normal
     private var scrollResetRevision: UInt64?
     private var markReadOnScrolloverEnabled = false
+    private var showsRefreshControl = true
     private var scrolloverPhase: IOSScrolloverPresentationPhase = .idle
     private var scrolloverLayoutGeneration: UInt64 = 0
     private var lastLayoutWidth: CGFloat = 0
@@ -569,29 +569,33 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
     private let refreshControl = UIRefreshControl()
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
 
+    private static func makeListLayout() -> UICollectionViewLayout {
+        var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+        configuration.showsSeparators = false
+        configuration.backgroundColor = .clear
+        return UICollectionViewCompositionalLayout.list(using: configuration)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = .clear
 
-        var layoutConfiguration = UICollectionLayoutListConfiguration(appearance: .plain)
-        layoutConfiguration.showsSeparators = false
-        layoutConfiguration.backgroundColor = .clear
         collectionView = UICollectionView(
             frame: .zero,
-            collectionViewLayout: UICollectionViewCompositionalLayout.list(using: layoutConfiguration)
+            collectionViewLayout: Self.makeListLayout()
         )
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         collectionView.backgroundColor = .clear
+        collectionView.contentInsetAdjustmentBehavior = .automatic
         collectionView.showsVerticalScrollIndicator = false
         collectionView.alwaysBounceVertical = true
         collectionView.delegate = self
         collectionView.prefetchDataSource = self
         collectionView.register(IOSUIKitArticleCell.self, forCellWithReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier)
-        collectionView.refreshControl = refreshControl
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _) in
             self.invalidateScrolloverGeometry()
-            self.collectionView.collectionViewLayout.invalidateLayout()
+            self.collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
         }
         view.addSubview(collectionView)
         NSLayoutConstraint.activate([
@@ -621,8 +625,9 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
             guard let id = cell.representedArticleID, let item = itemsByID[id] else { continue }
             configure(cell, item: item)
+            cell.setNeedsLayout()
         }
-        collectionView.collectionViewLayout.invalidateLayout()
+        collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
     }
 
     func update(
@@ -631,7 +636,8 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         previewLines newPreviewLines: ArticlePreviewLines,
         iconVariant newIconVariant: FeedIconVariant,
         scrollResetRevision newScrollResetRevision: UInt64,
-        markReadOnScrolloverEnabled newMarkReadOnScrolloverEnabled: Bool
+        markReadOnScrolloverEnabled newMarkReadOnScrolloverEnabled: Bool,
+        showsRefreshControl newShowsRefreshControl: Bool
     ) {
         loadViewIfNeeded()
 
@@ -651,6 +657,8 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         iconVariant = newIconVariant
         scrollResetRevision = newScrollResetRevision
         markReadOnScrolloverEnabled = newMarkReadOnScrolloverEnabled
+        showsRefreshControl = newShowsRefreshControl
+        collectionView.refreshControl = showsRefreshControl ? refreshControl : nil
         orderedIDs = newIDs
         itemsByID = Dictionary(uniqueKeysWithValues: items.map { ($0.article.id, $0) })
 
@@ -722,7 +730,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
     }
 
     @objc private func refreshTriggered() {
-        guard let onRefresh else {
+        guard showsRefreshControl, let onRefresh else {
             refreshControl.endRefreshing()
             return
         }
@@ -738,6 +746,11 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         onArticleTap?(item.article)
     }
 
+    func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        guard !orderedIDs.isEmpty, indexPath.item >= max(0, orderedIDs.count - 5) else { return }
+        onApproachingEnd?()
+    }
+
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         onMeaningfulInteraction?()
         setScrolloverPhase(.interacting)
@@ -750,10 +763,12 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { sampleScrolloverGeometry() }
         setScrolloverPhase(decelerate ? .decelerating : .idle)
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        sampleScrolloverGeometry()
         setScrolloverPhase(.idle)
     }
 
@@ -774,7 +789,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
     }
 
     private func sampleScrolloverGeometry() {
-        guard collectionView.bounds.height > 0 else { return }
+        guard markReadOnScrolloverEnabled, collectionView.bounds.height > 0 else { return }
 
         let effectiveTop = collectionView.contentOffset.y + collectionView.adjustedContentInset.top
         let effectiveBottom = collectionView.contentOffset.y + collectionView.bounds.height - collectionView.adjustedContentInset.bottom
@@ -801,7 +816,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
             rowFrames: rowFrames,
             layoutGeneration: scrolloverLayoutGeneration
         )
-        let result = scrolloverGeometryTracker.receive(sample, enabled: markReadOnScrolloverEnabled)
+        let result = scrolloverGeometryTracker.receive(sample, enabled: true)
         if let direction = result.direction { onScrolloverDirection?(direction) }
         if !result.batch.articleIDs.isEmpty { onScrolloverBatch?(result.batch) }
     }
@@ -954,13 +969,17 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
             switch mode {
             case .compact:
                 horizontalInset = containerWidth > 700 ? 28 : 10
-                outerVerticalPadding = 2
             case .visual:
                 horizontalInset = containerWidth > 700 ? 28 : 16
-                outerVerticalPadding = 2
             }
             availableWidth = max(0, containerWidth - horizontalInset * 2)
             isLandscapeVisual = ArticlePresentationLayout.usesLandscapeVisual(mode: mode, availableWidth: availableWidth)
+            switch mode {
+            case .compact:
+                outerVerticalPadding = 11
+            case .visual:
+                outerVerticalPadding = isLandscapeVisual ? 13 : 15
+            }
         }
 
         func imageSize(hasImage: Bool) -> CGSize {
@@ -1013,6 +1032,7 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         rootStack.translatesAutoresizingMaskIntoConstraints = false
         rootStack.spacing = 12
         rootStack.alignment = .fill
+        rootStack.distribution = .fill
         contentView.addSubview(rootStack)
         NSLayoutConstraint.activate([
             rootStack.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
@@ -1024,6 +1044,7 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         textStack.axis = .vertical
         textStack.spacing = 7
         textStack.alignment = .fill
+        textStack.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
         titleRow.axis = .horizontal
         titleRow.spacing = 8
@@ -1120,6 +1141,9 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
         articleImageView.clipsToBounds = true
         articleImageView.layer.cornerRadius = 12
         articleImageView.backgroundColor = .tertiarySystemFill
+        articleImageView.setContentHuggingPriority(.required, for: .vertical)
+        articleImageView.setContentCompressionResistancePriority(.required, for: .vertical)
+        articleImageView.setContentCompressionResistancePriority(.required, for: .horizontal)
         imagePlaceholder.translatesAutoresizingMaskIntoConstraints = false
         imagePlaceholder.tintColor = .secondaryLabel
         imagePlaceholder.contentMode = .center
@@ -1136,6 +1160,18 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func preferredLayoutAttributesFitting(_ layoutAttributes: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes {
+        guard let attributes = layoutAttributes.copy() as? UICollectionViewLayoutAttributes else { return layoutAttributes }
+        let targetSize = CGSize(width: layoutAttributes.size.width, height: UIView.layoutFittingCompressedSize.height)
+        let fittedSize = contentView.systemLayoutSizeFitting(
+            targetSize,
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        attributes.size.height = ceil(fittedSize.height)
+        return attributes
     }
 
     override func prepareForReuse() {
@@ -1202,6 +1238,8 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
             articleImageView.isHidden = false
             imageWidthConstraint = articleImageView.widthAnchor.constraint(equalToConstant: imageSize.width)
             imageHeightConstraint = articleImageView.heightAnchor.constraint(equalToConstant: imageSize.height)
+            imageWidthConstraint?.priority = .required
+            imageHeightConstraint?.priority = .required
             imageWidthConstraint?.isActive = true
             imageHeightConstraint?.isActive = true
         } else {
@@ -1212,12 +1250,14 @@ private final class IOSUIKitArticleCell: UICollectionViewCell {
             rootStack.addArrangedSubview(textStack)
             articleImageView.isHidden = false
             imageHeightConstraint = articleImageView.heightAnchor.constraint(equalTo: articleImageView.widthAnchor, multiplier: 1 / ArticlePresentationLayout.portraitImageAspectRatio)
+            imageHeightConstraint?.priority = .required
             imageHeightConstraint?.isActive = true
         }
 
         updateFeedIcon(image: item.feedIconImage, title: item.content.article.feedTitle)
         updateStatus(isRead: item.isRead, isStarred: item.isStarred)
         configureArticleImage(url: item.content.imageURL, targetSize: imageSize, displayScale: displayScale)
+        contentView.setNeedsLayout()
     }
 
     func updateStatus(isRead: Bool, isStarred: Bool) {
@@ -1329,18 +1369,20 @@ struct ArticleListView: View {
                     iconVariant: iconVariant,
                     scrollResetRevision: store.scrollResetRevision,
                     markReadOnScrolloverEnabled: store.markReadOnScrolloverEnabled,
+                    showsRefreshControl: true,
                     onArticleTap: onArticleTap,
                     onArticleAction: onArticleAction,
                     onSetRead: { article, read in store.setRead(article, read: read) },
                     onSetStarred: { article, starred in store.setStarred(article, starred: starred) },
                     onRequestFeedIcon: { feedID, variant in store.requestFeedIcon(feedID, variant: variant) },
                     onRefresh: { await store.syncManually() },
+                    onApproachingEnd: nil,
                     onMeaningfulInteraction: { store.markMeaningfulInteraction() },
                     onScrolloverBatch: { store.flushScrollover($0) },
                     onScrolloverDirection: { store.receiveScrolloverDirection($0) },
                     onScrolloverPhase: { store.setScrolloverPresentationPhase($0) }
                 )
-                .ignoresSafeArea(.container, edges: .bottom)
+                .ignoresSafeArea(.container, edges: [.top, .bottom])
             }
         }
         .background(.background)

@@ -1,6 +1,49 @@
 import SwiftUI
 
 struct SearchView: View {
+    @ObservedObject var store: IOSSearchStore
+    var newsreaderStore: NewsreaderStore
+    let onArticleTap: (ArticleSummary) -> Void
+    let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
+    let onSetRead: (ArticleSummary, Bool) -> Void
+    let onSetStarred: (ArticleSummary, Bool) -> Void
+    @State private var searchInterfacePresented = true
+
+    var body: some View {
+        SearchResultsContent(
+            store: store,
+            newsreaderStore: newsreaderStore,
+            onArticleTap: onArticleTap,
+            onArticleAction: onArticleAction,
+            onSetRead: onSetRead,
+            onSetStarred: onSetStarred
+        )
+        .navigationTitle(store.hasSearched ? "Search Results" : "Search")
+        .navigationBarTitleDisplayMode(.large)
+        .searchable(
+            text: $store.query,
+            isPresented: $searchInterfacePresented,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Search Miniflux"
+        )
+        .onSubmit(of: .search) { store.submit() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Clear") {
+                    store.clear()
+                    searchInterfacePresented = true
+                }
+                .disabled(!store.hasSearched && store.query.isEmpty)
+            }
+        }
+        .onAppear {
+            searchInterfacePresented = true
+        }
+        .onDisappear { store.invalidate() }
+    }
+}
+
+private struct SearchResultsContent: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var store: IOSSearchStore
     var newsreaderStore: NewsreaderStore
@@ -8,9 +51,10 @@ struct SearchView: View {
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
     let onSetRead: (ArticleSummary, Bool) -> Void
     let onSetStarred: (ArticleSummary, Bool) -> Void
-    @FocusState private var searchFieldFocused: Bool
 
     var body: some View {
+        let iconVariant = IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)
+
         Group {
             if store.isSearching && store.results.isEmpty {
                 ProgressView("Searching")
@@ -27,52 +71,44 @@ struct SearchView: View {
             } else if store.results.isEmpty {
                 ContentUnavailableView.search(text: store.submittedQuery)
             } else {
-                GeometryReader { proxy in
-                    let horizontalInset: CGFloat = proxy.size.width > 700 ? 28 : 16
-                    let spacing: CGFloat = ArticlePresentationLayout.usesLandscapeVisual(mode: newsreaderStore.articlePresentationMode, availableWidth: proxy.size.width - horizontalInset * 2) ? 20 : 26
-                    ScrollView {
-                        LazyVStack(spacing: spacing) {
-                            ForEach(store.results, id: \.id) { article in
-                                ArticlePresentationView(content: ArticleRowContent(article: article), fallbackRead: article.isRead, fallbackStarred: article.isStarred, rowState: nil, mode: newsreaderStore.articlePresentationMode, previewLines: newsreaderStore.articlePreviewLines, availableWidth: proxy.size.width - horizontalInset * 2, feedIcon: newsreaderStore.feedIconPresentationState(for: article.feedId, variant: IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)), iconVariant: IOSFeedIconPresentation.variant(isDark: colorScheme == .dark), onRequestFeedIcon: { newsreaderStore.requestFeedIcon(article.feedId, variant: IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)) }, onTap: { onArticleTap(article) }, onAction: { onArticleAction(article, $0) }, onSetRead: { onSetRead(article, $0) }, onSetStarred: { onSetStarred(article, $0) })
-                                    .equatable()
-                                    .onAppear { if article.id == store.results.last?.id { store.loadMore() } }
-                            }
-                            if store.isLoadingMore { ProgressView().padding() }
-                            if let errorMessage = store.errorMessage, !store.results.isEmpty {
-                                VStack(spacing: 8) {
-                                    Text(errorMessage).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                                    Button("Retry") { store.retry() }
-                                }
-                                .padding()
-                            } else if store.hasSearched {
-                                Text(String(format: String(localized: "Showing %lld of %lld"), store.results.count, store.total))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .padding(.bottom, 8)
-                            }
-                        }
-                        .padding(.horizontal, horizontalInset)
-                        .padding(.vertical, 12)
-                    }
-                    .scrollIndicators(.hidden)
-                }
+                IOSUIKitArticleTimelineView(
+                    items: timelineItems(iconVariant: iconVariant),
+                    mode: newsreaderStore.articlePresentationMode,
+                    previewLines: newsreaderStore.articlePreviewLines,
+                    iconVariant: iconVariant,
+                    scrollResetRevision: 0,
+                    markReadOnScrolloverEnabled: false,
+                    showsRefreshControl: false,
+                    onArticleTap: onArticleTap,
+                    onArticleAction: onArticleAction,
+                    onSetRead: onSetRead,
+                    onSetStarred: onSetStarred,
+                    onRequestFeedIcon: { feedID, variant in
+                        newsreaderStore.requestFeedIcon(feedID, variant: variant)
+                    },
+                    onRefresh: {},
+                    onApproachingEnd: { store.loadMore() },
+                    onMeaningfulInteraction: {},
+                    onScrolloverBatch: { _ in },
+                    onScrolloverDirection: { _ in },
+                    onScrolloverPhase: { _ in }
+                )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.background)
-        .navigationTitle(store.hasSearched ? "Search Results" : "Search")
-        .navigationBarTitleDisplayMode(.large)
-        .searchable(text: $store.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search Miniflux")
-        .searchFocused($searchFieldFocused)
-        .onSubmit(of: .search) { store.submit() }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                if store.hasSearched || !store.query.isEmpty {
-                    Button("Clear") { store.clear() }
-                }
-            }
+    }
+
+    private func timelineItems(iconVariant: FeedIconVariant) -> [IOSUIKitArticleTimelineItem] {
+        store.results.map { article in
+            let feedIcon = newsreaderStore.feedIconPresentationState(for: article.feedId, variant: iconVariant)
+            return IOSUIKitArticleTimelineItem(
+                article: article,
+                content: ArticleRowContent(article: article),
+                isRead: article.isRead,
+                isStarred: article.isStarred,
+                feedIconImage: feedIcon.image
+            )
         }
-        .onAppear { searchFieldFocused = true }
-        .onDisappear { store.invalidate() }
     }
 }

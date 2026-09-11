@@ -53,6 +53,7 @@ struct NewsNavigationView: View {
     @State private var addDestination: IOSNavigationAddDestination?
     @State private var feedSettingsTarget: IOSFeedSettingsTarget?
     @State private var expansionState = NewsNavigationExpansionState()
+    @State private var searchRequested = false
 
     init(store: NewsreaderStore, iPhoneSheetPresented: Binding<Bool>, presentation: NewsNavigationPresentation, onSearch: @escaping () -> Void = {}) {
         self.store = store
@@ -71,6 +72,11 @@ struct NewsNavigationView: View {
         .sheet(item: $feedSettingsTarget) { target in NavigationStack { IOSFeedSettingsView(store: store, target: target) } }
         .onAppear(perform: ensureSelectedFeedIsExpanded)
         .onChange(of: store.scope) { _, _ in ensureSelectedFeedIsExpanded() }
+        .onDisappear {
+            guard presentation == .sheet, searchRequested else { return }
+            searchRequested = false
+            onSearch()
+        }
     }
 
     private var listContent: some View {
@@ -132,7 +138,7 @@ struct NewsNavigationView: View {
 
     private func feedTitle(_ feedID: Int64) -> String { store.catalog.feeds.first { $0.id == feedID }?.title ?? String(localized: "Feed") }
     private var searchRow: some View {
-        Button(action: onSearch) {
+        Button(action: requestSearch) {
             Label {
                 Text("Search")
                     .foregroundStyle(.primary)
@@ -144,6 +150,16 @@ struct NewsNavigationView: View {
         .buttonStyle(.plain)
         .accessibilityIdentifier("navigation.search")
     }
+
+    private func requestSearch() {
+        if presentation == .sheet {
+            searchRequested = true
+            iPhoneSheetPresented = false
+        } else {
+            onSearch()
+        }
+    }
+
     private func scopeRow(_ title: String, systemImage: String, scope: BrowserScope, count: UInt64) -> some View {
         Label { labelTitle(title, count: count) } icon: { Image(systemName: systemImage) }
             .tag(scope)
