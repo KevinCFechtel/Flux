@@ -129,8 +129,8 @@ struct IOSArticleScrollGeometry: Equatable {
     let containerSize: CGSize
 }
 
-/// Historical SwiftUI/List sensor retained through U2 so its regression tests stay
-/// intact while the production renderer moves to UIKit. U3 replaces this sensor.
+/// Historical SwiftUI/List sensor retained temporarily for its existing regression tests.
+/// Production Timeline scrollover is driven by IOSUIKitScrolloverGeometryTracker below.
 final class IOSScrolloverGeometryController {
     private static let geometryTolerance: CGFloat = 0.5
 
@@ -274,6 +274,156 @@ final class IOSScrolloverGeometryController {
     }
 }
 
+/// One coherent UIKit geometry sample. All values use UICollectionView content coordinates.
+struct IOSUIKitScrolloverGeometrySample: Equatable {
+    let contentOffsetY: CGFloat
+    let effectiveTop: CGFloat
+    let effectiveBottom: CGFloat
+    let contentHeight: CGFloat
+    let rowFrames: [Int64: CGRect]
+    let layoutGeneration: UInt64
+}
+
+struct IOSUIKitScrolloverGeometryResult: Equatable {
+    let direction: IOSArticleScrollDirection?
+    let batch: IOSScrolloverBatch
+}
+
+/// Non-observable, bounded geometry detector owned by the UIKit Timeline.
+/// It only emits IDs that were actually observed in the viewport during a user-driven
+/// interaction and then crossed the effective upper viewport boundary while moving forward.
+final class IOSUIKitScrolloverGeometryTracker {
+    private static let movementEpsilon: CGFloat = 0.01
+    private static let bottomTolerance: CGFloat = 0.5
+    private static let maximumRetainedGeometryCount = 96
+
+    private var orderedIDs: [Int64] = []
+    private var positions: [Int64: Int] = [:]
+    private var emittedIDs = Set<Int64>()
+    private var qualifiedVisibleIDs = Set<Int64>()
+    private var retainedFrames: [Int64: CGRect] = [:]
+    private var previousSample: IOSUIKitScrolloverGeometrySample?
+    private var phase: IOSScrolloverPresentationPhase = .idle
+    private var wasAtBottom = false
+
+    var retainedGeometryCount: Int { retainedFrames.count }
+
+    func updateSnapshot(_ ids: [Int64]) {
+        guard ids != orderedIDs else { return }
+        orderedIDs = ids
+        positions = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset) })
+        emittedIDs.removeAll()
+        qualifiedVisibleIDs.removeAll()
+        invalidateGeometry()
+    }
+
+    func setPhase(_ newPhase: IOSScrolloverPresentationPhase) {
+        phase = newPhase
+        if newPhase == .idle {
+            qualifiedVisibleIDs.removeAll(keepingCapacity: true)
+            invalidateGeometry()
+        }
+    }
+
+    func invalidateGeometry() {
+        retainedFrames.removeAll(keepingCapacity: true)
+        previousSample = nil
+        wasAtBottom = false
+    }
+
+    func releaseEmittedIDs() {
+        emittedIDs.removeAll(keepingCapacity: true)
+    }
+
+    func rearm(_ ids: some Sequence<Int64>) {
+        for id in ids { emittedIDs.remove(id) }
+    }
+
+    func receive(_ sample: IOSUIKitScrolloverGeometrySample, enabled: Bool) -> IOSUIKitScrolloverGeometryResult {
+        guard phase.isScrolling else {
+            previousSample = sample
+            wasAtBottom = isAtBottom(sample)
+            return .init(direction: nil, batch: .init(articleIDs: []))
+        }
+
+        guard let previous = previousSample,
+              previous.layoutGeneration == sample.layoutGeneration else {
+            previousSample = sample
+            wasAtBottom = isAtBottom(sample)
+            seedVisibleRows(from: sample, enabled: enabled)
+            return .init(direction: nil, batch: .init(articleIDs: []))
+        }
+
+        let delta = sample.contentOffsetY - previous.contentOffsetY
+        let direction: IOSArticleScrollDirection?
+        if delta > Self.movementEpsilon { direction = .forward }
+        else if delta < -Self.movementEpsilon { direction = .backward }
+        else { direction = nil }
+
+        let visibleIDs = visibleIDs(in: sample)
+        if enabled {
+            qualifiedVisibleIDs.formUnion(visibleIDs)
+        } else {
+            qualifiedVisibleIDs.removeAll(keepingCapacity: true)
+        }
+
+        var candidates = Set<Int64>()
+        if enabled, direction == .forward {
+            for id in qualifiedVisibleIDs where !emittedIDs.contains(id) {
+                guard let frame = sample.rowFrames[id] ?? retainedFrames[id] else { continue }
+                if previous.effectiveTop < frame.maxY,
+                   sample.effectiveTop >= frame.maxY {
+                    candidates.insert(id)
+                }
+            }
+
+            let atBottom = isAtBottom(sample)
+            if !wasAtBottom, atBottom {
+                candidates.formUnion(visibleIDs)
+            }
+            wasAtBottom = atBottom
+        } else {
+            wasAtBottom = isAtBottom(sample)
+        }
+
+        retainBoundedGeometry(sample.rowFrames, viewportTop: sample.effectiveTop)
+        qualifiedVisibleIDs.formIntersection(Set(retainedFrames.keys).union(visibleIDs))
+        previousSample = sample
+
+        let ids = candidates
+            .filter { emittedIDs.insert($0).inserted }
+            .sorted { positions[$0, default: .max] < positions[$1, default: .max] }
+        return .init(direction: direction, batch: .init(articleIDs: ids))
+    }
+
+    private func seedVisibleRows(from sample: IOSUIKitScrolloverGeometrySample, enabled: Bool) {
+        let visible = visibleIDs(in: sample)
+        if enabled { qualifiedVisibleIDs.formUnion(visible) }
+        retainBoundedGeometry(sample.rowFrames, viewportTop: sample.effectiveTop)
+        qualifiedVisibleIDs.formIntersection(Set(retainedFrames.keys).union(visible))
+    }
+
+    private func visibleIDs(in sample: IOSUIKitScrolloverGeometrySample) -> Set<Int64> {
+        Set(sample.rowFrames.compactMap { id, frame in
+            guard frame.maxY > sample.effectiveTop, frame.minY < sample.effectiveBottom else { return nil }
+            return id
+        })
+    }
+
+    private func isAtBottom(_ sample: IOSUIKitScrolloverGeometrySample) -> Bool {
+        sample.effectiveBottom >= sample.contentHeight - Self.bottomTolerance
+    }
+
+    private func retainBoundedGeometry(_ frames: [Int64: CGRect], viewportTop: CGFloat) {
+        retainedFrames.merge(frames) { _, new in new }
+        guard retainedFrames.count > Self.maximumRetainedGeometryCount else { return }
+        let retained = retainedFrames
+            .sorted { abs($0.value.midY - viewportTop) < abs($1.value.midY - viewportTop) }
+            .prefix(Self.maximumRetainedGeometryCount)
+        retainedFrames = Dictionary(uniqueKeysWithValues: retained.map { ($0.key, $0.value) })
+    }
+}
+
 enum IOSArticleContextAction: Equatable {
     case starred
     case read
@@ -326,6 +476,8 @@ private struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
     let previewLines: ArticlePreviewLines
     let iconVariant: FeedIconVariant
     let scrollResetRevision: UInt64
+    let markReadOnScrolloverEnabled: Bool
+    let scrolloverRearmRevision: UInt64
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
     let onSetRead: (ArticleSummary, Bool) -> Void
@@ -333,6 +485,9 @@ private struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
     let onRequestFeedIcon: (Int64, FeedIconVariant) -> Void
     let onRefresh: () async -> Void
     let onMeaningfulInteraction: () -> Void
+    let onScrolloverBatch: (IOSScrolloverBatch) -> Void
+    let onScrolloverDirection: (IOSArticleScrollDirection) -> Void
+    let onScrolloverPhase: (IOSScrolloverPresentationPhase) -> Void
 
     func makeUIViewController(context: Context) -> IOSUIKitArticleTimelineController {
         let controller = IOSUIKitArticleTimelineController()
@@ -352,12 +507,17 @@ private struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
         controller.onRequestFeedIcon = onRequestFeedIcon
         controller.onRefresh = onRefresh
         controller.onMeaningfulInteraction = onMeaningfulInteraction
+        controller.onScrolloverBatch = onScrolloverBatch
+        controller.onScrolloverDirection = onScrolloverDirection
+        controller.onScrolloverPhase = onScrolloverPhase
         controller.update(
             items: items,
             mode: mode,
             previewLines: previewLines,
             iconVariant: iconVariant,
-            scrollResetRevision: scrollResetRevision
+            scrollResetRevision: scrollResetRevision,
+            markReadOnScrolloverEnabled: markReadOnScrolloverEnabled,
+            scrolloverRearmRevision: scrolloverRearmRevision
         )
     }
 }
@@ -373,6 +533,9 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
     var onRequestFeedIcon: ((Int64, FeedIconVariant) -> Void)?
     var onRefresh: (() async -> Void)?
     var onMeaningfulInteraction: (() -> Void)?
+    var onScrolloverBatch: ((IOSScrolloverBatch) -> Void)?
+    var onScrolloverDirection: ((IOSArticleScrollDirection) -> Void)?
+    var onScrolloverPhase: ((IOSScrolloverPresentationPhase) -> Void)?
 
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Int64>!
@@ -382,9 +545,14 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
     private var previewLines: ArticlePreviewLines = .standard
     private var iconVariant: FeedIconVariant = .normal
     private var scrollResetRevision: UInt64?
+    private var scrolloverRearmRevision: UInt64?
+    private var markReadOnScrolloverEnabled = false
+    private var scrolloverPhase: IOSScrolloverPresentationPhase = .idle
+    private var scrolloverLayoutGeneration: UInt64 = 0
     private var lastLayoutWidth: CGFloat = 0
     private var prefetchTasks: [Int64: Task<Void, Never>] = [:]
     private let refreshControl = UIRefreshControl()
+    private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -430,6 +598,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         guard width > 0, abs(width - lastLayoutWidth) > 0.5 else { return }
         lastLayoutWidth = width
         cancelAllPrefetch()
+        invalidateScrolloverGeometry()
         for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
             guard let id = cell.representedArticleID, let item = itemsByID[id] else { continue }
             configure(cell, item: item)
@@ -437,12 +606,21 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         collectionView.collectionViewLayout.invalidateLayout()
     }
 
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory else { return }
+        invalidateScrolloverGeometry()
+        collectionView?.collectionViewLayout.invalidateLayout()
+    }
+
     func update(
         items: [IOSUIKitArticleTimelineItem],
         mode newMode: ArticlePresentationMode,
         previewLines newPreviewLines: ArticlePreviewLines,
         iconVariant newIconVariant: FeedIconVariant,
-        scrollResetRevision newScrollResetRevision: UInt64
+        scrollResetRevision newScrollResetRevision: UInt64,
+        markReadOnScrolloverEnabled newMarkReadOnScrolloverEnabled: Bool,
+        scrolloverRearmRevision newScrolloverRearmRevision: UInt64
     ) {
         loadViewIfNeeded()
 
@@ -452,20 +630,32 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         let layoutInputsChanged = mode != newMode || previewLines != newPreviewLines
         let iconVariantChanged = iconVariant != newIconVariant
         let resetChanged = scrollResetRevision != nil && scrollResetRevision != newScrollResetRevision
+        let rearmChanged = scrolloverRearmRevision != nil && scrolloverRearmRevision != newScrolloverRearmRevision
+        let explicitlyUnreadIDs = items.compactMap { item -> Int64? in
+            guard previousItems[item.article.id]?.isRead == true, !item.isRead else { return nil }
+            return item.article.id
+        }
 
         mode = newMode
         previewLines = newPreviewLines
         iconVariant = newIconVariant
         scrollResetRevision = newScrollResetRevision
+        scrolloverRearmRevision = newScrolloverRearmRevision
+        markReadOnScrolloverEnabled = newMarkReadOnScrolloverEnabled
         orderedIDs = newIDs
         itemsByID = Dictionary(uniqueKeysWithValues: items.map { ($0.article.id, $0) })
 
         if structureChanged {
+            scrolloverGeometryTracker.updateSnapshot(newIDs)
+            invalidateScrolloverGeometry()
             var snapshot = NSDiffableDataSourceSnapshot<Section, Int64>()
             snapshot.appendSections([.main])
             snapshot.appendItems(newIDs)
             dataSource.apply(snapshot, animatingDifferences: false)
         }
+        if rearmChanged { scrolloverGeometryTracker.releaseEmittedIDs() }
+        if !explicitlyUnreadIDs.isEmpty { scrolloverGeometryTracker.rearm(explicitlyUnreadIDs) }
+        if layoutInputsChanged { invalidateScrolloverGeometry() }
 
         var needsLayoutInvalidation = layoutInputsChanged
         for indexPath in collectionView.indexPathsForVisibleItems {
@@ -498,6 +688,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
             collectionView.collectionViewLayout.invalidateLayout()
         }
         if resetChanged {
+            invalidateScrolloverGeometry()
             collectionView.setContentOffset(CGPoint(x: 0, y: -collectionView.adjustedContentInset.top), animated: false)
         }
     }
@@ -541,6 +732,71 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         onMeaningfulInteraction?()
+        setScrolloverPhase(.interacting)
+        sampleScrolloverGeometry()
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard scrolloverPhase.isScrolling else { return }
+        sampleScrolloverGeometry()
+    }
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        setScrolloverPhase(decelerate ? .decelerating : .idle)
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        setScrolloverPhase(.idle)
+    }
+
+    func scrollViewDidChangeAdjustedContentInset(_ scrollView: UIScrollView) {
+        invalidateScrolloverGeometry()
+    }
+
+    private func setScrolloverPhase(_ phase: IOSScrolloverPresentationPhase) {
+        guard scrolloverPhase != phase else { return }
+        scrolloverPhase = phase
+        scrolloverGeometryTracker.setPhase(phase)
+        onScrolloverPhase?(phase)
+    }
+
+    private func invalidateScrolloverGeometry() {
+        scrolloverLayoutGeneration &+= 1
+        scrolloverGeometryTracker.invalidateGeometry()
+    }
+
+    private func sampleScrolloverGeometry() {
+        guard collectionView.bounds.height > 0 else { return }
+        collectionView.layoutIfNeeded()
+
+        let effectiveTop = collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+        let effectiveBottom = collectionView.contentOffset.y + collectionView.bounds.height - collectionView.adjustedContentInset.bottom
+        let viewportHeight = max(1, effectiveBottom - effectiveTop)
+        let sensingRect = CGRect(
+            x: collectionView.bounds.minX,
+            y: max(0, effectiveTop - viewportHeight),
+            width: collectionView.bounds.width,
+            height: viewportHeight * 3
+        )
+        let attributes = collectionView.collectionViewLayout.layoutAttributesForElements(in: sensingRect) ?? []
+        var rowFrames: [Int64: CGRect] = [:]
+        rowFrames.reserveCapacity(attributes.count)
+        for attribute in attributes where attribute.representedElementCategory == .cell {
+            guard let id = dataSource.itemIdentifier(for: attribute.indexPath) else { continue }
+            rowFrames[id] = attribute.frame
+        }
+
+        let sample = IOSUIKitScrolloverGeometrySample(
+            contentOffsetY: collectionView.contentOffset.y,
+            effectiveTop: effectiveTop,
+            effectiveBottom: effectiveBottom,
+            contentHeight: collectionView.contentSize.height,
+            rowFrames: rowFrames,
+            layoutGeneration: scrolloverLayoutGeneration
+        )
+        let result = scrolloverGeometryTracker.receive(sample, enabled: markReadOnScrolloverEnabled)
+        if let direction = result.direction { onScrolloverDirection?(direction) }
+        if !result.batch.articleIDs.isEmpty { onScrolloverBatch?(result.batch) }
     }
 
     func collectionView(_ collectionView: UICollectionView, leadingSwipeActionsConfigurationForItemAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
@@ -617,6 +873,7 @@ private final class IOSUIKitArticleTimelineController: UIViewController, UIColle
         guard var item = itemsByID[id] else { return }
         item.isRead = value
         itemsByID[id] = item
+        if !value { scrolloverGeometryTracker.rearm([id]) }
         if let indexPath = dataSource.indexPath(for: id), let cell = collectionView.cellForItem(at: indexPath) as? IOSUIKitArticleCell {
             cell.updateStatus(isRead: value, isStarred: item.isStarred)
         }
@@ -1064,13 +1321,18 @@ struct ArticleListView: View {
                     previewLines: store.articlePreviewLines,
                     iconVariant: iconVariant,
                     scrollResetRevision: store.scrollResetRevision,
+                    markReadOnScrolloverEnabled: store.markReadOnScrolloverEnabled,
+                    scrolloverRearmRevision: store.scrolloverRearmRevision,
                     onArticleTap: onArticleTap,
                     onArticleAction: onArticleAction,
                     onSetRead: { article, read in store.setRead(article, read: read) },
                     onSetStarred: { article, starred in store.setStarred(article, starred: starred) },
                     onRequestFeedIcon: { feedID, variant in store.requestFeedIcon(feedID, variant: variant) },
                     onRefresh: { await store.syncManually() },
-                    onMeaningfulInteraction: { store.markMeaningfulInteraction() }
+                    onMeaningfulInteraction: { store.markMeaningfulInteraction() },
+                    onScrolloverBatch: { store.flushScrollover($0) },
+                    onScrolloverDirection: { store.receiveScrolloverDirection($0) },
+                    onScrolloverPhase: { store.setScrolloverPresentationPhase($0) }
                 )
                 .ignoresSafeArea(.container, edges: .bottom)
             }
