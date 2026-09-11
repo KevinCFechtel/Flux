@@ -29,7 +29,7 @@ struct SearchView: View {
             } else {
                 GeometryReader { proxy in
                     let horizontalInset: CGFloat = proxy.size.width > 700 ? 28 : 16
-                    let spacing: CGFloat = 28
+                    let spacing: CGFloat = 40
                     ScrollView {
                         LazyVStack(spacing: spacing) {
                             ForEach(store.results, id: \.id) { article in
