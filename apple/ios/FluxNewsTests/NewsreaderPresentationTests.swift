@@ -1153,10 +1153,10 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     func testDeterministicArticleLayoutEngineUsesCurrentWidthTransitionsAndPixelRounding() {
-        let column = layoutMetrics(mode: .visual, width: 401, hasImage: false, scale: 3)
-        let row = layoutMetrics(mode: .visual, width: 402, hasImage: false, scale: 3)
-        XCTAssertGreaterThan(column.metadataHeight, row.metadataHeight)
-        XCTAssertEqual((column.cellSize.height * 3).rounded(), column.cellSize.height * 3, accuracy: 0.001)
+        let narrow = layoutMetrics(mode: .visual, width: 401, hasImage: false, scale: 3)
+        let wide = layoutMetrics(mode: .visual, width: 402, hasImage: false, scale: 3)
+        XCTAssertEqual(narrow.metadataHeight, wide.metadataHeight)
+        XCTAssertEqual((narrow.cellSize.height * 3).rounded(), narrow.cellSize.height * 3, accuracy: 0.001)
         XCTAssertEqual(layoutMetrics(mode: .visual, width: 700, hasImage: true).horizontalInset, 16)
         XCTAssertEqual(layoutMetrics(mode: .visual, width: 701, hasImage: true).horizontalInset, 28)
     }
@@ -1176,8 +1176,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         ]
         let previews = ["", "Short preview", String(repeating: "A longer preview exercises bounded UIKit text wrapping. ", count: 8)]
         let cases: [(ArticlePresentationMode, CGFloat, Bool, ArticlePreviewLines)] = [
+            (.compact, 320, false, .standard),
             (.compact, 390, true, .compact),
             (.visual, 390, false, .standard),
+            (.visual, 430, false, .standard),
             (.visual, 390, true, .extended),
             (.visual, 760, true, .standard),
             (.visual, 401, false, .standard),
@@ -1193,7 +1195,59 @@ final class NewsreaderPresentationTests: XCTestCase {
             let expected = IOSUIKitArticleLayoutEngine.metrics(for: input)
             let diagnostics = cell.layoutDiagnosticsForTesting
             XCTAssertEqual(actual, expected.cellSize.height, accuracy: 0.5, "case \(index) variant \(expected.variant) cell=\(diagnostics) engine title=\(expected.titleFrame) metadata=\(expected.metadataFrame) preview=\(String(describing: expected.previewFrame)) image=\(String(describing: expected.imageFrame))")
+            assertFrameEqual(diagnostics.titleFrame, expected.titleFrame)
+            assertFrameEqual(diagnostics.metadataFrame, expected.metadataFrame)
+            assertFrameEqual(diagnostics.unreadFrame, expected.unreadFrame)
+            assertFrameEqual(diagnostics.feedIconFrame, expected.feedIconFrame)
+            assertFrameEqual(diagnostics.feedTitleFrame, expected.feedTitleFrame)
+            assertOptionalFrameEqual(diagnostics.commentsFrame, expected.commentsFrame)
+            assertFrameEqual(diagnostics.starFrame, expected.starFrame)
+            assertFrameEqual(diagnostics.dateFrame, expected.dateFrame)
+            assertOptionalFrameEqual(diagnostics.previewFrame, expected.previewFrame)
         }
+    }
+
+    @MainActor
+    func testUIKitMetadataMutablePresentationUpdatesAreGeometryNeutral() {
+        let cell = makeUIKitArticleCell(mode: .visual, width: 390)
+        let baselineHeight = measureUIKitArticleCell(cell, width: 390)
+        let baseline = cell.layoutDiagnosticsForTesting
+
+        cell.updateStatus(isRead: true, isStarred: true)
+        cell.updateFeedIcon(image: testImage(width: 80, height: 20), title: "Feed")
+        XCTAssertEqual(measureUIKitArticleCell(cell, width: 390), baselineHeight, accuracy: 0.5)
+        let updated = cell.layoutDiagnosticsForTesting
+        assertFrameEqual(updated.titleFrame, baseline.titleFrame)
+        assertFrameEqual(updated.metadataFrame, baseline.metadataFrame)
+        assertFrameEqual(updated.unreadFrame, baseline.unreadFrame)
+        assertFrameEqual(updated.feedIconFrame, baseline.feedIconFrame)
+        assertFrameEqual(updated.feedTitleFrame, baseline.feedTitleFrame)
+        assertFrameEqual(updated.starFrame, baseline.starFrame)
+        assertFrameEqual(updated.dateFrame, baseline.dateFrame)
+    }
+
+    @MainActor
+    func testUIKitMetadataCommentsUseFixedAccessorySlotAndLongFeedTitleTruncates() {
+        let title = String(repeating: "An exceptionally long feed title ", count: 12)
+        let withoutComments = oracleItem(title: "Title", preview: "", hasImage: false, hasComments: false, feedTitle: title)
+        let withComments = oracleItem(title: "Title", preview: "", hasImage: false, hasComments: true, feedTitle: title)
+        let withoutCell = configuredOracleCell(item: withoutComments, mode: .visual, previewLines: .standard, width: 390)
+        let withCell = configuredOracleCell(item: withComments, mode: .visual, previewLines: .standard, width: 390)
+        let withoutHeight = measureUIKitArticleCell(withoutCell, width: 390)
+        let withHeight = measureUIKitArticleCell(withCell, width: 390)
+        let without = withoutCell.layoutDiagnosticsForTesting
+        let with = withCell.layoutDiagnosticsForTesting
+
+        XCTAssertEqual(withoutHeight, withHeight, accuracy: 0.5)
+        XCTAssertEqual(with.metadataFrame.height, without.metadataFrame.height, accuracy: 0.5)
+        assertFrameEqual(with.starFrame, without.starFrame)
+        XCTAssertNotNil(with.commentsFrame)
+        XCTAssertNil(without.commentsFrame)
+        XCTAssertEqual(with.commentsFrame!.width, IOSUIKitArticleGeometry.commentSlotSize, accuracy: 0.5)
+        XCTAssertEqual(without.feedTitleFrame.width - with.feedTitleFrame.width, IOSUIKitArticleGeometry.commentSlotSize + IOSUIKitArticleGeometry.metadataAccessorySpacing, accuracy: 0.5)
+        XCTAssertEqual(without.feedTitleFrame.height, without.metadataFrame.height, accuracy: 0.5)
+        XCTAssertEqual(withoutCell.feedTitlePresentationForTesting.lineCount, 1)
+        XCTAssertEqual(withoutCell.feedTitlePresentationForTesting.lineBreakMode, .byTruncatingTail)
     }
 
     @MainActor
@@ -1230,13 +1284,26 @@ final class NewsreaderPresentationTests: XCTestCase {
         IOSUIKitArticleLayoutEngine.metrics(for: layoutInput(mode: mode, width: width, hasImage: hasImage, scale: scale))
     }
 
+    private func assertFrameEqual(_ actual: CGRect, _ expected: CGRect, accuracy: CGFloat = 0.5, file: StaticString = #filePath, line: UInt = #line) {
+        let message = "actual=\(actual) expected=\(expected)"
+        XCTAssertEqual(actual.minX, expected.minX, accuracy: accuracy, message, file: file, line: line)
+        XCTAssertEqual(actual.minY, expected.minY, accuracy: accuracy, message, file: file, line: line)
+        XCTAssertEqual(actual.width, expected.width, accuracy: accuracy, message, file: file, line: line)
+        XCTAssertEqual(actual.height, expected.height, accuracy: accuracy, message, file: file, line: line)
+    }
+
+    private func assertOptionalFrameEqual(_ actual: CGRect?, _ expected: CGRect?, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(actual == nil, expected == nil, file: file, line: line)
+        if let actual, let expected { assertFrameEqual(actual, expected, file: file, line: line) }
+    }
+
     private func layoutInput(mode: ArticlePresentationMode, width: CGFloat, hasImage: Bool, scale: CGFloat = 2) -> IOSUIKitArticleLayoutInput {
         .init(title: "A deliberately multiline article title that exercises deterministic bounded text measurement", feedTitle: "A feed title", publishedDate: "January 1", preview: "A preview long enough to occupy multiple lines and preserve the production card text stack.", hasImage: hasImage, hasComments: true, mode: mode, previewLines: .standard, containerWidth: width, displayScale: scale, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: .leftToRight)
     }
 
     @MainActor
-    private func oracleItem(title: String, preview: String, hasImage: Bool, hasComments: Bool) -> IOSUIKitArticleTimelineItem {
-        let article = ArticleSummary(id: 91, feedId: 10, categoryId: 20, feedTitle: "Oracle Feed", title: title, url: "https://example.com/article", commentsUrl: hasComments ? "https://example.com/comments" : "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: preview, imageUrl: hasImage ? "https://example.com/image.jpg" : nil)
+    private func oracleItem(title: String, preview: String, hasImage: Bool, hasComments: Bool, feedTitle: String = "Oracle Feed") -> IOSUIKitArticleTimelineItem {
+        let article = ArticleSummary(id: 91, feedId: 10, categoryId: 20, feedTitle: feedTitle, title: title, url: "https://example.com/article", commentsUrl: hasComments ? "https://example.com/comments" : "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: preview, imageUrl: hasImage ? "https://example.com/image.jpg" : nil)
         return .init(article: article, content: .init(article: article), isRead: false, isStarred: false, feedIconImage: nil)
     }
 

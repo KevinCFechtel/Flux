@@ -1377,18 +1377,16 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     }
 
     private let textStack = UIStackView()
-    private let titleRow = UIStackView()
     private let titleLabel = UILabel()
     private let starImageView = UIImageView(image: UIImage(systemName: "star.fill"))
-    private let metadataStack = UIStackView()
-    private let metadataPrimaryStack = UIStackView()
+    private let metadataRow = UIView()
     private let unreadIndicator = UIView()
     private let feedIconContainer = UIView()
     private let feedIconImageView = UIImageView()
     private let feedIconFallbackLabel = UILabel()
     private let feedTitleLabel = UILabel()
-    private let metadataBulletLabel = UILabel()
     private let dateLabel = UILabel()
+    private let commentsContainer = UIView()
     private let commentsImageView = UIImageView(image: UIImage(systemName: "bubble.left"))
     private let previewLabel = UILabel()
     private let articleImageView = UIImageView()
@@ -1401,6 +1399,8 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     private var portraitImageAspectConstraint: NSLayoutConstraint!
     private var landscapeImageWidthConstraint: NSLayoutConstraint!
     private var landscapeImageHeightConstraint: NSLayoutConstraint!
+    private var commentsWidthConstraint: NSLayoutConstraint!
+    private var commentsToStarSpacingConstraint: NSLayoutConstraint!
     private var currentLayoutVariant: IOSUIKitArticleCellLayoutVariant?
     private var imageTask: Task<Void, Never>?
     private var representedImageRequest: ArticleImageRequest?
@@ -1433,27 +1433,14 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         textStack.alignment = .fill
         textStack.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
-        titleRow.axis = .horizontal
-        titleRow.spacing = 8
-        titleRow.alignment = .firstBaseline
         titleLabel.font = .preferredFont(forTextStyle: .headline)
         titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.numberOfLines = 0
-        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         starImageView.tintColor = .systemYellow
         starImageView.alpha = 0
         starImageView.isAccessibilityElement = false
-        starImageView.setContentHuggingPriority(.required, for: .horizontal)
-        starImageView.setContentCompressionResistancePriority(.required, for: .horizontal)
-        titleRow.addArrangedSubview(titleLabel)
-        titleRow.addArrangedSubview(starImageView)
-
-        metadataStack.axis = .horizontal
-        metadataStack.spacing = 5
-        metadataStack.alignment = .center
-        metadataPrimaryStack.axis = .horizontal
-        metadataPrimaryStack.spacing = 6
-        metadataPrimaryStack.alignment = .center
+        metadataRow.translatesAutoresizingMaskIntoConstraints = false
+        metadataRow.heightAnchor.constraint(greaterThanOrEqualToConstant: IOSUIKitArticleGeometry.feedIconSize).isActive = true
 
         unreadIndicator.translatesAutoresizingMaskIntoConstraints = false
         unreadIndicator.backgroundColor = .tintColor
@@ -1494,35 +1481,57 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         feedTitleLabel.adjustsFontForContentSizeCategory = true
         feedTitleLabel.textColor = .secondaryLabel
         feedTitleLabel.lineBreakMode = .byTruncatingTail
-        feedTitleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        feedTitleLabel.numberOfLines = 1
+        feedTitleLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        commentsContainer.translatesAutoresizingMaskIntoConstraints = false
+        commentsImageView.translatesAutoresizingMaskIntoConstraints = false
         commentsImageView.tintColor = .secondaryLabel
-        commentsImageView.setContentHuggingPriority(.required, for: .horizontal)
-        metadataPrimaryStack.addArrangedSubview(unreadIndicator)
-        metadataPrimaryStack.addArrangedSubview(feedIconContainer)
-        metadataPrimaryStack.addArrangedSubview(feedTitleLabel)
-        metadataPrimaryStack.addArrangedSubview(commentsImageView)
-
-        metadataBulletLabel.text = "•"
-        metadataBulletLabel.textColor = .secondaryLabel
-        metadataBulletLabel.font = UIFont.preferredFont(forTextStyle: .caption1)
-        metadataBulletLabel.adjustsFontForContentSizeCategory = true
+        commentsContainer.addSubview(commentsImageView)
+        NSLayoutConstraint.activate([
+            commentsImageView.centerXAnchor.constraint(equalTo: commentsContainer.centerXAnchor),
+            commentsImageView.centerYAnchor.constraint(equalTo: commentsContainer.centerYAnchor),
+        ])
+        starImageView.translatesAutoresizingMaskIntoConstraints = false
         dateLabel.font = UIFont.preferredFont(forTextStyle: .caption1)
         dateLabel.adjustsFontForContentSizeCategory = true
         dateLabel.textColor = .secondaryLabel
-        dateLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        dateLabel.numberOfLines = 1
 
-        metadataStack.addArrangedSubview(metadataPrimaryStack)
-        metadataStack.addArrangedSubview(metadataBulletLabel)
-        metadataStack.addArrangedSubview(dateLabel)
+        metadataRow.addSubview(unreadIndicator)
+        metadataRow.addSubview(feedIconContainer)
+        metadataRow.addSubview(feedTitleLabel)
+        metadataRow.addSubview(commentsContainer)
+        metadataRow.addSubview(starImageView)
+        commentsWidthConstraint = commentsContainer.widthAnchor.constraint(equalToConstant: 0)
+        commentsToStarSpacingConstraint = commentsContainer.trailingAnchor.constraint(equalTo: starImageView.leadingAnchor)
+        NSLayoutConstraint.activate([
+            unreadIndicator.leadingAnchor.constraint(equalTo: metadataRow.leadingAnchor),
+            unreadIndicator.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
+            feedIconContainer.leadingAnchor.constraint(equalTo: unreadIndicator.trailingAnchor, constant: IOSUIKitArticleGeometry.metadataLeadingSpacing),
+            feedIconContainer.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
+            feedTitleLabel.leadingAnchor.constraint(equalTo: feedIconContainer.trailingAnchor, constant: IOSUIKitArticleGeometry.metadataLeadingSpacing),
+            feedTitleLabel.trailingAnchor.constraint(equalTo: commentsContainer.leadingAnchor, constant: -IOSUIKitArticleGeometry.metadataTitleSpacing),
+            feedTitleLabel.topAnchor.constraint(equalTo: metadataRow.topAnchor),
+            feedTitleLabel.bottomAnchor.constraint(equalTo: metadataRow.bottomAnchor),
+            commentsContainer.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
+            commentsWidthConstraint,
+            commentsContainer.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.commentSlotSize),
+            commentsToStarSpacingConstraint,
+            starImageView.trailingAnchor.constraint(equalTo: metadataRow.trailingAnchor),
+            starImageView.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
+            starImageView.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize),
+            starImageView.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize),
+        ])
 
         previewLabel.font = .preferredFont(forTextStyle: .subheadline)
         previewLabel.adjustsFontForContentSizeCategory = true
         previewLabel.textColor = .secondaryLabel
         previewLabel.numberOfLines = 3
 
-        textStack.addArrangedSubview(titleRow)
-        textStack.addArrangedSubview(metadataStack)
+        textStack.addArrangedSubview(titleLabel)
+        textStack.addArrangedSubview(metadataRow)
+        textStack.addArrangedSubview(dateLabel)
         textStack.addArrangedSubview(previewLabel)
 
         articleImageView.translatesAutoresizingMaskIntoConstraints = false
@@ -1669,7 +1678,10 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         previewLabel.text = item.content.article.preview
         previewLabel.isHidden = item.content.article.preview.isEmpty
         previewLabel.numberOfLines = previewLines.rawValue
-        commentsImageView.isHidden = !item.content.hasComments
+        let hasComments = item.content.hasComments
+        commentsContainer.isHidden = !hasComments
+        commentsWidthConstraint.constant = hasComments ? IOSUIKitArticleGeometry.commentSlotSize : 0
+        commentsToStarSpacingConstraint.constant = hasComments ? -IOSUIKitArticleGeometry.metadataAccessorySpacing : 0
 
         let hasImage = mode.showsArticleImage && item.content.imageURL != nil
         let imageSize = metrics.imageSize(hasImage: hasImage)
@@ -1688,12 +1700,6 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             bottom: metrics.outerVerticalPadding,
             trailing: metrics.horizontalInset
         )
-
-        let useColumnMetadata = IOSUIKitArticleGeometry(mode: metrics.mode, containerWidth: metrics.containerWidth).usesColumnMetadata
-        metadataStack.axis = useColumnMetadata ? .vertical : .horizontal
-        metadataStack.alignment = useColumnMetadata ? .leading : .center
-        metadataStack.spacing = useColumnMetadata ? 3 : 5
-        metadataBulletLabel.isHidden = useColumnMetadata
 
         if variant == .visualLandscape {
             let imageSize = metrics.imageSize(hasImage: true)
@@ -1746,7 +1752,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         currentIsStarred = isStarred
         titleLabel.textColor = isRead ? .secondaryLabel : .label
         unreadIndicator.alpha = ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: isRead)
-        // Reserve the star's arranged-subview slot so status changes cannot change title width or row height.
+        // The fixed trailing slot remains allocated when the star is not visible.
         starImageView.alpha = isStarred ? 1 : 0
         updateAccessibility()
     }
@@ -1780,20 +1786,20 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         let variant: IOSUIKitArticleCellLayoutVariant?
         let imageFrame: CGRect
         let textStackFrame: CGRect
-        let titleRowFrame: CGRect
         let titleFrame: CGRect
         let starFrame: CGRect
         let metadataFrame: CGRect
-        let metadataPrimaryFrame: CGRect
+        let unreadFrame: CGRect
         let feedIconFrame: CGRect
         let feedTitleFrame: CGRect
-        let commentsFrame: CGRect
+        let commentsFrame: CGRect?
         let dateFrame: CGRect
-        let previewFrame: CGRect
+        let previewFrame: CGRect?
     }
 
     var layoutDiagnosticsForTesting: LayoutDiagnostics {
-        .init(contentBounds: contentView.bounds, margins: contentView.directionalLayoutMargins, variant: currentLayoutVariant, imageFrame: articleImageView.frame, textStackFrame: textStack.frame, titleRowFrame: titleRow.frame, titleFrame: titleLabel.frame, starFrame: starImageView.frame, metadataFrame: metadataStack.frame, metadataPrimaryFrame: metadataPrimaryStack.frame, feedIconFrame: feedIconContainer.frame, feedTitleFrame: feedTitleLabel.frame, commentsFrame: commentsImageView.frame, dateFrame: dateLabel.frame, previewFrame: previewLabel.frame)
+        func frame(_ view: UIView) -> CGRect { view.convert(view.bounds, to: contentView) }
+        return .init(contentBounds: contentView.bounds, margins: contentView.directionalLayoutMargins, variant: currentLayoutVariant, imageFrame: frame(articleImageView), textStackFrame: frame(textStack), titleFrame: frame(titleLabel), starFrame: frame(starImageView), metadataFrame: frame(metadataRow), unreadFrame: frame(unreadIndicator), feedIconFrame: frame(feedIconContainer), feedTitleFrame: frame(feedTitleLabel), commentsFrame: commentsContainer.isHidden ? nil : frame(commentsContainer), dateFrame: frame(dateLabel), previewFrame: previewLabel.isHidden ? nil : frame(previewLabel))
     }
 
     var portraitAspectConstraintDiagnosticsForTesting: (multiplier: CGFloat, constant: CGFloat, priority: UILayoutPriority, imageFrame: CGRect, contentBounds: CGRect, margins: NSDirectionalEdgeInsets, displayScale: CGFloat) {
@@ -1801,6 +1807,9 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     }
     var layoutVariantForTesting: IOSUIKitArticleCellLayoutVariant? { currentLayoutVariant }
     var feedIconImageForTesting: UIImage? { feedIconImageView.image }
+    var feedTitlePresentationForTesting: (lineCount: Int, lineBreakMode: NSLineBreakMode) {
+        (feedTitleLabel.numberOfLines, feedTitleLabel.lineBreakMode)
+    }
 
     private func configureArticleImage(url: URL?, targetSize: CGSize, displayScale: CGFloat) {
         performanceMetrics?.recordImageBinding()
