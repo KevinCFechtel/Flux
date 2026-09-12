@@ -1,6 +1,6 @@
 # UIKit Timeline Performance Plan — U3.6.5 through U3.7
 
-> **Status: U3.6.5 AND U3.6.6 COMPLETE**
+> **Status: U3.6.5, U3.6.6, AND U3.6.7 COMPLETE**
 >
 > Baseline: `main` after U3.6.1–U3.6.4, currently including the merged UIKit renderer, targeted presentation bridge, resolved Scrollover geometry, and bounded image scheduler.
 >
@@ -162,6 +162,26 @@ A job with its last consumer cancelled can remain in the job table until the und
 - visible admission at full speculative capacity succeeds by evicting speculative work where policy permits;
 - active count never exceeds configured concurrency under cancel/promote/successor races;
 - shared consumer cancellation remains correct.
+
+### U3.6.7 implementation
+
+`ArticleImagePipeline` now assigns every job generation a UUID and explicit
+queued, active, or retiring lifecycle. Retiring active jobs remain counted until
+their token-matched completion arrives, but are excluded from coalescing; a later
+request creates a successor generation. Completion removes and resolves only its
+own token, so an old cancellation/failure cannot close that successor.
+
+Pending work uses one 48-request total bound with a 32-request speculative
+subset. Visible work is selected first and can evict queued speculative work when
+the total pending bound is full. Promotion moves a single tokenized queue entry
+between queues, so it cannot duplicate membership or increase pending metadata.
+The scheduler never preempts active speculative work and therefore preserves the
+three-operation active bound while visible demand waits for a real slot.
+
+`NewsreaderPresentationTests` covers cancellation followed by a same-request
+successor, including the old operation completing before the successor begins;
+the existing shared-consumer, bounded-concurrency, visible-priority, and queued
+prefetch tests continue to cover the surrounding scheduler contract.
 
 ## 6. U3.7.1 — Timeline Performance Instrumentation
 

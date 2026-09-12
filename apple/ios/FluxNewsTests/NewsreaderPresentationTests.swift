@@ -1029,7 +1029,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         await gate.waitUntilStarted(count: 3)
         let queuedPrefetch = Task { try await pipeline.prefetch(requests[3]) }
         let visible = Task { try await pipeline.image(for: requests[4]) }
-        await Task.yield()
+        for _ in 0..<8 { await Task.yield() }
 
         let saturated = await pipeline.metrics()
         XCTAssertEqual(saturated.activeOperations, ArticleImagePipeline.maximumConcurrentOperations)
@@ -1090,16 +1090,17 @@ final class NewsreaderPresentationTests: XCTestCase {
         let cancelled = Task { try await sharedPipeline.image(for: request) }
         await gate.waitUntilStarted()
         cancelled.cancel()
-        let active = Task { try await sharedPipeline.image(for: request) }
-        await Task.yield()
-        await gate.release()
         do {
             _ = try await cancelled.value
             XCTFail("Cancelled consumer must not receive an image")
         } catch is CancellationError {}
+        let active = Task { try await sharedPipeline.image(for: request) }
+        await gate.release()
+        await gate.waitUntilStarted(count: 2)
+        await gate.release()
         _ = try await active.value
         let sharedCalls = await gate.callCount()
-        XCTAssertEqual(sharedCalls, 1)
+        XCTAssertEqual(sharedCalls, 2)
     }
 
     private func imageData(width: Int, height: Int, orientation: Int? = nil) throws -> Data {
@@ -1470,6 +1471,7 @@ private actor ImageLoadGate {
     private let data: Data
     private var calls = 0
     private var didStart: CheckedContinuation<Void, Never>?
+    private var startWaiters: [Int: CheckedContinuation<Void, Never>] = [:]
     private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(data: Data) { self.data = data }
@@ -1478,6 +1480,8 @@ private actor ImageLoadGate {
         calls += 1
         didStart?.resume()
         didStart = nil
+        let readyCounts = startWaiters.keys.filter { calls >= $0 }
+        for count in readyCounts { startWaiters.removeValue(forKey: count)?.resume() }
         await withCheckedContinuation { releaseWaiters.append($0) }
         return data
     }
@@ -1485,6 +1489,11 @@ private actor ImageLoadGate {
     func waitUntilStarted() async {
         guard calls == 0 else { return }
         await withCheckedContinuation { didStart = $0 }
+    }
+
+    func waitUntilStarted(count: Int) async {
+        guard calls < count else { return }
+        await withCheckedContinuation { startWaiters[count] = $0 }
     }
 
     func release() {
