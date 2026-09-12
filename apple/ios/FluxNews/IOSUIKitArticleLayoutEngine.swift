@@ -1,4 +1,5 @@
 import UIKit
+import CoreText
 
 /// Immutable geometry input. Mutable presentation pixels and read/starred state
 /// are intentionally absent: they must never affect article-card geometry.
@@ -183,7 +184,7 @@ struct IOSUIKitArticleGeometry: Equatable {
 }
 
 /// Deterministic, cell-free counterpart to the current UIKit constraint geometry.
-/// Text measurement uses an isolated UILabel, never a configured article cell or solver.
+/// Core Text typesetting is immutable and does not require main-actor view ownership.
 enum IOSUIKitArticleLayoutEngine {
     static func metrics(for input: IOSUIKitArticleLayoutInput) -> IOSUIKitArticleLayoutMetrics {
         let scale = max(input.displayScale, 1)
@@ -198,10 +199,10 @@ enum IOSUIKitArticleLayoutEngine {
         let textWidth = variant == .visualLandscape ? max(0, geometry.availableWidth - imageSize.width - IOSUIKitArticleGeometry.landscapeSpacing) : geometry.availableWidth
 
         let titleFont = font(.headline, category: input.contentSizeCategory, bold: false)
-        let titleHeight = height(input.title, font: titleFont, width: textWidth, maxLines: 0)
+        let titleHeight = coreTextHeight(input.title, font: titleFont, width: textWidth, maximumLines: nil, displayScale: scale)
         let metadataHeight = max(IOSUIKitArticleGeometry.feedIconSize, font(.subheadline, category: input.contentSizeCategory, bold: true).lineHeight)
-        let dateHeight = height(input.publishedDate, font: font(.caption1, category: input.contentSizeCategory, bold: false), width: textWidth, maxLines: 1)
-        let previewHeight = input.preview.isEmpty ? 0 : height(input.preview, font: font(.subheadline, category: input.contentSizeCategory, bold: false), width: textWidth, maxLines: input.previewLines.rawValue)
+        let dateHeight = fixedLineHeight(input.publishedDate, font: font(.caption1, category: input.contentSizeCategory, bold: false))
+        let previewHeight = coreTextHeight(input.preview, font: font(.subheadline, category: input.contentSizeCategory, bold: false), width: textWidth, maximumLines: input.previewLines.rawValue, displayScale: scale)
         let textBlockHeight = titleHeight + IOSUIKitArticleGeometry.textSpacing + metadataHeight + IOSUIKitArticleGeometry.textSpacing + dateHeight + (previewHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
         let contentHeight: CGFloat
         switch variant {
@@ -244,13 +245,32 @@ enum IOSUIKitArticleLayoutEngine {
         return UIFont(descriptor: font.fontDescriptor.withSymbolicTraits(.traitBold) ?? font.fontDescriptor, size: font.pointSize)
     }
 
-    private static func height(_ text: String, font: UIFont, width: CGFloat, maxLines: Int) -> CGFloat {
+    private static func fixedLineHeight(_ text: String, font: UIFont) -> CGFloat {
+        text.isEmpty ? 0 : font.lineHeight
+    }
+
+    /// Counts only the lines that can affect visible height. The unbounded title
+    /// consumes every line; preview stops as soon as its configured limit is reached.
+    private static func coreTextHeight(_ text: String, font: UIFont, width: CGFloat, maximumLines: Int?, displayScale: CGFloat) -> CGFloat {
         guard !text.isEmpty, width > 0 else { return 0 }
-        let label = UILabel()
-        label.font = font
-        label.numberOfLines = maxLines
-        label.lineBreakMode = .byWordWrapping
-        label.text = text
-        return label.sizeThatFits(.init(width: width, height: .greatestFiniteMagnitude)).height
+        let coreTextFont = font as CTFont
+        let attributedText = NSAttributedString(string: text, attributes: [kCTFontAttributeName as NSAttributedString.Key: coreTextFont])
+        let typesetter = CTTypesetterCreateWithAttributedString(attributedText)
+        let length = attributedText.length
+        var index = 0
+        var lineCount = 0
+        while index < length, maximumLines.map({ lineCount < $0 }) ?? true {
+            var lineLength = CTTypesetterSuggestLineBreak(typesetter, index, Double(width))
+            if lineLength == 0 {
+                lineLength = CTTypesetterSuggestClusterBreak(typesetter, index, Double(width))
+            }
+            guard lineLength > 0 else { break }
+            index += lineLength
+            lineCount += 1
+        }
+        // UILabel uses its font line height plus inter-line font leading, then
+        // resolves the final label extent on the display-pixel grid.
+        let height = CGFloat(lineCount) * font.lineHeight + CGFloat(max(0, lineCount - 1)) * font.leading
+        return ceil(height * displayScale) / displayScale
     }
 }

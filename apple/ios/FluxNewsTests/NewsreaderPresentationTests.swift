@@ -3,6 +3,7 @@ import ImageIO
 import Observation
 import UniformTypeIdentifiers
 import UIKit
+import CoreText
 @testable import FluxNews
 
 final class NewsreaderPresentationTests: XCTestCase {
@@ -1173,6 +1174,87 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: "Updated title", feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: input.layoutDirection)))
         XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: false, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: input.layoutDirection)))
         XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: .compact, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: input.layoutDirection)))
+    }
+
+    @MainActor
+    func testCoreTextUIKitMetricDiagnostics() {
+        let fixtures = [
+            ("title-one", "Short title", UIFont.preferredFont(forTextStyle: .headline), 358 as CGFloat, 0),
+            ("title-multi", "A deliberately multiline article title for Core Text diagnostics that wraps across the current iPhone width.", UIFont.preferredFont(forTextStyle: .headline), 358 as CGFloat, 0),
+            ("preview-three", String(repeating: "A preview line measures UIKit and Core Text semantics. ", count: 8), UIFont.preferredFont(forTextStyle: .subheadline), 358 as CGFloat, 3),
+        ]
+        for fixture in fixtures {
+            let font = fixture.2
+            let ctFont = font as CTFont
+            let label = UILabel()
+            label.font = font
+            label.numberOfLines = fixture.4
+            label.lineBreakMode = .byWordWrapping
+            label.text = fixture.1
+            let fitted = label.sizeThatFits(.init(width: fixture.3, height: .greatestFiniteMagnitude))
+            let intrinsic = label.intrinsicContentSize
+            let text = NSAttributedString(string: fixture.1, attributes: [kCTFontAttributeName as NSAttributedString.Key: ctFont])
+            let typesetter = CTTypesetterCreateWithAttributedString(text)
+            var index = 0
+            var lines: [String] = []
+            while index < text.length, fixture.4 == 0 || lines.count < fixture.4 {
+                let count = CTTypesetterSuggestLineBreak(typesetter, index, Double(fixture.3))
+                guard count > 0 else { break }
+                let line = CTTypesetterCreateLine(typesetter, CFRange(location: index, length: count))
+                var ascent: CGFloat = 0; var descent: CGFloat = 0; var leading: CGFloat = 0
+                let width = CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
+                lines.append(String(format: "line=%d range=%d,%d width=%.6f ascent=%.6f descent=%.6f leading=%.6f", lines.count, index, count, width, ascent, descent, leading))
+                index += count
+            }
+            let frameSize = CTFramesetterSuggestFrameSizeWithConstraints(CTFramesetterCreateWithAttributedString(text), CFRange(location: 0, length: index), nil, .init(width: fixture.3, height: .greatestFiniteMagnitude), nil)
+            print(String(format: "[Text metrics] %@ font=%@ size=%.6f asc=%.6f desc=%.6f lead=%.6f line=%.6f cap=%.6f x=%.6f ctPostScript=%@ ctSize=%.6f ctAsc=%.6f ctDesc=%.6f ctLead=%.6f labelFit=(%.6f,%.6f) intrinsic=(%.6f,%.6f) frame=(%.6f,%.6f) lines=%@", fixture.0, font.fontName, font.pointSize, font.ascender, font.descender, font.leading, font.lineHeight, font.capHeight, font.xHeight, CTFontCopyPostScriptName(ctFont) as String, CTFontGetSize(ctFont), CTFontGetAscent(ctFont), CTFontGetDescent(ctFont), CTFontGetLeading(ctFont), fitted.width, fitted.height, intrinsic.width, intrinsic.height, frameSize.width, frameSize.height, lines.joined(separator: " | ")))
+        }
+    }
+
+    @MainActor
+    func testCoreTextUIKitCompatibleHeightMatrix() {
+        let categories: [UIContentSizeCategory] = [.large, .extraExtraLarge, .accessibilityExtraExtraExtraLarge]
+        let fixtures: [(String, String, UIFont.TextStyle, Int, CGFloat)] = [
+            ("title-one", "Short title", .headline, 0, 358),
+            ("title-multi", String(repeating: "A title that wraps using production UIKit font metrics. ", count: 4), .headline, 0, 358),
+            ("preview-two", String(repeating: "A preview line wraps with bounded Core Text counting. ", count: 8), .subheadline, 2, 358),
+            ("preview-three", String(repeating: "A preview line wraps with bounded Core Text counting. ", count: 8), .subheadline, 3, 358),
+            ("preview-five", String(repeating: "A preview line wraps with bounded Core Text counting. ", count: 12), .subheadline, 5, 358),
+        ]
+        for category in categories {
+            let trait = UITraitCollection(preferredContentSizeCategory: category)
+            for fixture in fixtures {
+                let font = UIFont.preferredFont(forTextStyle: fixture.2, compatibleWith: trait)
+                let text = NSAttributedString(string: fixture.1, attributes: [kCTFontAttributeName as NSAttributedString.Key: font as CTFont])
+                let typesetter = CTTypesetterCreateWithAttributedString(text)
+                var index = 0
+                var lineCount = 0
+                while index < text.length, fixture.3 == 0 || lineCount < fixture.3 {
+                    let count = CTTypesetterSuggestLineBreak(typesetter, index, Double(fixture.4))
+                    guard count > 0 else { break }
+                    index += count
+                    lineCount += 1
+                }
+                for scale in [2 as CGFloat, 3] {
+                    let scaleTrait = UITraitCollection(traitsFrom: [trait, UITraitCollection(displayScale: scale)])
+                    var fitted = CGSize.zero
+                    scaleTrait.performAsCurrent {
+                        let label = UILabel()
+                        label.font = font
+                        label.numberOfLines = fixture.3
+                        label.lineBreakMode = .byWordWrapping
+                        label.text = fixture.1
+                        fitted = label.sizeThatFits(.init(width: fixture.4, height: .greatestFiniteMagnitude))
+                    }
+                    let raw = CGFloat(lineCount) * font.lineHeight + CGFloat(max(0, lineCount - 1)) * font.leading
+                    let predicted = ceil(raw * scale) / scale
+                    let actualScale = 3 as CGFloat // UILabel sizing follows the simulator display, not a synthetic trait scale.
+                    let actualPrediction = ceil(raw * actualScale) / actualScale
+                    XCTAssertEqual(fitted.height, actualPrediction, accuracy: 0.001, "\(category.rawValue) \(fixture.0) @\(actualScale)x")
+                    print(String(format: "[Text matrix] category=%@ fixture=%@ requestedScale=%.0f point=%.6f line=%.6f leading=%.6f lines=%d raw=%.6f predicted=%.6f actualLabelScale=%.0f actual=%.6f delta=%.6f", category.rawValue, fixture.0, scale, font.pointSize, font.lineHeight, font.leading, lineCount, raw, predicted, actualScale, fitted.height, fitted.height - actualPrediction))
+                }
+            }
+        }
     }
 
     @MainActor
