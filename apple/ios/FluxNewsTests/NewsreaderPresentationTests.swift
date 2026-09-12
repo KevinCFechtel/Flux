@@ -1120,28 +1120,22 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testTimelinePerformanceMetricsAccountForCachedAndUncachedSizing() {
+    func testTimelinePerformanceMetricsKeepArticleSizingOutOfAutoLayout() {
         let cell = makeUIKitArticleCell(mode: .visual, width: 390)
         let metrics = IOSUIKitTimelinePerformanceMetrics()
-        let cache = IOSUIKitArticleCellHeightCache(capacity: 4)
-        cell.heightCache = cache
         cell.performanceMetrics = metrics
 
-        _ = measureUIKitArticleCell(cell, width: 390)
+        let firstHeight = measureUIKitArticleCell(cell, width: 390)
         let first = metrics.snapshot()
         XCTAssertEqual(first.preferredLayoutAttributesFittingCalls, 1)
-        XCTAssertEqual(first.heightCacheMisses, 1)
-        XCTAssertEqual(first.systemLayoutSizeFittingCalls, 1)
-        XCTAssertGreaterThan(first.systemLayoutSizeFittingMaxNanoseconds, 0)
+        XCTAssertEqual(firstHeight, cell.preparedLayoutMetrics?.cellSize.height)
+        XCTAssertEqual(first.systemLayoutSizeFittingCalls, 0)
+        XCTAssertEqual(cell.measurementSolveCount, 0)
 
         _ = measureUIKitArticleCell(cell, width: 390)
         let second = metrics.snapshot()
         XCTAssertEqual(second.preferredLayoutAttributesFittingCalls, 2)
-        XCTAssertEqual(second.heightCacheHits, 1)
-        XCTAssertEqual(second.systemLayoutSizeFittingCalls, 1)
-
-        _ = measureUIKitArticleCell(cell, width: 430)
-        XCTAssertEqual(metrics.snapshot().systemLayoutSizeFittingCalls, 2)
+        XCTAssertEqual(second.systemLayoutSizeFittingCalls, 0)
         metrics.reset()
         XCTAssertEqual(metrics.snapshot().systemLayoutSizeFittingCalls, 0)
     }
@@ -1326,10 +1320,12 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testArticleSizingContentKeyExcludesMutablePresentationState() {
+    func testArticleLayoutKeyExcludesMutablePresentationState() {
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: true)
         let updated = IOSUIKitArticleTimelineItem(article: item.article, content: item.content, isRead: true, isStarred: true, feedIconImage: testImage(width: 80, height: 20))
-        XCTAssertEqual(IOSUIKitArticleCellSizingContentKey(item: item), IOSUIKitArticleCellSizingContentKey(item: updated))
+        let input = IOSUIKitArticleLayoutInput(item: item, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 2, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: .leftToRight)
+        let updatedInput = IOSUIKitArticleLayoutInput(item: updated, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 2, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: .leftToRight)
+        XCTAssertEqual(IOSUIKitArticleLayoutKey(input), IOSUIKitArticleLayoutKey(updatedInput))
     }
 
     @MainActor
@@ -1528,7 +1524,9 @@ final class NewsreaderPresentationTests: XCTestCase {
         cell.semanticContentAttribute = semanticAttribute
         cell.contentView.semanticContentAttribute = semanticAttribute
         container.addSubview(cell)
-        cell.configure(item: item, mode: mode, previewLines: previewLines, metrics: .init(mode: mode, containerWidth: width), displayScale: 2, preparedLayoutMetrics: nil)
+        let displayScale = cell.traitCollection.displayScale
+        let input = IOSUIKitArticleLayoutInput(item: item, mode: mode, previewLines: previewLines, containerWidth: width, displayScale: displayScale, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: layoutDirection)
+        cell.configure(item: item, mode: mode, previewLines: previewLines, metrics: .init(mode: mode, containerWidth: width), displayScale: displayScale, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
         container.layoutIfNeeded()
         return cell
     }
@@ -1569,13 +1567,15 @@ final class NewsreaderPresentationTests: XCTestCase {
         cell.semanticContentAttribute = semanticAttribute
         cell.contentView.semanticContentAttribute = semanticAttribute
         container.addSubview(cell)
+        let displayScale = cell.traitCollection.displayScale
+        let input = IOSUIKitArticleLayoutInput(item: item, mode: mode, previewLines: .standard, containerWidth: width, displayScale: displayScale, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: layoutDirection)
         cell.configure(
             item: item,
             mode: mode,
             previewLines: .standard,
             metrics: .init(mode: mode, containerWidth: width),
-            displayScale: 2,
-            preparedLayoutMetrics: nil
+            displayScale: displayScale,
+            preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input)
         )
         container.layoutIfNeeded()
         return cell

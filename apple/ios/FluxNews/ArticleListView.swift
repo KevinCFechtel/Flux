@@ -703,7 +703,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private var prefetchTasks: [Int64: Task<Void, Never>] = [:]
     private let refreshControl = UIRefreshControl()
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
-    private let articleHeightCache = IOSUIKitArticleCellHeightCache(capacity: 512)
     private let preparedLayoutCoordinator = IOSUIKitArticleLayoutPreparationCoordinator()
     private let performanceMetrics = IOSUIKitTimelinePerformanceMetrics()
     private(set) var structuralReconciliationCount = 0
@@ -737,7 +736,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         collectionView.register(IOSUIKitArticleCell.self, forCellWithReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier)
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self, UITraitLayoutDirection.self]) { (self: Self, _) in
-            self.articleHeightCache.removeAll()
             self.invalidateScrolloverGeometry()
             self.replacePreparedLayoutWindow()
             self.collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
@@ -774,11 +772,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             cell.setNeedsLayout()
         }
         collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
-    }
-
-    override func didReceiveMemoryWarning() {
-        super.didReceiveMemoryWarning()
-        articleHeightCache.removeAll()
     }
 
     func update(
@@ -871,8 +864,15 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private func configure(_ cell: IOSUIKitArticleCell, item: IOSUIKitArticleTimelineItem) {
         let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: collectionView.bounds.width)
         let layoutInput = preparedLayoutInput(for: item)
-        let preparedMetrics = preparedLayoutCoordinator.metrics(for: layoutInput, priority: .visible)
-        cell.heightCache = articleHeightCache
+        let layoutMetrics: IOSUIKitArticleLayoutMetrics
+        if let prepared = preparedLayoutCoordinator.metrics(for: layoutInput, priority: .visible) {
+            performanceMetrics.recordDeterministicHeightRequest(prepared: true)
+            layoutMetrics = prepared
+        } else {
+            let startedAt = DispatchTime.now().uptimeNanoseconds
+            layoutMetrics = IOSUIKitArticleLayoutEngine.metrics(for: layoutInput)
+            performanceMetrics.recordDeterministicHeightFallback(durationNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt)
+        }
         cell.performanceMetrics = performanceMetrics
         performanceMetrics.recordConfigure()
         cell.configure(
@@ -881,7 +881,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             previewLines: previewLines,
             metrics: metrics,
             displayScale: view.traitCollection.displayScale,
-            preparedLayoutMetrics: preparedMetrics
+            preparedLayoutMetrics: layoutMetrics
         )
         onRequestFeedIcon?(item.content.article.feedId, iconVariant)
     }
@@ -1225,7 +1225,8 @@ enum IOSUIKitTimelinePerformanceDiagnostics {
         let imageHitRate = image.memoryCacheHits + image.memoryCacheMisses > 0 ? Double(image.memoryCacheHits) / Double(image.memoryCacheHits + image.memoryCacheMisses) : nil
         print("""
         [Timeline Performance]
-        timeline preferredLayoutAttributesFittingCalls=\(timeline.preferredLayoutAttributesFittingCalls) heightCacheHits=\(timeline.heightCacheHits) heightCacheMisses=\(timeline.heightCacheMisses) systemLayoutSizeFittingCalls=\(timeline.systemLayoutSizeFittingCalls) systemLayoutSizeFittingTotalNanoseconds=\(timeline.systemLayoutSizeFittingTotalNanoseconds) systemLayoutSizeFittingMaxNanoseconds=\(timeline.systemLayoutSizeFittingMaxNanoseconds) systemLayoutSizeFittingP50ApproxNanoseconds=\(timeline.systemLayoutSizeFittingP50ApproxNanoseconds) systemLayoutSizeFittingP95ApproxNanoseconds=\(timeline.systemLayoutSizeFittingP95ApproxNanoseconds) configureCount=\(timeline.configureCount) reuseCount=\(timeline.reuseCount) layoutVariantSwitchCount=\(timeline.layoutVariantSwitchCount) imageBindingCount=\(timeline.imageBindingCount) structuralReconciliationCount=\(timeline.structuralReconciliationCount) snapshotApplyCount=\(timeline.snapshotApplyCount) layoutInvalidationCount=\(timeline.layoutInvalidationCount)
+        timeline preferredLayoutAttributesFittingCalls=\(timeline.preferredLayoutAttributesFittingCalls) systemLayoutSizeFittingCalls=\(timeline.systemLayoutSizeFittingCalls) configureCount=\(timeline.configureCount) reuseCount=\(timeline.reuseCount) layoutVariantSwitchCount=\(timeline.layoutVariantSwitchCount) imageBindingCount=\(timeline.imageBindingCount) structuralReconciliationCount=\(timeline.structuralReconciliationCount) snapshotApplyCount=\(timeline.snapshotApplyCount) layoutInvalidationCount=\(timeline.layoutInvalidationCount)
+        deterministicHeight requests=\(timeline.deterministicHeightRequests) preparedHits=\(timeline.deterministicHeightPreparedHits) synchronousFallbacks=\(timeline.deterministicHeightSynchronousFallbacks) synchronousFallbackTotalNanoseconds=\(timeline.deterministicHeightSynchronousFallbackTotalNanoseconds) synchronousFallbackMaxNanoseconds=\(timeline.deterministicHeightSynchronousFallbackMaxNanoseconds)
         preparedLayout requests=\(timeline.preparedLayoutRequests) cacheHits=\(timeline.preparedLayoutCacheHits) cacheMisses=\(timeline.preparedLayoutCacheMisses) measurementsStarted=\(timeline.preparedLayoutMeasurementsStarted) measurementsCompleted=\(timeline.preparedLayoutMeasurementsCompleted) discardedResults=\(timeline.preparedLayoutDiscardedResults) cancellations=\(timeline.preparedLayoutCancellations) maximumConcurrency=\(timeline.preparedLayoutMaximumConcurrency) visibleRequests=\(timeline.visibleLayoutMetricRequests) visibleCacheHits=\(timeline.visibleLayoutMetricCacheHits) visibleCacheMisses=\(timeline.visibleLayoutMetricCacheMisses) prefetchRequests=\(timeline.prefetchLayoutMetricRequests) prefetchCacheHits=\(timeline.prefetchLayoutMetricCacheHits) prefetchCacheMisses=\(timeline.prefetchLayoutMetricCacheMisses)
         image memoryCacheHits=\(image.memoryCacheHits) memoryCacheMisses=\(image.memoryCacheMisses) startedOperations=\(image.startedOperations) completedOperations=\(image.completedOperations) retiredOperations=\(image.retiredOperations) maximumActiveOperations=\(image.maximumActiveOperations) visibleStarts=\(image.visibleStarts) prefetchStarts=\(image.prefetchStarts) activeOperations=\(image.activeOperations) queuedVisibleRequests=\(image.queuedVisibleRequests) queuedPrefetchRequests=\(image.queuedPrefetchRequests)
         derived heightCacheHitRate=\(cacheHitRate.map { String(format: "%.3f", $0) } ?? "n/a") solverRate=\(solverRate.map { String(format: "%.3f", $0) } ?? "n/a") averageSolveTime=\(averageSolveTime.map { String(format: "%.0f", $0) } ?? "n/a") imageMemoryCacheHitRate=\(imageHitRate.map { String(format: "%.3f", $0) } ?? "n/a")
@@ -1239,34 +1240,6 @@ enum IOSUIKitArticleCellLayoutVariant: Hashable {
     case visualTextOnly
     case visualPortrait
     case visualLandscape
-}
-
-struct IOSUIKitArticleCellSizingContentKey: Hashable {
-    let title: String
-    let feedTitle: String
-    let publishedDate: String
-    let preview: String
-    let hasImage: Bool
-    let hasComments: Bool
-
-    init(item: IOSUIKitArticleTimelineItem) {
-        title = item.content.article.title
-        feedTitle = item.content.article.feedTitle
-        publishedDate = item.content.publishedDate
-        preview = item.content.article.preview
-        hasImage = item.content.imageURL != nil
-        hasComments = item.content.hasComments
-    }
-}
-
-struct IOSUIKitArticleCellMeasurementKey: Hashable {
-    let content: IOSUIKitArticleCellSizingContentKey
-    let availableWidthPixels: Int
-    let displayScaleHundredths: Int
-    let variant: IOSUIKitArticleCellLayoutVariant
-    let previewLineCount: Int
-    let contentSizeCategory: String
-    let isRightToLeft: Bool
 }
 
 struct IOSUIKitTimelinePerformanceSnapshot: Equatable {
@@ -1299,6 +1272,11 @@ struct IOSUIKitTimelinePerformanceSnapshot: Equatable {
     let prefetchLayoutMetricRequests: UInt64
     let prefetchLayoutMetricCacheHits: UInt64
     let prefetchLayoutMetricCacheMisses: UInt64
+    let deterministicHeightRequests: UInt64
+    let deterministicHeightPreparedHits: UInt64
+    let deterministicHeightSynchronousFallbacks: UInt64
+    let deterministicHeightSynchronousFallbackTotalNanoseconds: UInt64
+    let deterministicHeightSynchronousFallbackMaxNanoseconds: UInt64
 }
 
 @MainActor
@@ -1319,6 +1297,11 @@ final class IOSUIKitTimelinePerformanceMetrics {
     private var structuralReconciliationCount: UInt64 = 0
     private var snapshotApplyCount: UInt64 = 0
     private var layoutInvalidationCount: UInt64 = 0
+    private var deterministicHeightRequests: UInt64 = 0
+    private var deterministicHeightPreparedHits: UInt64 = 0
+    private var deterministicHeightSynchronousFallbacks: UInt64 = 0
+    private var deterministicHeightSynchronousFallbackTotalNanoseconds: UInt64 = 0
+    private var deterministicHeightSynchronousFallbackMaxNanoseconds: UInt64 = 0
 
     func reset() {
         durationBuckets = Array(repeating: 0, count: Self.durationBucketCount)
@@ -1326,6 +1309,8 @@ final class IOSUIKitTimelinePerformanceMetrics {
         systemLayoutSizeFittingCalls = 0; systemLayoutSizeFittingTotalNanoseconds = 0; systemLayoutSizeFittingMaxNanoseconds = 0
         configureCount = 0; reuseCount = 0; layoutVariantSwitchCount = 0; imageBindingCount = 0
         structuralReconciliationCount = 0; snapshotApplyCount = 0; layoutInvalidationCount = 0
+        deterministicHeightRequests = 0; deterministicHeightPreparedHits = 0; deterministicHeightSynchronousFallbacks = 0
+        deterministicHeightSynchronousFallbackTotalNanoseconds = 0; deterministicHeightSynchronousFallbackMaxNanoseconds = 0
     }
     func recordFittingCall() { preferredLayoutAttributesFittingCalls &+= 1 }
     func recordCacheHit() { heightCacheHits &+= 1 }
@@ -1337,6 +1322,16 @@ final class IOSUIKitTimelinePerformanceMetrics {
     func recordStructuralReconciliation() { structuralReconciliationCount &+= 1 }
     func recordSnapshotApply() { snapshotApplyCount &+= 1 }
     func recordLayoutInvalidation() { layoutInvalidationCount &+= 1 }
+    func recordDeterministicHeightRequest(prepared: Bool) {
+        deterministicHeightRequests &+= 1
+        if prepared { deterministicHeightPreparedHits &+= 1 }
+    }
+    func recordDeterministicHeightFallback(durationNanoseconds: UInt64) {
+        deterministicHeightRequests &+= 1
+        deterministicHeightSynchronousFallbacks &+= 1
+        deterministicHeightSynchronousFallbackTotalNanoseconds &+= durationNanoseconds
+        deterministicHeightSynchronousFallbackMaxNanoseconds = max(deterministicHeightSynchronousFallbackMaxNanoseconds, durationNanoseconds)
+    }
     func recordSolve(durationNanoseconds: UInt64) {
         systemLayoutSizeFittingCalls &+= 1
         systemLayoutSizeFittingTotalNanoseconds &+= durationNanoseconds
@@ -1344,7 +1339,7 @@ final class IOSUIKitTimelinePerformanceMetrics {
         durationBuckets[min(durationNanoseconds == 0 ? 0 : 63 - durationNanoseconds.leadingZeroBitCount, Self.durationBucketCount - 1)] &+= 1
     }
     func snapshot(preparation: IOSUIKitArticleLayoutPreparationSnapshot = .init(requests: 0, cacheHits: 0, cacheMisses: 0, measurementsStarted: 0, measurementsCompleted: 0, discardedResults: 0, cancellations: 0, maximumConcurrentMeasurements: 0, visibleRequests: 0, visibleCacheHits: 0, visibleCacheMisses: 0, prefetchRequests: 0, prefetchCacheHits: 0, prefetchCacheMisses: 0)) -> IOSUIKitTimelinePerformanceSnapshot {
-        .init(preferredLayoutAttributesFittingCalls: preferredLayoutAttributesFittingCalls, heightCacheHits: heightCacheHits, heightCacheMisses: heightCacheMisses, systemLayoutSizeFittingCalls: systemLayoutSizeFittingCalls, systemLayoutSizeFittingTotalNanoseconds: systemLayoutSizeFittingTotalNanoseconds, systemLayoutSizeFittingMaxNanoseconds: systemLayoutSizeFittingMaxNanoseconds, systemLayoutSizeFittingP50ApproxNanoseconds: percentile(0.5), systemLayoutSizeFittingP95ApproxNanoseconds: percentile(0.95), configureCount: configureCount, reuseCount: reuseCount, layoutVariantSwitchCount: layoutVariantSwitchCount, imageBindingCount: imageBindingCount, structuralReconciliationCount: structuralReconciliationCount, snapshotApplyCount: snapshotApplyCount, layoutInvalidationCount: layoutInvalidationCount, preparedLayoutRequests: preparation.requests, preparedLayoutCacheHits: preparation.cacheHits, preparedLayoutCacheMisses: preparation.cacheMisses, preparedLayoutMeasurementsStarted: preparation.measurementsStarted, preparedLayoutMeasurementsCompleted: preparation.measurementsCompleted, preparedLayoutDiscardedResults: preparation.discardedResults, preparedLayoutCancellations: preparation.cancellations, preparedLayoutMaximumConcurrency: preparation.maximumConcurrentMeasurements, visibleLayoutMetricRequests: preparation.visibleRequests, visibleLayoutMetricCacheHits: preparation.visibleCacheHits, visibleLayoutMetricCacheMisses: preparation.visibleCacheMisses, prefetchLayoutMetricRequests: preparation.prefetchRequests, prefetchLayoutMetricCacheHits: preparation.prefetchCacheHits, prefetchLayoutMetricCacheMisses: preparation.prefetchCacheMisses)
+        .init(preferredLayoutAttributesFittingCalls: preferredLayoutAttributesFittingCalls, heightCacheHits: heightCacheHits, heightCacheMisses: heightCacheMisses, systemLayoutSizeFittingCalls: systemLayoutSizeFittingCalls, systemLayoutSizeFittingTotalNanoseconds: systemLayoutSizeFittingTotalNanoseconds, systemLayoutSizeFittingMaxNanoseconds: systemLayoutSizeFittingMaxNanoseconds, systemLayoutSizeFittingP50ApproxNanoseconds: percentile(0.5), systemLayoutSizeFittingP95ApproxNanoseconds: percentile(0.95), configureCount: configureCount, reuseCount: reuseCount, layoutVariantSwitchCount: layoutVariantSwitchCount, imageBindingCount: imageBindingCount, structuralReconciliationCount: structuralReconciliationCount, snapshotApplyCount: snapshotApplyCount, layoutInvalidationCount: layoutInvalidationCount, preparedLayoutRequests: preparation.requests, preparedLayoutCacheHits: preparation.cacheHits, preparedLayoutCacheMisses: preparation.cacheMisses, preparedLayoutMeasurementsStarted: preparation.measurementsStarted, preparedLayoutMeasurementsCompleted: preparation.measurementsCompleted, preparedLayoutDiscardedResults: preparation.discardedResults, preparedLayoutCancellations: preparation.cancellations, preparedLayoutMaximumConcurrency: preparation.maximumConcurrentMeasurements, visibleLayoutMetricRequests: preparation.visibleRequests, visibleLayoutMetricCacheHits: preparation.visibleCacheHits, visibleLayoutMetricCacheMisses: preparation.visibleCacheMisses, prefetchLayoutMetricRequests: preparation.prefetchRequests, prefetchLayoutMetricCacheHits: preparation.prefetchCacheHits, prefetchLayoutMetricCacheMisses: preparation.prefetchCacheMisses, deterministicHeightRequests: deterministicHeightRequests, deterministicHeightPreparedHits: deterministicHeightPreparedHits, deterministicHeightSynchronousFallbacks: deterministicHeightSynchronousFallbacks, deterministicHeightSynchronousFallbackTotalNanoseconds: deterministicHeightSynchronousFallbackTotalNanoseconds, deterministicHeightSynchronousFallbackMaxNanoseconds: deterministicHeightSynchronousFallbackMaxNanoseconds)
     }
     private func percentile(_ percentile: Double) -> UInt64 {
         let target = UInt64((Double(systemLayoutSizeFittingCalls) * percentile).rounded(.up))
@@ -1355,43 +1350,6 @@ final class IOSUIKitTimelinePerformanceMetrics {
             if seen >= target { return UInt64(1) << index }
         }
         return systemLayoutSizeFittingMaxNanoseconds
-    }
-}
-
-final class IOSUIKitArticleCellHeightCache {
-    let capacity: Int
-    private var values: [IOSUIKitArticleCellMeasurementKey: CGFloat] = [:]
-    private var slots: [IOSUIKitArticleCellMeasurementKey] = []
-    private var nextEvictionIndex = 0
-
-    init(capacity: Int) {
-        self.capacity = max(1, capacity)
-        values.reserveCapacity(self.capacity)
-        slots.reserveCapacity(self.capacity)
-    }
-
-    var count: Int { values.count }
-
-    func height(for key: IOSUIKitArticleCellMeasurementKey) -> CGFloat? {
-        values[key]
-    }
-
-    func insert(_ height: CGFloat, for key: IOSUIKitArticleCellMeasurementKey) {
-        if values.updateValue(height, forKey: key) != nil { return }
-        if slots.count < capacity {
-            slots.append(key)
-            return
-        }
-        let evicted = slots[nextEvictionIndex]
-        values.removeValue(forKey: evicted)
-        slots[nextEvictionIndex] = key
-        nextEvictionIndex = (nextEvictionIndex + 1) % capacity
-    }
-
-    func removeAll() {
-        values.removeAll(keepingCapacity: true)
-        slots.removeAll(keepingCapacity: true)
-        nextEvictionIndex = 0
     }
 }
 
@@ -1452,10 +1410,6 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     private var imageTask: Task<Void, Never>?
     private var representedImageRequest: ArticleImageRequest?
     private var imageBindingGeneration: UInt64 = 0
-    private var sizingContentKey: IOSUIKitArticleCellSizingContentKey?
-    private var sizingMode: ArticlePresentationMode = .visual
-    private var sizingPreviewLines: ArticlePreviewLines = .standard
-    private var sizingDisplayScale: CGFloat = 2
     private var currentTitle = ""
     private var currentFeedTitle = ""
     private var currentPublishedDate = ""
@@ -1463,7 +1417,6 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     private var currentIsStarred = false
     private(set) var preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics?
 
-    weak var heightCache: IOSUIKitArticleCellHeightCache?
     weak var performanceMetrics: IOSUIKitTimelinePerformanceMetrics?
     private(set) var representedArticleID: Int64?
     private(set) var layoutVariantRevision: UInt64 = 0
@@ -1651,46 +1604,8 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     override func preferredLayoutAttributesFitting(_ layoutAttributes: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes {
         performanceMetrics?.recordFittingCall()
         guard let attributes = layoutAttributes.copy() as? UICollectionViewLayoutAttributes else { return layoutAttributes }
-        guard let sizingContentKey else {
-            return measuredAttributes(attributes, cacheKey: nil)
-        }
-
-        let metrics = Metrics(mode: sizingMode, containerWidth: layoutAttributes.size.width)
-        let hasImage = sizingContentKey.hasImage && sizingMode.showsArticleImage
-        let variant = metrics.layoutVariant(hasImage: hasImage)
-        applyLayout(metrics: metrics, variant: variant)
-        let key = measurementKey(
-            content: sizingContentKey,
-            metrics: metrics,
-            variant: variant,
-            previewLines: sizingPreviewLines,
-            displayScale: sizingDisplayScale
-        )
-        if let cachedHeight = heightCache?.height(for: key) {
-            performanceMetrics?.recordCacheHit()
-            attributes.size.height = cachedHeight
-            return attributes
-        }
-        performanceMetrics?.recordCacheMiss()
-        return measuredAttributes(attributes, cacheKey: key)
-    }
-
-    private func measuredAttributes(
-        _ attributes: UICollectionViewLayoutAttributes,
-        cacheKey: IOSUIKitArticleCellMeasurementKey?
-    ) -> UICollectionViewLayoutAttributes {
-        let targetSize = CGSize(width: attributes.size.width, height: UIView.layoutFittingCompressedSize.height)
-        let startedAt = DispatchTime.now().uptimeNanoseconds
-        let fittedSize = contentView.systemLayoutSizeFitting(
-            targetSize,
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel
-        )
-        performanceMetrics?.recordSolve(durationNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt)
-        let height = ceil(fittedSize.height)
-        attributes.size.height = height
-        measurementSolveCount += 1
-        if let cacheKey { heightCache?.insert(height, for: cacheKey) }
+        guard let preparedLayoutMetrics else { return attributes }
+        attributes.size.height = preparedLayoutMetrics.cellSize.height
         return attributes
     }
 
@@ -1700,7 +1615,6 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         invalidateImageBinding()
         representedImageRequest = nil
         representedArticleID = nil
-        sizingContentKey = nil
         preparedLayoutMetrics = nil
         articleImageView.image = nil
         imagePlaceholder.isHidden = false
@@ -1712,15 +1626,11 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         previewLines: ArticlePreviewLines,
         metrics: Metrics,
         displayScale: CGFloat,
-        preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics?
+        preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics
     ) {
         representedArticleID = item.article.id
         // Keep the independently constrained metadata row in the cell's semantic direction.
         metadataRow.semanticContentAttribute = semanticContentAttribute
-        sizingContentKey = IOSUIKitArticleCellSizingContentKey(item: item)
-        sizingMode = mode
-        sizingPreviewLines = previewLines
-        sizingDisplayScale = displayScale
         self.preparedLayoutMetrics = preparedLayoutMetrics
         currentTitle = item.content.article.title
         currentFeedTitle = item.content.article.feedTitle
@@ -1779,24 +1689,6 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         layoutVariantRevision &+= 1
         performanceMetrics?.recordVariantSwitch()
         articleImageView.isHidden = variant == .compact || variant == .visualTextOnly
-    }
-
-    private func measurementKey(
-        content: IOSUIKitArticleCellSizingContentKey,
-        metrics: Metrics,
-        variant: IOSUIKitArticleCellLayoutVariant,
-        previewLines: ArticlePreviewLines,
-        displayScale: CGFloat
-    ) -> IOSUIKitArticleCellMeasurementKey {
-        IOSUIKitArticleCellMeasurementKey(
-            content: content,
-            availableWidthPixels: Int((metrics.availableWidth * displayScale).rounded()),
-            displayScaleHundredths: Int((displayScale * 100).rounded()),
-            variant: variant,
-            previewLineCount: previewLines.rawValue,
-            contentSizeCategory: traitCollection.preferredContentSizeCategory.rawValue,
-            isRightToLeft: effectiveUserInterfaceLayoutDirection == .rightToLeft
-        )
     }
 
     func updateStatus(isRead: Bool, isStarred: Bool) {
