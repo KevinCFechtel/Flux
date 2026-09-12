@@ -1119,6 +1119,33 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testTimelinePerformanceMetricsAccountForCachedAndUncachedSizing() {
+        let cell = makeUIKitArticleCell(mode: .visual, width: 390)
+        let metrics = IOSUIKitTimelinePerformanceMetrics()
+        let cache = IOSUIKitArticleCellHeightCache(capacity: 4)
+        cell.heightCache = cache
+        cell.performanceMetrics = metrics
+
+        _ = measureUIKitArticleCell(cell, width: 390)
+        let first = metrics.snapshot()
+        XCTAssertEqual(first.preferredLayoutAttributesFittingCalls, 1)
+        XCTAssertEqual(first.heightCacheMisses, 1)
+        XCTAssertEqual(first.systemLayoutSizeFittingCalls, 1)
+        XCTAssertGreaterThan(first.systemLayoutSizeFittingMaxNanoseconds, 0)
+
+        _ = measureUIKitArticleCell(cell, width: 390)
+        let second = metrics.snapshot()
+        XCTAssertEqual(second.preferredLayoutAttributesFittingCalls, 2)
+        XCTAssertEqual(second.heightCacheHits, 1)
+        XCTAssertEqual(second.systemLayoutSizeFittingCalls, 1)
+
+        _ = measureUIKitArticleCell(cell, width: 430)
+        XCTAssertEqual(metrics.snapshot().systemLayoutSizeFittingCalls, 2)
+        metrics.reset()
+        XCTAssertEqual(metrics.snapshot().systemLayoutSizeFittingCalls, 0)
+    }
+
+    @MainActor
     private func makeUIKitArticleCell(
         mode: ArticlePresentationMode,
         width: CGFloat,

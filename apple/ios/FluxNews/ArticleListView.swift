@@ -704,6 +704,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private let refreshControl = UIRefreshControl()
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
     private let articleHeightCache = IOSUIKitArticleCellHeightCache(capacity: 512)
+    private let performanceMetrics = IOSUIKitTimelinePerformanceMetrics()
     private(set) var structuralReconciliationCount = 0
     private(set) var structuralSnapshotApplicationCount = 0
     private(set) var articlePresentationApplicationCount = 0
@@ -815,6 +816,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
         if structuralChanged {
             structuralReconciliationCount &+= 1
+            performanceMetrics.recordStructuralReconciliation()
             let newIDs = structuralState.items.map(\.article.id)
             orderedIDs = newIDs
             itemsByID = Dictionary(uniqueKeysWithValues: structuralState.items.map { ($0.article.id, $0) })
@@ -829,6 +831,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             snapshot.appendItems(newIDs)
             dataSource.apply(snapshot, animatingDifferences: false)
             structuralSnapshotApplicationCount &+= 1
+            performanceMetrics.recordSnapshotApply()
         }
         if layoutInputsChanged { invalidateScrolloverGeometry() }
 
@@ -843,6 +846,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
         if needsLayoutInvalidation {
             cancelAllPrefetch()
+            performanceMetrics.recordLayoutInvalidation()
             collectionView.collectionViewLayout.invalidateLayout()
         }
         if resetChanged {
@@ -860,6 +864,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private func configure(_ cell: IOSUIKitArticleCell, item: IOSUIKitArticleTimelineItem) {
         let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: collectionView.bounds.width)
         cell.heightCache = articleHeightCache
+        cell.performanceMetrics = performanceMetrics
+        performanceMetrics.recordConfigure()
         cell.configure(
             item: item,
             mode: mode,
@@ -1148,6 +1154,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         presentationBridge = nil
         feedIconPresentationBridge = nil
     }
+
+    func resetPerformanceMetrics() { performanceMetrics.reset() }
+    func performanceSnapshot() -> IOSUIKitTimelinePerformanceSnapshot { performanceMetrics.snapshot() }
 }
 
 enum IOSUIKitArticleCellLayoutVariant: Hashable {
@@ -1186,6 +1195,81 @@ struct IOSUIKitArticleCellMeasurementKey: Hashable {
     let contentSizeCategory: String
     let localeIdentifier: String
     let isRightToLeft: Bool
+}
+
+struct IOSUIKitTimelinePerformanceSnapshot: Equatable {
+    let preferredLayoutAttributesFittingCalls: UInt64
+    let heightCacheHits: UInt64
+    let heightCacheMisses: UInt64
+    let systemLayoutSizeFittingCalls: UInt64
+    let systemLayoutSizeFittingTotalNanoseconds: UInt64
+    let systemLayoutSizeFittingMaxNanoseconds: UInt64
+    let systemLayoutSizeFittingP50ApproxNanoseconds: UInt64
+    let systemLayoutSizeFittingP95ApproxNanoseconds: UInt64
+    let configureCount: UInt64
+    let reuseCount: UInt64
+    let layoutVariantSwitchCount: UInt64
+    let imageBindingCount: UInt64
+    let structuralReconciliationCount: UInt64
+    let snapshotApplyCount: UInt64
+    let layoutInvalidationCount: UInt64
+}
+
+@MainActor
+final class IOSUIKitTimelinePerformanceMetrics {
+    // Logarithmic nanosecond buckets provide bounded percentile estimates.
+    private static let durationBucketCount = 64
+    private var durationBuckets = Array(repeating: UInt64(0), count: durationBucketCount)
+    private var preferredLayoutAttributesFittingCalls: UInt64 = 0
+    private var heightCacheHits: UInt64 = 0
+    private var heightCacheMisses: UInt64 = 0
+    private var systemLayoutSizeFittingCalls: UInt64 = 0
+    private var systemLayoutSizeFittingTotalNanoseconds: UInt64 = 0
+    private var systemLayoutSizeFittingMaxNanoseconds: UInt64 = 0
+    private var configureCount: UInt64 = 0
+    private var reuseCount: UInt64 = 0
+    private var layoutVariantSwitchCount: UInt64 = 0
+    private var imageBindingCount: UInt64 = 0
+    private var structuralReconciliationCount: UInt64 = 0
+    private var snapshotApplyCount: UInt64 = 0
+    private var layoutInvalidationCount: UInt64 = 0
+
+    func reset() {
+        durationBuckets = Array(repeating: 0, count: Self.durationBucketCount)
+        preferredLayoutAttributesFittingCalls = 0; heightCacheHits = 0; heightCacheMisses = 0
+        systemLayoutSizeFittingCalls = 0; systemLayoutSizeFittingTotalNanoseconds = 0; systemLayoutSizeFittingMaxNanoseconds = 0
+        configureCount = 0; reuseCount = 0; layoutVariantSwitchCount = 0; imageBindingCount = 0
+        structuralReconciliationCount = 0; snapshotApplyCount = 0; layoutInvalidationCount = 0
+    }
+    func recordFittingCall() { preferredLayoutAttributesFittingCalls &+= 1 }
+    func recordCacheHit() { heightCacheHits &+= 1 }
+    func recordCacheMiss() { heightCacheMisses &+= 1 }
+    func recordConfigure() { configureCount &+= 1 }
+    func recordReuse() { reuseCount &+= 1 }
+    func recordVariantSwitch() { layoutVariantSwitchCount &+= 1 }
+    func recordImageBinding() { imageBindingCount &+= 1 }
+    func recordStructuralReconciliation() { structuralReconciliationCount &+= 1 }
+    func recordSnapshotApply() { snapshotApplyCount &+= 1 }
+    func recordLayoutInvalidation() { layoutInvalidationCount &+= 1 }
+    func recordSolve(durationNanoseconds: UInt64) {
+        systemLayoutSizeFittingCalls &+= 1
+        systemLayoutSizeFittingTotalNanoseconds &+= durationNanoseconds
+        systemLayoutSizeFittingMaxNanoseconds = max(systemLayoutSizeFittingMaxNanoseconds, durationNanoseconds)
+        durationBuckets[min(durationNanoseconds == 0 ? 0 : 63 - durationNanoseconds.leadingZeroBitCount, Self.durationBucketCount - 1)] &+= 1
+    }
+    func snapshot() -> IOSUIKitTimelinePerformanceSnapshot {
+        .init(preferredLayoutAttributesFittingCalls: preferredLayoutAttributesFittingCalls, heightCacheHits: heightCacheHits, heightCacheMisses: heightCacheMisses, systemLayoutSizeFittingCalls: systemLayoutSizeFittingCalls, systemLayoutSizeFittingTotalNanoseconds: systemLayoutSizeFittingTotalNanoseconds, systemLayoutSizeFittingMaxNanoseconds: systemLayoutSizeFittingMaxNanoseconds, systemLayoutSizeFittingP50ApproxNanoseconds: percentile(0.5), systemLayoutSizeFittingP95ApproxNanoseconds: percentile(0.95), configureCount: configureCount, reuseCount: reuseCount, layoutVariantSwitchCount: layoutVariantSwitchCount, imageBindingCount: imageBindingCount, structuralReconciliationCount: structuralReconciliationCount, snapshotApplyCount: snapshotApplyCount, layoutInvalidationCount: layoutInvalidationCount)
+    }
+    private func percentile(_ percentile: Double) -> UInt64 {
+        let target = UInt64((Double(systemLayoutSizeFittingCalls) * percentile).rounded(.up))
+        guard target > 0 else { return 0 }
+        var seen: UInt64 = 0
+        for (index, count) in durationBuckets.enumerated() {
+            seen &+= count
+            if seen >= target { return UInt64(1) << index }
+        }
+        return systemLayoutSizeFittingMaxNanoseconds
+    }
 }
 
 final class IOSUIKitArticleCellHeightCache {
@@ -1317,6 +1401,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     private var currentIsStarred = false
 
     weak var heightCache: IOSUIKitArticleCellHeightCache?
+    weak var performanceMetrics: IOSUIKitTimelinePerformanceMetrics?
     private(set) var representedArticleID: Int64?
     private(set) var layoutVariantRevision: UInt64 = 0
     private(set) var measurementSolveCount = 0
@@ -1492,6 +1577,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     }
 
     override func preferredLayoutAttributesFitting(_ layoutAttributes: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes {
+        performanceMetrics?.recordFittingCall()
         guard let attributes = layoutAttributes.copy() as? UICollectionViewLayoutAttributes else { return layoutAttributes }
         guard let sizingContentKey else {
             return measuredAttributes(attributes, cacheKey: nil)
@@ -1509,9 +1595,11 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             displayScale: sizingDisplayScale
         )
         if let cachedHeight = heightCache?.height(for: key) {
+            performanceMetrics?.recordCacheHit()
             attributes.size.height = cachedHeight
             return attributes
         }
+        performanceMetrics?.recordCacheMiss()
         return measuredAttributes(attributes, cacheKey: key)
     }
 
@@ -1520,11 +1608,13 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         cacheKey: IOSUIKitArticleCellMeasurementKey?
     ) -> UICollectionViewLayoutAttributes {
         let targetSize = CGSize(width: attributes.size.width, height: UIView.layoutFittingCompressedSize.height)
+        let startedAt = DispatchTime.now().uptimeNanoseconds
         let fittedSize = contentView.systemLayoutSizeFitting(
             targetSize,
             withHorizontalFittingPriority: .required,
             verticalFittingPriority: .fittingSizeLevel
         )
+        performanceMetrics?.recordSolve(durationNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt)
         let height = ceil(fittedSize.height)
         attributes.size.height = height
         measurementSolveCount += 1
@@ -1534,6 +1624,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        performanceMetrics?.recordReuse()
         invalidateImageBinding()
         representedImageRequest = nil
         representedArticleID = nil
@@ -1612,6 +1703,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         NSLayoutConstraint.activate(activeLayoutConstraints)
         currentLayoutVariant = variant
         layoutVariantRevision &+= 1
+        performanceMetrics?.recordVariantSwitch()
         articleImageView.isHidden = variant == .compact || variant == .visualTextOnly
     }
 
@@ -1670,6 +1762,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     var feedIconImageForTesting: UIImage? { feedIconImageView.image }
 
     private func configureArticleImage(url: URL?, targetSize: CGSize, displayScale: CGFloat) {
+        performanceMetrics?.recordImageBinding()
         invalidateImageBinding()
         representedImageRequest = nil
         guard let url, targetSize.width > 0, targetSize.height > 0 else {

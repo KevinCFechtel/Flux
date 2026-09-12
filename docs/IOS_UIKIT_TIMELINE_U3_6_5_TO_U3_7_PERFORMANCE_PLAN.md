@@ -1,6 +1,6 @@
 # UIKit Timeline Performance Plan — U3.6.5 through U3.7
 
-> **Status: U3.6.5, U3.6.6, AND U3.6.7 COMPLETE**
+> **Status: U3.6.5, U3.6.6, U3.6.7, AND U3.7.1 COMPLETE**
 >
 > Baseline: `main` after U3.6.1–U3.6.4, currently including the merged UIKit renderer, targeted presentation bridge, resolved Scrollover geometry, and bounded image scheduler.
 >
@@ -184,6 +184,33 @@ the existing shared-consumer, bounded-concurrency, visible-priority, and queued
 prefetch tests continue to cover the surrounding scheduler contract.
 
 ## 6. U3.7.1 — Timeline Performance Instrumentation
+
+### U3.7.1 implementation
+
+The Timeline controller owns a resettable `IOSUIKitTimelinePerformanceMetrics`
+accumulator and exposes immutable snapshots for local diagnostics. It counts cell
+configuration/reuse, variant and image binding changes, fitting calls, cache hits
+and misses, actual solver calls and durations, structural reconciliation,
+diffable snapshot application, and layout invalidation. Solver duration uses
+`DispatchTime.uptimeNanoseconds` only around `systemLayoutSizeFitting`; a fixed
+64-bucket logarithmic histogram provides bounded p50/p95 approximations.
+
+`ArticleImagePipeline.Metrics` now includes memory-cache, start/completion/
+retirement, maximum-active, and visible/prefetch-start counters. Its actor-owned
+counters are resettable and are available in Release-like builds without logging,
+telemetry, file I/O, or per-frame work.
+
+`NewsreaderPresentationTests` verifies first sizing is a miss/solve, repeated
+sizing is a hit without a solve, width changes solve again, and snapshots reset.
+
+### Physical-device protocol
+
+For each run, reset Timeline and image-pipeline metrics immediately before
+scrolling, record approximate traversed rows and elapsed run time, then capture
+both snapshots. Run a Release build on the reference iPhone for: a cold,
+previously unvisited image-rich region with Scrollover enabled; a warm repeat of
+the same region/settings; and, when practical, a text-heavy control. This package
+defines no acceptance threshold: the snapshots establish the U3.7 baseline.
 
 Before replacing sizing, add instrumentation around the real production path so the architectural change can be verified rather than judged only from video.
 

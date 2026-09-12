@@ -44,6 +44,14 @@ actor ArticleImagePipeline {
         let queuedVisibleRequests: Int
         let queuedPrefetchRequests: Int
         let trackedRequests: Int
+        let memoryCacheHits: Int
+        let memoryCacheMisses: Int
+        let startedOperations: Int
+        let completedOperations: Int
+        let retiredOperations: Int
+        let maximumActiveOperations: Int
+        let visibleStarts: Int
+        let prefetchStarts: Int
     }
 
     private struct Job {
@@ -53,6 +61,7 @@ actor ArticleImagePipeline {
         var waiters: [UUID: CheckedContinuation<CGImage, Error>] = [:]
         var operation: Task<CGImage, Error>?
         var state: State = .queued
+        let demand: Demand
     }
 
     private struct QueuedJob: Equatable {
@@ -71,6 +80,14 @@ actor ArticleImagePipeline {
     private var visibleQueue: [QueuedJob] = []
     private var prefetchQueue: [QueuedJob] = []
     private var activeOperationCount = 0
+    private var memoryCacheHits = 0
+    private var memoryCacheMisses = 0
+    private var startedOperations = 0
+    private var completedOperations = 0
+    private var retiredOperations = 0
+    private var maximumActiveOperations = 0
+    private var visibleStarts = 0
+    private var prefetchStarts = 0
 
     init(loader: Loader? = nil) {
         self.loader = loader ?? { url in try await Self.loadData(from: url) }
@@ -85,8 +102,10 @@ actor ArticleImagePipeline {
     func image(for request: ArticleImageRequest, demand: Demand = .visible) async throws -> CGImage {
         let cacheKey = request.cacheKey
         if let image = cache.image(for: cacheKey) {
+            memoryCacheHits += 1
             return image
         }
+        memoryCacheMisses += 1
 
         let consumerID = UUID()
         return try await withTaskCancellationHandler {
@@ -113,8 +132,17 @@ actor ArticleImagePipeline {
             activeOperations: activeOperationCount,
             queuedVisibleRequests: visibleQueue.count,
             queuedPrefetchRequests: prefetchQueue.count,
-            trackedRequests: jobs.values.reduce(0) { $0 + $1.count }
+            trackedRequests: jobs.values.reduce(0) { $0 + $1.count },
+            memoryCacheHits: memoryCacheHits, memoryCacheMisses: memoryCacheMisses,
+            startedOperations: startedOperations, completedOperations: completedOperations,
+            retiredOperations: retiredOperations, maximumActiveOperations: maximumActiveOperations,
+            visibleStarts: visibleStarts, prefetchStarts: prefetchStarts
         )
+    }
+
+    func resetMetrics() {
+        memoryCacheHits = 0; memoryCacheMisses = 0; startedOperations = 0; completedOperations = 0
+        retiredOperations = 0; maximumActiveOperations = activeOperationCount; visibleStarts = 0; prefetchStarts = 0
     }
 
     func removeAllCachedImages() {
@@ -145,7 +173,7 @@ actor ArticleImagePipeline {
                 continuation.resume(throwing: CancellationError())
                 return
             }
-            var job = Job(generation: UUID())
+            var job = Job(generation: UUID(), demand: demand)
             job.waiters[consumerID] = continuation
             store(job, for: request)
             let queued = QueuedJob(request: request, generation: job.generation)
@@ -223,6 +251,9 @@ actor ArticleImagePipeline {
             job.state = .active
             store(job, for: queued.request)
             activeOperationCount += 1
+            startedOperations += 1
+            maximumActiveOperations = max(maximumActiveOperations, activeOperationCount)
+            if job.demand == .visible { visibleStarts += 1 } else { prefetchStarts += 1 }
             Task { [weak self] in
                 let result: Result<CGImage, Error>
                 do { result = .success(try await operation.value) }
@@ -241,6 +272,8 @@ actor ArticleImagePipeline {
     private func complete(_ queued: QueuedJob, result: Result<CGImage, Error>) {
         guard let job = removeJob(for: queued.request, generation: queued.generation) else { return }
         activeOperationCount -= 1
+        completedOperations += 1
+        if job.state == .retiring { retiredOperations += 1 }
         if case let .success(image) = result { cache.insert(image, for: queued.request.cacheKey) }
         for continuation in job.waiters.values {
             switch result {
