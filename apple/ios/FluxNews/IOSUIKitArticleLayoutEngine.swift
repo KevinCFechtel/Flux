@@ -42,12 +42,32 @@ struct IOSUIKitArticleLayoutInput: Hashable {
 }
 
 struct IOSUIKitArticleLayoutKey: Hashable {
-    let input: IOSUIKitArticleLayoutInput
+    let title: String
+    let feedTitle: String
+    let publishedDate: String
+    let preview: String
+    let hasComments: Bool
+    let variant: IOSUIKitArticleCellLayoutVariant
+    let previewLines: ArticlePreviewLines
     let containerWidthPixels: Int
+    let displayScaleHundredths: Int
+    let contentSizeCategory: String
+    let layoutDirection: UIUserInterfaceLayoutDirection
 
     init(_ input: IOSUIKitArticleLayoutInput) {
-        self.input = input
-        containerWidthPixels = Int((input.containerWidth * max(input.displayScale, 1)).rounded())
+        let scale = max(input.displayScale, 1)
+        let geometry = IOSUIKitArticleGeometry(mode: input.mode, containerWidth: input.containerWidth)
+        title = input.title
+        feedTitle = input.feedTitle
+        publishedDate = input.publishedDate
+        preview = input.preview
+        hasComments = input.hasComments
+        variant = geometry.variant(hasImage: input.hasImage && input.mode.showsArticleImage)
+        previewLines = input.previewLines
+        containerWidthPixels = Int((input.containerWidth * scale).rounded())
+        displayScaleHundredths = Int((scale * 100).rounded())
+        contentSizeCategory = input.contentSizeCategory.rawValue
+        layoutDirection = input.layoutDirection
     }
 }
 
@@ -191,16 +211,19 @@ enum IOSUIKitArticleLayoutEngine {
         }
         let totalHeight = ceil(contentHeight + geometry.verticalPadding * 2)
         let contentFrame = CGRect(x: geometry.horizontalInset, y: geometry.verticalPadding, width: geometry.availableWidth, height: contentHeight)
-        let imageFrame: CGRect? = imageSize == .zero ? nil : CGRect(x: geometry.horizontalInset, y: geometry.verticalPadding, width: imageSize.width, height: imageSize.height)
-        let textOrigin = variant == .visualPortrait ? CGPoint(x: geometry.horizontalInset, y: geometry.verticalPadding + imageSize.height + IOSUIKitArticleGeometry.portraitSpacing) : variant == .visualLandscape ? CGPoint(x: geometry.horizontalInset + imageSize.width + IOSUIKitArticleGeometry.landscapeSpacing, y: geometry.verticalPadding) : CGPoint(x: geometry.horizontalInset, y: geometry.verticalPadding)
+        let logicalImageX = geometry.horizontalInset
+        let imageFrame: CGRect? = imageSize == .zero ? nil : CGRect(x: physicalX(logicalX: logicalImageX, width: imageSize.width, in: input.containerWidth, direction: input.layoutDirection), y: geometry.verticalPadding, width: imageSize.width, height: imageSize.height)
+        let logicalTextX = variant == .visualLandscape ? geometry.horizontalInset + imageSize.width + IOSUIKitArticleGeometry.landscapeSpacing : geometry.horizontalInset
+        let textOrigin = CGPoint(x: physicalX(logicalX: logicalTextX, width: textWidth, in: input.containerWidth, direction: input.layoutDirection), y: variant == .visualPortrait ? geometry.verticalPadding + imageSize.height + IOSUIKitArticleGeometry.portraitSpacing : geometry.verticalPadding)
         let titleFrame = CGRect(x: textOrigin.x, y: textOrigin.y, width: textWidth, height: titleHeight)
         let metadataFrame = CGRect(x: textOrigin.x, y: titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: textWidth, height: metadataHeight)
         let metadataLayout = geometry.metadataLayout(width: textWidth, hasComments: input.hasComments, height: metadataHeight)
-        let unreadFrame = CGRect(x: metadataFrame.minX + metadataLayout.unreadX, y: metadataFrame.midY - IOSUIKitArticleGeometry.unreadSize / 2, width: IOSUIKitArticleGeometry.unreadSize, height: IOSUIKitArticleGeometry.unreadSize)
-        let feedIconFrame = CGRect(x: metadataFrame.minX + metadataLayout.feedIconX, y: metadataFrame.midY - IOSUIKitArticleGeometry.feedIconSize / 2, width: IOSUIKitArticleGeometry.feedIconSize, height: IOSUIKitArticleGeometry.feedIconSize)
-        let feedTitleFrame = CGRect(x: metadataFrame.minX + metadataLayout.feedTitleX, y: metadataFrame.minY, width: metadataLayout.feedTitleWidth, height: metadataHeight)
-        let commentsFrame = input.hasComments ? CGRect(x: metadataFrame.minX + metadataLayout.commentsX, y: metadataFrame.midY - IOSUIKitArticleGeometry.commentSlotSize / 2, width: IOSUIKitArticleGeometry.commentSlotSize, height: IOSUIKitArticleGeometry.commentSlotSize) : nil
-        let starFrame = CGRect(x: metadataFrame.minX + metadataLayout.starX, y: metadataFrame.midY - IOSUIKitArticleGeometry.starSlotSize / 2, width: IOSUIKitArticleGeometry.starSlotSize, height: IOSUIKitArticleGeometry.starSlotSize)
+        func metadataX(_ logicalX: CGFloat, width: CGFloat) -> CGFloat { input.layoutDirection == .rightToLeft ? metadataFrame.maxX - logicalX - width : metadataFrame.minX + logicalX }
+        let unreadFrame = CGRect(x: metadataX(metadataLayout.unreadX, width: IOSUIKitArticleGeometry.unreadSize), y: metadataFrame.midY - IOSUIKitArticleGeometry.unreadSize / 2, width: IOSUIKitArticleGeometry.unreadSize, height: IOSUIKitArticleGeometry.unreadSize)
+        let feedIconFrame = CGRect(x: metadataX(metadataLayout.feedIconX, width: IOSUIKitArticleGeometry.feedIconSize), y: metadataFrame.midY - IOSUIKitArticleGeometry.feedIconSize / 2, width: IOSUIKitArticleGeometry.feedIconSize, height: IOSUIKitArticleGeometry.feedIconSize)
+        let feedTitleFrame = CGRect(x: metadataX(metadataLayout.feedTitleX, width: metadataLayout.feedTitleWidth), y: metadataFrame.minY, width: metadataLayout.feedTitleWidth, height: metadataHeight)
+        let commentsFrame = input.hasComments ? CGRect(x: metadataX(metadataLayout.commentsX, width: IOSUIKitArticleGeometry.commentSlotSize), y: metadataFrame.midY - IOSUIKitArticleGeometry.commentSlotSize / 2, width: IOSUIKitArticleGeometry.commentSlotSize, height: IOSUIKitArticleGeometry.commentSlotSize) : nil
+        let starFrame = CGRect(x: metadataX(metadataLayout.starX, width: IOSUIKitArticleGeometry.starSlotSize), y: metadataFrame.midY - IOSUIKitArticleGeometry.starSlotSize / 2, width: IOSUIKitArticleGeometry.starSlotSize, height: IOSUIKitArticleGeometry.starSlotSize)
         let dateFrame = CGRect(x: textOrigin.x, y: metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: textWidth, height: dateHeight)
         let previewFrame = previewHeight == 0 ? nil : CGRect(x: textOrigin.x, y: dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: textWidth, height: previewHeight)
         return .init(variant: variant, cellSize: .init(width: input.containerWidth, height: totalHeight), contentFrame: contentFrame, imageFrame: imageFrame, textFrame: CGRect(x: textOrigin.x, y: textOrigin.y, width: textWidth, height: textBlockHeight), titleFrame: titleFrame, metadataFrame: metadataFrame, unreadFrame: unreadFrame, feedIconFrame: feedIconFrame, feedTitleFrame: feedTitleFrame, commentsFrame: commentsFrame, starFrame: starFrame, dateFrame: dateFrame, previewFrame: previewFrame, horizontalInset: geometry.horizontalInset, verticalInset: geometry.verticalPadding, titleHeight: titleHeight, metadataHeight: metadataHeight, previewHeight: previewHeight, textBlockHeight: textBlockHeight)
@@ -208,6 +231,10 @@ enum IOSUIKitArticleLayoutEngine {
 
     private static func pixelAligned(_ length: CGFloat, scale: CGFloat) -> CGFloat {
         (length * scale).rounded() / scale
+    }
+
+    private static func physicalX(logicalX: CGFloat, width: CGFloat, in containerWidth: CGFloat, direction: UIUserInterfaceLayoutDirection) -> CGFloat {
+        direction == .rightToLeft ? containerWidth - logicalX - width : logicalX
     }
 
     private static func font(_ style: UIFont.TextStyle, category: UIContentSizeCategory, bold: Bool) -> UIFont {

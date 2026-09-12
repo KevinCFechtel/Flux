@@ -1161,10 +1161,25 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(layoutMetrics(mode: .visual, width: 701, hasImage: true).horizontalInset, 28)
     }
 
-    func testDeterministicArticleLayoutEngineKeyExcludesPresentationPixelsAndStatus() {
+    func testDeterministicArticleLayoutEngineKeyCanonicalizesGeometryIdentity() {
         let input = layoutInput(mode: .visual, width: 390, hasImage: true)
-        XCTAssertEqual(IOSUIKitArticleLayoutKey(input), IOSUIKitArticleLayoutKey(input))
-        XCTAssertEqual(IOSUIKitArticleLayoutEngine.metrics(for: input).imageFrame?.size, IOSUIKitArticleLayoutEngine.metrics(for: input).imageFrame?.size)
+        let key = IOSUIKitArticleLayoutKey(input)
+        XCTAssertEqual(key, IOSUIKitArticleLayoutKey(layoutInput(mode: .visual, width: 390.1, hasImage: true)))
+        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(layoutInput(mode: .visual, width: 391, hasImage: true)))
+        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(layoutInput(mode: .compact, width: 390, hasImage: true)))
+        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: .extraLarge, localeIdentifier: input.localeIdentifier, layoutDirection: input.layoutDirection)))
+        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: .rightToLeft)))
+        XCTAssertEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: "ar_SA", layoutDirection: input.layoutDirection)))
+        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: "Updated title", feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: input.layoutDirection)))
+        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: false, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: input.layoutDirection)))
+        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: .compact, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: input.layoutDirection)))
+    }
+
+    @MainActor
+    func testArticleSizingContentKeyExcludesMutablePresentationState() {
+        let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: true)
+        let updated = IOSUIKitArticleTimelineItem(article: item.article, content: item.content, isRead: true, isStarred: true, feedIconImage: testImage(width: 80, height: 20))
+        XCTAssertEqual(IOSUIKitArticleCellSizingContentKey(item: item), IOSUIKitArticleCellSizingContentKey(item: updated))
     }
 
     @MainActor
@@ -1208,6 +1223,37 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testDeterministicArticleLayoutEngineMatchesUIKitCellOracleInRightToLeft() {
+        let cases: [(ArticlePresentationMode, CGFloat, Bool, Bool, String)] = [
+            (.visual, 390, false, false, "Oracle Feed"),
+            (.visual, 390, true, true, "Oracle Feed"),
+            (.visual, 390, false, false, String(repeating: "An exceptionally long feed title ", count: 12)),
+            (.compact, 320, false, true, "Oracle Feed"),
+            (.visual, 760, true, true, "Oracle Feed"),
+        ]
+        for (index, testCase) in cases.enumerated() {
+            let item = oracleItem(title: "A deliberately multiline article title for RTL component geometry.", preview: "A preview long enough to exercise the complete text stack.", hasImage: testCase.2, hasComments: testCase.3, feedTitle: testCase.4)
+            let cell = configuredOracleCell(item: item, mode: testCase.0, previewLines: .standard, width: testCase.1, layoutDirection: .rightToLeft)
+            let actual = measureUIKitArticleCell(cell, width: testCase.1)
+            let input = IOSUIKitArticleLayoutInput(item: item, mode: testCase.0, previewLines: .standard, containerWidth: testCase.1, displayScale: cell.traitCollection.displayScale, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: .rightToLeft)
+            let expected = IOSUIKitArticleLayoutEngine.metrics(for: input)
+            let ltr = IOSUIKitArticleLayoutEngine.metrics(for: .init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: .leftToRight))
+            let diagnostics = cell.layoutDiagnosticsForTesting
+            XCTAssertEqual(actual, expected.cellSize.height, accuracy: 0.5, "RTL case \(index) cell=\(diagnostics)")
+            XCTAssertEqual(expected.cellSize.height, ltr.cellSize.height, accuracy: 0.001)
+            assertFrameEqual(diagnostics.titleFrame, expected.titleFrame)
+            assertFrameEqual(diagnostics.metadataFrame, expected.metadataFrame)
+            assertFrameEqual(diagnostics.unreadFrame, expected.unreadFrame)
+            assertFrameEqual(diagnostics.feedIconFrame, expected.feedIconFrame)
+            assertFrameEqual(diagnostics.feedTitleFrame, expected.feedTitleFrame)
+            assertOptionalFrameEqual(diagnostics.commentsFrame, expected.commentsFrame)
+            assertFrameEqual(diagnostics.starFrame, expected.starFrame)
+            assertFrameEqual(diagnostics.dateFrame, expected.dateFrame)
+            assertOptionalFrameEqual(diagnostics.previewFrame, expected.previewFrame)
+        }
+    }
+
+    @MainActor
     func testUIKitMetadataMutablePresentationUpdatesAreGeometryNeutral() {
         let cell = makeUIKitArticleCell(mode: .visual, width: 390)
         let baselineHeight = measureUIKitArticleCell(cell, width: 390)
@@ -1224,6 +1270,22 @@ final class NewsreaderPresentationTests: XCTestCase {
         assertFrameEqual(updated.feedTitleFrame, baseline.feedTitleFrame)
         assertFrameEqual(updated.starFrame, baseline.starFrame)
         assertFrameEqual(updated.dateFrame, baseline.dateFrame)
+    }
+
+    @MainActor
+    func testUIKitMetadataMutablePresentationUpdatesAreGeometryNeutralInRightToLeft() {
+        let cell = makeUIKitArticleCell(mode: .visual, width: 390, layoutDirection: .rightToLeft)
+        let baselineHeight = measureUIKitArticleCell(cell, width: 390)
+        let baseline = cell.layoutDiagnosticsForTesting
+
+        cell.updateStatus(isRead: true, isStarred: true)
+        cell.updateFeedIcon(image: testImage(width: 80, height: 20), title: "Feed")
+        XCTAssertEqual(measureUIKitArticleCell(cell, width: 390), baselineHeight, accuracy: 0.5)
+        let updated = cell.layoutDiagnosticsForTesting
+        assertFrameEqual(updated.unreadFrame, baseline.unreadFrame)
+        assertFrameEqual(updated.feedIconFrame, baseline.feedIconFrame)
+        assertFrameEqual(updated.feedTitleFrame, baseline.feedTitleFrame)
+        assertFrameEqual(updated.starFrame, baseline.starFrame)
     }
 
     @MainActor
@@ -1308,9 +1370,13 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    private func configuredOracleCell(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, width: CGFloat) -> IOSUIKitArticleCell {
+    private func configuredOracleCell(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, width: CGFloat, layoutDirection: UIUserInterfaceLayoutDirection = .leftToRight) -> IOSUIKitArticleCell {
         let container = UIView(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
         let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
+        let semanticAttribute: UISemanticContentAttribute = layoutDirection == .rightToLeft ? .forceRightToLeft : .forceLeftToRight
+        container.semanticContentAttribute = semanticAttribute
+        cell.semanticContentAttribute = semanticAttribute
+        cell.contentView.semanticContentAttribute = semanticAttribute
         container.addSubview(cell)
         cell.configure(item: item, mode: mode, previewLines: previewLines, metrics: .init(mode: mode, containerWidth: width), displayScale: 2)
         container.layoutIfNeeded()
@@ -1322,7 +1388,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         mode: ArticlePresentationMode,
         width: CGFloat,
         articleID: Int64 = 1,
-        feedID: Int64 = 10
+        feedID: Int64 = 10,
+        layoutDirection: UIUserInterfaceLayoutDirection = .leftToRight
     ) -> IOSUIKitArticleCell {
         let article = ArticleSummary(
             id: articleID,
@@ -1347,6 +1414,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
         let container = UIView(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
         let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
+        let semanticAttribute: UISemanticContentAttribute = layoutDirection == .rightToLeft ? .forceRightToLeft : .forceLeftToRight
+        container.semanticContentAttribute = semanticAttribute
+        cell.semanticContentAttribute = semanticAttribute
+        cell.contentView.semanticContentAttribute = semanticAttribute
         container.addSubview(cell)
         cell.configure(
             item: item,

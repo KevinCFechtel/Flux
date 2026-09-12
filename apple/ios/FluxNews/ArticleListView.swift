@@ -1206,21 +1206,19 @@ enum IOSUIKitArticleCellLayoutVariant: Hashable {
 }
 
 struct IOSUIKitArticleCellSizingContentKey: Hashable {
-    let articleID: Int64
     let title: String
     let feedTitle: String
     let publishedDate: String
     let preview: String
-    let imageURL: String?
+    let hasImage: Bool
     let hasComments: Bool
 
     init(item: IOSUIKitArticleTimelineItem) {
-        articleID = item.article.id
         title = item.content.article.title
         feedTitle = item.content.article.feedTitle
         publishedDate = item.content.publishedDate
         preview = item.content.article.preview
-        imageURL = item.content.imageURL?.absoluteString
+        hasImage = item.content.imageURL != nil
         hasComments = item.content.hasComments
     }
 }
@@ -1232,7 +1230,6 @@ struct IOSUIKitArticleCellMeasurementKey: Hashable {
     let variant: IOSUIKitArticleCellLayoutVariant
     let previewLineCount: Int
     let contentSizeCategory: String
-    let localeIdentifier: String
     let isRightToLeft: Bool
 }
 
@@ -1608,7 +1605,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         }
 
         let metrics = Metrics(mode: sizingMode, containerWidth: layoutAttributes.size.width)
-        let hasImage = sizingContentKey.imageURL != nil && sizingMode.showsArticleImage
+        let hasImage = sizingContentKey.hasImage && sizingMode.showsArticleImage
         let variant = metrics.layoutVariant(hasImage: hasImage)
         applyLayout(metrics: metrics, variant: variant)
         let key = measurementKey(
@@ -1665,6 +1662,8 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         displayScale: CGFloat
     ) {
         representedArticleID = item.article.id
+        // Keep the independently constrained metadata row in the cell's semantic direction.
+        metadataRow.semanticContentAttribute = semanticContentAttribute
         sizingContentKey = IOSUIKitArticleCellSizingContentKey(item: item)
         sizingMode = mode
         sizingPreviewLines = previewLines
@@ -1742,7 +1741,6 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             variant: variant,
             previewLineCount: previewLines.rawValue,
             contentSizeCategory: traitCollection.preferredContentSizeCategory.rawValue,
-            localeIdentifier: Locale.current.identifier,
             isRightToLeft: effectiveUserInterfaceLayoutDirection == .rightToLeft
         )
     }
