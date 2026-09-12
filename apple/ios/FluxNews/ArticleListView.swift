@@ -790,6 +790,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         showsRefreshControl newShowsRefreshControl: Bool
     ) {
         loadViewIfNeeded()
+#if DEBUG
+        IOSUIKitTimelinePerformanceDiagnostics.currentController = self
+#endif
 
         let structuralChanged = structuralRevision != structuralState.revision
         let layoutInputsChanged = mode != newMode || previewLines != newPreviewLines
@@ -1158,6 +1161,42 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     func resetPerformanceMetrics() { performanceMetrics.reset() }
     func performanceSnapshot() -> IOSUIKitTimelinePerformanceSnapshot { performanceMetrics.snapshot() }
 }
+
+#if DEBUG
+@MainActor
+enum IOSUIKitTimelinePerformanceDiagnostics {
+    weak static var currentController: IOSUIKitArticleTimelineController?
+
+    static func resetAndPrint() async {
+        guard let controller = currentController else {
+            print("[Timeline Performance] No active Timeline controller")
+            return
+        }
+        controller.resetPerformanceMetrics()
+        await ArticleImagePipeline.shared.resetMetrics()
+        print("[Timeline Performance] Metrics reset")
+    }
+
+    static func printSnapshot() async {
+        guard let controller = currentController else {
+            print("[Timeline Performance] No active Timeline controller")
+            return
+        }
+        let timeline = controller.performanceSnapshot()
+        let image = await ArticleImagePipeline.shared.metrics()
+        let cacheHitRate = timeline.heightCacheHits + timeline.heightCacheMisses > 0 ? Double(timeline.heightCacheHits) / Double(timeline.heightCacheHits + timeline.heightCacheMisses) : nil
+        let solverRate = timeline.preferredLayoutAttributesFittingCalls > 0 ? Double(timeline.systemLayoutSizeFittingCalls) / Double(timeline.preferredLayoutAttributesFittingCalls) : nil
+        let averageSolveTime = timeline.systemLayoutSizeFittingCalls > 0 ? Double(timeline.systemLayoutSizeFittingTotalNanoseconds) / Double(timeline.systemLayoutSizeFittingCalls) : nil
+        let imageHitRate = image.memoryCacheHits + image.memoryCacheMisses > 0 ? Double(image.memoryCacheHits) / Double(image.memoryCacheHits + image.memoryCacheMisses) : nil
+        print("""
+        [Timeline Performance]
+        timeline preferredLayoutAttributesFittingCalls=\(timeline.preferredLayoutAttributesFittingCalls) heightCacheHits=\(timeline.heightCacheHits) heightCacheMisses=\(timeline.heightCacheMisses) systemLayoutSizeFittingCalls=\(timeline.systemLayoutSizeFittingCalls) systemLayoutSizeFittingTotalNanoseconds=\(timeline.systemLayoutSizeFittingTotalNanoseconds) systemLayoutSizeFittingMaxNanoseconds=\(timeline.systemLayoutSizeFittingMaxNanoseconds) systemLayoutSizeFittingP50ApproxNanoseconds=\(timeline.systemLayoutSizeFittingP50ApproxNanoseconds) systemLayoutSizeFittingP95ApproxNanoseconds=\(timeline.systemLayoutSizeFittingP95ApproxNanoseconds) configureCount=\(timeline.configureCount) reuseCount=\(timeline.reuseCount) layoutVariantSwitchCount=\(timeline.layoutVariantSwitchCount) imageBindingCount=\(timeline.imageBindingCount) structuralReconciliationCount=\(timeline.structuralReconciliationCount) snapshotApplyCount=\(timeline.snapshotApplyCount) layoutInvalidationCount=\(timeline.layoutInvalidationCount)
+        image memoryCacheHits=\(image.memoryCacheHits) memoryCacheMisses=\(image.memoryCacheMisses) startedOperations=\(image.startedOperations) completedOperations=\(image.completedOperations) retiredOperations=\(image.retiredOperations) maximumActiveOperations=\(image.maximumActiveOperations) visibleStarts=\(image.visibleStarts) prefetchStarts=\(image.prefetchStarts) activeOperations=\(image.activeOperations) queuedVisibleRequests=\(image.queuedVisibleRequests) queuedPrefetchRequests=\(image.queuedPrefetchRequests)
+        derived heightCacheHitRate=\(cacheHitRate.map { String(format: "%.3f", $0) } ?? "n/a") solverRate=\(solverRate.map { String(format: "%.3f", $0) } ?? "n/a") averageSolveTime=\(averageSolveTime.map { String(format: "%.0f", $0) } ?? "n/a") imageMemoryCacheHitRate=\(imageHitRate.map { String(format: "%.3f", $0) } ?? "n/a")
+        """)
+    }
+}
+#endif
 
 enum IOSUIKitArticleCellLayoutVariant: Hashable {
     case compact
