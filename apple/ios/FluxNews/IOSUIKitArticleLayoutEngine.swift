@@ -68,72 +68,109 @@ struct IOSUIKitArticleLayoutMetrics: Equatable {
     let textBlockHeight: CGFloat
 }
 
+/// The non-text geometry contract shared by the renderer and deterministic sizing.
+/// It deliberately has no presentation pixels or read/starred state.
+struct IOSUIKitArticleGeometry: Equatable {
+    static let metadataColumnThreshold: CGFloat = 370
+    static let wideInsetThreshold: CGFloat = 700
+    static let compactInset: CGFloat = 10
+    static let visualInset: CGFloat = 16
+    static let wideInset: CGFloat = 28
+    static let compactVerticalPadding: CGFloat = 11
+    static let portraitVerticalPadding: CGFloat = 15
+    static let landscapeVerticalPadding: CGFloat = 13
+    static let textSpacing: CGFloat = 7
+    static let portraitSpacing: CGFloat = 12
+    static let landscapeSpacing: CGFloat = 14
+    static let titleAccessoryWidth: CGFloat = 17
+    static let titleAccessorySpacing: CGFloat = 8
+    static let unreadSize: CGFloat = 6
+    static let feedIconSize: CGFloat = 22
+
+    let mode: ArticlePresentationMode
+    let containerWidth: CGFloat
+    let horizontalInset: CGFloat
+    let availableWidth: CGFloat
+    let isLandscapeVisual: Bool
+    let verticalPadding: CGFloat
+
+    init(mode: ArticlePresentationMode, containerWidth: CGFloat) {
+        self.mode = mode
+        self.containerWidth = containerWidth
+        horizontalInset = containerWidth > Self.wideInsetThreshold ? Self.wideInset : mode == .compact ? Self.compactInset : Self.visualInset
+        availableWidth = max(0, containerWidth - horizontalInset * 2)
+        isLandscapeVisual = ArticlePresentationLayout.usesLandscapeVisual(mode: mode, availableWidth: availableWidth)
+        verticalPadding = mode == .compact ? Self.compactVerticalPadding : isLandscapeVisual ? Self.landscapeVerticalPadding : Self.portraitVerticalPadding
+    }
+
+    func variant(hasImage: Bool) -> IOSUIKitArticleCellLayoutVariant {
+        guard mode == .visual else { return .compact }
+        guard hasImage else { return .visualTextOnly }
+        return isLandscapeVisual ? .visualLandscape : .visualPortrait
+    }
+
+    func imageSize(hasImage: Bool) -> CGSize {
+        guard hasImage, mode.showsArticleImage else { return .zero }
+        if isLandscapeVisual {
+            let width = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
+            return .init(width: width, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: width))
+        }
+        // Match the NSLayoutConstraint multiplier used by the cell, rather than
+        // the image-request helper's independently rounded target height.
+        return .init(width: availableWidth, height: availableWidth * (1 / ArticlePresentationLayout.portraitImageAspectRatio))
+    }
+
+    var usesColumnMetadata: Bool { availableWidth < Self.metadataColumnThreshold }
+}
+
 /// Deterministic, cell-free counterpart to the current UIKit constraint geometry.
 /// Text measurement uses an isolated UILabel, never a configured article cell or solver.
 enum IOSUIKitArticleLayoutEngine {
-    private static let textSpacing: CGFloat = 7
-    private static let portraitSpacing: CGFloat = 12
-    private static let landscapeSpacing: CGFloat = 14
-    private static let starSlotWidth: CGFloat = 17
-    private static let starSpacing: CGFloat = 8
-    private static let feedIconWidth: CGFloat = 22
-    private static let unreadWidth: CGFloat = 6
-    private static let metadataPrimarySpacing: CGFloat = 6
-
     static func metrics(for input: IOSUIKitArticleLayoutInput) -> IOSUIKitArticleLayoutMetrics {
         let scale = max(input.displayScale, 1)
-        let horizontalInset: CGFloat = input.containerWidth > 700 ? 28 : input.mode == .compact ? 10 : 16
-        let availableWidth = max(0, input.containerWidth - horizontalInset * 2)
-        let landscape = ArticlePresentationLayout.usesLandscapeVisual(mode: input.mode, availableWidth: availableWidth)
+        let geometry = IOSUIKitArticleGeometry(mode: input.mode, containerWidth: input.containerWidth)
         let hasImage = input.hasImage && input.mode.showsArticleImage
-        let variant: IOSUIKitArticleCellLayoutVariant = input.mode == .compact ? .compact : !hasImage ? .visualTextOnly : landscape ? .visualLandscape : .visualPortrait
-        // Metrics chooses this from the visual width before the image/no-image variant.
-        let verticalInset: CGFloat = input.mode == .compact ? 11 : landscape ? 13 : 15
-        let imageSize: CGSize
-        let textWidth: CGFloat
-        switch variant {
-        case .visualPortrait:
-            imageSize = .init(width: availableWidth, height: availableWidth / ArticlePresentationLayout.portraitImageAspectRatio)
-            textWidth = availableWidth
-        case .visualLandscape:
-            let width = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
-            imageSize = .init(width: width, height: width / ArticlePresentationLayout.landscapeImageAspectRatio)
-            // Mirrors the real constraints; do not use landscapeTextWidth here.
-            textWidth = max(0, availableWidth - width - landscapeSpacing)
-        default:
-            imageSize = .zero
-            textWidth = availableWidth
+        let variant = geometry.variant(hasImage: hasImage)
+        var imageSize = geometry.imageSize(hasImage: hasImage)
+        if variant == .visualPortrait {
+            // NSLayoutConstraint resolves the 16:9 frame on the display-pixel grid.
+            imageSize.height = pixelAligned(imageSize.height, scale: scale)
         }
+        let textWidth = variant == .visualLandscape ? max(0, geometry.availableWidth - imageSize.width - IOSUIKitArticleGeometry.landscapeSpacing) : geometry.availableWidth
 
         let titleFont = font(.headline, category: input.contentSizeCategory, bold: false)
-        let titleHeight = height(input.title, font: titleFont, width: max(0, textWidth - starSlotWidth - starSpacing), maxLines: 0)
-        let metadataHeight = metadataHeight(input, width: textWidth)
+        let titleHeight = height(input.title, font: titleFont, width: max(0, textWidth - IOSUIKitArticleGeometry.titleAccessoryWidth - IOSUIKitArticleGeometry.titleAccessorySpacing), maxLines: 0)
+        let metadataHeight = metadataHeight(input, usesColumnMetadata: geometry.usesColumnMetadata)
         let previewHeight = input.preview.isEmpty ? 0 : height(input.preview, font: font(.subheadline, category: input.contentSizeCategory, bold: false), width: textWidth, maxLines: input.previewLines.rawValue)
-        let textBlockHeight = titleHeight + textSpacing + metadataHeight + (previewHeight > 0 ? textSpacing + previewHeight : 0)
+        let textBlockHeight = titleHeight + IOSUIKitArticleGeometry.textSpacing + metadataHeight + (previewHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
         let contentHeight: CGFloat
         switch variant {
-        case .visualPortrait: contentHeight = imageSize.height + portraitSpacing + textBlockHeight
+        case .visualPortrait: contentHeight = imageSize.height + IOSUIKitArticleGeometry.portraitSpacing + textBlockHeight
         case .visualLandscape: contentHeight = max(imageSize.height, textBlockHeight)
         default: contentHeight = textBlockHeight
         }
-        let totalHeight = roundToPixel(contentHeight + verticalInset * 2, scale: scale)
-        let contentFrame = CGRect(x: horizontalInset, y: verticalInset, width: availableWidth, height: contentHeight)
-        let imageFrame: CGRect? = imageSize == .zero ? nil : CGRect(x: horizontalInset, y: verticalInset, width: imageSize.width, height: imageSize.height)
-        let textOrigin = variant == .visualPortrait ? CGPoint(x: horizontalInset, y: verticalInset + imageSize.height + portraitSpacing) : variant == .visualLandscape ? CGPoint(x: horizontalInset + imageSize.width + landscapeSpacing, y: verticalInset) : CGPoint(x: horizontalInset, y: verticalInset)
+        let totalHeight = ceil(contentHeight + geometry.verticalPadding * 2)
+        let contentFrame = CGRect(x: geometry.horizontalInset, y: geometry.verticalPadding, width: geometry.availableWidth, height: contentHeight)
+        let imageFrame: CGRect? = imageSize == .zero ? nil : CGRect(x: geometry.horizontalInset, y: geometry.verticalPadding, width: imageSize.width, height: imageSize.height)
+        let textOrigin = variant == .visualPortrait ? CGPoint(x: geometry.horizontalInset, y: geometry.verticalPadding + imageSize.height + IOSUIKitArticleGeometry.portraitSpacing) : variant == .visualLandscape ? CGPoint(x: geometry.horizontalInset + imageSize.width + IOSUIKitArticleGeometry.landscapeSpacing, y: geometry.verticalPadding) : CGPoint(x: geometry.horizontalInset, y: geometry.verticalPadding)
         let titleFrame = CGRect(x: textOrigin.x, y: textOrigin.y, width: textWidth, height: titleHeight)
-        let metadataFrame = CGRect(x: textOrigin.x, y: titleFrame.maxY + textSpacing, width: textWidth, height: metadataHeight)
-        let previewFrame = previewHeight == 0 ? nil : CGRect(x: textOrigin.x, y: metadataFrame.maxY + textSpacing, width: textWidth, height: previewHeight)
-        return .init(variant: variant, cellSize: .init(width: input.containerWidth, height: totalHeight), contentFrame: contentFrame, imageFrame: imageFrame, textFrame: CGRect(x: textOrigin.x, y: textOrigin.y, width: textWidth, height: textBlockHeight), titleFrame: titleFrame, metadataFrame: metadataFrame, previewFrame: previewFrame, horizontalInset: horizontalInset, verticalInset: verticalInset, titleHeight: titleHeight, metadataHeight: metadataHeight, previewHeight: previewHeight, textBlockHeight: textBlockHeight)
+        let metadataFrame = CGRect(x: textOrigin.x, y: titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: textWidth, height: metadataHeight)
+        let previewFrame = previewHeight == 0 ? nil : CGRect(x: textOrigin.x, y: metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: textWidth, height: previewHeight)
+        return .init(variant: variant, cellSize: .init(width: input.containerWidth, height: totalHeight), contentFrame: contentFrame, imageFrame: imageFrame, textFrame: CGRect(x: textOrigin.x, y: textOrigin.y, width: textWidth, height: textBlockHeight), titleFrame: titleFrame, metadataFrame: metadataFrame, previewFrame: previewFrame, horizontalInset: geometry.horizontalInset, verticalInset: geometry.verticalPadding, titleHeight: titleHeight, metadataHeight: metadataHeight, previewHeight: previewHeight, textBlockHeight: textBlockHeight)
     }
 
-    private static func metadataHeight(_ input: IOSUIKitArticleLayoutInput, width: CGFloat) -> CGFloat {
+    private static func metadataHeight(_ input: IOSUIKitArticleLayoutInput, usesColumnMetadata: Bool) -> CGFloat {
         let category = input.contentSizeCategory
-        let primaryHeight = max(feedIconWidth, font(.subheadline, category: category, bold: true).lineHeight)
-        if width < 370 {
+        let primaryHeight = max(IOSUIKitArticleGeometry.feedIconSize, font(.subheadline, category: category, bold: true).lineHeight)
+        if usesColumnMetadata {
             let dateHeight = font(.caption1, category: category, bold: false).lineHeight
             return primaryHeight + 3 + dateHeight
         }
         return max(primaryHeight, font(.caption1, category: category, bold: false).lineHeight)
+    }
+
+    private static func pixelAligned(_ length: CGFloat, scale: CGFloat) -> CGFloat {
+        (length * scale).rounded() / scale
     }
 
     private static func font(_ style: UIFont.TextStyle, category: UIContentSizeCategory, bold: Bool) -> UIFont {

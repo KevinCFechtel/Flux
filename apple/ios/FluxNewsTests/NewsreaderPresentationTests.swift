@@ -1189,10 +1189,41 @@ final class NewsreaderPresentationTests: XCTestCase {
             let item = oracleItem(title: titles[index % titles.count], preview: previews[index % previews.count], hasImage: testCase.2, hasComments: index.isMultiple(of: 2))
             let cell = configuredOracleCell(item: item, mode: testCase.0, previewLines: testCase.3, width: testCase.1)
             let actual = measureUIKitArticleCell(cell, width: testCase.1)
-            let input = IOSUIKitArticleLayoutInput(item: item, mode: testCase.0, previewLines: testCase.3, containerWidth: testCase.1, displayScale: 2, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: .leftToRight)
+            let input = IOSUIKitArticleLayoutInput(item: item, mode: testCase.0, previewLines: testCase.3, containerWidth: testCase.1, displayScale: cell.traitCollection.displayScale, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: .leftToRight)
             let expected = IOSUIKitArticleLayoutEngine.metrics(for: input)
-            XCTAssertEqual(actual, expected.cellSize.height, accuracy: 0.5, "case \(index) variant \(expected.variant)")
+            let diagnostics = cell.layoutDiagnosticsForTesting
+            XCTAssertEqual(actual, expected.cellSize.height, accuracy: 0.5, "case \(index) variant \(expected.variant) cell=\(diagnostics) engine title=\(expected.titleFrame) metadata=\(expected.metadataFrame) preview=\(String(describing: expected.previewFrame)) image=\(String(describing: expected.imageFrame))")
         }
+    }
+
+    @MainActor
+    func testUIKitPortraitAspectFrameResolutionDiagnostics() {
+        // These widths deliberately span distinct 16:9 physical-pixel residues.
+        var floorMatches = 0; var nearestMatches = 0; var ceilMatches = 0
+        for width in [386 as CGFloat, 387, 388, 389, 390, 391, 392, 393, 394, 395] {
+            let item = oracleItem(title: "Short", preview: "", hasImage: true, hasComments: false)
+            let cell = configuredOracleCell(item: item, mode: .visual, previewLines: .standard, width: width)
+            _ = measureUIKitArticleCell(cell, width: width)
+            let diagnostics = cell.portraitAspectConstraintDiagnosticsForTesting
+            let imageWidth = diagnostics.imageFrame.width
+            let exactHeight = imageWidth * 9 / 16
+            let scale = diagnostics.displayScale
+            let exactPixels = exactHeight * scale
+            let resolvedPixels = diagnostics.imageFrame.height * scale
+            let floorPixels = floor(exactPixels)
+            let nearestPixels = exactPixels.rounded()
+            let ceilPixels = ceil(exactPixels)
+            floorMatches += resolvedPixels == floorPixels ? 1 : 0
+            nearestMatches += resolvedPixels == nearestPixels ? 1 : 0
+            ceilMatches += resolvedPixels == ceilPixels ? 1 : 0
+            let frame = diagnostics.imageFrame
+            print(String(format: "[Portrait aspect] container=%.6f x=[%.6f,%.6f] width=%.6f y=[%.6f,%.6f] height=%.6f scale=%.6f exactHeight=%.9f exactPx=%.9f residue=%.9f resolvedPx=%.6f floor=%.0f nearest=%.0f ceil=%.0f", width, frame.minX, frame.maxX, frame.width, frame.minY, frame.maxY, frame.height, scale, exactHeight, exactPixels, exactPixels - floorPixels, resolvedPixels, floorPixels, nearestPixels, ceilPixels))
+            XCTAssertEqual(diagnostics.multiplier, 9 / 16, accuracy: .ulpOfOne * 8)
+            XCTAssertEqual(diagnostics.imageFrame.height * scale, (diagnostics.imageFrame.height * scale).rounded(), accuracy: 0.000_001, "width=\(width) exact=\(exactHeight) frame=\(diagnostics.imageFrame) scale=\(scale) px=\(diagnostics.imageFrame.height * scale)")
+            XCTAssertEqual(resolvedPixels, nearestPixels, accuracy: 0.000_001, "width=\(width)")
+        }
+        print("[Portrait aspect] matches floor=\(floorMatches)/10 nearest=\(nearestMatches)/10 ceil=\(ceilMatches)/10")
+        XCTAssertEqual(nearestMatches, 10)
     }
 
     private func layoutMetrics(mode: ArticlePresentationMode, width: CGFloat, hasImage: Bool, scale: CGFloat = 2) -> IOSUIKitArticleLayoutMetrics {

@@ -1361,42 +1361,18 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         let isLandscapeVisual: Bool
 
         init(mode: ArticlePresentationMode, containerWidth: CGFloat) {
-            self.mode = mode
-            self.containerWidth = containerWidth
-            switch mode {
-            case .compact:
-                horizontalInset = containerWidth > 700 ? 28 : 10
-            case .visual:
-                horizontalInset = containerWidth > 700 ? 28 : 16
-            }
-            availableWidth = max(0, containerWidth - horizontalInset * 2)
-            isLandscapeVisual = ArticlePresentationLayout.usesLandscapeVisual(mode: mode, availableWidth: availableWidth)
-            switch mode {
-            case .compact:
-                outerVerticalPadding = 11
-            case .visual:
-                outerVerticalPadding = isLandscapeVisual ? 13 : 15
-            }
+            let geometry = IOSUIKitArticleGeometry(mode: mode, containerWidth: containerWidth)
+            self.mode = geometry.mode; self.containerWidth = geometry.containerWidth
+            horizontalInset = geometry.horizontalInset; availableWidth = geometry.availableWidth
+            isLandscapeVisual = geometry.isLandscapeVisual; outerVerticalPadding = geometry.verticalPadding
         }
 
         func imageSize(hasImage: Bool) -> CGSize {
-            guard hasImage, mode.showsArticleImage else { return .zero }
-            if isLandscapeVisual {
-                let width = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
-                return CGSize(width: width, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: width))
-            }
-            let width = ArticlePresentationLayout.visualPortraitContentWidth(availableWidth)
-            return CGSize(width: width, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: width))
+            IOSUIKitArticleGeometry(mode: mode, containerWidth: containerWidth).imageSize(hasImage: hasImage)
         }
 
         func layoutVariant(hasImage: Bool) -> IOSUIKitArticleCellLayoutVariant {
-            switch mode {
-            case .compact:
-                return .compact
-            case .visual:
-                guard hasImage else { return .visualTextOnly }
-                return isLandscapeVisual ? .visualLandscape : .visualPortrait
-            }
+            IOSUIKitArticleGeometry(mode: mode, containerWidth: containerWidth).variant(hasImage: hasImage)
         }
     }
 
@@ -1713,7 +1689,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             trailing: metrics.horizontalInset
         )
 
-        let useColumnMetadata = metrics.availableWidth < 370
+        let useColumnMetadata = IOSUIKitArticleGeometry(mode: metrics.mode, containerWidth: metrics.containerWidth).usesColumnMetadata
         metadataStack.axis = useColumnMetadata ? .vertical : .horizontal
         metadataStack.alignment = useColumnMetadata ? .leading : .center
         metadataStack.spacing = useColumnMetadata ? 3 : 5
@@ -1797,6 +1773,32 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     }
 
     var articleImageSlotFrameForTesting: CGRect { articleImageView.frame }
+
+    struct LayoutDiagnostics: Equatable {
+        let contentBounds: CGRect
+        let margins: NSDirectionalEdgeInsets
+        let variant: IOSUIKitArticleCellLayoutVariant?
+        let imageFrame: CGRect
+        let textStackFrame: CGRect
+        let titleRowFrame: CGRect
+        let titleFrame: CGRect
+        let starFrame: CGRect
+        let metadataFrame: CGRect
+        let metadataPrimaryFrame: CGRect
+        let feedIconFrame: CGRect
+        let feedTitleFrame: CGRect
+        let commentsFrame: CGRect
+        let dateFrame: CGRect
+        let previewFrame: CGRect
+    }
+
+    var layoutDiagnosticsForTesting: LayoutDiagnostics {
+        .init(contentBounds: contentView.bounds, margins: contentView.directionalLayoutMargins, variant: currentLayoutVariant, imageFrame: articleImageView.frame, textStackFrame: textStack.frame, titleRowFrame: titleRow.frame, titleFrame: titleLabel.frame, starFrame: starImageView.frame, metadataFrame: metadataStack.frame, metadataPrimaryFrame: metadataPrimaryStack.frame, feedIconFrame: feedIconContainer.frame, feedTitleFrame: feedTitleLabel.frame, commentsFrame: commentsImageView.frame, dateFrame: dateLabel.frame, previewFrame: previewLabel.frame)
+    }
+
+    var portraitAspectConstraintDiagnosticsForTesting: (multiplier: CGFloat, constant: CGFloat, priority: UILayoutPriority, imageFrame: CGRect, contentBounds: CGRect, margins: NSDirectionalEdgeInsets, displayScale: CGFloat) {
+        (portraitImageAspectConstraint.multiplier, portraitImageAspectConstraint.constant, portraitImageAspectConstraint.priority, articleImageView.frame, contentView.bounds, contentView.directionalLayoutMargins, traitCollection.displayScale)
+    }
     var layoutVariantForTesting: IOSUIKitArticleCellLayoutVariant? { currentLayoutVariant }
     var feedIconImageForTesting: UIImage? { feedIconImageView.image }
 
