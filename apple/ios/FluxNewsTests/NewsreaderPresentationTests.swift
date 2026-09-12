@@ -1145,6 +1145,36 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(metrics.snapshot().systemLayoutSizeFittingCalls, 0)
     }
 
+    func testDeterministicArticleLayoutEngineSelectsCurrentPresentationVariants() {
+        XCTAssertEqual(layoutMetrics(mode: .compact, width: 390, hasImage: true).variant, .compact)
+        XCTAssertEqual(layoutMetrics(mode: .visual, width: 390, hasImage: false).variant, .visualTextOnly)
+        XCTAssertEqual(layoutMetrics(mode: .visual, width: 390, hasImage: true).variant, .visualPortrait)
+        XCTAssertEqual(layoutMetrics(mode: .visual, width: 760, hasImage: true).variant, .visualLandscape)
+    }
+
+    func testDeterministicArticleLayoutEngineUsesCurrentWidthTransitionsAndPixelRounding() {
+        let column = layoutMetrics(mode: .visual, width: 401, hasImage: false, scale: 3)
+        let row = layoutMetrics(mode: .visual, width: 402, hasImage: false, scale: 3)
+        XCTAssertGreaterThan(column.metadataHeight, row.metadataHeight)
+        XCTAssertEqual((column.cellSize.height * 3).rounded(), column.cellSize.height * 3, accuracy: 0.001)
+        XCTAssertEqual(layoutMetrics(mode: .visual, width: 700, hasImage: true).horizontalInset, 16)
+        XCTAssertEqual(layoutMetrics(mode: .visual, width: 701, hasImage: true).horizontalInset, 28)
+    }
+
+    func testDeterministicArticleLayoutEngineKeyExcludesPresentationPixelsAndStatus() {
+        let input = layoutInput(mode: .visual, width: 390, hasImage: true)
+        XCTAssertEqual(IOSUIKitArticleLayoutKey(input), IOSUIKitArticleLayoutKey(input))
+        XCTAssertEqual(IOSUIKitArticleLayoutEngine.metrics(for: input).imageFrame?.size, IOSUIKitArticleLayoutEngine.metrics(for: input).imageFrame?.size)
+    }
+
+    private func layoutMetrics(mode: ArticlePresentationMode, width: CGFloat, hasImage: Bool, scale: CGFloat = 2) -> IOSUIKitArticleLayoutMetrics {
+        IOSUIKitArticleLayoutEngine.metrics(for: layoutInput(mode: mode, width: width, hasImage: hasImage, scale: scale))
+    }
+
+    private func layoutInput(mode: ArticlePresentationMode, width: CGFloat, hasImage: Bool, scale: CGFloat = 2) -> IOSUIKitArticleLayoutInput {
+        .init(title: "A deliberately multiline article title that exercises deterministic bounded text measurement", feedTitle: "A feed title", publishedDate: "January 1", preview: "A preview long enough to occupy multiple lines and preserve the production card text stack.", hasImage: hasImage, hasComments: true, mode: mode, previewLines: .standard, containerWidth: width, displayScale: scale, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: .leftToRight)
+    }
+
     @MainActor
     private func makeUIKitArticleCell(
         mode: ArticlePresentationMode,
