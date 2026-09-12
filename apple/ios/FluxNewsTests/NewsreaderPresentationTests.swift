@@ -1177,6 +1177,74 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testPreparedLayoutMetricsReuseCanonicalIdentityAndRekeyLayoutChanges() {
+        let cache = IOSUIKitPreparedArticleLayoutMetricsCache(capacity: 4)
+        let input = layoutInput(mode: .visual, width: 390, hasImage: true)
+        let metrics = IOSUIKitArticleLayoutEngine.metrics(for: input)
+        cache.insert(metrics, for: .init(input))
+        let mutablePresentationEquivalent = IOSUIKitArticleLayoutInput(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: input.layoutDirection)
+        XCTAssertEqual(cache.metrics(for: .init(mutablePresentationEquivalent)), metrics)
+        XCTAssertNil(cache.metrics(for: .init(layoutInput(mode: .visual, width: 391, hasImage: true))))
+        XCTAssertNil(cache.metrics(for: .init(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: .accessibilityExtraExtraExtraLarge, localeIdentifier: input.localeIdentifier, layoutDirection: input.layoutDirection))))
+        XCTAssertNil(cache.metrics(for: .init(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: .rightToLeft))))
+        XCTAssertNil(cache.metrics(for: .init(layoutInput(mode: .compact, width: 390, hasImage: true))))
+    }
+
+    @MainActor
+    func testPreparedLayoutMetricsCacheHasDeterministicBound() {
+        let cache = IOSUIKitPreparedArticleLayoutMetricsCache(capacity: 2)
+        let first = layoutInput(mode: .visual, width: 390, hasImage: false)
+        let second = IOSUIKitArticleLayoutInput(title: "Second", feedTitle: first.feedTitle, publishedDate: first.publishedDate, preview: first.preview, hasImage: first.hasImage, hasComments: first.hasComments, mode: first.mode, previewLines: first.previewLines, containerWidth: first.containerWidth, displayScale: first.displayScale, contentSizeCategory: first.contentSizeCategory, localeIdentifier: first.localeIdentifier, layoutDirection: first.layoutDirection)
+        let third = IOSUIKitArticleLayoutInput(title: "Third", feedTitle: first.feedTitle, publishedDate: first.publishedDate, preview: first.preview, hasImage: first.hasImage, hasComments: first.hasComments, mode: first.mode, previewLines: first.previewLines, containerWidth: first.containerWidth, displayScale: first.displayScale, contentSizeCategory: first.contentSizeCategory, localeIdentifier: first.localeIdentifier, layoutDirection: first.layoutDirection)
+        for input in [first, second, third] { cache.insert(IOSUIKitArticleLayoutEngine.metrics(for: input), for: .init(input)) }
+        XCTAssertEqual(cache.count, 2)
+        XCTAssertNil(cache.metrics(for: .init(first)))
+        XCTAssertNotNil(cache.metrics(for: .init(second)))
+        XCTAssertNotNil(cache.metrics(for: .init(third)))
+    }
+
+    @MainActor
+    func testPreparedLayoutWindowIsBoundedAndCoalescesIdenticalKeys() async {
+        let coordinator = IOSUIKitArticleLayoutPreparationCoordinator(maximumConcurrency: 2)
+        let input = layoutInput(mode: .visual, width: 390, hasImage: true)
+        coordinator.replaceWindow(with: Array(repeating: input, count: 100), visibleCount: 1)
+        for _ in 0..<20 where coordinator.snapshot().measurementsCompleted == 0 { await Task.yield() }
+        let snapshot = coordinator.snapshot()
+        XCTAssertEqual(snapshot.requests, UInt64(IOSUIKitArticleLayoutPreparationCoordinator.nearbyWindowLimit + 1))
+        XCTAssertEqual(snapshot.measurementsStarted, 1)
+        XCTAssertLessThanOrEqual(snapshot.maximumConcurrentMeasurements, 2)
+        XCTAssertEqual(snapshot.measurementsCompleted, 1)
+    }
+
+    @MainActor
+    func testPreparedLayoutPrioritizesVisibleAndDiscardsReplacedGeneration() async {
+        let gate = LayoutMeasurementGate()
+        let coordinator = IOSUIKitArticleLayoutPreparationCoordinator(maximumConcurrency: 1) { input in
+            await gate.measure(input)
+        }
+        let far = IOSUIKitArticleLayoutInput(title: "far", feedTitle: "Feed", publishedDate: "Today", preview: "Preview", hasImage: false, hasComments: false, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 2, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: .leftToRight)
+        let visible = IOSUIKitArticleLayoutInput(title: "visible", feedTitle: far.feedTitle, publishedDate: far.publishedDate, preview: far.preview, hasImage: far.hasImage, hasComments: far.hasComments, mode: far.mode, previewLines: far.previewLines, containerWidth: far.containerWidth, displayScale: far.displayScale, contentSizeCategory: far.contentSizeCategory, localeIdentifier: far.localeIdentifier, layoutDirection: far.layoutDirection)
+        let replacement = IOSUIKitArticleLayoutInput(title: "replacement", feedTitle: far.feedTitle, publishedDate: far.publishedDate, preview: far.preview, hasImage: far.hasImage, hasComments: far.hasComments, mode: far.mode, previewLines: far.previewLines, containerWidth: far.containerWidth, displayScale: far.displayScale, contentSizeCategory: far.contentSizeCategory, localeIdentifier: far.localeIdentifier, layoutDirection: far.layoutDirection)
+        coordinator.prepare([far], priority: .prefetch)
+        await gate.waitUntilStarted(count: 1)
+        coordinator.prepare([visible], priority: .visible)
+        await gate.releaseAll()
+        await gate.waitUntilStarted(count: 2)
+        let startedAfterPriority = await gate.startedTitles()
+        XCTAssertEqual(startedAfterPriority, ["far", "visible"])
+        coordinator.replaceWindow(with: [replacement], visibleCount: 1)
+        await gate.waitUntilStarted(count: 3)
+        let startedAfterReplacement = await gate.startedTitles()
+        XCTAssertEqual(startedAfterReplacement, ["far", "visible", "replacement"])
+        await gate.releaseAll()
+        for _ in 0..<100 where coordinator.snapshot().discardedResults == 0 { await Task.yield() }
+        for _ in 0..<100 where coordinator.snapshot().measurementsCompleted == 0 { await Task.yield() }
+        let snapshot = coordinator.snapshot()
+        XCTAssertGreaterThanOrEqual(snapshot.cancellations, 1)
+        XCTAssertGreaterThanOrEqual(snapshot.discardedResults, 1)
+    }
+
+    @MainActor
     func testCoreTextUIKitMetricDiagnostics() {
         let fixtures = [
             ("title-one", "Short title", UIFont.preferredFont(forTextStyle: .headline), 358 as CGFloat, 0),
@@ -1460,7 +1528,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         cell.semanticContentAttribute = semanticAttribute
         cell.contentView.semanticContentAttribute = semanticAttribute
         container.addSubview(cell)
-        cell.configure(item: item, mode: mode, previewLines: previewLines, metrics: .init(mode: mode, containerWidth: width), displayScale: 2)
+        cell.configure(item: item, mode: mode, previewLines: previewLines, metrics: .init(mode: mode, containerWidth: width), displayScale: 2, preparedLayoutMetrics: nil)
         container.layoutIfNeeded()
         return cell
     }
@@ -1506,7 +1574,8 @@ final class NewsreaderPresentationTests: XCTestCase {
             mode: mode,
             previewLines: .standard,
             metrics: .init(mode: mode, containerWidth: width),
-            displayScale: 2
+            displayScale: 2,
+            preparedLayoutMetrics: nil
         )
         container.layoutIfNeeded()
         return cell
@@ -1817,6 +1886,33 @@ private actor ImageLoadCounter {
     }
 
     func callCount() -> Int { calls }
+}
+
+private actor LayoutMeasurementGate {
+    private var inputs: [IOSUIKitArticleLayoutInput] = []
+    private var startWaiters: [Int: CheckedContinuation<Void, Never>] = [:]
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func measure(_ input: IOSUIKitArticleLayoutInput) async -> IOSUIKitArticleLayoutMetrics {
+        inputs.append(input)
+        let readyCounts = startWaiters.keys.filter { inputs.count >= $0 }
+        for count in readyCounts { startWaiters.removeValue(forKey: count)?.resume() }
+        await withCheckedContinuation { releaseWaiters.append($0) }
+        return IOSUIKitArticleLayoutEngine.metrics(for: input)
+    }
+
+    func waitUntilStarted(count: Int) async {
+        guard inputs.count < count else { return }
+        await withCheckedContinuation { startWaiters[count] = $0 }
+    }
+
+    func releaseAll() {
+        let waiters = releaseWaiters
+        releaseWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+
+    func startedTitles() -> [String] { inputs.map(\.title) }
 }
 
 private actor ImageLoadGate {

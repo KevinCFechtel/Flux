@@ -95,6 +95,215 @@ struct IOSUIKitArticleLayoutMetrics: Equatable {
     let textBlockHeight: CGFloat
 }
 
+/// A deterministic FIFO cache. Reuse is keyed exclusively by the canonical
+/// layout identity, so mutable article presentation never invalidates it.
+@MainActor
+final class IOSUIKitPreparedArticleLayoutMetricsCache {
+    let capacity: Int
+    private var values: [IOSUIKitArticleLayoutKey: IOSUIKitArticleLayoutMetrics] = [:]
+    private var insertionOrder: [IOSUIKitArticleLayoutKey] = []
+
+    init(capacity: Int = 512) {
+        self.capacity = max(1, capacity)
+        values.reserveCapacity(self.capacity)
+        insertionOrder.reserveCapacity(self.capacity)
+    }
+
+    var count: Int { values.count }
+
+    func metrics(for key: IOSUIKitArticleLayoutKey) -> IOSUIKitArticleLayoutMetrics? {
+        values[key]
+    }
+
+    func insert(_ metrics: IOSUIKitArticleLayoutMetrics, for key: IOSUIKitArticleLayoutKey) {
+        if values.updateValue(metrics, forKey: key) != nil { return }
+        if insertionOrder.count == capacity {
+            values.removeValue(forKey: insertionOrder.removeFirst())
+        }
+        insertionOrder.append(key)
+    }
+
+    func removeAll() {
+        values.removeAll(keepingCapacity: true)
+        insertionOrder.removeAll(keepingCapacity: true)
+    }
+}
+
+struct IOSUIKitArticleLayoutPreparationSnapshot: Equatable {
+    let requests: UInt64
+    let cacheHits: UInt64
+    let cacheMisses: UInt64
+    let measurementsStarted: UInt64
+    let measurementsCompleted: UInt64
+    let discardedResults: UInt64
+    let cancellations: UInt64
+    let maximumConcurrentMeasurements: UInt64
+    let visibleRequests: UInt64
+    let visibleCacheHits: UInt64
+    let visibleCacheMisses: UInt64
+    let prefetchRequests: UInt64
+    let prefetchCacheHits: UInt64
+    let prefetchCacheMisses: UInt64
+}
+
+/// Keeps at most two immutable Core Text measurements in flight. UIKit captures
+/// inputs on the main actor; only the pure deterministic engine leaves it.
+@MainActor
+final class IOSUIKitArticleLayoutPreparationCoordinator {
+    static let nearbyWindowLimit = 24
+    enum Priority: Int {
+        case prefetch
+        case nearby
+        case visible
+    }
+
+    private struct Request {
+        let key: IOSUIKitArticleLayoutKey
+        let input: IOSUIKitArticleLayoutInput
+        let priority: Priority
+        let sequence: UInt64
+    }
+
+    private struct ActiveMeasurement {
+        let generation: UInt64
+        let task: Task<Void, Never>
+    }
+
+    private let cache: IOSUIKitPreparedArticleLayoutMetricsCache
+    private let maximumConcurrency: Int
+    private let measurement: @Sendable (IOSUIKitArticleLayoutInput) async -> IOSUIKitArticleLayoutMetrics
+    private var generation: UInt64 = 0
+    private var sequence: UInt64 = 0
+    private var pending: [IOSUIKitArticleLayoutKey: Request] = [:]
+    private var active: [IOSUIKitArticleLayoutKey: ActiveMeasurement] = [:]
+    private var requests: UInt64 = 0
+    private var cacheHits: UInt64 = 0
+    private var cacheMisses: UInt64 = 0
+    private var measurementsStarted: UInt64 = 0
+    private var measurementsCompleted: UInt64 = 0
+    private var discardedResults: UInt64 = 0
+    private var cancellations: UInt64 = 0
+    private var maximumConcurrentMeasurements: UInt64 = 0
+    private var visibleRequests: UInt64 = 0
+    private var visibleCacheHits: UInt64 = 0
+    private var visibleCacheMisses: UInt64 = 0
+    private var prefetchRequests: UInt64 = 0
+    private var prefetchCacheHits: UInt64 = 0
+    private var prefetchCacheMisses: UInt64 = 0
+
+    init(cache: IOSUIKitPreparedArticleLayoutMetricsCache? = nil, maximumConcurrency: Int = 2, measurement: @escaping @Sendable (IOSUIKitArticleLayoutInput) async -> IOSUIKitArticleLayoutMetrics = { input in
+        await Task.detached(priority: .utility) {
+            IOSUIKitArticleLayoutEngine.metrics(for: input)
+        }.value
+    }) {
+        self.cache = cache ?? .init()
+        self.maximumConcurrency = max(1, maximumConcurrency)
+        self.measurement = measurement
+    }
+
+    func metrics(for input: IOSUIKitArticleLayoutInput, priority: Priority) -> IOSUIKitArticleLayoutMetrics? {
+        let key = IOSUIKitArticleLayoutKey(input)
+        if let metrics = cache.metrics(for: key) {
+            recordCacheHit(priority)
+            return metrics
+        }
+        enqueue(input, key: key, priority: priority)
+        return nil
+    }
+
+    func replaceWindow(with inputs: [IOSUIKitArticleLayoutInput], visibleCount: Int) {
+        generation &+= 1
+        let cancelled = active.count
+        active.values.forEach { $0.task.cancel() }
+        active.removeAll(keepingCapacity: true)
+        pending.removeAll(keepingCapacity: true)
+        cancellations &+= UInt64(cancelled)
+        for (index, input) in inputs.prefix(visibleCount + Self.nearbyWindowLimit).enumerated() {
+            _ = metrics(for: input, priority: index < visibleCount ? .visible : .nearby)
+        }
+    }
+
+    func prepare(_ inputs: [IOSUIKitArticleLayoutInput], priority: Priority) {
+        for input in inputs {
+            _ = metrics(for: input, priority: priority)
+        }
+    }
+
+    func cancel() {
+        generation &+= 1
+        let cancelled = active.count
+        active.values.forEach { $0.task.cancel() }
+        active.removeAll(keepingCapacity: true)
+        pending.removeAll(keepingCapacity: true)
+        cancellations &+= UInt64(cancelled)
+    }
+
+    func snapshot() -> IOSUIKitArticleLayoutPreparationSnapshot {
+        .init(requests: requests, cacheHits: cacheHits, cacheMisses: cacheMisses, measurementsStarted: measurementsStarted, measurementsCompleted: measurementsCompleted, discardedResults: discardedResults, cancellations: cancellations, maximumConcurrentMeasurements: maximumConcurrentMeasurements, visibleRequests: visibleRequests, visibleCacheHits: visibleCacheHits, visibleCacheMisses: visibleCacheMisses, prefetchRequests: prefetchRequests, prefetchCacheHits: prefetchCacheHits, prefetchCacheMisses: prefetchCacheMisses)
+    }
+
+    func resetInstrumentation() {
+        requests = 0; cacheHits = 0; cacheMisses = 0; measurementsStarted = 0; measurementsCompleted = 0
+        discardedResults = 0; cancellations = 0; maximumConcurrentMeasurements = UInt64(active.count)
+        visibleRequests = 0; visibleCacheHits = 0; visibleCacheMisses = 0
+        prefetchRequests = 0; prefetchCacheHits = 0; prefetchCacheMisses = 0
+    }
+
+    private func enqueue(_ input: IOSUIKitArticleLayoutInput, key: IOSUIKitArticleLayoutKey, priority: Priority) {
+        requests &+= 1
+        cacheMisses &+= 1
+        if priority == .visible { visibleRequests &+= 1; visibleCacheMisses &+= 1 }
+        if priority == .prefetch { prefetchRequests &+= 1; prefetchCacheMisses &+= 1 }
+        if active[key] != nil { return }
+        if let existing = pending[key] {
+            guard priority.rawValue > existing.priority.rawValue else { return }
+            pending[key] = .init(key: key, input: input, priority: priority, sequence: existing.sequence)
+            return
+        }
+        sequence &+= 1
+        pending[key] = .init(key: key, input: input, priority: priority, sequence: sequence)
+        startNextMeasurements()
+    }
+
+    private func startNextMeasurements() {
+        while active.count < maximumConcurrency,
+              let request = pending.values.max(by: { lhs, rhs in
+                  lhs.priority == rhs.priority ? lhs.sequence > rhs.sequence : lhs.priority.rawValue < rhs.priority.rawValue
+              }) {
+            pending.removeValue(forKey: request.key)
+            let requestGeneration = generation
+            let measurement = measurement
+            measurementsStarted &+= 1
+            let task = Task { [weak self] in
+                let metrics = await measurement(request.input)
+                self?.finish(request, metrics: metrics, generation: requestGeneration, cancelled: Task.isCancelled)
+            }
+            active[request.key] = .init(generation: requestGeneration, task: task)
+            maximumConcurrentMeasurements = max(maximumConcurrentMeasurements, UInt64(active.count))
+        }
+    }
+
+    private func finish(_ request: Request, metrics: IOSUIKitArticleLayoutMetrics, generation resultGeneration: UInt64, cancelled: Bool) {
+        if active[request.key]?.generation == resultGeneration {
+            active.removeValue(forKey: request.key)
+        }
+        guard !cancelled, resultGeneration == generation else {
+            discardedResults &+= 1
+            startNextMeasurements()
+            return
+        }
+        cache.insert(metrics, for: request.key)
+        measurementsCompleted &+= 1
+        startNextMeasurements()
+    }
+
+    private func recordCacheHit(_ priority: Priority) {
+        cacheHits &+= 1
+        if priority == .visible { visibleCacheHits &+= 1 }
+        if priority == .prefetch { prefetchCacheHits &+= 1 }
+    }
+}
+
 /// The non-text geometry contract shared by the renderer and deterministic sizing.
 /// It deliberately has no presentation pixels or read/starred state.
 struct IOSUIKitArticleGeometry: Equatable {

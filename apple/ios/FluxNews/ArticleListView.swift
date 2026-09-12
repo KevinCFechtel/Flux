@@ -704,6 +704,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private let refreshControl = UIRefreshControl()
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
     private let articleHeightCache = IOSUIKitArticleCellHeightCache(capacity: 512)
+    private let preparedLayoutCoordinator = IOSUIKitArticleLayoutPreparationCoordinator()
     private let performanceMetrics = IOSUIKitTimelinePerformanceMetrics()
     private(set) var structuralReconciliationCount = 0
     private(set) var structuralSnapshotApplicationCount = 0
@@ -735,9 +736,10 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         collectionView.prefetchDataSource = self
         collectionView.register(IOSUIKitArticleCell.self, forCellWithReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier)
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
-        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _) in
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self, UITraitLayoutDirection.self]) { (self: Self, _) in
             self.articleHeightCache.removeAll()
             self.invalidateScrolloverGeometry()
+            self.replacePreparedLayoutWindow()
             self.collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
         }
         view.addSubview(collectionView)
@@ -765,6 +767,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         lastLayoutWidth = width
         cancelAllPrefetch()
         invalidateScrolloverGeometry()
+        replacePreparedLayoutWindow()
         for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
             guard let id = cell.representedArticleID, let item = renderedItem(for: id) else { continue }
             configure(cell, item: item)
@@ -849,6 +852,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
         if needsLayoutInvalidation {
             cancelAllPrefetch()
+            replacePreparedLayoutWindow()
             performanceMetrics.recordLayoutInvalidation()
             collectionView.collectionViewLayout.invalidateLayout()
         }
@@ -866,6 +870,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     private func configure(_ cell: IOSUIKitArticleCell, item: IOSUIKitArticleTimelineItem) {
         let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: collectionView.bounds.width)
+        let layoutInput = preparedLayoutInput(for: item)
+        let preparedMetrics = preparedLayoutCoordinator.metrics(for: layoutInput, priority: .visible)
         cell.heightCache = articleHeightCache
         cell.performanceMetrics = performanceMetrics
         performanceMetrics.recordConfigure()
@@ -874,7 +880,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             mode: mode,
             previewLines: previewLines,
             metrics: metrics,
-            displayScale: view.traitCollection.displayScale
+            displayScale: view.traitCollection.displayScale,
+            preparedLayoutMetrics: preparedMetrics
         )
         onRequestFeedIcon?(item.content.article.feedId, iconVariant)
     }
@@ -934,6 +941,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         if let articleCell = cell as? IOSUIKitArticleCell {
             reconcilePresentationForDisplay(articleCell)
         }
+        prepareVisibleLayoutMetrics()
         guard !orderedIDs.isEmpty, indexPath.item >= max(0, orderedIDs.count - 5) else { return }
         onApproachingEnd?()
     }
@@ -1115,6 +1123,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
+        let layoutInputs = indexPaths.compactMap { indexPath -> IOSUIKitArticleLayoutInput? in
+            guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
+            return preparedLayoutInput(for: item)
+        }
+        preparedLayoutCoordinator.prepare(layoutInputs, priority: .prefetch)
         guard mode.showsArticleImage else { return }
         for indexPath in indexPaths {
             guard let id = dataSource.itemIdentifier(for: indexPath), prefetchTasks[id] == nil,
@@ -1158,8 +1171,30 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         feedIconPresentationBridge = nil
     }
 
-    func resetPerformanceMetrics() { performanceMetrics.reset() }
-    func performanceSnapshot() -> IOSUIKitTimelinePerformanceSnapshot { performanceMetrics.snapshot() }
+    func resetPerformanceMetrics() {
+        performanceMetrics.reset()
+        preparedLayoutCoordinator.resetInstrumentation()
+    }
+    func performanceSnapshot() -> IOSUIKitTimelinePerformanceSnapshot { performanceMetrics.snapshot(preparation: preparedLayoutCoordinator.snapshot()) }
+
+    private func preparedLayoutInput(for item: IOSUIKitArticleTimelineItem) -> IOSUIKitArticleLayoutInput {
+        .init(item: item, mode: mode, previewLines: previewLines, containerWidth: collectionView.bounds.width, displayScale: view.traitCollection.displayScale, contentSizeCategory: view.traitCollection.preferredContentSizeCategory, localeIdentifier: Locale.current.identifier, layoutDirection: view.effectiveUserInterfaceLayoutDirection)
+    }
+
+    private func replacePreparedLayoutWindow() {
+        guard collectionView.bounds.width > 0 else { return }
+        let visibleIndexes = collectionView.indexPathsForVisibleItems.map(\.item).sorted()
+        let visibleIDs = visibleIndexes.compactMap { dataSource.itemIdentifier(for: .init(item: $0, section: 0)) }
+        let nextIndex = min(orderedIDs.count, (visibleIndexes.last ?? -1) + 1)
+        let nearbyIDs = orderedIDs.dropFirst(nextIndex).prefix(IOSUIKitArticleLayoutPreparationCoordinator.nearbyWindowLimit)
+        let ids = Array(visibleIDs + nearbyIDs.filter { !visibleIDs.contains($0) })
+        preparedLayoutCoordinator.replaceWindow(with: ids.compactMap { renderedItem(for: $0).map(preparedLayoutInput(for:)) }, visibleCount: visibleIDs.count)
+    }
+
+    private func prepareVisibleLayoutMetrics() {
+        let ids = collectionView.indexPathsForVisibleItems.sorted { $0.item < $1.item }.compactMap(dataSource.itemIdentifier(for:))
+        preparedLayoutCoordinator.prepare(ids.compactMap { renderedItem(for: $0).map(preparedLayoutInput(for:)) }, priority: .visible)
+    }
 }
 
 #if DEBUG
@@ -1191,6 +1226,7 @@ enum IOSUIKitTimelinePerformanceDiagnostics {
         print("""
         [Timeline Performance]
         timeline preferredLayoutAttributesFittingCalls=\(timeline.preferredLayoutAttributesFittingCalls) heightCacheHits=\(timeline.heightCacheHits) heightCacheMisses=\(timeline.heightCacheMisses) systemLayoutSizeFittingCalls=\(timeline.systemLayoutSizeFittingCalls) systemLayoutSizeFittingTotalNanoseconds=\(timeline.systemLayoutSizeFittingTotalNanoseconds) systemLayoutSizeFittingMaxNanoseconds=\(timeline.systemLayoutSizeFittingMaxNanoseconds) systemLayoutSizeFittingP50ApproxNanoseconds=\(timeline.systemLayoutSizeFittingP50ApproxNanoseconds) systemLayoutSizeFittingP95ApproxNanoseconds=\(timeline.systemLayoutSizeFittingP95ApproxNanoseconds) configureCount=\(timeline.configureCount) reuseCount=\(timeline.reuseCount) layoutVariantSwitchCount=\(timeline.layoutVariantSwitchCount) imageBindingCount=\(timeline.imageBindingCount) structuralReconciliationCount=\(timeline.structuralReconciliationCount) snapshotApplyCount=\(timeline.snapshotApplyCount) layoutInvalidationCount=\(timeline.layoutInvalidationCount)
+        preparedLayout requests=\(timeline.preparedLayoutRequests) cacheHits=\(timeline.preparedLayoutCacheHits) cacheMisses=\(timeline.preparedLayoutCacheMisses) measurementsStarted=\(timeline.preparedLayoutMeasurementsStarted) measurementsCompleted=\(timeline.preparedLayoutMeasurementsCompleted) discardedResults=\(timeline.preparedLayoutDiscardedResults) cancellations=\(timeline.preparedLayoutCancellations) maximumConcurrency=\(timeline.preparedLayoutMaximumConcurrency) visibleRequests=\(timeline.visibleLayoutMetricRequests) visibleCacheHits=\(timeline.visibleLayoutMetricCacheHits) visibleCacheMisses=\(timeline.visibleLayoutMetricCacheMisses) prefetchRequests=\(timeline.prefetchLayoutMetricRequests) prefetchCacheHits=\(timeline.prefetchLayoutMetricCacheHits) prefetchCacheMisses=\(timeline.prefetchLayoutMetricCacheMisses)
         image memoryCacheHits=\(image.memoryCacheHits) memoryCacheMisses=\(image.memoryCacheMisses) startedOperations=\(image.startedOperations) completedOperations=\(image.completedOperations) retiredOperations=\(image.retiredOperations) maximumActiveOperations=\(image.maximumActiveOperations) visibleStarts=\(image.visibleStarts) prefetchStarts=\(image.prefetchStarts) activeOperations=\(image.activeOperations) queuedVisibleRequests=\(image.queuedVisibleRequests) queuedPrefetchRequests=\(image.queuedPrefetchRequests)
         derived heightCacheHitRate=\(cacheHitRate.map { String(format: "%.3f", $0) } ?? "n/a") solverRate=\(solverRate.map { String(format: "%.3f", $0) } ?? "n/a") averageSolveTime=\(averageSolveTime.map { String(format: "%.0f", $0) } ?? "n/a") imageMemoryCacheHitRate=\(imageHitRate.map { String(format: "%.3f", $0) } ?? "n/a")
         """)
@@ -1249,6 +1285,20 @@ struct IOSUIKitTimelinePerformanceSnapshot: Equatable {
     let structuralReconciliationCount: UInt64
     let snapshotApplyCount: UInt64
     let layoutInvalidationCount: UInt64
+    let preparedLayoutRequests: UInt64
+    let preparedLayoutCacheHits: UInt64
+    let preparedLayoutCacheMisses: UInt64
+    let preparedLayoutMeasurementsStarted: UInt64
+    let preparedLayoutMeasurementsCompleted: UInt64
+    let preparedLayoutDiscardedResults: UInt64
+    let preparedLayoutCancellations: UInt64
+    let preparedLayoutMaximumConcurrency: UInt64
+    let visibleLayoutMetricRequests: UInt64
+    let visibleLayoutMetricCacheHits: UInt64
+    let visibleLayoutMetricCacheMisses: UInt64
+    let prefetchLayoutMetricRequests: UInt64
+    let prefetchLayoutMetricCacheHits: UInt64
+    let prefetchLayoutMetricCacheMisses: UInt64
 }
 
 @MainActor
@@ -1293,8 +1343,8 @@ final class IOSUIKitTimelinePerformanceMetrics {
         systemLayoutSizeFittingMaxNanoseconds = max(systemLayoutSizeFittingMaxNanoseconds, durationNanoseconds)
         durationBuckets[min(durationNanoseconds == 0 ? 0 : 63 - durationNanoseconds.leadingZeroBitCount, Self.durationBucketCount - 1)] &+= 1
     }
-    func snapshot() -> IOSUIKitTimelinePerformanceSnapshot {
-        .init(preferredLayoutAttributesFittingCalls: preferredLayoutAttributesFittingCalls, heightCacheHits: heightCacheHits, heightCacheMisses: heightCacheMisses, systemLayoutSizeFittingCalls: systemLayoutSizeFittingCalls, systemLayoutSizeFittingTotalNanoseconds: systemLayoutSizeFittingTotalNanoseconds, systemLayoutSizeFittingMaxNanoseconds: systemLayoutSizeFittingMaxNanoseconds, systemLayoutSizeFittingP50ApproxNanoseconds: percentile(0.5), systemLayoutSizeFittingP95ApproxNanoseconds: percentile(0.95), configureCount: configureCount, reuseCount: reuseCount, layoutVariantSwitchCount: layoutVariantSwitchCount, imageBindingCount: imageBindingCount, structuralReconciliationCount: structuralReconciliationCount, snapshotApplyCount: snapshotApplyCount, layoutInvalidationCount: layoutInvalidationCount)
+    func snapshot(preparation: IOSUIKitArticleLayoutPreparationSnapshot = .init(requests: 0, cacheHits: 0, cacheMisses: 0, measurementsStarted: 0, measurementsCompleted: 0, discardedResults: 0, cancellations: 0, maximumConcurrentMeasurements: 0, visibleRequests: 0, visibleCacheHits: 0, visibleCacheMisses: 0, prefetchRequests: 0, prefetchCacheHits: 0, prefetchCacheMisses: 0)) -> IOSUIKitTimelinePerformanceSnapshot {
+        .init(preferredLayoutAttributesFittingCalls: preferredLayoutAttributesFittingCalls, heightCacheHits: heightCacheHits, heightCacheMisses: heightCacheMisses, systemLayoutSizeFittingCalls: systemLayoutSizeFittingCalls, systemLayoutSizeFittingTotalNanoseconds: systemLayoutSizeFittingTotalNanoseconds, systemLayoutSizeFittingMaxNanoseconds: systemLayoutSizeFittingMaxNanoseconds, systemLayoutSizeFittingP50ApproxNanoseconds: percentile(0.5), systemLayoutSizeFittingP95ApproxNanoseconds: percentile(0.95), configureCount: configureCount, reuseCount: reuseCount, layoutVariantSwitchCount: layoutVariantSwitchCount, imageBindingCount: imageBindingCount, structuralReconciliationCount: structuralReconciliationCount, snapshotApplyCount: snapshotApplyCount, layoutInvalidationCount: layoutInvalidationCount, preparedLayoutRequests: preparation.requests, preparedLayoutCacheHits: preparation.cacheHits, preparedLayoutCacheMisses: preparation.cacheMisses, preparedLayoutMeasurementsStarted: preparation.measurementsStarted, preparedLayoutMeasurementsCompleted: preparation.measurementsCompleted, preparedLayoutDiscardedResults: preparation.discardedResults, preparedLayoutCancellations: preparation.cancellations, preparedLayoutMaximumConcurrency: preparation.maximumConcurrentMeasurements, visibleLayoutMetricRequests: preparation.visibleRequests, visibleLayoutMetricCacheHits: preparation.visibleCacheHits, visibleLayoutMetricCacheMisses: preparation.visibleCacheMisses, prefetchLayoutMetricRequests: preparation.prefetchRequests, prefetchLayoutMetricCacheHits: preparation.prefetchCacheHits, prefetchLayoutMetricCacheMisses: preparation.prefetchCacheMisses)
     }
     private func percentile(_ percentile: Double) -> UInt64 {
         let target = UInt64((Double(systemLayoutSizeFittingCalls) * percentile).rounded(.up))
@@ -1411,6 +1461,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     private var currentPublishedDate = ""
     private var currentIsRead = false
     private var currentIsStarred = false
+    private(set) var preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics?
 
     weak var heightCache: IOSUIKitArticleCellHeightCache?
     weak var performanceMetrics: IOSUIKitTimelinePerformanceMetrics?
@@ -1650,6 +1701,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         representedImageRequest = nil
         representedArticleID = nil
         sizingContentKey = nil
+        preparedLayoutMetrics = nil
         articleImageView.image = nil
         imagePlaceholder.isHidden = false
     }
@@ -1659,7 +1711,8 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         mode: ArticlePresentationMode,
         previewLines: ArticlePreviewLines,
         metrics: Metrics,
-        displayScale: CGFloat
+        displayScale: CGFloat,
+        preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics?
     ) {
         representedArticleID = item.article.id
         // Keep the independently constrained metadata row in the cell's semantic direction.
@@ -1668,6 +1721,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         sizingMode = mode
         sizingPreviewLines = previewLines
         sizingDisplayScale = displayScale
+        self.preparedLayoutMetrics = preparedLayoutMetrics
         currentTitle = item.content.article.title
         currentFeedTitle = item.content.article.feedTitle
         currentPublishedDate = item.content.publishedDate
