@@ -624,6 +624,78 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticlePresentationLayout.boundedArticleWidth(-1), 0)
     }
 
+    @MainActor
+    func testUIKitPortraitArticleImagePixelsDoNotChangeMeasuredGeometry() {
+        let cell = makeUIKitArticleCell(mode: .visual, width: 390)
+        let baseline = measureUIKitArticleCell(cell, width: 390)
+        let baselineSlot = cell.articleImageSlotFrameForTesting
+        let baselineVariant = cell.layoutVariantForTesting
+        let baselineVariantRevision = cell.layoutVariantRevision
+
+        for image in [testImage(width: 400, height: 400), testImage(width: 200, height: 800), testImage(width: 1200, height: 200)] {
+            cell.applyArticleImagePixelsForTesting(image)
+            let height = measureUIKitArticleCell(cell, width: 390)
+
+            XCTAssertEqual(height, baseline, accuracy: 0.5)
+            XCTAssertEqual(cell.articleImageSlotFrameForTesting.width, baselineSlot.width, accuracy: 0.5)
+            XCTAssertEqual(cell.articleImageSlotFrameForTesting.height, baselineSlot.height, accuracy: 0.5)
+            XCTAssertEqual(cell.layoutVariantForTesting, baselineVariant)
+            XCTAssertEqual(cell.layoutVariantRevision, baselineVariantRevision)
+        }
+    }
+
+    @MainActor
+    func testUIKitArticleImageArrivalBeforeAndAfterMeasurementHasIdenticalGeometry() {
+        let before = makeUIKitArticleCell(mode: .visual, width: 390)
+        before.applyArticleImagePixelsForTesting(testImage(width: 200, height: 800))
+        let beforeHeight = measureUIKitArticleCell(before, width: 390)
+        let beforeSlot = before.articleImageSlotFrameForTesting
+        let beforeVariantRevision = before.layoutVariantRevision
+
+        let after = makeUIKitArticleCell(mode: .visual, width: 390)
+        let afterHeight = measureUIKitArticleCell(after, width: 390)
+        after.applyArticleImagePixelsForTesting(testImage(width: 1200, height: 200))
+        let afterImageHeight = measureUIKitArticleCell(after, width: 390)
+
+        XCTAssertEqual(beforeHeight, afterHeight, accuracy: 0.5)
+        XCTAssertEqual(beforeHeight, afterImageHeight, accuracy: 0.5)
+        XCTAssertEqual(before.articleImageSlotFrameForTesting.width, beforeSlot.width, accuracy: 0.5)
+        XCTAssertEqual(after.articleImageSlotFrameForTesting.width, beforeSlot.width, accuracy: 0.5)
+        XCTAssertEqual(after.articleImageSlotFrameForTesting.height, beforeSlot.height, accuracy: 0.5)
+        XCTAssertEqual(before.layoutVariantForTesting, .visualPortrait)
+        XCTAssertEqual(after.layoutVariantForTesting, .visualPortrait)
+        XCTAssertEqual(before.layoutVariantRevision, beforeVariantRevision)
+    }
+
+    @MainActor
+    func testUIKitLandscapeArticleImageAndPresentationUpdatesDoNotChangeGeometry() {
+        let cell = makeUIKitArticleCell(mode: .visual, width: 760)
+        let baseline = measureUIKitArticleCell(cell, width: 760)
+        let baselineSlot = cell.articleImageSlotFrameForTesting
+        let baselineVariantRevision = cell.layoutVariantRevision
+
+        cell.applyArticleImagePixelsForTesting(testImage(width: 200, height: 800))
+        XCTAssertEqual(measureUIKitArticleCell(cell, width: 760), baseline, accuracy: 0.5)
+        XCTAssertEqual(cell.articleImageSlotFrameForTesting.width, baselineSlot.width, accuracy: 0.5)
+        XCTAssertEqual(cell.articleImageSlotFrameForTesting.height, baselineSlot.height, accuracy: 0.5)
+
+        cell.applyArticleImagePixelsForTesting(testImage(width: 1200, height: 200))
+        cell.updateStatus(isRead: true, isStarred: true)
+        cell.updateFeedIcon(image: testImage(width: 80, height: 20), title: "Feed")
+        XCTAssertEqual(measureUIKitArticleCell(cell, width: 760), baseline, accuracy: 0.5)
+        XCTAssertEqual(cell.articleImageSlotFrameForTesting.width, baselineSlot.width, accuracy: 0.5)
+        XCTAssertEqual(cell.articleImageSlotFrameForTesting.height, baselineSlot.height, accuracy: 0.5)
+        XCTAssertEqual(cell.layoutVariantForTesting, .visualLandscape)
+        XCTAssertEqual(cell.layoutVariantRevision, baselineVariantRevision)
+
+        cell.updateStatus(isRead: false, isStarred: false)
+        cell.updateFeedIcon(image: nil, title: "Feed")
+        cell.applyArticleImagePixelsForTesting(nil)
+        XCTAssertEqual(measureUIKitArticleCell(cell, width: 760), baseline, accuracy: 0.5)
+        XCTAssertEqual(cell.layoutVariantForTesting, .visualLandscape)
+        XCTAssertEqual(cell.layoutVariantRevision, baselineVariantRevision)
+    }
+
     func testArticleImageRequestBucketsDisplayPixelsDeterministically() {
         let url = URL(string: "https://example.com/image.jpg")!
         XCTAssertEqual(ArticleImageRequest(url: url, targetSize: CGSize(width: 100, height: 50), displayScale: 2).maxPixelDimension, 256)
@@ -871,6 +943,62 @@ final class NewsreaderPresentationTests: XCTestCase {
         CGImageDestinationAddImage(destination, image, properties)
         guard CGImageDestinationFinalize(destination) else { throw XCTSkip("Unable to encode image fixture") }
         return data as Data
+    }
+
+    @MainActor
+    private func makeUIKitArticleCell(mode: ArticlePresentationMode, width: CGFloat) -> IOSUIKitArticleCell {
+        let article = ArticleSummary(
+            id: 1,
+            feedId: 10,
+            categoryId: 20,
+            feedTitle: "Feed",
+            title: "A deliberately multiline article title that exercises the real UIKit sizing path",
+            url: "https://example.com/article",
+            commentsUrl: "https://example.com/comments",
+            publishedAt: "2026-01-01T00:00:00Z",
+            isRead: false,
+            isStarred: false,
+            preview: "A preview long enough to occupy multiple lines and preserve the production card text stack.",
+            imageUrl: "https://example.com/image.jpg"
+        )
+        let item = IOSUIKitArticleTimelineItem(
+            article: article,
+            content: ArticleRowContent(article: article),
+            isRead: false,
+            isStarred: false,
+            feedIconImage: nil
+        )
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
+        let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
+        container.addSubview(cell)
+        cell.configure(
+            item: item,
+            mode: mode,
+            previewLines: .standard,
+            metrics: .init(mode: mode, containerWidth: width),
+            displayScale: 2
+        )
+        container.layoutIfNeeded()
+        return cell
+    }
+
+    @MainActor
+    private func measureUIKitArticleCell(_ cell: IOSUIKitArticleCell, width: CGFloat) -> CGFloat {
+        let attributes = UICollectionViewLayoutAttributes(forCellWith: IndexPath(item: 0, section: 0))
+        attributes.size = CGSize(width: width, height: 1)
+        let measured = cell.preferredLayoutAttributesFitting(attributes)
+        cell.frame.size = measured.size
+        cell.setNeedsLayout()
+        cell.layoutIfNeeded()
+        return measured.size.height
+    }
+
+    @MainActor
+    private func testImage(width: CGFloat, height: CGFloat) -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: width, height: height)).image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        }
     }
 
     func testNavigationGroupsNestFeedsUnderCategoriesAndKeepOrphansVisible() {

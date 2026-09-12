@@ -1365,9 +1365,6 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         articleImageView.layer.cornerRadius = 12
         articleImageView.backgroundColor = .tertiarySystemFill
         articleImageView.isHidden = true
-        articleImageView.setContentHuggingPriority(.required, for: .vertical)
-        articleImageView.setContentCompressionResistancePriority(.required, for: .vertical)
-        articleImageView.setContentCompressionResistancePriority(.required, for: .horizontal)
         imagePlaceholder.translatesAutoresizingMaskIntoConstraints = false
         imagePlaceholder.tintColor = .secondaryLabel
         imagePlaceholder.contentMode = .center
@@ -1595,6 +1592,15 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             feedIconContainer.backgroundColor = .tintColor
         }
     }
+
+    // Internal test seam: pixels must remain a presentation-only update.
+    func applyArticleImagePixelsForTesting(_ image: UIImage?) {
+        articleImageView.image = image
+        imagePlaceholder.isHidden = image != nil
+    }
+
+    var articleImageSlotFrameForTesting: CGRect { articleImageView.frame }
+    var layoutVariantForTesting: IOSUIKitArticleCellLayoutVariant? { currentLayoutVariant }
 
     private func configureArticleImage(url: URL?, targetSize: CGSize, displayScale: CGFloat) {
         invalidateImageBinding()

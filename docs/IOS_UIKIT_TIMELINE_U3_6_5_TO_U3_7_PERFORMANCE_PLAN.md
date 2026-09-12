@@ -1,6 +1,6 @@
 # UIKit Timeline Performance Plan — U3.6.5 through U3.7
 
-> **Status: ACCEPTED / IMPLEMENTATION STARTED**
+> **Status: U3.6.5 COMPLETE**
 >
 > Baseline: `main` after U3.6.1–U3.6.4, currently including the merged UIKit renderer, targeted presentation bridge, resolved Scrollover geometry, and bounded image scheduler.
 >
@@ -64,6 +64,23 @@ The image pixels are presentation only. The slot geometry is already determined 
 6. No test should satisfy the gate only through a recreated pure helper; exercise the real cell/layout path where practical.
 
 During device validation, use an `UIViewAlertForUnsatisfiableConstraints` symbolic breakpoint or equivalent diagnostic to verify image arrival does not create constraint conflicts.
+
+### U3.6.5 implementation
+
+`IOSUIKitArticleCell` no longer raises the article image view's intrinsic-content
+hugging or compression-resistance priorities to required. The prepared required
+portrait and landscape slot constraints remain the sole geometry authority.
+Decoded pixels continue to use aspect fill, clipping, and the existing corner
+radius without changing the sizing identity.
+
+`NewsreaderPresentationTests` exercises actual configured and fitted UIKit cells.
+It verifies portrait placeholder, square/tall/wide pixels, before/after-measurement
+arrival, landscape pixels, Read/Starred, and feed-icon fallback/decoded-icon
+transitions preserve measured height, slot frame, layout variant, and prepared
+layout-variant revision. The tests call `layoutIfNeeded()` after each relevant
+pixel update. Physical-device acceptance should still use an
+`UIViewAlertForUnsatisfiableConstraints` symbolic breakpoint while image-rich
+rows load.
 
 ## 4. U3.6.6 — Presentation Delivery Repair
 
