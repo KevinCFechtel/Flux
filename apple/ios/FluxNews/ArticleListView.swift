@@ -524,13 +524,36 @@ struct IOSUIKitFeedIconPresentationDelta {
 /// mutable state so a later cell binding never needs a complete row reconstruction.
 @MainActor
 final class IOSUIKitArticleTimelinePresentationBridge {
-    private weak var controller: IOSUIKitArticleTimelineController?
+    private final class WeakControllerSubscription {
+        weak var controller: IOSUIKitArticleTimelineController?
+
+        init(_ controller: IOSUIKitArticleTimelineController) {
+            self.controller = controller
+        }
+    }
+
+    private var articleSubscribers: [ObjectIdentifier: WeakControllerSubscription] = [:]
+    private var feedIconSubscribers: [ObjectIdentifier: WeakControllerSubscription] = [:]
     private var articleStates: [Int64: IOSUIKitArticlePresentationState] = [:]
     private var feedIcons: [IOSFeedIconKey: IOSUIKitFeedIconPresentationDelta] = [:]
 
-    func attach(_ controller: IOSUIKitArticleTimelineController, appliesArticleState: Bool = true) {
-        self.controller = controller
-        if appliesArticleState { controller.applyPresentationBridgeState(self) }
+    func subscribeArticles(_ controller: IOSUIKitArticleTimelineController) {
+        pruneSubscriptions()
+        articleSubscribers[ObjectIdentifier(controller)] = .init(controller)
+        controller.applyPresentationBridgeState(self)
+    }
+
+    func unsubscribeArticles(_ controller: IOSUIKitArticleTimelineController) {
+        articleSubscribers.removeValue(forKey: ObjectIdentifier(controller))
+    }
+
+    func subscribeFeedIcons(_ controller: IOSUIKitArticleTimelineController) {
+        pruneSubscriptions()
+        feedIconSubscribers[ObjectIdentifier(controller)] = .init(controller)
+    }
+
+    func unsubscribeFeedIcons(_ controller: IOSUIKitArticleTimelineController) {
+        feedIconSubscribers.removeValue(forKey: ObjectIdentifier(controller))
     }
 
     func replaceArticleStates(_ states: [Int64: IOSUIKitArticlePresentationState]) {
@@ -540,13 +563,17 @@ final class IOSUIKitArticleTimelinePresentationBridge {
     func publishArticle(_ delta: IOSUIKitArticlePresentationDelta) {
         guard delta.state.revision >= articleStates[delta.articleID]?.revision ?? 0 else { return }
         articleStates[delta.articleID] = delta.state
-        controller?.applyArticlePresentation(delta)
+        for subscription in articleSubscribers.values {
+            subscription.controller?.applyArticlePresentation(delta)
+        }
     }
 
     func publishFeedIcon(_ delta: IOSUIKitFeedIconPresentationDelta) {
         guard delta.revision >= feedIcons[delta.key]?.revision ?? 0 else { return }
         feedIcons[delta.key] = delta
-        controller?.applyFeedIconPresentation(delta)
+        for subscription in feedIconSubscribers.values {
+            subscription.controller?.applyFeedIconPresentation(delta)
+        }
     }
 
     func articleState(for id: Int64, fallback: ArticleSummary) -> IOSUIKitArticlePresentationState {
@@ -555,6 +582,11 @@ final class IOSUIKitArticleTimelinePresentationBridge {
 
     func feedIcon(for feedID: Int64, variant: FeedIconVariant) -> UIImage? {
         feedIcons[.init(feedID: feedID, variant: variant)]?.image
+    }
+
+    private func pruneSubscriptions() {
+        articleSubscribers = articleSubscribers.filter { $0.value.controller != nil }
+        feedIconSubscribers = feedIconSubscribers.filter { $0.value.controller != nil }
     }
 }
 
@@ -602,6 +634,10 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: IOSUIKitArticleTimelineController, context: Context) {
         update(uiViewController)
+    }
+
+    static func dismantleUIViewController(_ uiViewController: IOSUIKitArticleTimelineController, coordinator: ()) {
+        uiViewController.detachPresentationBridges()
     }
 
     private func update(_ controller: IOSUIKitArticleTimelineController) {
@@ -767,12 +803,14 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         showsRefreshControl = newShowsRefreshControl
         collectionView.refreshControl = showsRefreshControl ? refreshControl : nil
         if presentationBridge !== newPresentationBridge {
+            presentationBridge?.unsubscribeArticles(self)
             presentationBridge = newPresentationBridge
-            newPresentationBridge.attach(self)
+            newPresentationBridge.subscribeArticles(self)
         }
         if feedIconPresentationBridge !== newFeedIconPresentationBridge {
+            feedIconPresentationBridge?.unsubscribeFeedIcons(self)
             feedIconPresentationBridge = newFeedIconPresentationBridge
-            newFeedIconPresentationBridge.attach(self, appliesArticleState: false)
+            newFeedIconPresentationBridge.subscribeFeedIcons(self)
         }
 
         if structuralChanged {
@@ -854,7 +892,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     func applyFeedIconPresentation(_ delta: IOSUIKitFeedIconPresentationDelta) {
         guard delta.key.variant == iconVariant else { return }
         feedIconPresentationApplicationCount &+= 1
-        for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
+        applyFeedIconPresentation(delta, to: collectionView.visibleCells.compactMap { $0 as? IOSUIKitArticleCell })
+    }
+
+    func applyFeedIconPresentation(_ delta: IOSUIKitFeedIconPresentationDelta, to cells: [IOSUIKitArticleCell]) {
+        for cell in cells {
             guard let id = cell.representedArticleID,
                   let item = itemsByID[id], item.article.feedId == delta.key.feedID else { continue }
             cell.updateFeedIcon(image: delta.image, title: item.content.article.feedTitle)
@@ -880,8 +922,25 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
         recordResolvedScrolloverFrame(for: cell)
+        if let articleCell = cell as? IOSUIKitArticleCell {
+            reconcilePresentationForDisplay(articleCell)
+        }
         guard !orderedIDs.isEmpty, indexPath.item >= max(0, orderedIDs.count - 5) else { return }
         onApproachingEnd?()
+    }
+
+    func reconcilePresentationForDisplay(_ cell: IOSUIKitArticleCell) {
+        guard let articleID = cell.representedArticleID,
+              let item = itemsByID[articleID] else { return }
+        let articleState = presentationBridge?.articleState(for: articleID, fallback: item.article)
+        cell.updateStatus(
+            isRead: articleState?.isRead ?? item.article.isRead,
+            isStarred: articleState?.isStarred ?? item.article.isStarred
+        )
+        cell.updateFeedIcon(
+            image: feedIconPresentationBridge?.feedIcon(for: item.article.feedId, variant: iconVariant),
+            title: item.content.article.feedTitle
+        )
     }
 
     func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
@@ -1081,6 +1140,13 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     deinit {
         for task in prefetchTasks.values { task.cancel() }
+    }
+
+    func detachPresentationBridges() {
+        presentationBridge?.unsubscribeArticles(self)
+        feedIconPresentationBridge?.unsubscribeFeedIcons(self)
+        presentationBridge = nil
+        feedIconPresentationBridge = nil
     }
 }
 
@@ -1601,6 +1667,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
 
     var articleImageSlotFrameForTesting: CGRect { articleImageView.frame }
     var layoutVariantForTesting: IOSUIKitArticleCellLayoutVariant? { currentLayoutVariant }
+    var feedIconImageForTesting: UIImage? { feedIconImageView.image }
 
     private func configureArticleImage(url: URL?, targetSize: CGSize, displayScale: CGFloat) {
         invalidateImageBinding()

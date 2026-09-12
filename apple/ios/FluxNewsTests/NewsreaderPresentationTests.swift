@@ -419,6 +419,169 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testSharedFeedIconBridgeDeliversToTimelineAndSearchWithoutStealingUpdates() {
+        let sharedIconBridge = IOSUIKitArticleTimelinePresentationBridge()
+        let timeline = makeTimelineController(presentationBridge: sharedIconBridge, feedIconBridge: sharedIconBridge)
+        let searchArticleBridge = IOSUIKitArticleTimelinePresentationBridge()
+        let search = makeTimelineController(presentationBridge: searchArticleBridge, feedIconBridge: sharedIconBridge)
+
+        sharedIconBridge.publishFeedIcon(.init(key: .init(feedID: 10, variant: .normal), image: UIImage(), revision: 1))
+
+        XCTAssertEqual(timeline.feedIconPresentationApplicationCount, 1)
+        XCTAssertEqual(search.feedIconPresentationApplicationCount, 1)
+
+        search.detachPresentationBridges()
+        sharedIconBridge.publishFeedIcon(.init(key: .init(feedID: 10, variant: .normal), image: UIImage(), revision: 2))
+
+        XCTAssertEqual(timeline.feedIconPresentationApplicationCount, 2)
+        XCTAssertEqual(search.feedIconPresentationApplicationCount, 1)
+    }
+
+    @MainActor
+    func testArticleStatusAndSharedFeedIconChannelsRemainIsolated() {
+        let sharedIconBridge = IOSUIKitArticleTimelinePresentationBridge()
+        let timeline = makeTimelineController(presentationBridge: sharedIconBridge, feedIconBridge: sharedIconBridge)
+        let searchArticleBridge = IOSUIKitArticleTimelinePresentationBridge()
+        let search = makeTimelineController(presentationBridge: searchArticleBridge, feedIconBridge: sharedIconBridge)
+
+        sharedIconBridge.publishArticle(.init(articleID: 1, state: .init(isRead: true, isStarred: false, revision: 1), rearmScrollover: false))
+        searchArticleBridge.publishArticle(.init(articleID: 1, state: .init(isRead: false, isStarred: true, revision: 1), rearmScrollover: false))
+
+        XCTAssertEqual(timeline.articlePresentationApplicationCount, 1)
+        XCTAssertEqual(search.articlePresentationApplicationCount, 1)
+        XCTAssertEqual(sharedIconBridge.articleState(for: 1, fallback: timelineArticle(id: 1)).isRead, true)
+        XCTAssertEqual(searchArticleBridge.articleState(for: 1, fallback: timelineArticle(id: 1)).isStarred, true)
+    }
+
+    @MainActor
+    func testRepeatedBridgeUpdatesDoNotDuplicatePresentationDelivery() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+        let structuralState = timelineStructuralState([timelineArticle(id: 1), timelineArticle(id: 2)], revision: 1)
+
+        for _ in 0..<4 {
+            controller.update(
+                structuralState: structuralState,
+                presentationBridge: bridge,
+                feedIconPresentationBridge: bridge,
+                mode: .visual,
+                previewLines: .standard,
+                iconVariant: .normal,
+                scrollResetRevision: 0,
+                markReadOnScrolloverEnabled: false,
+                showsRefreshControl: false
+            )
+        }
+        bridge.publishFeedIcon(.init(key: .init(feedID: 10, variant: .normal), image: UIImage(), revision: 1))
+
+        XCTAssertEqual(controller.feedIconPresentationApplicationCount, 1)
+    }
+
+    @MainActor
+    func testPreparedCellReconcilesRetainedIconWithoutStructuralOrSizingWork() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+        let cell = makeUIKitArticleCell(mode: .visual, width: 390)
+        let height = measureUIKitArticleCell(cell, width: 390)
+        let solveCount = cell.measurementSolveCount
+        let variant = cell.layoutVariantForTesting
+        let variantRevision = cell.layoutVariantRevision
+        let structuralCount = controller.structuralReconciliationCount
+        let snapshotCount = controller.structuralSnapshotApplicationCount
+
+        bridge.publishFeedIcon(.init(key: .init(feedID: 10, variant: .normal), image: testImage(width: 30, height: 30), revision: 1))
+        XCTAssertNil(cell.feedIconImageForTesting)
+
+        controller.reconcilePresentationForDisplay(cell)
+        cell.layoutIfNeeded()
+
+        XCTAssertNotNil(cell.feedIconImageForTesting)
+        XCTAssertEqual(cell.bounds.height, height, accuracy: 0.5)
+        XCTAssertEqual(cell.measurementSolveCount, solveCount)
+        XCTAssertEqual(cell.layoutVariantForTesting, variant)
+        XCTAssertEqual(cell.layoutVariantRevision, variantRevision)
+        XCTAssertEqual(controller.structuralReconciliationCount, structuralCount)
+        XCTAssertEqual(controller.structuralSnapshotApplicationCount, snapshotCount)
+    }
+
+    @MainActor
+    func testCachedAndStaleFeedIconBindingsReconcileOnlyTheCurrentFeed() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let articles = [timelineArticle(id: 1, feedID: 10), timelineArticle(id: 2, feedID: 20)]
+        let controller = makeTimelineController(articles: articles, presentationBridge: bridge, feedIconBridge: bridge)
+        bridge.publishFeedIcon(.init(key: .init(feedID: 10, variant: .normal), image: testImage(width: 30, height: 30), revision: 1))
+
+        let reboundCell = makeUIKitArticleCell(mode: .visual, width: 390, articleID: 2, feedID: 20)
+        controller.reconcilePresentationForDisplay(reboundCell)
+        XCTAssertNil(reboundCell.feedIconImageForTesting)
+
+        bridge.publishFeedIcon(.init(key: .init(feedID: 20, variant: .normal), image: testImage(width: 30, height: 30), revision: 1))
+        controller.reconcilePresentationForDisplay(reboundCell)
+        XCTAssertNotNil(reboundCell.feedIconImageForTesting)
+
+        let cachedCell = makeUIKitArticleCell(mode: .visual, width: 390, articleID: 1, feedID: 10)
+        controller.reconcilePresentationForDisplay(cachedCell)
+        XCTAssertNotNil(cachedCell.feedIconImageForTesting)
+    }
+
+    @MainActor
+    func testOneFeedIconDeltaUpdatesAllRelevantBoundCellsOnly() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let articles = [timelineArticle(id: 1, feedID: 10), timelineArticle(id: 2, feedID: 10), timelineArticle(id: 3, feedID: 20)]
+        let controller = makeTimelineController(articles: articles, presentationBridge: bridge, feedIconBridge: bridge)
+        let first = makeUIKitArticleCell(mode: .visual, width: 390, articleID: 1, feedID: 10)
+        let second = makeUIKitArticleCell(mode: .visual, width: 390, articleID: 2, feedID: 10)
+        let unrelated = makeUIKitArticleCell(mode: .visual, width: 390, articleID: 3, feedID: 20)
+
+        controller.applyFeedIconPresentation(.init(key: .init(feedID: 10, variant: .normal), image: testImage(width: 30, height: 30), revision: 1), to: [first, second, unrelated])
+
+        XCTAssertNotNil(first.feedIconImageForTesting)
+        XCTAssertNotNil(second.feedIconImageForTesting)
+        XCTAssertNil(unrelated.feedIconImageForTesting)
+    }
+
+    @MainActor
+    func testFeedIconTransientFailureRetriesAfterCooldownAndSuccessfulNilDoesNotRetry() async throws {
+        let retryLoader = FeedIconLoader(results: [.failure(URLError(.notConnectedToInternet)), .success(try imageData(width: 40, height: 40))])
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setFeedIconLoaderForTesting { _, _ in try retryLoader.load() }
+        let retryState = store.feedIconPresentationState(for: 10, variant: .normal)
+
+        store.requestFeedIcon(10, variant: .normal, now: 0)
+        await waitForFeedIconState(retryState, matching: .retryableFailure(retryAfter: 30))
+        XCTAssertEqual(retryLoader.callCount, 1)
+
+        store.requestFeedIcon(10, variant: .normal, now: 1)
+        await Task.yield()
+        XCTAssertEqual(retryLoader.callCount, 1)
+
+        store.requestFeedIcon(10, variant: .normal, now: 30)
+        await waitForFeedIconState(retryState, matching: .available)
+        XCTAssertNotNil(retryState.image)
+        XCTAssertEqual(retryLoader.callCount, 2)
+
+        let unavailableLoader = FeedIconLoader(results: [.success(nil)])
+        let unavailableStore = NewsreaderStore(defaults: UserDefaults())
+        unavailableStore.setFeedIconLoaderForTesting { _, _ in try unavailableLoader.load() }
+        let unavailableState = unavailableStore.feedIconPresentationState(for: 20, variant: .normal)
+        unavailableStore.requestFeedIcon(20, variant: .normal, now: 0)
+        await waitForFeedIconState(unavailableState, matching: .unavailable)
+        unavailableStore.requestFeedIcon(20, variant: .normal, now: 1_000)
+        await Task.yield()
+
+        XCTAssertEqual(unavailableLoader.callCount, 1)
+        XCTAssertEqual(unavailableState.loadState, .unavailable)
+
+        let decodeFailureLoader = FeedIconLoader(results: [.success(Data("not an image".utf8))])
+        let decodeFailureStore = NewsreaderStore(defaults: UserDefaults())
+        decodeFailureStore.setFeedIconLoaderForTesting { _, _ in try decodeFailureLoader.load() }
+        let decodeFailureState = decodeFailureStore.feedIconPresentationState(for: 30, variant: .normal)
+        decodeFailureStore.requestFeedIcon(30, variant: .normal, now: 0)
+        await waitForFeedIconState(decodeFailureState, matching: .retryableFailure(retryAfter: 30))
+        XCTAssertEqual(decodeFailureLoader.callCount, 1)
+    }
+
+    @MainActor
     func testExplicitUnreadDeltaRearmsOnlyTargetedScrolloverArticle() {
         let bridge = IOSUIKitArticleTimelinePresentationBridge()
         let controller = makeTimelineController(bridge: bridge)
@@ -461,13 +624,22 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     @MainActor
     private func makeTimelineController(bridge: IOSUIKitArticleTimelinePresentationBridge) -> IOSUIKitArticleTimelineController {
+        makeTimelineController(presentationBridge: bridge, feedIconBridge: bridge)
+    }
+
+    @MainActor
+    private func makeTimelineController(
+        articles: [ArticleSummary]? = nil,
+        presentationBridge: IOSUIKitArticleTimelinePresentationBridge,
+        feedIconBridge: IOSUIKitArticleTimelinePresentationBridge
+    ) -> IOSUIKitArticleTimelineController {
+        let articles = articles ?? [timelineArticle(id: 1), timelineArticle(id: 2)]
         let controller = IOSUIKitArticleTimelineController()
-        let articles = [timelineArticle(id: 1), timelineArticle(id: 2)]
-        bridge.replaceArticleStates(Dictionary(uniqueKeysWithValues: articles.map { ($0.id, .init(isRead: $0.isRead, isStarred: $0.isStarred, revision: 0)) }))
+        presentationBridge.replaceArticleStates(Dictionary(uniqueKeysWithValues: articles.map { ($0.id, .init(isRead: $0.isRead, isStarred: $0.isStarred, revision: 0)) }))
         controller.update(
             structuralState: timelineStructuralState(articles, revision: 1),
-            presentationBridge: bridge,
-            feedIconPresentationBridge: bridge,
+            presentationBridge: presentationBridge,
+            feedIconPresentationBridge: feedIconBridge,
             mode: .visual,
             previewLines: .standard,
             iconVariant: .normal,
@@ -482,8 +654,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         .init(items: articles.map { .init(article: $0, content: ArticleRowContent(article: $0)) }, revision: revision)
     }
 
-    private func timelineArticle(id: Int64) -> ArticleSummary {
-        .init(id: id, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article \(id)", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
+    private func timelineArticle(id: Int64, feedID: Int64 = 10) -> ArticleSummary {
+        .init(id: id, feedId: feedID, categoryId: 20, feedTitle: "Feed \(feedID)", title: "Article \(id)", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
     }
 
     private func makePresentation(article: ArticleSummary, fallbackRead: Bool, fallbackStarred: Bool, rowState: ArticleRowPresentationState?, feedIcon: IOSFeedIconPresentationState? = nil) -> ArticlePresentationView {
@@ -946,12 +1118,17 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    private func makeUIKitArticleCell(mode: ArticlePresentationMode, width: CGFloat) -> IOSUIKitArticleCell {
+    private func makeUIKitArticleCell(
+        mode: ArticlePresentationMode,
+        width: CGFloat,
+        articleID: Int64 = 1,
+        feedID: Int64 = 10
+    ) -> IOSUIKitArticleCell {
         let article = ArticleSummary(
-            id: 1,
-            feedId: 10,
+            id: articleID,
+            feedId: feedID,
             categoryId: 20,
-            feedTitle: "Feed",
+            feedTitle: "Feed \(feedID)",
             title: "A deliberately multiline article title that exercises the real UIKit sizing path",
             url: "https://example.com/article",
             commentsUrl: "https://example.com/comments",
@@ -998,6 +1175,39 @@ final class NewsreaderPresentationTests: XCTestCase {
         UIGraphicsImageRenderer(size: CGSize(width: width, height: height)).image { context in
             UIColor.systemBlue.setFill()
             context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        }
+    }
+
+    @MainActor
+    private func waitForFeedIconState(_ state: IOSFeedIconPresentationState, matching expected: IOSFeedIconLoadState) async {
+        for _ in 0..<100 {
+            if state.loadState == expected { return }
+            await Task.yield()
+        }
+        XCTFail("Timed out waiting for feed icon state \(expected)")
+    }
+
+    private final class FeedIconLoader: @unchecked Sendable {
+        private let lock = NSLock()
+        private var results: [Result<Data?, Error>]
+        private var calls = 0
+
+        init(results: [Result<Data?, Error>]) {
+            self.results = results
+        }
+
+        func load() throws -> Data? {
+            lock.lock()
+            defer { lock.unlock() }
+            calls += 1
+            guard !results.isEmpty else { throw URLError(.badServerResponse) }
+            return try results.removeFirst().get()
+        }
+
+        var callCount: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return calls
         }
     }
 

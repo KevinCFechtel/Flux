@@ -1,6 +1,6 @@
 # UIKit Timeline Performance Plan — U3.6.5 through U3.7
 
-> **Status: U3.6.5 COMPLETE**
+> **Status: U3.6.5 AND U3.6.6 COMPLETE**
 >
 > Baseline: `main` after U3.6.1–U3.6.4, currently including the merged UIKit renderer, targeted presentation bridge, resolved Scrollover geometry, and bounded image scheduler.
 >
@@ -111,6 +111,31 @@ Feed icon loading also conflates successful "no icon" with transient failure, wh
 - Multiple visible rows for one feed update correctly.
 - Transient failure followed by later success is retryable.
 - Successful no-icon result is retained without repeated requests.
+
+### U3.6.6 implementation
+
+`IOSUIKitArticleTimelinePresentationBridge` now has separate weak subscriber
+collections for article-status and feed-icon delivery. A controller subscribes
+to its own article bridge and may independently subscribe to the shared
+Newsreader icon bridge. Repeated updates replace the entry by controller
+identity; bridge replacement and SwiftUI dismantling explicitly unsubscribe,
+while weak entries cannot retain obsolete controllers.
+
+`willDisplay` reconciles the bound cell from retained article and feed-icon
+state keyed by article ID, feed ID, and icon variant. This calls only the
+cell's targeted status/icon presentation methods and does not reconfigure the
+cell, measure it, or apply structural list work.
+
+Feed-icon state is explicit: idle, loading, available, successful-unavailable,
+or retryable failure. The existing Core contract's successful `nil` icon is
+retained as successful-unavailable. Thrown Core failures and raw icon data that
+cannot decode as a `UIImage` are retryable failures, with a 30-second
+demand-based cooldown; concurrent demand remains deduplicated.
+
+`NewsreaderPresentationTests` covers simultaneous Timeline/Search icon
+subscription, article-channel isolation, repeated updates, prepared and cached
+cell reconciliation, stale feed bindings, targeted multi-row delivery, retry
+after transient/decode failure, and successful no-icon retention.
 
 ## 5. U3.6.7 — Image Scheduler Race Repair
 
