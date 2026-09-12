@@ -16,6 +16,29 @@ struct IOSUIKitArticleLayoutInput: Hashable {
     let contentSizeCategory: UIContentSizeCategory
     let localeIdentifier: String
     let layoutDirection: UIUserInterfaceLayoutDirection
+
+    init(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, localeIdentifier: String, layoutDirection: UIUserInterfaceLayoutDirection) {
+        title = item.content.article.title
+        feedTitle = item.content.article.feedTitle
+        publishedDate = item.content.publishedDate
+        preview = item.content.article.preview
+        hasImage = item.content.imageURL != nil
+        hasComments = item.content.hasComments
+        self.mode = mode
+        self.previewLines = previewLines
+        self.containerWidth = containerWidth
+        self.displayScale = displayScale
+        self.contentSizeCategory = contentSizeCategory
+        self.localeIdentifier = localeIdentifier
+        self.layoutDirection = layoutDirection
+    }
+
+    init(title: String, feedTitle: String, publishedDate: String, preview: String, hasImage: Bool, hasComments: Bool, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, localeIdentifier: String, layoutDirection: UIUserInterfaceLayoutDirection) {
+        self.title = title; self.feedTitle = feedTitle; self.publishedDate = publishedDate; self.preview = preview
+        self.hasImage = hasImage; self.hasComments = hasComments; self.mode = mode; self.previewLines = previewLines
+        self.containerWidth = containerWidth; self.displayScale = displayScale; self.contentSizeCategory = contentSizeCategory
+        self.localeIdentifier = localeIdentifier; self.layoutDirection = layoutDirection
+    }
 }
 
 struct IOSUIKitArticleLayoutKey: Hashable {
@@ -46,7 +69,7 @@ struct IOSUIKitArticleLayoutMetrics: Equatable {
 }
 
 /// Deterministic, cell-free counterpart to the current UIKit constraint geometry.
-/// Text uses UIKit's bounded string layout API, not a configured cell or solver.
+/// Text measurement uses an isolated UILabel, never a configured article cell or solver.
 enum IOSUIKitArticleLayoutEngine {
     private static let textSpacing: CGFloat = 7
     private static let portraitSpacing: CGFloat = 12
@@ -64,7 +87,8 @@ enum IOSUIKitArticleLayoutEngine {
         let landscape = ArticlePresentationLayout.usesLandscapeVisual(mode: input.mode, availableWidth: availableWidth)
         let hasImage = input.hasImage && input.mode.showsArticleImage
         let variant: IOSUIKitArticleCellLayoutVariant = input.mode == .compact ? .compact : !hasImage ? .visualTextOnly : landscape ? .visualLandscape : .visualPortrait
-        let verticalInset: CGFloat = variant == .compact ? 11 : variant == .visualLandscape ? 13 : 15
+        // Metrics chooses this from the visual width before the image/no-image variant.
+        let verticalInset: CGFloat = input.mode == .compact ? 11 : landscape ? 13 : 15
         let imageSize: CGSize
         let textWidth: CGFloat
         switch variant {
@@ -121,9 +145,12 @@ enum IOSUIKitArticleLayoutEngine {
 
     private static func height(_ text: String, font: UIFont, width: CGFloat, maxLines: Int) -> CGFloat {
         guard !text.isEmpty, width > 0 else { return 0 }
-        let lineHeight = font.lineHeight
-        let measured = (text as NSString).boundingRect(with: CGSize(width: width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: font], context: nil).height
-        return min(maxLines == 0 ? .greatestFiniteMagnitude : lineHeight * CGFloat(maxLines), ceil(measured))
+        let label = UILabel()
+        label.font = font
+        label.numberOfLines = maxLines
+        label.lineBreakMode = .byWordWrapping
+        label.text = text
+        return label.sizeThatFits(.init(width: width, height: .greatestFiniteMagnitude)).height
     }
 
     private static func roundToPixel(_ value: CGFloat, scale: CGFloat) -> CGFloat { ceil(value * scale) / scale }

@@ -1167,12 +1167,56 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSUIKitArticleLayoutEngine.metrics(for: input).imageFrame?.size, IOSUIKitArticleLayoutEngine.metrics(for: input).imageFrame?.size)
     }
 
+    @MainActor
+    func testDeterministicArticleLayoutEngineMatchesUIKitCellOracle() {
+        let titles = [
+            "Short title",
+            "A deliberately multiline article title that exercises the exact bounded text measurement used by the production UIKit cell.",
+            "Emoji headline \u{1F680} with Arabic \u{0645}\u{0631}\u{062D}\u{0628}\u{0627} and Japanese \u{65E5}\u{672C}\u{8A9E}",
+        ]
+        let previews = ["", "Short preview", String(repeating: "A longer preview exercises bounded UIKit text wrapping. ", count: 8)]
+        let cases: [(ArticlePresentationMode, CGFloat, Bool, ArticlePreviewLines)] = [
+            (.compact, 390, true, .compact),
+            (.visual, 390, false, .standard),
+            (.visual, 390, true, .extended),
+            (.visual, 760, true, .standard),
+            (.visual, 401, false, .standard),
+            (.visual, 402, false, .standard),
+            (.visual, 700, true, .standard),
+            (.visual, 701, true, .standard),
+        ]
+        for (index, testCase) in cases.enumerated() {
+            let item = oracleItem(title: titles[index % titles.count], preview: previews[index % previews.count], hasImage: testCase.2, hasComments: index.isMultiple(of: 2))
+            let cell = configuredOracleCell(item: item, mode: testCase.0, previewLines: testCase.3, width: testCase.1)
+            let actual = measureUIKitArticleCell(cell, width: testCase.1)
+            let input = IOSUIKitArticleLayoutInput(item: item, mode: testCase.0, previewLines: testCase.3, containerWidth: testCase.1, displayScale: 2, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: .leftToRight)
+            let expected = IOSUIKitArticleLayoutEngine.metrics(for: input)
+            XCTAssertEqual(actual, expected.cellSize.height, accuracy: 0.5, "case \(index) variant \(expected.variant)")
+        }
+    }
+
     private func layoutMetrics(mode: ArticlePresentationMode, width: CGFloat, hasImage: Bool, scale: CGFloat = 2) -> IOSUIKitArticleLayoutMetrics {
         IOSUIKitArticleLayoutEngine.metrics(for: layoutInput(mode: mode, width: width, hasImage: hasImage, scale: scale))
     }
 
     private func layoutInput(mode: ArticlePresentationMode, width: CGFloat, hasImage: Bool, scale: CGFloat = 2) -> IOSUIKitArticleLayoutInput {
         .init(title: "A deliberately multiline article title that exercises deterministic bounded text measurement", feedTitle: "A feed title", publishedDate: "January 1", preview: "A preview long enough to occupy multiple lines and preserve the production card text stack.", hasImage: hasImage, hasComments: true, mode: mode, previewLines: .standard, containerWidth: width, displayScale: scale, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: .leftToRight)
+    }
+
+    @MainActor
+    private func oracleItem(title: String, preview: String, hasImage: Bool, hasComments: Bool) -> IOSUIKitArticleTimelineItem {
+        let article = ArticleSummary(id: 91, feedId: 10, categoryId: 20, feedTitle: "Oracle Feed", title: title, url: "https://example.com/article", commentsUrl: hasComments ? "https://example.com/comments" : "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: preview, imageUrl: hasImage ? "https://example.com/image.jpg" : nil)
+        return .init(article: article, content: .init(article: article), isRead: false, isStarred: false, feedIconImage: nil)
+    }
+
+    @MainActor
+    private func configuredOracleCell(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, width: CGFloat) -> IOSUIKitArticleCell {
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
+        let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
+        container.addSubview(cell)
+        cell.configure(item: item, mode: mode, previewLines: previewLines, metrics: .init(mode: mode, containerWidth: width), displayScale: 2)
+        container.layoutIfNeeded()
+        return cell
     }
 
     @MainActor
