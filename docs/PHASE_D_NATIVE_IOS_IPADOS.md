@@ -151,6 +151,12 @@ filters, Core session, read/starred state, or Search domain state. iPhone,
 iPhone Duo, iPad, and future form factors fall out of this compact/regular model
 without dedicated UI implementations.
 
+The adaptive app shell keeps one persistent split/detail hierarchy across these
+transitions. Its detail Timeline remains in place while only column visibility
+and transient navigation presentation normalize. Entering regular presentation
+dismisses transient navigation; Search and Reader retain their request state and
+move to the appropriate native presentation without another Core request.
+
 ### iOS/iPadOS Article Timeline — UIKit
 
 The target Article Timeline is an owned UIKit view controller containing a
