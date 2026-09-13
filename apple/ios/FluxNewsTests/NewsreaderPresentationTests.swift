@@ -93,6 +93,11 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     func testIOSFirstReleaseUsesOneScene() {
         XCTAssertFalse(IOSSceneOwnershipPolicy.supportsMultipleScenes)
+
+        let appBundle = Bundle(for: FluxNewsAppBundleMarker.self)
+        let manifest = appBundle.object(forInfoDictionaryKey: "UIApplicationSceneManifest") as? [String: Any]
+        XCTAssertNotNil(manifest)
+        XCTAssertEqual(manifest?["UIApplicationSupportsMultipleScenes"] as? Bool, false)
     }
 
     func testAdaptivePresentationUsesSplitNavigationWhenRegularRegardlessOfDeviceIdentity() {

@@ -6,6 +6,8 @@ enum IOSSceneOwnershipPolicy {
     static let supportsMultipleScenes = false
 }
 
+final class FluxNewsAppBundleMarker {}
+
 @main
 struct FluxNewsApp: App {
     @Environment(\.scenePhase) private var scenePhase
