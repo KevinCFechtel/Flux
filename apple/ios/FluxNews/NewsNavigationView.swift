@@ -47,7 +47,7 @@ struct NewsNavigationExpansionState: Equatable {
 struct NewsNavigationView: View {
     @Environment(\.colorScheme) private var colorScheme
     var store: NewsreaderStore
-    @Binding var iPhoneSheetPresented: Bool
+    @Binding var sheetPresented: Bool
     let presentation: NewsNavigationPresentation
     let onSearch: () -> Void
     @State private var addDestination: IOSNavigationAddDestination?
@@ -55,9 +55,9 @@ struct NewsNavigationView: View {
     @State private var expansionState = NewsNavigationExpansionState()
     @State private var searchRequested = false
 
-    init(store: NewsreaderStore, iPhoneSheetPresented: Binding<Bool>, presentation: NewsNavigationPresentation, onSearch: @escaping () -> Void = {}) {
+    init(store: NewsreaderStore, sheetPresented: Binding<Bool>, presentation: NewsNavigationPresentation, onSearch: @escaping () -> Void = {}) {
         self.store = store
-        self._iPhoneSheetPresented = iPhoneSheetPresented
+        self._sheetPresented = sheetPresented
         self.presentation = presentation
         self.onSearch = onSearch
     }
@@ -129,7 +129,7 @@ struct NewsNavigationView: View {
     }
 
     private var selection: Binding<BrowserScope?> {
-        Binding(get: { store.scope }, set: { if let value = $0 { store.select(value); iPhoneSheetPresented = false } })
+        Binding(get: { store.scope }, set: { if let value = $0 { store.select(value); sheetPresented = false } })
     }
 
     private var groups: [NavigationPresentationGroup] {
@@ -154,7 +154,7 @@ struct NewsNavigationView: View {
     private func requestSearch() {
         if presentation == .sheet {
             searchRequested = true
-            iPhoneSheetPresented = false
+            sheetPresented = false
         } else {
             onSearch()
         }

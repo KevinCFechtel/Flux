@@ -80,14 +80,86 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertNil(IOSScopeNavigation.nextScope(after: .starred, catalog: catalog, hidingEmpty: false, counts: [:]))
     }
 
-    func testNewsNavigationPresentationMatchesDeviceRoutes() {
+    func testNewsNavigationPresentationMatchesAdaptiveRoutes() {
         XCTAssertEqual(NewsNavigationPresentation.sidebar, .sidebar)
         XCTAssertEqual(NewsNavigationPresentation.sheet, .sheet)
     }
 
-    func testNewsNavigationUsesSplitViewOnlyOnIPad() {
-        XCTAssertFalse(NewsNavigationLayout.usesSplitView(for: .phone))
-        XCTAssertTrue(NewsNavigationLayout.usesSplitView(for: .pad))
+    func testAdaptivePresentationUsesTransientNavigationWhenCompact() {
+        let presentation = AdaptivePresentationPolicy.presentation(horizontalSizeClass: .compact)
+        XCTAssertEqual(presentation, .compact)
+        XCTAssertFalse(presentation.usesPersistentSplitNavigation)
+    }
+
+    func testAdaptivePresentationUsesSplitNavigationWhenRegularRegardlessOfDeviceIdentity() {
+        let presentation = AdaptivePresentationPolicy.presentation(horizontalSizeClass: .regular)
+        XCTAssertEqual(presentation, .regular)
+        XCTAssertTrue(presentation.usesPersistentSplitNavigation)
+    }
+
+    func testAdaptivePresentationDoesNotChangeNavigationResetIdentity() {
+        let resetRevision: UInt64 = 7
+        XCTAssertEqual(IOSArticleNavigationPresentation.identity(for: resetRevision), resetRevision)
+        XCTAssertTrue(AdaptivePresentation.compact != AdaptivePresentation.regular)
+    }
+
+    func testAdaptiveShellTransitionNormalizesOnlyNavigationPresentation() {
+        XCTAssertFalse(AdaptiveShellTransitionPolicy.navigationSheetPresented(after: .regular, wasPresented: true))
+        XCTAssertTrue(AdaptiveShellTransitionPolicy.navigationSheetPresented(after: .compact, wasPresented: true))
+        XCTAssertEqual(AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .regular), .all)
+        XCTAssertEqual(AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .compact), .detailOnly)
+    }
+
+    func testAdaptiveShellTransitionPreservesSearchAndReaderRequestGenerations() {
+        var searchRequest = IOSSearchRequestState()
+        var readerRequest = ReaderRequestState()
+        let searchGeneration = searchRequest.begin()
+        let readerGeneration = readerRequest.begin()
+
+        _ = AdaptiveShellTransitionPolicy.navigationSheetPresented(after: .regular, wasPresented: true)
+        _ = AdaptiveShellTransitionPolicy.navigationSheetPresented(after: .compact, wasPresented: false)
+
+        XCTAssertTrue(searchRequest.isCurrent(searchGeneration))
+        XCTAssertTrue(readerRequest.isCurrent(readerGeneration))
+    }
+
+    @MainActor
+    func testAdaptiveShellTransitionDoesNotRecreateNewsreaderOrSearchState() {
+        let newsreader = NewsreaderStore(defaults: UserDefaults())
+        let search = IOSSearchStore()
+        search.query = "adaptive"
+        let structuralRevision = newsreader.timelineStructuralState.revision
+
+        _ = AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .regular)
+        _ = AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .compact)
+
+        XCTAssertEqual(search.query, "adaptive")
+        XCTAssertEqual(newsreader.timelineStructuralState.revision, structuralRevision)
+    }
+
+    @MainActor
+    func testAdaptiveShellTransitionDoesNotApplyAnotherTimelineSnapshot() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+        let structuralReconciliations = controller.structuralReconciliationCount
+        let snapshotApplications = controller.structuralSnapshotApplicationCount
+
+        _ = AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .regular)
+        _ = AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .compact)
+        controller.update(
+            structuralState: timelineStructuralState([timelineArticle(id: 1), timelineArticle(id: 2)], revision: 1),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+
+        XCTAssertEqual(controller.structuralReconciliationCount, structuralReconciliations)
+        XCTAssertEqual(controller.structuralSnapshotApplicationCount, snapshotApplications)
     }
 
     func testIPhoneNavigationButtonUsesTheFluxTemplateAsset() {
@@ -1816,10 +1888,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleOpenRouting.action(clickOnNews: .openLink, openInMiniflux: false), .original)
     }
 
-    func testReaderPresentationUsesInspectorOnlyOnRegularWidthIPad() {
-        XCTAssertEqual(ReaderPresentationPolicy.kind(isPad: true, isRegularWidth: true), .inspector)
-        XCTAssertEqual(ReaderPresentationPolicy.kind(isPad: true, isRegularWidth: false), .sheet)
-        XCTAssertEqual(ReaderPresentationPolicy.kind(isPad: false, isRegularWidth: true), .sheet)
+    func testReaderPresentationFollowsAdaptivePresentationRatherThanDeviceIdentity() {
+        XCTAssertEqual(AdaptivePresentation.compact.readerPresentationKind, .sheet)
+        XCTAssertEqual(AdaptivePresentation.regular.readerPresentationKind, .inspector)
+        XCTAssertEqual(AdaptivePresentationPolicy.presentation(horizontalSizeClass: .regular).readerPresentationKind, .inspector)
     }
 
     func testReaderPresentationExposesTheExplicitDismissAction() {
