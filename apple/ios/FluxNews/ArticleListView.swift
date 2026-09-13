@@ -699,8 +699,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private var scrolloverPhase: IOSScrolloverPresentationPhase = .idle
     private var scrolloverLayoutGeneration: UInt64 = 0
     private var resolvedScrolloverFrames = IOSUIKitResolvedScrolloverFrameStore()
-    private var lastLayoutWidth: CGFloat = 0
-    private var prefetchTasks: [Int64: Task<Void, Never>] = [:]
+    private var geometryIdentity: IOSUIKitTimelineGeometryIdentity?
+    private var geometryGeneration: UInt64 = 0
+    private var preparedWindowTask: Task<Void, Never>?
+    private var preparedWindowGeneration: UInt64 = 0
+    private var prefetchTasks: [Int64: (request: ArticleImageRequest, task: Task<Void, Never>)] = [:]
     private let refreshControl = UIRefreshControl()
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
     private let preparedLayoutCoordinator = IOSUIKitArticleLayoutPreparationCoordinator()
@@ -736,9 +739,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         collectionView.register(IOSUIKitArticleCell.self, forCellWithReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier)
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self, UITraitLayoutDirection.self]) { (self: Self, _) in
-            self.invalidateScrolloverGeometry()
-            self.replacePreparedLayoutWindow()
-            self.collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
+            self.updateGeometryIfNeeded()
         }
         view.addSubview(collectionView)
         NSLayoutConstraint.activate([
@@ -760,18 +761,22 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        let width = collectionView.bounds.width
-        guard width > 0, abs(width - lastLayoutWidth) > 0.5 else { return }
-        lastLayoutWidth = width
-        cancelAllPrefetch()
+        updateGeometryIfNeeded()
+    }
+
+    private func updateGeometryIfNeeded() {
+        guard let newIdentity = currentGeometryIdentity(), newIdentity != geometryIdentity else { return }
+        geometryIdentity = newIdentity
+        geometryGeneration &+= 1
         invalidateScrolloverGeometry()
-        replacePreparedLayoutWindow()
+        cancelIncompatibleImagePrefetch()
         for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
             guard let id = cell.representedArticleID, let item = renderedItem(for: id) else { continue }
             configure(cell, item: item)
             cell.setNeedsLayout()
         }
-        collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
+        collectionView.collectionViewLayout.invalidateLayout()
+        schedulePreparedLayoutWindow(for: newIdentity)
     }
 
     func update(
@@ -832,23 +837,22 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             structuralSnapshotApplicationCount &+= 1
             performanceMetrics.recordSnapshotApply()
         }
-        if layoutInputsChanged { invalidateScrolloverGeometry() }
-
-        var needsLayoutInvalidation = layoutInputsChanged
-        if structuralChanged || layoutInputsChanged || iconVariantChanged {
+        var needsLayoutInvalidation = false
+        if structuralChanged || iconVariantChanged {
             for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
                 guard let id = cell.representedArticleID, let item = renderedItem(for: id) else { continue }
                 configure(cell, item: item)
             }
-            needsLayoutInvalidation = structuralChanged || layoutInputsChanged
+            needsLayoutInvalidation = structuralChanged
         }
 
         if needsLayoutInvalidation {
             cancelAllPrefetch()
-            replacePreparedLayoutWindow()
+            schedulePreparedLayoutWindow(for: geometryIdentity)
             performanceMetrics.recordLayoutInvalidation()
             collectionView.collectionViewLayout.invalidateLayout()
         }
+        if layoutInputsChanged { updateGeometryIfNeeded() }
         if resetChanged {
             invalidateScrolloverGeometry()
             collectionView.setContentOffset(CGPoint(x: 0, y: -collectionView.adjustedContentInset.top), animated: false)
@@ -1130,20 +1134,27 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         preparedLayoutCoordinator.prepare(layoutInputs, priority: .prefetch)
         guard mode.showsArticleImage else { return }
         for indexPath in indexPaths {
-            guard let id = dataSource.itemIdentifier(for: indexPath), prefetchTasks[id] == nil,
+            guard let id = dataSource.itemIdentifier(for: indexPath),
                   let item = renderedItem(for: id), let request = imageRequest(for: item)
             else { continue }
-            prefetchTasks[id] = Task { [weak self] in
-                defer { self?.prefetchTasks[id] = nil }
+            if let existing = prefetchTasks[id], existing.request == request { continue }
+            prefetchTasks.removeValue(forKey: id)?.task.cancel()
+            let task = Task { [weak self] in
+                defer {
+                    if self?.prefetchTasks[id]?.request == request {
+                        self?.prefetchTasks[id] = nil
+                    }
+                }
                 _ = try? await ArticleImagePipeline.shared.prefetch(request)
             }
+            prefetchTasks[id] = (request, task)
         }
     }
 
     func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
         for indexPath in indexPaths {
             guard let id = dataSource.itemIdentifier(for: indexPath) else { continue }
-            prefetchTasks.removeValue(forKey: id)?.cancel()
+            prefetchTasks.removeValue(forKey: id)?.task.cancel()
         }
     }
 
@@ -1156,12 +1167,23 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func cancelAllPrefetch() {
-        for task in prefetchTasks.values { task.cancel() }
+        for prefetch in prefetchTasks.values { prefetch.task.cancel() }
         prefetchTasks.removeAll(keepingCapacity: true)
     }
 
+    private func cancelIncompatibleImagePrefetch() {
+        let incompatibleIDs = prefetchTasks.compactMap { id, prefetch in
+            guard let item = renderedItem(for: id), imageRequest(for: item) == prefetch.request else { return id }
+            return nil
+        }
+        for id in incompatibleIDs {
+            prefetchTasks.removeValue(forKey: id)?.task.cancel()
+        }
+    }
+
     deinit {
-        for task in prefetchTasks.values { task.cancel() }
+        preparedWindowTask?.cancel()
+        for prefetch in prefetchTasks.values { prefetch.task.cancel() }
     }
 
     func detachPresentationBridges() {
@@ -1179,6 +1201,34 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     private func preparedLayoutInput(for item: IOSUIKitArticleTimelineItem) -> IOSUIKitArticleLayoutInput {
         .init(item: item, mode: mode, previewLines: previewLines, containerWidth: collectionView.bounds.width, displayScale: view.traitCollection.displayScale, contentSizeCategory: view.traitCollection.preferredContentSizeCategory, localeIdentifier: Locale.current.identifier, layoutDirection: view.effectiveUserInterfaceLayoutDirection)
+    }
+
+    private func currentGeometryIdentity() -> IOSUIKitTimelineGeometryIdentity? {
+        guard collectionView.bounds.width > 0 else { return nil }
+        return .init(
+            mode: mode,
+            previewLines: previewLines,
+            containerWidth: collectionView.bounds.width,
+            displayScale: view.traitCollection.displayScale,
+            contentSizeCategory: view.traitCollection.preferredContentSizeCategory,
+            layoutDirection: view.effectiveUserInterfaceLayoutDirection
+        )
+    }
+
+    private func schedulePreparedLayoutWindow(for identity: IOSUIKitTimelineGeometryIdentity?) {
+        guard let identity else { return }
+        preparedWindowGeneration &+= 1
+        let generation = preparedWindowGeneration
+        preparedWindowTask?.cancel()
+        preparedWindowTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard !Task.isCancelled,
+                  let self,
+                  self.preparedWindowGeneration == generation,
+                  self.geometryIdentity == identity
+            else { return }
+            self.replacePreparedLayoutWindow()
+        }
     }
 
     private func replacePreparedLayoutWindow() {
@@ -1628,6 +1678,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         displayScale: CGFloat,
         preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics
     ) {
+        let articleChanged = representedArticleID != item.article.id
         representedArticleID = item.article.id
         // Keep the independently constrained metadata row in the cell's semantic direction.
         metadataRow.semanticContentAttribute = semanticContentAttribute
@@ -1652,7 +1703,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
 
         updateFeedIcon(image: item.feedIconImage, title: item.content.article.feedTitle)
         updateStatus(isRead: item.isRead, isStarred: item.isStarred)
-        configureArticleImage(url: item.content.imageURL, targetSize: imageSize, displayScale: displayScale)
+        configureArticleImage(url: item.content.imageURL, targetSize: imageSize, displayScale: displayScale, articleChanged: articleChanged)
         contentView.setNeedsLayout()
     }
 
@@ -1755,17 +1806,21 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         (feedTitleLabel.numberOfLines, feedTitleLabel.lineBreakMode)
     }
 
-    private func configureArticleImage(url: URL?, targetSize: CGSize, displayScale: CGFloat) {
-        performanceMetrics?.recordImageBinding()
-        invalidateImageBinding()
-        representedImageRequest = nil
+    private func configureArticleImage(url: URL?, targetSize: CGSize, displayScale: CGFloat, articleChanged: Bool) {
         guard let url, targetSize.width > 0, targetSize.height > 0 else {
+            guard representedImageRequest != nil else { return }
+            performanceMetrics?.recordImageBinding()
+            invalidateImageBinding()
+            representedImageRequest = nil
             articleImageView.image = nil
             imagePlaceholder.isHidden = false
             return
         }
 
         let request = ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale)
+        guard articleChanged || representedImageRequest != request else { return }
+        performanceMetrics?.recordImageBinding()
+        invalidateImageBinding()
         let bindingGeneration = imageBindingGeneration
         guard let articleID = representedArticleID else { return }
         representedImageRequest = request

@@ -173,6 +173,17 @@ Search, sheets, and other surfaces may continue using SwiftUI. Use public UIKit
 APIs; do not take over the internal delegate of a SwiftUI control through
 introspection. Retire the old Timeline path after the replacement is integrated.
 
+Available collection-container geometry is the Timeline layout authority; device
+identity, screen dimensions, and orientation names are not inputs. A canonical
+pixel geometry generation includes the effective collection width and the
+environment values that affect deterministic item layout. Geometry changes make
+visible cells correct immediately and establish a fresh Scrollover baseline, but
+coalesce only speculative prepared-layout work for the latest generation. Older
+generation results cannot be consumed as current layout. Relayout alone is never
+user scrolling and must not mark an article read. Image prefetch retains its
+existing canonical target-size bucket across a resize when possible, without
+changing visible-first or bounded scheduling behavior.
+
 Timeline actions use system-native swipe actions: leading Read/Unread and
 trailing Star/Unstar invoke the existing optimistic mutations and allow the
 platform's standard full-swipe behavior. Preserve context menus, pull-to-refresh,

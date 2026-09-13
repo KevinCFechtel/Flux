@@ -1318,6 +1318,25 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: .compact, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: input.layoutDirection)))
     }
 
+    func testTimelineGeometryIdentityUsesTheDeterministicMeasurementWidth() {
+        let input = layoutInput(mode: .visual, width: 390, hasImage: true, scale: 3)
+        let samePixels = IOSUIKitTimelineGeometryIdentity(mode: .visual, previewLines: .standard, containerWidth: 390.1, displayScale: 3, contentSizeCategory: input.contentSizeCategory, layoutDirection: input.layoutDirection)
+        let identity = IOSUIKitTimelineGeometryIdentity(mode: .visual, previewLines: .standard, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, layoutDirection: input.layoutDirection)
+        let changedWidth = IOSUIKitTimelineGeometryIdentity(mode: .visual, previewLines: .standard, containerWidth: 390.2, displayScale: 3, contentSizeCategory: input.contentSizeCategory, layoutDirection: input.layoutDirection)
+
+        XCTAssertEqual(identity, samePixels)
+        XCTAssertNotEqual(identity, changedWidth)
+        XCTAssertEqual(identity.containerWidthPixels, IOSUIKitArticleLayoutKey(input).containerWidthPixels)
+    }
+
+    func testTimelineGeometryIdentityRekeysEnvironmentInputsWithoutDeviceIdentity() {
+        let baseline = IOSUIKitTimelineGeometryIdentity(mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 3, contentSizeCategory: .large, layoutDirection: .leftToRight)
+        XCTAssertNotEqual(baseline, IOSUIKitTimelineGeometryIdentity(mode: .compact, previewLines: .standard, containerWidth: 390, displayScale: 3, contentSizeCategory: .large, layoutDirection: .leftToRight))
+        XCTAssertNotEqual(baseline, IOSUIKitTimelineGeometryIdentity(mode: .visual, previewLines: .compact, containerWidth: 390, displayScale: 3, contentSizeCategory: .large, layoutDirection: .leftToRight))
+        XCTAssertNotEqual(baseline, IOSUIKitTimelineGeometryIdentity(mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 3, contentSizeCategory: .extraLarge, layoutDirection: .leftToRight))
+        XCTAssertNotEqual(baseline, IOSUIKitTimelineGeometryIdentity(mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 3, contentSizeCategory: .large, layoutDirection: .rightToLeft))
+    }
+
     @MainActor
     func testPreparedLayoutMetricsReuseCanonicalIdentityAndRekeyLayoutChanges() {
         let cache = IOSUIKitPreparedArticleLayoutMetricsCache(capacity: 4)
@@ -1389,6 +1408,32 @@ final class NewsreaderPresentationTests: XCTestCase {
         let snapshot = coordinator.snapshot()
         XCTAssertGreaterThanOrEqual(snapshot.cancellations, 1)
         XCTAssertGreaterThanOrEqual(snapshot.discardedResults, 1)
+    }
+
+    @MainActor
+    func testRapidGeometryPreparationDiscardsSupersededWidthsAndPublishesLatest() async {
+        let gate = LayoutMeasurementGate()
+        let cache = IOSUIKitPreparedArticleLayoutMetricsCache(capacity: 8)
+        let coordinator = IOSUIKitArticleLayoutPreparationCoordinator(cache: cache, maximumConcurrency: 1) { input in
+            await gate.measure(input)
+        }
+        let first = layoutInput(mode: .visual, width: 390, hasImage: true)
+        let second = layoutInput(mode: .visual, width: 480, hasImage: true)
+        let latest = layoutInput(mode: .visual, width: 600, hasImage: true)
+
+        coordinator.replaceWindow(with: [first], visibleCount: 1)
+        await gate.waitUntilStarted(count: 1)
+        coordinator.replaceWindow(with: [second], visibleCount: 1)
+        coordinator.replaceWindow(with: [latest], visibleCount: 1)
+        await gate.releaseAll()
+        await gate.waitUntilStarted(count: 2)
+        await gate.releaseAll()
+        for _ in 0..<100 where coordinator.snapshot().measurementsCompleted == 0 { await Task.yield() }
+
+        XCTAssertNil(cache.metrics(for: .init(first)))
+        XCTAssertNil(cache.metrics(for: .init(second)))
+        XCTAssertNotNil(cache.metrics(for: .init(latest)))
+        XCTAssertGreaterThanOrEqual(coordinator.snapshot().discardedResults, 1)
     }
 
     @MainActor

@@ -55,6 +55,14 @@ struct IOSUIKitArticleLayoutKey: Hashable {
     let contentSizeCategory: String
     let layoutDirection: UIUserInterfaceLayoutDirection
 
+    static func canonicalContainerWidthPixels(_ width: CGFloat, displayScale: CGFloat) -> Int {
+        Int((width * max(displayScale, 1)).rounded())
+    }
+
+    static func canonicalDisplayScaleHundredths(_ displayScale: CGFloat) -> Int {
+        Int((max(displayScale, 1) * 100).rounded())
+    }
+
     init(_ input: IOSUIKitArticleLayoutInput) {
         let scale = max(input.displayScale, 1)
         let geometry = IOSUIKitArticleGeometry(mode: input.mode, containerWidth: input.containerWidth)
@@ -65,10 +73,31 @@ struct IOSUIKitArticleLayoutKey: Hashable {
         hasComments = input.hasComments
         variant = geometry.variant(hasImage: input.hasImage && input.mode.showsArticleImage)
         previewLines = input.previewLines
-        containerWidthPixels = Int((input.containerWidth * scale).rounded())
-        displayScaleHundredths = Int((scale * 100).rounded())
+        containerWidthPixels = Self.canonicalContainerWidthPixels(input.containerWidth, displayScale: scale)
+        displayScaleHundredths = Self.canonicalDisplayScaleHundredths(scale)
         contentSizeCategory = input.contentSizeCategory.rawValue
         layoutDirection = input.layoutDirection
+    }
+}
+
+/// The Timeline's layout environment, using the same pixel canonicalization as
+/// deterministic item metrics. This intentionally excludes device identity and
+/// mutable article presentation state.
+struct IOSUIKitTimelineGeometryIdentity: Hashable {
+    let containerWidthPixels: Int
+    let displayScaleHundredths: Int
+    let contentSizeCategory: String
+    let layoutDirection: UIUserInterfaceLayoutDirection
+    let mode: ArticlePresentationMode
+    let previewLines: ArticlePreviewLines
+
+    init(mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
+        containerWidthPixels = IOSUIKitArticleLayoutKey.canonicalContainerWidthPixels(containerWidth, displayScale: displayScale)
+        displayScaleHundredths = IOSUIKitArticleLayoutKey.canonicalDisplayScaleHundredths(displayScale)
+        self.contentSizeCategory = contentSizeCategory.rawValue
+        self.layoutDirection = layoutDirection
+        self.mode = mode
+        self.previewLines = previewLines
     }
 }
 
