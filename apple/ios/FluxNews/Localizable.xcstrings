@@ -1427,7 +1427,6 @@
       }
     },
     "Search" : {
-      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {

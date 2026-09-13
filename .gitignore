@@ -42,3 +42,4 @@ apple/macos/Build/EagerLinkingTBDs
 apple/macos/Build/ExplicitPrecompiledModules
 apple/macos/Build/FluxNews.build
 apple/Build/Products/
+apple/ios/FluxNews.xcodeproj/project.xcworkspace/xcuserdata/

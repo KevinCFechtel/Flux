@@ -22,15 +22,76 @@ private final class ArticleImageCacheEntry: NSObject {
     }
 }
 
-private final class ArticleImageCache: @unchecked Sendable {
+private enum ArticleImageCacheLookupSource {
+    case visible
+    case prefetch
+}
+
+private struct ArticleImageCacheMetrics: Sendable {
+    let visibleHits: Int
+    let visibleMisses: Int
+    let prefetchHits: Int
+    let prefetchMisses: Int
+    let insertions: Int
+    let evictions: Int
+}
+
+private final class ArticleImageCache: NSObject, NSCacheDelegate, @unchecked Sendable {
     let storage = NSCache<NSString, ArticleImageCacheEntry>()
+    private let lock = NSLock()
+    private var visibleHits = 0
+    private var visibleMisses = 0
+    private var prefetchHits = 0
+    private var prefetchMisses = 0
+    private var insertions = 0
+    private var evictions = 0
+
+    override init() {
+        super.init()
+        storage.delegate = self
+    }
 
     func image(for key: NSString) -> CGImage? {
         storage.object(forKey: key)?.image
     }
 
+    func lookup(_ key: NSString, source: ArticleImageCacheLookupSource) -> CGImage? {
+        let image = image(for: key)
+        lock.lock()
+        switch (source, image == nil) {
+        case (.visible, false): visibleHits += 1
+        case (.visible, true): visibleMisses += 1
+        case (.prefetch, false): prefetchHits += 1
+        case (.prefetch, true): prefetchMisses += 1
+        }
+        lock.unlock()
+        return image
+    }
+
     func insert(_ image: CGImage, for key: NSString) {
+        lock.lock()
+        insertions += 1
+        lock.unlock()
         storage.setObject(ArticleImageCacheEntry(image: image), forKey: key, cost: image.width * image.height * 4)
+    }
+
+    func snapshot() -> ArticleImageCacheMetrics {
+        lock.lock()
+        defer { lock.unlock() }
+        return .init(visibleHits: visibleHits, visibleMisses: visibleMisses, prefetchHits: prefetchHits, prefetchMisses: prefetchMisses, insertions: insertions, evictions: evictions)
+    }
+
+    func resetMetrics() {
+        lock.lock()
+        visibleHits = 0; visibleMisses = 0; prefetchHits = 0; prefetchMisses = 0
+        insertions = 0; evictions = 0
+        lock.unlock()
+    }
+
+    func cache(_ cache: NSCache<AnyObject, AnyObject>, willEvictObject obj: Any) {
+        lock.lock()
+        evictions += 1
+        lock.unlock()
     }
 }
 
@@ -44,38 +105,72 @@ actor ArticleImagePipeline {
         let queuedVisibleRequests: Int
         let queuedPrefetchRequests: Int
         let trackedRequests: Int
+        let memoryCacheHits: Int
+        let memoryCacheMisses: Int
+        let visibleMemoryCacheHits: Int
+        let visibleMemoryCacheMisses: Int
+        let prefetchMemoryCacheHits: Int
+        let prefetchMemoryCacheMisses: Int
+        let memoryCacheInsertions: Int
+        let memoryCacheEvictions: Int
+        let memoryCacheCostLimit: Int
+        let inFlightDedupHits: Int
+        let startedOperations: Int
+        let completedOperations: Int
+        let retiredOperations: Int
+        let maximumActiveOperations: Int
+        let visibleStarts: Int
+        let prefetchStarts: Int
     }
 
     private struct Job {
+        enum State { case queued, active, retiring }
+
+        let generation: UUID
         var waiters: [UUID: CheckedContinuation<CGImage, Error>] = [:]
         var operation: Task<CGImage, Error>?
+        var state: State = .queued
+        let demand: Demand
+    }
+
+    private struct QueuedJob: Equatable {
+        let request: ArticleImageRequest
+        let generation: UUID
     }
 
     static let shared = ArticleImagePipeline()
     static let maximumConcurrentOperations = 3
-    private static let maximumQueuedVisibleRequests = 48
+    static let memoryCacheCostLimit = 48 * 1024 * 1024
+    private static let maximumQueuedRequests = 48
     private static let maximumQueuedPrefetchRequests = 32
 
     private nonisolated let cache: ArticleImageCache
     private let loader: Loader
-    private var jobs: [ArticleImageRequest: Job] = [:]
-    private var visibleQueue: [ArticleImageRequest] = []
-    private var prefetchQueue: [ArticleImageRequest] = []
+    private var jobs: [ArticleImageRequest: [UUID: Job]] = [:]
+    private var visibleQueue: [QueuedJob] = []
+    private var prefetchQueue: [QueuedJob] = []
     private var activeOperationCount = 0
+    private var inFlightDedupHits = 0
+    private var startedOperations = 0
+    private var completedOperations = 0
+    private var retiredOperations = 0
+    private var maximumActiveOperations = 0
+    private var visibleStarts = 0
+    private var prefetchStarts = 0
 
-    init(loader: Loader? = nil) {
+    init(loader: Loader? = nil, memoryCacheCostLimit: Int = ArticleImagePipeline.memoryCacheCostLimit) {
         self.loader = loader ?? { url in try await Self.loadData(from: url) }
         cache = ArticleImageCache()
-        cache.storage.totalCostLimit = 48 * 1024 * 1024
+        cache.storage.totalCostLimit = max(1, memoryCacheCostLimit)
     }
 
     nonisolated func cachedImage(for request: ArticleImageRequest) -> CGImage? {
-        cache.image(for: request.cacheKey)
+        cache.lookup(request.cacheKey, source: .visible)
     }
 
-    func image(for request: ArticleImageRequest, demand: Demand = .visible) async throws -> CGImage {
+    func image(for request: ArticleImageRequest, demand: Demand = .visible, cacheWasChecked: Bool = false) async throws -> CGImage {
         let cacheKey = request.cacheKey
-        if let image = cache.image(for: cacheKey) {
+        if let image = cacheWasChecked ? cache.image(for: cacheKey) : cache.lookup(cacheKey, source: demand.cacheLookupSource) {
             return image
         }
 
@@ -100,12 +195,28 @@ actor ArticleImagePipeline {
     }
 
     func metrics() -> Metrics {
-        .init(
+        let cacheMetrics = cache.snapshot()
+        return .init(
             activeOperations: activeOperationCount,
             queuedVisibleRequests: visibleQueue.count,
             queuedPrefetchRequests: prefetchQueue.count,
-            trackedRequests: jobs.count
+            trackedRequests: jobs.values.reduce(0) { $0 + $1.count },
+            memoryCacheHits: cacheMetrics.visibleHits + cacheMetrics.prefetchHits,
+            memoryCacheMisses: cacheMetrics.visibleMisses + cacheMetrics.prefetchMisses,
+            visibleMemoryCacheHits: cacheMetrics.visibleHits, visibleMemoryCacheMisses: cacheMetrics.visibleMisses,
+            prefetchMemoryCacheHits: cacheMetrics.prefetchHits, prefetchMemoryCacheMisses: cacheMetrics.prefetchMisses,
+            memoryCacheInsertions: cacheMetrics.insertions, memoryCacheEvictions: cacheMetrics.evictions,
+            memoryCacheCostLimit: cache.storage.totalCostLimit, inFlightDedupHits: inFlightDedupHits,
+            startedOperations: startedOperations, completedOperations: completedOperations,
+            retiredOperations: retiredOperations, maximumActiveOperations: maximumActiveOperations,
+            visibleStarts: visibleStarts, prefetchStarts: prefetchStarts
         )
+    }
+
+    func resetMetrics() {
+        cache.resetMetrics()
+        inFlightDedupHits = 0; startedOperations = 0; completedOperations = 0
+        retiredOperations = 0; maximumActiveOperations = activeOperationCount; visibleStarts = 0; prefetchStarts = 0
     }
 
     func removeAllCachedImages() {
@@ -127,107 +238,118 @@ actor ArticleImagePipeline {
             return
         }
 
-        if var job = jobs[request] {
+        if let generation = coalescibleGeneration(for: request), var job = job(for: request, generation: generation) {
+            inFlightDedupHits += 1
             job.waiters[consumerID] = continuation
-            jobs[request] = job
-            if demand == .visible { promote(request) }
+            store(job, for: request)
+            if demand == .visible { promote(request, generation: generation) }
         } else {
-            if !canQueue(demand) {
+            guard admit(demand) else {
                 continuation.resume(throwing: CancellationError())
                 return
             }
-            var job = Job()
+            var job = Job(generation: UUID(), demand: demand)
             job.waiters[consumerID] = continuation
-            jobs[request] = job
+            store(job, for: request)
+            let queued = QueuedJob(request: request, generation: job.generation)
             switch demand {
-            case .visible: visibleQueue.append(request)
-            case .prefetch: prefetchQueue.append(request)
+            case .visible: visibleQueue.append(queued)
+            case .prefetch: prefetchQueue.append(queued)
             }
         }
         startAvailableOperations()
     }
 
-    private func canQueue(_ demand: Demand) -> Bool {
+    private func admit(_ demand: Demand) -> Bool {
         switch demand {
         case .prefetch:
-            return prefetchQueue.count < Self.maximumQueuedPrefetchRequests
+            return prefetchQueue.count < Self.maximumQueuedPrefetchRequests && pendingCount < Self.maximumQueuedRequests
         case .visible:
-            while visibleQueue.count >= Self.maximumQueuedVisibleRequests,
-                  let request = prefetchQueue.first {
+            while pendingCount >= Self.maximumQueuedRequests, let queued = prefetchQueue.first {
                 prefetchQueue.removeFirst()
-                cancelQueuedPrefetch(request)
+                cancelQueuedPrefetch(queued)
             }
-            return visibleQueue.count < Self.maximumQueuedVisibleRequests
+            return pendingCount < Self.maximumQueuedRequests
         }
     }
 
-    private func cancelQueuedPrefetch(_ request: ArticleImageRequest) {
-        guard let job = jobs.removeValue(forKey: request) else { return }
+    private var pendingCount: Int { visibleQueue.count + prefetchQueue.count }
+
+    private func cancelQueuedPrefetch(_ queued: QueuedJob) {
+        guard let job = removeJob(for: queued.request, generation: queued.generation) else { return }
         for continuation in job.waiters.values {
             continuation.resume(throwing: CancellationError())
         }
     }
 
-    private func promote(_ request: ArticleImageRequest) {
-        guard jobs[request]?.operation == nil,
-              let index = prefetchQueue.firstIndex(of: request) else { return }
+    private func promote(_ request: ArticleImageRequest, generation: UUID) {
+        let queued = QueuedJob(request: request, generation: generation)
+        guard let index = prefetchQueue.firstIndex(of: queued) else { return }
         prefetchQueue.remove(at: index)
-        if !visibleQueue.contains(request) { visibleQueue.append(request) }
+        visibleQueue.append(queued)
     }
 
     private func cancel(consumerID: UUID, for request: ArticleImageRequest) {
-        guard var job = jobs[request], let continuation = job.waiters.removeValue(forKey: consumerID) else { return }
+        guard let generation = generation(containing: consumerID, for: request),
+              var job = job(for: request, generation: generation),
+              let continuation = job.waiters.removeValue(forKey: consumerID) else { return }
         continuation.resume(throwing: CancellationError())
         guard job.waiters.isEmpty else {
-            jobs[request] = job
+            store(job, for: request)
             return
         }
 
         if let operation = job.operation {
-            jobs[request] = job
+            job.state = .retiring
+            store(job, for: request)
             operation.cancel()
         } else {
-            jobs[request] = nil
-            visibleQueue.removeAll { $0 == request }
-            prefetchQueue.removeAll { $0 == request }
+            _ = removeJob(for: request, generation: generation)
+            removeFromQueues(QueuedJob(request: request, generation: generation))
         }
     }
 
     private func startAvailableOperations() {
         while activeOperationCount < Self.maximumConcurrentOperations,
-              let request = nextQueuedRequest(),
-              var job = jobs[request] {
+              let queued = nextQueuedRequest(),
+              var job = job(for: queued.request, generation: queued.generation) {
             guard !job.waiters.isEmpty else {
-                jobs[request] = nil
+                _ = removeJob(for: queued.request, generation: queued.generation)
                 continue
             }
             let loader = loader
             let operation = Task.detached(priority: .utility) {
-                let data = try await loader(request.url)
-                return try Self.downsample(data: data, maxPixelDimension: request.maxPixelDimension)
+                let data = try await loader(queued.request.url)
+                return try Self.downsample(data: data, maxPixelDimension: queued.request.maxPixelDimension)
             }
             job.operation = operation
-            jobs[request] = job
+            job.state = .active
+            store(job, for: queued.request)
             activeOperationCount += 1
+            startedOperations += 1
+            maximumActiveOperations = max(maximumActiveOperations, activeOperationCount)
+            if job.demand == .visible { visibleStarts += 1 } else { prefetchStarts += 1 }
             Task { [weak self] in
                 let result: Result<CGImage, Error>
                 do { result = .success(try await operation.value) }
                 catch { result = .failure(error) }
-                await self?.complete(request: request, result: result)
+                await self?.complete(queued, result: result)
             }
         }
     }
 
-    private func nextQueuedRequest() -> ArticleImageRequest? {
+    private func nextQueuedRequest() -> QueuedJob? {
         if !visibleQueue.isEmpty { return visibleQueue.removeFirst() }
         if !prefetchQueue.isEmpty { return prefetchQueue.removeFirst() }
         return nil
     }
 
-    private func complete(request: ArticleImageRequest, result: Result<CGImage, Error>) {
-        guard let job = jobs.removeValue(forKey: request) else { return }
+    private func complete(_ queued: QueuedJob, result: Result<CGImage, Error>) {
+        guard let job = removeJob(for: queued.request, generation: queued.generation) else { return }
         activeOperationCount -= 1
-        if case let .success(image) = result { cache.insert(image, for: request.cacheKey) }
+        completedOperations += 1
+        if job.state == .retiring { retiredOperations += 1 }
+        if case let .success(image) = result { cache.insert(image, for: queued.request.cacheKey) }
         for continuation in job.waiters.values {
             switch result {
             case let .success(image): continuation.resume(returning: image)
@@ -235,6 +357,33 @@ actor ArticleImagePipeline {
             }
         }
         startAvailableOperations()
+    }
+
+    private func coalescibleGeneration(for request: ArticleImageRequest) -> UUID? {
+        jobs[request]?.values.first { $0.state != .retiring }?.generation
+    }
+
+    private func generation(containing consumerID: UUID, for request: ArticleImageRequest) -> UUID? {
+        jobs[request]?.values.first { $0.waiters[consumerID] != nil }?.generation
+    }
+
+    private func job(for request: ArticleImageRequest, generation: UUID) -> Job? {
+        jobs[request]?[generation]
+    }
+
+    private func store(_ job: Job, for request: ArticleImageRequest) {
+        jobs[request, default: [:]][job.generation] = job
+    }
+
+    private func removeJob(for request: ArticleImageRequest, generation: UUID) -> Job? {
+        guard var generations = jobs[request], let job = generations.removeValue(forKey: generation) else { return nil }
+        jobs[request] = generations.isEmpty ? nil : generations
+        return job
+    }
+
+    private func removeFromQueues(_ queued: QueuedJob) {
+        visibleQueue.removeAll { $0 == queued }
+        prefetchQueue.removeAll { $0 == queued }
     }
 
     private static let session: URLSession = {
@@ -270,6 +419,15 @@ actor ArticleImagePipeline {
             throw ArticleImageError.invalidImageData
         }
         return image
+    }
+}
+
+private extension ArticleImagePipeline.Demand {
+    var cacheLookupSource: ArticleImageCacheLookupSource {
+        switch self {
+        case .visible: .visible
+        case .prefetch: .prefetch
+        }
     }
 }
 
@@ -311,7 +469,7 @@ struct ArticleImageView: View {
             }
             image = nil
             do {
-                let loadedImage = try await ArticleImagePipeline.shared.image(for: request)
+                let loadedImage = try await ArticleImagePipeline.shared.image(for: request, cacheWasChecked: true)
                 try Task.checkCancellation()
                 image = loadedImage
             } catch is CancellationError {

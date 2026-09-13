@@ -524,13 +524,36 @@ struct IOSUIKitFeedIconPresentationDelta {
 /// mutable state so a later cell binding never needs a complete row reconstruction.
 @MainActor
 final class IOSUIKitArticleTimelinePresentationBridge {
-    private weak var controller: IOSUIKitArticleTimelineController?
+    private final class WeakControllerSubscription {
+        weak var controller: IOSUIKitArticleTimelineController?
+
+        init(_ controller: IOSUIKitArticleTimelineController) {
+            self.controller = controller
+        }
+    }
+
+    private var articleSubscribers: [ObjectIdentifier: WeakControllerSubscription] = [:]
+    private var feedIconSubscribers: [ObjectIdentifier: WeakControllerSubscription] = [:]
     private var articleStates: [Int64: IOSUIKitArticlePresentationState] = [:]
     private var feedIcons: [IOSFeedIconKey: IOSUIKitFeedIconPresentationDelta] = [:]
 
-    func attach(_ controller: IOSUIKitArticleTimelineController, appliesArticleState: Bool = true) {
-        self.controller = controller
-        if appliesArticleState { controller.applyPresentationBridgeState(self) }
+    func subscribeArticles(_ controller: IOSUIKitArticleTimelineController) {
+        pruneSubscriptions()
+        articleSubscribers[ObjectIdentifier(controller)] = .init(controller)
+        controller.applyPresentationBridgeState(self)
+    }
+
+    func unsubscribeArticles(_ controller: IOSUIKitArticleTimelineController) {
+        articleSubscribers.removeValue(forKey: ObjectIdentifier(controller))
+    }
+
+    func subscribeFeedIcons(_ controller: IOSUIKitArticleTimelineController) {
+        pruneSubscriptions()
+        feedIconSubscribers[ObjectIdentifier(controller)] = .init(controller)
+    }
+
+    func unsubscribeFeedIcons(_ controller: IOSUIKitArticleTimelineController) {
+        feedIconSubscribers.removeValue(forKey: ObjectIdentifier(controller))
     }
 
     func replaceArticleStates(_ states: [Int64: IOSUIKitArticlePresentationState]) {
@@ -540,13 +563,17 @@ final class IOSUIKitArticleTimelinePresentationBridge {
     func publishArticle(_ delta: IOSUIKitArticlePresentationDelta) {
         guard delta.state.revision >= articleStates[delta.articleID]?.revision ?? 0 else { return }
         articleStates[delta.articleID] = delta.state
-        controller?.applyArticlePresentation(delta)
+        for subscription in articleSubscribers.values {
+            subscription.controller?.applyArticlePresentation(delta)
+        }
     }
 
     func publishFeedIcon(_ delta: IOSUIKitFeedIconPresentationDelta) {
         guard delta.revision >= feedIcons[delta.key]?.revision ?? 0 else { return }
         feedIcons[delta.key] = delta
-        controller?.applyFeedIconPresentation(delta)
+        for subscription in feedIconSubscribers.values {
+            subscription.controller?.applyFeedIconPresentation(delta)
+        }
     }
 
     func articleState(for id: Int64, fallback: ArticleSummary) -> IOSUIKitArticlePresentationState {
@@ -555,6 +582,11 @@ final class IOSUIKitArticleTimelinePresentationBridge {
 
     func feedIcon(for feedID: Int64, variant: FeedIconVariant) -> UIImage? {
         feedIcons[.init(feedID: feedID, variant: variant)]?.image
+    }
+
+    private func pruneSubscriptions() {
+        articleSubscribers = articleSubscribers.filter { $0.value.controller != nil }
+        feedIconSubscribers = feedIconSubscribers.filter { $0.value.controller != nil }
     }
 }
 
@@ -602,6 +634,10 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: IOSUIKitArticleTimelineController, context: Context) {
         update(uiViewController)
+    }
+
+    static func dismantleUIViewController(_ uiViewController: IOSUIKitArticleTimelineController, coordinator: ()) {
+        uiViewController.detachPresentationBridges()
     }
 
     private func update(_ controller: IOSUIKitArticleTimelineController) {
@@ -667,7 +703,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private var prefetchTasks: [Int64: Task<Void, Never>] = [:]
     private let refreshControl = UIRefreshControl()
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
-    private let articleHeightCache = IOSUIKitArticleCellHeightCache(capacity: 512)
+    private let preparedLayoutCoordinator = IOSUIKitArticleLayoutPreparationCoordinator()
+    private let performanceMetrics = IOSUIKitTimelinePerformanceMetrics()
     private(set) var structuralReconciliationCount = 0
     private(set) var structuralSnapshotApplicationCount = 0
     private(set) var articlePresentationApplicationCount = 0
@@ -698,9 +735,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         collectionView.prefetchDataSource = self
         collectionView.register(IOSUIKitArticleCell.self, forCellWithReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier)
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
-        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _) in
-            self.articleHeightCache.removeAll()
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self, UITraitLayoutDirection.self]) { (self: Self, _) in
             self.invalidateScrolloverGeometry()
+            self.replacePreparedLayoutWindow()
             self.collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
         }
         view.addSubview(collectionView)
@@ -728,17 +765,13 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         lastLayoutWidth = width
         cancelAllPrefetch()
         invalidateScrolloverGeometry()
+        replacePreparedLayoutWindow()
         for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
             guard let id = cell.representedArticleID, let item = renderedItem(for: id) else { continue }
             configure(cell, item: item)
             cell.setNeedsLayout()
         }
         collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
-    }
-
-    override func didReceiveMemoryWarning() {
-        super.didReceiveMemoryWarning()
-        articleHeightCache.removeAll()
     }
 
     func update(
@@ -753,6 +786,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         showsRefreshControl newShowsRefreshControl: Bool
     ) {
         loadViewIfNeeded()
+#if DEBUG
+        IOSUIKitTimelinePerformanceDiagnostics.currentController = self
+#endif
 
         let structuralChanged = structuralRevision != structuralState.revision
         let layoutInputsChanged = mode != newMode || previewLines != newPreviewLines
@@ -767,16 +803,19 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         showsRefreshControl = newShowsRefreshControl
         collectionView.refreshControl = showsRefreshControl ? refreshControl : nil
         if presentationBridge !== newPresentationBridge {
+            presentationBridge?.unsubscribeArticles(self)
             presentationBridge = newPresentationBridge
-            newPresentationBridge.attach(self)
+            newPresentationBridge.subscribeArticles(self)
         }
         if feedIconPresentationBridge !== newFeedIconPresentationBridge {
+            feedIconPresentationBridge?.unsubscribeFeedIcons(self)
             feedIconPresentationBridge = newFeedIconPresentationBridge
-            newFeedIconPresentationBridge.attach(self, appliesArticleState: false)
+            newFeedIconPresentationBridge.subscribeFeedIcons(self)
         }
 
         if structuralChanged {
             structuralReconciliationCount &+= 1
+            performanceMetrics.recordStructuralReconciliation()
             let newIDs = structuralState.items.map(\.article.id)
             orderedIDs = newIDs
             itemsByID = Dictionary(uniqueKeysWithValues: structuralState.items.map { ($0.article.id, $0) })
@@ -791,6 +830,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             snapshot.appendItems(newIDs)
             dataSource.apply(snapshot, animatingDifferences: false)
             structuralSnapshotApplicationCount &+= 1
+            performanceMetrics.recordSnapshotApply()
         }
         if layoutInputsChanged { invalidateScrolloverGeometry() }
 
@@ -805,6 +845,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
         if needsLayoutInvalidation {
             cancelAllPrefetch()
+            replacePreparedLayoutWindow()
+            performanceMetrics.recordLayoutInvalidation()
             collectionView.collectionViewLayout.invalidateLayout()
         }
         if resetChanged {
@@ -821,13 +863,25 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     private func configure(_ cell: IOSUIKitArticleCell, item: IOSUIKitArticleTimelineItem) {
         let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: collectionView.bounds.width)
-        cell.heightCache = articleHeightCache
+        let layoutInput = preparedLayoutInput(for: item)
+        let layoutMetrics: IOSUIKitArticleLayoutMetrics
+        if let prepared = preparedLayoutCoordinator.metrics(for: layoutInput, priority: .visible) {
+            performanceMetrics.recordDeterministicHeightRequest(prepared: true)
+            layoutMetrics = prepared
+        } else {
+            let startedAt = DispatchTime.now().uptimeNanoseconds
+            layoutMetrics = IOSUIKitArticleLayoutEngine.metrics(for: layoutInput)
+            performanceMetrics.recordDeterministicHeightFallback(durationNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt)
+        }
+        cell.performanceMetrics = performanceMetrics
+        performanceMetrics.recordConfigure()
         cell.configure(
             item: item,
             mode: mode,
             previewLines: previewLines,
             metrics: metrics,
-            displayScale: view.traitCollection.displayScale
+            displayScale: view.traitCollection.displayScale,
+            preparedLayoutMetrics: layoutMetrics
         )
         onRequestFeedIcon?(item.content.article.feedId, iconVariant)
     }
@@ -854,7 +908,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     func applyFeedIconPresentation(_ delta: IOSUIKitFeedIconPresentationDelta) {
         guard delta.key.variant == iconVariant else { return }
         feedIconPresentationApplicationCount &+= 1
-        for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
+        applyFeedIconPresentation(delta, to: collectionView.visibleCells.compactMap { $0 as? IOSUIKitArticleCell })
+    }
+
+    func applyFeedIconPresentation(_ delta: IOSUIKitFeedIconPresentationDelta, to cells: [IOSUIKitArticleCell]) {
+        for cell in cells {
             guard let id = cell.representedArticleID,
                   let item = itemsByID[id], item.article.feedId == delta.key.feedID else { continue }
             cell.updateFeedIcon(image: delta.image, title: item.content.article.feedTitle)
@@ -880,8 +938,26 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
         recordResolvedScrolloverFrame(for: cell)
+        if let articleCell = cell as? IOSUIKitArticleCell {
+            reconcilePresentationForDisplay(articleCell)
+        }
+        prepareVisibleLayoutMetrics()
         guard !orderedIDs.isEmpty, indexPath.item >= max(0, orderedIDs.count - 5) else { return }
         onApproachingEnd?()
+    }
+
+    func reconcilePresentationForDisplay(_ cell: IOSUIKitArticleCell) {
+        guard let articleID = cell.representedArticleID,
+              let item = itemsByID[articleID] else { return }
+        let articleState = presentationBridge?.articleState(for: articleID, fallback: item.article)
+        cell.updateStatus(
+            isRead: articleState?.isRead ?? item.article.isRead,
+            isStarred: articleState?.isStarred ?? item.article.isStarred
+        )
+        cell.updateFeedIcon(
+            image: feedIconPresentationBridge?.feedIcon(for: item.article.feedId, variant: iconVariant),
+            title: item.content.article.feedTitle
+        )
     }
 
     func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
@@ -1047,6 +1123,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
+        let layoutInputs = indexPaths.compactMap { indexPath -> IOSUIKitArticleLayoutInput? in
+            guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
+            return preparedLayoutInput(for: item)
+        }
+        preparedLayoutCoordinator.prepare(layoutInputs, priority: .prefetch)
         guard mode.showsArticleImage else { return }
         for indexPath in indexPaths {
             guard let id = dataSource.itemIdentifier(for: indexPath), prefetchTasks[id] == nil,
@@ -1082,7 +1163,77 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     deinit {
         for task in prefetchTasks.values { task.cancel() }
     }
+
+    func detachPresentationBridges() {
+        presentationBridge?.unsubscribeArticles(self)
+        feedIconPresentationBridge?.unsubscribeFeedIcons(self)
+        presentationBridge = nil
+        feedIconPresentationBridge = nil
+    }
+
+    func resetPerformanceMetrics() {
+        performanceMetrics.reset()
+        preparedLayoutCoordinator.resetInstrumentation()
+    }
+    func performanceSnapshot() -> IOSUIKitTimelinePerformanceSnapshot { performanceMetrics.snapshot(preparation: preparedLayoutCoordinator.snapshot()) }
+
+    private func preparedLayoutInput(for item: IOSUIKitArticleTimelineItem) -> IOSUIKitArticleLayoutInput {
+        .init(item: item, mode: mode, previewLines: previewLines, containerWidth: collectionView.bounds.width, displayScale: view.traitCollection.displayScale, contentSizeCategory: view.traitCollection.preferredContentSizeCategory, localeIdentifier: Locale.current.identifier, layoutDirection: view.effectiveUserInterfaceLayoutDirection)
+    }
+
+    private func replacePreparedLayoutWindow() {
+        guard collectionView.bounds.width > 0 else { return }
+        let visibleIndexes = collectionView.indexPathsForVisibleItems.map(\.item).sorted()
+        let visibleIDs = visibleIndexes.compactMap { dataSource.itemIdentifier(for: .init(item: $0, section: 0)) }
+        let nextIndex = min(orderedIDs.count, (visibleIndexes.last ?? -1) + 1)
+        let nearbyIDs = orderedIDs.dropFirst(nextIndex).prefix(IOSUIKitArticleLayoutPreparationCoordinator.nearbyWindowLimit)
+        let ids = Array(visibleIDs + nearbyIDs.filter { !visibleIDs.contains($0) })
+        preparedLayoutCoordinator.replaceWindow(with: ids.compactMap { renderedItem(for: $0).map(preparedLayoutInput(for:)) }, visibleCount: visibleIDs.count)
+    }
+
+    private func prepareVisibleLayoutMetrics() {
+        let ids = collectionView.indexPathsForVisibleItems.sorted { $0.item < $1.item }.compactMap(dataSource.itemIdentifier(for:))
+        preparedLayoutCoordinator.prepare(ids.compactMap { renderedItem(for: $0).map(preparedLayoutInput(for:)) }, priority: .visible)
+    }
 }
+
+#if DEBUG
+@MainActor
+enum IOSUIKitTimelinePerformanceDiagnostics {
+    weak static var currentController: IOSUIKitArticleTimelineController?
+
+    static func resetAndPrint() async {
+        guard let controller = currentController else {
+            print("[Timeline Performance] No active Timeline controller")
+            return
+        }
+        controller.resetPerformanceMetrics()
+        await ArticleImagePipeline.shared.resetMetrics()
+        print("[Timeline Performance] Metrics reset")
+    }
+
+    static func printSnapshot() async {
+        guard let controller = currentController else {
+            print("[Timeline Performance] No active Timeline controller")
+            return
+        }
+        let timeline = controller.performanceSnapshot()
+        let image = await ArticleImagePipeline.shared.metrics()
+        let cacheHitRate = timeline.heightCacheHits + timeline.heightCacheMisses > 0 ? Double(timeline.heightCacheHits) / Double(timeline.heightCacheHits + timeline.heightCacheMisses) : nil
+        let solverRate = timeline.preferredLayoutAttributesFittingCalls > 0 ? Double(timeline.systemLayoutSizeFittingCalls) / Double(timeline.preferredLayoutAttributesFittingCalls) : nil
+        let averageSolveTime = timeline.systemLayoutSizeFittingCalls > 0 ? Double(timeline.systemLayoutSizeFittingTotalNanoseconds) / Double(timeline.systemLayoutSizeFittingCalls) : nil
+        let imageHitRate = image.visibleMemoryCacheHits + image.visibleMemoryCacheMisses > 0 ? Double(image.visibleMemoryCacheHits) / Double(image.visibleMemoryCacheHits + image.visibleMemoryCacheMisses) : nil
+        print("""
+        [Timeline Performance]
+        timeline preferredLayoutAttributesFittingCalls=\(timeline.preferredLayoutAttributesFittingCalls) systemLayoutSizeFittingCalls=\(timeline.systemLayoutSizeFittingCalls) configureCount=\(timeline.configureCount) reuseCount=\(timeline.reuseCount) layoutVariantSwitchCount=\(timeline.layoutVariantSwitchCount) imageBindingCount=\(timeline.imageBindingCount) structuralReconciliationCount=\(timeline.structuralReconciliationCount) snapshotApplyCount=\(timeline.snapshotApplyCount) layoutInvalidationCount=\(timeline.layoutInvalidationCount)
+        deterministicHeight requests=\(timeline.deterministicHeightRequests) preparedHits=\(timeline.deterministicHeightPreparedHits) synchronousFallbacks=\(timeline.deterministicHeightSynchronousFallbacks) synchronousFallbackTotalNanoseconds=\(timeline.deterministicHeightSynchronousFallbackTotalNanoseconds) synchronousFallbackMaxNanoseconds=\(timeline.deterministicHeightSynchronousFallbackMaxNanoseconds)
+        preparedLayout requests=\(timeline.preparedLayoutRequests) cacheHits=\(timeline.preparedLayoutCacheHits) cacheMisses=\(timeline.preparedLayoutCacheMisses) measurementsStarted=\(timeline.preparedLayoutMeasurementsStarted) measurementsCompleted=\(timeline.preparedLayoutMeasurementsCompleted) discardedResults=\(timeline.preparedLayoutDiscardedResults) cancellations=\(timeline.preparedLayoutCancellations) maximumConcurrency=\(timeline.preparedLayoutMaximumConcurrency) visibleRequests=\(timeline.visibleLayoutMetricRequests) visibleCacheHits=\(timeline.visibleLayoutMetricCacheHits) visibleCacheMisses=\(timeline.visibleLayoutMetricCacheMisses) prefetchRequests=\(timeline.prefetchLayoutMetricRequests) prefetchCacheHits=\(timeline.prefetchLayoutMetricCacheHits) prefetchCacheMisses=\(timeline.prefetchLayoutMetricCacheMisses)
+        image memoryCacheHits=\(image.memoryCacheHits) memoryCacheMisses=\(image.memoryCacheMisses) visibleMemoryCacheHits=\(image.visibleMemoryCacheHits) visibleMemoryCacheMisses=\(image.visibleMemoryCacheMisses) prefetchMemoryCacheHits=\(image.prefetchMemoryCacheHits) prefetchMemoryCacheMisses=\(image.prefetchMemoryCacheMisses) memoryCacheInsertions=\(image.memoryCacheInsertions) memoryCacheEvictions=\(image.memoryCacheEvictions) memoryCacheCostLimit=\(image.memoryCacheCostLimit) inFlightDedupHits=\(image.inFlightDedupHits) startedOperations=\(image.startedOperations) completedOperations=\(image.completedOperations) retiredOperations=\(image.retiredOperations) maximumActiveOperations=\(image.maximumActiveOperations) visibleStarts=\(image.visibleStarts) prefetchStarts=\(image.prefetchStarts) activeOperations=\(image.activeOperations) queuedVisibleRequests=\(image.queuedVisibleRequests) queuedPrefetchRequests=\(image.queuedPrefetchRequests)
+        derived heightCacheHitRate=\(cacheHitRate.map { String(format: "%.3f", $0) } ?? "n/a") solverRate=\(solverRate.map { String(format: "%.3f", $0) } ?? "n/a") averageSolveTime=\(averageSolveTime.map { String(format: "%.0f", $0) } ?? "n/a") visibleImageMemoryCacheHitRate=\(imageHitRate.map { String(format: "%.3f", $0) } ?? "n/a")
+        """)
+    }
+}
+#endif
 
 enum IOSUIKitArticleCellLayoutVariant: Hashable {
     case compact
@@ -1091,71 +1242,114 @@ enum IOSUIKitArticleCellLayoutVariant: Hashable {
     case visualLandscape
 }
 
-struct IOSUIKitArticleCellSizingContentKey: Hashable {
-    let articleID: Int64
-    let title: String
-    let feedTitle: String
-    let publishedDate: String
-    let preview: String
-    let imageURL: String?
-    let hasComments: Bool
-
-    init(item: IOSUIKitArticleTimelineItem) {
-        articleID = item.article.id
-        title = item.content.article.title
-        feedTitle = item.content.article.feedTitle
-        publishedDate = item.content.publishedDate
-        preview = item.content.article.preview
-        imageURL = item.content.imageURL?.absoluteString
-        hasComments = item.content.hasComments
-    }
+struct IOSUIKitTimelinePerformanceSnapshot: Equatable {
+    let preferredLayoutAttributesFittingCalls: UInt64
+    let heightCacheHits: UInt64
+    let heightCacheMisses: UInt64
+    let systemLayoutSizeFittingCalls: UInt64
+    let systemLayoutSizeFittingTotalNanoseconds: UInt64
+    let systemLayoutSizeFittingMaxNanoseconds: UInt64
+    let systemLayoutSizeFittingP50ApproxNanoseconds: UInt64
+    let systemLayoutSizeFittingP95ApproxNanoseconds: UInt64
+    let configureCount: UInt64
+    let reuseCount: UInt64
+    let layoutVariantSwitchCount: UInt64
+    let imageBindingCount: UInt64
+    let structuralReconciliationCount: UInt64
+    let snapshotApplyCount: UInt64
+    let layoutInvalidationCount: UInt64
+    let preparedLayoutRequests: UInt64
+    let preparedLayoutCacheHits: UInt64
+    let preparedLayoutCacheMisses: UInt64
+    let preparedLayoutMeasurementsStarted: UInt64
+    let preparedLayoutMeasurementsCompleted: UInt64
+    let preparedLayoutDiscardedResults: UInt64
+    let preparedLayoutCancellations: UInt64
+    let preparedLayoutMaximumConcurrency: UInt64
+    let visibleLayoutMetricRequests: UInt64
+    let visibleLayoutMetricCacheHits: UInt64
+    let visibleLayoutMetricCacheMisses: UInt64
+    let prefetchLayoutMetricRequests: UInt64
+    let prefetchLayoutMetricCacheHits: UInt64
+    let prefetchLayoutMetricCacheMisses: UInt64
+    let deterministicHeightRequests: UInt64
+    let deterministicHeightPreparedHits: UInt64
+    let deterministicHeightSynchronousFallbacks: UInt64
+    let deterministicHeightSynchronousFallbackTotalNanoseconds: UInt64
+    let deterministicHeightSynchronousFallbackMaxNanoseconds: UInt64
 }
 
-struct IOSUIKitArticleCellMeasurementKey: Hashable {
-    let content: IOSUIKitArticleCellSizingContentKey
-    let availableWidthPixels: Int
-    let displayScaleHundredths: Int
-    let variant: IOSUIKitArticleCellLayoutVariant
-    let previewLineCount: Int
-    let contentSizeCategory: String
-    let localeIdentifier: String
-    let isRightToLeft: Bool
-}
+@MainActor
+final class IOSUIKitTimelinePerformanceMetrics {
+    // Logarithmic nanosecond buckets provide bounded percentile estimates.
+    private static let durationBucketCount = 64
+    private var durationBuckets = Array(repeating: UInt64(0), count: durationBucketCount)
+    private var preferredLayoutAttributesFittingCalls: UInt64 = 0
+    private var heightCacheHits: UInt64 = 0
+    private var heightCacheMisses: UInt64 = 0
+    private var systemLayoutSizeFittingCalls: UInt64 = 0
+    private var systemLayoutSizeFittingTotalNanoseconds: UInt64 = 0
+    private var systemLayoutSizeFittingMaxNanoseconds: UInt64 = 0
+    private var configureCount: UInt64 = 0
+    private var reuseCount: UInt64 = 0
+    private var layoutVariantSwitchCount: UInt64 = 0
+    private var imageBindingCount: UInt64 = 0
+    private var structuralReconciliationCount: UInt64 = 0
+    private var snapshotApplyCount: UInt64 = 0
+    private var layoutInvalidationCount: UInt64 = 0
+    private var deterministicHeightRequests: UInt64 = 0
+    private var deterministicHeightPreparedHits: UInt64 = 0
+    private var deterministicHeightSynchronousFallbacks: UInt64 = 0
+    private var deterministicHeightSynchronousFallbackTotalNanoseconds: UInt64 = 0
+    private var deterministicHeightSynchronousFallbackMaxNanoseconds: UInt64 = 0
 
-final class IOSUIKitArticleCellHeightCache {
-    let capacity: Int
-    private var values: [IOSUIKitArticleCellMeasurementKey: CGFloat] = [:]
-    private var slots: [IOSUIKitArticleCellMeasurementKey] = []
-    private var nextEvictionIndex = 0
-
-    init(capacity: Int) {
-        self.capacity = max(1, capacity)
-        values.reserveCapacity(self.capacity)
-        slots.reserveCapacity(self.capacity)
+    func reset() {
+        durationBuckets = Array(repeating: 0, count: Self.durationBucketCount)
+        preferredLayoutAttributesFittingCalls = 0; heightCacheHits = 0; heightCacheMisses = 0
+        systemLayoutSizeFittingCalls = 0; systemLayoutSizeFittingTotalNanoseconds = 0; systemLayoutSizeFittingMaxNanoseconds = 0
+        configureCount = 0; reuseCount = 0; layoutVariantSwitchCount = 0; imageBindingCount = 0
+        structuralReconciliationCount = 0; snapshotApplyCount = 0; layoutInvalidationCount = 0
+        deterministicHeightRequests = 0; deterministicHeightPreparedHits = 0; deterministicHeightSynchronousFallbacks = 0
+        deterministicHeightSynchronousFallbackTotalNanoseconds = 0; deterministicHeightSynchronousFallbackMaxNanoseconds = 0
     }
-
-    var count: Int { values.count }
-
-    func height(for key: IOSUIKitArticleCellMeasurementKey) -> CGFloat? {
-        values[key]
+    func recordFittingCall() { preferredLayoutAttributesFittingCalls &+= 1 }
+    func recordCacheHit() { heightCacheHits &+= 1 }
+    func recordCacheMiss() { heightCacheMisses &+= 1 }
+    func recordConfigure() { configureCount &+= 1 }
+    func recordReuse() { reuseCount &+= 1 }
+    func recordVariantSwitch() { layoutVariantSwitchCount &+= 1 }
+    func recordImageBinding() { imageBindingCount &+= 1 }
+    func recordStructuralReconciliation() { structuralReconciliationCount &+= 1 }
+    func recordSnapshotApply() { snapshotApplyCount &+= 1 }
+    func recordLayoutInvalidation() { layoutInvalidationCount &+= 1 }
+    func recordDeterministicHeightRequest(prepared: Bool) {
+        deterministicHeightRequests &+= 1
+        if prepared { deterministicHeightPreparedHits &+= 1 }
     }
-
-    func insert(_ height: CGFloat, for key: IOSUIKitArticleCellMeasurementKey) {
-        if values.updateValue(height, forKey: key) != nil { return }
-        if slots.count < capacity {
-            slots.append(key)
-            return
+    func recordDeterministicHeightFallback(durationNanoseconds: UInt64) {
+        deterministicHeightRequests &+= 1
+        deterministicHeightSynchronousFallbacks &+= 1
+        deterministicHeightSynchronousFallbackTotalNanoseconds &+= durationNanoseconds
+        deterministicHeightSynchronousFallbackMaxNanoseconds = max(deterministicHeightSynchronousFallbackMaxNanoseconds, durationNanoseconds)
+    }
+    func recordSolve(durationNanoseconds: UInt64) {
+        systemLayoutSizeFittingCalls &+= 1
+        systemLayoutSizeFittingTotalNanoseconds &+= durationNanoseconds
+        systemLayoutSizeFittingMaxNanoseconds = max(systemLayoutSizeFittingMaxNanoseconds, durationNanoseconds)
+        durationBuckets[min(durationNanoseconds == 0 ? 0 : 63 - durationNanoseconds.leadingZeroBitCount, Self.durationBucketCount - 1)] &+= 1
+    }
+    func snapshot(preparation: IOSUIKitArticleLayoutPreparationSnapshot = .init(requests: 0, cacheHits: 0, cacheMisses: 0, measurementsStarted: 0, measurementsCompleted: 0, discardedResults: 0, cancellations: 0, maximumConcurrentMeasurements: 0, visibleRequests: 0, visibleCacheHits: 0, visibleCacheMisses: 0, prefetchRequests: 0, prefetchCacheHits: 0, prefetchCacheMisses: 0)) -> IOSUIKitTimelinePerformanceSnapshot {
+        .init(preferredLayoutAttributesFittingCalls: preferredLayoutAttributesFittingCalls, heightCacheHits: heightCacheHits, heightCacheMisses: heightCacheMisses, systemLayoutSizeFittingCalls: systemLayoutSizeFittingCalls, systemLayoutSizeFittingTotalNanoseconds: systemLayoutSizeFittingTotalNanoseconds, systemLayoutSizeFittingMaxNanoseconds: systemLayoutSizeFittingMaxNanoseconds, systemLayoutSizeFittingP50ApproxNanoseconds: percentile(0.5), systemLayoutSizeFittingP95ApproxNanoseconds: percentile(0.95), configureCount: configureCount, reuseCount: reuseCount, layoutVariantSwitchCount: layoutVariantSwitchCount, imageBindingCount: imageBindingCount, structuralReconciliationCount: structuralReconciliationCount, snapshotApplyCount: snapshotApplyCount, layoutInvalidationCount: layoutInvalidationCount, preparedLayoutRequests: preparation.requests, preparedLayoutCacheHits: preparation.cacheHits, preparedLayoutCacheMisses: preparation.cacheMisses, preparedLayoutMeasurementsStarted: preparation.measurementsStarted, preparedLayoutMeasurementsCompleted: preparation.measurementsCompleted, preparedLayoutDiscardedResults: preparation.discardedResults, preparedLayoutCancellations: preparation.cancellations, preparedLayoutMaximumConcurrency: preparation.maximumConcurrentMeasurements, visibleLayoutMetricRequests: preparation.visibleRequests, visibleLayoutMetricCacheHits: preparation.visibleCacheHits, visibleLayoutMetricCacheMisses: preparation.visibleCacheMisses, prefetchLayoutMetricRequests: preparation.prefetchRequests, prefetchLayoutMetricCacheHits: preparation.prefetchCacheHits, prefetchLayoutMetricCacheMisses: preparation.prefetchCacheMisses, deterministicHeightRequests: deterministicHeightRequests, deterministicHeightPreparedHits: deterministicHeightPreparedHits, deterministicHeightSynchronousFallbacks: deterministicHeightSynchronousFallbacks, deterministicHeightSynchronousFallbackTotalNanoseconds: deterministicHeightSynchronousFallbackTotalNanoseconds, deterministicHeightSynchronousFallbackMaxNanoseconds: deterministicHeightSynchronousFallbackMaxNanoseconds)
+    }
+    private func percentile(_ percentile: Double) -> UInt64 {
+        let target = UInt64((Double(systemLayoutSizeFittingCalls) * percentile).rounded(.up))
+        guard target > 0 else { return 0 }
+        var seen: UInt64 = 0
+        for (index, count) in durationBuckets.enumerated() {
+            seen &+= count
+            if seen >= target { return UInt64(1) << index }
         }
-        let evicted = slots[nextEvictionIndex]
-        values.removeValue(forKey: evicted)
-        slots[nextEvictionIndex] = key
-        nextEvictionIndex = (nextEvictionIndex + 1) % capacity
-    }
-
-    func removeAll() {
-        values.removeAll(keepingCapacity: true)
-        slots.removeAll(keepingCapacity: true)
-        nextEvictionIndex = 0
+        return systemLayoutSizeFittingMaxNanoseconds
     }
 }
 
@@ -1172,58 +1366,32 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         let isLandscapeVisual: Bool
 
         init(mode: ArticlePresentationMode, containerWidth: CGFloat) {
-            self.mode = mode
-            self.containerWidth = containerWidth
-            switch mode {
-            case .compact:
-                horizontalInset = containerWidth > 700 ? 28 : 10
-            case .visual:
-                horizontalInset = containerWidth > 700 ? 28 : 16
-            }
-            availableWidth = max(0, containerWidth - horizontalInset * 2)
-            isLandscapeVisual = ArticlePresentationLayout.usesLandscapeVisual(mode: mode, availableWidth: availableWidth)
-            switch mode {
-            case .compact:
-                outerVerticalPadding = 11
-            case .visual:
-                outerVerticalPadding = isLandscapeVisual ? 13 : 15
-            }
+            let geometry = IOSUIKitArticleGeometry(mode: mode, containerWidth: containerWidth)
+            self.mode = geometry.mode; self.containerWidth = geometry.containerWidth
+            horizontalInset = geometry.horizontalInset; availableWidth = geometry.availableWidth
+            isLandscapeVisual = geometry.isLandscapeVisual; outerVerticalPadding = geometry.verticalPadding
         }
 
         func imageSize(hasImage: Bool) -> CGSize {
-            guard hasImage, mode.showsArticleImage else { return .zero }
-            if isLandscapeVisual {
-                let width = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
-                return CGSize(width: width, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: width))
-            }
-            let width = ArticlePresentationLayout.visualPortraitContentWidth(availableWidth)
-            return CGSize(width: width, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: width))
+            IOSUIKitArticleGeometry(mode: mode, containerWidth: containerWidth).imageSize(hasImage: hasImage)
         }
 
         func layoutVariant(hasImage: Bool) -> IOSUIKitArticleCellLayoutVariant {
-            switch mode {
-            case .compact:
-                return .compact
-            case .visual:
-                guard hasImage else { return .visualTextOnly }
-                return isLandscapeVisual ? .visualLandscape : .visualPortrait
-            }
+            IOSUIKitArticleGeometry(mode: mode, containerWidth: containerWidth).variant(hasImage: hasImage)
         }
     }
 
     private let textStack = UIStackView()
-    private let titleRow = UIStackView()
     private let titleLabel = UILabel()
     private let starImageView = UIImageView(image: UIImage(systemName: "star.fill"))
-    private let metadataStack = UIStackView()
-    private let metadataPrimaryStack = UIStackView()
+    private let metadataRow = UIView()
     private let unreadIndicator = UIView()
     private let feedIconContainer = UIView()
     private let feedIconImageView = UIImageView()
     private let feedIconFallbackLabel = UILabel()
     private let feedTitleLabel = UILabel()
-    private let metadataBulletLabel = UILabel()
     private let dateLabel = UILabel()
+    private let commentsContainer = UIView()
     private let commentsImageView = UIImageView(image: UIImage(systemName: "bubble.left"))
     private let previewLabel = UILabel()
     private let articleImageView = UIImageView()
@@ -1236,21 +1404,20 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     private var portraitImageAspectConstraint: NSLayoutConstraint!
     private var landscapeImageWidthConstraint: NSLayoutConstraint!
     private var landscapeImageHeightConstraint: NSLayoutConstraint!
+    private var commentsWidthConstraint: NSLayoutConstraint!
+    private var commentsToStarSpacingConstraint: NSLayoutConstraint!
     private var currentLayoutVariant: IOSUIKitArticleCellLayoutVariant?
     private var imageTask: Task<Void, Never>?
     private var representedImageRequest: ArticleImageRequest?
     private var imageBindingGeneration: UInt64 = 0
-    private var sizingContentKey: IOSUIKitArticleCellSizingContentKey?
-    private var sizingMode: ArticlePresentationMode = .visual
-    private var sizingPreviewLines: ArticlePreviewLines = .standard
-    private var sizingDisplayScale: CGFloat = 2
     private var currentTitle = ""
     private var currentFeedTitle = ""
     private var currentPublishedDate = ""
     private var currentIsRead = false
     private var currentIsStarred = false
+    private(set) var preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics?
 
-    weak var heightCache: IOSUIKitArticleCellHeightCache?
+    weak var performanceMetrics: IOSUIKitTimelinePerformanceMetrics?
     private(set) var representedArticleID: Int64?
     private(set) var layoutVariantRevision: UInt64 = 0
     private(set) var measurementSolveCount = 0
@@ -1267,27 +1434,14 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         textStack.alignment = .fill
         textStack.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
-        titleRow.axis = .horizontal
-        titleRow.spacing = 8
-        titleRow.alignment = .firstBaseline
         titleLabel.font = .preferredFont(forTextStyle: .headline)
         titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.numberOfLines = 0
-        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         starImageView.tintColor = .systemYellow
         starImageView.alpha = 0
         starImageView.isAccessibilityElement = false
-        starImageView.setContentHuggingPriority(.required, for: .horizontal)
-        starImageView.setContentCompressionResistancePriority(.required, for: .horizontal)
-        titleRow.addArrangedSubview(titleLabel)
-        titleRow.addArrangedSubview(starImageView)
-
-        metadataStack.axis = .horizontal
-        metadataStack.spacing = 5
-        metadataStack.alignment = .center
-        metadataPrimaryStack.axis = .horizontal
-        metadataPrimaryStack.spacing = 6
-        metadataPrimaryStack.alignment = .center
+        metadataRow.translatesAutoresizingMaskIntoConstraints = false
+        metadataRow.heightAnchor.constraint(greaterThanOrEqualToConstant: IOSUIKitArticleGeometry.feedIconSize).isActive = true
 
         unreadIndicator.translatesAutoresizingMaskIntoConstraints = false
         unreadIndicator.backgroundColor = .tintColor
@@ -1328,35 +1482,57 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         feedTitleLabel.adjustsFontForContentSizeCategory = true
         feedTitleLabel.textColor = .secondaryLabel
         feedTitleLabel.lineBreakMode = .byTruncatingTail
-        feedTitleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        feedTitleLabel.numberOfLines = 1
+        feedTitleLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        commentsContainer.translatesAutoresizingMaskIntoConstraints = false
+        commentsImageView.translatesAutoresizingMaskIntoConstraints = false
         commentsImageView.tintColor = .secondaryLabel
-        commentsImageView.setContentHuggingPriority(.required, for: .horizontal)
-        metadataPrimaryStack.addArrangedSubview(unreadIndicator)
-        metadataPrimaryStack.addArrangedSubview(feedIconContainer)
-        metadataPrimaryStack.addArrangedSubview(feedTitleLabel)
-        metadataPrimaryStack.addArrangedSubview(commentsImageView)
-
-        metadataBulletLabel.text = "•"
-        metadataBulletLabel.textColor = .secondaryLabel
-        metadataBulletLabel.font = UIFont.preferredFont(forTextStyle: .caption1)
-        metadataBulletLabel.adjustsFontForContentSizeCategory = true
+        commentsContainer.addSubview(commentsImageView)
+        NSLayoutConstraint.activate([
+            commentsImageView.centerXAnchor.constraint(equalTo: commentsContainer.centerXAnchor),
+            commentsImageView.centerYAnchor.constraint(equalTo: commentsContainer.centerYAnchor),
+        ])
+        starImageView.translatesAutoresizingMaskIntoConstraints = false
         dateLabel.font = UIFont.preferredFont(forTextStyle: .caption1)
         dateLabel.adjustsFontForContentSizeCategory = true
         dateLabel.textColor = .secondaryLabel
-        dateLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        dateLabel.numberOfLines = 1
 
-        metadataStack.addArrangedSubview(metadataPrimaryStack)
-        metadataStack.addArrangedSubview(metadataBulletLabel)
-        metadataStack.addArrangedSubview(dateLabel)
+        metadataRow.addSubview(unreadIndicator)
+        metadataRow.addSubview(feedIconContainer)
+        metadataRow.addSubview(feedTitleLabel)
+        metadataRow.addSubview(commentsContainer)
+        metadataRow.addSubview(starImageView)
+        commentsWidthConstraint = commentsContainer.widthAnchor.constraint(equalToConstant: 0)
+        commentsToStarSpacingConstraint = commentsContainer.trailingAnchor.constraint(equalTo: starImageView.leadingAnchor)
+        NSLayoutConstraint.activate([
+            unreadIndicator.leadingAnchor.constraint(equalTo: metadataRow.leadingAnchor),
+            unreadIndicator.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
+            feedIconContainer.leadingAnchor.constraint(equalTo: unreadIndicator.trailingAnchor, constant: IOSUIKitArticleGeometry.metadataLeadingSpacing),
+            feedIconContainer.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
+            feedTitleLabel.leadingAnchor.constraint(equalTo: feedIconContainer.trailingAnchor, constant: IOSUIKitArticleGeometry.metadataLeadingSpacing),
+            feedTitleLabel.trailingAnchor.constraint(equalTo: commentsContainer.leadingAnchor, constant: -IOSUIKitArticleGeometry.metadataTitleSpacing),
+            feedTitleLabel.topAnchor.constraint(equalTo: metadataRow.topAnchor),
+            feedTitleLabel.bottomAnchor.constraint(equalTo: metadataRow.bottomAnchor),
+            commentsContainer.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
+            commentsWidthConstraint,
+            commentsContainer.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.commentSlotSize),
+            commentsToStarSpacingConstraint,
+            starImageView.trailingAnchor.constraint(equalTo: metadataRow.trailingAnchor),
+            starImageView.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
+            starImageView.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize),
+            starImageView.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize),
+        ])
 
         previewLabel.font = .preferredFont(forTextStyle: .subheadline)
         previewLabel.adjustsFontForContentSizeCategory = true
         previewLabel.textColor = .secondaryLabel
         previewLabel.numberOfLines = 3
 
-        textStack.addArrangedSubview(titleRow)
-        textStack.addArrangedSubview(metadataStack)
+        textStack.addArrangedSubview(titleLabel)
+        textStack.addArrangedSubview(metadataRow)
+        textStack.addArrangedSubview(dateLabel)
         textStack.addArrangedSubview(previewLabel)
 
         articleImageView.translatesAutoresizingMaskIntoConstraints = false
@@ -1365,9 +1541,6 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         articleImageView.layer.cornerRadius = 12
         articleImageView.backgroundColor = .tertiarySystemFill
         articleImageView.isHidden = true
-        articleImageView.setContentHuggingPriority(.required, for: .vertical)
-        articleImageView.setContentCompressionResistancePriority(.required, for: .vertical)
-        articleImageView.setContentCompressionResistancePriority(.required, for: .horizontal)
         imagePlaceholder.translatesAutoresizingMaskIntoConstraints = false
         imagePlaceholder.tintColor = .secondaryLabel
         imagePlaceholder.contentMode = .center
@@ -1429,52 +1602,20 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     }
 
     override func preferredLayoutAttributesFitting(_ layoutAttributes: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes {
+        performanceMetrics?.recordFittingCall()
         guard let attributes = layoutAttributes.copy() as? UICollectionViewLayoutAttributes else { return layoutAttributes }
-        guard let sizingContentKey else {
-            return measuredAttributes(attributes, cacheKey: nil)
-        }
-
-        let metrics = Metrics(mode: sizingMode, containerWidth: layoutAttributes.size.width)
-        let hasImage = sizingContentKey.imageURL != nil && sizingMode.showsArticleImage
-        let variant = metrics.layoutVariant(hasImage: hasImage)
-        applyLayout(metrics: metrics, variant: variant)
-        let key = measurementKey(
-            content: sizingContentKey,
-            metrics: metrics,
-            variant: variant,
-            previewLines: sizingPreviewLines,
-            displayScale: sizingDisplayScale
-        )
-        if let cachedHeight = heightCache?.height(for: key) {
-            attributes.size.height = cachedHeight
-            return attributes
-        }
-        return measuredAttributes(attributes, cacheKey: key)
-    }
-
-    private func measuredAttributes(
-        _ attributes: UICollectionViewLayoutAttributes,
-        cacheKey: IOSUIKitArticleCellMeasurementKey?
-    ) -> UICollectionViewLayoutAttributes {
-        let targetSize = CGSize(width: attributes.size.width, height: UIView.layoutFittingCompressedSize.height)
-        let fittedSize = contentView.systemLayoutSizeFitting(
-            targetSize,
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel
-        )
-        let height = ceil(fittedSize.height)
-        attributes.size.height = height
-        measurementSolveCount += 1
-        if let cacheKey { heightCache?.insert(height, for: cacheKey) }
+        guard let preparedLayoutMetrics else { return attributes }
+        attributes.size.height = preparedLayoutMetrics.cellSize.height
         return attributes
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        performanceMetrics?.recordReuse()
         invalidateImageBinding()
         representedImageRequest = nil
         representedArticleID = nil
-        sizingContentKey = nil
+        preparedLayoutMetrics = nil
         articleImageView.image = nil
         imagePlaceholder.isHidden = false
     }
@@ -1484,13 +1625,13 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         mode: ArticlePresentationMode,
         previewLines: ArticlePreviewLines,
         metrics: Metrics,
-        displayScale: CGFloat
+        displayScale: CGFloat,
+        preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics
     ) {
         representedArticleID = item.article.id
-        sizingContentKey = IOSUIKitArticleCellSizingContentKey(item: item)
-        sizingMode = mode
-        sizingPreviewLines = previewLines
-        sizingDisplayScale = displayScale
+        // Keep the independently constrained metadata row in the cell's semantic direction.
+        metadataRow.semanticContentAttribute = semanticContentAttribute
+        self.preparedLayoutMetrics = preparedLayoutMetrics
         currentTitle = item.content.article.title
         currentFeedTitle = item.content.article.feedTitle
         currentPublishedDate = item.content.publishedDate
@@ -1500,7 +1641,10 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         previewLabel.text = item.content.article.preview
         previewLabel.isHidden = item.content.article.preview.isEmpty
         previewLabel.numberOfLines = previewLines.rawValue
-        commentsImageView.isHidden = !item.content.hasComments
+        let hasComments = item.content.hasComments
+        commentsContainer.isHidden = !hasComments
+        commentsWidthConstraint.constant = hasComments ? IOSUIKitArticleGeometry.commentSlotSize : 0
+        commentsToStarSpacingConstraint.constant = hasComments ? -IOSUIKitArticleGeometry.metadataAccessorySpacing : 0
 
         let hasImage = mode.showsArticleImage && item.content.imageURL != nil
         let imageSize = metrics.imageSize(hasImage: hasImage)
@@ -1519,12 +1663,6 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             bottom: metrics.outerVerticalPadding,
             trailing: metrics.horizontalInset
         )
-
-        let useColumnMetadata = metrics.availableWidth < 370
-        metadataStack.axis = useColumnMetadata ? .vertical : .horizontal
-        metadataStack.alignment = useColumnMetadata ? .leading : .center
-        metadataStack.spacing = useColumnMetadata ? 3 : 5
-        metadataBulletLabel.isHidden = useColumnMetadata
 
         if variant == .visualLandscape {
             let imageSize = metrics.imageSize(hasImage: true)
@@ -1549,26 +1687,8 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         NSLayoutConstraint.activate(activeLayoutConstraints)
         currentLayoutVariant = variant
         layoutVariantRevision &+= 1
+        performanceMetrics?.recordVariantSwitch()
         articleImageView.isHidden = variant == .compact || variant == .visualTextOnly
-    }
-
-    private func measurementKey(
-        content: IOSUIKitArticleCellSizingContentKey,
-        metrics: Metrics,
-        variant: IOSUIKitArticleCellLayoutVariant,
-        previewLines: ArticlePreviewLines,
-        displayScale: CGFloat
-    ) -> IOSUIKitArticleCellMeasurementKey {
-        IOSUIKitArticleCellMeasurementKey(
-            content: content,
-            availableWidthPixels: Int((metrics.availableWidth * displayScale).rounded()),
-            displayScaleHundredths: Int((displayScale * 100).rounded()),
-            variant: variant,
-            previewLineCount: previewLines.rawValue,
-            contentSizeCategory: traitCollection.preferredContentSizeCategory.rawValue,
-            localeIdentifier: Locale.current.identifier,
-            isRightToLeft: effectiveUserInterfaceLayoutDirection == .rightToLeft
-        )
     }
 
     func updateStatus(isRead: Bool, isStarred: Bool) {
@@ -1576,7 +1696,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         currentIsStarred = isStarred
         titleLabel.textColor = isRead ? .secondaryLabel : .label
         unreadIndicator.alpha = ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: isRead)
-        // Reserve the star's arranged-subview slot so status changes cannot change title width or row height.
+        // The fixed trailing slot remains allocated when the star is not visible.
         starImageView.alpha = isStarred ? 1 : 0
         updateAccessibility()
     }
@@ -1596,7 +1716,47 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         }
     }
 
+    // Internal test seam: pixels must remain a presentation-only update.
+    func applyArticleImagePixelsForTesting(_ image: UIImage?) {
+        articleImageView.image = image
+        imagePlaceholder.isHidden = image != nil
+    }
+
+    var articleImageSlotFrameForTesting: CGRect { articleImageView.frame }
+
+    struct LayoutDiagnostics: Equatable {
+        let contentBounds: CGRect
+        let margins: NSDirectionalEdgeInsets
+        let variant: IOSUIKitArticleCellLayoutVariant?
+        let imageFrame: CGRect
+        let textStackFrame: CGRect
+        let titleFrame: CGRect
+        let starFrame: CGRect
+        let metadataFrame: CGRect
+        let unreadFrame: CGRect
+        let feedIconFrame: CGRect
+        let feedTitleFrame: CGRect
+        let commentsFrame: CGRect?
+        let dateFrame: CGRect
+        let previewFrame: CGRect?
+    }
+
+    var layoutDiagnosticsForTesting: LayoutDiagnostics {
+        func frame(_ view: UIView) -> CGRect { view.convert(view.bounds, to: contentView) }
+        return .init(contentBounds: contentView.bounds, margins: contentView.directionalLayoutMargins, variant: currentLayoutVariant, imageFrame: frame(articleImageView), textStackFrame: frame(textStack), titleFrame: frame(titleLabel), starFrame: frame(starImageView), metadataFrame: frame(metadataRow), unreadFrame: frame(unreadIndicator), feedIconFrame: frame(feedIconContainer), feedTitleFrame: frame(feedTitleLabel), commentsFrame: commentsContainer.isHidden ? nil : frame(commentsContainer), dateFrame: frame(dateLabel), previewFrame: previewLabel.isHidden ? nil : frame(previewLabel))
+    }
+
+    var portraitAspectConstraintDiagnosticsForTesting: (multiplier: CGFloat, constant: CGFloat, priority: UILayoutPriority, imageFrame: CGRect, contentBounds: CGRect, margins: NSDirectionalEdgeInsets, displayScale: CGFloat) {
+        (portraitImageAspectConstraint.multiplier, portraitImageAspectConstraint.constant, portraitImageAspectConstraint.priority, articleImageView.frame, contentView.bounds, contentView.directionalLayoutMargins, traitCollection.displayScale)
+    }
+    var layoutVariantForTesting: IOSUIKitArticleCellLayoutVariant? { currentLayoutVariant }
+    var feedIconImageForTesting: UIImage? { feedIconImageView.image }
+    var feedTitlePresentationForTesting: (lineCount: Int, lineBreakMode: NSLineBreakMode) {
+        (feedTitleLabel.numberOfLines, feedTitleLabel.lineBreakMode)
+    }
+
     private func configureArticleImage(url: URL?, targetSize: CGSize, displayScale: CGFloat) {
+        performanceMetrics?.recordImageBinding()
         invalidateImageBinding()
         representedImageRequest = nil
         guard let url, targetSize.width > 0, targetSize.height > 0 else {
@@ -1619,7 +1779,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         imagePlaceholder.isHidden = false
         imageTask = Task { @MainActor [weak self] in
             do {
-                let loadedImage = try await ArticleImagePipeline.shared.image(for: request)
+                let loadedImage = try await ArticleImagePipeline.shared.image(for: request, cacheWasChecked: true)
                 guard !Task.isCancelled,
                       let self,
                       self.imageBindingGeneration == bindingGeneration,

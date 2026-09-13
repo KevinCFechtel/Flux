@@ -10,14 +10,48 @@ struct IOSFeedIconKey: Hashable {
     let variant: FeedIconVariant
 }
 
+enum IOSFeedIconLoadState: Equatable {
+    case idle
+    case loading
+    case available
+    case unavailable
+    case retryableFailure(retryAfter: TimeInterval)
+}
+
 @Observable final class IOSFeedIconPresentationState {
     var image: UIImage?
-    var isUnavailable = false
+    private(set) var loadState: IOSFeedIconLoadState = .idle
     private(set) var revision: UInt64 = 0
 
-    func setImage(_ image: UIImage?) {
+    func beginLoading() { loadState = .loading }
+
+    func setAvailable(_ image: UIImage) {
         self.image = image
+        loadState = .available
         revision &+= 1
+    }
+
+    func setUnavailable() {
+        image = nil
+        loadState = .unavailable
+        revision &+= 1
+    }
+
+    func setRetryableFailure(retryAfter: TimeInterval) {
+        image = nil
+        loadState = .retryableFailure(retryAfter: retryAfter)
+        revision &+= 1
+    }
+
+    func canRequest(at time: TimeInterval) -> Bool {
+        switch loadState {
+        case .idle:
+            true
+        case let .retryableFailure(retryAfter):
+            time >= retryAfter
+        case .loading, .available, .unavailable:
+            false
+        }
     }
 }
 
@@ -262,6 +296,8 @@ struct ArticleRowContent: Equatable {
     private let defaults: UserDefaults
     private var pending = PendingNewData()
     private var requestedFeedIcons = Set<IOSFeedIconKey>()
+    private var feedIconLoader: (@Sendable (Int64, FeedIconVariant) throws -> Data?)?
+    private static let feedIconRetryCooldown: TimeInterval = 30
     private var scrolloverUndoTask: Task<Void, Never>?
     private var scrolloverUndoOpenedAt: TimeInterval?
     private var scrolloverUndoLastSuccessAt: TimeInterval?
@@ -429,26 +465,46 @@ struct ArticleRowContent: Equatable {
         return state
     }
 
-    func requestFeedIcon(_ feedID: Int64, variant: FeedIconVariant) {
+    func requestFeedIcon(_ feedID: Int64, variant: FeedIconVariant, now: TimeInterval = Date.timeIntervalSinceReferenceDate) {
         let key = IOSFeedIconKey(feedID: feedID, variant: variant)
         let state = feedIconPresentationState(for: feedID, variant: variant)
-        guard state.image == nil, !state.isUnavailable, let core else { return }
+        guard state.canRequest(at: now) else { return }
+        let loader: @Sendable (Int64, FeedIconVariant) throws -> Data?
+        if let feedIconLoader {
+            loader = feedIconLoader
+        } else if let core {
+            loader = { feedID, variant in try core.feedIcon(feedId: feedID, variant: variant)?.pngData }
+        } else {
+            return
+        }
         guard requestedFeedIcons.insert(key).inserted else { return }
-        Task { [weak self, core] in
-            let image: UIImage? = await Task.detached { () -> UIImage? in
-                guard let data = try? core.feedIcon(feedId: feedID, variant: variant)?.pngData else { return nil }
-                return UIImage(data: Data(data))
-            }.value
+        state.beginLoading()
+        Task { [weak self] in
+            let result = await Task.detached { Result { try loader(feedID, variant) } }.value
             guard let self else { return }
             requestedFeedIcons.remove(key)
             guard let state = feedIconPresentationStates[key] else { return }
-            if let image {
-                state.setImage(image)
+            switch result {
+            case let .success(data?):
+                guard let image = UIImage(data: data) else {
+                    state.setRetryableFailure(retryAfter: now + Self.feedIconRetryCooldown)
+                    return
+                }
+                state.setAvailable(image)
                 timelinePresentationBridge.publishFeedIcon(.init(key: key, image: image, revision: state.revision))
+            case .success(nil):
+                state.setUnavailable()
+            case .failure:
+                state.setRetryableFailure(retryAfter: now + Self.feedIconRetryCooldown)
             }
-            else { state.isUnavailable = true }
         }
     }
+
+#if DEBUG
+    func setFeedIconLoaderForTesting(_ loader: @escaping @Sendable (Int64, FeedIconVariant) throws -> Data?) {
+        feedIconLoader = loader
+    }
+#endif
 
     func syncManually() async {
         guard let core, !isSyncing else { return }

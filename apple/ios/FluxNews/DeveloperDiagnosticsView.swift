@@ -19,6 +19,16 @@ struct DeveloperDiagnosticsView: View {
                     }
                     Text("Read-only discovery; no legacy data is imported or modified.").font(.footnote).foregroundStyle(.secondary)
                 }
+#if DEBUG
+                Section("Timeline Performance") {
+                    Button("Reset Timeline Metrics") {
+                        Task { await IOSUIKitTimelinePerformanceDiagnostics.resetAndPrint() }
+                    }
+                    Button("Print Timeline Metrics") {
+                        Task { await IOSUIKitTimelinePerformanceDiagnostics.printSnapshot() }
+                    }
+                }
+#endif
             }
             .navigationTitle("Developer Diagnostics")
         }
