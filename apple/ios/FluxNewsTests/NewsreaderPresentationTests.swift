@@ -91,6 +91,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(presentation.usesPersistentSplitNavigation)
     }
 
+    func testIOSFirstReleaseUsesOneScene() {
+        XCTAssertFalse(IOSSceneOwnershipPolicy.supportsMultipleScenes)
+    }
+
     func testAdaptivePresentationUsesSplitNavigationWhenRegularRegardlessOfDeviceIdentity() {
         let presentation = AdaptivePresentationPolicy.presentation(horizontalSizeClass: .regular)
         XCTAssertEqual(presentation, .regular)

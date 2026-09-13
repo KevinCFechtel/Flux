@@ -22,6 +22,8 @@
 	<string>$(FLUX_STORAGE_NAMESPACE)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>UIApplicationSupportsMultipleScenes</key>
+	<false/>
 	<key>UILaunchScreen</key>
 <dict/>
 

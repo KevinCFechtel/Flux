@@ -157,6 +157,22 @@ and transient navigation presentation normalize. Entering regular presentation
 dismisses transient navigation; Search and Reader retain their request state and
 move to the appropriate native presentation without another Core request.
 
+### Scene ownership
+
+The first native iOS/iPadOS release intentionally supports one app scene. The
+app-level `CoreBootstrapper` and `NewsreaderStore` own the account/Core session,
+Core event subscription, Sync state, and serialized Scrollover mutation worker.
+The scene owns its presentation state and Search request state; Timeline
+controllers remain view-local. Article-image caching and HTTP loading are
+process-global native presentation infrastructure.
+
+Multi-scene support is deferred. It requires an app/account service that owns
+the shared Core session, subscriptions, synchronization, mutation coordination,
+and future media playback independently of per-scene presentation stores. Do not
+enable additional scenes until that boundary exists; a second scene must not
+create another Core against the same storage paths or share another scene's
+presentation state.
+
 ### iOS/iPadOS Article Timeline — UIKit
 
 The target Article Timeline is an owned UIKit view controller containing a

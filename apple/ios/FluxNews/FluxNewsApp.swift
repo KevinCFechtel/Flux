@@ -1,5 +1,11 @@
 import SwiftUI
 
+enum IOSSceneOwnershipPolicy {
+    // Core/session and mutation coordination are intentionally single-window until
+    // a future multi-scene coordinator can own them independently of presentation.
+    static let supportsMultipleScenes = false
+}
+
 @main
 struct FluxNewsApp: App {
     @Environment(\.scenePhase) private var scenePhase
