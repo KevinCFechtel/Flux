@@ -699,8 +699,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private var scrolloverPhase: IOSScrolloverPresentationPhase = .idle
     private var scrolloverLayoutGeneration: UInt64 = 0
     private var resolvedScrolloverFrames = IOSUIKitResolvedScrolloverFrameStore()
-    private var lastLayoutWidth: CGFloat = 0
-    private var prefetchTasks: [Int64: Task<Void, Never>] = [:]
+    private var geometryIdentity: IOSUIKitTimelineGeometryIdentity?
+    private var geometryGeneration: UInt64 = 0
+    private var preparedWindowTask: Task<Void, Never>?
+    private var preparedWindowGeneration: UInt64 = 0
+    private var scheduledPreparedWindowGeneration: UInt64?
+    private var prefetchTasks: [Int64: (request: ArticleImageRequest, task: Task<Void, Never>)] = [:]
     private let refreshControl = UIRefreshControl()
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
     private let preparedLayoutCoordinator = IOSUIKitArticleLayoutPreparationCoordinator()
@@ -736,9 +740,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         collectionView.register(IOSUIKitArticleCell.self, forCellWithReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier)
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self, UITraitLayoutDirection.self]) { (self: Self, _) in
-            self.invalidateScrolloverGeometry()
-            self.replacePreparedLayoutWindow()
-            self.collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
+            self.updateGeometryIfNeeded()
         }
         view.addSubview(collectionView)
         NSLayoutConstraint.activate([
@@ -760,18 +762,23 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        let width = collectionView.bounds.width
-        guard width > 0, abs(width - lastLayoutWidth) > 0.5 else { return }
-        lastLayoutWidth = width
-        cancelAllPrefetch()
+        updateGeometryIfNeeded()
+    }
+
+    private func updateGeometryIfNeeded() {
+        guard let newIdentity = currentGeometryIdentity(), newIdentity != geometryIdentity else { return }
+        geometryIdentity = newIdentity
+        geometryGeneration &+= 1
+        performanceMetrics.recordGeometryChange()
         invalidateScrolloverGeometry()
-        replacePreparedLayoutWindow()
+        cancelIncompatibleImagePrefetch()
         for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
             guard let id = cell.representedArticleID, let item = renderedItem(for: id) else { continue }
             configure(cell, item: item)
             cell.setNeedsLayout()
         }
-        collectionView.setCollectionViewLayout(Self.makeListLayout(), animated: false)
+        collectionView.collectionViewLayout.invalidateLayout()
+        schedulePreparedLayoutWindow(for: newIdentity)
     }
 
     func update(
@@ -832,23 +839,22 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             structuralSnapshotApplicationCount &+= 1
             performanceMetrics.recordSnapshotApply()
         }
-        if layoutInputsChanged { invalidateScrolloverGeometry() }
-
-        var needsLayoutInvalidation = layoutInputsChanged
-        if structuralChanged || layoutInputsChanged || iconVariantChanged {
+        var needsLayoutInvalidation = false
+        if structuralChanged || iconVariantChanged {
             for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
                 guard let id = cell.representedArticleID, let item = renderedItem(for: id) else { continue }
                 configure(cell, item: item)
             }
-            needsLayoutInvalidation = structuralChanged || layoutInputsChanged
+            needsLayoutInvalidation = structuralChanged
         }
 
         if needsLayoutInvalidation {
             cancelAllPrefetch()
-            replacePreparedLayoutWindow()
+            schedulePreparedLayoutWindow(for: geometryIdentity)
             performanceMetrics.recordLayoutInvalidation()
             collectionView.collectionViewLayout.invalidateLayout()
         }
+        if layoutInputsChanged { updateGeometryIfNeeded() }
         if resetChanged {
             invalidateScrolloverGeometry()
             collectionView.setContentOffset(CGPoint(x: 0, y: -collectionView.adjustedContentInset.top), animated: false)
@@ -1130,20 +1136,27 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         preparedLayoutCoordinator.prepare(layoutInputs, priority: .prefetch)
         guard mode.showsArticleImage else { return }
         for indexPath in indexPaths {
-            guard let id = dataSource.itemIdentifier(for: indexPath), prefetchTasks[id] == nil,
+            guard let id = dataSource.itemIdentifier(for: indexPath),
                   let item = renderedItem(for: id), let request = imageRequest(for: item)
             else { continue }
-            prefetchTasks[id] = Task { [weak self] in
-                defer { self?.prefetchTasks[id] = nil }
+            if let existing = prefetchTasks[id], existing.request == request { continue }
+            prefetchTasks.removeValue(forKey: id)?.task.cancel()
+            let task = Task { [weak self] in
+                defer {
+                    if self?.prefetchTasks[id]?.request == request {
+                        self?.prefetchTasks[id] = nil
+                    }
+                }
                 _ = try? await ArticleImagePipeline.shared.prefetch(request)
             }
+            prefetchTasks[id] = (request, task)
         }
     }
 
     func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
         for indexPath in indexPaths {
             guard let id = dataSource.itemIdentifier(for: indexPath) else { continue }
-            prefetchTasks.removeValue(forKey: id)?.cancel()
+            prefetchTasks.removeValue(forKey: id)?.task.cancel()
         }
     }
 
@@ -1156,12 +1169,23 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func cancelAllPrefetch() {
-        for task in prefetchTasks.values { task.cancel() }
+        for prefetch in prefetchTasks.values { prefetch.task.cancel() }
         prefetchTasks.removeAll(keepingCapacity: true)
     }
 
+    private func cancelIncompatibleImagePrefetch() {
+        let incompatibleIDs = prefetchTasks.compactMap { id, prefetch in
+            guard let item = renderedItem(for: id), imageRequest(for: item) == prefetch.request else { return id }
+            return nil
+        }
+        for id in incompatibleIDs {
+            prefetchTasks.removeValue(forKey: id)?.task.cancel()
+        }
+    }
+
     deinit {
-        for task in prefetchTasks.values { task.cancel() }
+        preparedWindowTask?.cancel()
+        for prefetch in prefetchTasks.values { prefetch.task.cancel() }
     }
 
     func detachPresentationBridges() {
@@ -1179,6 +1203,45 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     private func preparedLayoutInput(for item: IOSUIKitArticleTimelineItem) -> IOSUIKitArticleLayoutInput {
         .init(item: item, mode: mode, previewLines: previewLines, containerWidth: collectionView.bounds.width, displayScale: view.traitCollection.displayScale, contentSizeCategory: view.traitCollection.preferredContentSizeCategory, localeIdentifier: Locale.current.identifier, layoutDirection: view.effectiveUserInterfaceLayoutDirection)
+    }
+
+    private func currentGeometryIdentity() -> IOSUIKitTimelineGeometryIdentity? {
+        guard collectionView.bounds.width > 0 else { return nil }
+        return .init(
+            mode: mode,
+            previewLines: previewLines,
+            containerWidth: collectionView.bounds.width,
+            displayScale: view.traitCollection.displayScale,
+            contentSizeCategory: view.traitCollection.preferredContentSizeCategory,
+            layoutDirection: view.effectiveUserInterfaceLayoutDirection
+        )
+    }
+
+    private func schedulePreparedLayoutWindow(for identity: IOSUIKitTimelineGeometryIdentity?) {
+        guard let identity else { return }
+        if scheduledPreparedWindowGeneration != nil {
+            performanceMetrics.recordPreparedWindowGenerationSuperseded()
+        }
+        preparedWindowGeneration &+= 1
+        let generation = preparedWindowGeneration
+        scheduledPreparedWindowGeneration = generation
+        preparedWindowTask?.cancel()
+        preparedWindowTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self else { return }
+            guard !Task.isCancelled,
+                  self.preparedWindowGeneration == generation,
+                  self.geometryIdentity == identity
+            else {
+                if self.scheduledPreparedWindowGeneration == generation {
+                    self.scheduledPreparedWindowGeneration = nil
+                }
+                return
+            }
+            self.scheduledPreparedWindowGeneration = nil
+            self.performanceMetrics.recordPreparedWindowReplacement()
+            self.replacePreparedLayoutWindow()
+        }
     }
 
     private func replacePreparedLayoutWindow() {
@@ -1226,6 +1289,7 @@ enum IOSUIKitTimelinePerformanceDiagnostics {
         print("""
         [Timeline Performance]
         timeline preferredLayoutAttributesFittingCalls=\(timeline.preferredLayoutAttributesFittingCalls) systemLayoutSizeFittingCalls=\(timeline.systemLayoutSizeFittingCalls) configureCount=\(timeline.configureCount) reuseCount=\(timeline.reuseCount) layoutVariantSwitchCount=\(timeline.layoutVariantSwitchCount) imageBindingCount=\(timeline.imageBindingCount) structuralReconciliationCount=\(timeline.structuralReconciliationCount) snapshotApplyCount=\(timeline.snapshotApplyCount) layoutInvalidationCount=\(timeline.layoutInvalidationCount)
+        geometry identityChanges=\(timeline.geometryIdentityChanges) layoutInvalidations=\(timeline.geometryLayoutInvalidationCount) preparedWindowReplacements=\(timeline.preparedWindowReplacementCount) preparedWindowGenerationsSuperseded=\(timeline.preparedWindowGenerationsSuperseded)
         deterministicHeight requests=\(timeline.deterministicHeightRequests) preparedHits=\(timeline.deterministicHeightPreparedHits) synchronousFallbacks=\(timeline.deterministicHeightSynchronousFallbacks) synchronousFallbackTotalNanoseconds=\(timeline.deterministicHeightSynchronousFallbackTotalNanoseconds) synchronousFallbackMaxNanoseconds=\(timeline.deterministicHeightSynchronousFallbackMaxNanoseconds)
         preparedLayout requests=\(timeline.preparedLayoutRequests) cacheHits=\(timeline.preparedLayoutCacheHits) cacheMisses=\(timeline.preparedLayoutCacheMisses) measurementsStarted=\(timeline.preparedLayoutMeasurementsStarted) measurementsCompleted=\(timeline.preparedLayoutMeasurementsCompleted) discardedResults=\(timeline.preparedLayoutDiscardedResults) cancellations=\(timeline.preparedLayoutCancellations) maximumConcurrency=\(timeline.preparedLayoutMaximumConcurrency) visibleRequests=\(timeline.visibleLayoutMetricRequests) visibleCacheHits=\(timeline.visibleLayoutMetricCacheHits) visibleCacheMisses=\(timeline.visibleLayoutMetricCacheMisses) prefetchRequests=\(timeline.prefetchLayoutMetricRequests) prefetchCacheHits=\(timeline.prefetchLayoutMetricCacheHits) prefetchCacheMisses=\(timeline.prefetchLayoutMetricCacheMisses)
         image memoryCacheHits=\(image.memoryCacheHits) memoryCacheMisses=\(image.memoryCacheMisses) visibleMemoryCacheHits=\(image.visibleMemoryCacheHits) visibleMemoryCacheMisses=\(image.visibleMemoryCacheMisses) prefetchMemoryCacheHits=\(image.prefetchMemoryCacheHits) prefetchMemoryCacheMisses=\(image.prefetchMemoryCacheMisses) memoryCacheInsertions=\(image.memoryCacheInsertions) memoryCacheEvictions=\(image.memoryCacheEvictions) memoryCacheCostLimit=\(image.memoryCacheCostLimit) inFlightDedupHits=\(image.inFlightDedupHits) startedOperations=\(image.startedOperations) completedOperations=\(image.completedOperations) retiredOperations=\(image.retiredOperations) maximumActiveOperations=\(image.maximumActiveOperations) visibleStarts=\(image.visibleStarts) prefetchStarts=\(image.prefetchStarts) activeOperations=\(image.activeOperations) queuedVisibleRequests=\(image.queuedVisibleRequests) queuedPrefetchRequests=\(image.queuedPrefetchRequests)
@@ -1258,6 +1322,10 @@ struct IOSUIKitTimelinePerformanceSnapshot: Equatable {
     let structuralReconciliationCount: UInt64
     let snapshotApplyCount: UInt64
     let layoutInvalidationCount: UInt64
+    let geometryIdentityChanges: UInt64
+    let geometryLayoutInvalidationCount: UInt64
+    let preparedWindowReplacementCount: UInt64
+    let preparedWindowGenerationsSuperseded: UInt64
     let preparedLayoutRequests: UInt64
     let preparedLayoutCacheHits: UInt64
     let preparedLayoutCacheMisses: UInt64
@@ -1297,6 +1365,10 @@ final class IOSUIKitTimelinePerformanceMetrics {
     private var structuralReconciliationCount: UInt64 = 0
     private var snapshotApplyCount: UInt64 = 0
     private var layoutInvalidationCount: UInt64 = 0
+    private var geometryIdentityChanges: UInt64 = 0
+    private var geometryLayoutInvalidationCount: UInt64 = 0
+    private var preparedWindowReplacementCount: UInt64 = 0
+    private var preparedWindowGenerationsSuperseded: UInt64 = 0
     private var deterministicHeightRequests: UInt64 = 0
     private var deterministicHeightPreparedHits: UInt64 = 0
     private var deterministicHeightSynchronousFallbacks: UInt64 = 0
@@ -1309,6 +1381,8 @@ final class IOSUIKitTimelinePerformanceMetrics {
         systemLayoutSizeFittingCalls = 0; systemLayoutSizeFittingTotalNanoseconds = 0; systemLayoutSizeFittingMaxNanoseconds = 0
         configureCount = 0; reuseCount = 0; layoutVariantSwitchCount = 0; imageBindingCount = 0
         structuralReconciliationCount = 0; snapshotApplyCount = 0; layoutInvalidationCount = 0
+        geometryIdentityChanges = 0; geometryLayoutInvalidationCount = 0
+        preparedWindowReplacementCount = 0; preparedWindowGenerationsSuperseded = 0
         deterministicHeightRequests = 0; deterministicHeightPreparedHits = 0; deterministicHeightSynchronousFallbacks = 0
         deterministicHeightSynchronousFallbackTotalNanoseconds = 0; deterministicHeightSynchronousFallbackMaxNanoseconds = 0
     }
@@ -1322,6 +1396,13 @@ final class IOSUIKitTimelinePerformanceMetrics {
     func recordStructuralReconciliation() { structuralReconciliationCount &+= 1 }
     func recordSnapshotApply() { snapshotApplyCount &+= 1 }
     func recordLayoutInvalidation() { layoutInvalidationCount &+= 1 }
+    func recordGeometryChange() {
+        geometryIdentityChanges &+= 1
+        geometryLayoutInvalidationCount &+= 1
+        layoutInvalidationCount &+= 1
+    }
+    func recordPreparedWindowReplacement() { preparedWindowReplacementCount &+= 1 }
+    func recordPreparedWindowGenerationSuperseded() { preparedWindowGenerationsSuperseded &+= 1 }
     func recordDeterministicHeightRequest(prepared: Bool) {
         deterministicHeightRequests &+= 1
         if prepared { deterministicHeightPreparedHits &+= 1 }
@@ -1339,7 +1420,7 @@ final class IOSUIKitTimelinePerformanceMetrics {
         durationBuckets[min(durationNanoseconds == 0 ? 0 : 63 - durationNanoseconds.leadingZeroBitCount, Self.durationBucketCount - 1)] &+= 1
     }
     func snapshot(preparation: IOSUIKitArticleLayoutPreparationSnapshot = .init(requests: 0, cacheHits: 0, cacheMisses: 0, measurementsStarted: 0, measurementsCompleted: 0, discardedResults: 0, cancellations: 0, maximumConcurrentMeasurements: 0, visibleRequests: 0, visibleCacheHits: 0, visibleCacheMisses: 0, prefetchRequests: 0, prefetchCacheHits: 0, prefetchCacheMisses: 0)) -> IOSUIKitTimelinePerformanceSnapshot {
-        .init(preferredLayoutAttributesFittingCalls: preferredLayoutAttributesFittingCalls, heightCacheHits: heightCacheHits, heightCacheMisses: heightCacheMisses, systemLayoutSizeFittingCalls: systemLayoutSizeFittingCalls, systemLayoutSizeFittingTotalNanoseconds: systemLayoutSizeFittingTotalNanoseconds, systemLayoutSizeFittingMaxNanoseconds: systemLayoutSizeFittingMaxNanoseconds, systemLayoutSizeFittingP50ApproxNanoseconds: percentile(0.5), systemLayoutSizeFittingP95ApproxNanoseconds: percentile(0.95), configureCount: configureCount, reuseCount: reuseCount, layoutVariantSwitchCount: layoutVariantSwitchCount, imageBindingCount: imageBindingCount, structuralReconciliationCount: structuralReconciliationCount, snapshotApplyCount: snapshotApplyCount, layoutInvalidationCount: layoutInvalidationCount, preparedLayoutRequests: preparation.requests, preparedLayoutCacheHits: preparation.cacheHits, preparedLayoutCacheMisses: preparation.cacheMisses, preparedLayoutMeasurementsStarted: preparation.measurementsStarted, preparedLayoutMeasurementsCompleted: preparation.measurementsCompleted, preparedLayoutDiscardedResults: preparation.discardedResults, preparedLayoutCancellations: preparation.cancellations, preparedLayoutMaximumConcurrency: preparation.maximumConcurrentMeasurements, visibleLayoutMetricRequests: preparation.visibleRequests, visibleLayoutMetricCacheHits: preparation.visibleCacheHits, visibleLayoutMetricCacheMisses: preparation.visibleCacheMisses, prefetchLayoutMetricRequests: preparation.prefetchRequests, prefetchLayoutMetricCacheHits: preparation.prefetchCacheHits, prefetchLayoutMetricCacheMisses: preparation.prefetchCacheMisses, deterministicHeightRequests: deterministicHeightRequests, deterministicHeightPreparedHits: deterministicHeightPreparedHits, deterministicHeightSynchronousFallbacks: deterministicHeightSynchronousFallbacks, deterministicHeightSynchronousFallbackTotalNanoseconds: deterministicHeightSynchronousFallbackTotalNanoseconds, deterministicHeightSynchronousFallbackMaxNanoseconds: deterministicHeightSynchronousFallbackMaxNanoseconds)
+        .init(preferredLayoutAttributesFittingCalls: preferredLayoutAttributesFittingCalls, heightCacheHits: heightCacheHits, heightCacheMisses: heightCacheMisses, systemLayoutSizeFittingCalls: systemLayoutSizeFittingCalls, systemLayoutSizeFittingTotalNanoseconds: systemLayoutSizeFittingTotalNanoseconds, systemLayoutSizeFittingMaxNanoseconds: systemLayoutSizeFittingMaxNanoseconds, systemLayoutSizeFittingP50ApproxNanoseconds: percentile(0.5), systemLayoutSizeFittingP95ApproxNanoseconds: percentile(0.95), configureCount: configureCount, reuseCount: reuseCount, layoutVariantSwitchCount: layoutVariantSwitchCount, imageBindingCount: imageBindingCount, structuralReconciliationCount: structuralReconciliationCount, snapshotApplyCount: snapshotApplyCount, layoutInvalidationCount: layoutInvalidationCount, geometryIdentityChanges: geometryIdentityChanges, geometryLayoutInvalidationCount: geometryLayoutInvalidationCount, preparedWindowReplacementCount: preparedWindowReplacementCount, preparedWindowGenerationsSuperseded: preparedWindowGenerationsSuperseded, preparedLayoutRequests: preparation.requests, preparedLayoutCacheHits: preparation.cacheHits, preparedLayoutCacheMisses: preparation.cacheMisses, preparedLayoutMeasurementsStarted: preparation.measurementsStarted, preparedLayoutMeasurementsCompleted: preparation.measurementsCompleted, preparedLayoutDiscardedResults: preparation.discardedResults, preparedLayoutCancellations: preparation.cancellations, preparedLayoutMaximumConcurrency: preparation.maximumConcurrentMeasurements, visibleLayoutMetricRequests: preparation.visibleRequests, visibleLayoutMetricCacheHits: preparation.visibleCacheHits, visibleLayoutMetricCacheMisses: preparation.visibleCacheMisses, prefetchLayoutMetricRequests: preparation.prefetchRequests, prefetchLayoutMetricCacheHits: preparation.prefetchCacheHits, prefetchLayoutMetricCacheMisses: preparation.prefetchCacheMisses, deterministicHeightRequests: deterministicHeightRequests, deterministicHeightPreparedHits: deterministicHeightPreparedHits, deterministicHeightSynchronousFallbacks: deterministicHeightSynchronousFallbacks, deterministicHeightSynchronousFallbackTotalNanoseconds: deterministicHeightSynchronousFallbackTotalNanoseconds, deterministicHeightSynchronousFallbackMaxNanoseconds: deterministicHeightSynchronousFallbackMaxNanoseconds)
     }
     private func percentile(_ percentile: Double) -> UInt64 {
         let target = UInt64((Double(systemLayoutSizeFittingCalls) * percentile).rounded(.up))
@@ -1628,6 +1709,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         displayScale: CGFloat,
         preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics
     ) {
+        let articleChanged = representedArticleID != item.article.id
         representedArticleID = item.article.id
         // Keep the independently constrained metadata row in the cell's semantic direction.
         metadataRow.semanticContentAttribute = semanticContentAttribute
@@ -1652,7 +1734,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
 
         updateFeedIcon(image: item.feedIconImage, title: item.content.article.feedTitle)
         updateStatus(isRead: item.isRead, isStarred: item.isStarred)
-        configureArticleImage(url: item.content.imageURL, targetSize: imageSize, displayScale: displayScale)
+        configureArticleImage(url: item.content.imageURL, targetSize: imageSize, displayScale: displayScale, articleChanged: articleChanged)
         contentView.setNeedsLayout()
     }
 
@@ -1755,17 +1837,21 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         (feedTitleLabel.numberOfLines, feedTitleLabel.lineBreakMode)
     }
 
-    private func configureArticleImage(url: URL?, targetSize: CGSize, displayScale: CGFloat) {
-        performanceMetrics?.recordImageBinding()
-        invalidateImageBinding()
-        representedImageRequest = nil
+    private func configureArticleImage(url: URL?, targetSize: CGSize, displayScale: CGFloat, articleChanged: Bool) {
         guard let url, targetSize.width > 0, targetSize.height > 0 else {
+            guard representedImageRequest != nil else { return }
+            performanceMetrics?.recordImageBinding()
+            invalidateImageBinding()
+            representedImageRequest = nil
             articleImageView.image = nil
             imagePlaceholder.isHidden = false
             return
         }
 
         let request = ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale)
+        guard articleChanged || representedImageRequest != request else { return }
+        performanceMetrics?.recordImageBinding()
+        invalidateImageBinding()
         let bindingGeneration = imageBindingGeneration
         guard let articleID = representedArticleID else { return }
         representedImageRequest = request
