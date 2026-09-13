@@ -1202,6 +1202,8 @@ final class NewsreaderPresentationTests: XCTestCase {
     @MainActor
     func testDeterministicHeightFallbackMetricsRemainAvailableWithoutAutoLayout() {
         let metrics = IOSUIKitTimelinePerformanceMetrics()
+        let layout = IOSUIKitArticleLayoutEngine.metrics(for: layoutInput(mode: .visual, width: 390, hasImage: true))
+        XCTAssertGreaterThan(layout.cellSize.height, 0)
         metrics.recordDeterministicHeightFallback(durationNanoseconds: 17)
         metrics.recordDeterministicHeightRequest(prepared: true)
 
