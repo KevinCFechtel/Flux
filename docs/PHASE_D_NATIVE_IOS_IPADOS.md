@@ -544,6 +544,63 @@ Timeline, including long feeds and cell reuse. Record actual correctness and
 device-performance evidence before marking the amendment complete; documentation
 approval is not runtime acceptance.
 
+### U3.8.5 — Adaptive Device Matrix & Runtime Acceptance
+
+The automated U3.8.5 acceptance baseline runs on the available compact iPhone
+simulator and covers semantic compact/regular transitions, deterministic widths,
+display scales, Dynamic Type including accessibility XXXL, and LTR/RTL. It
+verifies persistent adaptive shell state, no structural Timeline snapshot for
+presentation/geometry-only changes, canonical geometry and deterministic
+UIKit-cell height agreement, Search request generation preservation, Reader
+request preservation, Scrollover rebaselining, image request canonicalization,
+bounded image work, and the single-scene hosted app manifest. The available
+regular iPad simulator was booted and its test run began, but did not complete
+within the six-minute acceptance timeout; it is not counted as completed iPad
+acceptance.
+
+Timeline diagnostics now report geometry identity changes, geometry layout
+invalidations, prepared-window replacements, and superseded prepared-window
+generations alongside the existing preparation, deterministic fallback, image,
+structural-snapshot, and cell-work counters. A controller-level same-runloop
+resize regression executes three canonical width changes and records one
+prepared-window replacement with at least two superseded generations and no
+structural reconciliation or snapshot application. This proves `Task.yield()`
+coalesces a burst before speculative window replacement; it is not a substitute
+for a sustained live-resize trace. No coalescing strategy change is justified
+without a runtime trace showing expensive measurement churn rather than cheap
+generation replacement.
+
+Automated Scrollover coverage confirms that structural/geometry rebaselining,
+layout-generation changes, Dynamic Type/RTL layout keys, and stale completion
+paths cannot synthesize crossings or publish stale presentation. Image tests
+confirm compatible canonical requests are retained, visible work is prioritized,
+concurrency remains bounded, and stale image arrivals do not affect geometry.
+The deterministic path performs no production Auto Layout sizing; the current
+evidence does not justify U3.7.5 manual cell layout.
+
+The available simulator inventory does not include an iPhone Duo runtime, and
+there is no UI-test target or configured simulator account for interactive
+Newsreader acceptance. U3.8 remains pending the following manual/physical
+acceptance before it can be marked complete:
+
+1. On a configured account, exercise compact portrait/landscape and regular
+   iPad portrait/landscape; repeat compact-to-regular transitions, rotation, and
+   iPad Split View or Stage Manager widths while Timeline, Search, and Reader
+   are active.
+2. Reset and print Timeline Performance diagnostics around sustained live resize,
+   resize during deceleration, image loading, and the first 250 ms of repeated
+   idle-to-first-scroll attempts. Record geometry/replacement/supersession,
+   preparation, fallback, invalidation, image, and structural counters.
+3. Verify Scrollover sequences across resize, slow and fast crossings, Undo and
+   explicit Unread; confirm no geometry-only read mutation and that a subsequent
+   genuine scroll resumes qualification.
+4. Verify normal and accessibility Dynamic Type, LTR and RTL, safe-area/sidebar
+   width changes, read/starred/feed-icon updates, refresh, Search Timeline, and
+   Reader handoff without duplicate Core requests or scroll-position reset.
+5. Confirm the app remains single-scene in normal iPad/window operation. If an
+   iPhone Duo runtime becomes available, run the same compact/regular transition
+   cases there without adding device-specific behavior.
+
 ### D5 — Background Sync, Local Notifications & Widgets
 
 Integrate BGTaskScheduler, local notifications and the native iOS WidgetKit

@@ -1297,6 +1297,34 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(snapshot.systemLayoutSizeFittingCalls, 0)
     }
 
+    @MainActor
+    func testSameRunloopResizeCoalescesPreparedWindowReplacement() async {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
+        controller.view.layoutIfNeeded()
+        for _ in 0..<10 { await Task.yield() }
+
+        controller.resetPerformanceMetrics()
+        for width in [391 as CGFloat, 392, 393] {
+            controller.view.frame.size.width = width
+            controller.view.layoutIfNeeded()
+        }
+        for _ in 0..<100 where controller.performanceSnapshot().preparedWindowReplacementCount == 0 {
+            await Task.yield()
+        }
+
+        let snapshot = controller.performanceSnapshot()
+        XCTAssertEqual(snapshot.geometryIdentityChanges, 3)
+        XCTAssertEqual(snapshot.geometryLayoutInvalidationCount, 3)
+        XCTAssertEqual(snapshot.layoutInvalidationCount, 3)
+        XCTAssertEqual(snapshot.preparedWindowReplacementCount, 1)
+        XCTAssertGreaterThanOrEqual(snapshot.preparedWindowGenerationsSuperseded, 2)
+        XCTAssertEqual(snapshot.structuralReconciliationCount, 0)
+        XCTAssertEqual(snapshot.snapshotApplyCount, 0)
+    }
+
     func testDeterministicArticleLayoutEngineSelectsCurrentPresentationVariants() {
         XCTAssertEqual(layoutMetrics(mode: .compact, width: 390, hasImage: true).variant, .compact)
         XCTAssertEqual(layoutMetrics(mode: .visual, width: 390, hasImage: false).variant, .visualTextOnly)
