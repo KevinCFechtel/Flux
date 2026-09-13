@@ -39,7 +39,6 @@ struct SearchView: View {
         .onAppear {
             searchInterfacePresented = true
         }
-        .onDisappear { store.invalidate() }
     }
 }
 

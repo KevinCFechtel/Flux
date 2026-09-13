@@ -22,6 +22,16 @@ enum AdaptivePresentationPolicy {
     }
 }
 
+enum AdaptiveShellTransitionPolicy {
+    static func navigationSheetPresented(after presentation: AdaptivePresentation, wasPresented: Bool) -> Bool {
+        presentation.usesPersistentSplitNavigation ? false : wasPresented
+    }
+
+    static func splitColumnVisibility(after presentation: AdaptivePresentation) -> NavigationSplitViewVisibility {
+        presentation.usesPersistentSplitNavigation ? .all : .detailOnly
+    }
+}
+
 enum ReaderDocumentNotice {
     static func text(simplified: Bool, truncated: Bool) -> String? {
         switch (simplified, truncated) {

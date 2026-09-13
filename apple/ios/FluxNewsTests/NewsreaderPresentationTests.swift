@@ -103,6 +103,65 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(AdaptivePresentation.compact != AdaptivePresentation.regular)
     }
 
+    func testAdaptiveShellTransitionNormalizesOnlyNavigationPresentation() {
+        XCTAssertFalse(AdaptiveShellTransitionPolicy.navigationSheetPresented(after: .regular, wasPresented: true))
+        XCTAssertTrue(AdaptiveShellTransitionPolicy.navigationSheetPresented(after: .compact, wasPresented: true))
+        XCTAssertEqual(AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .regular), .all)
+        XCTAssertEqual(AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .compact), .detailOnly)
+    }
+
+    func testAdaptiveShellTransitionPreservesSearchAndReaderRequestGenerations() {
+        var searchRequest = IOSSearchRequestState()
+        var readerRequest = ReaderRequestState()
+        let searchGeneration = searchRequest.begin()
+        let readerGeneration = readerRequest.begin()
+
+        _ = AdaptiveShellTransitionPolicy.navigationSheetPresented(after: .regular, wasPresented: true)
+        _ = AdaptiveShellTransitionPolicy.navigationSheetPresented(after: .compact, wasPresented: false)
+
+        XCTAssertTrue(searchRequest.isCurrent(searchGeneration))
+        XCTAssertTrue(readerRequest.isCurrent(readerGeneration))
+    }
+
+    @MainActor
+    func testAdaptiveShellTransitionDoesNotRecreateNewsreaderOrSearchState() {
+        let newsreader = NewsreaderStore(defaults: UserDefaults())
+        let search = IOSSearchStore()
+        search.query = "adaptive"
+        let structuralRevision = newsreader.timelineStructuralState.revision
+
+        _ = AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .regular)
+        _ = AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .compact)
+
+        XCTAssertEqual(search.query, "adaptive")
+        XCTAssertEqual(newsreader.timelineStructuralState.revision, structuralRevision)
+    }
+
+    @MainActor
+    func testAdaptiveShellTransitionDoesNotApplyAnotherTimelineSnapshot() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+        let structuralReconciliations = controller.structuralReconciliationCount
+        let snapshotApplications = controller.structuralSnapshotApplicationCount
+
+        _ = AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .regular)
+        _ = AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .compact)
+        controller.update(
+            structuralState: timelineStructuralState([timelineArticle(id: 1), timelineArticle(id: 2)], revision: 1),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+
+        XCTAssertEqual(controller.structuralReconciliationCount, structuralReconciliations)
+        XCTAssertEqual(controller.structuralSnapshotApplicationCount, snapshotApplications)
+    }
+
     func testIPhoneNavigationButtonUsesTheFluxTemplateAsset() {
         XCTAssertEqual(IOSNavigationButtonPresentation.imageName, "FluxNewsTemplate")
         XCTAssertEqual(IOSNavigationButtonPresentation.accessibilityLabel, String(localized: "Choose news scope"))

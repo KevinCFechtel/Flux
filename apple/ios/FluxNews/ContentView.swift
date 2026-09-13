@@ -177,6 +177,13 @@ struct ContentView: View {
         .confirmationDialog(markReadDialogTitle, isPresented: $markReadConfirmationPresented, titleVisibility: .visible) {
             Button(markReadDialogTitle, role: .destructive) { performMarkReadWorkflow() }
         } message: { Text("Marks all unread articles in this scope as read.") }
+        .onChange(of: adaptivePresentation) { _, presentation in
+            normalizeAdaptiveShell(for: presentation)
+        }
+        .onChange(of: searchPresented) { _, presented in
+            if !presented { searchStore.invalidate() }
+        }
+        .onAppear { normalizeAdaptiveShell(for: adaptivePresentation) }
         .task(id: bootstrapper.coreRevision) {
             if let core = newsreaderStore.core {
                 searchStore.attach(to: core)
@@ -187,8 +194,16 @@ struct ContentView: View {
 
     @ViewBuilder
     private var newsreader: some View {
-        Group {
-            if adaptivePresentation.usesPersistentSplitNavigation { splitNewsreader } else { compactNewsreader }
+        NavigationSplitView(columnVisibility: $splitColumnVisibility) {
+            NewsNavigationView(
+                store: newsreaderStore,
+                sheetPresented: $navigationPresented,
+                presentation: .sidebar,
+                onSearch: openSearch
+            )
+            .toolbar(removing: .sidebarToggle)
+        } detail: {
+            adaptiveDetail
         }
         // These presentations outlive an article-navigation reset.
         .sheet(isPresented: $navigationPresented) {
@@ -200,35 +215,26 @@ struct ContentView: View {
         .sheet(isPresented: $settingsPresented) { SettingsView(store: newsreaderStore, bootstrapper: bootstrapper, onDiagnostics: { diagnosticsPresented = true }) }
     }
 
-    private var splitNewsreader: some View {
-        NavigationSplitView(columnVisibility: $splitColumnVisibility) {
-            NewsNavigationView(store: newsreaderStore, sheetPresented: $navigationPresented, presentation: .sidebar, onSearch: openSearch).toolbar(removing: .sidebarToggle)
-        } detail: {
-            if searchPresented {
-                searchView
-            } else {
-                IOSArticleNavigationHost(resetRevision: newsreaderStore.scrollResetRevision) { articleList }
-            }
-        }
-    }
-
-    private var compactNewsreader: some View {
-        IOSArticleNavigationHost(resetRevision: newsreaderStore.scrollResetRevision) {
+    private var adaptiveDetail: some View {
+        Group {
             articleList
                 .navigationDestination(isPresented: $searchPresented) { searchView }
                 .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button { navigationPresented = true } label: {
-                            Image(IOSNavigationButtonPresentation.imageName)
-                                .renderingMode(.template)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: IOSNavigationButtonPresentation.glyphSize, height: IOSNavigationButtonPresentation.glyphSize)
+                    if !adaptivePresentation.usesPersistentSplitNavigation {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button { navigationPresented = true } label: {
+                                Image(IOSNavigationButtonPresentation.imageName)
+                                    .renderingMode(.template)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: IOSNavigationButtonPresentation.glyphSize, height: IOSNavigationButtonPresentation.glyphSize)
+                            }
+                                .accessibilityLabel(IOSNavigationButtonPresentation.accessibilityLabel)
                         }
-                            .accessibilityLabel(IOSNavigationButtonPresentation.accessibilityLabel)
                     }
                 }
         }
+        .id(IOSArticleNavigationPresentation.identity(for: newsreaderStore.scrollResetRevision))
     }
 
     private var articleList: some View {
@@ -338,6 +344,14 @@ struct ContentView: View {
     private func openSearch() {
         navigationPresented = false
         searchPresented = true
+    }
+
+    private func normalizeAdaptiveShell(for presentation: AdaptivePresentation) {
+        navigationPresented = AdaptiveShellTransitionPolicy.navigationSheetPresented(
+            after: presentation,
+            wasPresented: navigationPresented
+        )
+        splitColumnVisibility = AdaptiveShellTransitionPolicy.splitColumnVisibility(after: presentation)
     }
 
     private func openArticle(_ article: ArticleSummary) {
@@ -654,14 +668,14 @@ extension ContentView {
     private var readerSheetBinding: Binding<IOSReaderArticle?> {
         Binding(
             get: { usesReaderInspector ? nil : readerArticle },
-            set: { if $0 == nil { readerArticle = nil; readerGeneration += 1 } }
+            set: { if $0 == nil, !usesReaderInspector { dismissReader() } }
         )
     }
 
     private var readerInspectorBinding: Binding<Bool> {
         Binding(
             get: { usesReaderInspector && readerArticle != nil },
-            set: { if !$0 { readerArticle = nil; readerGeneration += 1 } }
+            set: { if !$0, usesReaderInspector { dismissReader() } }
         )
     }
 
