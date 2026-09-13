@@ -117,19 +117,23 @@ Miniflux/Core rather than copied from Flutter SQLite.
 The current Core `FeedPreferences` model is authoritative. Legacy Flutter fields
 without a current semantic equivalent do not justify a compatibility layer.
 
-## 5. iPhone and iPad product architecture
+## 5. Adaptive iOS/iPadOS product architecture
 
-There is one common iOS/iPadOS app target, not separate iPhone and iPad apps.
+Flux is one adaptive iOS/iPadOS application, not separate iPhone and iPad
+applications. Available presentation environment and platform capability are
+authoritative for layout; device name is not.
 
-### iPhone
+### Compact presentation
 
-The app starts directly in the Article List. Navigation is optional and opens as
-a native sheet containing All News, Starred, Listening List, Categories and
-Feeds. Selecting a scope closes the sheet and updates the list.
+In compact presentation, the app starts directly in the Article List.
+Navigation is transient and opens as a native sheet containing All News,
+Starred, Listening List, Categories and Feeds. Selecting a scope closes the
+sheet and updates the list.
 
-### iPad
+### Regular presentation
 
-The primary layout is a two-column `NavigationSplitView`:
+In regular presentation, navigation and the Article List may coexist in a
+two-column `NavigationSplitView`:
 
 ```text
 Navigation | Article List
@@ -138,8 +142,14 @@ Navigation | Article List
 There is no permanent third article/detail column. The existing article-first
 behavior remains: a normal article tap tries the configured installed-app deep
 link and falls back to the in-app browser. The internal Reader is an explicitly
-configured exception and is temporary presentation, preferably an inspector on
-regular-width iPad and a sheet/full-screen presentation on compact width/iPhone.
+configured exception and is temporary presentation: an inspector in regular
+presentation and a sheet/full-screen presentation in compact presentation.
+
+Presentation may change at runtime as available environment changes. This does
+not create a second app hierarchy or replace BrowserScope, article snapshots,
+filters, Core session, read/starred state, or Search domain state. iPhone,
+iPhone Duo, iPad, and future form factors fall out of this compact/regular model
+without dedicated UI implementations.
 
 ### iOS/iPadOS Article Timeline — UIKit
 
@@ -147,7 +157,7 @@ The target Article Timeline is an owned UIKit view controller containing a
 `UICollectionView`, embedded through a narrow bridge in the SwiftUI app shell.
 Use stable Article IDs and a collection-view list configuration with native
 UIKit article cells. Compact and visual modes, portrait/landscape image slots,
-preview-line choices, Dynamic Type, VoiceOver, and the current iPhone/iPad
+preview-line choices, Dynamic Type, VoiceOver, and adaptive compact/regular
 presentation remain supported. Cell structure and content sizing are reused
 when their layout inputs have not changed.
 
@@ -161,7 +171,7 @@ Timeline actions use system-native swipe actions: leading Read/Unread and
 trailing Star/Unstar invoke the existing optimistic mutations and allow the
 platform's standard full-swipe behavior. Preserve context menus, pull-to-refresh,
 article routing, native Large Title/scroll-edge behavior, semantic scope resets,
-and iPad navigation. Actions identify articles by stable ID, never a captured
+and persistent split navigation. Actions identify articles by stable ID, never a captured
 index path or a cell reference that may have been reused.
 
 Mark-as-Read-on-Scrollover uses actual UIKit scroll movement and resolved cell
@@ -376,8 +386,8 @@ upgrade path is technically proven, and macOS remains green.
 
 ### D2 — Native Newsreader Foundation
 
-Implement iPhone article-first navigation, iPad two-column navigation, Article
-List, Row/Card presentation, preview-line choices, Startup Scope, Hide Empty,
+Implement compact article-first navigation, regular two-column navigation,
+Article List, Row/Card presentation, preview-line choices, Startup Scope, Hide Empty,
 Remove When Read, pull-to-refresh, native swipe actions, Scrollover/Undo and
 stable snapshot/pending-new-data behavior. Extract proven shared Apple code only
 where this creates actual reuse.
@@ -458,8 +468,9 @@ count can be disabled through the native iOS article presentation settings.
 
 #### D4.4 — Real-Device Validation & Polish
 
-Perform combined real-device D2-D4 validation and polish on representative
-iPhone and iPad devices.
+Perform combined real-device D2-D4 validation and polish across representative
+compact and regular presentation environments, including runtime resize,
+rotation, and multitasking transitions where supported.
 
 Before D4.4 completion, establish consistent native user-facing error
 presentation for Sync/network, account/credential, and user-action failures.
@@ -494,10 +505,11 @@ or unrelated phase architecture.
 
 For iOS Scrollover, D4.4 still requires real-device coverage of slow drags,
 fast flicks that skip rows, reverse-then-forward movement, Remove When Read,
-Dynamic Type, rotation/safe-area changes, and the rolling Undo window on both
-iPhone and iPad. Run these cases on the new UIKit Timeline, including long feeds
-and cell reuse. Record actual correctness and device-performance evidence before
-marking the amendment complete; documentation approval is not runtime acceptance.
+Dynamic Type, rotation/safe-area changes, and the rolling Undo window across
+compact and regular presentation environments. Run these cases on the new UIKit
+Timeline, including long feeds and cell reuse. Record actual correctness and
+device-performance evidence before marking the amendment complete; documentation
+approval is not runtime acceptance.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 
@@ -534,7 +546,7 @@ repeated migration safely.
 Run the real production-identity upgrade path from representative Flutter state
 to the native app and validate Newsreader, sync, widgets, notifications, media,
 downloads, CarPlay and ActivityKit across foreground/background/offline/restart
-conditions and representative iPhone/iPad layouts. Quality and regression tests
+conditions and representative compact/regular presentation environments. Quality and regression tests
 must already run throughout D1-D9; D10 is integration/replacement validation,
 not a deferred testing phase.
 

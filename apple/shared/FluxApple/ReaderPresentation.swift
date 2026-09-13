@@ -3,9 +3,22 @@ import SwiftUI
 
 enum ReaderPresentationKind: Equatable { case sheet, inspector }
 
-enum ReaderPresentationPolicy {
-    static func kind(isPad: Bool, isRegularWidth: Bool) -> ReaderPresentationKind {
-        isPad && isRegularWidth ? .inspector : .sheet
+enum AdaptivePresentation: Equatable {
+    case compact
+    case regular
+
+    var usesPersistentSplitNavigation: Bool {
+        self == .regular
+    }
+
+    var readerPresentationKind: ReaderPresentationKind {
+        self == .regular ? .inspector : .sheet
+    }
+}
+
+enum AdaptivePresentationPolicy {
+    static func presentation(horizontalSizeClass: UserInterfaceSizeClass?) -> AdaptivePresentation {
+        horizontalSizeClass == .regular ? .regular : .compact
     }
 }
 
