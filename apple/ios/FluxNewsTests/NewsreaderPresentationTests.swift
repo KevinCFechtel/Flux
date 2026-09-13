@@ -968,6 +968,42 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertGreaterThan(image.width, small.maxPixelDimension)
     }
 
+    func testArticleImagePipelinePrefetchMakesTheSameCanonicalVisibleRequestAnImmediateMemoryHit() async throws {
+        let data = try imageData(width: 800, height: 400)
+        let counter = ImageLoadCounter(data: data)
+        let pipeline = ArticleImagePipeline { _ in await counter.load() }
+        let request = ArticleImageRequest(url: URL(string: "https://example.com/image.jpg")!, targetSize: CGSize(width: 390, height: 215), displayScale: 3)
+
+        _ = try await pipeline.prefetch(request)
+        XCTAssertNotNil(pipeline.cachedImage(for: request))
+
+        let metrics = await pipeline.metrics()
+        let calls = await counter.callCount()
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(metrics.prefetchMemoryCacheMisses, 1)
+        XCTAssertEqual(metrics.visibleMemoryCacheHits, 1)
+        XCTAssertEqual(metrics.memoryCacheInsertions, 1)
+        XCTAssertEqual(metrics.startedOperations, 1)
+    }
+
+    func testArticleImagePipelineVisibleReuseHitsMemoryWithoutAnotherDecode() async throws {
+        let data = try imageData(width: 800, height: 400)
+        let counter = ImageLoadCounter(data: data)
+        let pipeline = ArticleImagePipeline { _ in await counter.load() }
+        let request = ArticleImageRequest(url: URL(string: "https://example.com/image.jpg")!, targetSize: CGSize(width: 100, height: 50), displayScale: 1)
+
+        _ = try await pipeline.image(for: request)
+        _ = try await pipeline.image(for: request)
+
+        let metrics = await pipeline.metrics()
+        let calls = await counter.callCount()
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(metrics.visibleMemoryCacheHits, 1)
+        XCTAssertEqual(metrics.visibleMemoryCacheMisses, 1)
+        XCTAssertEqual(metrics.startedOperations, 1)
+        XCTAssertEqual(metrics.memoryCacheCostLimit, ArticleImagePipeline.memoryCacheCostLimit)
+    }
+
     func testArticleImagePipelineSynchronousLookupUsesTheSameNormalizedCacheKey() async throws {
         let pipeline = ArticleImagePipeline { _ in try self.imageData(width: 800, height: 400) }
         let url = URL(string: "https://example.com/image.jpg")!
@@ -997,6 +1033,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         _ = try await second
         let calls = await gate.callCount()
         XCTAssertEqual(calls, 1)
+        let metrics = await pipeline.metrics()
+        XCTAssertEqual(metrics.inFlightDedupHits, 1)
     }
 
     func testArticleImagePipelinePrefetchBatchesDuplicateRequests() async throws {
@@ -1104,6 +1142,27 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(sharedCalls, 2)
     }
 
+    func testArticleImagePipelineCancellingOneConsumerRetainsTheCompletedSharedImage() async throws {
+        let gate = ImageLoadGate(data: try imageData(width: 800, height: 400))
+        let pipeline = ArticleImagePipeline { _ in try await gate.load() }
+        let request = ArticleImageRequest(url: URL(string: "https://example.com/image.jpg")!, targetSize: CGSize(width: 200, height: 100), displayScale: 1)
+
+        let cancelled = Task { try await pipeline.image(for: request) }
+        await gate.waitUntilStarted()
+        let retained = Task { try await pipeline.image(for: request) }
+        cancelled.cancel()
+        await gate.release()
+        do {
+            _ = try await cancelled.value
+            XCTFail("Cancelled consumer must not receive an image")
+        } catch is CancellationError {}
+        _ = try await retained.value
+
+        XCTAssertNotNil(pipeline.cachedImage(for: request))
+        let calls = await gate.callCount()
+        XCTAssertEqual(calls, 1)
+    }
+
     private func imageData(width: Int, height: Int, orientation: Int? = nil) throws -> Data {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
@@ -1138,6 +1197,21 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(second.systemLayoutSizeFittingCalls, 0)
         metrics.reset()
         XCTAssertEqual(metrics.snapshot().systemLayoutSizeFittingCalls, 0)
+    }
+
+    @MainActor
+    func testDeterministicHeightFallbackMetricsRemainAvailableWithoutAutoLayout() {
+        let metrics = IOSUIKitTimelinePerformanceMetrics()
+        metrics.recordDeterministicHeightFallback(durationNanoseconds: 17)
+        metrics.recordDeterministicHeightRequest(prepared: true)
+
+        let snapshot = metrics.snapshot()
+        XCTAssertEqual(snapshot.deterministicHeightRequests, 2)
+        XCTAssertEqual(snapshot.deterministicHeightPreparedHits, 1)
+        XCTAssertEqual(snapshot.deterministicHeightSynchronousFallbacks, 1)
+        XCTAssertEqual(snapshot.deterministicHeightSynchronousFallbackTotalNanoseconds, 17)
+        XCTAssertEqual(snapshot.deterministicHeightSynchronousFallbackMaxNanoseconds, 17)
+        XCTAssertEqual(snapshot.systemLayoutSizeFittingCalls, 0)
     }
 
     func testDeterministicArticleLayoutEngineSelectsCurrentPresentationVariants() {
@@ -1199,10 +1273,15 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     @MainActor
     func testPreparedLayoutWindowIsBoundedAndCoalescesIdenticalKeys() async {
-        let coordinator = IOSUIKitArticleLayoutPreparationCoordinator(maximumConcurrency: 2)
+        let gate = LayoutMeasurementGate()
+        let coordinator = IOSUIKitArticleLayoutPreparationCoordinator(maximumConcurrency: 2) { input in
+            await gate.measure(input)
+        }
         let input = layoutInput(mode: .visual, width: 390, hasImage: true)
         coordinator.replaceWindow(with: Array(repeating: input, count: 100), visibleCount: 1)
-        for _ in 0..<20 where coordinator.snapshot().measurementsCompleted == 0 { await Task.yield() }
+        await gate.waitUntilStarted(count: 1)
+        await gate.releaseAll()
+        for _ in 0..<100 where coordinator.snapshot().measurementsCompleted == 0 { await Task.yield() }
         let snapshot = coordinator.snapshot()
         XCTAssertEqual(snapshot.requests, UInt64(IOSUIKitArticleLayoutPreparationCoordinator.nearbyWindowLimit + 1))
         XCTAssertEqual(snapshot.measurementsStarted, 1)

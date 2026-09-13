@@ -22,15 +22,76 @@ private final class ArticleImageCacheEntry: NSObject {
     }
 }
 
-private final class ArticleImageCache: @unchecked Sendable {
+private enum ArticleImageCacheLookupSource {
+    case visible
+    case prefetch
+}
+
+private struct ArticleImageCacheMetrics: Sendable {
+    let visibleHits: Int
+    let visibleMisses: Int
+    let prefetchHits: Int
+    let prefetchMisses: Int
+    let insertions: Int
+    let evictions: Int
+}
+
+private final class ArticleImageCache: NSObject, NSCacheDelegate, @unchecked Sendable {
     let storage = NSCache<NSString, ArticleImageCacheEntry>()
+    private let lock = NSLock()
+    private var visibleHits = 0
+    private var visibleMisses = 0
+    private var prefetchHits = 0
+    private var prefetchMisses = 0
+    private var insertions = 0
+    private var evictions = 0
+
+    override init() {
+        super.init()
+        storage.delegate = self
+    }
 
     func image(for key: NSString) -> CGImage? {
         storage.object(forKey: key)?.image
     }
 
+    func lookup(_ key: NSString, source: ArticleImageCacheLookupSource) -> CGImage? {
+        let image = image(for: key)
+        lock.lock()
+        switch (source, image == nil) {
+        case (.visible, false): visibleHits += 1
+        case (.visible, true): visibleMisses += 1
+        case (.prefetch, false): prefetchHits += 1
+        case (.prefetch, true): prefetchMisses += 1
+        }
+        lock.unlock()
+        return image
+    }
+
     func insert(_ image: CGImage, for key: NSString) {
+        lock.lock()
+        insertions += 1
+        lock.unlock()
         storage.setObject(ArticleImageCacheEntry(image: image), forKey: key, cost: image.width * image.height * 4)
+    }
+
+    func snapshot() -> ArticleImageCacheMetrics {
+        lock.lock()
+        defer { lock.unlock() }
+        return .init(visibleHits: visibleHits, visibleMisses: visibleMisses, prefetchHits: prefetchHits, prefetchMisses: prefetchMisses, insertions: insertions, evictions: evictions)
+    }
+
+    func resetMetrics() {
+        lock.lock()
+        visibleHits = 0; visibleMisses = 0; prefetchHits = 0; prefetchMisses = 0
+        insertions = 0; evictions = 0
+        lock.unlock()
+    }
+
+    func cache(_ cache: NSCache<AnyObject, AnyObject>, willEvictObject obj: Any) {
+        lock.lock()
+        evictions += 1
+        lock.unlock()
     }
 }
 
@@ -46,6 +107,14 @@ actor ArticleImagePipeline {
         let trackedRequests: Int
         let memoryCacheHits: Int
         let memoryCacheMisses: Int
+        let visibleMemoryCacheHits: Int
+        let visibleMemoryCacheMisses: Int
+        let prefetchMemoryCacheHits: Int
+        let prefetchMemoryCacheMisses: Int
+        let memoryCacheInsertions: Int
+        let memoryCacheEvictions: Int
+        let memoryCacheCostLimit: Int
+        let inFlightDedupHits: Int
         let startedOperations: Int
         let completedOperations: Int
         let retiredOperations: Int
@@ -71,6 +140,7 @@ actor ArticleImagePipeline {
 
     static let shared = ArticleImagePipeline()
     static let maximumConcurrentOperations = 3
+    static let memoryCacheCostLimit = 48 * 1024 * 1024
     private static let maximumQueuedRequests = 48
     private static let maximumQueuedPrefetchRequests = 32
 
@@ -80,8 +150,7 @@ actor ArticleImagePipeline {
     private var visibleQueue: [QueuedJob] = []
     private var prefetchQueue: [QueuedJob] = []
     private var activeOperationCount = 0
-    private var memoryCacheHits = 0
-    private var memoryCacheMisses = 0
+    private var inFlightDedupHits = 0
     private var startedOperations = 0
     private var completedOperations = 0
     private var retiredOperations = 0
@@ -89,23 +158,21 @@ actor ArticleImagePipeline {
     private var visibleStarts = 0
     private var prefetchStarts = 0
 
-    init(loader: Loader? = nil) {
+    init(loader: Loader? = nil, memoryCacheCostLimit: Int = ArticleImagePipeline.memoryCacheCostLimit) {
         self.loader = loader ?? { url in try await Self.loadData(from: url) }
         cache = ArticleImageCache()
-        cache.storage.totalCostLimit = 48 * 1024 * 1024
+        cache.storage.totalCostLimit = max(1, memoryCacheCostLimit)
     }
 
     nonisolated func cachedImage(for request: ArticleImageRequest) -> CGImage? {
-        cache.image(for: request.cacheKey)
+        cache.lookup(request.cacheKey, source: .visible)
     }
 
-    func image(for request: ArticleImageRequest, demand: Demand = .visible) async throws -> CGImage {
+    func image(for request: ArticleImageRequest, demand: Demand = .visible, cacheWasChecked: Bool = false) async throws -> CGImage {
         let cacheKey = request.cacheKey
-        if let image = cache.image(for: cacheKey) {
-            memoryCacheHits += 1
+        if let image = cacheWasChecked ? cache.image(for: cacheKey) : cache.lookup(cacheKey, source: demand.cacheLookupSource) {
             return image
         }
-        memoryCacheMisses += 1
 
         let consumerID = UUID()
         return try await withTaskCancellationHandler {
@@ -128,12 +195,18 @@ actor ArticleImagePipeline {
     }
 
     func metrics() -> Metrics {
-        .init(
+        let cacheMetrics = cache.snapshot()
+        return .init(
             activeOperations: activeOperationCount,
             queuedVisibleRequests: visibleQueue.count,
             queuedPrefetchRequests: prefetchQueue.count,
             trackedRequests: jobs.values.reduce(0) { $0 + $1.count },
-            memoryCacheHits: memoryCacheHits, memoryCacheMisses: memoryCacheMisses,
+            memoryCacheHits: cacheMetrics.visibleHits + cacheMetrics.prefetchHits,
+            memoryCacheMisses: cacheMetrics.visibleMisses + cacheMetrics.prefetchMisses,
+            visibleMemoryCacheHits: cacheMetrics.visibleHits, visibleMemoryCacheMisses: cacheMetrics.visibleMisses,
+            prefetchMemoryCacheHits: cacheMetrics.prefetchHits, prefetchMemoryCacheMisses: cacheMetrics.prefetchMisses,
+            memoryCacheInsertions: cacheMetrics.insertions, memoryCacheEvictions: cacheMetrics.evictions,
+            memoryCacheCostLimit: cache.storage.totalCostLimit, inFlightDedupHits: inFlightDedupHits,
             startedOperations: startedOperations, completedOperations: completedOperations,
             retiredOperations: retiredOperations, maximumActiveOperations: maximumActiveOperations,
             visibleStarts: visibleStarts, prefetchStarts: prefetchStarts
@@ -141,7 +214,8 @@ actor ArticleImagePipeline {
     }
 
     func resetMetrics() {
-        memoryCacheHits = 0; memoryCacheMisses = 0; startedOperations = 0; completedOperations = 0
+        cache.resetMetrics()
+        inFlightDedupHits = 0; startedOperations = 0; completedOperations = 0
         retiredOperations = 0; maximumActiveOperations = activeOperationCount; visibleStarts = 0; prefetchStarts = 0
     }
 
@@ -165,6 +239,7 @@ actor ArticleImagePipeline {
         }
 
         if let generation = coalescibleGeneration(for: request), var job = job(for: request, generation: generation) {
+            inFlightDedupHits += 1
             job.waiters[consumerID] = continuation
             store(job, for: request)
             if demand == .visible { promote(request, generation: generation) }
@@ -347,6 +422,15 @@ actor ArticleImagePipeline {
     }
 }
 
+private extension ArticleImagePipeline.Demand {
+    var cacheLookupSource: ArticleImageCacheLookupSource {
+        switch self {
+        case .visible: .visible
+        case .prefetch: .prefetch
+        }
+    }
+}
+
 private extension ArticleImageRequest {
     var cacheKey: NSString { "\(url.absoluteString)|\(maxPixelDimension)" as NSString }
 }
@@ -385,7 +469,7 @@ struct ArticleImageView: View {
             }
             image = nil
             do {
-                let loadedImage = try await ArticleImagePipeline.shared.image(for: request)
+                let loadedImage = try await ArticleImagePipeline.shared.image(for: request, cacheWasChecked: true)
                 try Task.checkCancellation()
                 image = loadedImage
             } catch is CancellationError {
