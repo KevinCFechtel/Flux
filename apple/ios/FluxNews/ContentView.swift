@@ -84,12 +84,6 @@ private enum IOSMarkReadWorkflow: Equatable {
     case readAndNext
 }
 
-enum NewsNavigationLayout {
-    static func usesSplitView(for idiom: UIUserInterfaceIdiom) -> Bool {
-        idiom == .pad
-    }
-}
-
 enum IOSNavigationButtonPresentation {
     static let imageName = "FluxNewsTemplate"
     static let accessibilityLabel = String(localized: "Choose news scope")
@@ -131,7 +125,7 @@ struct ContentView: View {
     @State private var searchPresented = false
     @State private var diagnosticsPresented = false
     @State private var settingsPresented = false
-    @State private var iPadColumnVisibility: NavigationSplitViewVisibility = .all
+    @State private var splitColumnVisibility: NavigationSplitViewVisibility = .all
     @State private var browser: IOSBrowserURL?
     @State private var articleOpenError: String?
     @State private var articleOpenGeneration = 0
@@ -148,8 +142,8 @@ struct ContentView: View {
     @State private var syncPresentation: IOSSyncButtonPresentation.State = .idle
     @State private var syncPresentationGeneration: UInt64 = 0
 
-    private var usesSplitNavigation: Bool {
-        NewsNavigationLayout.usesSplitView(for: UIDevice.current.userInterfaceIdiom)
+    private var adaptivePresentation: AdaptivePresentation {
+        AdaptivePresentationPolicy.presentation(horizontalSizeClass: horizontalSizeClass)
     }
 
     var body: some View {
@@ -194,21 +188,21 @@ struct ContentView: View {
     @ViewBuilder
     private var newsreader: some View {
         Group {
-            if usesSplitNavigation { iPadNewsreader } else { iPhoneNewsreader }
+            if adaptivePresentation.usesPersistentSplitNavigation { splitNewsreader } else { compactNewsreader }
         }
         // These presentations outlive an article-navigation reset.
         .sheet(isPresented: $navigationPresented) {
             NavigationStack {
-                NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented, presentation: .sheet, onSearch: openSearch)
+                NewsNavigationView(store: newsreaderStore, sheetPresented: $navigationPresented, presentation: .sheet, onSearch: openSearch)
                     .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { navigationPresented = false } } }
             }
         }
         .sheet(isPresented: $settingsPresented) { SettingsView(store: newsreaderStore, bootstrapper: bootstrapper, onDiagnostics: { diagnosticsPresented = true }) }
     }
 
-    private var iPadNewsreader: some View {
-        NavigationSplitView(columnVisibility: $iPadColumnVisibility) {
-            NewsNavigationView(store: newsreaderStore, iPhoneSheetPresented: $navigationPresented, presentation: .sidebar, onSearch: openSearch).toolbar(removing: .sidebarToggle)
+    private var splitNewsreader: some View {
+        NavigationSplitView(columnVisibility: $splitColumnVisibility) {
+            NewsNavigationView(store: newsreaderStore, sheetPresented: $navigationPresented, presentation: .sidebar, onSearch: openSearch).toolbar(removing: .sidebarToggle)
         } detail: {
             if searchPresented {
                 searchView
@@ -218,7 +212,7 @@ struct ContentView: View {
         }
     }
 
-    private var iPhoneNewsreader: some View {
+    private var compactNewsreader: some View {
         IOSArticleNavigationHost(resetRevision: newsreaderStore.scrollResetRevision) {
             articleList
                 .navigationDestination(isPresented: $searchPresented) { searchView }
@@ -654,7 +648,7 @@ private struct ArticleListNavigationChrome<Content: View>: View {
 
 extension ContentView {
     private var usesReaderInspector: Bool {
-        ReaderPresentationPolicy.kind(isPad: usesSplitNavigation, isRegularWidth: horizontalSizeClass == .regular) == .inspector
+        adaptivePresentation.readerPresentationKind == .inspector
     }
 
     private var readerSheetBinding: Binding<IOSReaderArticle?> {

@@ -80,14 +80,27 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertNil(IOSScopeNavigation.nextScope(after: .starred, catalog: catalog, hidingEmpty: false, counts: [:]))
     }
 
-    func testNewsNavigationPresentationMatchesDeviceRoutes() {
+    func testNewsNavigationPresentationMatchesAdaptiveRoutes() {
         XCTAssertEqual(NewsNavigationPresentation.sidebar, .sidebar)
         XCTAssertEqual(NewsNavigationPresentation.sheet, .sheet)
     }
 
-    func testNewsNavigationUsesSplitViewOnlyOnIPad() {
-        XCTAssertFalse(NewsNavigationLayout.usesSplitView(for: .phone))
-        XCTAssertTrue(NewsNavigationLayout.usesSplitView(for: .pad))
+    func testAdaptivePresentationUsesTransientNavigationWhenCompact() {
+        let presentation = AdaptivePresentationPolicy.presentation(horizontalSizeClass: .compact)
+        XCTAssertEqual(presentation, .compact)
+        XCTAssertFalse(presentation.usesPersistentSplitNavigation)
+    }
+
+    func testAdaptivePresentationUsesSplitNavigationWhenRegularRegardlessOfDeviceIdentity() {
+        let presentation = AdaptivePresentationPolicy.presentation(horizontalSizeClass: .regular)
+        XCTAssertEqual(presentation, .regular)
+        XCTAssertTrue(presentation.usesPersistentSplitNavigation)
+    }
+
+    func testAdaptivePresentationDoesNotChangeNavigationResetIdentity() {
+        let resetRevision: UInt64 = 7
+        XCTAssertEqual(IOSArticleNavigationPresentation.identity(for: resetRevision), resetRevision)
+        XCTAssertTrue(AdaptivePresentation.compact != AdaptivePresentation.regular)
     }
 
     func testIPhoneNavigationButtonUsesTheFluxTemplateAsset() {
@@ -1816,10 +1829,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleOpenRouting.action(clickOnNews: .openLink, openInMiniflux: false), .original)
     }
 
-    func testReaderPresentationUsesInspectorOnlyOnRegularWidthIPad() {
-        XCTAssertEqual(ReaderPresentationPolicy.kind(isPad: true, isRegularWidth: true), .inspector)
-        XCTAssertEqual(ReaderPresentationPolicy.kind(isPad: true, isRegularWidth: false), .sheet)
-        XCTAssertEqual(ReaderPresentationPolicy.kind(isPad: false, isRegularWidth: true), .sheet)
+    func testReaderPresentationFollowsAdaptivePresentationRatherThanDeviceIdentity() {
+        XCTAssertEqual(AdaptivePresentation.compact.readerPresentationKind, .sheet)
+        XCTAssertEqual(AdaptivePresentation.regular.readerPresentationKind, .inspector)
+        XCTAssertEqual(AdaptivePresentationPolicy.presentation(horizontalSizeClass: .regular).readerPresentationKind, .inspector)
     }
 
     func testReaderPresentationExposesTheExplicitDismissAction() {
