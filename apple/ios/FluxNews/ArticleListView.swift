@@ -724,6 +724,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private(set) var articlePresentationApplicationCount = 0
     private(set) var feedIconPresentationApplicationCount = 0
     private(set) var scrolloverRearmCount = 0
+#if DEBUG
+    private(set) var scrollResetApplicationCountForTesting = 0
+    private(set) var lastScrollResetOffsetForTesting: CGPoint?
+    var contentOffsetForTesting: CGPoint { collectionView.contentOffset }
+    var scrolloverLayoutGenerationForTesting: UInt64 { scrolloverLayoutGeneration }
+#endif
 
     private static func makeListLayout() -> UICollectionViewLayout {
         var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
@@ -871,7 +877,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         if feedIconRequestChanged { requestFeedIconsForVisibleCells() }
         if resetChanged {
             invalidateScrolloverGeometry()
-            collectionView.setContentOffset(CGPoint(x: 0, y: -collectionView.adjustedContentInset.top), animated: false)
+            let naturalTop = CGPoint(x: 0, y: -collectionView.adjustedContentInset.top)
+            collectionView.setContentOffset(naturalTop, animated: false)
+#if DEBUG
+            scrollResetApplicationCountForTesting &+= 1
+            lastScrollResetOffsetForTesting = naturalTop
+#endif
         }
     }
 

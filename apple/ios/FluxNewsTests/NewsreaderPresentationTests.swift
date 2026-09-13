@@ -106,9 +106,15 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(presentation.usesPersistentSplitNavigation)
     }
 
-    func testAdaptivePresentationDoesNotChangeNavigationResetIdentity() {
-        let resetRevision: UInt64 = 7
-        XCTAssertEqual(IOSArticleNavigationPresentation.identity(for: resetRevision), resetRevision)
+    @MainActor
+    func testAdaptivePresentationDoesNotChangeSemanticScrollResetRevision() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let resetRevision = store.scrollResetRevision
+
+        _ = AdaptiveShellTransitionPolicy.navigationSheetPresented(after: .compact, wasPresented: true)
+        _ = AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .regular)
+
+        XCTAssertEqual(store.scrollResetRevision, resetRevision)
         XCTAssertTrue(AdaptivePresentation.compact != AdaptivePresentation.regular)
     }
 
@@ -147,14 +153,14 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testAdaptiveShellTransitionDoesNotApplyAnotherTimelineSnapshot() {
+    func testSemanticScrollResetPreservesTimelineControllerAndAvoidsStructuralSnapshot() {
         let bridge = IOSUIKitArticleTimelinePresentationBridge()
         let controller = makeTimelineController(bridge: bridge)
+        let controllerIdentity = ObjectIdentifier(controller)
         let structuralReconciliations = controller.structuralReconciliationCount
         let snapshotApplications = controller.structuralSnapshotApplicationCount
+        let scrolloverGeneration = controller.scrolloverLayoutGenerationForTesting
 
-        _ = AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .regular)
-        _ = AdaptiveShellTransitionPolicy.splitColumnVisibility(after: .compact)
         controller.update(
             structuralState: timelineStructuralState([timelineArticle(id: 1), timelineArticle(id: 2)], revision: 1),
             presentationBridge: bridge,
@@ -163,13 +169,18 @@ final class NewsreaderPresentationTests: XCTestCase {
             previewLines: .standard,
             iconVariant: .normal,
             feedIconRequestRevision: 0,
-            scrollResetRevision: 0,
+            scrollResetRevision: 1,
             markReadOnScrolloverEnabled: false,
             showsRefreshControl: false
         )
 
+        XCTAssertEqual(ObjectIdentifier(controller), controllerIdentity)
         XCTAssertEqual(controller.structuralReconciliationCount, structuralReconciliations)
         XCTAssertEqual(controller.structuralSnapshotApplicationCount, snapshotApplications)
+        XCTAssertEqual(controller.scrollResetApplicationCountForTesting, 1)
+        XCTAssertEqual(controller.lastScrollResetOffsetForTesting, .init(x: 0, y: 0))
+        XCTAssertEqual(controller.contentOffsetForTesting, .init(x: 0, y: 0))
+        XCTAssertGreaterThan(controller.scrolloverLayoutGenerationForTesting, scrolloverGeneration)
     }
 
     func testIPhoneNavigationButtonUsesTheFluxTemplateAsset() {
@@ -184,10 +195,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(IOSNavigationBranding.iconUsesSolidAccentColor)
     }
 
-    func testArticleNavigationHostUsesTheExistingResetRevisionAsItsIdentity() {
-        XCTAssertEqual(IOSArticleNavigationPresentation.identity(for: 0), 0)
-        XCTAssertEqual(IOSArticleNavigationPresentation.identity(for: 1), 1)
-        XCTAssertEqual(IOSArticleNavigationPresentation.identity(for: 2), 2)
+    func testArticleNavigationUsesSystemLargeTitlePresentation() {
+        XCTAssertEqual(IOSArticleNavigationPresentation.titleDisplayMode, .large)
     }
 
     func testArticleListTitleDoesNotContainSelectionCount() {

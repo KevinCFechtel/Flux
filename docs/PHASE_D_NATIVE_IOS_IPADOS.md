@@ -490,6 +490,16 @@ article count. Where supported, iOS uses the native navigation subtitle for the
 optional current-scope count; older supported iOS versions retain the native
 trailing-counter fallback. System Large Title and collapsed navigation behavior
 is authoritative and is not recreated through custom scroll tracking.
+
+On iOS, a semantic scope/filter/sort reset stays within the existing UIKit
+Timeline controller: it resets the collection view to its natural top position
+and rebaselines Scrollover geometry without re-identifying the adaptive detail
+subtree. The system navigation controller derives Large Title state from that
+normal scroll-edge position. Device acceptance must verify a populated Timeline
+after collapsing its Large Title, then after each scope, filter, and sort reset:
+the Timeline returns to its natural start, the Large Title expands naturally,
+there is no Timeline teardown/flicker, and subsequent Scrollover remains
+correct.
 Sync activity is communicated by the normal Newsreader UI; an empty scope shows
 `News syncing…` while Sync is active and `No News` after it completes, without
 an additional custom splash screen.

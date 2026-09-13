@@ -95,24 +95,10 @@ enum IOSReaderDismissalPresentation {
 }
 
 enum IOSArticleNavigationPresentation {
-    // The navigation controller, rather than the Article ScrollView, owns the
-    // native large-title collapse state. Keep both lifecycles on this signal.
-    static func identity(for resetRevision: UInt64) -> UInt64 { resetRevision }
-}
-
-struct IOSArticleNavigationHost<Content: View>: View {
-    let resetRevision: UInt64
-    @ViewBuilder let content: () -> Content
-
-    init(resetRevision: UInt64, @ViewBuilder content: @escaping () -> Content) {
-        self.resetRevision = resetRevision
-        self.content = content
-    }
-
-    var body: some View {
-        NavigationStack { content() }
-            .id(IOSArticleNavigationPresentation.identity(for: resetRevision))
-    }
+    // UIKit derives system Large Title state from the Timeline collection view's
+    // scroll edge. Semantic resets therefore preserve view identity and move the
+    // collection view to its natural top position.
+    static let titleDisplayMode: NavigationBarItem.TitleDisplayMode = .large
 }
 
 struct ContentView: View {
@@ -234,14 +220,13 @@ struct ContentView: View {
                     }
                 }
         }
-        .id(IOSArticleNavigationPresentation.identity(for: newsreaderStore.scrollResetRevision))
     }
 
     private var articleList: some View {
         ArticleListNavigationChrome(store: newsreaderStore) {
             ArticleListView(store: newsreaderStore, onArticleTap: openArticle, onArticleAction: handleArticleAction)
         }
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(IOSArticleNavigationPresentation.titleDisplayMode)
             .toolbar {
                 ToolbarItemGroup(placement: .bottomBar) {
                     Button { Task { await performManualSync() } } label: {
