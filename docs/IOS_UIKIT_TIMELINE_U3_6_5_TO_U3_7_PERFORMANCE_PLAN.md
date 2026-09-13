@@ -205,6 +205,44 @@ sizing is a hit without a solve, width changes solve again, and snapshots reset.
 
 ### Physical-device protocol
 
+#### Release-compatible diagnostic build
+
+`FLUX_PERFORMANCE_DIAGNOSTICS` is an explicit Swift compilation condition for
+physical Timeline profiling. It retains Release optimization while compiling the
+local Timeline Performance controls, snapshots, the Scrollover diagnostic log,
+and a few low-frequency Timeline signposts. It does not define `DEBUG`.
+
+Build a signed device app with:
+
+```sh
+./apple/ios/Build/build-app.sh \
+  --configuration Release \
+  --performance-diagnostics \
+  --destination 'generic/platform=iOS'
+```
+
+The flag is accepted only with `Release` and passes
+`SWIFT_ACTIVE_COMPILATION_CONDITIONS=FLUX_PERFORMANCE_DIAGNOSTICS` to Xcode.
+An ordinary `Release` build omits the condition, so the Timeline Performance
+controls, diagnostics owner, Scrollover diagnostic logging, and signposts are
+not compiled into the production app.
+
+In a diagnostic build, open **Settings → Developer Diagnostics**. **Reset
+Timeline Metrics** clears the Timeline, prepared-layout, and image-pipeline
+counters; **Print Timeline Metrics** emits one local snapshot. Instruments can
+use the `timeline-performance` signpost category to align the first drag
+(`Timeline interaction began`) with the rare geometry and snapshot events. No
+per-scroll callback text logging is added.
+
+For an idle-to-first-scroll profiling run on a physical device:
+
+1. Install and run the Release diagnostic build, then allow initial sync and rendering to settle.
+2. Perform one warm scroll, leave the Timeline idle for 10–20 seconds, and reset metrics.
+3. Begin one slow scroll, stop, and print the snapshot; capture signposts in the same interval.
+4. Repeat about ten times and note whether a hitch aligns with prepared-layout fallback, image miss/decode, snapshot or reconciliation work, geometry invalidation, Scrollover work, or store/Core activity.
+
+This procedure collects evidence only; it does not establish a performance conclusion.
+
 For each run, reset Timeline and image-pipeline metrics immediately before
 scrolling, record approximate traversed rows and elapsed run time, then capture
 both snapshots. Run a Release build on the reference iPhone for: a cold,

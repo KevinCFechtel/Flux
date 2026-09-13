@@ -19,7 +19,7 @@ struct DeveloperDiagnosticsView: View {
                     }
                     Text("Read-only discovery; no legacy data is imported or modified.").font(.footnote).foregroundStyle(.secondary)
                 }
-#if DEBUG
+#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
                 Section("Timeline Performance") {
                     Button("Reset Timeline Metrics") {
                         Task { await IOSUIKitTimelinePerformanceDiagnostics.resetAndPrint() }

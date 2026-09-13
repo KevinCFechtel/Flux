@@ -1,5 +1,8 @@
 import SwiftUI
 import UIKit
+#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
+import OSLog
+#endif
 
 enum IOSArticleScrollDirection: Equatable {
     case forward
@@ -719,6 +722,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
     private let preparedLayoutCoordinator = IOSUIKitArticleLayoutPreparationCoordinator()
     private let performanceMetrics = IOSUIKitTimelinePerformanceMetrics()
+#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
+    private static let performanceSignposter = OSSignposter(
+        subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews",
+        category: "timeline-performance"
+    )
+#endif
     private(set) var structuralReconciliationCount = 0
     private(set) var structuralSnapshotApplicationCount = 0
     private(set) var articlePresentationApplicationCount = 0
@@ -786,6 +795,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         geometryIdentity = newIdentity
         geometryGeneration &+= 1
         performanceMetrics.recordGeometryChange()
+#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
+        Self.performanceSignposter.emitEvent("Timeline geometry changed")
+#endif
         invalidateScrolloverGeometry()
         cancelIncompatibleImagePrefetch()
         for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
@@ -810,7 +822,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         showsRefreshControl newShowsRefreshControl: Bool
     ) {
         loadViewIfNeeded()
-#if DEBUG
+#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
         IOSUIKitTimelinePerformanceDiagnostics.currentController = self
 #endif
 
@@ -857,6 +869,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             dataSource.apply(snapshot, animatingDifferences: false)
             structuralSnapshotApplicationCount &+= 1
             performanceMetrics.recordSnapshotApply()
+#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
+            Self.performanceSignposter.emitEvent("Timeline snapshot applied")
+#endif
         }
         var needsLayoutInvalidation = false
         if structuralChanged || iconVariantChanged {
@@ -1019,6 +1034,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
+        Self.performanceSignposter.emitEvent("Timeline interaction began")
+#endif
         onMeaningfulInteraction?()
         setScrolloverPhase(.interacting)
         sampleScrolloverGeometry()
@@ -1306,7 +1324,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 }
 
-#if DEBUG
+#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
 @MainActor
 enum IOSUIKitTimelinePerformanceDiagnostics {
     weak static var currentController: IOSUIKitArticleTimelineController?

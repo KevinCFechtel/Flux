@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 import UIKit
-#if DEBUG
+#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
 import OSLog
 #endif
 
@@ -248,7 +248,7 @@ struct ArticleRowContent: Equatable {
 
 @MainActor
 @Observable final class NewsreaderStore {
-#if DEBUG
+#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
     private static let scrolloverDiagnosticLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "scrollover-diagnostic")
 #endif
     private enum Key {
@@ -1229,13 +1229,13 @@ struct ArticleRowContent: Equatable {
     }
 
     private func scrolloverDiagnostic(_ message: String) {
-#if DEBUG
+#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
         Self.scrolloverDiagnosticLog.debug("\(message, privacy: .public)")
 #endif
     }
 
     private func scrolloverDiagnosticError(ids: [Int64], error: Error) {
-#if DEBUG
+#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
         Self.scrolloverDiagnosticLog.debug("mutation failure ids=\(ids) error=\(String(reflecting: error), privacy: .private)")
 #endif
     }
