@@ -162,6 +162,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             mode: .visual,
             previewLines: .standard,
             iconVariant: .normal,
+            feedIconRequestRevision: 0,
             scrollResetRevision: 0,
             markReadOnScrolloverEnabled: false,
             showsRefreshControl: false
@@ -549,6 +550,7 @@ final class NewsreaderPresentationTests: XCTestCase {
                 mode: .visual,
                 previewLines: .standard,
                 iconVariant: .normal,
+                feedIconRequestRevision: 0,
                 scrollResetRevision: 0,
                 markReadOnScrolloverEnabled: false,
                 showsRefreshControl: false
@@ -664,6 +666,99 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testNavigationRefreshMakesNegativeFeedIconResultRequestableAgain() async throws {
+        let loader = FeedIconLoader(results: [.success(nil), .success(try imageData(width: 40, height: 40))])
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setFeedIconLoaderForTesting { _, _ in try loader.load() }
+
+        let unavailable = store.feedIconPresentationState(for: 10, variant: .normal)
+        store.requestFeedIcon(10, variant: .normal, now: 0)
+        await waitForFeedIconState(unavailable, matching: .unavailable)
+        XCTAssertEqual(loader.callCount, 1)
+
+        store.invalidateFeedIconAvailabilityForTesting()
+        let refreshed = store.feedIconPresentationState(for: 10, variant: .normal)
+        XCTAssertFalse(refreshed === unavailable)
+        store.requestFeedIcon(10, variant: .normal, now: 1)
+        await waitForFeedIconState(refreshed, matching: .available)
+
+        XCTAssertNotNil(refreshed.image)
+        XCTAssertEqual(loader.callCount, 2)
+    }
+
+    @MainActor
+    func testFeedIconDetachLetsSameKeyRequestAgainAndRejectsOldSessionCompletion() async throws {
+        let oldLoader = FeedIconLoadGate(result: .success(nil))
+        let newData = try imageData(width: 40, height: 40)
+        let newLoader = FeedIconLoader(results: [.success(newData)])
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setFeedIconLoaderForTesting { _, _ in try oldLoader.load() }
+
+        let oldState = store.feedIconPresentationState(for: 10, variant: .normal)
+        store.requestFeedIcon(10, variant: .normal, now: 0)
+        await oldLoader.waitUntilStarted()
+
+        store.detach()
+        store.setFeedIconLoaderForTesting { _, _ in try newLoader.load() }
+        let newState = store.feedIconPresentationState(for: 10, variant: .normal)
+        store.requestFeedIcon(10, variant: .normal, now: 1)
+        await waitForFeedIconState(newState, matching: .available)
+        XCTAssertEqual(newLoader.callCount, 1)
+
+        oldLoader.release()
+        await oldLoader.waitUntilReturned()
+        for _ in 0..<100 { await Task.yield() }
+
+        XCTAssertEqual(oldState.loadState, .loading)
+        XCTAssertEqual(newState.loadState, .available)
+        XCTAssertNotNil(store.timelinePresentationBridge.feedIcon(for: 10, variant: .normal))
+    }
+
+    @MainActor
+    func testFeedIconBridgeResetRemovesCachedIconsAndPreservesArticlePresentation() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let article = timelineArticle(id: 1)
+        bridge.replaceArticleStates([1: .init(isRead: true, isStarred: true, revision: 4)])
+        bridge.publishFeedIcon(.init(key: .init(feedID: 10, variant: .normal), image: testImage(width: 30, height: 30), revision: 1))
+
+        bridge.resetFeedIcons()
+
+        XCTAssertNil(bridge.feedIcon(for: 10, variant: .normal))
+        XCTAssertEqual(bridge.articleState(for: 1, fallback: article), .init(isRead: true, isStarred: true, revision: 4))
+    }
+
+    @MainActor
+    func testFeedIconBridgeResetClearsSubscribedControllerCellsWithoutSnapshotWork() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+        let cell = makeUIKitArticleCell(mode: .visual, width: 390, articleID: 1, feedID: 10)
+        let structuralCount = controller.structuralSnapshotApplicationCount
+
+        controller.applyFeedIconPresentation(.init(key: .init(feedID: 10, variant: .normal), image: testImage(width: 30, height: 30), revision: 1), to: [cell])
+        XCTAssertNotNil(cell.feedIconImageForTesting)
+
+        bridge.resetFeedIcons()
+        XCTAssertEqual(controller.feedIconPresentationApplicationCount, 1)
+        controller.clearFeedIconPresentation(to: [cell])
+
+        XCTAssertNil(cell.feedIconImageForTesting)
+        XCTAssertEqual(controller.structuralSnapshotApplicationCount, structuralCount)
+    }
+
+    @MainActor
+    func testFeedIconBridgePublishesNormallyAfterReset() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+
+        bridge.publishFeedIcon(.init(key: .init(feedID: 10, variant: .normal), image: testImage(width: 20, height: 20), revision: 1))
+        bridge.resetFeedIcons()
+        bridge.publishFeedIcon(.init(key: .init(feedID: 10, variant: .normal), image: testImage(width: 30, height: 30), revision: 1))
+
+        XCTAssertNotNil(bridge.feedIcon(for: 10, variant: .normal))
+        XCTAssertEqual(controller.feedIconPresentationApplicationCount, 3)
+    }
+
+    @MainActor
     func testExplicitUnreadDeltaRearmsOnlyTargetedScrolloverArticle() {
         let bridge = IOSUIKitArticleTimelinePresentationBridge()
         let controller = makeTimelineController(bridge: bridge)
@@ -697,6 +792,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             mode: .visual,
             previewLines: .standard,
             iconVariant: .normal,
+            feedIconRequestRevision: 0,
             scrollResetRevision: 0,
             markReadOnScrolloverEnabled: false,
             showsRefreshControl: false
@@ -725,6 +821,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             mode: .visual,
             previewLines: .standard,
             iconVariant: .normal,
+            feedIconRequestRevision: 0,
             scrollResetRevision: 0,
             markReadOnScrolloverEnabled: false,
             showsRefreshControl: false
@@ -2107,6 +2204,69 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(inline.count, 5)
     }
 
+}
+
+private final class FeedIconLoadGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let releaseSemaphore = DispatchSemaphore(value: 0)
+    private let result: Result<Data?, Error>
+    private var started = false
+    private var returned = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var returnWaiters: [CheckedContinuation<Void, Never>] = []
+
+    init(result: Result<Data?, Error>) {
+        self.result = result
+    }
+
+    func load() throws -> Data? {
+        let startedWaiters = withLock {
+            started = true
+            let waiters = startWaiters
+            startWaiters.removeAll()
+            return waiters
+        }
+        startedWaiters.forEach { $0.resume() }
+        releaseSemaphore.wait()
+        let completedWaiters = withLock {
+            returned = true
+            let waiters = returnWaiters
+            returnWaiters.removeAll()
+            return waiters
+        }
+        completedWaiters.forEach { $0.resume() }
+        return try result.get()
+    }
+
+    func waitUntilStarted() async {
+        await withCheckedContinuation { continuation in
+            let shouldResume = withLock {
+                if started { return true }
+                startWaiters.append(continuation)
+                return false
+            }
+            if shouldResume { continuation.resume() }
+        }
+    }
+
+    func waitUntilReturned() async {
+        await withCheckedContinuation { continuation in
+            let shouldResume = withLock {
+                if returned { return true }
+                returnWaiters.append(continuation)
+                return false
+            }
+            if shouldResume { continuation.resume() }
+        }
+    }
+
+    func release() { releaseSemaphore.signal() }
+
+    private func withLock<Value>(_ body: () -> Value) -> Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
 }
 
 private actor ImageLoadCounter {

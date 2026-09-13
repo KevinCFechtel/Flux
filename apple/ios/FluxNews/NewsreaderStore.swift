@@ -43,6 +43,11 @@ enum IOSFeedIconLoadState: Equatable {
         revision &+= 1
     }
 
+    func invalidateLoading() {
+        guard loadState == .loading else { return }
+        loadState = .idle
+    }
+
     func canRequest(at time: TimeInterval) -> Bool {
         switch loadState {
         case .idle:
@@ -57,6 +62,11 @@ enum IOSFeedIconLoadState: Equatable {
 
 enum IOSFeedIconPresentation {
     static func variant(isDark: Bool) -> FeedIconVariant { isDark ? .dark : .normal }
+}
+
+private struct IOSFeedIconRequestOwnership: Hashable {
+    let key: IOSFeedIconKey
+    let generation: UInt64
 }
 
 struct IOSNewsreaderReadRequest: Equatable {
@@ -295,7 +305,13 @@ struct ArticleRowContent: Equatable {
     private var eventSubscription: EventSubscription?
     private let defaults: UserDefaults
     private var pending = PendingNewData()
-    private var requestedFeedIcons = Set<IOSFeedIconKey>()
+    private var requestedFeedIcons = Set<IOSFeedIconRequestOwnership>()
+    // A request belongs to the active Core session and navigation/feed state.
+    // Completion may mutate presentation only while this generation still owns it.
+    private var feedIconOwnershipGeneration: UInt64 = 0
+    // Causes existing timeline controllers to request icons again after a
+    // successful navigation refresh invalidates negative results.
+    private(set) var feedIconRequestRevision: UInt64 = 0
     private var feedIconLoader: (@Sendable (Int64, FeedIconVariant) throws -> Data?)?
     private static let feedIconRetryCooldown: TimeInterval = 30
     private var scrolloverUndoTask: Task<Void, Never>?
@@ -371,7 +387,7 @@ struct ArticleRowContent: Equatable {
         selectionTotal = 0
         categoryCounts = [:]
         feedCounts = [:]
-        feedIconPresentationStates = [:]
+        invalidateFeedIconSession()
         isLoading = false
         isSyncing = false
         resetPresentationState()
@@ -419,6 +435,7 @@ struct ArticleRowContent: Equatable {
                 starredTotal = value.starredTotal
                 categoryCounts = value.categoryCounts
                 feedCounts = value.feedCounts
+                invalidateFeedIconAvailabilityAfterNavigationRefresh()
                 pending.removeAbsentFeeds(Set(value.catalog.feeds.map(\.id)))
                 publishPending()
                 if readLifecycle.ownsError(request) { errorMessage = nil }
@@ -477,12 +494,14 @@ struct ArticleRowContent: Equatable {
         } else {
             return
         }
-        guard requestedFeedIcons.insert(key).inserted else { return }
+        let ownership = IOSFeedIconRequestOwnership(key: key, generation: feedIconOwnershipGeneration)
+        guard requestedFeedIcons.insert(ownership).inserted else { return }
         state.beginLoading()
         Task { [weak self] in
             let result = await Task.detached { Result { try loader(feedID, variant) } }.value
             guard let self else { return }
-            requestedFeedIcons.remove(key)
+            guard ownership.generation == feedIconOwnershipGeneration else { return }
+            requestedFeedIcons.remove(ownership)
             guard let state = feedIconPresentationStates[key] else { return }
             switch result {
             case let .success(data?):
@@ -503,6 +522,10 @@ struct ArticleRowContent: Equatable {
 #if DEBUG
     func setFeedIconLoaderForTesting(_ loader: @escaping @Sendable (Int64, FeedIconVariant) throws -> Data?) {
         feedIconLoader = loader
+    }
+
+    func invalidateFeedIconAvailabilityForTesting() {
+        invalidateFeedIconAvailabilityAfterNavigationRefresh()
     }
 #endif
 
@@ -951,6 +974,27 @@ struct ArticleRowContent: Equatable {
             setStartupFeedID(nil)
             setStartupScope(.allNews)
         }
+    }
+
+    private func invalidateFeedIconSession() {
+        feedIconOwnershipGeneration &+= 1
+        requestedFeedIcons = []
+        feedIconPresentationStates = [:]
+        feedIconRequestRevision &+= 1
+        timelinePresentationBridge.resetFeedIcons()
+    }
+
+    // Navigation is the Core-owned feed-state refresh. A nil response remains
+    // cached until then, while decoded icons stay valid. Requests already in
+    // flight belong to the prior feed state and cannot complete into this one.
+    private func invalidateFeedIconAvailabilityAfterNavigationRefresh() {
+        feedIconOwnershipGeneration &+= 1
+        requestedFeedIcons = []
+        for state in feedIconPresentationStates.values {
+            state.invalidateLoading()
+        }
+        feedIconPresentationStates = feedIconPresentationStates.filter { $0.value.loadState != .unavailable }
+        feedIconRequestRevision &+= 1
     }
 
     func markMeaningfulInteraction() { hasMeaningfullyInteracted = true }

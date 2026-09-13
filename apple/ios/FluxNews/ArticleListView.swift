@@ -576,6 +576,13 @@ final class IOSUIKitArticleTimelinePresentationBridge {
         }
     }
 
+    func resetFeedIcons() {
+        feedIcons = [:]
+        for subscription in feedIconSubscribers.values {
+            subscription.controller?.clearFeedIconPresentation()
+        }
+    }
+
     func articleState(for id: Int64, fallback: ArticleSummary) -> IOSUIKitArticlePresentationState {
         articleStates[id] ?? .init(isRead: fallback.isRead, isStarred: fallback.isStarred, revision: 0)
     }
@@ -611,6 +618,7 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
     let iconVariant: FeedIconVariant
+    let feedIconRequestRevision: UInt64
     let scrollResetRevision: UInt64
     let markReadOnScrolloverEnabled: Bool
     let showsRefreshControl: Bool
@@ -659,6 +667,7 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
             mode: mode,
             previewLines: previewLines,
             iconVariant: iconVariant,
+            feedIconRequestRevision: feedIconRequestRevision,
             scrollResetRevision: scrollResetRevision,
             markReadOnScrolloverEnabled: markReadOnScrolloverEnabled,
             showsRefreshControl: showsRefreshControl
@@ -693,6 +702,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private var mode: ArticlePresentationMode = .visual
     private var previewLines: ArticlePreviewLines = .standard
     private var iconVariant: FeedIconVariant = .normal
+    private var feedIconRequestRevision: UInt64?
     private var scrollResetRevision: UInt64?
     private var markReadOnScrolloverEnabled = false
     private var showsRefreshControl = true
@@ -788,6 +798,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         mode newMode: ArticlePresentationMode,
         previewLines newPreviewLines: ArticlePreviewLines,
         iconVariant newIconVariant: FeedIconVariant,
+        feedIconRequestRevision newFeedIconRequestRevision: UInt64,
         scrollResetRevision newScrollResetRevision: UInt64,
         markReadOnScrolloverEnabled newMarkReadOnScrolloverEnabled: Bool,
         showsRefreshControl newShowsRefreshControl: Bool
@@ -800,11 +811,13 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         let structuralChanged = structuralRevision != structuralState.revision
         let layoutInputsChanged = mode != newMode || previewLines != newPreviewLines
         let iconVariantChanged = iconVariant != newIconVariant
+        let feedIconRequestChanged = feedIconRequestRevision != nil && feedIconRequestRevision != newFeedIconRequestRevision
         let resetChanged = scrollResetRevision != nil && scrollResetRevision != newScrollResetRevision
 
         mode = newMode
         previewLines = newPreviewLines
         iconVariant = newIconVariant
+        feedIconRequestRevision = newFeedIconRequestRevision
         scrollResetRevision = newScrollResetRevision
         markReadOnScrolloverEnabled = newMarkReadOnScrolloverEnabled
         showsRefreshControl = newShowsRefreshControl
@@ -855,6 +868,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             collectionView.collectionViewLayout.invalidateLayout()
         }
         if layoutInputsChanged { updateGeometryIfNeeded() }
+        if feedIconRequestChanged { requestFeedIconsForVisibleCells() }
         if resetChanged {
             invalidateScrolloverGeometry()
             collectionView.setContentOffset(CGPoint(x: 0, y: -collectionView.adjustedContentInset.top), animated: false)
@@ -922,6 +936,27 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             guard let id = cell.representedArticleID,
                   let item = itemsByID[id], item.article.feedId == delta.key.feedID else { continue }
             cell.updateFeedIcon(image: delta.image, title: item.content.article.feedTitle)
+        }
+    }
+
+    func clearFeedIconPresentation() {
+        feedIconPresentationApplicationCount &+= 1
+        clearFeedIconPresentation(to: collectionView.visibleCells.compactMap { $0 as? IOSUIKitArticleCell })
+    }
+
+    func clearFeedIconPresentation(to cells: [IOSUIKitArticleCell]) {
+        for cell in cells {
+            guard let id = cell.representedArticleID, let item = itemsByID[id] else { continue }
+            cell.updateFeedIcon(image: nil, title: item.content.article.feedTitle)
+        }
+    }
+
+    private func requestFeedIconsForVisibleCells() {
+        for cell in collectionView.visibleCells {
+            guard let id = (cell as? IOSUIKitArticleCell)?.representedArticleID,
+                  let item = itemsByID[id]
+            else { continue }
+            onRequestFeedIcon?(item.content.article.feedId, iconVariant)
         }
     }
 
@@ -1935,6 +1970,7 @@ struct ArticleListView: View {
                     mode: store.articlePresentationMode,
                     previewLines: store.articlePreviewLines,
                     iconVariant: iconVariant,
+                    feedIconRequestRevision: store.feedIconRequestRevision,
                     scrollResetRevision: store.scrollResetRevision,
                     markReadOnScrolloverEnabled: store.markReadOnScrolloverEnabled,
                     showsRefreshControl: true,

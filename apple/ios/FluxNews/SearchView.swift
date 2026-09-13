@@ -77,6 +77,7 @@ private struct SearchResultsContent: View {
                     mode: newsreaderStore.articlePresentationMode,
                     previewLines: newsreaderStore.articlePreviewLines,
                     iconVariant: iconVariant,
+                    feedIconRequestRevision: newsreaderStore.feedIconRequestRevision,
                     scrollResetRevision: 0,
                     markReadOnScrolloverEnabled: false,
                     showsRefreshControl: false,
