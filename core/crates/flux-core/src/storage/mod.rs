@@ -2863,7 +2863,11 @@ impl Store {
         Self::query_articles_locked(&connection, query)
     }
 
-    pub fn article_page(&self, query: &ArticleQuery) -> Result<ArticlePage, CoreError> {
+    pub fn article_page(
+        &self,
+        query: &ArticleQuery,
+        include_total: bool,
+    ) -> Result<ArticlePage, CoreError> {
         if query.limit == 0 {
             return Err(CoreError::data("article page limit must be positive"));
         }
@@ -2871,9 +2875,13 @@ impl Store {
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
-        let mut total_query = query.clone();
-        total_query.cursor = None;
-        let total = Self::count_articles_locked(&connection, &total_query)?;
+        let total = if include_total {
+            let mut total_query = query.clone();
+            total_query.cursor = None;
+            Some(Self::count_articles_locked(&connection, &total_query)?)
+        } else {
+            None
+        };
         let mut fetch_query = query.clone();
         fetch_query.limit = query.limit.saturating_add(1);
         let mut articles = Self::query_articles_locked(&connection, &fetch_query)?;

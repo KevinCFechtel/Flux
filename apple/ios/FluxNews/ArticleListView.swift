@@ -323,8 +323,8 @@ final class IOSUIKitScrolloverGeometryTracker {
     private static let bottomTolerance: CGFloat = 0.5
     private static let maximumRetainedGeometryCount = 96
 
-    private var orderedIDs: [Int64] = []
     private var positions: [Int64: Int] = [:]
+    private var nextPosition = 0
     private var emittedIDs = Set<Int64>()
     private var observedVisibleIDs = Set<Int64>()
     private var retainedFrames: [Int64: CGRect] = [:]
@@ -335,9 +335,8 @@ final class IOSUIKitScrolloverGeometryTracker {
     var retainedGeometryCount: Int { retainedFrames.count }
 
     func updateSnapshot(_ ids: [Int64]) {
-        guard ids != orderedIDs else { return }
-        orderedIDs = ids
         positions = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset) })
+        nextPosition = ids.count
         emittedIDs.removeAll()
         observedVisibleIDs.removeAll()
         invalidateGeometry()
@@ -346,9 +345,20 @@ final class IOSUIKitScrolloverGeometryTracker {
     func appendSnapshot(_ ids: [Int64]) {
         guard !ids.isEmpty else { return }
         for id in ids where positions[id] == nil {
-            positions[id] = orderedIDs.count
-            orderedIDs.append(id)
+            positions[id] = nextPosition
+            nextPosition &+= 1
         }
+    }
+
+    func removeSnapshot(_ ids: some Sequence<Int64>) {
+        for id in ids {
+            positions[id] = nil
+            emittedIDs.remove(id)
+            observedVisibleIDs.remove(id)
+            retainedFrames[id] = nil
+        }
+        previousSample = nil
+        wasAtBottom = false
     }
 
     func setPhase(_ newPhase: IOSScrolloverPresentationPhase) {
@@ -575,6 +585,10 @@ final class IOSUIKitArticleTimelinePresentationBridge {
         for (id, state) in states where articleStates[id] == nil { articleStates[id] = state }
     }
 
+    func removeArticleStates(_ ids: some Sequence<Int64>) {
+        for id in ids { articleStates[id] = nil }
+    }
+
     func publishArticle(_ delta: IOSUIKitArticlePresentationDelta) {
         guard delta.state.revision >= articleStates[delta.articleID]?.revision ?? 0 else { return }
         articleStates[delta.articleID] = delta.state
@@ -619,6 +633,7 @@ final class IOSUIKitArticleTimelineStructuralStorage {
 enum IOSUIKitArticleTimelineStructuralChange {
     case replace
     case append([IOSUIKitArticleTimelineStructuralItem])
+    case remove([Int64])
 }
 
 struct IOSUIKitArticleTimelineStructuralState {
@@ -772,6 +787,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private(set) var lastScrollResetOffsetForTesting: CGPoint?
     var contentOffsetForTesting: CGPoint { collectionView.contentOffset }
     var scrolloverLayoutGenerationForTesting: UInt64 { scrolloverLayoutGeneration }
+    var orderedArticleIDsForTesting: [Int64] { orderedIDs }
 #endif
 
     private static func makeListLayout() -> UICollectionViewLayout {
@@ -888,13 +904,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         if structuralChanged {
             structuralReconciliationCount &+= 1
             performanceMetrics.recordStructuralReconciliation()
-            let canAppend: Bool
-            if case .append = structuralState.change {
-                canAppend = structuralRevision == structuralState.revision &- 1
-            } else {
-                canAppend = false
-            }
-            if canAppend, case let .append(appendedItems) = structuralState.change {
+            let canApplyIncrementally = structuralRevision == structuralState.revision &- 1
+            if canApplyIncrementally, case let .append(appendedItems) = structuralState.change {
                 let appended = appendedItems.filter { itemsByID[$0.article.id] == nil }
                 let appendedIDs = appended.map(\.article.id)
                 orderedIDs.append(contentsOf: appendedIDs)
@@ -906,6 +917,22 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
                 var snapshot = dataSource.snapshot()
                 snapshot.appendItems(appendedIDs)
                 dataSource.apply(snapshot, animatingDifferences: false)
+            } else if canApplyIncrementally, case let .remove(removedIDs) = structuralState.change {
+                let removed = removedIDs.filter { itemsByID[$0] != nil }
+                if !removed.isEmpty {
+                    let removedSet = Set(removed)
+                    orderedIDs.removeAll { removedSet.contains($0) }
+                    for id in removed {
+                        itemsByID[id] = nil
+                        presentationByID[id] = nil
+                        prefetchTasks.removeValue(forKey: id)?.task.cancel()
+                    }
+                    scrolloverGeometryTracker.removeSnapshot(removed)
+                    invalidateScrolloverGeometry()
+                    var snapshot = dataSource.snapshot()
+                    snapshot.deleteItems(removed)
+                    dataSource.apply(snapshot, animatingDifferences: false)
+                }
             } else {
                 let items = structuralState.storage.items
                 let newIDs = items.map(\.article.id)
@@ -2031,7 +2058,7 @@ struct ArticleListView: View {
             isSyncing: store.isSyncing,
             isLoading: store.isLoading,
             errorMessage: store.errorMessage,
-            hasArticles: !store.articles.isEmpty
+            hasArticles: store.hasLoadedArticles
         )
         let iconVariant = IOSFeedIconPresentation.variant(isDark: colorScheme == .dark)
 

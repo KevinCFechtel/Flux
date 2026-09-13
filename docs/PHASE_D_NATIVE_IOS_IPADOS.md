@@ -500,8 +500,10 @@ never derives optimistic navigation counts.
 
 The local UIKit Timeline uses bounded Core keyset pages, ordered by
 `(published_at, article_id)`, rather than reading an unbounded selected
-dataset. A first page replaces the Timeline and later pages append prepared
-immutable row content; loaded pages remain retained for the current semantic
+dataset. A first page obtains the authoritative selection total and replaces the
+Timeline; later pages omit that repeated aggregate and append prepared immutable
+row content. Targeted structural removals preserve unaffected presentation state
+and pagination state. Loaded pages remain retained for the current semantic
 query. This is separate from targeted read/starred/Scrollover presentation
 updates and from Search's remote pagination. Hard Timeline windowing is deferred
 unless future profiling justifies it.

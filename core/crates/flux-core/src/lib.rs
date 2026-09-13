@@ -449,8 +449,12 @@ impl FluxCore {
     pub fn query_articles(&self, query: ArticleQuery) -> Result<Vec<ArticleSummary>, CoreError> {
         self.store.query_articles(&query)
     }
-    pub fn article_page(&self, query: ArticleQuery) -> Result<domain::ArticlePage, CoreError> {
-        self.store.article_page(&query)
+    pub fn article_page(
+        &self,
+        query: ArticleQuery,
+        include_total: bool,
+    ) -> Result<domain::ArticlePage, CoreError> {
+        self.store.article_page(&query, include_total)
     }
     pub fn article_audio_action_states(
         &self,
@@ -2275,10 +2279,13 @@ mod tests {
         let (core, _) = core(&temp, data);
         core.sync(SyncReason::Manual).unwrap();
         let first = core
-            .article_page(ArticleQuery {
-                limit: 2,
-                ..Default::default()
-            })
+            .article_page(
+                ArticleQuery {
+                    limit: 2,
+                    ..Default::default()
+                },
+                true,
+            )
             .unwrap();
         assert_eq!(
             first
@@ -2288,13 +2295,16 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![4, 3]
         );
-        assert_eq!(first.total, 4);
+        assert_eq!(first.total, Some(4));
         let second = core
-            .article_page(ArticleQuery {
-                limit: 2,
-                cursor: first.next_cursor,
-                ..Default::default()
-            })
+            .article_page(
+                ArticleQuery {
+                    limit: 2,
+                    cursor: first.next_cursor,
+                    ..Default::default()
+                },
+                false,
+            )
             .unwrap();
         assert_eq!(
             second
@@ -2304,14 +2314,17 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![2, 1]
         );
-        assert_eq!(second.total, 4);
+        assert_eq!(second.total, None);
         assert!(second.next_cursor.is_none());
         let oldest = core
-            .article_page(ArticleQuery {
-                sort: ArticleSort::OldestFirst,
-                limit: 2,
-                ..Default::default()
-            })
+            .article_page(
+                ArticleQuery {
+                    sort: ArticleSort::OldestFirst,
+                    limit: 2,
+                    ..Default::default()
+                },
+                true,
+            )
             .unwrap();
         assert_eq!(
             oldest
@@ -2321,7 +2334,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![1, 2]
         );
-        assert_eq!(oldest.total, 4);
+        assert_eq!(oldest.total, Some(4));
     }
 
     #[test]
@@ -2331,11 +2344,14 @@ mod tests {
         core.sync(SyncReason::Manual).unwrap();
 
         let category = core
-            .article_page(ArticleQuery {
-                scope: ArticleScope::Category(1),
-                limit: 1,
-                ..Default::default()
-            })
+            .article_page(
+                ArticleQuery {
+                    scope: ArticleScope::Category(1),
+                    limit: 1,
+                    ..Default::default()
+                },
+                true,
+            )
             .unwrap();
         assert_eq!(
             category
@@ -2345,15 +2361,18 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![1]
         );
-        assert_eq!(category.total, 2);
+        assert_eq!(category.total, Some(2));
         assert!(category.next_cursor.is_some());
 
         let feed = core
-            .article_page(ArticleQuery {
-                scope: ArticleScope::Feed(20),
-                limit: 1,
-                ..Default::default()
-            })
+            .article_page(
+                ArticleQuery {
+                    scope: ArticleScope::Feed(20),
+                    limit: 1,
+                    ..Default::default()
+                },
+                true,
+            )
             .unwrap();
         assert_eq!(
             feed.articles
@@ -2362,15 +2381,18 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![3]
         );
-        assert_eq!(feed.total, 1);
+        assert_eq!(feed.total, Some(1));
         assert!(feed.next_cursor.is_none());
 
         let unread = core
-            .article_page(ArticleQuery {
-                read_filter: ReadFilter::Unread,
-                limit: 1,
-                ..Default::default()
-            })
+            .article_page(
+                ArticleQuery {
+                    read_filter: ReadFilter::Unread,
+                    limit: 1,
+                    ..Default::default()
+                },
+                true,
+            )
             .unwrap();
         assert_eq!(
             unread
@@ -2380,14 +2402,17 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![1]
         );
-        assert_eq!(unread.total, 1);
+        assert_eq!(unread.total, Some(1));
 
         let starred = core
-            .article_page(ArticleQuery {
-                starred_filter: StarredFilter::Starred,
-                limit: 1,
-                ..Default::default()
-            })
+            .article_page(
+                ArticleQuery {
+                    starred_filter: StarredFilter::Starred,
+                    limit: 1,
+                    ..Default::default()
+                },
+                true,
+            )
             .unwrap();
         assert_eq!(
             starred
@@ -2397,40 +2422,49 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![2]
         );
-        assert_eq!(starred.total, 1);
+        assert_eq!(starred.total, Some(1));
 
         let empty = core
-            .article_page(ArticleQuery {
-                scope: ArticleScope::Feed(999),
-                limit: 1,
-                ..Default::default()
-            })
+            .article_page(
+                ArticleQuery {
+                    scope: ArticleScope::Feed(999),
+                    limit: 1,
+                    ..Default::default()
+                },
+                true,
+            )
             .unwrap();
         assert!(empty.articles.is_empty());
-        assert_eq!(empty.total, 0);
+        assert_eq!(empty.total, Some(0));
         assert!(empty.next_cursor.is_none());
 
         core.set_read_state(1, true).unwrap();
         core.set_starred_state(2, false).unwrap();
         assert_eq!(
-            core.article_page(ArticleQuery {
-                read_filter: ReadFilter::Unread,
-                limit: 1,
-                ..Default::default()
-            })
+            core.article_page(
+                ArticleQuery {
+                    read_filter: ReadFilter::Unread,
+                    limit: 1,
+                    ..Default::default()
+                },
+                true
+            )
             .unwrap()
             .total,
-            0
+            Some(0)
         );
         assert_eq!(
-            core.article_page(ArticleQuery {
-                starred_filter: StarredFilter::Starred,
-                limit: 1,
-                ..Default::default()
-            })
+            core.article_page(
+                ArticleQuery {
+                    starred_filter: StarredFilter::Starred,
+                    limit: 1,
+                    ..Default::default()
+                },
+                true
+            )
             .unwrap()
             .total,
-            0
+            Some(0)
         );
     }
     #[test]

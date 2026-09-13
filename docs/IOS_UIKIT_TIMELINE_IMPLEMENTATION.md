@@ -136,18 +136,20 @@ must not recreate the controller or reapply an unchanged article snapshot.
 ### Local Timeline pagination
 
 The local iOS Timeline reads bounded Core-owned keyset pages. The cursor is the
-shared `(published_at, article_id)` ordering contract; each Core page also
-reports the full selected-scope total and the next cursor. A first page replaces
-the Timeline, while later pages append only new stable IDs and their immutable
-row content. Prepared row content, including date and link derivation, is made
-off-main before the MainActor validates the page generation and publishes the
-small structural delta.
+shared `(published_at, article_id)` ordering contract. A first page includes the
+authoritative full selected-scope total and replaces the Timeline; later pages
+omit the repeated total and append only new stable IDs and immutable row content.
+Targeted removals likewise publish only deleted IDs, retaining unaffected row
+presentation objects and content. Prepared row content, including date and link
+derivation, is made off-main before the MainActor validates the page generation
+and publishes the small structural delta.
 
 Loaded pages remain retained for the lifetime of the current Timeline query.
 Hard windowing/eviction is deliberately deferred until profiling demonstrates a
-need. Targeted read/starred/Scrollover presentation mutations remain separate
-from structural pagination. Remote Search keeps its own offset-pagination
-contract rather than using the local article cursor.
+need. Paging requests are generation-owned, so stale work cannot block or clear
+a newer query's request. Targeted read/starred/Scrollover presentation mutations
+remain separate from structural pagination. Remote Search keeps its own
+offset-pagination contract rather than using the local article cursor.
 
 ### Mutation execution and feedback
 

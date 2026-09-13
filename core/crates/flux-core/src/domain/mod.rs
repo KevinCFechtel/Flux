@@ -475,11 +475,11 @@ pub struct ArticleQuery {
     pub cursor: Option<ArticleCursor>,
 }
 
-/// One bounded keyset page and the full selection total at the time it was read.
+/// One bounded keyset page. The full selection total is included only when requested.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArticlePage {
     pub articles: Vec<ArticleSummary>,
-    pub total: u64,
+    pub total: Option<u64>,
     pub next_cursor: Option<ArticleCursor>,
 }
 

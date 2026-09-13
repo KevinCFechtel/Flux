@@ -409,6 +409,73 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testTimelineRemovalPreservesUnaffectedRowStateAndPagingCursor() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let first = timelineArticle(id: 1)
+        let second = timelineArticle(id: 2)
+        let third = timelineArticle(id: 3)
+        let cursor = ArticleCursor(publishedAt: "2026-01-01T00:00:00Z", articleId: 3)
+        store.setArticlesForTesting([first, second, third])
+        store.applyReadMutationForTesting([3], read: true)
+        let survivingState = store.rowPresentationStateForTesting(3)!
+        let survivingRevision = survivingState.mutationRevision
+        store.setTimelinePagingForTesting(cursor: cursor, hasMore: true)
+
+        store.removeVisibleArticlesForTesting([1, 2])
+
+        XCTAssertEqual(store.articles.map(\.id), [3])
+        XCTAssertTrue(store.rowPresentationStateForTesting(3) === survivingState)
+        XCTAssertEqual(store.rowPresentationStateForTesting(3)?.mutationRevision, survivingRevision)
+        XCTAssertNil(store.rowPresentationStateForTesting(1))
+        XCTAssertNil(store.rowPresentationStateForTesting(2))
+        XCTAssertEqual(store.timelinePagingStateForTesting.cursor, cursor)
+        XCTAssertTrue(store.timelinePagingStateForTesting.hasMore)
+        if case let .remove(ids) = store.timelineStructuralChangeForTesting {
+            XCTAssertEqual(Set(ids), Set([1, 2]))
+        } else {
+            XCTFail("targeted removal must not publish a full replacement")
+        }
+    }
+
+    @MainActor
+    func testTimelineControllerAppliesTargetedStructuralRemoval() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let first = timelineArticle(id: 1)
+        let second = timelineArticle(id: 2)
+        let controller = makeTimelineController(articles: [first, second], presentationBridge: bridge, feedIconBridge: bridge)
+        let storage = IOSUIKitArticleTimelineStructuralStorage()
+        storage.items = [.init(article: second, content: ArticleRowContent(article: second))]
+
+        controller.update(
+            structuralState: .init(storage: storage, change: .remove([1]), revision: 2),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            feedIconRequestRevision: 0,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+
+        XCTAssertEqual(controller.orderedArticleIDsForTesting, [2])
+    }
+
+    @MainActor
+    func testStaleTimelinePageCompletionCannotClearNewerRequestOwnership() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let stale = store.beginTimelinePageRequestForTesting()
+        store.resetTimelinePagingGenerationForTesting()
+        let current = store.beginTimelinePageRequestForTesting()
+
+        XCTAssertFalse(store.completeTimelinePageRequestForTesting(stale))
+        XCTAssertTrue(store.timelinePagingStateForTesting.inFlight)
+        XCTAssertTrue(store.completeTimelinePageRequestForTesting(current))
+        XCTAssertFalse(store.timelinePagingStateForTesting.inFlight)
+    }
+
+    @MainActor
     func testRowStatusMutationsDoNotInvalidateImmutableRowContent() {
         let article = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "https://example.com/comments", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: "https://example.com/image.jpg")
         let rowState = ArticleRowPresentationState(article: article)
@@ -2147,6 +2214,18 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(lifecycle.ownsError(stale))
         XCTAssertTrue(lifecycle.isCurrentArticle(current))
         XCTAssertTrue(lifecycle.ownsError(current))
+    }
+
+    func testTimelinePagingOwnershipRejectsStaleRequestsAcrossGenerationReset() {
+        var lifecycle = IOSNewsreaderReadLifecycle()
+        _ = lifecycle.beginArticle()
+        let stale = lifecycle.beginNextArticlePage()
+        _ = lifecycle.beginArticle()
+        let current = lifecycle.beginNextArticlePage()
+
+        XCTAssertFalse(lifecycle.ownsTimelinePage(stale))
+        XCTAssertTrue(lifecycle.ownsTimelinePage(current))
+        XCTAssertNotEqual(stale.requestGeneration, current.requestGeneration)
     }
 
     func testNavigationReadPublishesOnlyForItsCurrentGeneration() {

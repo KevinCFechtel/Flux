@@ -108,7 +108,7 @@ pub struct ArticleSummary {
 #[derive(uniffi::Record)]
 pub struct ArticlePage {
     pub articles: Vec<ArticleSummary>,
-    pub total: u64,
+    pub total: Option<u64>,
     pub next_cursor: Option<ArticleCursor>,
 }
 #[derive(uniffi::Record)]
@@ -929,9 +929,13 @@ impl Flux {
             .map(|rows| rows.into_iter().map(Into::into).collect())
             .map_err(map_error)
     }
-    pub fn article_page(&self, query: ArticleQuery) -> Result<ArticlePage, FluxError> {
+    pub fn article_page(
+        &self,
+        query: ArticleQuery,
+        include_total: bool,
+    ) -> Result<ArticlePage, FluxError> {
         self.core
-            .article_page(query.into())
+            .article_page(query.into(), include_total)
             .map(Into::into)
             .map_err(map_error)
     }
@@ -2716,7 +2720,7 @@ mod tests {
                 preview: String::new(),
                 image_url: None,
             }],
-            total: 12,
+            total: Some(12),
             next_cursor: Some(domain::ArticleCursor {
                 published_at: "2026-01-01T00:00:00Z".into(),
                 article_id: 7,
@@ -2725,7 +2729,7 @@ mod tests {
         .into();
 
         assert_eq!(mapped.articles[0].id, 7);
-        assert_eq!(mapped.total, 12);
+        assert_eq!(mapped.total, Some(12));
         assert_eq!(mapped.next_cursor.unwrap().article_id, 7);
     }
 

@@ -76,12 +76,20 @@ struct IOSNewsreaderReadRequest: Equatable {
     let errorGeneration: UInt64
 }
 
+struct IOSNewsreaderTimelinePageRequest: Equatable {
+    let session: UInt64
+    let timelineGeneration: UInt64
+    let requestGeneration: UInt64
+}
+
 struct IOSNewsreaderReadLifecycle {
     private(set) var session: UInt64 = 0
     private(set) var articleGeneration: UInt64 = 0
     private(set) var navigationGeneration: UInt64 = 0
     private(set) var selectionCountGeneration: UInt64 = 0
     private(set) var errorGeneration: UInt64 = 0
+    private(set) var timelineGeneration: UInt64 = 0
+    private(set) var timelinePageRequestGeneration: UInt64 = 0
 
     mutating func invalidateSession() {
         session &+= 1
@@ -89,25 +97,27 @@ struct IOSNewsreaderReadLifecycle {
         navigationGeneration &+= 1
         selectionCountGeneration &+= 1
         errorGeneration &+= 1
+        timelineGeneration &+= 1
     }
 
     mutating func beginArticle() -> IOSNewsreaderReadRequest {
         articleGeneration &+= 1
         selectionCountGeneration &+= 1
         errorGeneration &+= 1
+        timelineGeneration &+= 1
         return .init(session: session, generation: articleGeneration, selectionCountGeneration: selectionCountGeneration, errorGeneration: errorGeneration)
     }
 
-    mutating func beginNextArticlePage() -> IOSNewsreaderReadRequest {
-        articleGeneration &+= 1
-        errorGeneration &+= 1
-        return .init(session: session, generation: articleGeneration, selectionCountGeneration: selectionCountGeneration, errorGeneration: errorGeneration)
+    mutating func beginNextArticlePage() -> IOSNewsreaderTimelinePageRequest {
+        timelinePageRequestGeneration &+= 1
+        return .init(session: session, timelineGeneration: timelineGeneration, requestGeneration: timelinePageRequestGeneration)
     }
 
     mutating func invalidateArticle() {
         articleGeneration &+= 1
         selectionCountGeneration &+= 1
         errorGeneration &+= 1
+        timelineGeneration &+= 1
     }
 
     mutating func invalidateNavigation() {
@@ -130,6 +140,7 @@ struct IOSNewsreaderReadLifecycle {
     func isCurrentArticle(_ request: IOSNewsreaderReadRequest) -> Bool { request.session == session && request.generation == articleGeneration }
     func isCurrentNavigation(_ request: IOSNewsreaderReadRequest) -> Bool { request.session == session && request.generation == navigationGeneration }
     func isCurrentSelectionCount(_ request: IOSNewsreaderReadRequest) -> Bool { request.session == session && request.selectionCountGeneration == selectionCountGeneration }
+    func ownsTimelinePage(_ request: IOSNewsreaderTimelinePageRequest) -> Bool { request.session == session && request.timelineGeneration == timelineGeneration }
     func ownsError(_ request: IOSNewsreaderReadRequest) -> Bool { request.errorGeneration == errorGeneration }
 }
 
@@ -266,16 +277,16 @@ struct ArticleRowContent: Equatable, Sendable {
         static let clickOnNews = "FluxNews.clickOnNews"
     }
 
-    private(set) var articles: [ArticleSummary] = []
+    var articles: [ArticleSummary] { timelineStructuralStorage.items.map(\.article) }
+    private(set) var hasLoadedArticles = false
     private let timelineStructuralStorage = IOSUIKitArticleTimelineStructuralStorage()
     private(set) var timelineStructuralState: IOSUIKitArticleTimelineStructuralState
     let timelinePresentationBridge = IOSUIKitArticleTimelinePresentationBridge()
     @ObservationIgnored private var rowPresentationStates: [Int64: ArticleRowPresentationState] = [:]
-    @ObservationIgnored private var loadedArticleIDs = Set<Int64>()
-    @ObservationIgnored private var articleIndices: [Int64: Int] = [:]
+    @ObservationIgnored private var loadedArticlesByID: [Int64: ArticleSummary] = [:]
     private var nextTimelineCursor: ArticleCursor?
     private var hasMoreTimelinePages = false
-    private var nextTimelinePageLoadInFlight = false
+    private var nextTimelinePageRequest: IOSNewsreaderTimelinePageRequest?
     private static let timelinePageSize: UInt32 = 72
     private(set) var catalog = NavigationCatalog(categories: [], feeds: [])
     private(set) var unreadTotal: UInt64 = 0
@@ -438,18 +449,21 @@ struct ArticleRowContent: Equatable, Sendable {
         guard let core else { return }
         let request = readLifecycle.beginArticle()
         let articleQuery = query()
+        nextTimelinePageRequest = nil
+        nextTimelineCursor = nil
+        hasMoreTimelinePages = false
         isLoading = true
         errorMessage = nil
         Task { [weak self, core] in
             let result = await AppleCoreExecution.shared.responsiveResult {
-                let page = try core.articlePage(query: articleQuery)
+                let page = try core.articlePage(query: articleQuery, includeTotal: true)
                 return TimelinePagePreparation(page: page, contents: page.articles.map(ArticleRowContent.init(article:)))
             }
             guard let self, self.readLifecycle.isCurrentArticle(request), self.readLifecycle.isCurrentSelectionCount(request) else { return }
             switch result {
             case let .success(value):
                 replaceFirstTimelinePage(value)
-                selectionTotal = value.page.total
+                selectionTotal = value.page.total ?? selectionTotal
                 if acknowledgePending { acknowledgePendingForCurrentScope() }
                 if resetSnapshot { snapshotRevision &+= 1 }
                 if readLifecycle.ownsError(request) { errorMessage = nil }
@@ -991,6 +1005,10 @@ struct ArticleRowContent: Equatable, Sendable {
         // another batch already owns the worker.
         drainScrolloverMutations()
         readLifecycle.invalidateArticle()
+        // Presentation-only resets invalidate page publication too. Release the
+        // old token now; its synchronous Core work may finish later, but cannot
+        // clear or publish into this generation.
+        nextTimelinePageRequest = nil
         if !preserveLoading { isLoading = false }
         hasMeaningfullyInteracted = false
         snapshotRevision &+= 1
@@ -1001,7 +1019,7 @@ struct ArticleRowContent: Equatable, Sendable {
         pendingScrolloverReadPresentationIDs = []
         hasForwardPendingScrolloverPresentation = false
         pendingSuccessfulScrolloverUndoPresentation = []
-        for article in articles { rowPresentationStates[article.id]?.reconcile(with: article) }
+        for article in loadedArticlesByID.values { rowPresentationStates[article.id]?.reconcile(with: article) }
         scrolloverPresentationPhase = .idle
         scrolloverPresentationGeneration &+= 1
     }
@@ -1090,11 +1108,11 @@ struct ArticleRowContent: Equatable, Sendable {
 
     private func replaceFirstTimelinePage(_ value: TimelinePagePreparation) {
         let articles = value.page.articles
-        self.articles = articles
-        loadedArticleIDs = Set(articles.map(\.id))
-        articleIndices = Dictionary(uniqueKeysWithValues: articles.enumerated().map { ($0.element.id, $0.offset) })
-        rowPresentationStates = rowPresentationStates.filter { loadedArticleIDs.contains($0.key) }
-        pendingScrolloverReadPresentationIDs.formIntersection(loadedArticleIDs)
+        loadedArticlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
+        let loadedIDs = Set(loadedArticlesByID.keys)
+        hasLoadedArticles = !loadedIDs.isEmpty
+        rowPresentationStates = rowPresentationStates.filter { loadedIDs.contains($0.key) }
+        pendingScrolloverReadPresentationIDs.formIntersection(loadedIDs)
         for (article, content) in zip(articles, value.contents) {
             if let state = rowPresentationStates[article.id] {
                 state.reconcile(with: article, content: content)
@@ -1112,11 +1130,11 @@ struct ArticleRowContent: Equatable, Sendable {
         timelineStructuralState = .init(storage: timelineStructuralStorage, change: .replace, revision: timelineStructuralState.revision &+ 1)
         nextTimelineCursor = value.page.nextCursor
         hasMoreTimelinePages = value.page.nextCursor != nil
-        nextTimelinePageLoadInFlight = false
+        nextTimelinePageRequest = nil
     }
 
     func loadNextTimelinePage() {
-        guard let core, let cursor = nextTimelineCursor, hasMoreTimelinePages, !nextTimelinePageLoadInFlight else { return }
+        guard let core, let cursor = nextTimelineCursor, hasMoreTimelinePages, nextTimelinePageRequest == nil else { return }
         let request = readLifecycle.beginNextArticlePage()
         let currentQuery = query()
         let pageQuery = ArticleQuery(
@@ -1127,35 +1145,38 @@ struct ArticleRowContent: Equatable, Sendable {
             limit: Self.timelinePageSize,
             cursor: cursor
         )
-        nextTimelinePageLoadInFlight = true
+        nextTimelinePageRequest = request
         Task { [weak self, core] in
             let result = await AppleCoreExecution.shared.responsiveResult {
-                let page = try core.articlePage(query: pageQuery)
+                let page = try core.articlePage(query: pageQuery, includeTotal: false)
                 return TimelinePagePreparation(page: page, contents: page.articles.map(ArticleRowContent.init(article:)))
             }
-            guard let self, self.readLifecycle.isCurrentArticle(request) else { return }
-            self.nextTimelinePageLoadInFlight = false
+            guard let self, self.completeNextTimelinePageRequest(request) else { return }
             switch result {
             case let .success(value):
                 self.appendTimelinePage(value)
-                self.selectionTotal = value.page.total
             case let .failure(error):
-                if self.readLifecycle.ownsError(request) { self.errorMessage = IOSErrorPresentation.message(for: error, context: .contentLoad) }
+                self.errorMessage = IOSErrorPresentation.message(for: error, context: .contentLoad)
             }
         }
+    }
+
+    private func completeNextTimelinePageRequest(_ request: IOSNewsreaderTimelinePageRequest) -> Bool {
+        guard readLifecycle.ownsTimelinePage(request), nextTimelinePageRequest == request else { return false }
+        nextTimelinePageRequest = nil
+        return true
     }
 
     private func appendTimelinePage(_ value: TimelinePagePreparation) {
         var appended: [IOSUIKitArticleTimelineStructuralItem] = []
         for (article, content) in zip(value.page.articles, value.contents) {
-            if let index = articleIndices[article.id] {
-                articles[index] = article
+            if loadedArticlesByID[article.id] != nil {
+                loadedArticlesByID[article.id] = article
                 rowPresentationStates[article.id]?.reconcileContent(with: article, content: content)
                 continue
             }
-            loadedArticleIDs.insert(article.id)
-            articleIndices[article.id] = articles.count
-            articles.append(article)
+            loadedArticlesByID[article.id] = article
+            hasLoadedArticles = true
             let state = ArticleRowPresentationState(article: article, content: content)
             rowPresentationStates[article.id] = state
             appended.append(.init(article: article, content: content))
@@ -1211,7 +1232,7 @@ struct ArticleRowContent: Equatable, Sendable {
     private func restoreReadPresentation(_ ids: [Int64], revisions: [Int64: UInt64], snapshotRevision: UInt64) {
         guard self.snapshotRevision == snapshotRevision else { return }
         for id in ids where rowPresentationStates[id]?.mutationRevision == revisions[id] {
-            if let article = articles.first(where: { $0.id == id }) {
+            if let article = loadedArticlesByID[id] {
                 rowPresentationStates[id]?.setRead(article.isRead)
                 publishArticlePresentation(id, rearmScrollover: !article.isRead)
             }
@@ -1221,7 +1242,7 @@ struct ArticleRowContent: Equatable, Sendable {
     private func restoreStarredPresentation(_ ids: [Int64], revisions: [Int64: UInt64], snapshotRevision: UInt64) {
         guard self.snapshotRevision == snapshotRevision else { return }
         for id in ids where rowPresentationStates[id]?.mutationRevision == revisions[id] {
-            if let article = articles.first(where: { $0.id == id }) {
+            if let article = loadedArticlesByID[id] {
                 rowPresentationStates[id]?.setStarred(article.isStarred)
                 publishArticlePresentation(id)
             }
@@ -1232,7 +1253,7 @@ struct ArticleRowContent: Equatable, Sendable {
         guard presentationGeneration == scrolloverPresentationGeneration else { return }
         pendingScrolloverReadPresentationIDs.subtract(ids)
         for id in ids where rowPresentationStates[id]?.mutationRevision == publishedScrolloverPresentationRevisions[id] {
-            if let article = articles.first(where: { $0.id == id }) {
+            if let article = loadedArticlesByID[id] {
                 rowPresentationStates[id]?.setRead(article.isRead)
                 publishArticlePresentation(id, rearmScrollover: !article.isRead)
             }
@@ -1240,13 +1261,15 @@ struct ArticleRowContent: Equatable, Sendable {
     }
 
     private func removeVisibleArticles(_ ids: [Int64]) {
-        let ids = Set(ids)
-        guard articles.contains(where: { ids.contains($0.id) }) else { return }
-        let cursor = nextTimelineCursor
-        let hasMore = hasMoreTimelinePages
-        replaceArticles(articles.filter { !ids.contains($0.id) })
-        nextTimelineCursor = cursor
-        hasMoreTimelinePages = hasMore
+        let removalSet = Set(ids)
+        let removedIDs = ids.filter { loadedArticlesByID.removeValue(forKey: $0) != nil }
+        guard !removedIDs.isEmpty else { return }
+        hasLoadedArticles = !loadedArticlesByID.isEmpty
+        for id in removedIDs { rowPresentationStates[id] = nil }
+        timelinePresentationBridge.removeArticleStates(removedIDs)
+        pendingScrolloverReadPresentationIDs.subtract(removedIDs)
+        timelineStructuralStorage.items.removeAll(where: { removalSet.contains($0.article.id) })
+        timelineStructuralState = .init(storage: timelineStructuralStorage, change: .remove(removedIDs), revision: timelineStructuralState.revision &+ 1)
         snapshotRevision &+= 1
     }
 
@@ -1298,10 +1321,35 @@ struct ArticleRowContent: Equatable, Sendable {
     func setArticlesForTesting(_ value: [ArticleSummary]) { replaceArticles(value) }
     @MainActor
     func appendArticlesForTesting(_ value: [ArticleSummary]) {
-        appendTimelinePage(.init(page: .init(articles: value, total: UInt64(articles.count + value.count), nextCursor: nil), contents: value.map(ArticleRowContent.init(article:))))
+        appendTimelinePage(.init(page: .init(articles: value, total: nil, nextCursor: nil), contents: value.map(ArticleRowContent.init(article:))))
     }
     @MainActor
     var timelineStructuralItemCountForTesting: Int { timelineStructuralStorage.items.count }
+    @MainActor
+    var timelineStructuralChangeForTesting: IOSUIKitArticleTimelineStructuralChange { timelineStructuralState.change }
+    @MainActor
+    func removeVisibleArticlesForTesting(_ ids: [Int64]) { removeVisibleArticles(ids) }
+    @MainActor
+    func setTimelinePagingForTesting(cursor: ArticleCursor?, hasMore: Bool) {
+        nextTimelineCursor = cursor
+        hasMoreTimelinePages = hasMore
+    }
+    @MainActor
+    var timelinePagingStateForTesting: (cursor: ArticleCursor?, hasMore: Bool, inFlight: Bool) {
+        (nextTimelineCursor, hasMoreTimelinePages, nextTimelinePageRequest != nil)
+    }
+    @MainActor
+    func beginTimelinePageRequestForTesting() -> IOSNewsreaderTimelinePageRequest {
+        let request = readLifecycle.beginNextArticlePage()
+        nextTimelinePageRequest = request
+        return request
+    }
+    @MainActor
+    func completeTimelinePageRequestForTesting(_ request: IOSNewsreaderTimelinePageRequest) -> Bool {
+        completeNextTimelinePageRequest(request)
+    }
+    @MainActor
+    func resetTimelinePagingGenerationForTesting() { resetPresentationState() }
     @MainActor
     func applyReadMutationForTesting(_ ids: [Int64], read: Bool) { markMeaningfulInteraction(); updateVisibleRead(ids, read: read) }
     @MainActor

@@ -102,12 +102,12 @@ concern. Scrollover may defer a navigation-projection refresh until the
 Timeline is idle, but does not derive counts itself.
 
 The local native iOS Timeline reads Core-owned keyset pages using the
-`(published_at, article_id)` cursor. Each page includes the full selection total
-and the next cursor; iOS retains pages for its current query and appends only
-the new immutable row content. Initial replacement and targeted read/starred
-presentation changes remain distinct from page append. Search retains its
-separate remote offset-pagination contract. Hard Timeline windowing/eviction is
-deferred pending memory profiling.
+`(published_at, article_id)` cursor. The first page includes the authoritative
+full selection total; later pages omit that repeated aggregate and include only
+their bounded rows and next cursor. iOS retains pages for its current query and
+publishes append and removal deltas without rebuilding unaffected row content or
+presentation state. Search retains its separate remote offset-pagination
+contract. Hard Timeline windowing/eviction is deferred pending memory profiling.
 
 ### Apple synchronous Core execution boundary
 
