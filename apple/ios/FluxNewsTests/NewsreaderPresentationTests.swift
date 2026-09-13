@@ -1337,12 +1337,25 @@ final class NewsreaderPresentationTests: XCTestCase {
         let cancelled = Task { try await pipeline.image(for: request) }
         await gate.waitUntilStarted()
         let retained = Task { try await pipeline.image(for: request) }
+
+        for _ in 0..<100 {
+            if (await pipeline.metrics()).inFlightDedupHits == 1 { break }
+            await Task.yield()
+        }
+        guard (await pipeline.metrics()).inFlightDedupHits == 1 else {
+            cancelled.cancel()
+            retained.cancel()
+            await gate.release()
+            XCTFail("Retained consumer did not attach to the shared image load")
+            return
+        }
+
         cancelled.cancel()
-        await gate.release()
         do {
             _ = try await cancelled.value
             XCTFail("Cancelled consumer must not receive an image")
         } catch is CancellationError {}
+        await gate.release()
         _ = try await retained.value
 
         XCTAssertNotNil(pipeline.cachedImage(for: request))
