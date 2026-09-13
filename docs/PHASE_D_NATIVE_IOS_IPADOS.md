@@ -674,7 +674,13 @@ not a deferred testing phase.
 7. Required capabilities may be isolated into implementation work packages, but
    CarPlay, Live Activities/Dynamic Island and the production migration path
    cannot be dropped from Phase D completion.
-8. Potentially blocking Rust Core work must not execute on `MainActor`.
-   `MainActor` owns native presentation inputs, request lifecycle, and state
-   publication; Core reads and result construction execute off-main and may only
-   publish while their presentation request remains current.
+8. Potentially blocking Rust Core work must not execute on `MainActor` or a
+   Swift cooperative executor. `MainActor` owns native presentation inputs,
+   request lifecycle, and state publication; a bounded Apple worker policy owns
+   synchronous Core/UniFFI closure execution. Separate responsive/local and
+   blocking/remote lanes prevent network work from head-of-line blocking local
+   reads and mutations. Existing request/session generations still decide whether
+   results publish. Swift cancellation may prevent queued work from starting, but
+   does not cancel already-running synchronous Rust network I/O. CPU-only
+   detached image/layout work is outside this policy; Timeline bounded-query and
+   pagination work remains separate.

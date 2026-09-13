@@ -401,9 +401,9 @@ struct ArticleRowContent: Equatable {
         let request = readLifecycle.beginNavigation()
         let countMode: NavigationCountMode = unreadOnly ? .unread : .all
         Task { [weak self, core] in
-            let result = await Task.detached {
-                Result { try core.navigationProjection(countMode: countMode) }
-            }.value
+            let result = await AppleCoreExecution.shared.responsiveResult {
+                try core.navigationProjection(countMode: countMode)
+            }
             guard let self, self.readLifecycle.isCurrentNavigation(request) else { return }
             switch result {
             case let .success(value):
@@ -423,11 +423,9 @@ struct ArticleRowContent: Equatable {
         isLoading = true
         errorMessage = nil
         Task { [weak self, core] in
-            let result = await Task.detached {
-                Result {
-                    ArticleReadResult(articles: try core.queryArticles(query: articleQuery), selectionTotal: try core.countArticles(query: articleQuery))
-                }
-            }.value
+            let result = await AppleCoreExecution.shared.responsiveResult {
+                ArticleReadResult(articles: try core.queryArticles(query: articleQuery), selectionTotal: try core.countArticles(query: articleQuery))
+            }
             guard let self, self.readLifecycle.isCurrentArticle(request), self.readLifecycle.isCurrentSelectionCount(request) else { return }
             switch result {
             case let .success(value):
@@ -468,7 +466,7 @@ struct ArticleRowContent: Equatable {
         guard requestedFeedIcons.insert(ownership).inserted else { return }
         state.beginLoading()
         Task { [weak self] in
-            let result = await Task.detached { Result { try loader(feedID, variant) } }.value
+            let result = await AppleCoreExecution.shared.blockingResult { try loader(feedID, variant) }
             guard let self else { return }
             guard ownership.generation == feedIconOwnershipGeneration else { return }
             requestedFeedIcons.remove(ownership)
@@ -504,7 +502,7 @@ struct ArticleRowContent: Equatable {
         isSyncing = true
         errorMessage = nil
 
-        let result = await Task.detached { Result { try core.sync(reason: .manual) } }.value
+        let result = await AppleCoreExecution.shared.blockingResult { try core.sync(reason: .manual) }
         switch result {
         case let .success(metadata):
             handleSyncCompleted(metadata)
@@ -581,7 +579,7 @@ struct ArticleRowContent: Equatable {
             return
         }
         Task { [weak self, core] in
-            let result = await Task.detached { Result { try core.readerDocument(articleId: articleID) } }.value
+            let result = await AppleCoreExecution.shared.responsiveResult { try core.readerDocument(articleId: articleID) }
             guard let self, self.readerRequests.isCurrent(request) else { return }
             completion(result)
         }
@@ -601,7 +599,7 @@ struct ArticleRowContent: Equatable {
             return
         }
         Task { [weak self, core] in
-            let result = await Task.detached { Result { try core.saveToService(articleId: article.id) } }.value
+            let result = await AppleCoreExecution.shared.blockingResult { try core.saveToService(articleId: article.id) }
             guard self != nil else { return }
             completion(result)
         }
@@ -609,13 +607,13 @@ struct ArticleRowContent: Equatable {
 
     func discoverSubscriptions(_ request: DiscoverSubscriptionsRequest, completion: @escaping (Result<[DiscoveredSubscription], Error>) -> Void) {
         guard let core else { completion(.failure(unconfiguredError)); return }
-        Task { let result = await Task.detached { Result { try core.discoverSubscriptions(request: request) } }.value; completion(result) }
+        Task { let result = await AppleCoreExecution.shared.blockingResult { try core.discoverSubscriptions(request: request) }; completion(result) }
     }
 
     func createFeed(_ request: CreateFeedRequest, completion: @escaping (Result<CreateFeedResult, Error>) -> Void) {
         guard let core else { completion(.failure(unconfiguredError)); return }
         Task { [weak self] in
-            let result = await Task.detached { Result { try core.createFeed(request: request) } }.value
+            let result = await AppleCoreExecution.shared.blockingResult { try core.createFeed(request: request) }
             if case .success = result { self?.loadNavigationAndCounts() }
             completion(result)
         }
@@ -624,7 +622,7 @@ struct ArticleRowContent: Equatable {
     func createCategory(_ title: String, completion: @escaping (Result<CreateCategoryResult, Error>) -> Void) {
         guard let core else { completion(.failure(unconfiguredError)); return }
         Task { [weak self] in
-            let result = await Task.detached { Result { try core.createCategory(title: title) } }.value
+            let result = await AppleCoreExecution.shared.blockingResult { try core.createCategory(title: title) }
             if case .success = result { self?.loadNavigationAndCounts() }
             completion(result)
         }
@@ -633,7 +631,7 @@ struct ArticleRowContent: Equatable {
     func loadFeedPreferences(feedID: Int64, completion: @escaping (Result<FeedPreferences, Error>) -> Void) {
         guard let core else { completion(.failure(unconfiguredError)); return }
         Task { [weak self, core] in
-            let result = await Task.detached { Result { try core.feedPreferences(feedId: feedID) } }.value
+            let result = await AppleCoreExecution.shared.responsiveResult { try core.feedPreferences(feedId: feedID) }
             guard self?.core === core else { return }
             completion(result)
         }
@@ -654,7 +652,7 @@ struct ArticleRowContent: Equatable {
     private func updateFeedPreferences(feedID: Int64, change: @escaping @Sendable (Flux) throws -> Void, completion: @escaping (Result<Void, Error>) -> Void) {
         guard let core else { completion(.failure(unconfiguredError)); return }
         Task { [weak self, core] in
-            let result = await Task.detached { Result { try change(core) } }.value
+            let result = await AppleCoreExecution.shared.responsiveResult { try change(core) }
             guard self?.core === core else { return }
             completion(result)
         }
@@ -670,7 +668,7 @@ struct ArticleRowContent: Equatable {
             if let conflictingScrolloverMutation {
                 await conflictingScrolloverMutation.value
             }
-            let result = await Task.detached { Result { try core.setReadStateBulk(articleIds: articleIDs, read: read) } }.value
+            let result = await AppleCoreExecution.shared.responsiveResult { try core.setReadStateBulk(articleIds: articleIDs, read: read) }
             guard let self else { return }
             switch result {
             case .success:
@@ -691,7 +689,7 @@ struct ArticleRowContent: Equatable {
         let revisions = optimisticallySetStarred(articleIDs, starred: starred)
         let snapshotRevision = snapshotRevision
         Task { [weak self, core] in
-            let result = await Task.detached { Result { try core.setStarredStateBulk(articleIds: articleIDs, starred: starred) } }.value
+            let result = await AppleCoreExecution.shared.responsiveResult { try core.setStarredStateBulk(articleIds: articleIDs, starred: starred) }
             guard let self else { return }
             switch result {
             case .success:
@@ -750,9 +748,9 @@ struct ArticleRowContent: Equatable {
         let sessionGeneration = scrolloverSessionGeneration
         scrolloverDiagnostic("persistence flush count=\(ids.count)")
         let task = Task { [weak self, core] in
-            let result = await Task.detached { Result { try core.setReadStateBulk(articleIds: ids, read: true) } }.value
+            let result = await AppleCoreExecution.shared.responsiveResult { try core.setReadStateBulk(articleIds: ids, read: true) }
             guard let self else { return }
-            // A detached Core must never complete into, or continue work for, a
+            // A prior Core operation must never complete into, or continue work for, a
             // newly attached Core session.
             guard sessionGeneration == self.scrolloverSessionGeneration else { return }
             switch result {
@@ -910,7 +908,7 @@ struct ArticleRowContent: Equatable {
         guard let core, !scrolloverUndoIDs.isEmpty else { return }
         let ids = scrolloverUndoIDs
         Task { [weak self, core] in
-            let result = await Task.detached { Result { try core.setReadStateBulk(articleIds: ids, read: false) } }.value
+            let result = await AppleCoreExecution.shared.responsiveResult { try core.setReadStateBulk(articleIds: ids, read: false) }
             guard let self else { return }
             switch result {
             case .success:
@@ -1174,12 +1172,12 @@ struct ArticleRowContent: Equatable {
         let scope = scope
         let query = ArticleQuery(scope: query(scope: scope).scope, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil)
         Task { [weak self, core] in
-            let result = await Task.detached { Result { try core.queryArticles(query: query).map(\.id) } }.value
+            let result = await AppleCoreExecution.shared.responsiveResult { try core.queryArticles(query: query).map(\.id) }
             guard let self else { return }
             switch result {
             case let .success(ids):
                 guard !ids.isEmpty else { completion(true); return }
-                let mutation = await Task.detached { Result { try core.setReadStateBulk(articleIds: ids, read: true) } }.value
+                let mutation = await AppleCoreExecution.shared.responsiveResult { try core.setReadStateBulk(articleIds: ids, read: true) }
                 switch mutation {
                 case .success:
                     self.markMeaningfulInteraction()
@@ -1320,13 +1318,11 @@ struct ArticleRowContent: Equatable {
         let selectionQuery = query()
         let countMode: NavigationCountMode = unreadOnly ? .unread : .all
         Task { [weak self, core] in
-            let result = await Task.detached {
-                Result {
-                    let selection = try core.countArticles(query: selectionQuery)
-                    let navigation = try core.navigationProjection(countMode: countMode)
-                    return (selection, navigation)
-                }
-            }.value
+            let result = await AppleCoreExecution.shared.responsiveResult {
+                let selection = try core.countArticles(query: selectionQuery)
+                let navigation = try core.navigationProjection(countMode: countMode)
+                return (selection, navigation)
+            }
             guard let self else { return }
             switch result {
             case let .success(counts):

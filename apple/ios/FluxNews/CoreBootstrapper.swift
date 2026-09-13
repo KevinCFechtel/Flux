@@ -83,9 +83,9 @@ final class CoreBootstrapper: ObservableObject {
             return
         }
         let validator = accountValidator
-        let validation = await Task.detached(priority: .userInitiated) {
-            Result { try validator(proposed) }
-        }.value
+        let validation = await AppleCoreExecution.shared.blockingResult {
+            try validator(proposed)
+        }
         guard generation == bootstrapGeneration else { return }
         switch validation {
         case let .failure(error): validationMessage = IOSAccountValidationPresentation.message(for: IOSAccountValidationPresentation.failure(for: error))
@@ -123,7 +123,9 @@ final class CoreBootstrapper: ObservableObject {
             return
         }
         do {
-            try await Task.detached { try activeCore.removeAccountState() }.value
+            try await AppleCoreExecution.shared.responsive {
+                try activeCore.removeAccountState()
+            }
             guard generation == bootstrapGeneration else { return }
             try credentialStore.remove()
             deactivate()
@@ -139,9 +141,9 @@ final class CoreBootstrapper: ObservableObject {
     private func activate(_ account: IOSMinifluxCredentials, persist: Bool, generation: UInt64) async throws -> Bool {
         if persist { try credentialStore.save(account) }
         let factory = coreFactory
-        let result = await Task.detached(priority: .userInitiated) {
-            Result { try factory(account) }
-        }.value
+        let result = await AppleCoreExecution.shared.responsiveResult {
+            try factory(account)
+        }
         guard generation == bootstrapGeneration else { return false }
         let configuredCore = try result.get()
         core = configuredCore

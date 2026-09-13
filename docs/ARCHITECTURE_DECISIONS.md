@@ -101,6 +101,27 @@ currently selected Timeline/query count remains a separate bounded-query
 concern. Scrollover may defer a navigation-projection refresh until the
 Timeline is idle, but does not derive counts itself.
 
+### Apple synchronous Core execution boundary
+
+The Rust Core and its UniFFI surface remain synchronous. Swift Concurrency owns
+the async lifecycle of a request and native presentation coordination, while a
+small bounded Apple worker policy owns execution of synchronous Core closures.
+The closure itself must execute on dedicated system worker infrastructure, not
+on a Swift cooperative-executor thread or `MainActor`.
+
+The policy has separate bounded responsive/local and potentially blocking/remote
+lanes. This prevents synchronous network work from head-of-line blocking local
+SQLite reads and mutations; it does not attempt to create parallel SQLite access
+where the Core Store already serializes it. Rust retains domain, storage,
+network, synchronization, and error semantics. Native clients retain request
+generation/session ownership and only publish current results.
+
+Cancelling a Swift waiter may prevent queued work from starting, but does not
+cancel a synchronous Core operation once it has begun, including in-flight Rust
+network I/O. CPU-only detached work such as image decoding and article layout is
+outside this boundary. Timeline bounded-query/pagination work remains a separate
+concern.
+
 Visible article snapshots remain stable according to the snapshot rules
 below, but selected status surfaces may intentionally show live core
 counts. In particular, the macOS menu-bar unread count reflects the
