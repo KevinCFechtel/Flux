@@ -605,6 +605,31 @@ pub struct NavigationCatalog {
     pub feeds: Vec<Feed>,
 }
 
+/// Selects whether navigation entry counts include only unread articles or all
+/// articles. Totals retain their fixed semantics regardless of this mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NavigationCountMode {
+    Unread,
+    All,
+}
+
+/// A single Core-owned navigation read model. Catalog metadata and all of its
+/// associated counts are read together from the same storage boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NavigationProjection {
+    pub catalog: NavigationCatalog,
+    pub unread_total: u64,
+    pub starred_total: u64,
+    pub category_counts: Vec<NavigationScopedCount>,
+    pub feed_counts: Vec<NavigationScopedCount>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NavigationScopedCount {
+    pub id: i64,
+    pub count: u64,
+}
+
 /// Compact, widget-specific read model data. Native clients serialize this into
 /// their versioned App Group contract; it is not a persistence model.
 #[derive(Clone, Debug, PartialEq, Eq)]

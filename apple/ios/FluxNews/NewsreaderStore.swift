@@ -127,14 +127,6 @@ struct IOSNewsreaderReadLifecycle {
     func ownsError(_ request: IOSNewsreaderReadRequest) -> Bool { request.errorGeneration == errorGeneration }
 }
 
-private struct NavigationReadResult {
-    let catalog: NavigationCatalog
-    let unreadTotal: UInt64
-    let starredTotal: UInt64
-    let categoryCounts: [Int64: UInt64]
-    let feedCounts: [Int64: UInt64]
-}
-
 private struct ArticleReadResult {
     let articles: [ArticleSummary]
     let selectionTotal: UInt64
@@ -404,40 +396,18 @@ struct ArticleRowContent: Equatable {
         return ArticleQuery(scope: coreScope, readFilter: selected == .starred ? .all : (unreadOnly ? .unread : .all), starredFilter: selected == .starred ? .starred : .all, sort: newestFirst ? .newestFirst : .oldestFirst, limit: 0, cursor: nil)
     }
 
-    nonisolated private static func navigationQuery(scope: ArticleScope, unreadOnly: Bool, newestFirst: Bool) -> ArticleQuery {
-        ArticleQuery(scope: scope, readFilter: unreadOnly ? .unread : .all, starredFilter: .all, sort: newestFirst ? .newestFirst : .oldestFirst, limit: 0, cursor: nil)
-    }
-
     func loadNavigationAndCounts(afterCompletion: (() -> Void)? = nil) {
         guard let core else { return }
         let request = readLifecycle.beginNavigation()
-        let categoryQueryInputs = (unreadOnly, newestFirst)
+        let countMode: NavigationCountMode = unreadOnly ? .unread : .all
         Task { [weak self, core] in
             let result = await Task.detached {
-                Result {
-                    let catalog = try core.navigationCatalog()
-                    let unreadTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil))
-                    let starredTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .all, starredFilter: .starred, sort: .newestFirst, limit: 0, cursor: nil))
-                    let categoryCounts = try catalog.categories.reduce(into: [:]) { counts, category in
-                        counts[category.id] = try core.countArticles(query: Self.navigationQuery(scope: .category(id: category.id), unreadOnly: categoryQueryInputs.0, newestFirst: categoryQueryInputs.1))
-                    }
-                    let feedCounts = try catalog.feeds.reduce(into: [:]) { counts, feed in
-                        counts[feed.id] = try core.countArticles(query: Self.navigationQuery(scope: .feed(id: feed.id), unreadOnly: categoryQueryInputs.0, newestFirst: categoryQueryInputs.1))
-                    }
-                    return NavigationReadResult(catalog: catalog, unreadTotal: unreadTotal, starredTotal: starredTotal, categoryCounts: categoryCounts, feedCounts: feedCounts)
-                }
+                Result { try core.navigationProjection(countMode: countMode) }
             }.value
             guard let self, self.readLifecycle.isCurrentNavigation(request) else { return }
             switch result {
             case let .success(value):
-                catalog = value.catalog
-                unreadTotal = value.unreadTotal
-                starredTotal = value.starredTotal
-                categoryCounts = value.categoryCounts
-                feedCounts = value.feedCounts
-                invalidateFeedIconAvailabilityAfterNavigationRefresh()
-                pending.removeAbsentFeeds(Set(value.catalog.feeds.map(\.id)))
-                publishPending()
+                publishNavigationProjection(value)
                 if readLifecycle.ownsError(request) { errorMessage = nil }
             case let .failure(error):
                 if readLifecycle.ownsError(request) { errorMessage = IOSErrorPresentation.message(for: error, context: .contentLoad) }
@@ -708,7 +678,7 @@ struct ArticleRowContent: Equatable {
                 if snapshotRevision == self.snapshotRevision && read && ArticleListPresentationPolicy.removesMarkedReadArticle(removeWhenMarkedRead: removeArticlesWhenMarkedRead, unreadOnly: unreadOnly, scope: scope) {
                     removeVisibleArticles(articleIDs)
                 }
-                reloadCounts(includeNavigationCounts: true)
+                reloadCounts()
             case let .failure(error):
                 restoreReadPresentation(articleIDs, revisions: revisions, snapshotRevision: snapshotRevision)
                 errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
@@ -727,7 +697,7 @@ struct ArticleRowContent: Equatable {
             case .success:
                 markMeaningfulInteraction()
                 if snapshotRevision == self.snapshotRevision && !starred && scope == .starred { removeVisibleArticles(articleIDs) }
-                reloadCounts(includeNavigationCounts: true)
+                reloadCounts()
             case let .failure(error):
                 restoreStarredPresentation(articleIDs, revisions: revisions, snapshotRevision: snapshotRevision)
                 errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
@@ -858,7 +828,7 @@ struct ArticleRowContent: Equatable {
               pendingScrolloverIDs.isEmpty,
               scrolloverCountsPending else { return }
         scrolloverCountsPending = false
-        reloadCounts(includeNavigationCounts: true)
+        reloadCounts()
     }
 
     private func recordSuccessfulScrolloverUndo(_ ids: [Int64], now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
@@ -945,7 +915,7 @@ struct ArticleRowContent: Equatable {
             switch result {
             case .success:
                 updateVisibleRead(ids, read: false)
-                clearScrolloverUndoGroup(); reloadCounts(includeNavigationCounts: true)
+                clearScrolloverUndoGroup(); reloadCounts()
             case let .failure(error): errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
             }
         }
@@ -1042,9 +1012,9 @@ struct ArticleRowContent: Equatable {
             loadNavigationAndCounts { [weak self] in self?.applySyncSnapshotRefresh(metadata, action: action) }
             return
         case .allCounts where action == .replace:
-            applySyncSnapshotRefresh(metadata, action: action) { [weak self] in self?.reloadCounts(includeNavigationCounts: true) }
+            applySyncSnapshotRefresh(metadata, action: action) { [weak self] in self?.reloadCounts() }
         case .allCounts:
-            reloadCounts(includeNavigationCounts: true)
+            reloadCounts()
             applySyncSnapshotRefresh(metadata, action: action)
         case .none:
             applySyncSnapshotRefresh(metadata, action: action)
@@ -1343,34 +1313,43 @@ struct ArticleRowContent: Equatable {
     @MainActor
     var scrolloverSessionGenerationForTesting: UInt64 { scrolloverSessionGeneration }
 
-    private func reloadCounts(includeNavigationCounts: Bool = false) {
+    private func reloadCounts() {
         guard let core else { return }
+        let navigationRequest = readLifecycle.beginNavigation()
         let request = readLifecycle.beginSelectionCount()
         let selectionQuery = query()
-        let categoryQueries = includeNavigationCounts ? catalog.categories.map { (id: $0.id, query: query(scope: .category($0.id))) } : []
-        let feedQueries = includeNavigationCounts ? catalog.feeds.map { (id: $0.id, query: query(scope: .feed($0.id))) } : []
+        let countMode: NavigationCountMode = unreadOnly ? .unread : .all
         Task { [weak self, core] in
             let result = await Task.detached {
                 Result {
                     let selection = try core.countArticles(query: selectionQuery)
-                    let unread = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil))
-                    let starred = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .all, starredFilter: .starred, sort: .newestFirst, limit: 0, cursor: nil))
-                    var categories: [Int64: UInt64] = [:]
-                    var feeds: [Int64: UInt64] = [:]
-                    for item in categoryQueries { categories[item.id] = try core.countArticles(query: item.query) }
-                    for item in feedQueries { feeds[item.id] = try core.countArticles(query: item.query) }
-                    return (selection, unread, starred, categories, feeds)
+                    let navigation = try core.navigationProjection(countMode: countMode)
+                    return (selection, navigation)
                 }
             }.value
-            guard let self, self.readLifecycle.isCurrentSelectionCount(request) else { return }
+            guard let self else { return }
             switch result {
             case let .success(counts):
-                selectionTotal = counts.0; unreadTotal = counts.1; starredTotal = counts.2
-                if includeNavigationCounts { categoryCounts = counts.3; feedCounts = counts.4 }
+                if readLifecycle.isCurrentSelectionCount(request) { selectionTotal = counts.0 }
+                if readLifecycle.isCurrentNavigation(navigationRequest) {
+                    publishNavigationProjection(counts.1)
+                }
+                if readLifecycle.ownsError(request) { errorMessage = nil }
             case let .failure(error):
                 if readLifecycle.ownsError(request) { errorMessage = IOSErrorPresentation.message(for: error, context: .contentLoad) }
             }
         }
+    }
+
+    private func publishNavigationProjection(_ projection: NavigationProjection) {
+        catalog = projection.catalog
+        unreadTotal = projection.unreadTotal
+        starredTotal = projection.starredTotal
+        categoryCounts = Dictionary(uniqueKeysWithValues: projection.categoryCounts.map { ($0.id, $0.count) })
+        feedCounts = Dictionary(uniqueKeysWithValues: projection.feedCounts.map { ($0.id, $0.count) })
+        invalidateFeedIconAvailabilityAfterNavigationRefresh()
+        pending.removeAbsentFeeds(Set(projection.catalog.feeds.map(\.id)))
+        publishPending()
     }
 
     private func requestScrollReset() { scrollResetRevision &+= 1 }

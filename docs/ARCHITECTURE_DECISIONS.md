@@ -93,6 +93,14 @@ require sorting or pagination. They can be refreshed independently from
 visible article snapshots, for example after Read-on-Scrollover, without
 re-querying the visible list.
 
+Navigation catalog metadata and its navigation counts are one shared Core
+projection. Native clients choose the navigation count mode (unread or all)
+and consume the resulting catalog, global unread/starred totals, and category/
+feed counts; they do not derive or incrementally maintain those counts. The
+currently selected Timeline/query count remains a separate bounded-query
+concern. Scrollover may defer a navigation-projection refresh until the
+Timeline is idle, but does not derive counts itself.
+
 Visible article snapshots remain stable according to the snapshot rules
 below, but selected status surfaces may intentionally show live core
 counts. In particular, the macOS menu-bar unread count reflects the

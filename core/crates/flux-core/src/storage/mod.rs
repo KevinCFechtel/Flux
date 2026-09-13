@@ -14,8 +14,9 @@ use crate::domain::{
     LegacyPlaybackImport, LegacyPlaybackImportResult, ListeningListEnclosure, ListeningListFeed,
     ListeningListItem, ListeningListSort, MediaArtworkSource, MediaChapter, MediaChapterSource,
     MediaDownload, MediaMetadata, MediaTransferWork, MutationField, NavigationCatalog,
-    PlaybackState, PlaybackStatus, ReadArticleRetention, ReadFilter, SavedMedia,
-    SavedMediaMarkerState, SavedMediaSyncConfiguration, SavedPlayableMediaItem, StarredFilter,
+    NavigationCountMode, NavigationProjection, NavigationScopedCount, PlaybackState,
+    PlaybackStatus, ReadArticleRetention, ReadFilter, SavedMedia, SavedMediaMarkerState,
+    SavedMediaSyncConfiguration, SavedPlayableMediaItem, StarredFilter,
     SystemNotificationCandidate, WidgetArticle, WidgetCounts, WidgetData, WidgetScopedCount,
 };
 use crate::media_metadata::{
@@ -2795,32 +2796,56 @@ impl Store {
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
-        let mut categories = connection
-            .prepare("SELECT id,title FROM categories ORDER BY title COLLATE NOCASE,id")
+        self.navigation_catalog_locked(&connection)
+    }
+    /// Holds the Store connection lock through catalog and aggregate reads so a
+    /// concurrent local mutation or reconciliation cannot mix their states.
+    pub fn navigation_projection(
+        &self,
+        count_mode: NavigationCountMode,
+    ) -> Result<NavigationProjection, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let catalog = self.navigation_catalog_locked(&connection)?;
+        let (unread_total, starred_total) = connection
+            .query_row(
+                "SELECT \
+                    COALESCE(SUM(CASE WHEN is_read=0 THEN 1 ELSE 0 END),0), \
+                    COALESCE(SUM(CASE WHEN is_starred=1 THEN 1 ELSE 0 END),0) \
+                 FROM articles",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
             .map_err(sql_error)?;
-        let categories = categories
-            .query_map([], |row| {
-                Ok(Category {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                })
-            })
-            .map_err(sql_error)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(sql_error)?;
-        let mut feeds=connection.prepare("SELECT id,category_id,title FROM feeds ORDER BY category_id,title COLLATE NOCASE,id").map_err(sql_error)?;
-        let feeds = feeds
-            .query_map([], |row| {
-                Ok(Feed {
-                    id: row.get(0)?,
-                    category_id: row.get(1)?,
-                    title: row.get(2)?,
-                })
-            })
-            .map_err(sql_error)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(sql_error)?;
-        Ok(NavigationCatalog { categories, feeds })
+        let (feed_sql, category_sql) = match count_mode {
+            NavigationCountMode::Unread => (
+                "SELECT f.id,COUNT(a.id) FROM feeds f \
+                 LEFT JOIN articles a ON a.feed_id=f.id AND a.is_read=0 \
+                 GROUP BY f.id ORDER BY f.id",
+                "SELECT c.id,COUNT(a.id) FROM categories c \
+                 LEFT JOIN feeds f ON f.category_id=c.id \
+                 LEFT JOIN articles a ON a.feed_id=f.id AND a.is_read=0 \
+                 GROUP BY c.id ORDER BY c.id",
+            ),
+            NavigationCountMode::All => (
+                "SELECT f.id,COUNT(a.id) FROM feeds f \
+                 LEFT JOIN articles a ON a.feed_id=f.id \
+                 GROUP BY f.id ORDER BY f.id",
+                "SELECT c.id,COUNT(a.id) FROM categories c \
+                 LEFT JOIN feeds f ON f.category_id=c.id \
+                 LEFT JOIN articles a ON a.feed_id=f.id \
+                 GROUP BY c.id ORDER BY c.id",
+            ),
+        };
+        Ok(NavigationProjection {
+            catalog,
+            unread_total,
+            starred_total,
+            category_counts: navigation_scoped_counts(&connection, category_sql)?,
+            feed_counts: navigation_scoped_counts(&connection, feed_sql)?,
+        })
     }
     pub fn count_articles(&self, query: &ArticleQuery) -> Result<u64, CoreError> {
         let connection = self
@@ -3004,6 +3029,22 @@ fn scoped_counts(connection: &Connection, sql: &str) -> Result<Vec<WidgetScopedC
             Ok(WidgetScopedCount {
                 id: r.get(0)?,
                 count: r.get(1)?,
+            })
+        })
+        .map_err(sql_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sql_error)
+}
+fn navigation_scoped_counts(
+    connection: &Connection,
+    sql: &str,
+) -> Result<Vec<NavigationScopedCount>, CoreError> {
+    let mut statement = connection.prepare(sql).map_err(sql_error)?;
+    statement
+        .query_map([], |row| {
+            Ok(NavigationScopedCount {
+                id: row.get(0)?,
+                count: row.get(1)?,
             })
         })
         .map_err(sql_error)?
@@ -3958,6 +3999,108 @@ mod tests {
         let media = temp.path().join("media");
         std::fs::create_dir_all(&data).unwrap();
         (data, cache, media)
+    }
+
+    #[test]
+    fn navigation_projection_aggregates_catalog_counts_for_each_mode_in_constant_queries() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [
+            Category {
+                id: 1,
+                title: "First".into(),
+            },
+            Category {
+                id: 2,
+                title: "Second".into(),
+            },
+        ];
+        let feeds = [
+            Feed {
+                id: 10,
+                category_id: 1,
+                title: "First".into(),
+            },
+            Feed {
+                id: 20,
+                category_id: 1,
+                title: "Second".into(),
+            },
+            Feed {
+                id: 30,
+                category_id: 2,
+                title: "No articles".into(),
+            },
+        ];
+        let article = |id, feed_id, is_read, is_starred| Article {
+            id,
+            feed_id,
+            title: format!("Article {id}"),
+            url: format!("https://example.test/{id}"),
+            comments_url: String::new(),
+            published_at: "2026-01-01T00:00:00Z".into(),
+            is_read,
+            is_starred,
+            raw_html_content: String::new(),
+            preview: String::new(),
+            image_url: None,
+        };
+        store
+            .reconcile(
+                &categories,
+                &feeds,
+                &[
+                    article(1, 10, false, false),
+                    article(2, 10, true, true),
+                    article(3, 20, false, true),
+                ],
+            )
+            .unwrap();
+
+        let unread = store
+            .navigation_projection(NavigationCountMode::Unread)
+            .unwrap();
+        assert_eq!(unread.catalog.categories, categories);
+        assert_eq!(unread.catalog.feeds, feeds);
+        assert_eq!(unread.unread_total, 2);
+        assert_eq!(unread.starred_total, 2);
+        assert_eq!(
+            unread.category_counts,
+            vec![
+                NavigationScopedCount { id: 1, count: 2 },
+                NavigationScopedCount { id: 2, count: 0 },
+            ]
+        );
+        assert_eq!(
+            unread.feed_counts,
+            vec![
+                NavigationScopedCount { id: 10, count: 1 },
+                NavigationScopedCount { id: 20, count: 1 },
+                NavigationScopedCount { id: 30, count: 0 },
+            ]
+        );
+
+        let all = store
+            .navigation_projection(NavigationCountMode::All)
+            .unwrap();
+        assert_eq!(all.unread_total, 2);
+        assert_eq!(all.starred_total, 2);
+        assert_eq!(
+            all.category_counts,
+            vec![
+                NavigationScopedCount { id: 1, count: 3 },
+                NavigationScopedCount { id: 2, count: 0 },
+            ]
+        );
+        assert_eq!(
+            all.feed_counts,
+            vec![
+                NavigationScopedCount { id: 10, count: 2 },
+                NavigationScopedCount { id: 20, count: 1 },
+                NavigationScopedCount { id: 30, count: 0 },
+            ]
+        );
     }
 
     #[test]

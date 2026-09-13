@@ -2142,6 +2142,25 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(lifecycle.ownsError(current))
     }
 
+    func testNavigationRefreshUsesOneCoreProjectionInsteadOfCountFanout() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let sourceURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("FluxNews/NewsreaderStore.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let navigationStart = try XCTUnwrap(source.range(of: "func loadNavigationAndCounts"))
+        let navigationEnd = try XCTUnwrap(source.range(of: "func loadVisibleArticles", range: navigationStart.upperBound..<source.endIndex))
+        let navigationRefresh = String(source[navigationStart.lowerBound..<navigationEnd.lowerBound])
+        XCTAssertEqual(navigationRefresh.components(separatedBy: "core.navigationProjection").count - 1, 1)
+        XCTAssertFalse(navigationRefresh.contains("core.countArticles"))
+
+        let countsStart = try XCTUnwrap(source.range(of: "private func reloadCounts"))
+        let countsEnd = try XCTUnwrap(source.range(of: "private func requestScrollReset", range: countsStart.upperBound..<source.endIndex))
+        let countRefresh = String(source[countsStart.lowerBound..<countsEnd.lowerBound])
+        XCTAssertEqual(countRefresh.components(separatedBy: "core.navigationProjection").count - 1, 1)
+        XCTAssertEqual(countRefresh.components(separatedBy: "core.countArticles").count - 1, 1, "selectionTotal remains a separate selected-query count")
+    }
+
     func testDetachAndReattachInvalidateAllPriorReadRequests() {
         var lifecycle = IOSNewsreaderReadLifecycle()
         let article = lifecycle.beginArticle()

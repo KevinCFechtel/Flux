@@ -253,6 +253,24 @@ pub struct NavigationCatalog {
     pub categories: Vec<Category>,
     pub feeds: Vec<Feed>,
 }
+#[derive(uniffi::Enum)]
+pub enum NavigationCountMode {
+    Unread,
+    All,
+}
+#[derive(uniffi::Record)]
+pub struct NavigationProjection {
+    pub catalog: NavigationCatalog,
+    pub unread_total: u64,
+    pub starred_total: u64,
+    pub category_counts: Vec<NavigationScopedCount>,
+    pub feed_counts: Vec<NavigationScopedCount>,
+}
+#[derive(uniffi::Record)]
+pub struct NavigationScopedCount {
+    pub id: i64,
+    pub count: u64,
+}
 #[derive(uniffi::Record)]
 pub struct WidgetData {
     pub categories: Vec<Category>,
@@ -1253,6 +1271,15 @@ impl Flux {
             .map(Into::into)
             .map_err(map_error)
     }
+    pub fn navigation_projection(
+        &self,
+        count_mode: NavigationCountMode,
+    ) -> Result<NavigationProjection, FluxError> {
+        self.core
+            .navigation_projection(count_mode.into())
+            .map(Into::into)
+            .map_err(map_error)
+    }
     pub fn feed_system_notification_settings(
         &self,
     ) -> Result<Vec<FeedSystemNotificationSetting>, FluxError> {
@@ -2037,6 +2064,33 @@ impl From<domain::NavigationCatalog> for NavigationCatalog {
         }
     }
 }
+impl From<NavigationCountMode> for domain::NavigationCountMode {
+    fn from(value: NavigationCountMode) -> Self {
+        match value {
+            NavigationCountMode::Unread => Self::Unread,
+            NavigationCountMode::All => Self::All,
+        }
+    }
+}
+impl From<domain::NavigationProjection> for NavigationProjection {
+    fn from(value: domain::NavigationProjection) -> Self {
+        Self {
+            catalog: value.catalog.into(),
+            unread_total: value.unread_total,
+            starred_total: value.starred_total,
+            category_counts: value.category_counts.into_iter().map(Into::into).collect(),
+            feed_counts: value.feed_counts.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+impl From<domain::NavigationScopedCount> for NavigationScopedCount {
+    fn from(value: domain::NavigationScopedCount) -> Self {
+        Self {
+            id: value.id,
+            count: value.count,
+        }
+    }
+}
 impl From<domain::WidgetData> for WidgetData {
     fn from(value: domain::WidgetData) -> Self {
         Self {
@@ -2585,6 +2639,39 @@ mod tests {
         assert!(matches!(
             flux_core::MediaProgressCapability::Unknown.into(),
             MediaProgressCapability::Unknown
+        ));
+    }
+
+    #[test]
+    fn navigation_projection_mapping_preserves_catalog_totals_and_scoped_counts() {
+        let mapped: NavigationProjection = domain::NavigationProjection {
+            catalog: domain::NavigationCatalog {
+                categories: vec![domain::Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                feeds: vec![domain::Feed {
+                    id: 10,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+            },
+            unread_total: 4,
+            starred_total: 2,
+            category_counts: vec![domain::NavigationScopedCount { id: 1, count: 3 }],
+            feed_counts: vec![domain::NavigationScopedCount { id: 10, count: 3 }],
+        }
+        .into();
+
+        assert_eq!(mapped.catalog.categories[0].title, "Category");
+        assert_eq!(mapped.catalog.feeds[0].category_id, 1);
+        assert_eq!(mapped.unread_total, 4);
+        assert_eq!(mapped.starred_total, 2);
+        assert_eq!(mapped.category_counts[0].count, 3);
+        assert_eq!(mapped.feed_counts[0].id, 10);
+        assert!(matches!(
+            domain::NavigationCountMode::from(NavigationCountMode::All),
+            domain::NavigationCountMode::All
         ));
     }
 

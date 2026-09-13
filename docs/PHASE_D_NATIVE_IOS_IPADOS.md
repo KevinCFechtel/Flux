@@ -491,6 +491,13 @@ optional current-scope count; older supported iOS versions retain the native
 trailing-counter fallback. System Large Title and collapsed navigation behavior
 is authoritative and is not recreated through custom scroll tracking.
 
+Navigation metadata and navigation counts are consumed as one shared Rust Core
+projection. Swift selects unread-only or all-entry navigation semantics but
+does not derive or incrementally cache category/feed counts; the selected
+Timeline/query `selectionTotal` remains separate. Scrollover keeps its existing
+idle-refresh policy and may defer consuming a fresh projection until idle, but
+never derives optimistic navigation counts.
+
 On iOS, a semantic scope/filter/sort reset stays within the existing UIKit
 Timeline controller: it resets the collection view to its natural top position
 and rebaselines Scrollover geometry without re-identifying the adaptive detail

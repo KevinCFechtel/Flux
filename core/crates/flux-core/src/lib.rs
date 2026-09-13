@@ -32,10 +32,11 @@ use domain::{
     FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, LegacyPlaybackImport,
     LegacyPlaybackImportResult, ListeningListFeed, ListeningListItem, ListeningListSort,
     MediaChapter, MediaDownload, MediaMetadata, MediaTransferWork, MutationField, MutationResult,
-    NavigationCatalog, PlaybackPreparation, PlaybackState, ReadArticleRetention, ReaderDocument,
-    RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult, SavedMediaSyncConfiguration,
-    SavedMediaSyncSetupInfo, SavedPlayableMediaItem, SearchArticlesRequest, SearchArticlesResult,
-    SearchMutationDisposition, SyncCompleted, SyncFailure, SyncReason, WidgetData,
+    NavigationCatalog, NavigationCountMode, NavigationProjection, PlaybackPreparation,
+    PlaybackState, ReadArticleRetention, ReaderDocument, RuntimeHealth, RuntimeHealthStatus,
+    SaveToServiceResult, SavedMediaSyncConfiguration, SavedMediaSyncSetupInfo,
+    SavedPlayableMediaItem, SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition,
+    SyncCompleted, SyncFailure, SyncReason, WidgetData,
 };
 use miniflux::{
     AccountValidationAttempt, AccountValidationError, AccountValidationResult, HttpHeader,
@@ -899,6 +900,12 @@ impl FluxCore {
     }
     pub fn navigation_catalog(&self) -> Result<NavigationCatalog, CoreError> {
         self.store.navigation_catalog()
+    }
+    pub fn navigation_projection(
+        &self,
+        count_mode: NavigationCountMode,
+    ) -> Result<NavigationProjection, CoreError> {
+        self.store.navigation_projection(count_mode)
     }
     pub fn feed_system_notification_settings(
         &self,
@@ -2871,6 +2878,74 @@ mod tests {
             })
             .unwrap(),
             1
+        );
+    }
+    #[test]
+    fn navigation_projection_tracks_local_read_and_starred_mutations() {
+        let temp = TempDir::new().unwrap();
+        let (core, _) = mutation_core(&temp);
+
+        let initial = core
+            .navigation_projection(NavigationCountMode::Unread)
+            .unwrap();
+        assert_eq!(initial.catalog.categories.len(), 2);
+        assert_eq!(initial.catalog.feeds.len(), 2);
+        assert_eq!(initial.unread_total, 1);
+        assert_eq!(initial.starred_total, 1);
+        assert_eq!(
+            initial.category_counts,
+            vec![
+                NavigationScopedCount { id: 1, count: 1 },
+                NavigationScopedCount { id: 2, count: 0 },
+            ]
+        );
+        assert_eq!(
+            initial.feed_counts,
+            vec![
+                NavigationScopedCount { id: 10, count: 1 },
+                NavigationScopedCount { id: 20, count: 0 },
+            ]
+        );
+
+        core.set_read_state(1, true).unwrap();
+        core.set_starred_state(3, true).unwrap();
+        let after_mutations = core
+            .navigation_projection(NavigationCountMode::All)
+            .unwrap();
+        assert_eq!(after_mutations.unread_total, 0);
+        assert_eq!(after_mutations.starred_total, 2);
+        assert_eq!(
+            after_mutations.category_counts,
+            vec![
+                NavigationScopedCount { id: 1, count: 2 },
+                NavigationScopedCount { id: 2, count: 1 },
+            ]
+        );
+        assert_eq!(
+            after_mutations.feed_counts,
+            vec![
+                NavigationScopedCount { id: 10, count: 2 },
+                NavigationScopedCount { id: 20, count: 1 },
+            ]
+        );
+    }
+    #[test]
+    fn navigation_projection_is_empty_before_the_first_sync() {
+        let temp = TempDir::new().unwrap();
+        let (core, _) = core(&temp, snapshot());
+        assert_eq!(
+            core.navigation_projection(NavigationCountMode::Unread)
+                .unwrap(),
+            NavigationProjection {
+                catalog: NavigationCatalog {
+                    categories: vec![],
+                    feeds: vec![],
+                },
+                unread_total: 0,
+                starred_total: 0,
+                category_counts: vec![],
+                feed_counts: vec![],
+            }
         );
     }
     #[test]
