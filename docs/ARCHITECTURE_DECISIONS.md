@@ -101,6 +101,14 @@ currently selected Timeline/query count remains a separate bounded-query
 concern. Scrollover may defer a navigation-projection refresh until the
 Timeline is idle, but does not derive counts itself.
 
+The local native iOS Timeline reads Core-owned keyset pages using the
+`(published_at, article_id)` cursor. Each page includes the full selection total
+and the next cursor; iOS retains pages for its current query and appends only
+the new immutable row content. Initial replacement and targeted read/starred
+presentation changes remain distinct from page append. Search retains its
+separate remote offset-pagination contract. Hard Timeline windowing/eviction is
+deferred pending memory profiling.
+
 ### Apple synchronous Core execution boundary
 
 The Rust Core and its UniFFI surface remain synchronous. Swift Concurrency owns

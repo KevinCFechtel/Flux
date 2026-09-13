@@ -106,6 +106,12 @@ pub struct ArticleSummary {
     pub image_url: Option<String>,
 }
 #[derive(uniffi::Record)]
+pub struct ArticlePage {
+    pub articles: Vec<ArticleSummary>,
+    pub total: u64,
+    pub next_cursor: Option<ArticleCursor>,
+}
+#[derive(uniffi::Record)]
 pub struct ArticleAudioActionProjection {
     pub article_id: i64,
     pub enclosures: Vec<Enclosure>,
@@ -921,6 +927,12 @@ impl Flux {
         self.core
             .query_articles(query.into())
             .map(|rows| rows.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn article_page(&self, query: ArticleQuery) -> Result<ArticlePage, FluxError> {
+        self.core
+            .article_page(query.into())
+            .map(Into::into)
             .map_err(map_error)
     }
     pub fn article_audio_action_states(
@@ -1936,6 +1948,18 @@ impl From<domain::ArticleSummary> for ArticleSummary {
         }
     }
 }
+impl From<domain::ArticlePage> for ArticlePage {
+    fn from(value: domain::ArticlePage) -> Self {
+        Self {
+            articles: value.articles.into_iter().map(Into::into).collect(),
+            total: value.total,
+            next_cursor: value.next_cursor.map(|cursor| ArticleCursor {
+                published_at: cursor.published_at,
+                article_id: cursor.article_id,
+            }),
+        }
+    }
+}
 impl From<domain::ArticleAudioActionProjection> for ArticleAudioActionProjection {
     fn from(value: domain::ArticleAudioActionProjection) -> Self {
         Self {
@@ -2673,6 +2697,36 @@ mod tests {
             domain::NavigationCountMode::from(NavigationCountMode::All),
             domain::NavigationCountMode::All
         ));
+    }
+
+    #[test]
+    fn article_page_mapping_preserves_total_and_cursor() {
+        let mapped: ArticlePage = domain::ArticlePage {
+            articles: vec![domain::ArticleSummary {
+                id: 7,
+                feed_id: 10,
+                category_id: 2,
+                feed_title: "Feed".into(),
+                title: "Article".into(),
+                url: "https://example.test/article".into(),
+                comments_url: String::new(),
+                published_at: "2026-01-01T00:00:00Z".into(),
+                is_read: false,
+                is_starred: true,
+                preview: String::new(),
+                image_url: None,
+            }],
+            total: 12,
+            next_cursor: Some(domain::ArticleCursor {
+                published_at: "2026-01-01T00:00:00Z".into(),
+                article_id: 7,
+            }),
+        }
+        .into();
+
+        assert_eq!(mapped.articles[0].id, 7);
+        assert_eq!(mapped.total, 12);
+        assert_eq!(mapped.next_cursor.unwrap().article_id, 7);
     }
 
     #[test]

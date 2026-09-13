@@ -133,6 +133,22 @@ The SwiftUI bridge receives semantic revisions/inputs, not continuously changing
 offsets or per-row positions. SwiftUI updates to navigation, badges, or overlays
 must not recreate the controller or reapply an unchanged article snapshot.
 
+### Local Timeline pagination
+
+The local iOS Timeline reads bounded Core-owned keyset pages. The cursor is the
+shared `(published_at, article_id)` ordering contract; each Core page also
+reports the full selected-scope total and the next cursor. A first page replaces
+the Timeline, while later pages append only new stable IDs and their immutable
+row content. Prepared row content, including date and link derivation, is made
+off-main before the MainActor validates the page generation and publishes the
+small structural delta.
+
+Loaded pages remain retained for the lifetime of the current Timeline query.
+Hard windowing/eviction is deliberately deferred until profiling demonstrates a
+need. Targeted read/starred/Scrollover presentation mutations remain separate
+from structural pagination. Remote Search keeps its own offset-pagination
+contract rather than using the local article cursor.
+
 ### Mutation execution and feedback
 
 Adapt/extract the existing scheduler into one session-owned worker with a

@@ -7,17 +7,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::domain::{
-    Article, ArticleAudioActionProjection, ArticleQuery, ArticleScope, ArticleSort, ArticleSummary,
-    Category, ContinueListeningItem, CoreError, CoreSettings, DeliveryMode, DetailRenderingMode,
-    DiscoveryMode, DownloadFailureKind, DownloadNetworkPolicy, DownloadOrigin, DownloadRetention,
-    DownloadState, Enclosure, Feed, FeedPreferences, FeedSystemNotificationSetting,
-    LegacyPlaybackImport, LegacyPlaybackImportResult, ListeningListEnclosure, ListeningListFeed,
-    ListeningListItem, ListeningListSort, MediaArtworkSource, MediaChapter, MediaChapterSource,
-    MediaDownload, MediaMetadata, MediaTransferWork, MutationField, NavigationCatalog,
-    NavigationCountMode, NavigationProjection, NavigationScopedCount, PlaybackState,
-    PlaybackStatus, ReadArticleRetention, ReadFilter, SavedMedia, SavedMediaMarkerState,
-    SavedMediaSyncConfiguration, SavedPlayableMediaItem, StarredFilter,
-    SystemNotificationCandidate, WidgetArticle, WidgetCounts, WidgetData, WidgetScopedCount,
+    Article, ArticleAudioActionProjection, ArticlePage, ArticleQuery, ArticleScope, ArticleSort,
+    ArticleSummary, Category, ContinueListeningItem, CoreError, CoreSettings, DeliveryMode,
+    DetailRenderingMode, DiscoveryMode, DownloadFailureKind, DownloadNetworkPolicy, DownloadOrigin,
+    DownloadRetention, DownloadState, Enclosure, Feed, FeedPreferences,
+    FeedSystemNotificationSetting, LegacyPlaybackImport, LegacyPlaybackImportResult,
+    ListeningListEnclosure, ListeningListFeed, ListeningListItem, ListeningListSort,
+    MediaArtworkSource, MediaChapter, MediaChapterSource, MediaDownload, MediaMetadata,
+    MediaTransferWork, MutationField, NavigationCatalog, NavigationCountMode, NavigationProjection,
+    NavigationScopedCount, PlaybackState, PlaybackStatus, ReadArticleRetention, ReadFilter,
+    SavedMedia, SavedMediaMarkerState, SavedMediaSyncConfiguration, SavedPlayableMediaItem,
+    StarredFilter, SystemNotificationCandidate, WidgetArticle, WidgetCounts, WidgetData,
+    WidgetScopedCount,
 };
 use crate::media_metadata::{
     AnalyzedMedia, analyze_file, article_chapters, resolve_media_reference, to_domain_chapters,
@@ -2852,6 +2853,53 @@ impl Store {
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        Self::count_articles_locked(&connection, query)
+    }
+    pub fn query_articles(&self, query: &ArticleQuery) -> Result<Vec<ArticleSummary>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        Self::query_articles_locked(&connection, query)
+    }
+
+    pub fn article_page(&self, query: &ArticleQuery) -> Result<ArticlePage, CoreError> {
+        if query.limit == 0 {
+            return Err(CoreError::data("article page limit must be positive"));
+        }
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut total_query = query.clone();
+        total_query.cursor = None;
+        let total = Self::count_articles_locked(&connection, &total_query)?;
+        let mut fetch_query = query.clone();
+        fetch_query.limit = query.limit.saturating_add(1);
+        let mut articles = Self::query_articles_locked(&connection, &fetch_query)?;
+        let has_more = articles.len() > query.limit as usize;
+        if has_more {
+            articles.pop();
+        }
+        let next_cursor = has_more
+            .then(|| {
+                articles.last().map(|article| crate::domain::ArticleCursor {
+                    published_at: article.published_at.clone(),
+                    article_id: article.id,
+                })
+            })
+            .flatten();
+        Ok(ArticlePage {
+            articles,
+            total,
+            next_cursor,
+        })
+    }
+
+    fn count_articles_locked(
+        connection: &Connection,
+        query: &ArticleQuery,
+    ) -> Result<u64, CoreError> {
         let (sql, values) = article_filter_sql(
             "SELECT COUNT(*) FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE 1=1".into(),
             query,
@@ -2862,11 +2910,11 @@ impl Store {
             })
             .map_err(sql_error)
     }
-    pub fn query_articles(&self, query: &ArticleQuery) -> Result<Vec<ArticleSummary>, CoreError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+
+    fn query_articles_locked(
+        connection: &Connection,
+        query: &ArticleQuery,
+    ) -> Result<Vec<ArticleSummary>, CoreError> {
         let (mut sql,mut values)=article_filter_sql("SELECT a.id,a.feed_id,f.category_id,f.title,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.preview,a.image_url FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE 1=1".into(),query);
         let descending = query.sort == ArticleSort::NewestFirst;
         if let Some(cursor) = &query.cursor {

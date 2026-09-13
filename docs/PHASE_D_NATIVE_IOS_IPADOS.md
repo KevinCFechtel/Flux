@@ -498,6 +498,14 @@ Timeline/query `selectionTotal` remains separate. Scrollover keeps its existing
 idle-refresh policy and may defer consuming a fresh projection until idle, but
 never derives optimistic navigation counts.
 
+The local UIKit Timeline uses bounded Core keyset pages, ordered by
+`(published_at, article_id)`, rather than reading an unbounded selected
+dataset. A first page replaces the Timeline and later pages append prepared
+immutable row content; loaded pages remain retained for the current semantic
+query. This is separate from targeted read/starred/Scrollover presentation
+updates and from Search's remote pagination. Hard Timeline windowing is deferred
+unless future profiling justifies it.
+
 On iOS, a semantic scope/filter/sort reset stays within the existing UIKit
 Timeline controller: it resets the collection view to its natural top position
 and rebaselines Scrollover geometry without re-identifying the adaptive detail

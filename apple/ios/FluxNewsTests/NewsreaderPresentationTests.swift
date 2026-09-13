@@ -391,6 +391,24 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testTimelinePageAppendPreservesExistingRowStateAndAddsOnlyNewIDs() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let first = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "First", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "", imageUrl: nil)
+        let second = ArticleSummary(id: 2, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Second", url: "https://example.com/2", commentsUrl: "", publishedAt: "2026-01-02T00:00:00Z", isRead: false, isStarred: false, preview: "", imageUrl: nil)
+        store.setArticlesForTesting([first])
+        store.applyReadMutationForTesting([1], read: true)
+        let revision = store.rowPresentationStateForTesting(1)!.mutationRevision
+
+        store.appendArticlesForTesting([first, second])
+
+        XCTAssertEqual(store.articles.map(\.id), [1, 2])
+        XCTAssertEqual(store.timelineStructuralItemCountForTesting, 2)
+        XCTAssertEqual(store.rowPresentationStateForTesting(1)?.mutationRevision, revision)
+        XCTAssertEqual(store.isArticleReadForTesting(1), true)
+        XCTAssertNotNil(store.rowPresentationStateForTesting(2))
+    }
+
+    @MainActor
     func testRowStatusMutationsDoNotInvalidateImmutableRowContent() {
         let article = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "https://example.com/comments", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: "https://example.com/image.jpg")
         let rowState = ArticleRowPresentationState(article: article)

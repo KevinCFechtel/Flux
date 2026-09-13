@@ -343,6 +343,14 @@ final class IOSUIKitScrolloverGeometryTracker {
         invalidateGeometry()
     }
 
+    func appendSnapshot(_ ids: [Int64]) {
+        guard !ids.isEmpty else { return }
+        for id in ids where positions[id] == nil {
+            positions[id] = orderedIDs.count
+            orderedIDs.append(id)
+        }
+    }
+
     func setPhase(_ newPhase: IOSScrolloverPresentationPhase) {
         phase = newPhase
         if newPhase == .idle {
@@ -563,6 +571,10 @@ final class IOSUIKitArticleTimelinePresentationBridge {
         articleStates = states
     }
 
+    func appendArticleStates(_ states: [Int64: IOSUIKitArticlePresentationState]) {
+        for (id, state) in states where articleStates[id] == nil { articleStates[id] = state }
+    }
+
     func publishArticle(_ delta: IOSUIKitArticlePresentationDelta) {
         guard delta.state.revision >= articleStates[delta.articleID]?.revision ?? 0 else { return }
         articleStates[delta.articleID] = delta.state
@@ -600,9 +612,31 @@ final class IOSUIKitArticleTimelinePresentationBridge {
     }
 }
 
+final class IOSUIKitArticleTimelineStructuralStorage {
+    var items: [IOSUIKitArticleTimelineStructuralItem] = []
+}
+
+enum IOSUIKitArticleTimelineStructuralChange {
+    case replace
+    case append([IOSUIKitArticleTimelineStructuralItem])
+}
+
 struct IOSUIKitArticleTimelineStructuralState {
-    let items: [IOSUIKitArticleTimelineStructuralItem]
+    let storage: IOSUIKitArticleTimelineStructuralStorage
+    let change: IOSUIKitArticleTimelineStructuralChange
     let revision: UInt64
+
+    init(storage: IOSUIKitArticleTimelineStructuralStorage, change: IOSUIKitArticleTimelineStructuralChange, revision: UInt64) {
+        self.storage = storage
+        self.change = change
+        self.revision = revision
+    }
+
+    init(items: [IOSUIKitArticleTimelineStructuralItem], revision: UInt64) {
+        let storage = IOSUIKitArticleTimelineStructuralStorage()
+        storage.items = items
+        self.init(storage: storage, change: .replace, revision: revision)
+    }
 }
 
 struct IOSUIKitArticleTimelineItem {
@@ -854,19 +888,40 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         if structuralChanged {
             structuralReconciliationCount &+= 1
             performanceMetrics.recordStructuralReconciliation()
-            let newIDs = structuralState.items.map(\.article.id)
-            orderedIDs = newIDs
-            itemsByID = Dictionary(uniqueKeysWithValues: structuralState.items.map { ($0.article.id, $0) })
-            presentationByID = Dictionary(uniqueKeysWithValues: structuralState.items.map {
-                ($0.article.id, newPresentationBridge.articleState(for: $0.article.id, fallback: $0.article))
-            })
+            let canAppend: Bool
+            if case .append = structuralState.change {
+                canAppend = structuralRevision == structuralState.revision &- 1
+            } else {
+                canAppend = false
+            }
+            if canAppend, case let .append(appendedItems) = structuralState.change {
+                let appended = appendedItems.filter { itemsByID[$0.article.id] == nil }
+                let appendedIDs = appended.map(\.article.id)
+                orderedIDs.append(contentsOf: appendedIDs)
+                for item in appended {
+                    itemsByID[item.article.id] = item
+                    presentationByID[item.article.id] = newPresentationBridge.articleState(for: item.article.id, fallback: item.article)
+                }
+                scrolloverGeometryTracker.appendSnapshot(appendedIDs)
+                var snapshot = dataSource.snapshot()
+                snapshot.appendItems(appendedIDs)
+                dataSource.apply(snapshot, animatingDifferences: false)
+            } else {
+                let items = structuralState.storage.items
+                let newIDs = items.map(\.article.id)
+                orderedIDs = newIDs
+                itemsByID = Dictionary(uniqueKeysWithValues: items.map { ($0.article.id, $0) })
+                presentationByID = Dictionary(uniqueKeysWithValues: items.map {
+                    ($0.article.id, newPresentationBridge.articleState(for: $0.article.id, fallback: $0.article))
+                })
+                scrolloverGeometryTracker.updateSnapshot(newIDs)
+                invalidateScrolloverGeometry()
+                var snapshot = NSDiffableDataSourceSnapshot<Section, Int64>()
+                snapshot.appendSections([.main])
+                snapshot.appendItems(newIDs)
+                dataSource.apply(snapshot, animatingDifferences: false)
+            }
             structuralRevision = structuralState.revision
-            scrolloverGeometryTracker.updateSnapshot(newIDs)
-            invalidateScrolloverGeometry()
-            var snapshot = NSDiffableDataSourceSnapshot<Section, Int64>()
-            snapshot.appendSections([.main])
-            snapshot.appendItems(newIDs)
-            dataSource.apply(snapshot, animatingDifferences: false)
             structuralSnapshotApplicationCount &+= 1
             performanceMetrics.recordSnapshotApply()
 #if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
@@ -2009,7 +2064,7 @@ struct ArticleListView: View {
                     onSetStarred: { article, starred in store.setStarred(article, starred: starred) },
                     onRequestFeedIcon: { feedID, variant in store.requestFeedIcon(feedID, variant: variant) },
                     onRefresh: { await store.syncManually() },
-                    onApproachingEnd: nil,
+                    onApproachingEnd: { store.loadNextTimelinePage() },
                     onMeaningfulInteraction: { store.markMeaningfulInteraction() },
                     onScrolloverBatch: { store.flushScrollover($0) },
                     onScrolloverDirection: { store.receiveScrolloverDirection($0) },
