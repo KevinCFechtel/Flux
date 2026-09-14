@@ -1099,29 +1099,46 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(ArticlePresentationMode.compact.showsArticleImage)
     }
 
-    func testArticleImagePresentationPerformanceDiagnosticDefersOnlyActiveScrolling() {
-        XCTAssertTrue(IOSUIKitTimelineArticleImagePresentationPerformanceDiagnostic.deferArticleImagePresentationWhileScrollingForPerformanceDiagnosis)
-        XCTAssertTrue(IOSUIKitTimelineArticleImagePresentationPerformanceDiagnostic.shouldDeferArticleImagePresentation(whileScrolling: true))
-        XCTAssertFalse(IOSUIKitTimelineArticleImagePresentationPerformanceDiagnostic.shouldDeferArticleImagePresentation(whileScrolling: false))
-        XCTAssertFalse(IOSUIKitTimelineArticleImagePresentationPerformanceDiagnostic.shouldDeferArticleImagePresentation(whileScrolling: true, diagnosticEnabled: false))
+    func testArticleImageAssignmentPerformanceDiagnosticSuppressesOnlyActiveScrolling() {
+        XCTAssertTrue(IOSUIKitTimelineArticleImageAssignmentPerformanceDiagnostic.suppressArticleImageAssignmentWhileScrollingForPerformanceDiagnosis)
+        XCTAssertTrue(IOSUIKitTimelineArticleImageAssignmentPerformanceDiagnostic.shouldSuppressArticleImageAssignment(whileScrolling: true))
+        XCTAssertFalse(IOSUIKitTimelineArticleImageAssignmentPerformanceDiagnostic.shouldSuppressArticleImageAssignment(whileScrolling: false))
+        XCTAssertFalse(IOSUIKitTimelineArticleImageAssignmentPerformanceDiagnostic.shouldSuppressArticleImageAssignment(whileScrolling: true, diagnosticEnabled: false))
     }
 
     @MainActor
-    func testCachedArticleImagePresentsImmediatelyWhileScrolling() async throws {
+    func testCachedArticleImageAssignmentIsSuppressedWhileScrollingAndCorrectedWhenIdle() async throws {
         let data = try imageData(width: 800, height: 400)
         let counter = ImageLoadCounter(data: data)
         let pipeline = ArticleImagePipeline { _ in await counter.load() }
-        let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
+        let first = oracleItem(title: "First", preview: "Preview", hasImage: true, hasComments: false, articleID: 1, imageURL: "https://example.com/first.jpg")
+        let second = oracleItem(title: "Second", preview: "Preview", hasImage: true, hasComments: false, articleID: 2, imageURL: "https://example.com/second.jpg")
         let metrics = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 390)
-        let request = ArticleImageRequest(url: try XCTUnwrap(item.content.imageURL), targetSize: metrics.imageSize(hasImage: true), displayScale: 3, cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius)
-        _ = try await pipeline.image(for: request)
+        let firstRequest = ArticleImageRequest(url: try XCTUnwrap(first.content.imageURL), targetSize: metrics.imageSize(hasImage: true), displayScale: 3, cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius)
+        let secondRequest = ArticleImageRequest(url: try XCTUnwrap(second.content.imageURL), targetSize: metrics.imageSize(hasImage: true), displayScale: 3, cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius)
+        _ = try await pipeline.image(for: firstRequest)
+        _ = try await pipeline.image(for: secondRequest)
 
-        let cell = configuredArticleImageTestCell(item: item, pipeline: pipeline, shouldDeferArticleImagePresentation: { true })
+        var isScrolling = false
+        let cell = configuredArticleImageTestCell(item: first, pipeline: pipeline, shouldDeferArticleImagePresentation: { isScrolling })
+        let retainedImage = try XCTUnwrap(cell.articleImageForTesting)
 
-        XCTAssertNotNil(cell.articleImageForTesting)
-        XCTAssertFalse(cell.hasDeferredArticleImagePresentationForTesting)
+        isScrolling = true
+        let input = IOSUIKitArticleLayoutInput(item: second, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 3, contentSizeCategory: .large, layoutDirection: .leftToRight)
+        cell.prepareForReuse()
+        cell.configure(item: second, mode: .visual, previewLines: .standard, metrics: metrics, displayScale: 3, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
+
+        XCTAssertTrue(cell.articleImageForTesting === retainedImage)
+        XCTAssertEqual(cell.deferredArticleImageRequestForTesting, secondRequest)
         let calls = await counter.callCount()
-        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(calls, 2)
+
+        isScrolling = false
+        cell.presentDeferredArticleImageIfAvailable()
+
+        XCTAssertFalse(cell.articleImageForTesting === retainedImage)
+        XCTAssertEqual(cell.representedArticleID, second.article.id)
+        XCTAssertFalse(cell.hasDeferredArticleImagePresentationForTesting)
     }
 
     @MainActor
@@ -1137,10 +1154,12 @@ final class NewsreaderPresentationTests: XCTestCase {
         cell.configure(item: item, mode: .visual, previewLines: .standard, metrics: metrics, displayScale: 3, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
         await gate.waitUntilSuspended()
         await gate.release()
-        await waitForArticleImagePresentation { cell.hasDeferredArticleImagePresentationForTesting }
+        let request = ArticleImageRequest(url: try XCTUnwrap(item.content.imageURL), targetSize: metrics.imageSize(hasImage: true), displayScale: 3, cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius)
+        await waitForArticleImagePresentation { pipeline.cachedImage(for: request) != nil }
 
         XCTAssertNil(cell.articleImageForTesting)
         XCTAssertTrue(cell.hasDeferredArticleImagePresentationForTesting)
+        XCTAssertFalse(cell.articleImagePresentationForTesting.placeholderHidden)
 
         isScrolling = false
         cell.presentDeferredArticleImageIfAvailable()
@@ -1165,7 +1184,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         cell.configure(item: second, mode: .visual, previewLines: .standard, metrics: metrics, displayScale: 3, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
         await gate.waitUntilSuspended(count: 2)
         await gate.release()
-        await waitForArticleImagePresentation { cell.hasDeferredArticleImagePresentationForTesting }
+        let secondRequest = ArticleImageRequest(url: try XCTUnwrap(second.content.imageURL), targetSize: metrics.imageSize(hasImage: true), displayScale: 3, cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius)
+        await waitForArticleImagePresentation { pipeline.cachedImage(for: secondRequest) != nil }
 
         XCTAssertEqual(cell.representedArticleID, second.article.id)
         XCTAssertEqual(cell.deferredArticleImageRequestForTesting?.url, URL(string: "https://example.com/second.jpg"))
@@ -1184,7 +1204,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         let pipeline = ArticleImagePipeline { _ in try await gate.load() }
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
         let cell = configuredArticleImageTestCell(item: item, pipeline: pipeline, shouldDeferArticleImagePresentation: {
-            IOSUIKitTimelineArticleImagePresentationPerformanceDiagnostic.shouldDeferArticleImagePresentation(whileScrolling: true, diagnosticEnabled: false)
+            IOSUIKitTimelineArticleImageAssignmentPerformanceDiagnostic.shouldSuppressArticleImageAssignment(whileScrolling: true, diagnosticEnabled: false)
         })
 
         let metrics = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 390)
@@ -1213,7 +1233,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testArticleImagePresentationPerformanceDiagnosticPreservesStandardImageSlotGeometry() {
+    func testArticleImageAssignmentPerformanceDiagnosticPreservesStandardImageSlotGeometry() {
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: true)
         let cell = configuredOracleCell(item: item, mode: .visual, previewLines: .standard, width: 390)
         let input = IOSUIKitArticleLayoutInput(item: item, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: cell.traitCollection.displayScale, contentSizeCategory: .large, layoutDirection: .leftToRight)
