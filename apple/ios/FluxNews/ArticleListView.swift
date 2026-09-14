@@ -4,13 +4,14 @@ import UIKit
 import OSLog
 #endif
 
-// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. This keeps the Standard
-// Timeline's image-bearing geometry while removing all article-image work.
-enum IOSUIKitTimelineArticleImagePerformanceDiagnostic {
-    static let disableArticleImagesForPerformanceDiagnosis = true
+// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. This retains normal image
+// loading and rasterization, but holds asynchronous visible-image commits while
+// the Timeline is actively scrolling.
+enum IOSUIKitTimelineArticleImagePresentationPerformanceDiagnostic {
+    static let deferArticleImagePresentationWhileScrollingForPerformanceDiagnosis = true
 
-    static func suppressesArticleImageWork(for mode: ArticlePresentationMode) -> Bool {
-        disableArticleImagesForPerformanceDiagnosis && mode == .visual
+    static func shouldDeferArticleImagePresentation(whileScrolling: Bool, diagnosticEnabled: Bool = deferArticleImagePresentationWhileScrollingForPerformanceDiagnosis) -> Bool {
+        diagnosticEnabled && whileScrolling
     }
 }
 
@@ -842,12 +843,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     var contentOffsetForTesting: CGPoint { collectionView.contentOffset }
     var scrolloverLayoutGenerationForTesting: UInt64 { scrolloverLayoutGeneration }
     var orderedArticleIDsForTesting: [Int64] { orderedIDs }
-    var articleImagePrefetchTaskCountForTesting: Int { prefetchTasks.count }
-    func articleImageRequestForTesting(articleID: Int64) -> ArticleImageRequest? {
-        guard let item = renderedItem(for: articleID) else { return nil }
-        return imageRequest(for: item)
-    }
-    var collectionViewForTesting: UICollectionView { collectionView }
 #endif
 
     private static func makeListLayout() -> UICollectionViewLayout {
@@ -1083,6 +1078,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             performanceMetrics.recordDeterministicHeightFallback(durationNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt)
         }
         cell.performanceMetrics = performanceMetrics
+        cell.shouldDeferArticleImagePresentation = { [weak self] in
+            guard let self else { return false }
+            return IOSUIKitTimelineArticleImagePresentationPerformanceDiagnostic.shouldDeferArticleImagePresentation(
+                whileScrolling: self.scrolloverPhase.isScrolling
+            )
+        }
         performanceMetrics.recordConfigure()
         cell.configure(
             item: item,
@@ -1240,6 +1241,16 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         scrolloverPhase = phase
         scrolloverGeometryTracker.setPhase(phase)
         onScrolloverPhase?(phase)
+        if phase == .idle {
+            presentDeferredArticleImagesForVisibleCells()
+        }
+    }
+
+    private func presentDeferredArticleImagesForVisibleCells() {
+        guard IOSUIKitTimelineArticleImagePresentationPerformanceDiagnostic.deferArticleImagePresentationWhileScrollingForPerformanceDiagnosis else { return }
+        for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
+            cell.presentDeferredArticleImageIfAvailable()
+        }
     }
 
     private func invalidateScrolloverGeometry() {
@@ -1371,9 +1382,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             return preparedLayoutInput(for: item)
         }
         preparedLayoutCoordinator.prepare(layoutInputs, priority: .prefetch)
-        guard mode.showsArticleImage,
-              !IOSUIKitTimelineArticleImagePerformanceDiagnostic.suppressesArticleImageWork(for: mode)
-        else { return }
+        guard mode.showsArticleImage else { return }
         for indexPath in indexPaths {
             guard let id = dataSource.itemIdentifier(for: indexPath),
                   let item = renderedItem(for: id), let request = imageRequest(for: item)
@@ -1400,10 +1409,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func imageRequest(for item: IOSUIKitArticleTimelineItem) -> ArticleImageRequest? {
-        guard mode.showsArticleImage,
-              !IOSUIKitTimelineArticleImagePerformanceDiagnostic.suppressesArticleImageWork(for: mode),
-              let url = item.content.imageURL
-        else { return nil }
+        guard mode.showsArticleImage, let url = item.content.imageURL else { return nil }
         let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: collectionView.bounds.width)
         let targetSize = metrics.imageSize(hasImage: true)
         guard targetSize.width > 0, targetSize.height > 0 else { return nil }
@@ -1747,6 +1753,14 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     private var currentLayoutVariant: IOSUIKitArticleCellLayoutVariant?
     private var imageTask: Task<Void, Never>?
     private var representedImageRequest: ArticleImageRequest?
+    private struct DeferredArticleImagePresentation {
+        let articleID: Int64
+        let request: ArticleImageRequest
+        let bindingGeneration: UInt64
+        let displayScale: CGFloat
+    }
+    private var deferredArticleImagePresentation: DeferredArticleImagePresentation?
+    private var articleImagePipeline = ArticleImagePipeline.shared
     private var imageBindingGeneration: UInt64 = 0
     private var currentTitle = ""
     private var currentFeedTitle = ""
@@ -1756,6 +1770,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     private(set) var preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics?
 
     weak var performanceMetrics: IOSUIKitTimelinePerformanceMetrics?
+    var shouldDeferArticleImagePresentation: () -> Bool = { false }
     private(set) var representedArticleID: Int64?
     private(set) var layoutVariantRevision: UInt64 = 0
     private(set) var measurementSolveCount = 0
@@ -1988,11 +2003,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
 
         updateFeedIcon(image: item.feedIconImage, title: item.content.article.feedTitle)
         updateStatus(isRead: item.isRead, isStarred: item.isStarred)
-        if IOSUIKitTimelineArticleImagePerformanceDiagnostic.suppressesArticleImageWork(for: mode) {
-            suppressArticleImageForPerformanceDiagnosis()
-        } else {
-            configureArticleImage(url: item.content.imageURL, targetSize: imageSize, displayScale: displayScale, articleChanged: articleChanged)
-        }
+        configureArticleImage(url: item.content.imageURL, targetSize: imageSize, displayScale: displayScale, articleChanged: articleChanged)
         contentView.setNeedsLayout()
     }
 
@@ -2010,11 +2021,8 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             landscapeImageHeightConstraint.constant = imageSize.height
         }
 
-        // Rendering is hidden only for this diagnostic; visual constraints and
-        // the Standard cell variant remain active so the slot keeps its space.
-        let hidesArticleImageSlot = variant == .compact || variant == .visualTextOnly || IOSUIKitTimelineArticleImagePerformanceDiagnostic.suppressesArticleImageWork(for: metrics.mode)
         guard currentLayoutVariant != variant else {
-            articleImageView.isHidden = hidesArticleImageSlot
+            articleImageView.isHidden = variant == .compact || variant == .visualTextOnly
             return
         }
 
@@ -2031,7 +2039,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         currentLayoutVariant = variant
         layoutVariantRevision &+= 1
         performanceMetrics?.recordVariantSwitch()
-        articleImageView.isHidden = hidesArticleImageSlot
+        articleImageView.isHidden = variant == .compact || variant == .visualTextOnly
     }
 
     func updateStatus(isRead: Bool, isStarred: Bool) {
@@ -2071,6 +2079,11 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     var articleImageSlotFrameForTesting: CGRect { articleImageView.frame }
     var articleImageForTesting: UIImage? { articleImageView.image }
     var articleImageSlotIsHiddenForTesting: Bool { articleImageView.isHidden }
+#if DEBUG
+    var hasDeferredArticleImagePresentationForTesting: Bool { deferredArticleImagePresentation != nil }
+    var deferredArticleImageRequestForTesting: ArticleImageRequest? { deferredArticleImagePresentation?.request }
+    func setArticleImagePipelineForTesting(_ pipeline: ArticleImagePipeline) { articleImagePipeline = pipeline }
+#endif
     var articleImagePresentationForTesting: (placeholderHidden: Bool, contentMode: UIView.ContentMode, clipsToBounds: Bool, cornerRadius: CGFloat) {
         (imagePlaceholder.isHidden, articleImageView.contentMode, articleImageView.clipsToBounds, articleImageView.layer.cornerRadius)
     }
@@ -2109,14 +2122,6 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         (feedTitleLabel.numberOfLines, feedTitleLabel.lineBreakMode)
     }
 
-    private func suppressArticleImageForPerformanceDiagnosis() {
-        invalidateImageBinding()
-        representedImageRequest = nil
-        // A source-level toggle can be flipped during development. Clear a
-        // pre-existing raster once, but do not create or present a new one.
-        if articleImageView.image != nil { articleImageView.image = nil }
-    }
-
     private func configureArticleImage(url: URL?, targetSize: CGSize, displayScale: CGFloat, articleChanged: Bool) {
         guard let url, targetSize.width > 0, targetSize.height > 0 else {
             guard representedImageRequest != nil else { return }
@@ -2136,28 +2141,29 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         let bindingGeneration = imageBindingGeneration
         guard let articleID = representedArticleID else { return }
         representedImageRequest = request
-        if let cachedImage = ArticleImagePipeline.shared.cachedImage(for: request) {
-            articleImageView.image = UIImage(cgImage: cachedImage, scale: displayScale, orientation: .up)
-            imagePlaceholder.isHidden = true
-            setArticleImagePresentation(loaded: true)
+        if let cachedImage = articleImagePipeline.cachedImage(for: request) {
+            presentArticleImage(cachedImage, displayScale: displayScale)
             return
         }
 
         articleImageView.image = nil
         imagePlaceholder.isHidden = false
         setArticleImagePresentation(loaded: false)
-        imageTask = Task { @MainActor [weak self] in
+        let pipeline = articleImagePipeline
+        imageTask = Task { @MainActor [weak self, pipeline] in
             do {
-                let loadedImage = try await ArticleImagePipeline.shared.image(for: request, cacheWasChecked: true)
+                let loadedImage = try await pipeline.image(for: request, cacheWasChecked: true)
                 guard !Task.isCancelled,
                       let self,
                       self.imageBindingGeneration == bindingGeneration,
                       self.representedArticleID == articleID,
                       self.representedImageRequest == request
                 else { return }
-                self.articleImageView.image = UIImage(cgImage: loadedImage, scale: displayScale, orientation: .up)
-                self.imagePlaceholder.isHidden = true
-                self.setArticleImagePresentation(loaded: true)
+                if self.shouldDeferArticleImagePresentation() {
+                    self.deferredArticleImagePresentation = .init(articleID: articleID, request: request, bindingGeneration: bindingGeneration, displayScale: displayScale)
+                    return
+                }
+                self.presentArticleImage(loadedImage, displayScale: displayScale)
             } catch {
                 guard !Task.isCancelled,
                       let self,
@@ -2170,6 +2176,30 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
                 self.setArticleImagePresentation(loaded: false)
             }
         }
+    }
+
+    func presentDeferredArticleImageIfAvailable() {
+        guard let deferred = deferredArticleImagePresentation,
+              !shouldDeferArticleImagePresentation(),
+              imageBindingGeneration == deferred.bindingGeneration,
+              representedArticleID == deferred.articleID,
+              representedImageRequest == deferred.request
+        else {
+            deferredArticleImagePresentation = nil
+            return
+        }
+        guard let image = articleImagePipeline.cachedImage(for: deferred.request) else {
+            deferredArticleImagePresentation = nil
+            return
+        }
+        deferredArticleImagePresentation = nil
+        presentArticleImage(image, displayScale: deferred.displayScale)
+    }
+
+    private func presentArticleImage(_ image: CGImage, displayScale: CGFloat) {
+        articleImageView.image = UIImage(cgImage: image, scale: displayScale, orientation: .up)
+        imagePlaceholder.isHidden = true
+        setArticleImagePresentation(loaded: true)
     }
 
     private func setArticleImagePresentation(loaded: Bool) {
@@ -2191,6 +2221,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         imageBindingGeneration &+= 1
         imageTask?.cancel()
         imageTask = nil
+        deferredArticleImagePresentation = nil
     }
 
     private func updateAccessibility() {

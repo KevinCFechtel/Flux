@@ -1099,25 +1099,121 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(ArticlePresentationMode.compact.showsArticleImage)
     }
 
-    func testStandardNoImagePerformanceDiagnosticSuppressesOnlyStandardArticleImageWork() {
-        XCTAssertTrue(IOSUIKitTimelineArticleImagePerformanceDiagnostic.disableArticleImagesForPerformanceDiagnosis)
-        XCTAssertTrue(IOSUIKitTimelineArticleImagePerformanceDiagnostic.suppressesArticleImageWork(for: .visual))
-        XCTAssertFalse(IOSUIKitTimelineArticleImagePerformanceDiagnostic.suppressesArticleImageWork(for: .compact))
+    func testArticleImagePresentationPerformanceDiagnosticDefersOnlyActiveScrolling() {
+        XCTAssertTrue(IOSUIKitTimelineArticleImagePresentationPerformanceDiagnostic.deferArticleImagePresentationWhileScrollingForPerformanceDiagnosis)
+        XCTAssertTrue(IOSUIKitTimelineArticleImagePresentationPerformanceDiagnostic.shouldDeferArticleImagePresentation(whileScrolling: true))
+        XCTAssertFalse(IOSUIKitTimelineArticleImagePresentationPerformanceDiagnostic.shouldDeferArticleImagePresentation(whileScrolling: false))
+        XCTAssertFalse(IOSUIKitTimelineArticleImagePresentationPerformanceDiagnostic.shouldDeferArticleImagePresentation(whileScrolling: true, diagnosticEnabled: false))
     }
 
     @MainActor
-    func testStandardNoImagePerformanceDiagnosticDoesNotConstructOrPrefetchArticleImages() {
-        let bridge = IOSUIKitArticleTimelinePresentationBridge()
-        let article = timelineArticle(id: 1, imageURL: "https://example.com/image.jpg")
-        let controller = makeTimelineController(articles: [article], presentationBridge: bridge, feedIconBridge: bridge)
+    func testCachedArticleImagePresentsImmediatelyWhileScrolling() async throws {
+        let data = try imageData(width: 800, height: 400)
+        let counter = ImageLoadCounter(data: data)
+        let pipeline = ArticleImagePipeline { _ in await counter.load() }
+        let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
+        let metrics = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 390)
+        let request = ArticleImageRequest(url: try XCTUnwrap(item.content.imageURL), targetSize: metrics.imageSize(hasImage: true), displayScale: 3, cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius)
+        _ = try await pipeline.image(for: request)
 
-        XCTAssertNil(controller.articleImageRequestForTesting(articleID: article.id))
-        controller.collectionView(controller.collectionViewForTesting, prefetchItemsAt: [IndexPath(item: 0, section: 0)])
-        XCTAssertEqual(controller.articleImagePrefetchTaskCountForTesting, 0)
+        let cell = configuredArticleImageTestCell(item: item, pipeline: pipeline, shouldDeferArticleImagePresentation: { true })
+
+        XCTAssertNotNil(cell.articleImageForTesting)
+        XCTAssertFalse(cell.hasDeferredArticleImagePresentationForTesting)
+        let calls = await counter.callCount()
+        XCTAssertEqual(calls, 1)
     }
 
     @MainActor
-    func testStandardNoImagePerformanceDiagnosticPreservesImageSlotGeometryWithoutArticlePixels() {
+    func testAsyncArticleImageCompletionDefersUntilIdle() async throws {
+        let gate = ImageLoadGate(data: try imageData(width: 800, height: 400))
+        let pipeline = ArticleImagePipeline { _ in try await gate.load() }
+        let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
+        var isScrolling = true
+        let cell = configuredArticleImageTestCell(item: item, pipeline: pipeline, shouldDeferArticleImagePresentation: { isScrolling })
+
+        let metrics = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 390)
+        let input = IOSUIKitArticleLayoutInput(item: item, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 3, contentSizeCategory: .large, layoutDirection: .leftToRight)
+        cell.configure(item: item, mode: .visual, previewLines: .standard, metrics: metrics, displayScale: 3, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
+        await gate.waitUntilSuspended()
+        await gate.release()
+        await waitForArticleImagePresentation { cell.hasDeferredArticleImagePresentationForTesting }
+
+        XCTAssertNil(cell.articleImageForTesting)
+        XCTAssertTrue(cell.hasDeferredArticleImagePresentationForTesting)
+
+        isScrolling = false
+        cell.presentDeferredArticleImageIfAvailable()
+
+        XCTAssertNotNil(cell.articleImageForTesting)
+        XCTAssertFalse(cell.hasDeferredArticleImagePresentationForTesting)
+    }
+
+    @MainActor
+    func testDeferredArticleImageCompletionDoesNotApplyToAReusedCell() async throws {
+        let gate = ImageLoadGate(data: try imageData(width: 800, height: 400))
+        let pipeline = ArticleImagePipeline { _ in try await gate.load() }
+        let first = oracleItem(title: "First", preview: "Preview", hasImage: true, hasComments: false, articleID: 1, imageURL: "https://example.com/first.jpg")
+        let second = oracleItem(title: "Second", preview: "Preview", hasImage: true, hasComments: false, articleID: 2, imageURL: "https://example.com/second.jpg")
+        var isScrolling = true
+        let cell = configuredArticleImageTestCell(item: first, pipeline: pipeline, shouldDeferArticleImagePresentation: { isScrolling })
+        await gate.waitUntilSuspended()
+
+        let metrics = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 390)
+        let input = IOSUIKitArticleLayoutInput(item: second, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 3, contentSizeCategory: .large, layoutDirection: .leftToRight)
+        cell.prepareForReuse()
+        cell.configure(item: second, mode: .visual, previewLines: .standard, metrics: metrics, displayScale: 3, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
+        await gate.waitUntilSuspended(count: 2)
+        await gate.release()
+        await waitForArticleImagePresentation { cell.hasDeferredArticleImagePresentationForTesting }
+
+        XCTAssertEqual(cell.representedArticleID, second.article.id)
+        XCTAssertEqual(cell.deferredArticleImageRequestForTesting?.url, URL(string: "https://example.com/second.jpg"))
+        XCTAssertNil(cell.articleImageForTesting)
+
+        isScrolling = false
+        cell.presentDeferredArticleImageIfAvailable()
+
+        XCTAssertNotNil(cell.articleImageForTesting)
+        XCTAssertEqual(cell.representedArticleID, second.article.id)
+    }
+
+    @MainActor
+    func testArticleImageCompletionPresentsNormallyWhenDiagnosticIsDisabled() async throws {
+        let gate = ImageLoadGate(data: try imageData(width: 800, height: 400))
+        let pipeline = ArticleImagePipeline { _ in try await gate.load() }
+        let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
+        let cell = configuredArticleImageTestCell(item: item, pipeline: pipeline, shouldDeferArticleImagePresentation: {
+            IOSUIKitTimelineArticleImagePresentationPerformanceDiagnostic.shouldDeferArticleImagePresentation(whileScrolling: true, diagnosticEnabled: false)
+        })
+
+        let metrics = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 390)
+        let input = IOSUIKitArticleLayoutInput(item: item, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 3, contentSizeCategory: .large, layoutDirection: .leftToRight)
+        cell.configure(item: item, mode: .visual, previewLines: .standard, metrics: metrics, displayScale: 3, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
+        await gate.waitUntilSuspended()
+        await gate.release()
+        await waitForArticleImagePresentation { cell.articleImageForTesting != nil }
+
+        XCTAssertNotNil(cell.articleImageForTesting)
+        XCTAssertFalse(cell.hasDeferredArticleImagePresentationForTesting)
+    }
+
+    @MainActor
+    func testCompactArticleCellsRemainWithoutArticleImageWork() async throws {
+        let gate = ImageLoadGate(data: try imageData(width: 800, height: 400))
+        let pipeline = ArticleImagePipeline { _ in try await gate.load() }
+        let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
+        let cell = configuredArticleImageTestCell(item: item, pipeline: pipeline, mode: .compact)
+
+        await Task.yield()
+        XCTAssertEqual(cell.layoutVariantForTesting, .compact)
+        XCTAssertTrue(cell.articleImageSlotIsHiddenForTesting)
+        let calls = await gate.callCount()
+        XCTAssertEqual(calls, 0)
+    }
+
+    @MainActor
+    func testArticleImagePresentationPerformanceDiagnosticPreservesStandardImageSlotGeometry() {
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: true)
         let cell = configuredOracleCell(item: item, mode: .visual, previewLines: .standard, width: 390)
         let input = IOSUIKitArticleLayoutInput(item: item, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: cell.traitCollection.displayScale, contentSizeCategory: .large, layoutDirection: .leftToRight)
@@ -1129,8 +1225,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             return XCTFail("Standard visual geometry must retain its image slot")
         }
         assertFrameEqual(cell.articleImageSlotFrameForTesting, expectedImageFrame)
-        XCTAssertTrue(cell.articleImageSlotIsHiddenForTesting)
-        XCTAssertNil(cell.articleImageForTesting)
+        XCTAssertFalse(cell.articleImageSlotIsHiddenForTesting)
     }
 
     func testArticlePresentationLayoutUsesBoundedDeterministicImageSlots() {
@@ -2210,15 +2305,34 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    private func oracleItem(title: String, preview: String, hasImage: Bool, hasComments: Bool, feedTitle: String = "Oracle Feed") -> IOSUIKitArticleTimelineItem {
-        let article = ArticleSummary(id: 91, feedId: 10, categoryId: 20, feedTitle: feedTitle, title: title, url: "https://example.com/article", commentsUrl: hasComments ? "https://example.com/comments" : "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: preview, imageUrl: hasImage ? "https://example.com/image.jpg" : nil)
+    private func oracleItem(title: String, preview: String, hasImage: Bool, hasComments: Bool, feedTitle: String = "Oracle Feed", articleID: Int64 = 91, imageURL: String? = nil) -> IOSUIKitArticleTimelineItem {
+        let article = ArticleSummary(id: articleID, feedId: 10, categoryId: 20, feedTitle: feedTitle, title: title, url: "https://example.com/article", commentsUrl: hasComments ? "https://example.com/comments" : "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: preview, imageUrl: hasImage ? (imageURL ?? "https://example.com/image.jpg") : nil)
         return .init(article: article, content: .init(article: article), isRead: false, isStarred: false, feedIconImage: nil)
+    }
+
+    @MainActor
+    private func configuredArticleImageTestCell(item: IOSUIKitArticleTimelineItem, pipeline: ArticleImagePipeline, mode: ArticlePresentationMode = .visual, displayScale: CGFloat = 3, shouldDeferArticleImagePresentation: @escaping () -> Bool = { false }) -> IOSUIKitArticleCell {
+        let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: 390, height: 1_000))
+        cell.setArticleImagePipelineForTesting(pipeline)
+        cell.shouldDeferArticleImagePresentation = shouldDeferArticleImagePresentation
+        let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: 390)
+        let input = IOSUIKitArticleLayoutInput(item: item, mode: mode, previewLines: .standard, containerWidth: 390, displayScale: displayScale, contentSizeCategory: .large, layoutDirection: .leftToRight)
+        cell.configure(item: item, mode: mode, previewLines: .standard, metrics: metrics, displayScale: displayScale, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
+        return cell
+    }
+
+    @MainActor
+    private func waitForArticleImagePresentation(_ condition: () -> Bool) async {
+        for _ in 0..<200 where !condition() {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
     }
 
     @MainActor
     private func configuredOracleCell(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, width: CGFloat, layoutDirection: UIUserInterfaceLayoutDirection = .leftToRight) -> IOSUIKitArticleCell {
         let container = UIView(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
         let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
+        cell.setArticleImagePipelineForTesting(ArticleImagePipeline { _ in throw CancellationError() })
         let semanticAttribute: UISemanticContentAttribute = layoutDirection == .rightToLeft ? .forceRightToLeft : .forceLeftToRight
         container.semanticContentAttribute = semanticAttribute
         cell.semanticContentAttribute = semanticAttribute
@@ -2262,6 +2376,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
         let container = UIView(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
         let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
+        cell.setArticleImagePipelineForTesting(ArticleImagePipeline { _ in throw CancellationError() })
         let semanticAttribute: UISemanticContentAttribute = layoutDirection == .rightToLeft ? .forceRightToLeft : .forceLeftToRight
         container.semanticContentAttribute = semanticAttribute
         cell.semanticContentAttribute = semanticAttribute
@@ -2727,8 +2842,10 @@ private actor LayoutMeasurementGate {
 private actor ImageLoadGate {
     private let data: Data
     private var calls = 0
+    private var suspendedLoads = 0
     private var didStart: CheckedContinuation<Void, Never>?
     private var startWaiters: [Int: CheckedContinuation<Void, Never>] = [:]
+    private var suspensionWaiters: [Int: CheckedContinuation<Void, Never>] = [:]
     private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(data: Data) { self.data = data }
@@ -2739,7 +2856,12 @@ private actor ImageLoadGate {
         didStart = nil
         let readyCounts = startWaiters.keys.filter { calls >= $0 }
         for count in readyCounts { startWaiters.removeValue(forKey: count)?.resume() }
-        await withCheckedContinuation { releaseWaiters.append($0) }
+        await withCheckedContinuation { continuation in
+            suspendedLoads += 1
+            let readyCounts = suspensionWaiters.keys.filter { suspendedLoads >= $0 }
+            for count in readyCounts { suspensionWaiters.removeValue(forKey: count)?.resume() }
+            releaseWaiters.append(continuation)
+        }
         return data
     }
 
@@ -2751,6 +2873,15 @@ private actor ImageLoadGate {
     func waitUntilStarted(count: Int) async {
         guard calls < count else { return }
         await withCheckedContinuation { startWaiters[count] = $0 }
+    }
+
+    func waitUntilSuspended() async {
+        await waitUntilSuspended(count: 1)
+    }
+
+    func waitUntilSuspended(count: Int) async {
+        guard suspendedLoads < count else { return }
+        await withCheckedContinuation { suspensionWaiters[count] = $0 }
     }
 
     func release() {
