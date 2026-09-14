@@ -831,7 +831,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     func testFeedIconDetachLetsSameKeyRequestAgainAndRejectsOldSessionCompletion() async throws {
         let oldLoader = FeedIconLoadGate(result: .success(nil))
         let newData = try imageData(width: 40, height: 40)
-        let newLoader = FeedIconLoader(results: [.success(newData)])
+        let newLoader = FeedIconLoadGate(result: .success(newData))
         let store = NewsreaderStore(defaults: UserDefaults())
         store.setFeedIconLoaderForTesting { _, _ in try oldLoader.load() }
 
@@ -843,8 +843,9 @@ final class NewsreaderPresentationTests: XCTestCase {
         store.setFeedIconLoaderForTesting { _, _ in try newLoader.load() }
         let newState = store.feedIconPresentationState(for: 10, variant: .normal)
         store.requestFeedIcon(10, variant: .normal, now: 1)
-        await waitForFeedIconState(newState, matching: .available)
-        XCTAssertEqual(newLoader.callCount, 1)
+        await newLoader.waitUntilStarted()
+        newLoader.release()
+        await newState.waitForLoadStateForTesting(.available)
 
         oldLoader.release()
         await oldLoader.waitUntilReturned()
@@ -1215,9 +1216,13 @@ final class NewsreaderPresentationTests: XCTestCase {
         }
 
         XCTAssertFalse(ranOnMain)
-        XCTAssertLessThanOrEqual(prepared.pixelSize.width, IOSFeedIconImagePreparation.displaySidePoints * 3)
-        XCTAssertLessThanOrEqual(prepared.pixelSize.height, IOSFeedIconImagePreparation.displaySidePoints * 3)
+        XCTAssertEqual(prepared.pixelSize.width, IOSFeedIconImagePreparation.displaySidePoints * 3)
+        XCTAssertEqual(prepared.pixelSize.height, IOSFeedIconImagePreparation.displaySidePoints * 3)
         XCTAssertEqual(prepared.image.scale, 3)
+        let image = try XCTUnwrap(prepared.image.cgImage)
+        XCTAssertEqual(image.alphaInfo, .premultipliedFirst)
+        XCTAssertTrue(image.bitmapInfo.contains(.byteOrder32Little))
+        XCTAssertEqual(alpha(at: .zero, in: image), 0)
     }
 
     func testPrefetchMetadataReusesAnUnchangedStructuralSnapshot() {
@@ -1348,7 +1353,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(metrics.memoryCacheCostLimit, ArticleImagePipeline.memoryCacheCostLimit)
     }
 
-    func testArticleImagePipelineSynchronousLookupUsesTheSameNormalizedCacheKey() async throws {
+    func testArticleImagePipelineCachesTheExactPreparedDisplayGeometry() async throws {
         let pipeline = ArticleImagePipeline { _ in try self.imageData(width: 800, height: 400) }
         let url = URL(string: "https://example.com/image.jpg")!
         let cachedRequest = ArticleImageRequest(url: url, targetSize: CGSize(width: 100, height: 50), displayScale: 1)
@@ -1358,7 +1363,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertNil(pipeline.cachedImage(for: cachedRequest))
         _ = try await pipeline.image(for: cachedRequest)
 
-        XCTAssertNotNil(pipeline.cachedImage(for: equivalentRequest))
+        XCTAssertNil(pipeline.cachedImage(for: equivalentRequest))
         XCTAssertNil(pipeline.cachedImage(for: differentSizeRequest))
     }
 
@@ -1457,6 +1462,22 @@ final class NewsreaderPresentationTests: XCTestCase {
         } catch {}
     }
 
+    func testArticleImagePipelineProducesBGRARoundedDisplayRaster() throws {
+        let request = ArticleImageRequest(
+            url: URL(string: "https://example.com/image.jpg")!,
+            targetSize: .init(width: 100, height: 50),
+            displayScale: 2,
+            cornerRadius: 12
+        )
+        let image = try ArticleImagePipeline.downsample(data: imageData(width: 800, height: 400), request: request)
+
+        XCTAssertEqual(image.width, 200)
+        XCTAssertEqual(image.height, 100)
+        XCTAssertEqual(image.alphaInfo, .premultipliedFirst)
+        XCTAssertTrue(image.bitmapInfo.contains(.byteOrder32Little))
+        XCTAssertEqual(alpha(at: .zero, in: image), 0)
+    }
+
     func testArticleImagePipelineCanLoadAfterCacheEvictionAndCancelledWaiter() async throws {
         let data = try imageData(width: 800, height: 400)
         let counter = ImageLoadCounter(data: data)
@@ -1533,6 +1554,24 @@ final class NewsreaderPresentationTests: XCTestCase {
         CGImageDestinationAddImage(destination, image, properties)
         guard CGImageDestinationFinalize(destination) else { throw XCTSkip("Unable to encode image fixture") }
         return data as Data
+    }
+
+    private func alpha(at point: CGPoint, in image: CGImage) -> UInt8 {
+        var pixel = [UInt8](repeating: 0, count: 4)
+        pixel.withUnsafeMutableBytes { bytes in
+            let context = CGContext(
+                data: bytes.baseAddress,
+                width: 1,
+                height: 1,
+                bitsPerComponent: 8,
+                bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )!
+            context.translateBy(x: -point.x, y: -point.y)
+            context.draw(image, in: .init(x: 0, y: 0, width: image.width, height: image.height))
+        }
+        return pixel[3]
     }
 
     @MainActor
@@ -2349,6 +2388,21 @@ final class NewsreaderPresentationTests: XCTestCase {
         let countRefresh = String(source[countsStart.lowerBound..<countsEnd.lowerBound])
         XCTAssertEqual(countRefresh.components(separatedBy: "core.navigationProjection").count - 1, 1)
         XCTAssertEqual(countRefresh.components(separatedBy: "core.countArticles").count - 1, 1, "selectionTotal remains a separate selected-query count")
+    }
+
+    func testArchiveUsesWholeModuleOptimizationWithoutChangingSimulatorOrDiagnosticsPolicy() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let archive = try String(contentsOf: iosRoot.appendingPathComponent("Build/archive.sh"), encoding: .utf8)
+        let simulator = try String(contentsOf: iosRoot.appendingPathComponent("Build/run-simulator.sh"), encoding: .utf8)
+        let build = try String(contentsOf: iosRoot.appendingPathComponent("Build/build-app.sh"), encoding: .utf8)
+        let project = try String(contentsOf: iosRoot.appendingPathComponent("FluxNews.xcodeproj/project.pbxproj"), encoding: .utf8)
+
+        XCTAssertTrue(archive.contains("SWIFT_COMPILATION_MODE=wholemodule"))
+        XCTAssertTrue(simulator.contains("CONFIGURATION=\"${CONFIGURATION:-Debug}\""))
+        XCTAssertTrue(build.contains("FLUX_PERFORMANCE_DIAGNOSTICS"))
+        XCTAssertFalse(project.contains("FLUX_PERFORMANCE_DIAGNOSTICS"))
     }
 
     func testDetachAndReattachInvalidateAllPriorReadRequests() {

@@ -182,6 +182,17 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertLessThanOrEqual(source.count, IOSUIKitResolvedScrolloverFrameStore.capacity)
     }
 
+    func testResolvedFrameSourceEvictsOnlyTheOldestBoundedSlot() {
+        var source = IOSUIKitResolvedScrolloverFrameStore()
+        for id in 1...(IOSUIKitResolvedScrolloverFrameStore.capacity + 1) {
+            source.record(articleID: Int64(id), frame: .init(x: 0, y: CGFloat(id), width: 320, height: 10), viewportTop: 0)
+        }
+
+        XCTAssertEqual(source.count, IOSUIKitResolvedScrolloverFrameStore.capacity)
+        XCTAssertNil(source.frames[1])
+        XCTAssertNotNil(source.frames[Int64(IOSUIKitResolvedScrolloverFrameStore.capacity + 1)])
+    }
+
     func testUIKitStructuralSnapshotChangeResetsGeometrySafely() {
         let tracker = IOSUIKitScrolloverGeometryTracker()
         let firstFrames: [Int64: CGRect] = [1: .init(x: 0, y: 0, width: 320, height: 20)]

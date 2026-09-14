@@ -5,11 +5,19 @@ import SwiftUI
 struct ArticleImageRequest: Hashable, Sendable {
     let url: URL
     let maxPixelDimension: Int
+    let targetPixelSize: CGSize
+    let cornerRadiusPixels: CGFloat
 
-    init(url: URL, targetSize: CGSize, displayScale: CGFloat) {
-        let pixels = max(targetSize.width, targetSize.height) * max(displayScale, 1)
+    init(url: URL, targetSize: CGSize, displayScale: CGFloat, cornerRadius: CGFloat = 0) {
+        let scale = max(displayScale, 1)
+        let pixels = max(targetSize.width, targetSize.height) * scale
         // Bucketing upward prevents tiny layout changes from creating duplicate decodes.
         maxPixelDimension = max(64, Int((ceil(pixels) / 64).rounded(.up)) * 64)
+        targetPixelSize = .init(
+            width: max(1, (targetSize.width * scale).rounded()),
+            height: max(1, (targetSize.height * scale).rounded())
+        )
+        cornerRadiusPixels = max(0, (cornerRadius * scale).rounded())
         self.url = url
     }
 }
@@ -327,7 +335,7 @@ actor ArticleImagePipeline {
             let priority: TaskPriority = job.demand == .visible ? .userInitiated : .utility
             let operation = Task.detached(priority: priority) {
                 let data = try await loader(queued.request.url)
-                return try Self.downsample(data: data, maxPixelDimension: queued.request.maxPixelDimension)
+                return try Self.downsample(data: data, request: queued.request)
             }
             job.operation = operation
             job.state = .active
@@ -413,6 +421,24 @@ actor ArticleImagePipeline {
     }
 
     nonisolated static func downsample(data: Data, maxPixelDimension: Int) throws -> CGImage {
+        let image = try thumbnail(data: data, maxPixelDimension: maxPixelDimension)
+        return renderDisplayReady(
+            image,
+            targetPixelSize: .init(width: image.width, height: image.height),
+            cornerRadiusPixels: 0
+        ) ?? image
+    }
+
+    nonisolated static func downsample(data: Data, request: ArticleImageRequest) throws -> CGImage {
+        let image = try thumbnail(data: data, maxPixelDimension: request.maxPixelDimension)
+        return renderDisplayReady(
+            image,
+            targetPixelSize: request.targetPixelSize,
+            cornerRadiusPixels: request.cornerRadiusPixels
+        ) ?? image
+    }
+
+    private nonisolated static func thumbnail(data: Data, maxPixelDimension: Int) throws -> CGImage {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             throw ArticleImageError.invalidImageData
         }
@@ -425,23 +451,53 @@ actor ArticleImagePipeline {
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else {
             throw ArticleImageError.invalidImageData
         }
-        return decompressed(image) ?? image
+        return image
     }
 
-    private nonisolated static func decompressed(_ image: CGImage) -> CGImage? {
+    private nonisolated static func renderDisplayReady(
+        _ image: CGImage,
+        targetPixelSize: CGSize,
+        cornerRadiusPixels: CGFloat
+    ) -> CGImage? {
+        let width = max(1, Int(targetPixelSize.width.rounded()))
+        let height = max(1, Int(targetPixelSize.height.rounded()))
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
         guard let context = CGContext(
             data: nil,
-            width: image.width,
-            height: image.height,
+            width: width,
+            height: height,
             bitsPerComponent: 8,
             bytesPerRow: 0,
             space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            bitmapInfo: displayBitmapInfo
         ) else { return nil }
         context.interpolationQuality = .high
-        context.draw(image, in: .init(x: 0, y: 0, width: image.width, height: image.height))
+        let destination = CGRect(x: 0, y: 0, width: width, height: height)
+        context.clear(destination)
+        if cornerRadiusPixels > 0 {
+            let radius = min(cornerRadiusPixels, min(destination.width, destination.height) / 2)
+            context.addPath(CGPath(
+                roundedRect: destination,
+                cornerWidth: radius,
+                cornerHeight: radius,
+                transform: nil
+            ))
+            context.clip()
+        }
+        let scale = max(destination.width / CGFloat(image.width), destination.height / CGFloat(image.height))
+        let drawSize = CGSize(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
+        let drawRect = CGRect(
+            x: destination.midX - drawSize.width / 2,
+            y: destination.midY - drawSize.height / 2,
+            width: drawSize.width,
+            height: drawSize.height
+        )
+        context.draw(image, in: drawRect)
         return context.makeImage()
+    }
+
+    private nonisolated static var displayBitmapInfo: UInt32 {
+        CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
     }
 }
 
@@ -455,7 +511,9 @@ private extension ArticleImagePipeline.Demand {
 }
 
 private extension ArticleImageRequest {
-    var cacheKey: NSString { "\(url.absoluteString)|\(maxPixelDimension)" as NSString }
+    var cacheKey: NSString {
+        "\(url.absoluteString)|\(maxPixelDimension)|\(Int(targetPixelSize.width))x\(Int(targetPixelSize.height))|\(Int(cornerRadiusPixels))" as NSString
+    }
 }
 
 private enum ArticleImageError: Error {
