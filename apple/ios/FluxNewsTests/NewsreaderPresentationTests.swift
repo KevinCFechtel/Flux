@@ -975,8 +975,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         .init(items: articles.map { .init(article: $0, content: ArticleRowContent(article: $0)) }, revision: revision)
     }
 
-    private func timelineArticle(id: Int64, feedID: Int64 = 10) -> ArticleSummary {
-        .init(id: id, feedId: feedID, categoryId: 20, feedTitle: "Feed \(feedID)", title: "Article \(id)", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
+    private func timelineArticle(id: Int64, feedID: Int64 = 10, imageURL: String? = nil) -> ArticleSummary {
+        .init(id: id, feedId: feedID, categoryId: 20, feedTitle: "Feed \(feedID)", title: "Article \(id)", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: imageURL)
     }
 
     private func makePresentation(article: ArticleSummary, fallbackRead: Bool, fallbackStarred: Bool, rowState: ArticleRowPresentationState?, feedIcon: IOSFeedIconPresentationState? = nil) -> ArticlePresentationView {
@@ -1097,6 +1097,40 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: true), 0)
         XCTAssertTrue(ArticlePresentationMode.visual.showsArticleImage)
         XCTAssertFalse(ArticlePresentationMode.compact.showsArticleImage)
+    }
+
+    func testStandardNoImagePerformanceDiagnosticSuppressesOnlyStandardArticleImageWork() {
+        XCTAssertTrue(IOSUIKitTimelineArticleImagePerformanceDiagnostic.disableArticleImagesForPerformanceDiagnosis)
+        XCTAssertTrue(IOSUIKitTimelineArticleImagePerformanceDiagnostic.suppressesArticleImageWork(for: .visual))
+        XCTAssertFalse(IOSUIKitTimelineArticleImagePerformanceDiagnostic.suppressesArticleImageWork(for: .compact))
+    }
+
+    @MainActor
+    func testStandardNoImagePerformanceDiagnosticDoesNotConstructOrPrefetchArticleImages() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let article = timelineArticle(id: 1, imageURL: "https://example.com/image.jpg")
+        let controller = makeTimelineController(articles: [article], presentationBridge: bridge, feedIconBridge: bridge)
+
+        XCTAssertNil(controller.articleImageRequestForTesting(articleID: article.id))
+        controller.collectionView(controller.collectionViewForTesting, prefetchItemsAt: [IndexPath(item: 0, section: 0)])
+        XCTAssertEqual(controller.articleImagePrefetchTaskCountForTesting, 0)
+    }
+
+    @MainActor
+    func testStandardNoImagePerformanceDiagnosticPreservesImageSlotGeometryWithoutArticlePixels() {
+        let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: true)
+        let cell = configuredOracleCell(item: item, mode: .visual, previewLines: .standard, width: 390)
+        let input = IOSUIKitArticleLayoutInput(item: item, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: cell.traitCollection.displayScale, contentSizeCategory: .large, layoutDirection: .leftToRight)
+        let expected = IOSUIKitArticleLayoutEngine.metrics(for: input)
+
+        XCTAssertEqual(cell.layoutVariantForTesting, .visualPortrait)
+        XCTAssertEqual(measureUIKitArticleCell(cell, width: 390), expected.cellSize.height, accuracy: 0.5)
+        guard let expectedImageFrame = expected.imageFrame else {
+            return XCTFail("Standard visual geometry must retain its image slot")
+        }
+        assertFrameEqual(cell.articleImageSlotFrameForTesting, expectedImageFrame)
+        XCTAssertTrue(cell.articleImageSlotIsHiddenForTesting)
+        XCTAssertNil(cell.articleImageForTesting)
     }
 
     func testArticlePresentationLayoutUsesBoundedDeterministicImageSlots() {

@@ -4,6 +4,16 @@ import UIKit
 import OSLog
 #endif
 
+// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. This keeps the Standard
+// Timeline's image-bearing geometry while removing all article-image work.
+enum IOSUIKitTimelineArticleImagePerformanceDiagnostic {
+    static let disableArticleImagesForPerformanceDiagnosis = true
+
+    static func suppressesArticleImageWork(for mode: ArticlePresentationMode) -> Bool {
+        disableArticleImagesForPerformanceDiagnosis && mode == .visual
+    }
+}
+
 enum IOSArticleScrollDirection: Equatable {
     case forward
     case backward
@@ -832,6 +842,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     var contentOffsetForTesting: CGPoint { collectionView.contentOffset }
     var scrolloverLayoutGenerationForTesting: UInt64 { scrolloverLayoutGeneration }
     var orderedArticleIDsForTesting: [Int64] { orderedIDs }
+    var articleImagePrefetchTaskCountForTesting: Int { prefetchTasks.count }
+    func articleImageRequestForTesting(articleID: Int64) -> ArticleImageRequest? {
+        guard let item = renderedItem(for: articleID) else { return nil }
+        return imageRequest(for: item)
+    }
+    var collectionViewForTesting: UICollectionView { collectionView }
 #endif
 
     private static func makeListLayout() -> UICollectionViewLayout {
@@ -1355,7 +1371,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             return preparedLayoutInput(for: item)
         }
         preparedLayoutCoordinator.prepare(layoutInputs, priority: .prefetch)
-        guard mode.showsArticleImage else { return }
+        guard mode.showsArticleImage,
+              !IOSUIKitTimelineArticleImagePerformanceDiagnostic.suppressesArticleImageWork(for: mode)
+        else { return }
         for indexPath in indexPaths {
             guard let id = dataSource.itemIdentifier(for: indexPath),
                   let item = renderedItem(for: id), let request = imageRequest(for: item)
@@ -1382,7 +1400,10 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func imageRequest(for item: IOSUIKitArticleTimelineItem) -> ArticleImageRequest? {
-        guard mode.showsArticleImage, let url = item.content.imageURL else { return nil }
+        guard mode.showsArticleImage,
+              !IOSUIKitTimelineArticleImagePerformanceDiagnostic.suppressesArticleImageWork(for: mode),
+              let url = item.content.imageURL
+        else { return nil }
         let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: collectionView.bounds.width)
         let targetSize = metrics.imageSize(hasImage: true)
         guard targetSize.width > 0, targetSize.height > 0 else { return nil }
@@ -1967,7 +1988,11 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
 
         updateFeedIcon(image: item.feedIconImage, title: item.content.article.feedTitle)
         updateStatus(isRead: item.isRead, isStarred: item.isStarred)
-        configureArticleImage(url: item.content.imageURL, targetSize: imageSize, displayScale: displayScale, articleChanged: articleChanged)
+        if IOSUIKitTimelineArticleImagePerformanceDiagnostic.suppressesArticleImageWork(for: mode) {
+            suppressArticleImageForPerformanceDiagnosis()
+        } else {
+            configureArticleImage(url: item.content.imageURL, targetSize: imageSize, displayScale: displayScale, articleChanged: articleChanged)
+        }
         contentView.setNeedsLayout()
     }
 
@@ -1985,8 +2010,11 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             landscapeImageHeightConstraint.constant = imageSize.height
         }
 
+        // Rendering is hidden only for this diagnostic; visual constraints and
+        // the Standard cell variant remain active so the slot keeps its space.
+        let hidesArticleImageSlot = variant == .compact || variant == .visualTextOnly || IOSUIKitTimelineArticleImagePerformanceDiagnostic.suppressesArticleImageWork(for: metrics.mode)
         guard currentLayoutVariant != variant else {
-            articleImageView.isHidden = variant == .compact || variant == .visualTextOnly
+            articleImageView.isHidden = hidesArticleImageSlot
             return
         }
 
@@ -2003,7 +2031,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         currentLayoutVariant = variant
         layoutVariantRevision &+= 1
         performanceMetrics?.recordVariantSwitch()
-        articleImageView.isHidden = variant == .compact || variant == .visualTextOnly
+        articleImageView.isHidden = hidesArticleImageSlot
     }
 
     func updateStatus(isRead: Bool, isStarred: Bool) {
@@ -2041,6 +2069,8 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     }
 
     var articleImageSlotFrameForTesting: CGRect { articleImageView.frame }
+    var articleImageForTesting: UIImage? { articleImageView.image }
+    var articleImageSlotIsHiddenForTesting: Bool { articleImageView.isHidden }
     var articleImagePresentationForTesting: (placeholderHidden: Bool, contentMode: UIView.ContentMode, clipsToBounds: Bool, cornerRadius: CGFloat) {
         (imagePlaceholder.isHidden, articleImageView.contentMode, articleImageView.clipsToBounds, articleImageView.layer.cornerRadius)
     }
@@ -2077,6 +2107,14 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     var feedIconImageForTesting: UIImage? { feedIconImageView.image }
     var feedTitlePresentationForTesting: (lineCount: Int, lineBreakMode: NSLineBreakMode) {
         (feedTitleLabel.numberOfLines, feedTitleLabel.lineBreakMode)
+    }
+
+    private func suppressArticleImageForPerformanceDiagnosis() {
+        invalidateImageBinding()
+        representedImageRequest = nil
+        // A source-level toggle can be flipped during development. Clear a
+        // pre-existing raster once, but do not create or present a new one.
+        if articleImageView.image != nil { articleImageView.image = nil }
     }
 
     private func configureArticleImage(url: URL?, targetSize: CGSize, displayScale: CGFloat, articleChanged: Bool) {
