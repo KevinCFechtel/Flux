@@ -520,21 +520,27 @@ measurement. The frame-headroom hardening pass keeps append/removal from
 fanning out into unrelated visible-cell configuration, prefetch cancellation,
 or broad layout invalidation. Feed-icon PNGs and article images are decoded,
 downsampled, corner-composed, and rasterized off-main into sRGB BGRA
-premultiplied-first display-ready pixels; actual prepared-image presentation no
-longer depends on a rounded clipping layer, while transparent corners preserve
-adaptive backgrounds and the fallback placeholders retain their native rounded
-appearance. The timeline collection surface is explicitly opaque over the
+premultiplied-first display-ready pixels. The final raster interpolation is
+`.medium`, appropriate for reduced RSS preview assets. Actual prepared-image
+presentation no longer depends on a rounded clipping layer, while transparent
+corners preserve adaptive backgrounds; the cold article placeholder keeps its
+rounded background without clipping its centred symbol. The timeline collection surface is explicitly opaque over the
 system background. The existing native cell uses stable registrations for
 compact/text-only, portrait, and landscape constraint variants to avoid
 ordinary reuse switching between those graphs. The article-image pipeline
-prioritizes visible decode work over prefetch and keeps its bounded cache.
-Scrollover's per-scroll geometry state uses bounded ordered frame slots and
-direct frame/observation traversal instead of rebuilding retained geometry
-dictionaries and temporary set unions. Archive Release builds enable
+prioritizes visible decode work over prefetch and keeps a bounded 128 MiB cache
+for warm/back-scroll reuse without making image memory unbounded. Scrollover's
+per-scroll geometry state uses bounded ordered frame slots, scalar previous
+geometry, and a private bounded previous-frame copy. It no longer retains a
+sample dictionary that shares the mutable frame-store buffer, avoiding the
+per-scroll copy-on-write of resolved frames; stale-ID storage is allocated only
+when pruning is actually needed. Archive Release builds enable
 whole-module Swift compilation through the archive script only; normal simulator
 execution remains Debug and performance diagnostics remain dynamically injected
-by the diagnostics build command. U3.7.5 manual cell layout remains deferred
-pending device evidence; this pass does not claim a new physical-device result.
+by the diagnostics build command. Diagnostics builds are instrumented and are
+not assumed bit-identical to the shipped archive. U3.7.5 manual cell layout
+remains deferred pending device evidence; this pass does not claim a new
+physical-device result.
 
 On iOS, a semantic scope/filter/sort reset stays within the existing UIKit
 Timeline controller: it resets the collection view to its natural top position

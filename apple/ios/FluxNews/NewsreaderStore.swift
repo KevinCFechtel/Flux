@@ -111,6 +111,7 @@ struct IOSPreparedFeedIcon: @unchecked Sendable {
 
 enum IOSFeedIconImagePreparation {
     static let displaySidePoints: CGFloat = 22
+    static let cornerRadius = displaySidePoints / 2
 
     static func prepare(data: Data, displayScale: CGFloat) throws -> IOSPreparedFeedIcon {
         let scale = max(displayScale, 1)
@@ -153,7 +154,7 @@ enum IOSFeedIconImagePreparation {
             space: colorSpace,
             bitmapInfo: displayBitmapInfo
         ) else { return nil }
-        context.interpolationQuality = .high
+        context.interpolationQuality = .medium
         let destination = CGRect(x: 0, y: 0, width: pixelSide, height: pixelSide)
         context.clear(destination)
         let radius = min(cornerRadiusPixels, CGFloat(pixelSide) / 2)

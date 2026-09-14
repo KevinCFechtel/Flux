@@ -150,7 +150,9 @@ actor ArticleImagePipeline {
     static let maximumConcurrentOperations = 3
     // A visual card is commonly about 1.5-2.5 MiB decoded at @3x. This retains
     // a useful scrolling runway without allowing unbounded image memory.
-    static let memoryCacheCostLimit = 64 * 1024 * 1024
+    /// Display-ready rasters are retained for warm/back scrolling. 128 MiB keeps
+    /// that reuse useful without making the cache unbounded under memory pressure.
+    static let memoryCacheCostLimit = 128 * 1024 * 1024
     private static let maximumQueuedRequests = 48
     private static let maximumQueuedPrefetchRequests = 32
 
@@ -420,15 +422,6 @@ actor ArticleImagePipeline {
         return data
     }
 
-    nonisolated static func downsample(data: Data, maxPixelDimension: Int) throws -> CGImage {
-        let image = try thumbnail(data: data, maxPixelDimension: maxPixelDimension)
-        return renderDisplayReady(
-            image,
-            targetPixelSize: .init(width: image.width, height: image.height),
-            cornerRadiusPixels: 0
-        ) ?? image
-    }
-
     nonisolated static func downsample(data: Data, request: ArticleImageRequest) throws -> CGImage {
         let image = try thumbnail(data: data, maxPixelDimension: request.maxPixelDimension)
         return renderDisplayReady(
@@ -471,7 +464,7 @@ actor ArticleImagePipeline {
             space: colorSpace,
             bitmapInfo: displayBitmapInfo
         ) else { return nil }
-        context.interpolationQuality = .high
+        context.interpolationQuality = .medium
         let destination = CGRect(x: 0, y: 0, width: width, height: height)
         context.clear(destination)
         if cornerRadiusPixels > 0 {

@@ -142,18 +142,16 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertTrue(tracker.receive(uikitGeometry(y: 40, frames: frames), enabled: true).batch.articleIDs.isEmpty)
     }
 
-    func testUIKitGeometryRetentionIsBoundedAcrossLongFeeds() {
+    func testUIKitPreviousFrameOwnershipRemainsBoundedAcrossLongFeeds() {
         let tracker = IOSUIKitScrolloverGeometryTracker()
         tracker.updateSnapshot((1...8_000).map(Int64.init))
         tracker.setPhase(.interacting)
-        for offset in stride(from: 0, through: 1_000, by: 10) {
-            let frames = Dictionary(uniqueKeysWithValues: (0..<10).map { index in
-                let id = Int64(offset + index + 1)
-                return (id, CGRect(x: 0, y: CGFloat(offset + index) * 10, width: 320, height: 10))
-            })
-            _ = tracker.receive(uikitGeometry(y: CGFloat(offset) * 10, frames: frames, contentHeight: 100_000), enabled: true)
-        }
-        XCTAssertLessThanOrEqual(tracker.retainedGeometryCount, 96)
+        let frames = Dictionary(uniqueKeysWithValues: (1...(IOSUIKitResolvedScrolloverFrameStore.capacity + 32)).map { id in
+            (Int64(id), CGRect(x: 0, y: CGFloat(id) * 10, width: 320, height: 10))
+        })
+        _ = tracker.receive(uikitGeometry(y: 0, frames: frames, contentHeight: 100_000), enabled: true)
+
+        XCTAssertEqual(tracker.retainedPreviousFrameCount, IOSUIKitResolvedScrolloverFrameStore.capacity)
     }
 
     func testResolvedFrameSourceRetainsExitedCellForEitherCallbackOrder() {
@@ -164,11 +162,11 @@ final class NewsreaderD23MutationTests: XCTestCase {
         tracker.setPhase(.interacting)
 
         // `willDisplay`/a prior visible-cell refresh established resolved geometry.
-        source.record(articleID: 1, frame: frame, viewportTop: 0)
+        source.record(articleID: 1, frame: frame)
         _ = tracker.receive(uikitGeometry(y: 0, frames: source.frames), enabled: true)
         // `didEndDisplaying` may arrive before the scroll callback; it preserves
         // the same resolved frame rather than requiring a layout lookup.
-        source.record(articleID: 1, frame: frame, viewportTop: 20)
+        source.record(articleID: 1, frame: frame)
 
         XCTAssertEqual(tracker.receive(uikitGeometry(y: 20, frames: source.frames), enabled: true).batch.articleIDs, [1])
     }
@@ -176,7 +174,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
     func testResolvedFrameSourceIsBoundedIndependentlyOfLoadedArticles() {
         var source = IOSUIKitResolvedScrolloverFrameStore()
         for id in 1...8_000 {
-            source.record(articleID: Int64(id), frame: .init(x: 0, y: CGFloat(id) * 10, width: 320, height: 10), viewportTop: CGFloat(id) * 10)
+            source.record(articleID: Int64(id), frame: .init(x: 0, y: CGFloat(id) * 10, width: 320, height: 10))
         }
 
         XCTAssertLessThanOrEqual(source.count, IOSUIKitResolvedScrolloverFrameStore.capacity)
@@ -185,7 +183,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
     func testResolvedFrameSourceEvictsOnlyTheOldestBoundedSlot() {
         var source = IOSUIKitResolvedScrolloverFrameStore()
         for id in 1...(IOSUIKitResolvedScrolloverFrameStore.capacity + 1) {
-            source.record(articleID: Int64(id), frame: .init(x: 0, y: CGFloat(id), width: 320, height: 10), viewportTop: 0)
+            source.record(articleID: Int64(id), frame: .init(x: 0, y: CGFloat(id), width: 320, height: 10))
         }
 
         XCTAssertEqual(source.count, IOSUIKitResolvedScrolloverFrameStore.capacity)

@@ -15,10 +15,9 @@ struct IOSUIKitArticleLayoutInput: Hashable {
     let containerWidth: CGFloat
     let displayScale: CGFloat
     let contentSizeCategory: UIContentSizeCategory
-    let localeIdentifier: String
     let layoutDirection: UIUserInterfaceLayoutDirection
 
-    init(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, localeIdentifier: String, layoutDirection: UIUserInterfaceLayoutDirection) {
+    init(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
         title = item.content.article.title
         feedTitle = item.content.article.feedTitle
         publishedDate = item.content.publishedDate
@@ -30,15 +29,14 @@ struct IOSUIKitArticleLayoutInput: Hashable {
         self.containerWidth = containerWidth
         self.displayScale = displayScale
         self.contentSizeCategory = contentSizeCategory
-        self.localeIdentifier = localeIdentifier
         self.layoutDirection = layoutDirection
     }
 
-    init(title: String, feedTitle: String, publishedDate: String, preview: String, hasImage: Bool, hasComments: Bool, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, localeIdentifier: String, layoutDirection: UIUserInterfaceLayoutDirection) {
+    init(title: String, feedTitle: String, publishedDate: String, preview: String, hasImage: Bool, hasComments: Bool, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
         self.title = title; self.feedTitle = feedTitle; self.publishedDate = publishedDate; self.preview = preview
         self.hasImage = hasImage; self.hasComments = hasComments; self.mode = mode; self.previewLines = previewLines
         self.containerWidth = containerWidth; self.displayScale = displayScale; self.contentSizeCategory = contentSizeCategory
-        self.localeIdentifier = localeIdentifier; self.layoutDirection = layoutDirection
+        self.layoutDirection = layoutDirection
     }
 }
 
@@ -369,6 +367,7 @@ struct IOSUIKitArticleGeometry: Equatable {
     static let landscapeSpacing: CGFloat = 14
     static let unreadSize: CGFloat = 6
     static let feedIconSize: CGFloat = 22
+    static let articleImageCornerRadius: CGFloat = 12
     static let starSlotSize: CGFloat = 17
     static let commentSlotSize: CGFloat = 17
     static let metadataLeadingSpacing: CGFloat = 6

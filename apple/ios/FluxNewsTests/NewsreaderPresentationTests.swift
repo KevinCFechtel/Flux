@@ -1189,6 +1189,43 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(cell.layoutVariantRevision, baselineVariantRevision)
     }
 
+    @MainActor
+    func testUIKitArticleAndFeedImagePresentationTransitionsRestoreSafeStates() {
+        let cell = makeUIKitArticleCell(mode: .visual, width: 390)
+        let placeholder = cell.articleImagePresentationForTesting
+        XCTAssertFalse(placeholder.placeholderHidden)
+        XCTAssertEqual(placeholder.contentMode, .scaleAspectFill)
+        XCTAssertFalse(placeholder.clipsToBounds)
+        XCTAssertEqual(placeholder.cornerRadius, IOSUIKitArticleGeometry.articleImageCornerRadius)
+
+        cell.applyArticleImagePixelsForTesting(testImage(width: 200, height: 100))
+        let loaded = cell.articleImagePresentationForTesting
+        XCTAssertTrue(loaded.placeholderHidden)
+        XCTAssertEqual(loaded.contentMode, .scaleAspectFill)
+        XCTAssertTrue(loaded.clipsToBounds)
+        XCTAssertEqual(loaded.cornerRadius, 0)
+
+        cell.prepareForReuse()
+        let reused = cell.articleImagePresentationForTesting
+        XCTAssertFalse(reused.placeholderHidden)
+        XCTAssertFalse(reused.clipsToBounds)
+        XCTAssertEqual(reused.cornerRadius, IOSUIKitArticleGeometry.articleImageCornerRadius)
+
+        cell.updateFeedIcon(image: testImage(width: 22, height: 22), title: "Feed")
+        let icon = cell.feedIconPresentationForTesting
+        XCTAssertFalse(icon.imageHidden)
+        XCTAssertTrue(icon.fallbackHidden)
+        XCTAssertFalse(icon.clipsToBounds)
+        XCTAssertEqual(icon.cornerRadius, 0)
+
+        cell.updateFeedIcon(image: nil, title: "Feed")
+        let fallback = cell.feedIconPresentationForTesting
+        XCTAssertTrue(fallback.imageHidden)
+        XCTAssertFalse(fallback.fallbackHidden)
+        XCTAssertTrue(fallback.clipsToBounds)
+        XCTAssertEqual(fallback.cornerRadius, IOSFeedIconImagePreparation.cornerRadius)
+    }
+
     func testArticleImageRequestBucketsDisplayPixelsDeterministically() {
         let url = URL(string: "https://example.com/image.jpg")!
         XCTAssertEqual(ArticleImageRequest(url: url, targetSize: CGSize(width: 100, height: 50), displayScale: 2).maxPixelDimension, 256)
@@ -1208,7 +1245,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     func testFeedIconPreparationDownsamplesToTheFixedDisplaySlotOffMain() async throws {
-        let data = try imageData(width: 800, height: 400)
+        let data = try solidPNGData(width: 800, height: 400, color: .red)
         let execution = AppleCoreExecution(responsiveConcurrency: 1, blockingConcurrency: 1)
         let ranOnMain = try await execution.blocking { Thread.isMainThread }
         let prepared = try await execution.blocking {
@@ -1222,7 +1259,9 @@ final class NewsreaderPresentationTests: XCTestCase {
         let image = try XCTUnwrap(prepared.image.cgImage)
         XCTAssertEqual(image.alphaInfo, .premultipliedFirst)
         XCTAssertTrue(image.bitmapInfo.contains(.byteOrder32Little))
-        XCTAssertEqual(alpha(at: .zero, in: image), 0)
+        XCTAssertEqual(pixel(at: .zero, in: image).alpha, 0)
+        let center = pixel(at: .init(x: image.width / 2, y: image.height / 2), in: image)
+        XCTAssertEqual(center, .init(blue: 0, green: 0, red: 255, alpha: 255))
     }
 
     func testPrefetchMetadataReusesAnUnchangedStructuralSnapshot() {
@@ -1351,6 +1390,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(metrics.visibleMemoryCacheMisses, 1)
         XCTAssertEqual(metrics.startedOperations, 1)
         XCTAssertEqual(metrics.memoryCacheCostLimit, ArticleImagePipeline.memoryCacheCostLimit)
+        XCTAssertEqual(ArticleImagePipeline.memoryCacheCostLimit, 128 * 1024 * 1024)
     }
 
     func testArticleImagePipelineCachesTheExactPreparedDisplayGeometry() async throws {
@@ -1442,13 +1482,17 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     func testArticleImagePipelineDownsamplesAndFailsSafely() async throws {
         let data = try imageData(width: 800, height: 400)
-        let image = try ArticleImagePipeline.downsample(data: data, maxPixelDimension: 128)
-        XCTAssertLessThanOrEqual(max(image.width, image.height), 128)
-
-        let rotated = try ArticleImagePipeline.downsample(data: imageData(width: 800, height: 400, orientation: 6), maxPixelDimension: 128)
-        XCTAssertGreaterThan(rotated.height, rotated.width)
-
         let url = URL(string: "https://example.com/image.jpg")!
+        let displayRequest = ArticleImageRequest(url: url, targetSize: CGSize(width: 128, height: 64), displayScale: 1)
+        let image = try ArticleImagePipeline.downsample(data: data, request: displayRequest)
+        XCTAssertEqual(image.width, 128)
+        XCTAssertEqual(image.height, 64)
+
+        let rotatedRequest = ArticleImageRequest(url: url, targetSize: CGSize(width: 64, height: 128), displayScale: 1)
+        let rotated = try ArticleImagePipeline.downsample(data: imageData(width: 800, height: 400, orientation: 6), request: rotatedRequest)
+        XCTAssertEqual(rotated.width, 64)
+        XCTAssertEqual(rotated.height, 128)
+
         let corrupt = ArticleImagePipeline { _ in Data("not an image".utf8) }
         let failing = ArticleImagePipeline { _ in throw URLError(.badServerResponse) }
         let request = ArticleImageRequest(url: url, targetSize: CGSize(width: 100, height: 50), displayScale: 1)
@@ -1462,20 +1506,29 @@ final class NewsreaderPresentationTests: XCTestCase {
         } catch {}
     }
 
-    func testArticleImagePipelineProducesBGRARoundedDisplayRaster() throws {
+    func testArticleImagePipelineProducesBGRARoundedDisplayRasterAndCentreCrop() throws {
         let request = ArticleImageRequest(
             url: URL(string: "https://example.com/image.jpg")!,
-            targetSize: .init(width: 100, height: 50),
-            displayScale: 2,
-            cornerRadius: 12
+            targetSize: .init(width: 20, height: 10),
+            displayScale: 1,
+            cornerRadius: 4
         )
-        let image = try ArticleImagePipeline.downsample(data: imageData(width: 800, height: 400), request: request)
+        let portrait = try horizontalBandPNGData(width: 10, height: 30)
+        let image = try ArticleImagePipeline.downsample(data: portrait, request: request)
 
-        XCTAssertEqual(image.width, 200)
-        XCTAssertEqual(image.height, 100)
+        XCTAssertEqual(image.width, 20)
+        XCTAssertEqual(image.height, 10)
         XCTAssertEqual(image.alphaInfo, .premultipliedFirst)
         XCTAssertTrue(image.bitmapInfo.contains(.byteOrder32Little))
-        XCTAssertEqual(alpha(at: .zero, in: image), 0)
+        XCTAssertEqual(pixel(at: .zero, in: image).alpha, 0)
+        XCTAssertEqual(pixel(at: .init(x: image.width / 2, y: image.height / 2), in: image), .init(blue: 0, green: 255, red: 0, alpha: 255))
+
+        let square = try horizontalBandPNGData(width: 20, height: 20)
+        let squareImage = try ArticleImagePipeline.downsample(data: square, request: request)
+        XCTAssertEqual(pixel(at: .init(x: squareImage.width / 2, y: squareImage.height / 2), in: squareImage), .init(blue: 0, green: 255, red: 0, alpha: 255))
+
+        let red = try ArticleImagePipeline.downsample(data: solidPNGData(width: 20, height: 10, color: .red), request: request)
+        XCTAssertEqual(pixel(at: .init(x: red.width / 2, y: red.height / 2), in: red), .init(blue: 0, green: 0, red: 255, alpha: 255))
     }
 
     func testArticleImagePipelineCanLoadAfterCacheEvictionAndCancelledWaiter() async throws {
@@ -1556,22 +1609,65 @@ final class NewsreaderPresentationTests: XCTestCase {
         return data as Data
     }
 
-    private func alpha(at point: CGPoint, in image: CGImage) -> UInt8 {
-        var pixel = [UInt8](repeating: 0, count: 4)
-        pixel.withUnsafeMutableBytes { bytes in
-            let context = CGContext(
-                data: bytes.baseAddress,
-                width: 1,
-                height: 1,
-                bitsPerComponent: 8,
-                bytesPerRow: 4,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-            )!
-            context.translateBy(x: -point.x, y: -point.y)
-            context.draw(image, in: .init(x: 0, y: 0, width: image.width, height: image.height))
+    private func solidPNGData(width: Int, height: Int, color: UIColor) throws -> Data {
+        try pngData(width: width, height: height) { context in
+            context.setFillColor(color.cgColor)
+            context.fill(.init(x: 0, y: 0, width: width, height: height))
         }
-        return pixel[3]
+    }
+
+    /// Top/middle/bottom primary-color bands make the production aspect-fill
+    /// centre crop directly observable instead of merely checking dimensions.
+    private func horizontalBandPNGData(width: Int, height: Int) throws -> Data {
+        try pngData(width: width, height: height) { context in
+            let bandHeight = CGFloat(height) / 3
+            context.setFillColor(UIColor.red.cgColor)
+            context.fill(.init(x: 0, y: bandHeight * 2, width: CGFloat(width), height: bandHeight))
+            context.setFillColor(UIColor.green.cgColor)
+            context.fill(.init(x: 0, y: bandHeight, width: CGFloat(width), height: bandHeight))
+            context.setFillColor(UIColor.blue.cgColor)
+            context.fill(.init(x: 0, y: 0, width: CGFloat(width), height: bandHeight))
+        }
+    }
+
+    private func pngData(width: Int, height: Int, draw: (CGContext) -> Void) throws -> Data {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { throw XCTSkip("Unable to create PNG fixture context") }
+        draw(context)
+        let data = NSMutableData()
+        guard let image = context.makeImage(),
+              let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)
+        else { throw XCTSkip("Unable to create PNG fixture") }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { throw XCTSkip("Unable to encode PNG fixture") }
+        return data as Data
+    }
+
+    private struct BGRAPixel: Equatable {
+        let blue: UInt8
+        let green: UInt8
+        let red: UInt8
+        let alpha: UInt8
+    }
+
+    private func pixel(at point: CGPoint, in image: CGImage) -> BGRAPixel {
+        let x = Int(point.x)
+        let y = Int(point.y)
+        precondition((0..<image.width).contains(x) && (0..<image.height).contains(y))
+        precondition(image.bitsPerPixel == 32)
+        guard let data = image.dataProvider?.data,
+              let bytes = CFDataGetBytePtr(data)
+        else { fatalError("Display-ready image did not expose bitmap data") }
+        let offset = y * image.bytesPerRow + x * 4
+        return .init(blue: bytes[offset], green: bytes[offset + 1], red: bytes[offset + 2], alpha: bytes[offset + 3])
     }
 
     @MainActor
@@ -1662,12 +1758,11 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(key, IOSUIKitArticleLayoutKey(layoutInput(mode: .visual, width: 390.1, hasImage: true)))
         XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(layoutInput(mode: .visual, width: 391, hasImage: true)))
         XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(layoutInput(mode: .compact, width: 390, hasImage: true)))
-        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: .extraLarge, localeIdentifier: input.localeIdentifier, layoutDirection: input.layoutDirection)))
-        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: .rightToLeft)))
-        XCTAssertEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: "ar_SA", layoutDirection: input.layoutDirection)))
-        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: "Updated title", feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: input.layoutDirection)))
-        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: false, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: input.layoutDirection)))
-        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: .compact, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: input.layoutDirection)))
+        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: .extraLarge, layoutDirection: input.layoutDirection)))
+        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, layoutDirection: .rightToLeft)))
+        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: "Updated title", feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, layoutDirection: input.layoutDirection)))
+        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: false, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, layoutDirection: input.layoutDirection)))
+        XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: .compact, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, layoutDirection: input.layoutDirection)))
     }
 
     func testTimelineGeometryIdentityUsesTheDeterministicMeasurementWidth() {
@@ -1695,11 +1790,11 @@ final class NewsreaderPresentationTests: XCTestCase {
         let input = layoutInput(mode: .visual, width: 390, hasImage: true)
         let metrics = IOSUIKitArticleLayoutEngine.metrics(for: input)
         cache.insert(metrics, for: .init(input))
-        let mutablePresentationEquivalent = IOSUIKitArticleLayoutInput(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: input.layoutDirection)
+        let mutablePresentationEquivalent = IOSUIKitArticleLayoutInput(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, layoutDirection: input.layoutDirection)
         XCTAssertEqual(cache.metrics(for: .init(mutablePresentationEquivalent)), metrics)
         XCTAssertNil(cache.metrics(for: .init(layoutInput(mode: .visual, width: 391, hasImage: true))))
-        XCTAssertNil(cache.metrics(for: .init(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: .accessibilityExtraExtraExtraLarge, localeIdentifier: input.localeIdentifier, layoutDirection: input.layoutDirection))))
-        XCTAssertNil(cache.metrics(for: .init(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: .rightToLeft))))
+        XCTAssertNil(cache.metrics(for: .init(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: .accessibilityExtraExtraExtraLarge, layoutDirection: input.layoutDirection))))
+        XCTAssertNil(cache.metrics(for: .init(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, layoutDirection: .rightToLeft))))
         XCTAssertNil(cache.metrics(for: .init(layoutInput(mode: .compact, width: 390, hasImage: true))))
     }
 
@@ -1707,8 +1802,8 @@ final class NewsreaderPresentationTests: XCTestCase {
     func testPreparedLayoutMetricsCacheHasDeterministicBound() {
         let cache = IOSUIKitPreparedArticleLayoutMetricsCache(capacity: 2)
         let first = layoutInput(mode: .visual, width: 390, hasImage: false)
-        let second = IOSUIKitArticleLayoutInput(title: "Second", feedTitle: first.feedTitle, publishedDate: first.publishedDate, preview: first.preview, hasImage: first.hasImage, hasComments: first.hasComments, mode: first.mode, previewLines: first.previewLines, containerWidth: first.containerWidth, displayScale: first.displayScale, contentSizeCategory: first.contentSizeCategory, localeIdentifier: first.localeIdentifier, layoutDirection: first.layoutDirection)
-        let third = IOSUIKitArticleLayoutInput(title: "Third", feedTitle: first.feedTitle, publishedDate: first.publishedDate, preview: first.preview, hasImage: first.hasImage, hasComments: first.hasComments, mode: first.mode, previewLines: first.previewLines, containerWidth: first.containerWidth, displayScale: first.displayScale, contentSizeCategory: first.contentSizeCategory, localeIdentifier: first.localeIdentifier, layoutDirection: first.layoutDirection)
+        let second = IOSUIKitArticleLayoutInput(title: "Second", feedTitle: first.feedTitle, publishedDate: first.publishedDate, preview: first.preview, hasImage: first.hasImage, hasComments: first.hasComments, mode: first.mode, previewLines: first.previewLines, containerWidth: first.containerWidth, displayScale: first.displayScale, contentSizeCategory: first.contentSizeCategory, layoutDirection: first.layoutDirection)
+        let third = IOSUIKitArticleLayoutInput(title: "Third", feedTitle: first.feedTitle, publishedDate: first.publishedDate, preview: first.preview, hasImage: first.hasImage, hasComments: first.hasComments, mode: first.mode, previewLines: first.previewLines, containerWidth: first.containerWidth, displayScale: first.displayScale, contentSizeCategory: first.contentSizeCategory, layoutDirection: first.layoutDirection)
         for input in [first, second, third] { cache.insert(IOSUIKitArticleLayoutEngine.metrics(for: input), for: .init(input)) }
         XCTAssertEqual(cache.count, 2)
         XCTAssertNil(cache.metrics(for: .init(first)))
@@ -1761,9 +1856,9 @@ final class NewsreaderPresentationTests: XCTestCase {
         let coordinator = IOSUIKitArticleLayoutPreparationCoordinator(maximumConcurrency: 1) { input in
             await gate.measure(input)
         }
-        let far = IOSUIKitArticleLayoutInput(title: "far", feedTitle: "Feed", publishedDate: "Today", preview: "Preview", hasImage: false, hasComments: false, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 2, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: .leftToRight)
-        let visible = IOSUIKitArticleLayoutInput(title: "visible", feedTitle: far.feedTitle, publishedDate: far.publishedDate, preview: far.preview, hasImage: far.hasImage, hasComments: far.hasComments, mode: far.mode, previewLines: far.previewLines, containerWidth: far.containerWidth, displayScale: far.displayScale, contentSizeCategory: far.contentSizeCategory, localeIdentifier: far.localeIdentifier, layoutDirection: far.layoutDirection)
-        let replacement = IOSUIKitArticleLayoutInput(title: "replacement", feedTitle: far.feedTitle, publishedDate: far.publishedDate, preview: far.preview, hasImage: far.hasImage, hasComments: far.hasComments, mode: far.mode, previewLines: far.previewLines, containerWidth: far.containerWidth, displayScale: far.displayScale, contentSizeCategory: far.contentSizeCategory, localeIdentifier: far.localeIdentifier, layoutDirection: far.layoutDirection)
+        let far = IOSUIKitArticleLayoutInput(title: "far", feedTitle: "Feed", publishedDate: "Today", preview: "Preview", hasImage: false, hasComments: false, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 2, contentSizeCategory: .large, layoutDirection: .leftToRight)
+        let visible = IOSUIKitArticleLayoutInput(title: "visible", feedTitle: far.feedTitle, publishedDate: far.publishedDate, preview: far.preview, hasImage: far.hasImage, hasComments: far.hasComments, mode: far.mode, previewLines: far.previewLines, containerWidth: far.containerWidth, displayScale: far.displayScale, contentSizeCategory: far.contentSizeCategory, layoutDirection: far.layoutDirection)
+        let replacement = IOSUIKitArticleLayoutInput(title: "replacement", feedTitle: far.feedTitle, publishedDate: far.publishedDate, preview: far.preview, hasImage: far.hasImage, hasComments: far.hasComments, mode: far.mode, previewLines: far.previewLines, containerWidth: far.containerWidth, displayScale: far.displayScale, contentSizeCategory: far.contentSizeCategory, layoutDirection: far.layoutDirection)
         coordinator.prepare([far], priority: .prefetch)
         await gate.waitUntilStarted(count: 1)
         coordinator.prepare([visible], priority: .visible)
@@ -1894,8 +1989,8 @@ final class NewsreaderPresentationTests: XCTestCase {
     func testArticleLayoutKeyExcludesMutablePresentationState() {
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: true)
         let updated = IOSUIKitArticleTimelineItem(article: item.article, content: item.content, isRead: true, isStarred: true, feedIconImage: testImage(width: 80, height: 20))
-        let input = IOSUIKitArticleLayoutInput(item: item, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 2, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: .leftToRight)
-        let updatedInput = IOSUIKitArticleLayoutInput(item: updated, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 2, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: .leftToRight)
+        let input = IOSUIKitArticleLayoutInput(item: item, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 2, contentSizeCategory: .large, layoutDirection: .leftToRight)
+        let updatedInput = IOSUIKitArticleLayoutInput(item: updated, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 2, contentSizeCategory: .large, layoutDirection: .leftToRight)
         XCTAssertEqual(IOSUIKitArticleLayoutKey(input), IOSUIKitArticleLayoutKey(updatedInput))
     }
 
@@ -1923,7 +2018,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             let item = oracleItem(title: titles[index % titles.count], preview: previews[index % previews.count], hasImage: testCase.2, hasComments: index.isMultiple(of: 2))
             let cell = configuredOracleCell(item: item, mode: testCase.0, previewLines: testCase.3, width: testCase.1)
             let actual = measureUIKitArticleCell(cell, width: testCase.1)
-            let input = IOSUIKitArticleLayoutInput(item: item, mode: testCase.0, previewLines: testCase.3, containerWidth: testCase.1, displayScale: cell.traitCollection.displayScale, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: .leftToRight)
+            let input = IOSUIKitArticleLayoutInput(item: item, mode: testCase.0, previewLines: testCase.3, containerWidth: testCase.1, displayScale: cell.traitCollection.displayScale, contentSizeCategory: .large, layoutDirection: .leftToRight)
             let expected = IOSUIKitArticleLayoutEngine.metrics(for: input)
             let diagnostics = cell.layoutDiagnosticsForTesting
             XCTAssertEqual(actual, expected.cellSize.height, accuracy: 0.5, "case \(index) variant \(expected.variant) cell=\(diagnostics) engine title=\(expected.titleFrame) metadata=\(expected.metadataFrame) preview=\(String(describing: expected.previewFrame)) image=\(String(describing: expected.imageFrame))")
@@ -1952,9 +2047,9 @@ final class NewsreaderPresentationTests: XCTestCase {
             let item = oracleItem(title: "A deliberately multiline article title for RTL component geometry.", preview: "A preview long enough to exercise the complete text stack.", hasImage: testCase.2, hasComments: testCase.3, feedTitle: testCase.4)
             let cell = configuredOracleCell(item: item, mode: testCase.0, previewLines: .standard, width: testCase.1, layoutDirection: .rightToLeft)
             let actual = measureUIKitArticleCell(cell, width: testCase.1)
-            let input = IOSUIKitArticleLayoutInput(item: item, mode: testCase.0, previewLines: .standard, containerWidth: testCase.1, displayScale: cell.traitCollection.displayScale, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: .rightToLeft)
+            let input = IOSUIKitArticleLayoutInput(item: item, mode: testCase.0, previewLines: .standard, containerWidth: testCase.1, displayScale: cell.traitCollection.displayScale, contentSizeCategory: .large, layoutDirection: .rightToLeft)
             let expected = IOSUIKitArticleLayoutEngine.metrics(for: input)
-            let ltr = IOSUIKitArticleLayoutEngine.metrics(for: .init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, localeIdentifier: input.localeIdentifier, layoutDirection: .leftToRight))
+            let ltr = IOSUIKitArticleLayoutEngine.metrics(for: .init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, layoutDirection: .leftToRight))
             let diagnostics = cell.layoutDiagnosticsForTesting
             XCTAssertEqual(actual, expected.cellSize.height, accuracy: 0.5, "RTL case \(index) cell=\(diagnostics)")
             XCTAssertEqual(expected.cellSize.height, ltr.cellSize.height, accuracy: 0.001)
@@ -2077,7 +2172,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     private func layoutInput(mode: ArticlePresentationMode, width: CGFloat, hasImage: Bool, scale: CGFloat = 2) -> IOSUIKitArticleLayoutInput {
-        .init(title: "A deliberately multiline article title that exercises deterministic bounded text measurement", feedTitle: "A feed title", publishedDate: "January 1", preview: "A preview long enough to occupy multiple lines and preserve the production card text stack.", hasImage: hasImage, hasComments: true, mode: mode, previewLines: .standard, containerWidth: width, displayScale: scale, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: .leftToRight)
+        .init(title: "A deliberately multiline article title that exercises deterministic bounded text measurement", feedTitle: "A feed title", publishedDate: "January 1", preview: "A preview long enough to occupy multiple lines and preserve the production card text stack.", hasImage: hasImage, hasComments: true, mode: mode, previewLines: .standard, containerWidth: width, displayScale: scale, contentSizeCategory: .large, layoutDirection: .leftToRight)
     }
 
     @MainActor
@@ -2096,7 +2191,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         cell.contentView.semanticContentAttribute = semanticAttribute
         container.addSubview(cell)
         let displayScale = cell.traitCollection.displayScale
-        let input = IOSUIKitArticleLayoutInput(item: item, mode: mode, previewLines: previewLines, containerWidth: width, displayScale: displayScale, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: layoutDirection)
+        let input = IOSUIKitArticleLayoutInput(item: item, mode: mode, previewLines: previewLines, containerWidth: width, displayScale: displayScale, contentSizeCategory: .large, layoutDirection: layoutDirection)
         cell.configure(item: item, mode: mode, previewLines: previewLines, metrics: .init(mode: mode, containerWidth: width), displayScale: displayScale, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
         container.layoutIfNeeded()
         return cell
@@ -2139,7 +2234,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         cell.contentView.semanticContentAttribute = semanticAttribute
         container.addSubview(cell)
         let displayScale = cell.traitCollection.displayScale
-        let input = IOSUIKitArticleLayoutInput(item: item, mode: mode, previewLines: .standard, containerWidth: width, displayScale: displayScale, contentSizeCategory: .large, localeIdentifier: "en_US", layoutDirection: layoutDirection)
+        let input = IOSUIKitArticleLayoutInput(item: item, mode: mode, previewLines: .standard, containerWidth: width, displayScale: displayScale, contentSizeCategory: .large, layoutDirection: layoutDirection)
         cell.configure(
             item: item,
             mode: mode,

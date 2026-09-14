@@ -305,8 +305,7 @@ struct IOSUIKitResolvedScrolloverFrameStore {
     var frames: [Int64: CGRect] { framesByID }
     var count: Int { framesByID.count }
 
-    mutating func record(articleID: Int64, frame: CGRect, viewportTop: CGFloat) {
-        _ = viewportTop
+    mutating func record(articleID: Int64, frame: CGRect) {
         framesByID[articleID] = frame
         guard slotByID[articleID] == nil else { return }
         if let evictedID = slots[nextSlot] {
@@ -332,15 +331,34 @@ struct IOSUIKitResolvedScrolloverFrameStore {
 final class IOSUIKitScrolloverGeometryTracker {
     private static let bottomTolerance: CGFloat = 0.5
 
+    /// The previous scalar geometry and a private bounded frame copy. Keeping this
+    /// separate from the source sample is intentional: retaining `rowFrames`
+    /// directly would share the frame store's dictionary buffer and force a
+    /// copy-on-write of that bounded store on its next mutation.
+    private struct PreviousGeometry {
+        let contentOffsetY: CGFloat
+        let effectiveTop: CGFloat
+        let effectiveBottom: CGFloat
+        let layoutGeneration: UInt64
+
+        init(_ sample: IOSUIKitScrolloverGeometrySample) {
+            contentOffsetY = sample.contentOffsetY
+            effectiveTop = sample.effectiveTop
+            effectiveBottom = sample.effectiveBottom
+            layoutGeneration = sample.layoutGeneration
+        }
+    }
+
     private var positions: [Int64: Int] = [:]
     private var nextPosition = 0
     private var emittedIDs = Set<Int64>()
     private var observedVisibleIDs = Set<Int64>()
-    private var previousSample: IOSUIKitScrolloverGeometrySample?
+    private var previousGeometry: PreviousGeometry?
+    private var previousFrames: [Int64: CGRect] = [:]
     private var phase: IOSScrolloverPresentationPhase = .idle
     private var wasAtBottom = false
 
-    var retainedGeometryCount: Int { previousSample?.rowFrames.count ?? 0 }
+    var retainedPreviousFrameCount: Int { previousFrames.count }
 
     func updateSnapshot(_ ids: [Int64]) {
         positions = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset) })
@@ -364,7 +382,7 @@ final class IOSUIKitScrolloverGeometryTracker {
             emittedIDs.remove(id)
             observedVisibleIDs.remove(id)
         }
-        previousSample = nil
+        clearPreviousGeometry()
         wasAtBottom = false
     }
 
@@ -377,7 +395,7 @@ final class IOSUIKitScrolloverGeometryTracker {
     }
 
     func invalidateGeometry() {
-        previousSample = nil
+        clearPreviousGeometry()
         wasAtBottom = false
     }
 
@@ -387,18 +405,18 @@ final class IOSUIKitScrolloverGeometryTracker {
 
     func receive(_ sample: IOSUIKitScrolloverGeometrySample, enabled: Bool) -> IOSUIKitScrolloverGeometryResult {
         guard phase.isScrolling else {
-            previousSample = sample
+            storePrevious(sample)
             wasAtBottom = isAtBottom(sample)
             return .init(direction: nil, batch: .init(articleIDs: []))
         }
 
-        guard let previous = previousSample,
+        guard let previous = previousGeometry,
               previous.layoutGeneration == sample.layoutGeneration else {
             rebaseline(with: sample, enabled: enabled)
             return .init(direction: nil, batch: .init(articleIDs: []))
         }
 
-        guard !hasMaterialLayoutChange(from: previous, to: sample) else {
+        guard !hasMaterialLayoutChange(from: previousFrames, to: sample) else {
             rebaseline(with: sample, enabled: enabled)
             return .init(direction: nil, batch: .init(articleIDs: []))
         }
@@ -412,7 +430,7 @@ final class IOSUIKitScrolloverGeometryTracker {
         var candidates: [Int64] = []
         if enabled, direction == .forward {
             for id in observedVisibleIDs where !emittedIDs.contains(id) {
-                guard let frame = sample.rowFrames[id] ?? previous.rowFrames[id] else { continue }
+                guard let frame = sample.rowFrames[id] ?? previousFrames[id] else { continue }
                 if previous.effectiveTop < frame.maxY,
                    sample.effectiveTop >= frame.maxY {
                     candidates.append(id)
@@ -437,8 +455,8 @@ final class IOSUIKitScrolloverGeometryTracker {
         } else {
             observedVisibleIDs.removeAll(keepingCapacity: true)
         }
-        pruneObservedIDs(current: sample.rowFrames, previous: previous.rowFrames)
-        previousSample = sample
+        pruneObservedIDs(current: sample.rowFrames, previous: previousFrames)
+        storePrevious(sample)
 
         let ids = candidates
             .filter { emittedIDs.insert($0).inserted }
@@ -453,7 +471,7 @@ final class IOSUIKitScrolloverGeometryTracker {
                 observedVisibleIDs.insert(id)
             }
         }
-        previousSample = sample
+        storePrevious(sample)
         wasAtBottom = isAtBottom(sample)
     }
 
@@ -466,10 +484,10 @@ final class IOSUIKitScrolloverGeometryTracker {
     }
 
     private func hasMaterialLayoutChange(
-        from previous: IOSUIKitScrolloverGeometrySample,
+        from previous: [Int64: CGRect],
         to sample: IOSUIKitScrolloverGeometrySample
     ) -> Bool {
-        for (id, oldFrame) in previous.rowFrames {
+        for (id, oldFrame) in previous {
             guard let newFrame = sample.rowFrames[id], oldFrame != newFrame else { continue }
             return true
         }
@@ -477,12 +495,28 @@ final class IOSUIKitScrolloverGeometryTracker {
     }
 
     private func pruneObservedIDs(current: [Int64: CGRect], previous: [Int64: CGRect]) {
-        var staleIDs: [Int64] = []
-        staleIDs.reserveCapacity(observedVisibleIDs.count)
+        var staleIDs: [Int64]?
         for id in observedVisibleIDs where current[id] == nil && previous[id] == nil {
-            staleIDs.append(id)
+            if staleIDs == nil { staleIDs = [id] }
+            else { staleIDs!.append(id) }
         }
-        for id in staleIDs { observedVisibleIDs.remove(id) }
+        if let staleIDs {
+            for id in staleIDs { observedVisibleIDs.remove(id) }
+        }
+    }
+
+    private func storePrevious(_ sample: IOSUIKitScrolloverGeometrySample) {
+        previousGeometry = .init(sample)
+        previousFrames.removeAll(keepingCapacity: true)
+        previousFrames.reserveCapacity(min(sample.rowFrames.count, IOSUIKitResolvedScrolloverFrameStore.capacity))
+        for (id, frame) in sample.rowFrames.prefix(IOSUIKitResolvedScrolloverFrameStore.capacity) {
+            previousFrames[id] = frame
+        }
+    }
+
+    private func clearPreviousGeometry() {
+        previousGeometry = nil
+        previousFrames.removeAll(keepingCapacity: true)
     }
 }
 
@@ -1203,8 +1237,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
               let articleID = articleCell.representedArticleID else { return }
         resolvedScrolloverFrames.record(
             articleID: articleID,
-            frame: articleCell.frame,
-            viewportTop: collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+            frame: articleCell.frame
         )
     }
 
@@ -1357,7 +1390,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             url: url,
             targetSize: targetSize,
             displayScale: view.traitCollection.displayScale,
-            cornerRadius: 12
+            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius
         )
     }
 
@@ -1398,7 +1431,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     func performanceSnapshot() -> IOSUIKitTimelinePerformanceSnapshot { performanceMetrics.snapshot(preparation: preparedLayoutCoordinator.snapshot()) }
 
     private func preparedLayoutInput(for item: IOSUIKitArticleTimelineItem) -> IOSUIKitArticleLayoutInput {
-        .init(item: item, mode: mode, previewLines: previewLines, containerWidth: collectionView.bounds.width, displayScale: view.traitCollection.displayScale, contentSizeCategory: view.traitCollection.preferredContentSizeCategory, localeIdentifier: "", layoutDirection: view.effectiveUserInterfaceLayoutDirection)
+        .init(item: item, mode: mode, previewLines: previewLines, containerWidth: collectionView.bounds.width, displayScale: view.traitCollection.displayScale, contentSizeCategory: view.traitCollection.preferredContentSizeCategory, layoutDirection: view.effectiveUserInterfaceLayoutDirection)
     }
 
     private func currentGeometryIdentity() -> IOSUIKitTimelineGeometryIdentity? {
@@ -1737,8 +1770,8 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
 
         feedIconContainer.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            feedIconContainer.widthAnchor.constraint(equalToConstant: 22),
-            feedIconContainer.heightAnchor.constraint(equalToConstant: 22),
+            feedIconContainer.widthAnchor.constraint(equalToConstant: IOSFeedIconImagePreparation.displaySidePoints),
+            feedIconContainer.heightAnchor.constraint(equalToConstant: IOSFeedIconImagePreparation.displaySidePoints),
         ])
         feedIconImageView.translatesAutoresizingMaskIntoConstraints = false
         feedIconImageView.contentMode = .scaleAspectFit
@@ -2008,6 +2041,12 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     }
 
     var articleImageSlotFrameForTesting: CGRect { articleImageView.frame }
+    var articleImagePresentationForTesting: (placeholderHidden: Bool, contentMode: UIView.ContentMode, clipsToBounds: Bool, cornerRadius: CGFloat) {
+        (imagePlaceholder.isHidden, articleImageView.contentMode, articleImageView.clipsToBounds, articleImageView.layer.cornerRadius)
+    }
+    var feedIconPresentationForTesting: (imageHidden: Bool, fallbackHidden: Bool, clipsToBounds: Bool, cornerRadius: CGFloat) {
+        (feedIconImageView.isHidden, feedIconFallbackLabel.isHidden, feedIconContainer.clipsToBounds, feedIconContainer.layer.cornerRadius)
+    }
 
     struct LayoutDiagnostics: Equatable {
         let contentBounds: CGRect
@@ -2052,7 +2091,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             return
         }
 
-        let request = ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale, cornerRadius: 12)
+        let request = ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale, cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius)
         guard articleChanged || representedImageRequest != request else { return }
         performanceMetrics?.recordImageBinding()
         invalidateImageBinding()
@@ -2096,16 +2135,18 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     }
 
     private func setArticleImagePresentation(loaded: Bool) {
-        articleImageView.contentMode = loaded ? .scaleToFill : .scaleAspectFill
-        articleImageView.clipsToBounds = !loaded
-        articleImageView.layer.cornerRadius = loaded ? 0 : 12
+        articleImageView.contentMode = .scaleAspectFill
+        // Display-ready assets exactly fill this slot. A raw fallback can still
+        // arrive when rasterization fails, so retain only rectangular clipping.
+        articleImageView.clipsToBounds = loaded
+        articleImageView.layer.cornerRadius = loaded ? 0 : IOSUIKitArticleGeometry.articleImageCornerRadius
         articleImageView.backgroundColor = loaded ? .clear : .tertiarySystemFill
     }
 
     private func setFeedIconPresentation(loaded: Bool) {
         feedIconImageView.contentMode = loaded ? .scaleToFill : .scaleAspectFit
         feedIconContainer.clipsToBounds = !loaded
-        feedIconContainer.layer.cornerRadius = loaded ? 0 : 11
+        feedIconContainer.layer.cornerRadius = loaded ? 0 : IOSFeedIconImagePreparation.cornerRadius
     }
 
     private func invalidateImageBinding() {
