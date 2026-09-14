@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import Observation
 import UIKit
 #if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
@@ -67,6 +68,59 @@ enum IOSFeedIconPresentation {
 private struct IOSFeedIconRequestOwnership: Hashable {
     let key: IOSFeedIconKey
     let generation: UInt64
+}
+
+private enum IOSFeedIconImagePreparationError: Error {
+    case invalidImageData
+}
+
+/// Feed icons are rendered in a fixed 22-point slot. Decode and rasterize the
+/// Core PNG off-main after the bounded Core fetch and before presentation.
+struct IOSPreparedFeedIcon: @unchecked Sendable {
+    let image: UIImage
+    let pixelSize: CGSize
+}
+
+enum IOSFeedIconImagePreparation {
+    static let displaySidePoints: CGFloat = 22
+
+    static func prepare(data: Data, displayScale: CGFloat) throws -> IOSPreparedFeedIcon {
+        let scale = max(displayScale, 1)
+        let maxPixelDimension = max(1, Int((displaySidePoints * scale).rounded(.up)))
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            throw IOSFeedIconImagePreparationError.invalidImageData
+        }
+        let options: CFDictionary = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelDimension,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+        ] as CFDictionary
+        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else {
+            throw IOSFeedIconImagePreparationError.invalidImageData
+        }
+        let displayReady = decompressed(thumbnail) ?? thumbnail
+        return .init(
+            image: UIImage(cgImage: displayReady, scale: scale, orientation: .up),
+            pixelSize: .init(width: displayReady.width, height: displayReady.height)
+        )
+    }
+
+    private static func decompressed(_ image: CGImage) -> CGImage? {
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: image.width,
+            height: image.height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(image, in: .init(x: 0, y: 0, width: image.width, height: image.height))
+        return context.makeImage()
+    }
 }
 
 struct IOSNewsreaderReadRequest: Equatable {
@@ -483,7 +537,7 @@ struct ArticleRowContent: Equatable, Sendable {
         return state
     }
 
-    func requestFeedIcon(_ feedID: Int64, variant: FeedIconVariant, now: TimeInterval = Date.timeIntervalSinceReferenceDate) {
+    func requestFeedIcon(_ feedID: Int64, variant: FeedIconVariant, displayScale: CGFloat = 1, now: TimeInterval = Date.timeIntervalSinceReferenceDate) {
         let key = IOSFeedIconKey(feedID: feedID, variant: variant)
         let state = feedIconPresentationState(for: feedID, variant: variant)
         guard state.canRequest(at: now) else { return }
@@ -499,19 +553,28 @@ struct ArticleRowContent: Equatable, Sendable {
         guard requestedFeedIcons.insert(ownership).inserted else { return }
         state.beginLoading()
         Task { [weak self] in
-            let result = await AppleCoreExecution.shared.blockingResult { try loader(feedID, variant) }
+            // The synchronous Core fetch remains on the bounded blocking lane.
+            // ImageIO raster work is CPU-only and deliberately leaves that lane;
+            // it must not run on the MainActor that owns presentation state.
+            let loaded = await AppleCoreExecution.shared.blockingResult { try loader(feedID, variant) }
+            let result: Result<IOSPreparedFeedIcon?, Error> = switch loaded {
+            case let .success(data?):
+                await Task.detached(priority: .userInitiated) {
+                    Result { try IOSFeedIconImagePreparation.prepare(data: data, displayScale: displayScale) }
+                }.value
+            case .success(nil):
+                .success(nil)
+            case let .failure(error):
+                .failure(error)
+            }
             guard let self else { return }
             guard ownership.generation == feedIconOwnershipGeneration else { return }
             requestedFeedIcons.remove(ownership)
             guard let state = feedIconPresentationStates[key] else { return }
             switch result {
-            case let .success(data?):
-                guard let image = UIImage(data: data) else {
-                    state.setRetryableFailure(retryAfter: now + Self.feedIconRetryCooldown)
-                    return
-                }
-                state.setAvailable(image)
-                timelinePresentationBridge.publishFeedIcon(.init(key: key, image: image, revision: state.revision))
+            case let .success(prepared?):
+                state.setAvailable(prepared.image)
+                timelinePresentationBridge.publishFeedIcon(.init(key: key, image: prepared.image, revision: state.revision))
             case .success(nil):
                 state.setUnavailable()
             case .failure:

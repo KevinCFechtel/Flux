@@ -463,6 +463,53 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testIncrementalTimelineChangesDoNotPerformFullReplacementCleanup() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let first = timelineArticle(id: 1)
+        let second = timelineArticle(id: 2)
+        let third = timelineArticle(id: 3)
+        let controller = makeTimelineController(articles: [first, second], presentationBridge: bridge, feedIconBridge: bridge)
+        let initialPrefetchCancellations = controller.fullPrefetchCancellationCountForTesting
+        let initialLayoutInvalidations = controller.layoutInvalidationCountForTesting
+        let initialVisibleReconfigurePasses = controller.visibleCellReconfigurationPassCountForTesting
+
+        let appendedStorage = IOSUIKitArticleTimelineStructuralStorage()
+        appendedStorage.items = [first, second, third].map { .init(article: $0, content: ArticleRowContent(article: $0)) }
+        controller.update(
+            structuralState: .init(storage: appendedStorage, change: .append([.init(article: third, content: ArticleRowContent(article: third))]), revision: 2),
+            presentationBridge: bridge, feedIconPresentationBridge: bridge, mode: .visual, previewLines: .standard,
+            iconVariant: .normal, feedIconRequestRevision: 0, scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false, showsRefreshControl: false
+        )
+        XCTAssertEqual(controller.orderedArticleIDsForTesting, [1, 2, 3])
+        XCTAssertEqual(controller.fullPrefetchCancellationCountForTesting, initialPrefetchCancellations)
+        XCTAssertEqual(controller.layoutInvalidationCountForTesting, initialLayoutInvalidations)
+        XCTAssertEqual(controller.visibleCellReconfigurationPassCountForTesting, initialVisibleReconfigurePasses)
+
+        let removedStorage = IOSUIKitArticleTimelineStructuralStorage()
+        removedStorage.items = [first, third].map { .init(article: $0, content: ArticleRowContent(article: $0)) }
+        controller.update(
+            structuralState: .init(storage: removedStorage, change: .remove([2]), revision: 3),
+            presentationBridge: bridge, feedIconPresentationBridge: bridge, mode: .visual, previewLines: .standard,
+            iconVariant: .normal, feedIconRequestRevision: 0, scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false, showsRefreshControl: false
+        )
+        XCTAssertEqual(controller.orderedArticleIDsForTesting, [1, 3])
+        XCTAssertEqual(controller.fullPrefetchCancellationCountForTesting, initialPrefetchCancellations)
+        XCTAssertEqual(controller.layoutInvalidationCountForTesting, initialLayoutInvalidations)
+        XCTAssertEqual(controller.visibleCellReconfigurationPassCountForTesting, initialVisibleReconfigurePasses)
+
+        controller.update(
+            structuralState: .init(items: [.init(article: first, content: ArticleRowContent(article: first))], revision: 5),
+            presentationBridge: bridge, feedIconPresentationBridge: bridge, mode: .visual, previewLines: .standard,
+            iconVariant: .normal, feedIconRequestRevision: 0, scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false, showsRefreshControl: false
+        )
+        XCTAssertEqual(controller.fullPrefetchCancellationCountForTesting, initialPrefetchCancellations + 1)
+        XCTAssertEqual(controller.layoutInvalidationCountForTesting, initialLayoutInvalidations + 1)
+    }
+
+    @MainActor
     func testStaleTimelinePageCompletionCannotClearNewerRequestOwnership() {
         let store = NewsreaderStore(defaults: UserDefaults())
         let stale = store.beginTimelinePageRequestForTesting()
@@ -1148,6 +1195,31 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleImageRequest(url: url, targetSize: CGSize(width: 128.1, height: 20), displayScale: 1).maxPixelDimension, 192)
     }
 
+    @MainActor
+    func testUIKitArticleCellUsesSeparateStableVariantReuseIdentifiers() {
+        let identifiers = [
+            IOSUIKitArticleCell.reuseIdentifier(for: .compact),
+            IOSUIKitArticleCell.reuseIdentifier(for: .visualTextOnly),
+            IOSUIKitArticleCell.reuseIdentifier(for: .visualPortrait),
+            IOSUIKitArticleCell.reuseIdentifier(for: .visualLandscape),
+        ]
+        XCTAssertEqual(Set(identifiers).count, identifiers.count)
+    }
+
+    func testFeedIconPreparationDownsamplesToTheFixedDisplaySlotOffMain() async throws {
+        let data = try imageData(width: 800, height: 400)
+        let execution = AppleCoreExecution(responsiveConcurrency: 1, blockingConcurrency: 1)
+        let ranOnMain = try await execution.blocking { Thread.isMainThread }
+        let prepared = try await execution.blocking {
+            try IOSFeedIconImagePreparation.prepare(data: data, displayScale: 3)
+        }
+
+        XCTAssertFalse(ranOnMain)
+        XCTAssertLessThanOrEqual(prepared.pixelSize.width, IOSFeedIconImagePreparation.displaySidePoints * 3)
+        XCTAssertLessThanOrEqual(prepared.pixelSize.height, IOSFeedIconImagePreparation.displaySidePoints * 3)
+        XCTAssertEqual(prepared.image.scale, 3)
+    }
+
     func testPrefetchMetadataReusesAnUnchangedStructuralSnapshot() {
         func article(_ id: Int64, imageURL: String? = nil) -> ArticleSummary {
             ArticleSummary(id: id, feedId: 1, categoryId: 1, feedTitle: "Feed", title: "Article", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "", imageUrl: imageURL)
@@ -1603,6 +1675,27 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertNil(cache.metrics(for: .init(first)))
         XCTAssertNotNil(cache.metrics(for: .init(second)))
         XCTAssertNotNil(cache.metrics(for: .init(third)))
+    }
+
+    @MainActor
+    func testSynchronousPreparedLayoutFallbackStoresAndRetiresEquivalentWork() async {
+        let gate = LayoutMeasurementGate()
+        let cache = IOSUIKitPreparedArticleLayoutMetricsCache(capacity: 8)
+        let coordinator = IOSUIKitArticleLayoutPreparationCoordinator(cache: cache, maximumConcurrency: 1) { input in
+            await gate.measure(input)
+        }
+        let input = layoutInput(mode: .visual, width: 390, hasImage: true)
+        XCTAssertNil(coordinator.metrics(for: input, priority: .visible))
+        await gate.waitUntilStarted(count: 1)
+
+        let fallback = coordinator.measureSynchronously(input, priority: .visible)
+        XCTAssertEqual(cache.metrics(for: .init(input)), fallback)
+        XCTAssertEqual(coordinator.metrics(for: input, priority: .visible), fallback)
+        XCTAssertGreaterThanOrEqual(coordinator.snapshot().cancellations, 1)
+
+        await gate.releaseAll()
+        for _ in 0..<100 where coordinator.snapshot().discardedResults == 0 { await Task.yield() }
+        XCTAssertEqual(coordinator.snapshot().measurementsCompleted, 0)
     }
 
     @MainActor

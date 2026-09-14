@@ -146,7 +146,9 @@ final class AppleCoreExecutionTests: XCTestCase {
             "FluxNews/CoreBootstrapper.swift"
         ].map { try String(contentsOf: iosDirectory.appendingPathComponent($0), encoding: .utf8) }
 
-        for source in sources {
+        XCTAssertTrue(sources[0].contains("AppleCoreExecution.shared"))
+        XCTAssertTrue(sources[0].contains("Task.detached(priority: .userInitiated)")) // CPU-only feed-icon ImageIO preparation.
+        for source in sources.dropFirst() {
             XCTAssertFalse(source.contains("Task.detached"))
             XCTAssertTrue(source.contains("AppleCoreExecution.shared"))
         }

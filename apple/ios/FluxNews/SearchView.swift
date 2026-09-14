@@ -85,8 +85,8 @@ private struct SearchResultsContent: View {
                     onArticleAction: onArticleAction,
                     onSetRead: onSetRead,
                     onSetStarred: onSetStarred,
-                    onRequestFeedIcon: { feedID, variant in
-                        newsreaderStore.requestFeedIcon(feedID, variant: variant)
+                    onRequestFeedIcon: { feedID, variant, displayScale in
+                        newsreaderStore.requestFeedIcon(feedID, variant: variant, displayScale: displayScale)
                     },
                     onRefresh: {},
                     onApproachingEnd: { store.loadMore() },

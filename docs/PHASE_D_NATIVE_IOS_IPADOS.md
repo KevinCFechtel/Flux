@@ -508,6 +508,22 @@ query. This is separate from targeted read/starred/Scrollover presentation
 updates and from Search's remote pagination. Hard Timeline windowing is deferred
 unless future profiling justifies it.
 
+Incremental structural changes are deliberately narrower than a semantic
+replacement: page append adds only new Diffable identifiers and prepares only
+new immutable layout inputs; targeted removal deletes only affected identifiers
+and cancels only their article-image requests. Existing visible cells, valid
+prefetch, and prepared layout metrics are retained. Full replacement or a real
+geometry change remains responsible for broader cancellation and layout
+invalidation. A synchronous prepared-metrics miss is retained in the same
+generation-safe cache, so it does not cause a second equivalent asynchronous
+measurement. Feed-icon PNGs are decoded, downsampled to the fixed 22-point
+display slot, and rasterized off-main before presentation. The existing native
+cell uses stable registrations for compact/text-only, portrait, and landscape
+constraint variants to avoid ordinary reuse switching between those graphs. The
+article-image pipeline prioritizes visible decode work over prefetch, returns
+display-ready decoded pixels, and keeps its bounded cache. U3.7.5 manual cell
+layout remains deferred pending device evidence.
+
 On iOS, a semantic scope/filter/sort reset stays within the existing UIKit
 Timeline controller: it resets the collection view to its natural top position
 and rebaselines Scrollover geometry without re-identifying the adaptive detail

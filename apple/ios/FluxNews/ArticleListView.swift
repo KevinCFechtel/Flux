@@ -678,7 +678,7 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
     let onSetRead: (ArticleSummary, Bool) -> Void
     let onSetStarred: (ArticleSummary, Bool) -> Void
-    let onRequestFeedIcon: (Int64, FeedIconVariant) -> Void
+    let onRequestFeedIcon: (Int64, FeedIconVariant, CGFloat) -> Void
     let onRefresh: () async -> Void
     let onApproachingEnd: (() -> Void)?
     let onMeaningfulInteraction: () -> Void
@@ -735,7 +735,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     var onArticleAction: ((ArticleSummary, IOSArticleContextAction) -> Void)?
     var onSetRead: ((ArticleSummary, Bool) -> Void)?
     var onSetStarred: ((ArticleSummary, Bool) -> Void)?
-    var onRequestFeedIcon: ((Int64, FeedIconVariant) -> Void)?
+    var onRequestFeedIcon: ((Int64, FeedIconVariant, CGFloat) -> Void)?
     var onRefresh: (() async -> Void)?
     var onApproachingEnd: (() -> Void)?
     var onMeaningfulInteraction: (() -> Void)?
@@ -783,6 +783,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private(set) var feedIconPresentationApplicationCount = 0
     private(set) var scrolloverRearmCount = 0
 #if DEBUG
+    private(set) var fullPrefetchCancellationCountForTesting = 0
+    private(set) var layoutInvalidationCountForTesting = 0
+    private(set) var visibleCellReconfigurationPassCountForTesting = 0
+#endif
+#if DEBUG
     private(set) var scrollResetApplicationCountForTesting = 0
     private(set) var lastScrollResetOffsetForTesting: CGPoint?
     var contentOffsetForTesting: CGPoint { collectionView.contentOffset }
@@ -812,7 +817,14 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         collectionView.alwaysBounceVertical = true
         collectionView.delegate = self
         collectionView.prefetchDataSource = self
-        collectionView.register(IOSUIKitArticleCell.self, forCellWithReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier)
+        for variant in [
+            IOSUIKitArticleCellLayoutVariant.compact,
+            .visualTextOnly,
+            .visualPortrait,
+            .visualLandscape,
+        ] {
+            collectionView.register(IOSUIKitArticleCell.self, forCellWithReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant))
+        }
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self, UITraitLayoutDirection.self]) { (self: Self, _) in
             self.updateGeometryIfNeeded()
@@ -827,9 +839,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
         dataSource = UICollectionViewDiffableDataSource<Section, Int64>(collectionView: collectionView) { [weak self] collectionView, indexPath, id in
             guard let self,
-                  let cell = collectionView.dequeueReusableCell(withReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier, for: indexPath) as? IOSUIKitArticleCell,
                   let item = self.renderedItem(for: id)
             else { return nil }
+            let metrics = IOSUIKitArticleCell.Metrics(mode: self.mode, containerWidth: collectionView.bounds.width)
+            let variant = metrics.layoutVariant(hasImage: self.mode.showsArticleImage && item.content.imageURL != nil)
+            guard let cell = collectionView.dequeueReusableCell(withReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant), for: indexPath) as? IOSUIKitArticleCell else { return nil }
             self.configure(cell, item: item)
             return cell
         }
@@ -850,11 +864,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 #endif
         invalidateScrolloverGeometry()
         cancelIncompatibleImagePrefetch()
-        for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
-            guard let id = cell.representedArticleID, let item = renderedItem(for: id) else { continue }
-            configure(cell, item: item)
-            cell.setNeedsLayout()
-        }
+        reconfigureVisibleCells(needsLayout: true)
         collectionView.collectionViewLayout.invalidateLayout()
         schedulePreparedLayoutWindow(for: newIdentity)
     }
@@ -901,6 +911,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             newFeedIconPresentationBridge.subscribeFeedIcons(self)
         }
 
+        var structuralUpdate: IOSUIKitArticleTimelineStructuralChange?
         if structuralChanged {
             structuralReconciliationCount &+= 1
             performanceMetrics.recordStructuralReconciliation()
@@ -917,6 +928,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
                 var snapshot = dataSource.snapshot()
                 snapshot.appendItems(appendedIDs)
                 dataSource.apply(snapshot, animatingDifferences: false)
+                structuralUpdate = .append(appended)
             } else if canApplyIncrementally, case let .remove(removedIDs) = structuralState.change {
                 let removed = removedIDs.filter { itemsByID[$0] != nil }
                 if !removed.isEmpty {
@@ -932,6 +944,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
                     var snapshot = dataSource.snapshot()
                     snapshot.deleteItems(removed)
                     dataSource.apply(snapshot, animatingDifferences: false)
+                    structuralUpdate = .remove(removed)
                 }
             } else {
                 let items = structuralState.storage.items
@@ -947,6 +960,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
                 snapshot.appendSections([.main])
                 snapshot.appendItems(newIDs)
                 dataSource.apply(snapshot, animatingDifferences: false)
+                structuralUpdate = .replace
             }
             structuralRevision = structuralState.revision
             structuralSnapshotApplicationCount &+= 1
@@ -955,20 +969,30 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             Self.performanceSignposter.emitEvent("Timeline snapshot applied")
 #endif
         }
-        var needsLayoutInvalidation = false
-        if structuralChanged || iconVariantChanged {
-            for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
-                guard let id = cell.representedArticleID, let item = renderedItem(for: id) else { continue }
-                configure(cell, item: item)
-            }
-            needsLayoutInvalidation = structuralChanged
+        // Append and removal own only their changed IDs. Reconfiguring every
+        // visible cell here used to restart image bindings and duplicate layout
+        // work even though neither operation changes unaffected row geometry.
+        if iconVariantChanged {
+            reconfigureVisibleCells(needsLayout: false)
         }
 
-        if needsLayoutInvalidation {
+        if case .replace? = structuralUpdate {
             cancelAllPrefetch()
             schedulePreparedLayoutWindow(for: geometryIdentity)
             performanceMetrics.recordLayoutInvalidation()
+#if DEBUG
+            layoutInvalidationCountForTesting &+= 1
+#endif
             collectionView.collectionViewLayout.invalidateLayout()
+        } else if case let .append(appended)? = structuralUpdate {
+            // Keep the existing visible/nearby window and prepare only the new
+            // immutable inputs. UIKit prefetch will promote rows as they approach.
+            preparedLayoutCoordinator.prepare(
+                appended.prefix(IOSUIKitArticleLayoutPreparationCoordinator.nearbyWindowLimit)
+                    .compactMap { renderedItem(for: $0.article.id) }
+                    .map { preparedLayoutInput(for: $0) },
+                priority: .nearby
+            )
         }
         if layoutInputsChanged { updateGeometryIfNeeded() }
         if feedIconRequestChanged { requestFeedIconsForVisibleCells() }
@@ -998,7 +1022,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             layoutMetrics = prepared
         } else {
             let startedAt = DispatchTime.now().uptimeNanoseconds
-            layoutMetrics = IOSUIKitArticleLayoutEngine.metrics(for: layoutInput)
+            layoutMetrics = preparedLayoutCoordinator.measureSynchronously(layoutInput, priority: .visible)
             performanceMetrics.recordDeterministicHeightFallback(durationNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt)
         }
         cell.performanceMetrics = performanceMetrics
@@ -1011,7 +1035,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             displayScale: view.traitCollection.displayScale,
             preparedLayoutMetrics: layoutMetrics
         )
-        onRequestFeedIcon?(item.content.article.feedId, iconVariant)
+        onRequestFeedIcon?(item.content.article.feedId, iconVariant, view.traitCollection.displayScale)
     }
 
     func applyPresentationBridgeState(_ bridge: IOSUIKitArticleTimelinePresentationBridge) {
@@ -1064,7 +1088,18 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             guard let id = (cell as? IOSUIKitArticleCell)?.representedArticleID,
                   let item = itemsByID[id]
             else { continue }
-            onRequestFeedIcon?(item.content.article.feedId, iconVariant)
+            onRequestFeedIcon?(item.content.article.feedId, iconVariant, view.traitCollection.displayScale)
+        }
+    }
+
+    private func reconfigureVisibleCells(needsLayout: Bool) {
+#if DEBUG
+        visibleCellReconfigurationPassCountForTesting &+= 1
+#endif
+        for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
+            guard let id = cell.representedArticleID, let item = renderedItem(for: id) else { continue }
+            configure(cell, item: item)
+            if needsLayout { cell.setNeedsLayout() }
         }
     }
 
@@ -1315,6 +1350,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func cancelAllPrefetch() {
+#if DEBUG
+        fullPrefetchCancellationCountForTesting &+= 1
+#endif
         for prefetch in prefetchTasks.values { prefetch.task.cancel() }
         prefetchTasks.removeAll(keepingCapacity: true)
     }
@@ -1582,7 +1620,14 @@ final class IOSUIKitTimelinePerformanceMetrics {
 
 @MainActor
 final class IOSUIKitArticleCell: UICollectionViewCell {
-    static let reuseIdentifier = "IOSUIKitArticleCell"
+    static func reuseIdentifier(for variant: IOSUIKitArticleCellLayoutVariant) -> String {
+        switch variant {
+        case .compact: return "IOSUIKitArticleCell.compact"
+        case .visualTextOnly: return "IOSUIKitArticleCell.visualTextOnly"
+        case .visualPortrait: return "IOSUIKitArticleCell.visualPortrait"
+        case .visualLandscape: return "IOSUIKitArticleCell.visualLandscape"
+        }
+    }
 
     struct Metrics {
         let mode: ArticlePresentationMode
@@ -2089,7 +2134,7 @@ struct ArticleListView: View {
                     onArticleAction: onArticleAction,
                     onSetRead: { article, read in store.setRead(article, read: read) },
                     onSetStarred: { article, starred in store.setStarred(article, starred: starred) },
-                    onRequestFeedIcon: { feedID, variant in store.requestFeedIcon(feedID, variant: variant) },
+                    onRequestFeedIcon: { feedID, variant, displayScale in store.requestFeedIcon(feedID, variant: variant, displayScale: displayScale) },
                     onRefresh: { await store.syncManually() },
                     onApproachingEnd: { store.loadNextTimelinePage() },
                     onMeaningfulInteraction: { store.markMeaningfulInteraction() },

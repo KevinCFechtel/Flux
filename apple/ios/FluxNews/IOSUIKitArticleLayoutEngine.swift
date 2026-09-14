@@ -240,6 +240,27 @@ final class IOSUIKitArticleLayoutPreparationCoordinator {
         return nil
     }
 
+    /// A displayed cell cannot wait for preparation. Retain its deterministic
+    /// result in the same cache used by background preparation and retire an
+    /// equivalent queued/running measurement so the miss converges to one value.
+    func measureSynchronously(_ input: IOSUIKitArticleLayoutInput, priority: Priority) -> IOSUIKitArticleLayoutMetrics {
+        let key = IOSUIKitArticleLayoutKey(input)
+        if let metrics = cache.metrics(for: key) {
+            recordCacheHit(priority)
+            return metrics
+        }
+
+        pending.removeValue(forKey: key)
+        if let activeMeasurement = active.removeValue(forKey: key) {
+            activeMeasurement.task.cancel()
+            cancellations &+= 1
+        }
+        let metrics = IOSUIKitArticleLayoutEngine.metrics(for: input)
+        cache.insert(metrics, for: key)
+        startNextMeasurements()
+        return metrics
+    }
+
     func replaceWindow(with inputs: [IOSUIKitArticleLayoutInput], visibleCount: Int) {
         generation &+= 1
         let cancelled = active.count

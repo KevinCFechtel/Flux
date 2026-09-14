@@ -130,7 +130,7 @@ actor ArticleImagePipeline {
         var waiters: [UUID: CheckedContinuation<CGImage, Error>] = [:]
         var operation: Task<CGImage, Error>?
         var state: State = .queued
-        let demand: Demand
+        var demand: Demand
     }
 
     private struct QueuedJob: Equatable {
@@ -140,7 +140,9 @@ actor ArticleImagePipeline {
 
     static let shared = ArticleImagePipeline()
     static let maximumConcurrentOperations = 3
-    static let memoryCacheCostLimit = 48 * 1024 * 1024
+    // A visual card is commonly about 1.5-2.5 MiB decoded at @3x. This retains
+    // a useful scrolling runway without allowing unbounded image memory.
+    static let memoryCacheCostLimit = 64 * 1024 * 1024
     private static let maximumQueuedRequests = 48
     private static let maximumQueuedPrefetchRequests = 32
 
@@ -286,6 +288,10 @@ actor ArticleImagePipeline {
         let queued = QueuedJob(request: request, generation: generation)
         guard let index = prefetchQueue.firstIndex(of: queued) else { return }
         prefetchQueue.remove(at: index)
+        if var job = job(for: request, generation: generation) {
+            job.demand = .visible
+            store(job, for: request)
+        }
         visibleQueue.append(queued)
     }
 
@@ -318,7 +324,8 @@ actor ArticleImagePipeline {
                 continue
             }
             let loader = loader
-            let operation = Task.detached(priority: .utility) {
+            let priority: TaskPriority = job.demand == .visible ? .userInitiated : .utility
+            let operation = Task.detached(priority: priority) {
                 let data = try await loader(queued.request.url)
                 return try Self.downsample(data: data, maxPixelDimension: queued.request.maxPixelDimension)
             }
@@ -418,7 +425,23 @@ actor ArticleImagePipeline {
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else {
             throw ArticleImageError.invalidImageData
         }
-        return image
+        return decompressed(image) ?? image
+    }
+
+    private nonisolated static func decompressed(_ image: CGImage) -> CGImage? {
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: image.width,
+            height: image.height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(image, in: .init(x: 0, y: 0, width: image.width, height: image.height))
+        return context.makeImage()
     }
 }
 
