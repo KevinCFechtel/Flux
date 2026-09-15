@@ -1100,100 +1100,118 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testDecodedRasterPerformanceDiagnosticIsEnabled() {
-        XCTAssertTrue(IOSUIKitTimelineArticleImageDecodedRasterPerformanceDiagnostic.useDecodedRasterWithoutExactSlotRenderingForPerformanceDiagnosis)
-        XCTAssertEqual(IOSUIKitTimelineArticleImageDecodedRasterPerformanceDiagnostic.rasterRepresentation(), .decodedThumbnail)
-        XCTAssertEqual(IOSUIKitTimelineArticleImageDecodedRasterPerformanceDiagnostic.rasterRepresentation(diagnosticEnabled: false), .exactSlotDisplayReady)
+    func testTwoXArticleImageRasterPerformanceDiagnosticIsEnabled() {
+        XCTAssertTrue(IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.useTwoXArticleImageRasterForPerformanceDiagnosis)
+        XCTAssertEqual(IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(displayScale: 3), 2)
+        XCTAssertEqual(IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(displayScale: 3, diagnosticEnabled: false), 3)
     }
 
-    func testDecodedRasterDiagnosticUsesRealLoaderCacheAndNativeResolutionThumbnail() async throws {
-        let data = try imageData(width: 2_400, height: 1_200)
-        let counter = ImageLoadCounter(data: data)
-        let pipeline = ArticleImagePipeline { _ in await counter.load() }
+    func testTwoXDiagnosticUsesExactSlotBGRARasterWithReducedRepresentativeGeometry() throws {
         let targetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
         let request = ArticleImageRequest(
             url: URL(string: "https://example.com/image.jpg")!,
             targetSize: targetSize,
             displayScale: 3,
             cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
-            rasterRepresentation: .decodedThumbnail
+            rasterScale: IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(displayScale: 3)
         )
 
-        let image = try await pipeline.prefetch(request)
-        let cached = try XCTUnwrap(pipeline.cachedImage(for: request))
+        XCTAssertEqual(targetSize, .init(width: 361, height: 203.0625))
+        XCTAssertEqual(request.rasterScale, 2)
+        XCTAssertEqual(request.maxPixelDimension, 768)
+        XCTAssertEqual(request.targetPixelSize, .init(width: 722, height: 406))
 
-        XCTAssertEqual(request.maxPixelDimension, 1_088)
-        XCTAssertEqual(request.targetPixelSize, .init(width: 1_083, height: 609))
-        XCTAssertEqual(image.width, 1_088)
-        XCTAssertEqual(image.height, 544)
-        XCTAssertNotEqual(CGSize(width: image.width, height: image.height), request.targetPixelSize)
-        XCTAssertTrue(image === cached)
+        let image = try ArticleImagePipeline.downsample(
+            data: horizontalBandPNGData(width: 10, height: 30),
+            request: request
+        )
+        XCTAssertEqual(CGSize(width: image.width, height: image.height), request.targetPixelSize)
+        XCTAssertEqual(image.alphaInfo, .premultipliedFirst)
+        XCTAssertTrue(image.bitmapInfo.contains(.byteOrder32Little))
+        XCTAssertEqual(pixel(at: .zero, in: image).alpha, 0)
+        XCTAssertEqual(pixel(at: .init(x: image.width / 2, y: image.height / 2), in: image), .init(blue: 0, green: 255, red: 0, alpha: 255))
+        XCTAssertEqual(ArticleImagePipeline.memoryCost(of: image), 722 * 406 * 4)
+    }
+
+    func testTwoXDiagnosticUsesRealLoaderCacheAndCannotAliasThreeXRaster() async throws {
+        let data = try imageData(width: 2_400, height: 1_200)
+        let counter = ImageLoadCounter(data: data)
+        let pipeline = ArticleImagePipeline { _ in await counter.load() }
+        let targetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
+        let twoX = ArticleImageRequest(
+            url: URL(string: "https://example.com/image.jpg")!, targetSize: targetSize, displayScale: 3,
+            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius, rasterScale: 2
+        )
+        let threeX = ArticleImageRequest(
+            url: twoX.url, targetSize: targetSize, displayScale: 3,
+            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius
+        )
+
+        let image = try await pipeline.prefetch(twoX)
+        XCTAssertEqual(CGSize(width: image.width, height: image.height), twoX.targetPixelSize)
+        XCTAssertNotEqual(twoX, threeX)
+        XCTAssertNil(pipeline.cachedImage(for: threeX))
+        XCTAssertNotNil(pipeline.cachedImage(for: twoX))
         let calls = await counter.callCount()
-        XCTAssertEqual(calls, 1)
         let metrics = await pipeline.metrics()
+        XCTAssertEqual(calls, 1)
         XCTAssertEqual(metrics.memoryCacheInsertions, 1)
-
-        let exactSlotRequest = ArticleImageRequest(
-            url: request.url,
-            targetSize: targetSize,
-            displayScale: 3,
-            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
-            rasterRepresentation: .exactSlotDisplayReady
-        )
-        XCTAssertNil(pipeline.cachedImage(for: exactSlotRequest))
     }
 
     @MainActor
-    func testDecodedRasterDiagnosticPresentsCachedImageImmediatelyWithRuntimeCorners() async throws {
+    func testTwoXDiagnosticPresentsCachedExactRasterImmediatelyAtPhysicalDisplayScale() async throws {
         let data = try imageData(width: 1_600, height: 800)
         let counter = ImageLoadCounter(data: data)
         let pipeline = ArticleImagePipeline { _ in await counter.load() }
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
         let metrics = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 390)
         let request = ArticleImageRequest(
-            url: try XCTUnwrap(item.content.imageURL),
-            targetSize: metrics.imageSize(hasImage: true),
-            displayScale: 3,
-            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
-            rasterRepresentation: .decodedThumbnail
+            url: try XCTUnwrap(item.content.imageURL), targetSize: metrics.imageSize(hasImage: true), displayScale: 3,
+            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius, rasterScale: 2
         )
         let cached = try await pipeline.prefetch(request)
-        let cell = configuredArticleImageTestCell(item: item, pipeline: pipeline, rasterRepresentation: .decodedThumbnail)
+        let cell = configuredArticleImageTestCell(item: item, pipeline: pipeline, rasterScale: 2)
 
         XCTAssertTrue(cell.articleImageRasterForTesting === cached)
+        XCTAssertEqual(cell.articleImageForTesting?.scale, 3)
         let presentation = cell.articleImagePresentationForTesting
         XCTAssertTrue(presentation.placeholderHidden)
         XCTAssertEqual(presentation.contentMode, .scaleAspectFill)
         XCTAssertTrue(presentation.clipsToBounds)
-        XCTAssertEqual(presentation.cornerRadius, IOSUIKitArticleGeometry.articleImageCornerRadius)
+        XCTAssertEqual(presentation.cornerRadius, 0)
         let calls = await counter.callCount()
         XCTAssertEqual(calls, 1)
     }
 
     @MainActor
-    func testDecodedRasterDiagnosticKeepsArticleImagePrefetchAndLayoutPrefetchActive() {
-        let bridge = IOSUIKitArticleTimelinePresentationBridge()
-        let article = timelineArticle(id: 1, imageURL: "https://example.com/image.jpg")
-        let controller = makeTimelineController(articles: [article], presentationBridge: bridge, feedIconBridge: bridge)
-
-        controller.collectionView(controller.collectionViewForTesting, prefetchItemsAt: [IndexPath(item: 0, section: 0)])
-
-        XCTAssertEqual(controller.articleImagePrefetchTaskCountForTesting, 1)
-        XCTAssertEqual(controller.layoutPrefetchInputCountForTesting, 1)
+    func testTwoXDiagnosticKeepsArticleImageAndLayoutPrefetchActive() {
+        // The diagnostic changes the request's raster scale, not the Standard
+        // article-image prefetch policy or its two-image forward window.
+        XCTAssertEqual(
+            IOSArticleImagePrefetchPolicy.candidateIDs(
+                orderedIDs: [1, 2, 3], visibleIDs: [1], imageIDs: [2, 3], direction: .forward
+            ),
+            [2, 3]
+        )
+        let request = ArticleImageRequest(
+            url: URL(string: "https://example.com/image.jpg")!, targetSize: .init(width: 361, height: 203), displayScale: 3,
+            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius, rasterScale: 2
+        )
+        XCTAssertEqual(request.rasterScale, 2)
     }
 
     @MainActor
-    func testDecodedRasterDiagnosticAssignsAsyncImageImmediatelyAndNormalReuseClearsIt() async throws {
+    func testTwoXDiagnosticAssignsAsyncImageImmediatelyAndNormalReuseClearsIt() async throws {
         let gate = ImageLoadGate(data: try imageData(width: 800, height: 400))
         let pipeline = ArticleImagePipeline { _ in try await gate.load() }
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
-        let cell = configuredArticleImageTestCell(item: item, pipeline: pipeline, rasterRepresentation: .decodedThumbnail)
+        let cell = configuredArticleImageTestCell(item: item, pipeline: pipeline, rasterScale: 2)
         await gate.waitUntilSuspended()
         await gate.release()
         await waitForArticleImagePresentation { cell.articleImageForTesting != nil }
 
         XCTAssertNotNil(cell.articleImageForTesting)
-        XCTAssertEqual(cell.articleImagePresentationForTesting.cornerRadius, IOSUIKitArticleGeometry.articleImageCornerRadius)
+        XCTAssertEqual(cell.articleImagePresentationForTesting.cornerRadius, 0)
         cell.prepareForReuse()
         XCTAssertNil(cell.articleImageForTesting)
         XCTAssertFalse(cell.articleImagePresentationForTesting.placeholderHidden)
@@ -1206,7 +1224,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         let gate = ImageLoadGate(data: try imageData(width: 800, height: 400))
         let pipeline = ArticleImagePipeline { _ in try await gate.load() }
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
-        let cell = configuredArticleImageTestCell(item: item, pipeline: pipeline, mode: .compact, rasterRepresentation: .decodedThumbnail)
+        let cell = configuredArticleImageTestCell(item: item, pipeline: pipeline, mode: .compact, rasterScale: 2)
 
         await Task.yield()
         XCTAssertEqual(cell.layoutVariantForTesting, .compact)
@@ -1216,9 +1234,9 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testDecodedRasterPerformanceDiagnosticPreservesStandardImageSlotGeometry() {
+    func testTwoXDiagnosticPreservesStandardImageSlotGeometry() {
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: true)
-        let cell = configuredOracleCell(item: item, mode: .visual, previewLines: .standard, width: 390, rasterRepresentation: .decodedThumbnail)
+        let cell = configuredOracleCell(item: item, mode: .visual, previewLines: .standard, width: 390, rasterScale: 2)
         let input = IOSUIKitArticleLayoutInput(item: item, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: cell.traitCollection.displayScale, contentSizeCategory: .large, layoutDirection: .leftToRight)
         let expected = IOSUIKitArticleLayoutEngine.metrics(for: input)
 
@@ -1638,14 +1656,22 @@ final class NewsreaderPresentationTests: XCTestCase {
         } catch {}
     }
 
-    func testExactSlotDisplayReadyRasterRemainsAvailableWhenDiagnosticIsDisabled() throws {
-        XCTAssertEqual(IOSUIKitTimelineArticleImageDecodedRasterPerformanceDiagnostic.rasterRepresentation(diagnosticEnabled: false), .exactSlotDisplayReady)
+    func testNormalDisplayScaleExactSlotRasterRemainsAvailableWhenDiagnosticIsDisabled() throws {
+        let representativeTargetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
+        let normalRepresentative = ArticleImageRequest(
+            url: URL(string: "https://example.com/image.jpg")!, targetSize: representativeTargetSize, displayScale: 3,
+            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
+            rasterScale: IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(displayScale: 3, diagnosticEnabled: false)
+        )
+        XCTAssertEqual(normalRepresentative.rasterScale, 3)
+        XCTAssertEqual(normalRepresentative.maxPixelDimension, 1_088)
+        XCTAssertEqual(normalRepresentative.targetPixelSize, .init(width: 1_083, height: 609))
+
         let request = ArticleImageRequest(
             url: URL(string: "https://example.com/image.jpg")!,
             targetSize: .init(width: 20, height: 10),
             displayScale: 1,
-            cornerRadius: 4,
-            rasterRepresentation: .exactSlotDisplayReady
+            cornerRadius: 4
         )
         let portrait = try horizontalBandPNGData(width: 10, height: 30)
         let image = try ArticleImagePipeline.downsample(data: portrait, request: request)
@@ -2316,10 +2342,10 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    private func configuredArticleImageTestCell(item: IOSUIKitArticleTimelineItem, pipeline: ArticleImagePipeline, mode: ArticlePresentationMode = .visual, displayScale: CGFloat = 3, rasterRepresentation: ArticleImageRasterRepresentation = .exactSlotDisplayReady) -> IOSUIKitArticleCell {
+    private func configuredArticleImageTestCell(item: IOSUIKitArticleTimelineItem, pipeline: ArticleImagePipeline, mode: ArticlePresentationMode = .visual, displayScale: CGFloat = 3, rasterScale: CGFloat? = nil) -> IOSUIKitArticleCell {
         let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: 390, height: 1_000))
         cell.setArticleImagePipelineForTesting(pipeline)
-        cell.articleImageRasterRepresentation = { rasterRepresentation }
+        cell.articleImageRasterScale = { _ in rasterScale ?? displayScale }
         let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: 390)
         let input = IOSUIKitArticleLayoutInput(item: item, mode: mode, previewLines: .standard, containerWidth: 390, displayScale: displayScale, contentSizeCategory: .large, layoutDirection: .leftToRight)
         cell.configure(item: item, mode: mode, previewLines: .standard, metrics: metrics, displayScale: displayScale, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
@@ -2334,11 +2360,11 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    private func configuredOracleCell(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, width: CGFloat, layoutDirection: UIUserInterfaceLayoutDirection = .leftToRight, rasterRepresentation: ArticleImageRasterRepresentation = .exactSlotDisplayReady) -> IOSUIKitArticleCell {
+    private func configuredOracleCell(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, width: CGFloat, layoutDirection: UIUserInterfaceLayoutDirection = .leftToRight, rasterScale: CGFloat? = nil) -> IOSUIKitArticleCell {
         let container = UIView(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
         let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
         cell.setArticleImagePipelineForTesting(ArticleImagePipeline { _ in throw CancellationError() })
-        cell.articleImageRasterRepresentation = { rasterRepresentation }
+        cell.articleImageRasterScale = { displayScale in rasterScale ?? displayScale }
         let semanticAttribute: UISemanticContentAttribute = layoutDirection == .rightToLeft ? .forceRightToLeft : .forceLeftToRight
         container.semanticContentAttribute = semanticAttribute
         cell.semanticContentAttribute = semanticAttribute

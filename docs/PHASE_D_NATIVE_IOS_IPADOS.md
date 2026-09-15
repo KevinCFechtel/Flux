@@ -542,37 +542,48 @@ not assumed bit-identical to the shipped archive. U3.7.5 manual cell layout
 remains deferred pending device evidence; this pass does not claim a new
 physical-device result.
 
-#### Temporary article-image representation diagnostic — physical result pending
+#### Temporary article-image raster-scale diagnostic — physical result pending
 
-The UIKit Timeline has a temporary, source-level diagnostic enabled for the
-next iPhone 15 comparison. It is motivated by the legacy Flutter implementation:
-`FluxNews/lib/ui/news_card_ios.dart` uses `ExtendedImage.network` with a
-native-ish `cacheWidth`, cached decoded image, `BoxFit.cover`, and its configured
-crop alignment. It does not materialize Flux's separate exact-slot article
-raster after ImageIO decoding. The hypothesis is that the native second raster
-materialization — distinct exact-slot BGRA crop plus baked rounded corners per
-article — contributes to the residual image-rich scrolling unevenness.
+Physical iPhone 15 testing of `2c3ecd8` found that presenting real, roughly
+@3x ImageIO thumbnails directly — without Flux's exact-slot
+`renderDisplayReady` stage — was not meaningfully smoother than the normal
+pipeline and was subjectively more uneven than diagnostic C's shared full-size
+opaque raster. Exact-slot prerasterization is therefore downgraded as the
+primary explanation for the residual image-rich scrolling unevenness. This does
+not establish any particular lower-level cause.
 
-The diagnostic holds Standard geometry, article-image slot dimensions, native
-display-scale ImageIO bounding, real URL loading, HTTP/cache behavior, bounded
-memory cache, visible/prefetch scheduling, immediate UIKit assignment, normal
-reuse, Scrollover, and Compact behavior constant. For a visual Standard request
-it changes only the prepared representation: ImageIO's source-aspect thumbnail
-is cached and assigned directly, and `renderDisplayReady` does not allocate the
-second exact target-pixel CGContext or bake crop/corners. Request/cache identity
-includes the representation, preventing a decoded thumbnail from colliding with
-a production exact-slot raster.
+The next temporary, source-level diagnostic is
+`IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic`, enabled with
+`useTwoXArticleImageRasterForPerformanceDiagnosis = true`. It tests the narrower
+hypothesis that scrolling cost materially scales with the pixel/byte volume of
+the distinct article rasters being presented. Standard Timeline article-image
+requests use an effective raster scale of exactly 2.0 rather than the physical
+display scale (normally 3.0 on iPhone 15). It affects both ImageIO's
+`maxPixelDimension` and `renderDisplayReady`'s exact `targetPixelSize`; it does
+not change the logical UIKit image slot, card geometry, or presentation timing.
+2x is diagnostic-only and is not a proposed shipping quality level.
 
-UIKit continues to use the fixed slot with `.scaleAspectFill` and clipping; the
-diagnostic reuses the centralized article corner radius through runtime image-view
-corner clipping because that radius is no longer baked into the thumbnail. The
-thumbnail dimensions therefore follow source aspect ratio rather than the 16:9
-slot. For example, at a 393 pt-wide @3x iPhone 15 Standard portrait card, the
-361 pt × 203 pt slot is 1083 × 609 target pixels and requests a 1088-pixel
-ImageIO thumbnail; a 2:1 source decodes to approximately 1088 × 544 pixels
-before UIKit aspect-fills/crops it. Runtime corner clipping and the source-aspect
-thumbnail are intentional changed variables and limitations of this experiment.
-No physical-device conclusion is recorded until this build is tested.
+For a 393 pt-wide iPhone 15 Standard portrait card, the fixed 361 pt × 203 pt
+slot normally produces a 1083 × 609 @3x BGRA raster (about 2.5 MiB) after an
+1088-pixel ImageIO thumbnail request. The diagnostic produces a 722 × 406 @2x
+BGRA raster (about 1.1 MiB) after a 768-pixel request: approximately 56% fewer
+display-ready pixel bytes. Both paths retain ImageIO decoding,
+`renderDisplayReady`, exact aspect-fill crop, baked 12 pt-equivalent rounded
+corners, sRGB BGRA premultiplied-first pixels, and `.medium` interpolation.
+Cache identity includes effective raster scale as well as raster geometry, so
+2x and 3x entries cannot alias.
+
+UIKit still creates `UIImage(cgImage:scale:orientation:)` with the physical
+display scale, not the diagnostic 2x raster scale. The existing fixed
+point-sized `UIImageView` constraints and `.scaleAspectFill` remain authoritative
+for layout, so the lower-resolution raster fills the unchanged logical slot.
+Real URL loading, HTTP/cache behavior, 128 MiB cache budget, visible/prefetch
+scheduling, immediate cache-hit and completion assignment, normal reuse, and
+Compact behavior remain unchanged. No A-prime presentation suppression,
+diagnostic-C shared raster, or decoded-thumbnail direct-presentation behavior is
+active. Physical-device results for this 2x experiment remain pending; no Core
+Animation, texture upload, IOSurface, Render Server, memory-bandwidth, or other
+specific mechanism has been proven.
 
 On iOS, a semantic scope/filter/sort reset stays within the existing UIKit
 Timeline controller: it resets the collection view to its natural top position

@@ -2,22 +2,18 @@ import Foundation
 import ImageIO
 import SwiftUI
 
-// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. This lets the UIKit
-// Timeline cache ImageIO's bounded decoded thumbnail instead of materializing a
-// second exact-slot display raster.
-enum IOSUIKitTimelineArticleImageDecodedRasterPerformanceDiagnostic {
-    static let useDecodedRasterWithoutExactSlotRenderingForPerformanceDiagnosis = true
+// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. This isolates the pixel
+// volume of distinct Standard Timeline article rasters without changing their
+// exact-slot rendering or UIKit presentation behavior.
+enum IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic {
+    static let useTwoXArticleImageRasterForPerformanceDiagnosis = true
 
-    static func rasterRepresentation(
-        diagnosticEnabled: Bool = useDecodedRasterWithoutExactSlotRenderingForPerformanceDiagnosis
-    ) -> ArticleImageRasterRepresentation {
-        diagnosticEnabled ? .decodedThumbnail : .exactSlotDisplayReady
+    static func effectiveRasterScale(
+        displayScale: CGFloat,
+        diagnosticEnabled: Bool = useTwoXArticleImageRasterForPerformanceDiagnosis
+    ) -> CGFloat {
+        diagnosticEnabled ? 2 : max(displayScale, 1)
     }
-}
-
-enum ArticleImageRasterRepresentation: String, Hashable, Sendable {
-    case exactSlotDisplayReady
-    case decodedThumbnail
 }
 
 struct ArticleImageRequest: Hashable, Sendable {
@@ -25,16 +21,16 @@ struct ArticleImageRequest: Hashable, Sendable {
     let maxPixelDimension: Int
     let targetPixelSize: CGSize
     let cornerRadiusPixels: CGFloat
-    let rasterRepresentation: ArticleImageRasterRepresentation
+    let rasterScale: CGFloat
 
     init(
         url: URL,
         targetSize: CGSize,
         displayScale: CGFloat,
         cornerRadius: CGFloat = 0,
-        rasterRepresentation: ArticleImageRasterRepresentation = .exactSlotDisplayReady
+        rasterScale: CGFloat? = nil
     ) {
-        let scale = max(displayScale, 1)
+        let scale = max(rasterScale ?? displayScale, 1)
         let pixels = max(targetSize.width, targetSize.height) * scale
         // Bucketing upward prevents tiny layout changes from creating duplicate decodes.
         maxPixelDimension = max(64, Int((ceil(pixels) / 64).rounded(.up)) * 64)
@@ -43,7 +39,7 @@ struct ArticleImageRequest: Hashable, Sendable {
             height: max(1, (targetSize.height * scale).rounded())
         )
         cornerRadiusPixels = max(0, (cornerRadius * scale).rounded())
-        self.rasterRepresentation = rasterRepresentation
+        self.rasterScale = scale
         self.url = url
     }
 }
@@ -106,7 +102,7 @@ private final class ArticleImageCache: NSObject, NSCacheDelegate, @unchecked Sen
         lock.lock()
         insertions += 1
         lock.unlock()
-        storage.setObject(ArticleImageCacheEntry(image: image), forKey: key, cost: image.width * image.height * 4)
+        storage.setObject(ArticleImageCacheEntry(image: image), forKey: key, cost: ArticleImagePipeline.memoryCost(of: image))
     }
 
     func snapshot() -> ArticleImageCacheMetrics {
@@ -204,6 +200,10 @@ actor ArticleImagePipeline {
 
     nonisolated func cachedImage(for request: ArticleImageRequest) -> CGImage? {
         cache.lookup(request.cacheKey, source: .visible)
+    }
+
+    nonisolated static func memoryCost(of image: CGImage) -> Int {
+        image.width * image.height * 4
     }
 
     func image(for request: ArticleImageRequest, demand: Demand = .visible, cacheWasChecked: Bool = false) async throws -> CGImage {
@@ -450,16 +450,11 @@ actor ArticleImagePipeline {
 
     nonisolated static func downsample(data: Data, request: ArticleImageRequest) throws -> CGImage {
         let image = try thumbnail(data: data, maxPixelDimension: request.maxPixelDimension)
-        switch request.rasterRepresentation {
-        case .exactSlotDisplayReady:
-            return renderDisplayReady(
-                image,
-                targetPixelSize: request.targetPixelSize,
-                cornerRadiusPixels: request.cornerRadiusPixels
-            ) ?? image
-        case .decodedThumbnail:
-            return image
-        }
+        return renderDisplayReady(
+            image,
+            targetPixelSize: request.targetPixelSize,
+            cornerRadiusPixels: request.cornerRadiusPixels
+        ) ?? image
     }
 
     private nonisolated static func thumbnail(data: Data, maxPixelDimension: Int) throws -> CGImage {
@@ -536,7 +531,7 @@ private extension ArticleImagePipeline.Demand {
 
 private extension ArticleImageRequest {
     var cacheKey: NSString {
-        "\(url.absoluteString)|\(maxPixelDimension)|\(Int(targetPixelSize.width))x\(Int(targetPixelSize.height))|\(Int(cornerRadiusPixels))|\(rasterRepresentation.rawValue)" as NSString
+        "\(url.absoluteString)|\(maxPixelDimension)|\(Int(targetPixelSize.width))x\(Int(targetPixelSize.height))|\(Int(cornerRadiusPixels))|scale=\(Int((rasterScale * 100).rounded()))" as NSString
     }
 }
 

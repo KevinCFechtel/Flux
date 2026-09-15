@@ -1070,8 +1070,10 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             performanceMetrics.recordDeterministicHeightFallback(durationNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt)
         }
         cell.performanceMetrics = performanceMetrics
-        cell.articleImageRasterRepresentation = {
-            IOSUIKitTimelineArticleImageDecodedRasterPerformanceDiagnostic.rasterRepresentation()
+        cell.articleImageRasterScale = { displayScale in
+            IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(
+                displayScale: displayScale
+            )
         }
         performanceMetrics.recordConfigure()
         cell.configure(
@@ -1402,7 +1404,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             targetSize: targetSize,
             displayScale: view.traitCollection.displayScale,
             cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
-            rasterRepresentation: IOSUIKitTimelineArticleImageDecodedRasterPerformanceDiagnostic.rasterRepresentation()
+            rasterScale: IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(
+                displayScale: view.traitCollection.displayScale
+            )
         )
     }
 
@@ -1748,7 +1752,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     private(set) var preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics?
 
     weak var performanceMetrics: IOSUIKitTimelinePerformanceMetrics?
-    var articleImageRasterRepresentation: () -> ArticleImageRasterRepresentation = { .exactSlotDisplayReady }
+    var articleImageRasterScale: (CGFloat) -> CGFloat = { $0 }
     private(set) var representedArticleID: Int64?
     private(set) var layoutVariantRevision: UInt64 = 0
     private(set) var measurementSolveCount = 0
@@ -1983,8 +1987,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             url: item.content.imageURL,
             targetSize: imageSize,
             displayScale: displayScale,
-            articleChanged: articleChanged,
-            rasterRepresentation: articleImageRasterRepresentation()
+            articleChanged: articleChanged
         )
         contentView.setNeedsLayout()
     }
@@ -2107,8 +2110,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         url: URL?,
         targetSize: CGSize,
         displayScale: CGFloat,
-        articleChanged: Bool,
-        rasterRepresentation: ArticleImageRasterRepresentation
+        articleChanged: Bool
     ) {
         guard let url, targetSize.width > 0, targetSize.height > 0 else {
             guard representedImageRequest != nil else { return }
@@ -2126,7 +2128,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             targetSize: targetSize,
             displayScale: displayScale,
             cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
-            rasterRepresentation: rasterRepresentation
+            rasterScale: articleImageRasterScale(displayScale)
         )
         guard articleChanged || representedImageRequest != request else { return }
         performanceMetrics?.recordImageBinding()
@@ -2135,11 +2137,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         guard let articleID = representedArticleID else { return }
         representedImageRequest = request
         if let cachedImage = articleImagePipeline.cachedImage(for: request) {
-            presentArticleImage(
-                cachedImage,
-                displayScale: displayScale,
-                usesRuntimeCornerClipping: request.rasterRepresentation == .decodedThumbnail
-            )
+            presentArticleImage(cachedImage, displayScale: displayScale)
             return
         }
 
@@ -2154,11 +2152,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
                       self.representedArticleID == articleID,
                       self.representedImageRequest == request
                 else { return }
-                self.presentArticleImage(
-                    loadedImage,
-                    displayScale: displayScale,
-                    usesRuntimeCornerClipping: request.rasterRepresentation == .decodedThumbnail
-                )
+                self.presentArticleImage(loadedImage, displayScale: displayScale)
             } catch {
                 guard !Task.isCancelled,
                       let self,
@@ -2171,11 +2165,14 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         }
     }
 
-    private func presentArticleImage(_ image: CGImage, displayScale: CGFloat, usesRuntimeCornerClipping: Bool) {
+    private func presentArticleImage(_ image: CGImage, displayScale: CGFloat) {
+        // Use the physical display scale for UIImage semantics. Fixed image-view
+        // constraints remain authoritative for the unchanged logical slot, so a
+        // 2x diagnostic raster fills that same slot on a 3x display.
         articleImageView.image = UIImage(cgImage: image, scale: displayScale, orientation: .up)
         articleImageView.isOpaque = false
         imagePlaceholder.isHidden = true
-        setArticleImagePresentation(loaded: true, usesRuntimeCornerClipping: usesRuntimeCornerClipping)
+        setArticleImagePresentation(loaded: true)
     }
 
     private func clearArticleImagePresentation() {
@@ -2185,13 +2182,11 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         setArticleImagePresentation(loaded: false)
     }
 
-    private func setArticleImagePresentation(loaded: Bool, usesRuntimeCornerClipping: Bool = false) {
+    private func setArticleImagePresentation(loaded: Bool) {
         articleImageView.contentMode = .scaleAspectFill
-        // The decoded-thumbnail diagnostic asks UIKit to crop and round at the
-        // fixed slot. Production display-ready assets retain their baked corners.
         articleImageView.clipsToBounds = loaded
         if loaded {
-            articleImageView.layer.cornerRadius = usesRuntimeCornerClipping ? IOSUIKitArticleGeometry.articleImageCornerRadius : 0
+            articleImageView.layer.cornerRadius = 0
         } else {
             articleImageView.layer.cornerRadius = IOSUIKitArticleGeometry.articleImageCornerRadius
         }
