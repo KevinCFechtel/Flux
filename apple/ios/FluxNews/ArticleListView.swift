@@ -4,14 +4,57 @@ import UIKit
 import OSLog
 #endif
 
-// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. This retains normal image
-// loading and rasterization, but suppresses all article-image assignments while
-// the Timeline is actively scrolling.
-enum IOSUIKitTimelineArticleImageAssignmentPerformanceDiagnostic {
-    static let suppressArticleImageAssignmentWhileScrollingForPerformanceDiagnosis = true
+// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. This bypasses real article
+// images with one shared, opaque raster per exact pixel size.
+@MainActor
+enum IOSUIKitTimelineSharedOpaqueArticleImageRasterPerformanceDiagnostic {
+    static let useSharedOpaqueArticleImageRasterForPerformanceDiagnosis = true
 
-    static func shouldSuppressArticleImageAssignment(whileScrolling: Bool, diagnosticEnabled: Bool = suppressArticleImageAssignmentWhileScrollingForPerformanceDiagnosis) -> Bool {
-        diagnosticEnabled && whileScrolling
+    private struct RasterKey: Hashable {
+        let width: Int
+        let height: Int
+    }
+
+    private static let maximumRasterCount = 4
+    private static var rasters: [RasterKey: CGImage] = [:]
+    private static var rasterKeys: [RasterKey] = []
+
+    static func raster(targetSize: CGSize, displayScale: CGFloat) -> CGImage {
+        let scale = max(displayScale, 1)
+        let key = RasterKey(
+            width: max(1, Int((targetSize.width * scale).rounded())),
+            height: max(1, Int((targetSize.height * scale).rounded()))
+        )
+        if let existing = rasters[key] {
+            rasterKeys.removeAll { $0 == key }
+            rasterKeys.append(key)
+            return existing
+        }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+        guard let context = CGContext(
+            data: nil,
+            width: key.width,
+            height: key.height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else {
+            preconditionFailure("Unable to create the diagnostic article-image raster")
+        }
+        context.setFillColor(CGColor(red: 0.46, green: 0.48, blue: 0.50, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: key.width, height: key.height))
+        guard let raster = context.makeImage() else {
+            preconditionFailure("Unable to finalize the diagnostic article-image raster")
+        }
+        if rasterKeys.count == maximumRasterCount {
+            rasters.removeValue(forKey: rasterKeys.removeFirst())
+        }
+        rasters[key] = raster
+        rasterKeys.append(key)
+        return raster
     }
 }
 
@@ -836,6 +879,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private(set) var fullPrefetchCancellationCountForTesting = 0
     private(set) var layoutInvalidationCountForTesting = 0
     private(set) var visibleCellReconfigurationPassCountForTesting = 0
+    private(set) var layoutPrefetchInputCountForTesting = 0
+    var articleImagePrefetchTaskCountForTesting: Int { prefetchTasks.count }
+    var collectionViewForTesting: UICollectionView { collectionView }
 #endif
 #if DEBUG
     private(set) var scrollResetApplicationCountForTesting = 0
@@ -1078,11 +1124,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             performanceMetrics.recordDeterministicHeightFallback(durationNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt)
         }
         cell.performanceMetrics = performanceMetrics
-        cell.shouldDeferArticleImagePresentation = { [weak self] in
-            guard let self else { return false }
-            return IOSUIKitTimelineArticleImageAssignmentPerformanceDiagnostic.shouldSuppressArticleImageAssignment(
-                whileScrolling: self.scrolloverPhase.isScrolling
-            )
+        cell.usesSharedOpaqueArticleImageRasterForPerformanceDiagnosis = {
+            IOSUIKitTimelineSharedOpaqueArticleImageRasterPerformanceDiagnostic.useSharedOpaqueArticleImageRasterForPerformanceDiagnosis
         }
         performanceMetrics.recordConfigure()
         cell.configure(
@@ -1241,16 +1284,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         scrolloverPhase = phase
         scrolloverGeometryTracker.setPhase(phase)
         onScrolloverPhase?(phase)
-        if phase == .idle {
-            presentDeferredArticleImagesForVisibleCells()
-        }
-    }
-
-    private func presentDeferredArticleImagesForVisibleCells() {
-        guard IOSUIKitTimelineArticleImageAssignmentPerformanceDiagnostic.suppressArticleImageAssignmentWhileScrollingForPerformanceDiagnosis else { return }
-        for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
-            cell.presentDeferredArticleImageIfAvailable()
-        }
     }
 
     private func invalidateScrolloverGeometry() {
@@ -1381,8 +1414,13 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
             return preparedLayoutInput(for: item)
         }
+#if DEBUG
+        layoutPrefetchInputCountForTesting += layoutInputs.count
+#endif
         preparedLayoutCoordinator.prepare(layoutInputs, priority: .prefetch)
-        guard mode.showsArticleImage else { return }
+        guard mode.showsArticleImage,
+              !IOSUIKitTimelineSharedOpaqueArticleImageRasterPerformanceDiagnostic.useSharedOpaqueArticleImageRasterForPerformanceDiagnosis
+        else { return }
         for indexPath in indexPaths {
             guard let id = dataSource.itemIdentifier(for: indexPath),
                   let item = renderedItem(for: id), let request = imageRequest(for: item)
@@ -1409,7 +1447,10 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func imageRequest(for item: IOSUIKitArticleTimelineItem) -> ArticleImageRequest? {
-        guard mode.showsArticleImage, let url = item.content.imageURL else { return nil }
+        guard mode.showsArticleImage,
+              !IOSUIKitTimelineSharedOpaqueArticleImageRasterPerformanceDiagnostic.useSharedOpaqueArticleImageRasterForPerformanceDiagnosis,
+              let url = item.content.imageURL
+        else { return nil }
         let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: collectionView.bounds.width)
         let targetSize = metrics.imageSize(hasImage: true)
         guard targetSize.width > 0, targetSize.height > 0 else { return nil }
@@ -1753,13 +1794,6 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     private var currentLayoutVariant: IOSUIKitArticleCellLayoutVariant?
     private var imageTask: Task<Void, Never>?
     private var representedImageRequest: ArticleImageRequest?
-    private struct DeferredArticleImagePresentation {
-        let articleID: Int64
-        let request: ArticleImageRequest
-        let bindingGeneration: UInt64
-        let displayScale: CGFloat
-    }
-    private var deferredArticleImagePresentation: DeferredArticleImagePresentation?
     private var articleImagePipeline = ArticleImagePipeline.shared
     private var imageBindingGeneration: UInt64 = 0
     private var currentTitle = ""
@@ -1770,7 +1804,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     private(set) var preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics?
 
     weak var performanceMetrics: IOSUIKitTimelinePerformanceMetrics?
-    var shouldDeferArticleImagePresentation: () -> Bool = { false }
+    var usesSharedOpaqueArticleImageRasterForPerformanceDiagnosis: () -> Bool = { false }
     private(set) var representedArticleID: Int64?
     private(set) var layoutVariantRevision: UInt64 = 0
     private(set) var measurementSolveCount = 0
@@ -1965,12 +1999,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         representedImageRequest = nil
         representedArticleID = nil
         preparedLayoutMetrics = nil
-        // This intentionally retains a recycled raster while the diagnostic is
-        // active, isolating assignment cost from the cost of compositing an
-        // already-textured image layer. The next idle edge corrects it.
-        if !shouldDeferArticleImagePresentation() {
-            clearArticleImagePresentation()
-        }
+        clearArticleImagePresentation()
     }
 
     func configure(
@@ -2006,7 +2035,13 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
 
         updateFeedIcon(image: item.feedIconImage, title: item.content.article.feedTitle)
         updateStatus(isRead: item.isRead, isStarred: item.isStarred)
-        configureArticleImage(url: item.content.imageURL, targetSize: imageSize, displayScale: displayScale, articleChanged: articleChanged)
+        configureArticleImage(
+            url: item.content.imageURL,
+            targetSize: imageSize,
+            displayScale: displayScale,
+            articleChanged: articleChanged,
+            useSharedOpaqueDiagnosticRaster: hasImage && usesSharedOpaqueArticleImageRasterForPerformanceDiagnosis()
+        )
         contentView.setNeedsLayout()
     }
 
@@ -2083,8 +2118,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     var articleImageForTesting: UIImage? { articleImageView.image }
     var articleImageSlotIsHiddenForTesting: Bool { articleImageView.isHidden }
 #if DEBUG
-    var hasDeferredArticleImagePresentationForTesting: Bool { deferredArticleImagePresentation != nil }
-    var deferredArticleImageRequestForTesting: ArticleImageRequest? { deferredArticleImagePresentation?.request }
+    var articleImageRasterForTesting: CGImage? { articleImageView.image?.cgImage }
     func setArticleImagePipelineForTesting(_ pipeline: ArticleImagePipeline) { articleImagePipeline = pipeline }
 #endif
     var articleImagePresentationForTesting: (placeholderHidden: Bool, contentMode: UIView.ContentMode, clipsToBounds: Bool, cornerRadius: CGFloat) {
@@ -2125,7 +2159,13 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         (feedTitleLabel.numberOfLines, feedTitleLabel.lineBreakMode)
     }
 
-    private func configureArticleImage(url: URL?, targetSize: CGSize, displayScale: CGFloat, articleChanged: Bool) {
+    private func configureArticleImage(
+        url: URL?,
+        targetSize: CGSize,
+        displayScale: CGFloat,
+        articleChanged: Bool,
+        useSharedOpaqueDiagnosticRaster: Bool
+    ) {
         guard let url, targetSize.width > 0, targetSize.height > 0 else {
             guard representedImageRequest != nil else { return }
             performanceMetrics?.recordImageBinding()
@@ -2137,6 +2177,19 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             return
         }
 
+        if useSharedOpaqueDiagnosticRaster {
+            let raster = IOSUIKitTimelineSharedOpaqueArticleImageRasterPerformanceDiagnostic.raster(
+                targetSize: targetSize,
+                displayScale: displayScale
+            )
+            guard articleChanged || articleImageView.image?.cgImage !== raster else { return }
+            performanceMetrics?.recordImageBinding()
+            invalidateImageBinding()
+            representedImageRequest = nil
+            presentSharedOpaqueDiagnosticArticleImage(raster, displayScale: displayScale)
+            return
+        }
+
         let request = ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale, cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius)
         guard articleChanged || representedImageRequest != request else { return }
         performanceMetrics?.recordImageBinding()
@@ -2144,20 +2197,12 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         let bindingGeneration = imageBindingGeneration
         guard let articleID = representedArticleID else { return }
         representedImageRequest = request
-        if shouldDeferArticleImagePresentation() {
-            deferredArticleImagePresentation = .init(articleID: articleID, request: request, bindingGeneration: bindingGeneration, displayScale: displayScale)
-        }
         if let cachedImage = articleImagePipeline.cachedImage(for: request) {
-            if shouldDeferArticleImagePresentation() {
-                return
-            }
             presentArticleImage(cachedImage, displayScale: displayScale)
             return
         }
 
-        if !shouldDeferArticleImagePresentation() || articleImageView.image == nil {
-            clearArticleImagePresentation()
-        }
+        clearArticleImagePresentation()
         let pipeline = articleImagePipeline
         imageTask = Task { @MainActor [weak self, pipeline] in
             do {
@@ -2168,9 +2213,6 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
                       self.representedArticleID == articleID,
                       self.representedImageRequest == request
                 else { return }
-                if self.shouldDeferArticleImagePresentation() {
-                    return
-                }
                 self.presentArticleImage(loadedImage, displayScale: displayScale)
             } catch {
                 guard !Task.isCancelled,
@@ -2179,41 +2221,28 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
                       self.representedArticleID == articleID,
                       self.representedImageRequest == request
                 else { return }
-                if self.shouldDeferArticleImagePresentation() {
-                    return
-                }
                 self.clearArticleImagePresentation()
             }
         }
     }
 
-    func presentDeferredArticleImageIfAvailable() {
-        guard let deferred = deferredArticleImagePresentation else { return }
-        guard !shouldDeferArticleImagePresentation() else { return }
-        guard
-              imageBindingGeneration == deferred.bindingGeneration,
-              representedArticleID == deferred.articleID,
-              representedImageRequest == deferred.request
-        else {
-            deferredArticleImagePresentation = nil
-            return
-        }
-        deferredArticleImagePresentation = nil
-        guard let image = articleImagePipeline.cachedImage(for: deferred.request) else {
-            clearArticleImagePresentation()
-            return
-        }
-        presentArticleImage(image, displayScale: deferred.displayScale)
-    }
-
     private func presentArticleImage(_ image: CGImage, displayScale: CGFloat) {
         articleImageView.image = UIImage(cgImage: image, scale: displayScale, orientation: .up)
+        articleImageView.isOpaque = false
+        imagePlaceholder.isHidden = true
+        setArticleImagePresentation(loaded: true)
+    }
+
+    private func presentSharedOpaqueDiagnosticArticleImage(_ image: CGImage, displayScale: CGFloat) {
+        articleImageView.image = UIImage(cgImage: image, scale: displayScale, orientation: .up)
+        articleImageView.isOpaque = true
         imagePlaceholder.isHidden = true
         setArticleImagePresentation(loaded: true)
     }
 
     private func clearArticleImagePresentation() {
         articleImageView.image = nil
+        articleImageView.isOpaque = false
         imagePlaceholder.isHidden = false
         setArticleImagePresentation(loaded: false)
     }
@@ -2237,7 +2266,6 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         imageBindingGeneration &+= 1
         imageTask?.cancel()
         imageTask = nil
-        deferredArticleImagePresentation = nil
     }
 
     private func updateAccessibility() {
