@@ -542,6 +542,38 @@ not assumed bit-identical to the shipped archive. U3.7.5 manual cell layout
 remains deferred pending device evidence; this pass does not claim a new
 physical-device result.
 
+#### Temporary article-image representation diagnostic — physical result pending
+
+The UIKit Timeline has a temporary, source-level diagnostic enabled for the
+next iPhone 15 comparison. It is motivated by the legacy Flutter implementation:
+`FluxNews/lib/ui/news_card_ios.dart` uses `ExtendedImage.network` with a
+native-ish `cacheWidth`, cached decoded image, `BoxFit.cover`, and its configured
+crop alignment. It does not materialize Flux's separate exact-slot article
+raster after ImageIO decoding. The hypothesis is that the native second raster
+materialization — distinct exact-slot BGRA crop plus baked rounded corners per
+article — contributes to the residual image-rich scrolling unevenness.
+
+The diagnostic holds Standard geometry, article-image slot dimensions, native
+display-scale ImageIO bounding, real URL loading, HTTP/cache behavior, bounded
+memory cache, visible/prefetch scheduling, immediate UIKit assignment, normal
+reuse, Scrollover, and Compact behavior constant. For a visual Standard request
+it changes only the prepared representation: ImageIO's source-aspect thumbnail
+is cached and assigned directly, and `renderDisplayReady` does not allocate the
+second exact target-pixel CGContext or bake crop/corners. Request/cache identity
+includes the representation, preventing a decoded thumbnail from colliding with
+a production exact-slot raster.
+
+UIKit continues to use the fixed slot with `.scaleAspectFill` and clipping; the
+diagnostic reuses the centralized article corner radius through runtime image-view
+corner clipping because that radius is no longer baked into the thumbnail. The
+thumbnail dimensions therefore follow source aspect ratio rather than the 16:9
+slot. For example, at a 393 pt-wide @3x iPhone 15 Standard portrait card, the
+361 pt × 203 pt slot is 1083 × 609 target pixels and requests a 1088-pixel
+ImageIO thumbnail; a 2:1 source decodes to approximately 1088 × 544 pixels
+before UIKit aspect-fills/crops it. Runtime corner clipping and the source-aspect
+thumbnail are intentional changed variables and limitations of this experiment.
+No physical-device conclusion is recorded until this build is tested.
+
 On iOS, a semantic scope/filter/sort reset stays within the existing UIKit
 Timeline controller: it resets the collection view to its natural top position
 and rebaselines Scrollover geometry without re-identifying the adaptive detail

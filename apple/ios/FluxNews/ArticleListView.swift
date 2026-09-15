@@ -4,60 +4,6 @@ import UIKit
 import OSLog
 #endif
 
-// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. This bypasses real article
-// images with one shared, opaque raster per exact pixel size.
-@MainActor
-enum IOSUIKitTimelineSharedOpaqueArticleImageRasterPerformanceDiagnostic {
-    static let useSharedOpaqueArticleImageRasterForPerformanceDiagnosis = true
-
-    private struct RasterKey: Hashable {
-        let width: Int
-        let height: Int
-    }
-
-    private static let maximumRasterCount = 4
-    private static var rasters: [RasterKey: CGImage] = [:]
-    private static var rasterKeys: [RasterKey] = []
-
-    static func raster(targetSize: CGSize, displayScale: CGFloat) -> CGImage {
-        let scale = max(displayScale, 1)
-        let key = RasterKey(
-            width: max(1, Int((targetSize.width * scale).rounded())),
-            height: max(1, Int((targetSize.height * scale).rounded()))
-        )
-        if let existing = rasters[key] {
-            rasterKeys.removeAll { $0 == key }
-            rasterKeys.append(key)
-            return existing
-        }
-
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
-        guard let context = CGContext(
-            data: nil,
-            width: key.width,
-            height: key.height,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo
-        ) else {
-            preconditionFailure("Unable to create the diagnostic article-image raster")
-        }
-        context.setFillColor(CGColor(red: 0.46, green: 0.48, blue: 0.50, alpha: 1))
-        context.fill(CGRect(x: 0, y: 0, width: key.width, height: key.height))
-        guard let raster = context.makeImage() else {
-            preconditionFailure("Unable to finalize the diagnostic article-image raster")
-        }
-        if rasterKeys.count == maximumRasterCount {
-            rasters.removeValue(forKey: rasterKeys.removeFirst())
-        }
-        rasters[key] = raster
-        rasterKeys.append(key)
-        return raster
-    }
-}
-
 enum IOSArticleScrollDirection: Equatable {
     case forward
     case backward
@@ -1124,8 +1070,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             performanceMetrics.recordDeterministicHeightFallback(durationNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt)
         }
         cell.performanceMetrics = performanceMetrics
-        cell.usesSharedOpaqueArticleImageRasterForPerformanceDiagnosis = {
-            IOSUIKitTimelineSharedOpaqueArticleImageRasterPerformanceDiagnostic.useSharedOpaqueArticleImageRasterForPerformanceDiagnosis
+        cell.articleImageRasterRepresentation = {
+            IOSUIKitTimelineArticleImageDecodedRasterPerformanceDiagnostic.rasterRepresentation()
         }
         performanceMetrics.recordConfigure()
         cell.configure(
@@ -1418,9 +1364,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         layoutPrefetchInputCountForTesting += layoutInputs.count
 #endif
         preparedLayoutCoordinator.prepare(layoutInputs, priority: .prefetch)
-        guard mode.showsArticleImage,
-              !IOSUIKitTimelineSharedOpaqueArticleImageRasterPerformanceDiagnostic.useSharedOpaqueArticleImageRasterForPerformanceDiagnosis
-        else { return }
+        guard mode.showsArticleImage else { return }
         for indexPath in indexPaths {
             guard let id = dataSource.itemIdentifier(for: indexPath),
                   let item = renderedItem(for: id), let request = imageRequest(for: item)
@@ -1448,7 +1392,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     private func imageRequest(for item: IOSUIKitArticleTimelineItem) -> ArticleImageRequest? {
         guard mode.showsArticleImage,
-              !IOSUIKitTimelineSharedOpaqueArticleImageRasterPerformanceDiagnostic.useSharedOpaqueArticleImageRasterForPerformanceDiagnosis,
               let url = item.content.imageURL
         else { return nil }
         let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: collectionView.bounds.width)
@@ -1458,7 +1401,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             url: url,
             targetSize: targetSize,
             displayScale: view.traitCollection.displayScale,
-            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius
+            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
+            rasterRepresentation: IOSUIKitTimelineArticleImageDecodedRasterPerformanceDiagnostic.rasterRepresentation()
         )
     }
 
@@ -1804,7 +1748,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     private(set) var preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics?
 
     weak var performanceMetrics: IOSUIKitTimelinePerformanceMetrics?
-    var usesSharedOpaqueArticleImageRasterForPerformanceDiagnosis: () -> Bool = { false }
+    var articleImageRasterRepresentation: () -> ArticleImageRasterRepresentation = { .exactSlotDisplayReady }
     private(set) var representedArticleID: Int64?
     private(set) var layoutVariantRevision: UInt64 = 0
     private(set) var measurementSolveCount = 0
@@ -2040,7 +1984,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             targetSize: imageSize,
             displayScale: displayScale,
             articleChanged: articleChanged,
-            useSharedOpaqueDiagnosticRaster: hasImage && usesSharedOpaqueArticleImageRasterForPerformanceDiagnosis()
+            rasterRepresentation: articleImageRasterRepresentation()
         )
         contentView.setNeedsLayout()
     }
@@ -2164,7 +2108,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         targetSize: CGSize,
         displayScale: CGFloat,
         articleChanged: Bool,
-        useSharedOpaqueDiagnosticRaster: Bool
+        rasterRepresentation: ArticleImageRasterRepresentation
     ) {
         guard let url, targetSize.width > 0, targetSize.height > 0 else {
             guard representedImageRequest != nil else { return }
@@ -2177,20 +2121,13 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             return
         }
 
-        if useSharedOpaqueDiagnosticRaster {
-            let raster = IOSUIKitTimelineSharedOpaqueArticleImageRasterPerformanceDiagnostic.raster(
-                targetSize: targetSize,
-                displayScale: displayScale
-            )
-            guard articleChanged || articleImageView.image?.cgImage !== raster else { return }
-            performanceMetrics?.recordImageBinding()
-            invalidateImageBinding()
-            representedImageRequest = nil
-            presentSharedOpaqueDiagnosticArticleImage(raster, displayScale: displayScale)
-            return
-        }
-
-        let request = ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale, cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius)
+        let request = ArticleImageRequest(
+            url: url,
+            targetSize: targetSize,
+            displayScale: displayScale,
+            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
+            rasterRepresentation: rasterRepresentation
+        )
         guard articleChanged || representedImageRequest != request else { return }
         performanceMetrics?.recordImageBinding()
         invalidateImageBinding()
@@ -2198,7 +2135,11 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         guard let articleID = representedArticleID else { return }
         representedImageRequest = request
         if let cachedImage = articleImagePipeline.cachedImage(for: request) {
-            presentArticleImage(cachedImage, displayScale: displayScale)
+            presentArticleImage(
+                cachedImage,
+                displayScale: displayScale,
+                usesRuntimeCornerClipping: request.rasterRepresentation == .decodedThumbnail
+            )
             return
         }
 
@@ -2213,7 +2154,11 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
                       self.representedArticleID == articleID,
                       self.representedImageRequest == request
                 else { return }
-                self.presentArticleImage(loadedImage, displayScale: displayScale)
+                self.presentArticleImage(
+                    loadedImage,
+                    displayScale: displayScale,
+                    usesRuntimeCornerClipping: request.rasterRepresentation == .decodedThumbnail
+                )
             } catch {
                 guard !Task.isCancelled,
                       let self,
@@ -2226,18 +2171,11 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         }
     }
 
-    private func presentArticleImage(_ image: CGImage, displayScale: CGFloat) {
+    private func presentArticleImage(_ image: CGImage, displayScale: CGFloat, usesRuntimeCornerClipping: Bool) {
         articleImageView.image = UIImage(cgImage: image, scale: displayScale, orientation: .up)
         articleImageView.isOpaque = false
         imagePlaceholder.isHidden = true
-        setArticleImagePresentation(loaded: true)
-    }
-
-    private func presentSharedOpaqueDiagnosticArticleImage(_ image: CGImage, displayScale: CGFloat) {
-        articleImageView.image = UIImage(cgImage: image, scale: displayScale, orientation: .up)
-        articleImageView.isOpaque = true
-        imagePlaceholder.isHidden = true
-        setArticleImagePresentation(loaded: true)
+        setArticleImagePresentation(loaded: true, usesRuntimeCornerClipping: usesRuntimeCornerClipping)
     }
 
     private func clearArticleImagePresentation() {
@@ -2247,12 +2185,16 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         setArticleImagePresentation(loaded: false)
     }
 
-    private func setArticleImagePresentation(loaded: Bool) {
+    private func setArticleImagePresentation(loaded: Bool, usesRuntimeCornerClipping: Bool = false) {
         articleImageView.contentMode = .scaleAspectFill
-        // Display-ready assets exactly fill this slot. A raw fallback can still
-        // arrive when rasterization fails, so retain only rectangular clipping.
+        // The decoded-thumbnail diagnostic asks UIKit to crop and round at the
+        // fixed slot. Production display-ready assets retain their baked corners.
         articleImageView.clipsToBounds = loaded
-        articleImageView.layer.cornerRadius = loaded ? 0 : IOSUIKitArticleGeometry.articleImageCornerRadius
+        if loaded {
+            articleImageView.layer.cornerRadius = usesRuntimeCornerClipping ? IOSUIKitArticleGeometry.articleImageCornerRadius : 0
+        } else {
+            articleImageView.layer.cornerRadius = IOSUIKitArticleGeometry.articleImageCornerRadius
+        }
         articleImageView.backgroundColor = loaded ? .clear : .tertiarySystemFill
     }
 
