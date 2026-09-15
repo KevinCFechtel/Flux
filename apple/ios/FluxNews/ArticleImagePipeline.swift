@@ -6,7 +6,11 @@ import SwiftUI
 // volume of distinct Standard Timeline article rasters without changing their
 // exact-slot rendering or UIKit presentation behavior.
 enum IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic {
-    static let useTwoXArticleImageRasterForPerformanceDiagnosis = true
+    // Physical iPhone 15 result: 2x was not meaningfully smoother than 3x, so
+    // article raster pixel volume is not the driver of the residual unevenness.
+    // Restored to the shipping display scale; the scaffolding stays only until
+    // the temporary diagnostics are removed together.
+    static let useTwoXArticleImageRasterForPerformanceDiagnosis = false
 
     static func effectiveRasterScale(
         displayScale: CGFloat,

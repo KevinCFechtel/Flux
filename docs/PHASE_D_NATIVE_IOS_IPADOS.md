@@ -542,7 +542,7 @@ not assumed bit-identical to the shipped archive. U3.7.5 manual cell layout
 remains deferred pending device evidence; this pass does not claim a new
 physical-device result.
 
-#### Temporary article-image raster-scale diagnostic — physical result pending
+#### Temporary article-image raster-scale diagnostic — concluded
 
 Physical iPhone 15 testing of `2c3ecd8` found that presenting real, roughly
 @3x ImageIO thumbnails directly — without Flux's exact-slot
@@ -581,9 +581,31 @@ Real URL loading, HTTP/cache behavior, 128 MiB cache budget, visible/prefetch
 scheduling, immediate cache-hit and completion assignment, normal reuse, and
 Compact behavior remain unchanged. No A-prime presentation suppression,
 diagnostic-C shared raster, or decoded-thumbnail direct-presentation behavior is
-active. Physical-device results for this 2x experiment remain pending; no Core
-Animation, texture upload, IOSurface, Render Server, memory-bandwidth, or other
-specific mechanism has been proven.
+active.
+
+Physical iPhone 15 testing found 2x **not meaningfully smoother than 3x**.
+Article raster pixel volume — and with it ImageIO decode cost, texture upload
+and image memory footprint — is therefore downgraded as a driver of the residual
+unevenness. `useTwoXArticleImageRasterForPerformanceDiagnosis` is restored to
+`false`, so the shipping display scale is active again; the scaffolding remains
+only until the temporary diagnostics are removed together.
+
+This result does **not** exonerate article-image *composition*. The composited
+area of a card is its on-screen slot (361 × 203 pt), which is identical at 2x
+and 3x, so the experiment never varied the per-frame blend cost. The exact-slot
+raster still carries an alpha channel with transparent rounded corners
+(`ArticleImagePipeline.renderDisplayReady`, `premultipliedFirst`), so the
+largest layer in the Timeline is alpha-composited every frame. An opaque raster
+whose corners are filled with the Timeline background remains an open,
+unmeasured candidate; it would require the effective `UIUserInterfaceStyle` in
+the raster cache identity.
+
+No Core Animation, texture upload, IOSurface, Render Server, memory-bandwidth,
+or other specific mechanism has been proven. The next step is the two-part
+attribution measurement in `docs/Flux_iOS_Frame_Headroom_Messprotokoll.md`,
+which separates main-thread from render-server frame deficits and quantifies the
+fixed cost of the iOS 26 scroll edge effect over the scrolling Timeline. That
+effect is a product decision and is measured, not changed.
 
 On iOS, a semantic scope/filter/sort reset stays within the existing UIKit
 Timeline controller: it resets the collection view to its natural top position

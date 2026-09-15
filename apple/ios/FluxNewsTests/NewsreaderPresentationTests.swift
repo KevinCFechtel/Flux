@@ -1099,11 +1099,15 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(ArticlePresentationMode.compact.showsArticleImage)
     }
 
+    /// The 2x experiment concluded: it was not meaningfully smoother on the
+    /// device, so the shipping path uses the physical display scale again. The
+    /// reduced-raster mechanism stays covered while the scaffolding exists.
     @MainActor
-    func testTwoXArticleImageRasterPerformanceDiagnosticIsEnabled() {
-        XCTAssertTrue(IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.useTwoXArticleImageRasterForPerformanceDiagnosis)
-        XCTAssertEqual(IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(displayScale: 3), 2)
-        XCTAssertEqual(IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(displayScale: 3, diagnosticEnabled: false), 3)
+    func testArticleImageRasterScaleUsesDisplayScaleWithTwoXDiagnosticRetired() {
+        XCTAssertFalse(IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.useTwoXArticleImageRasterForPerformanceDiagnosis)
+        XCTAssertEqual(IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(displayScale: 3), 3)
+        XCTAssertEqual(IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(displayScale: 2), 2)
+        XCTAssertEqual(IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(displayScale: 3, diagnosticEnabled: true), 2)
     }
 
     func testTwoXDiagnosticUsesExactSlotBGRARasterWithReducedRepresentativeGeometry() throws {
@@ -1113,7 +1117,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             targetSize: targetSize,
             displayScale: 3,
             cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
-            rasterScale: IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(displayScale: 3)
+            rasterScale: IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(displayScale: 3, diagnosticEnabled: true)
         )
 
         XCTAssertEqual(targetSize, .init(width: 361, height: 203.0625))
@@ -1372,7 +1376,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         let fallback = cell.feedIconPresentationForTesting
         XCTAssertTrue(fallback.imageHidden)
         XCTAssertFalse(fallback.fallbackHidden)
-        XCTAssertTrue(fallback.clipsToBounds)
+        // The rounded background must never mask a sublayer: that combination
+        // forces a per-frame offscreen render pass. Same contract as the cold
+        // article-image placeholder asserted above.
+        XCTAssertFalse(fallback.clipsToBounds)
         XCTAssertEqual(fallback.cornerRadius, IOSFeedIconImagePreparation.cornerRadius)
     }
 
@@ -2447,13 +2454,13 @@ final class NewsreaderPresentationTests: XCTestCase {
         }
     }
 
+    /// Icon preparation finishes on a detached task, so a bounded spin over
+    /// `Task.yield()` only ever polled the cooperative pool and failed whenever
+    /// the machine was busy. The presentation state already exposes a
+    /// continuation-based waiter that resumes on the actual transition.
     @MainActor
     private func waitForFeedIconState(_ state: IOSFeedIconPresentationState, matching expected: IOSFeedIconLoadState) async {
-        for _ in 0..<100 {
-            if state.loadState == expected { return }
-            await Task.yield()
-        }
-        XCTFail("Timed out waiting for feed icon state \(expected)")
+        await state.waitForLoadStateForTesting(expected)
     }
 
     private final class FeedIconLoader: @unchecked Sendable {

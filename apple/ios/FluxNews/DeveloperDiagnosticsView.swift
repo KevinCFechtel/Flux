@@ -3,6 +3,11 @@ import SwiftUI
 struct DeveloperDiagnosticsView: View {
     @ObservedObject var bootstrapper: CoreBootstrapper
     @State private var legacyResult = LegacyStateDiscovery.probe()
+    // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
+    @State private var scrollEdgeEffectArm = IOSUIKitTimelineScrollEdgeEffectDiagnostic.arm
+    @AppStorage(IOSUIKitTimelineScrolloverOverlayDiagnostic.defaultsKey)
+    private var scrolloverOverlayArm = IOSUIKitTimelineScrolloverOverlayDiagnostic.Arm.material.rawValue
+    @State private var frameHeadroom = IOSUIKitTimelineFrameHeadroomDiagnostics.formattedSnapshot()
 
     var body: some View {
         NavigationStack {
@@ -18,6 +23,32 @@ struct DeveloperDiagnosticsView: View {
                         LabeledContent(localizedDiagnosticLabel(key), value: value)
                     }
                     Text("Read-only discovery; no legacy data is imported or modified.").font(.footnote).foregroundStyle(.secondary)
+                }
+                // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. Release
+                // builds must reach this to record both scroll-edge arms in one
+                // session on one device.
+                Section("Timeline Frame Headroom (diagnostic)") {
+                    Picker("Scroll edge effect", selection: $scrollEdgeEffectArm) {
+                        ForEach(IOSUIKitTimelineScrollEdgeEffectDiagnostic.Arm.allCases) { arm in
+                            Text(arm.label).tag(arm)
+                        }
+                    }
+                    .onChange(of: scrollEdgeEffectArm) { _, newArm in
+                        IOSUIKitTimelineScrollEdgeEffectDiagnostic.setArm(newArm)
+                    }
+                    Picker("Scrollover Undo pill", selection: $scrolloverOverlayArm) {
+                        ForEach(IOSUIKitTimelineScrolloverOverlayDiagnostic.Arm.allCases) { arm in
+                            Text(arm.label).tag(arm.rawValue)
+                        }
+                    }
+                    Text(frameHeadroom).font(.footnote.monospaced()).textSelection(.enabled)
+                    Button("Refresh Frame Headroom") {
+                        frameHeadroom = IOSUIKitTimelineFrameHeadroomDiagnostics.formattedSnapshot()
+                    }
+                    Button("Reset Frame Headroom") {
+                        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.reset()
+                        frameHeadroom = IOSUIKitTimelineFrameHeadroomDiagnostics.formattedSnapshot()
+                    }
                 }
 #if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
                 Section("Timeline Performance") {

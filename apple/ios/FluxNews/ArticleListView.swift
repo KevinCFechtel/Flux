@@ -869,6 +869,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         ] {
             collectionView.register(IOSUIKitArticleCell.self, forCellWithReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant))
         }
+        // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
+        IOSUIKitTimelineScrollEdgeEffectDiagnostic.adopt(collectionView)
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self, UITraitLayoutDirection.self]) { (self: Self, _) in
             self.updateGeometryIfNeeded()
@@ -1210,6 +1212,16 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard scrolloverPhase.isScrolling else { return }
+        // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
+        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.recordContentHeight(scrollView.contentSize.height)
+        if scrolloverPhase == .decelerating {
+            let top = -scrollView.adjustedContentInset.top
+            let bottom = max(top, scrollView.contentSize.height + scrollView.adjustedContentInset.bottom - scrollView.bounds.height)
+            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.recordDeceleratingOffset(
+                scrollView.contentOffset.y,
+                isBouncing: scrollView.contentOffset.y < top || scrollView.contentOffset.y > bottom
+            )
+        }
         sampleScrolloverGeometry()
     }
 
@@ -1229,7 +1241,15 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     private func setScrolloverPhase(_ phase: IOSScrolloverPresentationPhase) {
         guard scrolloverPhase != phase else { return }
+        let wasIdle = scrolloverPhase == .idle
         scrolloverPhase = phase
+        // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. The phase already
+        // brackets every scroll, including when Scrollover itself is disabled.
+        if phase == .idle {
+            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.stop()
+        } else if wasIdle {
+            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.start()
+        }
         scrolloverGeometryTracker.setPhase(phase)
         onScrolloverPhase?(phase)
     }
@@ -2195,7 +2215,12 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
 
     private func setFeedIconPresentation(loaded: Bool) {
         feedIconImageView.contentMode = loaded ? .scaleToFill : .scaleAspectFit
-        feedIconContainer.clipsToBounds = !loaded
+        // Core Animation resolves a rounded background analytically, but a
+        // rounded mask over a sublayer needs an offscreen pass. The fallback
+        // letter is centred inside the circle and never overflows it, so the
+        // container keeps its rounded background without masking — matching the
+        // cold article-image placeholder next to it.
+        feedIconContainer.clipsToBounds = false
         feedIconContainer.layer.cornerRadius = loaded ? 0 : IOSFeedIconImagePreparation.cornerRadius
     }
 
@@ -2297,6 +2322,19 @@ private struct ArticleListBottomOverlay: View {
     }
 }
 
+// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
+private struct ScrolloverUndoBackground: ViewModifier {
+    let arm: String
+
+    func body(content: Content) -> some View {
+        if arm == IOSUIKitTimelineScrolloverOverlayDiagnostic.Arm.opaque.rawValue {
+            content.background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+        } else {
+            content.background(.regularMaterial, in: Capsule())
+        }
+    }
+}
+
 enum ScrolloverUndoPresentationPolicy {
     static func shouldTriggerFeedback(previouslyVisible: Bool, currentlyVisible: Bool) -> Bool {
         !previouslyVisible && currentlyVisible
@@ -2305,6 +2343,10 @@ enum ScrolloverUndoPresentationPolicy {
 
 private struct ScrolloverUndoPresentation: View {
     var store: NewsreaderStore
+    // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. `@AppStorage` keeps the
+    // pill re-rendering when the arm changes while it is already visible.
+    @AppStorage(IOSUIKitTimelineScrolloverOverlayDiagnostic.defaultsKey)
+    private var overlayArm = IOSUIKitTimelineScrolloverOverlayDiagnostic.Arm.material.rawValue
 
     var body: some View {
         HStack(spacing: 10) {
@@ -2315,7 +2357,7 @@ private struct ScrolloverUndoPresentation: View {
         .font(.callout)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.regularMaterial, in: Capsule())
+        .modifier(ScrolloverUndoBackground(arm: overlayArm))
         .padding(.bottom, 12)
     }
 
