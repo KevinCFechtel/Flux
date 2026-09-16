@@ -127,9 +127,18 @@ enum IOSUIKitTimelineScrolloverOverlayDiagnostic {
 struct IOSUIKitTimelineFrameHeadroomSnapshot: Equatable {
     /// Display frames in which the main thread ran at least once.
     let sampledFrames: UInt64
-    /// Vsyncs for which the display link callback never ran, because the main
-    /// thread was still busy. Each one is a main-thread-caused dropped frame.
+    /// Derived from `CADisplayLink.timestamp`, which follows the display's
+    /// schedule rather than the actual callback time. Retained for comparison
+    /// only — `lateCallbacks` is the load-bearing signal.
     let skippedVSyncs: UInt64
+    /// Consecutive callbacks measured against a monotonic clock.
+    let callbackGapSamples: UInt64
+    /// Gaps of at least one and a half refresh periods: a vsync passed without
+    /// the main thread getting to run. This is a missed frame, measured without
+    /// relying on any timestamp UIKit reports.
+    let lateCallbacks: UInt64
+    let missedRefreshes: UInt64
+    let maximumCallbackGapMilliseconds: Double
     /// Frames whose main-thread work never yielded before the next vsync.
     let unyieldedFrames: UInt64
     let expectedFrameNanoseconds: UInt64
@@ -151,6 +160,9 @@ struct IOSUIKitTimelineFrameHeadroomSnapshot: Equatable {
     /// never does either, so each one is a position discontinuity.
     let deceleratingDiscontinuities: UInt64
     let maximumDeceleratingExcess: Double
+    /// Separate deceleration runs observed. If discontinuities track this count,
+    /// the detector is reacting to gesture boundaries rather than to defects.
+    let deceleratingRuns: UInt64
 
     var averageBusyNanoseconds: UInt64 {
         sampledFrames == 0 ? 0 : totalBusyNanoseconds / sampledFrames
@@ -179,13 +191,70 @@ struct IOSUIKitTimelineFrameHeadroomSnapshot: Equatable {
 /// entirely. Occupancy is measured from the callback to the run loop's
 /// `beforeWaiting` activity, observed after Core Animation's own commit
 /// observer, so it includes layout, display and the CATransaction commit.
+/// What the Timeline did during one display frame.
+///
+/// Averages cannot find a sparse event — they average it away. This attributes
+/// the slowest individual frames of a session to the work that happened in them.
+struct IOSUIKitTimelineFrameEvents: OptionSet, Hashable {
+    let rawValue: Int
+    static let cellConfigured = Self(rawValue: 1 << 0)
+    static let articleImageAssigned = Self(rawValue: 1 << 1)
+    static let snapshotApplied = Self(rawValue: 1 << 2)
+    static let hardReload = Self(rawValue: 1 << 3)
+    static let presentationApplied = Self(rawValue: 1 << 4)
+    static let feedIconApplied = Self(rawValue: 1 << 5)
+    static let paginationRequested = Self(rawValue: 1 << 6)
+
+    var label: String {
+        var parts: [String] = []
+        if contains(.cellConfigured) { parts.append("cell") }
+        if contains(.articleImageAssigned) { parts.append("image") }
+        if contains(.snapshotApplied) { parts.append("snapshot") }
+        if contains(.hardReload) { parts.append("reload") }
+        if contains(.presentationApplied) { parts.append("status") }
+        if contains(.feedIconApplied) { parts.append("icon") }
+        if contains(.paginationRequested) { parts.append("page") }
+        return parts.isEmpty ? "—" : parts.joined(separator: "+")
+    }
+}
+
+struct IOSUIKitTimelineSlowFrame: Equatable {
+    let busyMilliseconds: Double
+    let events: IOSUIKitTimelineFrameEvents
+    let configuredCells: Int
+    let assignedImages: Int
+    /// Cell configuration and image assignment both run *inside* the table's
+    /// layout pass, so they are nested in `layoutMilliseconds` and must not be
+    /// subtracted again when computing the unaccounted remainder.
+    let imageAssignMilliseconds: Double
+    let configureMilliseconds: Double
+    let scrolloverSampleMilliseconds: Double
+    let layoutMilliseconds: Double
+    /// From just before Core Animation's commit observer to just after it.
+    let commitWindowMilliseconds: Double
+
+    /// Main-thread time in this frame that none of the brackets accounted for.
+    var unaccountedMilliseconds: Double {
+        max(0, busyMilliseconds - layoutMilliseconds - scrolloverSampleMilliseconds - commitWindowMilliseconds)
+    }
+}
+
 @MainActor
 final class IOSUIKitTimelineFrameHeadroomRecorder {
+    /// Frames slower than this are recorded individually with their cause.
+    static let slowFrameThresholdSeconds: CFTimeInterval = 0.008
+    private static let retainedSlowFrames = 12
     static let busyBucketUpperBoundsMilliseconds: [Double] = [2, 4, 6, 8, 10, 12, 14, 16.7, 20, 25, 33, 50]
 
     private var displayLink: CADisplayLink?
     private var runLoopObserver: CFRunLoopObserver?
     private var previousTimestamp: CFTimeInterval?
+    private var previousFireTime: CFTimeInterval?
+    private var callbackGapSamples: UInt64 = 0
+    private var lateCallbacks: UInt64 = 0
+    private var missedRefreshes: UInt64 = 0
+    private var maximumCallbackGapSeconds: CFTimeInterval = 0
+    private var lateCallbackCauses: [IOSUIKitTimelineFrameEvents: UInt64] = [:]
     private var busyFrameStart: CFTimeInterval?
     private var expectedFrameSeconds: CFTimeInterval = 1.0 / 60
     private var sampledFrames: UInt64 = 0
@@ -200,6 +269,19 @@ final class IOSUIKitTimelineFrameHeadroomRecorder {
     private var deceleratingSamples: UInt64 = 0
     private var deceleratingDiscontinuities: UInt64 = 0
     private var maximumDeceleratingExcess: Double = 0
+    private var deceleratingRuns: UInt64 = 0
+    private var frameEvents: IOSUIKitTimelineFrameEvents = []
+    private var frameConfiguredCells = 0
+    private var frameAssignedImages = 0
+    private var frameImageAssignNanoseconds: UInt64 = 0
+    private var frameConfigureNanoseconds: UInt64 = 0
+    private var frameScrolloverSampleNanoseconds: UInt64 = 0
+    private var frameLayoutNanoseconds: UInt64 = 0
+    private var frameCommitNanoseconds: UInt64 = 0
+    private var commitWindowStart: CFTimeInterval?
+    private var commitObserver: CFRunLoopObserver?
+    private var slowFrames: [IOSUIKitTimelineSlowFrame] = []
+    private var slowFrameCauses: [IOSUIKitTimelineFrameEvents: UInt64] = [:]
     private var contentHeightChanges: UInt64 = 0
     private var maximumContentHeightJump: Double = 0
     private var totalContentHeightDrift: Double = 0
@@ -207,6 +289,7 @@ final class IOSUIKitTimelineFrameHeadroomRecorder {
     func start() {
         installIfNeeded()
         previousTimestamp = nil
+        previousFireTime = nil
         busyFrameStart = nil
         displayLink?.isPaused = false
     }
@@ -214,6 +297,7 @@ final class IOSUIKitTimelineFrameHeadroomRecorder {
     func stop() {
         displayLink?.isPaused = true
         previousTimestamp = nil
+        previousFireTime = nil
         busyFrameStart = nil
         previousContentHeight = nil
         previousOffset = nil
@@ -225,6 +309,15 @@ final class IOSUIKitTimelineFrameHeadroomRecorder {
     /// speeds up and never reverses. Anything else is the content being moved by
     /// something other than the deceleration — measured directly on the offset
     /// instead of inferred from recorded pixels.
+    /// The offset baseline must not survive a gesture boundary. Carrying it
+    /// across a re-grab compared the first ballistic sample against the offset
+    /// from before the drag, which flagged one false discontinuity per flick.
+    func resetDecelerationBaseline(beginningRun: Bool) {
+        previousOffset = nil
+        previousOffsetDelta = nil
+        if beginningRun { deceleratingRuns &+= 1 }
+    }
+
     func recordDeceleratingOffset(_ y: Double, isBouncing: Bool) {
         guard !isBouncing else {
             previousOffset = nil
@@ -248,6 +341,50 @@ final class IOSUIKitTimelineFrameHeadroomRecorder {
 
     /// Call from `scrollViewDidScroll`. A stable list has a stable content
     /// height; repeated changes mean the layout is still resolving estimates.
+    /// Called from the Timeline while a frame is being produced.
+    func note(_ event: IOSUIKitTimelineFrameEvents) {
+        frameEvents.insert(event)
+        if event.contains(.cellConfigured) { frameConfiguredCells += 1 }
+        if event.contains(.articleImageAssigned) { frameAssignedImages += 1 }
+    }
+
+    /// Segments that are timed but do not label the frame's cause, so the
+    /// `slowFrameCause` histogram keeps meaning what it meant before.
+    enum Segment {
+        case scrolloverSample
+        case tableLayout
+    }
+
+    func timing<T>(_ segment: Segment, _ body: () -> T) -> T {
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let value = body()
+        let elapsed = DispatchTime.now().uptimeNanoseconds &- startedAt
+        switch segment {
+        case .scrolloverSample: frameScrolloverSampleNanoseconds &+= elapsed
+        case .tableLayout: frameLayoutNanoseconds &+= elapsed
+        }
+        return value
+    }
+
+    /// Brackets one suspect and keeps its cost separate from the rest of the frame.
+    func measuring<T>(_ event: IOSUIKitTimelineFrameEvents, _ body: () -> T) -> T {
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let value = body()
+        let elapsed = DispatchTime.now().uptimeNanoseconds &- startedAt
+        if event.contains(.articleImageAssigned) { frameImageAssignNanoseconds &+= elapsed }
+        if event.contains(.cellConfigured) { frameConfigureNanoseconds &+= elapsed }
+        note(event)
+        return value
+    }
+
+    var slowFrameReport: [IOSUIKitTimelineSlowFrame] { slowFrames }
+    var lateCallbackCauseHistogram: [(events: IOSUIKitTimelineFrameEvents, count: UInt64)] {
+        lateCallbackCauses.sorted { $0.value > $1.value }.map { (events: $0.key, count: $0.value) }
+    }
+    var slowFrameCauseHistogram: [(events: IOSUIKitTimelineFrameEvents, count: UInt64)] {
+        slowFrameCauses.sorted { $0.value > $1.value }.map { (events: $0.key, count: $0.value) }
+    }
+
     func recordContentHeight(_ height: Double) {
         defer { previousContentHeight = height }
         guard let previousContentHeight, height != previousContentHeight else { return }
@@ -260,6 +397,12 @@ final class IOSUIKitTimelineFrameHeadroomRecorder {
     func reset() {
         sampledFrames = 0
         skippedVSyncs = 0
+        previousFireTime = nil
+        callbackGapSamples = 0
+        lateCallbacks = 0
+        missedRefreshes = 0
+        maximumCallbackGapSeconds = 0
+        lateCallbackCauses.removeAll()
         unyieldedFrames = 0
         totalBusyNanoseconds = 0
         maximumBusyNanoseconds = 0
@@ -275,12 +418,27 @@ final class IOSUIKitTimelineFrameHeadroomRecorder {
         deceleratingSamples = 0
         deceleratingDiscontinuities = 0
         maximumDeceleratingExcess = 0
+        deceleratingRuns = 0
+        frameEvents = []
+        frameConfiguredCells = 0
+        frameAssignedImages = 0
+        frameImageAssignNanoseconds = 0
+        frameConfigureNanoseconds = 0
+        frameScrolloverSampleNanoseconds = 0
+        frameLayoutNanoseconds = 0
+        frameCommitNanoseconds = 0
+        slowFrames.removeAll()
+        slowFrameCauses.removeAll()
     }
 
     func snapshot() -> IOSUIKitTimelineFrameHeadroomSnapshot {
         .init(
             sampledFrames: sampledFrames,
             skippedVSyncs: skippedVSyncs,
+            callbackGapSamples: callbackGapSamples,
+            lateCallbacks: lateCallbacks,
+            missedRefreshes: missedRefreshes,
+            maximumCallbackGapMilliseconds: maximumCallbackGapSeconds * 1000,
             unyieldedFrames: unyieldedFrames,
             expectedFrameNanoseconds: UInt64((expectedFrameSeconds * 1_000_000_000).rounded()),
             totalBusyNanoseconds: totalBusyNanoseconds,
@@ -291,7 +449,8 @@ final class IOSUIKitTimelineFrameHeadroomRecorder {
             totalContentHeightDrift: totalContentHeightDrift,
             deceleratingSamples: deceleratingSamples,
             deceleratingDiscontinuities: deceleratingDiscontinuities,
-            maximumDeceleratingExcess: maximumDeceleratingExcess
+            maximumDeceleratingExcess: maximumDeceleratingExcess,
+            deceleratingRuns: deceleratingRuns
         )
     }
 
@@ -302,6 +461,21 @@ final class IOSUIKitTimelineFrameHeadroomRecorder {
             // `.common` keeps the callback running during scroll tracking.
             link.add(to: .main, forMode: .common)
             displayLink = link
+        }
+        if commitObserver == nil {
+            // A low order runs before Core Animation's own beforeWaiting
+            // observer; the existing high-order observer runs after it. The
+            // interval between them contains the commit.
+            let observer = CFRunLoopObserverCreateWithHandler(
+                kCFAllocatorDefault,
+                CFRunLoopActivity.beforeWaiting.rawValue,
+                true,
+                .min
+            ) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.commitWindowStart = CACurrentMediaTime() }
+            }
+            CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+            commitObserver = observer
         }
         guard runLoopObserver == nil else { return }
         // A large order runs after Core Animation's commit observer, so the
@@ -329,6 +503,27 @@ final class IOSUIKitTimelineFrameHeadroomRecorder {
             unyieldedFrames &+= 1
             record(busy: now - busyFrameStart)
         }
+        if let previousFireTime {
+            let gap = now - previousFireTime
+            callbackGapSamples &+= 1
+            let missed = Int((gap / expectedFrameSeconds - 1).rounded())
+            if missed > 0 {
+                lateCallbacks &+= 1
+                missedRefreshes &+= UInt64(missed)
+                maximumCallbackGapSeconds = max(maximumCallbackGapSeconds, gap)
+                lateCallbackCauses[frameEvents, default: 0] &+= 1
+            }
+        }
+        previousFireTime = now
+
+        frameEvents = []
+        frameConfiguredCells = 0
+        frameAssignedImages = 0
+        frameImageAssignNanoseconds = 0
+        frameConfigureNanoseconds = 0
+        frameScrolloverSampleNanoseconds = 0
+        frameLayoutNanoseconds = 0
+        frameCommitNanoseconds = 0
 
         if let previousTimestamp {
             let elapsedPeriods = (link.timestamp - previousTimestamp) / expectedFrameSeconds
@@ -340,9 +535,14 @@ final class IOSUIKitTimelineFrameHeadroomRecorder {
     }
 
     private func frameDidYield() {
+        let now = CACurrentMediaTime()
+        if let commitWindowStart {
+            frameCommitNanoseconds &+= UInt64(max(0, (now - commitWindowStart)) * 1_000_000_000)
+            self.commitWindowStart = nil
+        }
         guard let busyFrameStart else { return }
         self.busyFrameStart = nil
-        record(busy: CACurrentMediaTime() - busyFrameStart)
+        record(busy: now - busyFrameStart)
     }
 
     private func record(busy seconds: CFTimeInterval) {
@@ -355,6 +555,23 @@ final class IOSUIKitTimelineFrameHeadroomRecorder {
         let index = Self.busyBucketUpperBoundsMilliseconds.firstIndex { milliseconds <= $0 }
             ?? Self.busyBucketUpperBoundsMilliseconds.count
         busyBuckets[index] &+= 1
+
+        guard seconds >= Self.slowFrameThresholdSeconds else { return }
+        slowFrameCauses[frameEvents, default: 0] &+= 1
+        let sample = IOSUIKitTimelineSlowFrame(
+            busyMilliseconds: milliseconds,
+            events: frameEvents,
+            configuredCells: frameConfiguredCells,
+            assignedImages: frameAssignedImages,
+            imageAssignMilliseconds: Double(frameImageAssignNanoseconds) / 1_000_000,
+            configureMilliseconds: Double(frameConfigureNanoseconds) / 1_000_000,
+            scrolloverSampleMilliseconds: Double(frameScrolloverSampleNanoseconds) / 1_000_000,
+            layoutMilliseconds: Double(frameLayoutNanoseconds) / 1_000_000,
+            commitWindowMilliseconds: Double(frameCommitNanoseconds) / 1_000_000
+        )
+        slowFrames.append(sample)
+        slowFrames.sort { $0.busyMilliseconds > $1.busyMilliseconds }
+        if slowFrames.count > Self.retainedSlowFrames { slowFrames.removeLast() }
     }
 }
 
@@ -386,7 +603,15 @@ enum IOSUIKitTimelineFrameHeadroomDiagnostics {
         var lines: [String] = []
         lines.append(String(format: "budget %.1f ms/frame", budgetMilliseconds))
         lines.append("frames \(snapshot.sampledFrames)")
-        lines.append("skippedVSyncs \(snapshot.skippedVSyncs)")
+        lines.append("skippedVSyncs \(snapshot.skippedVSyncs) (timestamp-derived, unreliable)")
+        let lateRate = snapshot.callbackGapSamples == 0 ? 0 : Double(snapshot.lateCallbacks) / Double(snapshot.callbackGapSamples) * 100
+        lines.append(String(format: "lateCallbacks %llu/%llu (%.2f %%) missedRefreshes %llu maxGap %.1f ms",
+                            snapshot.lateCallbacks, snapshot.callbackGapSamples, lateRate,
+                            snapshot.missedRefreshes, snapshot.maximumCallbackGapMilliseconds))
+        let lateCauses = recorder.lateCallbackCauseHistogram.prefix(6)
+            .map { "\($0.events.label)=\($0.count)" }
+            .joined(separator: " ")
+        lines.append("lateCallbackCause " + (lateCauses.isEmpty ? "—" : lateCauses))
         lines.append("unyielded \(snapshot.unyieldedFrames)")
         lines.append(String(format: "busy avg %.2f ms  max %.2f ms",
                             Double(snapshot.averageBusyNanoseconds) / 1_000_000,
@@ -410,8 +635,22 @@ enum IOSUIKitTimelineFrameHeadroomDiagnostics {
                             snapshot.contentHeightChanges,
                             snapshot.maximumContentHeightJump,
                             snapshot.totalContentHeightDrift))
-        lines.append(String(format: "decel frames=%llu discontinuities=%llu maxExcess=%.1f pt",
+        let causes = recorder.slowFrameCauseHistogram.prefix(6)
+            .map { "\($0.events.label)=\($0.count)" }
+            .joined(separator: " ")
+        lines.append("slowFrameCause " + (causes.isEmpty ? "—" : causes))
+        for frame in recorder.slowFrameReport.prefix(5) {
+            lines.append(String(format: "  %.1f ms %@ layout=%.1f (cfg=%.1f assign=%.1f) sampler=%.1f commit=%.1f rest=%.1f",
+                                frame.busyMilliseconds, frame.events.label,
+                                frame.layoutMilliseconds,
+                                frame.configureMilliseconds, frame.imageAssignMilliseconds,
+                                frame.scrolloverSampleMilliseconds,
+                                frame.commitWindowMilliseconds,
+                                frame.unaccountedMilliseconds))
+        }
+        lines.append(String(format: "decel frames=%llu runs=%llu discontinuities=%llu maxExcess=%.1f pt",
                             snapshot.deceleratingSamples,
+                            snapshot.deceleratingRuns,
                             snapshot.deceleratingDiscontinuities,
                             snapshot.maximumDeceleratingExcess))
         return lines.joined(separator: "\n")

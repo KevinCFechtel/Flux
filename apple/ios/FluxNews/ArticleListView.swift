@@ -767,7 +767,14 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
 }
 
 @MainActor
-final class IOSUIKitArticleTimelineController: UIViewController, UICollectionViewDelegate, UICollectionViewDataSourcePrefetching {
+// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
+final class IOSUIKitTimelineInstrumentedTableView: UITableView {
+    override func layoutSubviews() {
+        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.timing(.tableLayout) { super.layoutSubviews() }
+    }
+}
+
+final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDelegate, UITableViewDataSourcePrefetching {
     private enum Section: Hashable { case main }
 
     var onArticleTap: ((ArticleSummary) -> Void)?
@@ -782,8 +789,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     var onScrolloverDirection: ((IOSArticleScrollDirection) -> Void)?
     var onScrolloverPhase: ((IOSScrolloverPresentationPhase) -> Void)?
 
-    private var collectionView: UICollectionView!
-    private var dataSource: UICollectionViewDiffableDataSource<Section, Int64>!
+    private var tableView: UITableView!
+    private var dataSource: UITableViewDiffableDataSource<Section, Int64>!
     private var orderedIDs: [Int64] = []
     private var itemsByID: [Int64: IOSUIKitArticleTimelineStructuralItem] = [:]
     private var presentationByID: [Int64: IOSUIKitArticlePresentationState] = [:]
@@ -809,6 +816,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private let refreshControl = UIRefreshControl()
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
     private let preparedLayoutCoordinator = IOSUIKitArticleLayoutPreparationCoordinator()
+    /// Exact heights for every loaded row. Estimation is disabled, so a missing
+    /// entry would force Core Text onto the main actor during layout.
+    private let rowHeights = IOSUIKitArticleRowHeightStore()
+    private var rowHeightTask: Task<Void, Never>?
+    private var rowHeightGeneration: UInt64 = 0
+    private var pendingStructuralApply: Task<Void, Never>?
     private let performanceMetrics = IOSUIKitTimelinePerformanceMetrics()
 #if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
     private static let performanceSignposter = OSSignposter(
@@ -827,72 +840,86 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private(set) var visibleCellReconfigurationPassCountForTesting = 0
     private(set) var layoutPrefetchInputCountForTesting = 0
     var articleImagePrefetchTaskCountForTesting: Int { prefetchTasks.count }
-    var collectionViewForTesting: UICollectionView { collectionView }
+    var tableViewForTesting: UITableView { tableView }
+    var preparedRowHeightCountForTesting: Int { rowHeights.preparedCount }
+    private(set) var synchronousRowHeightFallbackCountForTesting = 0
+    /// Structural updates and geometry changes measure heights off the main
+    /// actor before they are applied. Tests await that work instead of polling.
+    func settleForTesting() async {
+        while pendingStructuralApply != nil || rowHeightTask != nil {
+            await pendingStructuralApply?.value
+            await rowHeightTask?.value
+        }
+    }
 #endif
 #if DEBUG
     private(set) var scrollResetApplicationCountForTesting = 0
     private(set) var lastScrollResetOffsetForTesting: CGPoint?
-    var contentOffsetForTesting: CGPoint { collectionView.contentOffset }
+    var contentOffsetForTesting: CGPoint { tableView.contentOffset }
     var scrolloverLayoutGenerationForTesting: UInt64 { scrolloverLayoutGeneration }
     var orderedArticleIDsForTesting: [Int64] { orderedIDs }
 #endif
-
-    private static func makeListLayout() -> UICollectionViewLayout {
-        var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
-        configuration.showsSeparators = false
-        configuration.backgroundColor = .systemBackground
-        return UICollectionViewCompositionalLayout.list(using: configuration)
-    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         view.isOpaque = true
 
-        collectionView = UICollectionView(
-            frame: .zero,
-            collectionViewLayout: Self.makeListLayout()
-        )
-        collectionView.translatesAutoresizingMaskIntoConstraints = false
-        collectionView.backgroundColor = .systemBackground
-        collectionView.isOpaque = true
-        collectionView.contentInsetAdjustmentBehavior = .automatic
-        collectionView.showsVerticalScrollIndicator = false
-        collectionView.alwaysBounceVertical = true
-        collectionView.delegate = self
-        collectionView.prefetchDataSource = self
+        tableView = IOSUIKitTimelineInstrumentedTableView(frame: .zero, style: .plain)
+        tableView.translatesAutoresizingMaskIntoConstraints = false
+        tableView.backgroundColor = .systemBackground
+        tableView.isOpaque = true
+        tableView.contentInsetAdjustmentBehavior = .automatic
+        // Every row height comes from the deterministic engine, so estimation is
+        // switched off entirely. Estimated self-sizing rewrites `contentSize`
+        // while the list scrolls, which moves the running deceleration target.
+        tableView.estimatedRowHeight = 0
+        tableView.estimatedSectionHeaderHeight = 0
+        tableView.estimatedSectionFooterHeight = 0
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.separatorStyle = .none
+        // A plain table reserves padding above its (absent) section header.
+        tableView.sectionHeaderTopPadding = 0
+        // Unchanged from the collection view. The indicator would now be exact,
+        // because the content height no longer moves — enabling it is a separate
+        // product decision, not a side effect of this change.
+        tableView.showsVerticalScrollIndicator = false
+        tableView.alwaysBounceVertical = true
+        tableView.delegate = self
+        tableView.prefetchDataSource = self
         for variant in [
             IOSUIKitArticleCellLayoutVariant.compact,
             .visualTextOnly,
             .visualPortrait,
             .visualLandscape,
         ] {
-            collectionView.register(IOSUIKitArticleCell.self, forCellWithReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant))
+            tableView.register(IOSUIKitArticleCell.self, forCellReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant))
         }
         // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
-        IOSUIKitTimelineScrollEdgeEffectDiagnostic.adopt(collectionView)
+        IOSUIKitTimelineScrollEdgeEffectDiagnostic.adopt(tableView)
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self, UITraitLayoutDirection.self]) { (self: Self, _) in
             self.updateGeometryIfNeeded()
         }
-        view.addSubview(collectionView)
+        view.addSubview(tableView)
         NSLayoutConstraint.activate([
-            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            collectionView.topAnchor.constraint(equalTo: view.topAnchor),
-            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            tableView.topAnchor.constraint(equalTo: view.topAnchor),
+            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
-        dataSource = UICollectionViewDiffableDataSource<Section, Int64>(collectionView: collectionView) { [weak self] collectionView, indexPath, id in
+        dataSource = UITableViewDiffableDataSource<Section, Int64>(tableView: tableView) { [weak self] tableView, indexPath, id in
             guard let self,
                   let item = self.renderedItem(for: id)
             else { return nil }
-            let metrics = IOSUIKitArticleCell.Metrics(mode: self.mode, containerWidth: collectionView.bounds.width)
+            let metrics = IOSUIKitArticleCell.Metrics(mode: self.mode, containerWidth: tableView.bounds.width)
             let variant = metrics.layoutVariant(hasImage: self.mode.showsArticleImage && item.content.imageURL != nil)
-            guard let cell = collectionView.dequeueReusableCell(withReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant), for: indexPath) as? IOSUIKitArticleCell else { return nil }
+            guard let cell = tableView.dequeueReusableCell(withIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant), for: indexPath) as? IOSUIKitArticleCell else { return nil }
             self.configure(cell, item: item)
             return cell
         }
+        dataSource.defaultRowAnimation = .none
     }
 
     override func viewDidLayoutSubviews() {
@@ -911,8 +938,103 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         invalidateScrolloverGeometry()
         cancelIncompatibleImagePrefetch()
         reconfigureVisibleCells(needsLayout: true)
-        collectionView.collectionViewLayout.invalidateLayout()
         schedulePreparedLayoutWindow(for: newIdentity)
+        // The store keeps serving the superseded heights while the replacement
+        // set is measured, so rotation and Dynamic Type never block a frame on a
+        // full re-measurement of every loaded row.
+        rowHeights.beginGeneration(newIdentity)
+        scheduleRowHeightMeasurement(reloadWhenComplete: true)
+    }
+
+    private func scheduleRowHeightMeasurement(reloadWhenComplete: Bool) {
+        guard let identity = geometryIdentity else { return }
+        let missing = rowHeights.missingIDs(in: orderedIDs)
+        guard !missing.isEmpty else {
+            if reloadWhenComplete { reloadPreservingAnchor() }
+            return
+        }
+        rowHeightGeneration &+= 1
+        let generation = rowHeightGeneration
+        let inputs = rowHeightInputs(for: missing)
+        rowHeightTask?.cancel()
+        rowHeightTask = Task { @MainActor [weak self] in
+            let measured = await IOSUIKitArticleRowHeightMeasurement.heights(for: inputs)
+            guard let self, !Task.isCancelled, self.rowHeightGeneration == generation else { return }
+            self.rowHeightTask = nil
+            self.rowHeights.store(measured, for: identity)
+            _ = self.rowHeights.retireSupersededHeights(ifComplete: self.orderedIDs)
+            if reloadWhenComplete { self.reloadPreservingAnchor() }
+        }
+    }
+
+    private func rowHeightInputs(for ids: [Int64]) -> [(id: Int64, input: IOSUIKitArticleLayoutInput)] {
+        ids.compactMap { id in
+            guard let item = renderedItem(for: id) else { return nil }
+            return (id, preparedLayoutInput(for: item))
+        }
+    }
+
+    /// A reload with exact heights rewrites every row position at once, so the
+    /// visible article is re-anchored explicitly instead of being left wherever
+    /// the new content size happens to put it.
+    private func reloadPreservingAnchor() {
+        let anchor = currentScrollAnchor()
+        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.note(.hardReload)
+        dataSource.applySnapshotUsingReloadData(dataSource.snapshot(), completion: nil)
+        guard let anchor, let row = orderedIDs.firstIndex(of: anchor.id) else { return }
+        tableView.layoutIfNeeded()
+        let rect = tableView.rectForRow(at: IndexPath(row: row, section: 0))
+        tableView.setContentOffset(CGPoint(x: tableView.contentOffset.x, y: rect.minY - anchor.offset), animated: false)
+    }
+
+    private func currentScrollAnchor() -> (id: Int64, offset: CGFloat)? {
+        guard let indexPath = tableView.indexPathsForVisibleRows?.first,
+              indexPath.row < orderedIDs.count
+        else { return nil }
+        return (orderedIDs[indexPath.row], tableView.rectForRow(at: indexPath).minY - tableView.contentOffset.y)
+    }
+
+    /// Rows are never published before their exact heights exist. Applying a
+    /// snapshot whose heights are unknown would make the table measure text
+    /// synchronously while laying out.
+    private func applySnapshotWhenHeightsReady(_ snapshot: NSDiffableDataSourceSnapshot<Section, Int64>) {
+        guard let identity = geometryIdentity else {
+            dataSource.apply(snapshot, animatingDifferences: false)
+            return
+        }
+        let missing = rowHeights.missingIDs(in: snapshot.itemIdentifiers)
+        guard !missing.isEmpty else {
+            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.note(.snapshotApplied)
+            dataSource.apply(snapshot, animatingDifferences: false)
+            return
+        }
+        let inputs = rowHeightInputs(for: missing)
+        pendingStructuralApply?.cancel()
+        pendingStructuralApply = Task { @MainActor [weak self] in
+            let measured = await IOSUIKitArticleRowHeightMeasurement.heights(for: inputs)
+            guard let self, !Task.isCancelled else { return }
+            self.pendingStructuralApply = nil
+            self.rowHeights.store(measured, for: identity)
+            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.note(.snapshotApplied)
+            self.dataSource.apply(snapshot, animatingDifferences: false, completion: nil)
+        }
+    }
+
+    func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+        guard let id = dataSource.itemIdentifier(for: indexPath) else { return UITableView.automaticDimension }
+        if let height = rowHeights.height(for: id) { return height }
+        // Last resort: a prepared height is missing. Worth counting rather than
+        // silently absorbing, because this is the one path that can put Core Text
+        // on the main actor during layout.
+        guard let item = renderedItem(for: id) else { return UITableView.automaticDimension }
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let metrics = preparedLayoutCoordinator.measureSynchronously(preparedLayoutInput(for: item), priority: .visible)
+        performanceMetrics.recordDeterministicHeightFallback(durationNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt)
+#if DEBUG
+        synchronousRowHeightFallbackCountForTesting &+= 1
+#endif
+        if let identity = geometryIdentity { rowHeights.store([id: metrics.cellSize.height], for: identity) }
+        return metrics.cellSize.height
     }
 
     func update(
@@ -945,7 +1067,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         scrollResetRevision = newScrollResetRevision
         markReadOnScrolloverEnabled = newMarkReadOnScrolloverEnabled
         showsRefreshControl = newShowsRefreshControl
-        collectionView.refreshControl = showsRefreshControl ? refreshControl : nil
+        tableView.refreshControl = showsRefreshControl ? refreshControl : nil
         if presentationBridge !== newPresentationBridge {
             presentationBridge?.unsubscribeArticles(self)
             presentationBridge = newPresentationBridge
@@ -973,7 +1095,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
                 scrolloverGeometryTracker.appendSnapshot(appendedIDs)
                 var snapshot = dataSource.snapshot()
                 snapshot.appendItems(appendedIDs)
-                dataSource.apply(snapshot, animatingDifferences: false)
+                applySnapshotWhenHeightsReady(snapshot)
                 structuralUpdate = .append(appended)
             } else if canApplyIncrementally, case let .remove(removedIDs) = structuralState.change {
                 let removed = removedIDs.filter { itemsByID[$0] != nil }
@@ -987,9 +1109,10 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
                     }
                     scrolloverGeometryTracker.removeSnapshot(removed)
                     invalidateScrolloverGeometry()
+                    rowHeights.remove(removed)
                     var snapshot = dataSource.snapshot()
                     snapshot.deleteItems(removed)
-                    dataSource.apply(snapshot, animatingDifferences: false)
+                    applySnapshotWhenHeightsReady(snapshot)
                     structuralUpdate = .remove(removed)
                 }
             } else {
@@ -1005,7 +1128,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
                 var snapshot = NSDiffableDataSourceSnapshot<Section, Int64>()
                 snapshot.appendSections([.main])
                 snapshot.appendItems(newIDs)
-                dataSource.apply(snapshot, animatingDifferences: false)
+                applySnapshotWhenHeightsReady(snapshot)
                 structuralUpdate = .replace
             }
             structuralRevision = structuralState.revision
@@ -1029,7 +1152,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 #if DEBUG
             layoutInvalidationCountForTesting &+= 1
 #endif
-            collectionView.collectionViewLayout.invalidateLayout()
         } else if case let .append(appended)? = structuralUpdate {
             // Keep the existing visible/nearby window and prepare only the new
             // immutable inputs. UIKit prefetch will promote rows as they approach.
@@ -1044,8 +1166,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         if feedIconRequestChanged { requestFeedIconsForVisibleCells() }
         if resetChanged {
             invalidateScrolloverGeometry()
-            let naturalTop = CGPoint(x: 0, y: -collectionView.adjustedContentInset.top)
-            collectionView.setContentOffset(naturalTop, animated: false)
+            let naturalTop = CGPoint(x: 0, y: -tableView.adjustedContentInset.top)
+            tableView.setContentOffset(naturalTop, animated: false)
 #if DEBUG
             scrollResetApplicationCountForTesting &+= 1
             lastScrollResetOffsetForTesting = naturalTop
@@ -1060,7 +1182,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func configure(_ cell: IOSUIKitArticleCell, item: IOSUIKitArticleTimelineItem) {
-        let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: collectionView.bounds.width)
+        let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: tableView.bounds.width)
         let layoutInput = preparedLayoutInput(for: item)
         let layoutMetrics: IOSUIKitArticleLayoutMetrics
         if let prepared = preparedLayoutCoordinator.metrics(for: layoutInput, priority: .visible) {
@@ -1078,14 +1200,16 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             )
         }
         performanceMetrics.recordConfigure()
-        cell.configure(
-            item: item,
-            mode: mode,
-            previewLines: previewLines,
-            metrics: metrics,
-            displayScale: view.traitCollection.displayScale,
-            preparedLayoutMetrics: layoutMetrics
-        )
+        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.measuring(.cellConfigured) {
+            cell.configure(
+                item: item,
+                mode: mode,
+                previewLines: previewLines,
+                metrics: metrics,
+                displayScale: view.traitCollection.displayScale,
+                preparedLayoutMetrics: layoutMetrics
+            )
+        }
         onRequestFeedIcon?(item.content.article.feedId, iconVariant, view.traitCollection.displayScale)
     }
 
@@ -1098,20 +1222,22 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     func applyArticlePresentation(_ delta: IOSUIKitArticlePresentationDelta) {
         guard let current = presentationByID[delta.articleID], delta.state.revision >= current.revision else { return }
         articlePresentationApplicationCount &+= 1
+        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.note(.presentationApplied)
         presentationByID[delta.articleID] = delta.state
         if delta.rearmScrollover {
             scrolloverGeometryTracker.rearm([delta.articleID])
             scrolloverRearmCount &+= 1
         }
         guard let indexPath = dataSource.indexPath(for: delta.articleID),
-              let cell = collectionView.cellForItem(at: indexPath) as? IOSUIKitArticleCell else { return }
+              let cell = tableView.cellForRow(at: indexPath) as? IOSUIKitArticleCell else { return }
         cell.updateStatus(isRead: delta.state.isRead, isStarred: delta.state.isStarred)
     }
 
     func applyFeedIconPresentation(_ delta: IOSUIKitFeedIconPresentationDelta) {
         guard delta.key.variant == iconVariant else { return }
         feedIconPresentationApplicationCount &+= 1
-        applyFeedIconPresentation(delta, to: collectionView.visibleCells.compactMap { $0 as? IOSUIKitArticleCell })
+        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.note(.feedIconApplied)
+        applyFeedIconPresentation(delta, to: tableView.visibleCells.compactMap { $0 as? IOSUIKitArticleCell })
     }
 
     func applyFeedIconPresentation(_ delta: IOSUIKitFeedIconPresentationDelta, to cells: [IOSUIKitArticleCell]) {
@@ -1124,7 +1250,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     func clearFeedIconPresentation() {
         feedIconPresentationApplicationCount &+= 1
-        clearFeedIconPresentation(to: collectionView.visibleCells.compactMap { $0 as? IOSUIKitArticleCell })
+        clearFeedIconPresentation(to: tableView.visibleCells.compactMap { $0 as? IOSUIKitArticleCell })
     }
 
     func clearFeedIconPresentation(to cells: [IOSUIKitArticleCell]) {
@@ -1135,7 +1261,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func requestFeedIconsForVisibleCells() {
-        for cell in collectionView.visibleCells {
+        for cell in tableView.visibleCells {
             guard let id = (cell as? IOSUIKitArticleCell)?.representedArticleID,
                   let item = itemsByID[id]
             else { continue }
@@ -1147,7 +1273,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 #if DEBUG
         visibleCellReconfigurationPassCountForTesting &+= 1
 #endif
-        for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
+        for case let cell as IOSUIKitArticleCell in tableView.visibleCells {
             guard let id = cell.representedArticleID, let item = renderedItem(for: id) else { continue }
             configure(cell, item: item)
             if needsLayout { cell.setNeedsLayout() }
@@ -1165,19 +1291,20 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         }
     }
 
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        defer { collectionView.deselectItem(at: indexPath, animated: true) }
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        defer { tableView.deselectRow(at: indexPath, animated: true) }
         guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return }
         onArticleTap?(item.article)
     }
 
-    func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+    func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
         recordResolvedScrolloverFrame(for: cell)
         if let articleCell = cell as? IOSUIKitArticleCell {
             reconcilePresentationForDisplay(articleCell)
         }
         prepareVisibleLayoutMetrics()
-        guard !orderedIDs.isEmpty, indexPath.item >= max(0, orderedIDs.count - 5) else { return }
+        guard !orderedIDs.isEmpty, indexPath.row >= max(0, orderedIDs.count - 5) else { return }
+        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.note(.paginationRequested)
         onApproachingEnd?()
     }
 
@@ -1195,7 +1322,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         )
     }
 
-    func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+    func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
         // Keep the resolved frame briefly so either lifecycle/scroll callback order
         // can still prove a crossing using the same content-coordinate geometry.
         recordResolvedScrolloverFrame(for: cell)
@@ -1250,6 +1377,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         } else if wasIdle {
             IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.start()
         }
+        // Every phase boundary restarts the ballistic baseline.
+        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.resetDecelerationBaseline(beginningRun: phase == .decelerating)
         scrolloverGeometryTracker.setPhase(phase)
         onScrolloverPhase?(phase)
     }
@@ -1260,7 +1389,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         scrolloverGeometryTracker.invalidateGeometry()
     }
 
-    private func recordResolvedScrolloverFrame(for cell: UICollectionViewCell) {
+    private func recordResolvedScrolloverFrame(for cell: UITableViewCell) {
         guard let articleCell = cell as? IOSUIKitArticleCell,
               let articleID = articleCell.representedArticleID else { return }
         resolvedScrolloverFrames.record(
@@ -1270,25 +1399,29 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func refreshResolvedVisibleScrolloverFrames() {
-        for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
+        for case let cell as IOSUIKitArticleCell in tableView.visibleCells {
             recordResolvedScrolloverFrame(for: cell)
         }
     }
 
     private func sampleScrolloverGeometry() {
-        guard markReadOnScrolloverEnabled, collectionView.bounds.height > 0 else { return }
+        guard markReadOnScrolloverEnabled, tableView.bounds.height > 0 else { return }
+        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.timing(.scrolloverSample) { sampleScrolloverGeometryBody() }
+    }
 
-        let effectiveTop = collectionView.contentOffset.y + collectionView.adjustedContentInset.top
-        let effectiveBottom = collectionView.contentOffset.y + collectionView.bounds.height - collectionView.adjustedContentInset.bottom
+    private func sampleScrolloverGeometryBody() {
+
+        let effectiveTop = tableView.contentOffset.y + tableView.adjustedContentInset.top
+        let effectiveBottom = tableView.contentOffset.y + tableView.bounds.height - tableView.adjustedContentInset.bottom
         // `visibleCells` are UIKit-resolved geometry. The retained source covers a
         // cell whose didEndDisplaying arrives on either side of this scroll callback.
         refreshResolvedVisibleScrolloverFrames()
 
         let sample = IOSUIKitScrolloverGeometrySample(
-            contentOffsetY: collectionView.contentOffset.y,
+            contentOffsetY: tableView.contentOffset.y,
             effectiveTop: effectiveTop,
             effectiveBottom: effectiveBottom,
-            contentHeight: collectionView.contentSize.height,
+            contentHeight: tableView.contentSize.height,
             rowFrames: resolvedScrolloverFrames.frames,
             layoutGeneration: scrolloverLayoutGeneration
         )
@@ -1297,7 +1430,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         if !result.batch.articleIDs.isEmpty { onScrolloverBatch?(result.batch) }
     }
 
-    func collectionView(_ collectionView: UICollectionView, leadingSwipeActionsConfigurationForItemAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+    func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
         let newValue = !item.isRead
         let action = UIContextualAction(style: .normal, title: newValue ? String(localized: "Mark as Read") : String(localized: "Mark as Unread")) { [weak self] _, _, completion in
@@ -1311,7 +1444,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         return configuration
     }
 
-    func collectionView(_ collectionView: UICollectionView, trailingSwipeActionsConfigurationForItemAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+    func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
         let newValue = !item.isStarred
         let action = UIContextualAction(style: .normal, title: newValue ? String(localized: "Star") : String(localized: "Unstar")) { [weak self] _, _, completion in
@@ -1325,7 +1458,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         return configuration
     }
 
-    func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
+    func tableView(_ tableView: UITableView, contextMenuConfigurationForRowAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
         guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
         return UIContextMenuConfiguration(identifier: NSNumber(value: id), previewProvider: nil) { [weak self] _ in
             guard let self, let current = self.renderedItem(for: id) else { return nil }
@@ -1377,7 +1510,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         onSetStarred?(item.article, value)
     }
 
-    func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
+    func tableView(_ tableView: UITableView, prefetchRowsAt indexPaths: [IndexPath]) {
         let layoutInputs = indexPaths.compactMap { indexPath -> IOSUIKitArticleLayoutInput? in
             guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
             return preparedLayoutInput(for: item)
@@ -1405,7 +1538,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         }
     }
 
-    func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
+    func tableView(_ tableView: UITableView, cancelPrefetchingForRowsAt indexPaths: [IndexPath]) {
         for indexPath in indexPaths {
             guard let id = dataSource.itemIdentifier(for: indexPath) else { continue }
             prefetchTasks.removeValue(forKey: id)?.task.cancel()
@@ -1416,7 +1549,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         guard mode.showsArticleImage,
               let url = item.content.imageURL
         else { return nil }
-        let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: collectionView.bounds.width)
+        let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: tableView.bounds.width)
         let targetSize = metrics.imageSize(hasImage: true)
         guard targetSize.width > 0, targetSize.height > 0 else { return nil }
         return ArticleImageRequest(
@@ -1426,7 +1559,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
             rasterScale: IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(
                 displayScale: view.traitCollection.displayScale
-            )
+            ),
+            usesDisplayP3: view.traitCollection.displayGamut == .P3
         )
     }
 
@@ -1467,15 +1601,15 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     func performanceSnapshot() -> IOSUIKitTimelinePerformanceSnapshot { performanceMetrics.snapshot(preparation: preparedLayoutCoordinator.snapshot()) }
 
     private func preparedLayoutInput(for item: IOSUIKitArticleTimelineItem) -> IOSUIKitArticleLayoutInput {
-        .init(item: item, mode: mode, previewLines: previewLines, containerWidth: collectionView.bounds.width, displayScale: view.traitCollection.displayScale, contentSizeCategory: view.traitCollection.preferredContentSizeCategory, layoutDirection: view.effectiveUserInterfaceLayoutDirection)
+        .init(item: item, mode: mode, previewLines: previewLines, containerWidth: tableView.bounds.width, displayScale: view.traitCollection.displayScale, contentSizeCategory: view.traitCollection.preferredContentSizeCategory, layoutDirection: view.effectiveUserInterfaceLayoutDirection)
     }
 
     private func currentGeometryIdentity() -> IOSUIKitTimelineGeometryIdentity? {
-        guard collectionView.bounds.width > 0 else { return nil }
+        guard tableView.bounds.width > 0 else { return nil }
         return .init(
             mode: mode,
             previewLines: previewLines,
-            containerWidth: collectionView.bounds.width,
+            containerWidth: tableView.bounds.width,
             displayScale: view.traitCollection.displayScale,
             contentSizeCategory: view.traitCollection.preferredContentSizeCategory,
             layoutDirection: view.effectiveUserInterfaceLayoutDirection
@@ -1510,9 +1644,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func replacePreparedLayoutWindow() {
-        guard collectionView.bounds.width > 0 else { return }
-        let visibleIndexes = collectionView.indexPathsForVisibleItems.map(\.item).sorted()
-        let visibleIDs = visibleIndexes.compactMap { dataSource.itemIdentifier(for: .init(item: $0, section: 0)) }
+        guard tableView.bounds.width > 0 else { return }
+        let visibleIndexes = (tableView.indexPathsForVisibleRows ?? []).map(\.row).sorted()
+        let visibleIDs = visibleIndexes.compactMap { dataSource.itemIdentifier(for: .init(row: $0, section: 0)) }
         let nextIndex = min(orderedIDs.count, (visibleIndexes.last ?? -1) + 1)
         let nearbyIDs = orderedIDs.dropFirst(nextIndex).prefix(IOSUIKitArticleLayoutPreparationCoordinator.nearbyWindowLimit)
         let ids = Array(visibleIDs + nearbyIDs.filter { !visibleIDs.contains($0) })
@@ -1520,7 +1654,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func prepareVisibleLayoutMetrics() {
-        let ids = collectionView.indexPathsForVisibleItems.sorted { $0.item < $1.item }.compactMap(dataSource.itemIdentifier(for:))
+        let ids = (tableView.indexPathsForVisibleRows ?? []).sorted { $0.row < $1.row }.compactMap(dataSource.itemIdentifier(for:))
         preparedLayoutCoordinator.prepare(ids.compactMap { renderedItem(for: $0).map(preparedLayoutInput(for:)) }, priority: .visible)
     }
 }
@@ -1700,7 +1834,7 @@ final class IOSUIKitTimelinePerformanceMetrics {
 }
 
 @MainActor
-final class IOSUIKitArticleCell: UICollectionViewCell {
+final class IOSUIKitArticleCell: UITableViewCell {
     static func reuseIdentifier(for variant: IOSUIKitArticleCellLayoutVariant) -> String {
         switch variant {
         case .compact: return "IOSUIKitArticleCell.compact"
@@ -1773,15 +1907,19 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
 
     weak var performanceMetrics: IOSUIKitTimelinePerformanceMetrics?
     var articleImageRasterScale: (CGFloat) -> CGFloat = { $0 }
+    /// Production derives this from the display's gamut; tests pin it so a
+    /// request built in the test matches the one the cell builds.
+    var articleImageUsesDisplayP3: (() -> Bool)?
     private(set) var representedArticleID: Int64?
     private(set) var layoutVariantRevision: UInt64 = 0
     private(set) var measurementSolveCount = 0
 
-    override init(frame: CGRect) {
-        super.init(frame: frame)
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
         backgroundColor = .clear
         contentView.backgroundColor = .clear
         contentView.preservesSuperviewLayoutMargins = false
+        selectionStyle = .default
 
         textStack.translatesAutoresizingMaskIntoConstraints = false
         textStack.axis = .vertical
@@ -1950,14 +2088,6 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             textStack.topAnchor.constraint(equalTo: margins.topAnchor),
             textStack.bottomAnchor.constraint(lessThanOrEqualTo: margins.bottomAnchor),
         ]
-    }
-
-    override func preferredLayoutAttributesFitting(_ layoutAttributes: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes {
-        performanceMetrics?.recordFittingCall()
-        guard let attributes = layoutAttributes.copy() as? UICollectionViewLayoutAttributes else { return layoutAttributes }
-        guard let preparedLayoutMetrics else { return attributes }
-        attributes.size.height = preparedLayoutMetrics.cellSize.height
-        return attributes
     }
 
     override func prepareForReuse() {
@@ -2148,7 +2278,8 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             targetSize: targetSize,
             displayScale: displayScale,
             cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
-            rasterScale: articleImageRasterScale(displayScale)
+            rasterScale: articleImageRasterScale(displayScale),
+            usesDisplayP3: articleImageUsesDisplayP3?() ?? (traitCollection.displayGamut == .P3)
         )
         guard articleChanged || representedImageRequest != request else { return }
         performanceMetrics?.recordImageBinding()
@@ -2186,13 +2317,14 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     }
 
     private func presentArticleImage(_ image: CGImage, displayScale: CGFloat) {
-        // Use the physical display scale for UIImage semantics. Fixed image-view
-        // constraints remain authoritative for the unchanged logical slot, so a
-        // 2x diagnostic raster fills that same slot on a 3x display.
-        articleImageView.image = UIImage(cgImage: image, scale: displayScale, orientation: .up)
-        articleImageView.isOpaque = false
-        imagePlaceholder.isHidden = true
-        setArticleImagePresentation(loaded: true)
+        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.measuring(.articleImageAssigned) {
+            // Use the physical display scale for UIImage semantics. Fixed
+            // image-view constraints remain authoritative for the slot.
+            articleImageView.image = UIImage(cgImage: image, scale: displayScale, orientation: .up)
+            articleImageView.isOpaque = false
+            imagePlaceholder.isHidden = true
+            setArticleImagePresentation(loaded: true)
+        }
     }
 
     private func clearArticleImagePresentation() {

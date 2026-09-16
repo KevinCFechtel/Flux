@@ -26,13 +26,19 @@ struct ArticleImageRequest: Hashable, Sendable {
     let targetPixelSize: CGSize
     let cornerRadiusPixels: CGFloat
     let rasterScale: CGFloat
+    /// Core Animation colour-matches layer contents whose colour space differs
+    /// from the display's — on the main thread, during the commit, proportional
+    /// to the pixel count. The raster is produced in the display's gamut so that
+    /// conversion never happens.
+    let usesDisplayP3: Bool
 
     init(
         url: URL,
         targetSize: CGSize,
         displayScale: CGFloat,
         cornerRadius: CGFloat = 0,
-        rasterScale: CGFloat? = nil
+        rasterScale: CGFloat? = nil,
+        usesDisplayP3: Bool = false
     ) {
         let scale = max(rasterScale ?? displayScale, 1)
         let pixels = max(targetSize.width, targetSize.height) * scale
@@ -44,6 +50,7 @@ struct ArticleImageRequest: Hashable, Sendable {
         )
         cornerRadiusPixels = max(0, (cornerRadius * scale).rounded())
         self.rasterScale = scale
+        self.usesDisplayP3 = usesDisplayP3
         self.url = url
     }
 }
@@ -457,7 +464,8 @@ actor ArticleImagePipeline {
         return renderDisplayReady(
             image,
             targetPixelSize: request.targetPixelSize,
-            cornerRadiusPixels: request.cornerRadiusPixels
+            cornerRadiusPixels: request.cornerRadiusPixels,
+            usesDisplayP3: request.usesDisplayP3
         ) ?? image
     }
 
@@ -480,11 +488,13 @@ actor ArticleImagePipeline {
     private nonisolated static func renderDisplayReady(
         _ image: CGImage,
         targetPixelSize: CGSize,
-        cornerRadiusPixels: CGFloat
+        cornerRadiusPixels: CGFloat,
+        usesDisplayP3: Bool
     ) -> CGImage? {
         let width = max(1, Int(targetPixelSize.width.rounded()))
         let height = max(1, Int(targetPixelSize.height.rounded()))
-        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+        let preferredColorSpace = usesDisplayP3 ? CGColorSpace.displayP3 : CGColorSpace.sRGB
+        let colorSpace = CGColorSpace(name: preferredColorSpace) ?? image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
         guard let context = CGContext(
             data: nil,
             width: width,
@@ -535,7 +545,7 @@ private extension ArticleImagePipeline.Demand {
 
 private extension ArticleImageRequest {
     var cacheKey: NSString {
-        "\(url.absoluteString)|\(maxPixelDimension)|\(Int(targetPixelSize.width))x\(Int(targetPixelSize.height))|\(Int(cornerRadiusPixels))|scale=\(Int((rasterScale * 100).rounded()))" as NSString
+        "\(url.absoluteString)|\(maxPixelDimension)|\(Int(targetPixelSize.width))x\(Int(targetPixelSize.height))|\(Int(cornerRadiusPixels))|scale=\(Int((rasterScale * 100).rounded()))|p3=\(usesDisplayP3 ? 1 : 0)" as NSString
     }
 }
 

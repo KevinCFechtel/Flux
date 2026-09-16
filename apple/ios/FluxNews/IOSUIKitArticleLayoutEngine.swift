@@ -532,3 +532,89 @@ enum IOSUIKitArticleLayoutEngine {
         return ceil(height * displayScale) / displayScale
     }
 }
+
+/// Exact row heights for every loaded article.
+///
+/// A table with estimation disabled asks for the height of *every* row before it
+/// can lay out, so a bounded cache is not sufficient: a miss would run Core Text
+/// synchronously on the main actor. This store keeps one height per loaded
+/// article and, while a new geometry generation is being measured, keeps serving
+/// the superseded heights. A rotation or Dynamic Type change therefore never
+/// blocks a frame waiting for a full re-measurement.
+@MainActor
+final class IOSUIKitArticleRowHeightStore {
+    private(set) var identity: IOSUIKitTimelineGeometryIdentity?
+    private var current: [Int64: CGFloat] = [:]
+    private var superseded: [Int64: CGFloat] = [:]
+
+    var preparedCount: Int { current.count }
+    var isServingSupersededHeights: Bool { !superseded.isEmpty }
+
+    /// An exact height for the active identity, or the superseded one while a
+    /// replacement generation is still being measured.
+    func height(for id: Int64) -> CGFloat? {
+        current[id] ?? superseded[id]
+    }
+
+    func hasExactHeight(for id: Int64) -> Bool { current[id] != nil }
+
+    /// Starts a new generation. Existing heights keep serving until `store`
+    /// replaces them, so the caller can measure without blocking.
+    func beginGeneration(_ newIdentity: IOSUIKitTimelineGeometryIdentity) {
+        guard identity != newIdentity else { return }
+        if !current.isEmpty { superseded = current }
+        current = [:]
+        identity = newIdentity
+    }
+
+    /// Results measured for a stale identity are dropped rather than mixed in.
+    func store(_ measured: [Int64: CGFloat], for measuredIdentity: IOSUIKitTimelineGeometryIdentity) {
+        guard measuredIdentity == identity else { return }
+        current.merge(measured) { _, new in new }
+    }
+
+    /// Superseded heights are only safe to drop once every loaded row has an
+    /// exact height for the active identity.
+    func retireSupersededHeights(ifComplete ids: [Int64]) -> Bool {
+        guard !superseded.isEmpty else { return false }
+        guard ids.allSatisfy({ current[$0] != nil }) else { return false }
+        superseded.removeAll()
+        return true
+    }
+
+    func missingIDs(in ids: [Int64]) -> [Int64] {
+        ids.filter { current[$0] == nil }
+    }
+
+    func remove(_ ids: some Sequence<Int64>) {
+        for id in ids {
+            current[id] = nil
+            superseded[id] = nil
+        }
+    }
+
+    func removeAll() {
+        current.removeAll()
+        superseded.removeAll()
+        identity = nil
+    }
+}
+
+/// Measures whole pages of rows off the main actor.
+///
+/// Heights are the only value needed to lay the table out; the full per-subview
+/// metrics stay with the existing preparation coordinator, which the cell uses
+/// when it is actually configured.
+enum IOSUIKitArticleRowHeightMeasurement {
+    static func heights(for inputs: [(id: Int64, input: IOSUIKitArticleLayoutInput)]) async -> [Int64: CGFloat] {
+        guard !inputs.isEmpty else { return [:] }
+        let payload = inputs.map { ($0.id, $0.input) }
+        return await Task.detached(priority: .userInitiated) {
+            var result = [Int64: CGFloat](minimumCapacity: payload.count)
+            for (id, input) in payload {
+                result[id] = IOSUIKitArticleLayoutEngine.metrics(for: input).cellSize.height
+            }
+            return result
+        }.value
+    }
+}

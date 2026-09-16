@@ -1837,25 +1837,102 @@ final class NewsreaderPresentationTests: XCTestCase {
         return .init(blue: bytes[offset], green: bytes[offset + 1], red: bytes[offset + 2], alpha: bytes[offset + 3])
     }
 
+    /// Self-sizing is gone: the table takes each row height from the store, and
+    /// the cell never resolves its own size. What must still hold is that the
+    /// cell's own constraints agree with the engine — otherwise rows would be
+    /// laid out at a height their content does not fit.
     @MainActor
-    func testTimelinePerformanceMetricsKeepArticleSizingOutOfAutoLayout() {
+    func testArticleRowHeightMatchesTheCellConstraintsWithoutSelfSizing() {
         let cell = makeUIKitArticleCell(mode: .visual, width: 390)
         let metrics = IOSUIKitTimelinePerformanceMetrics()
         cell.performanceMetrics = metrics
 
-        let firstHeight = measureUIKitArticleCell(cell, width: 390)
-        let first = metrics.snapshot()
-        XCTAssertEqual(first.preferredLayoutAttributesFittingCalls, 1)
-        XCTAssertEqual(firstHeight, cell.preparedLayoutMetrics?.cellSize.height)
-        XCTAssertEqual(first.systemLayoutSizeFittingCalls, 0)
-        XCTAssertEqual(cell.measurementSolveCount, 0)
+        let constraintHeight = measureUIKitArticleCell(cell, width: 390)
+        XCTAssertEqual(constraintHeight, cell.preparedLayoutMetrics?.cellSize.height ?? 0, accuracy: 0.5)
 
-        _ = measureUIKitArticleCell(cell, width: 390)
-        let second = metrics.snapshot()
-        XCTAssertEqual(second.preferredLayoutAttributesFittingCalls, 2)
-        XCTAssertEqual(second.systemLayoutSizeFittingCalls, 0)
-        metrics.reset()
-        XCTAssertEqual(metrics.snapshot().systemLayoutSizeFittingCalls, 0)
+        let snapshot = metrics.snapshot()
+        XCTAssertEqual(snapshot.preferredLayoutAttributesFittingCalls, 0)
+        XCTAssertEqual(snapshot.systemLayoutSizeFittingCalls, 0)
+        XCTAssertEqual(cell.measurementSolveCount, 0)
+    }
+
+    @MainActor
+    func testRowHeightStoreServesSupersededHeightsUntilTheNewGenerationIsComplete() {
+        let store = IOSUIKitArticleRowHeightStore()
+        let first = geometryIdentity(width: 390)
+        let second = geometryIdentity(width: 780)
+
+        store.beginGeneration(first)
+        store.store([1: 100, 2: 200], for: first)
+        XCTAssertEqual(store.height(for: 1), 100)
+        XCTAssertFalse(store.isServingSupersededHeights)
+
+        store.beginGeneration(second)
+        // The old heights keep the table laying out while the new set is measured.
+        XCTAssertTrue(store.isServingSupersededHeights)
+        XCTAssertEqual(store.height(for: 1), 100)
+        XCTAssertFalse(store.hasExactHeight(for: 1))
+        XCTAssertEqual(store.missingIDs(in: [1, 2]), [1, 2])
+
+        // A result measured for the stale identity must not be mixed in.
+        store.store([1: 999], for: first)
+        XCTAssertEqual(store.height(for: 1), 100)
+
+        store.store([1: 150], for: second)
+        XCTAssertFalse(store.retireSupersededHeights(ifComplete: [1, 2]))
+        store.store([2: 250], for: second)
+        XCTAssertTrue(store.retireSupersededHeights(ifComplete: [1, 2]))
+        XCTAssertEqual(store.height(for: 1), 150)
+        XCTAssertEqual(store.height(for: 2), 250)
+
+        store.remove([1])
+        XCTAssertNil(store.height(for: 1))
+    }
+
+    /// The property that removes the whole defect class: the table's content
+    /// height is the exact sum of the deterministic row heights from the first
+    /// frame, so nothing is corrected later while the list is scrolling.
+    @MainActor
+    func testTableContentHeightEqualsTheSumOfDeterministicRowHeights() async {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = IOSUIKitArticleTimelineController()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
+        controller.view.layoutIfNeeded()
+
+        let articles = (1...40).map { timelineArticle(id: Int64($0)) }
+        bridge.replaceArticleStates(Dictionary(uniqueKeysWithValues: articles.map { ($0.id, .init(isRead: false, isStarred: false, revision: 0)) }))
+        controller.update(
+            structuralState: timelineStructuralState(articles, revision: 1),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            feedIconRequestRevision: 0,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+        await controller.settleForTesting()
+
+        let table = controller.tableViewForTesting
+        table.layoutIfNeeded()
+
+        XCTAssertEqual(controller.preparedRowHeightCountForTesting, articles.count)
+        XCTAssertEqual(table.numberOfRows(inSection: 0), articles.count)
+        XCTAssertEqual(controller.synchronousRowHeightFallbackCountForTesting, 0)
+
+        let traits = controller.view.traitCollection
+        let expected = articles.reduce(CGFloat.zero) { total, article in
+            let item = IOSUIKitArticleTimelineItem(article: article, content: ArticleRowContent(article: article), isRead: false, isStarred: false, feedIconImage: nil)
+            let input = IOSUIKitArticleLayoutInput(item: item, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: traits.displayScale, contentSizeCategory: traits.preferredContentSizeCategory, layoutDirection: controller.view.effectiveUserInterfaceLayoutDirection)
+            return total + IOSUIKitArticleLayoutEngine.metrics(for: input).cellSize.height
+        }
+        XCTAssertEqual(table.contentSize.height, expected, accuracy: 1)
+    }
+
+    private func geometryIdentity(width: CGFloat) -> IOSUIKitTimelineGeometryIdentity {
+        .init(mode: .visual, previewLines: .standard, containerWidth: width, displayScale: 3, contentSizeCategory: .large, layoutDirection: .leftToRight)
     }
 
     @MainActor
@@ -2353,6 +2430,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: 390, height: 1_000))
         cell.setArticleImagePipelineForTesting(pipeline)
         cell.articleImageRasterScale = { _ in rasterScale ?? displayScale }
+        cell.articleImageUsesDisplayP3 = { false }
         let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: 390)
         let input = IOSUIKitArticleLayoutInput(item: item, mode: mode, previewLines: .standard, containerWidth: 390, displayScale: displayScale, contentSizeCategory: .large, layoutDirection: .leftToRight)
         cell.configure(item: item, mode: mode, previewLines: .standard, metrics: metrics, displayScale: displayScale, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
@@ -2372,6 +2450,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
         cell.setArticleImagePipelineForTesting(ArticleImagePipeline { _ in throw CancellationError() })
         cell.articleImageRasterScale = { displayScale in rasterScale ?? displayScale }
+        cell.articleImageUsesDisplayP3 = { false }
         let semanticAttribute: UISemanticContentAttribute = layoutDirection == .rightToLeft ? .forceRightToLeft : .forceLeftToRight
         container.semanticContentAttribute = semanticAttribute
         cell.semanticContentAttribute = semanticAttribute
@@ -2435,15 +2514,25 @@ final class NewsreaderPresentationTests: XCTestCase {
         return cell
     }
 
+    /// The cell no longer resolves its own size — the table asks the controller,
+    /// which asks the engine. The oracle therefore measures what the cell's own
+    /// constraints would produce and asserts the engine agrees with it. That is
+    /// the independent cross-check: if the two ever diverge, rows are laid out at
+    /// a height their content does not fit.
     @MainActor
     private func measureUIKitArticleCell(_ cell: IOSUIKitArticleCell, width: CGFloat) -> CGFloat {
-        let attributes = UICollectionViewLayoutAttributes(forCellWith: IndexPath(item: 0, section: 0))
-        attributes.size = CGSize(width: width, height: 1)
-        let measured = cell.preferredLayoutAttributesFitting(attributes)
-        cell.frame.size = measured.size
+        cell.frame.size.width = width
         cell.setNeedsLayout()
         cell.layoutIfNeeded()
-        return measured.size.height
+        let measured = cell.contentView.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height
+        cell.frame.size = CGSize(width: width, height: measured)
+        cell.setNeedsLayout()
+        cell.layoutIfNeeded()
+        return measured
     }
 
     @MainActor
