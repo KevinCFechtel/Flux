@@ -136,7 +136,7 @@ enum IOSUIKitTimelineNavigationChromeDiagnostic {
     enum Arm: String, CaseIterable, Identifiable {
         /// Shipping behaviour: large title with the native subtitle.
         case system
-        /// Title and subtitle in a floating glass capsule; the bar carries no title.
+        /// Title and subtitle in a glass capsule in the bar's inline slot.
         case glassCapsule
 
         var id: String { rawValue }
@@ -151,6 +151,90 @@ enum IOSUIKitTimelineNavigationChromeDiagnostic {
 
     static var arm: Arm {
         UserDefaults.standard.string(forKey: defaultsKey).flatMap(Arm.init(rawValue:)) ?? .system
+    }
+}
+
+/// Runtime arm for a scrim behind the status bar.
+///
+/// Every element of the bars carries its own glass, so hiding the scroll edge
+/// effect costs little legibility — except for the status bar, which has no
+/// material of its own. This is the cheap, local replacement for an effect that
+/// spans two whole bar regions.
+@MainActor
+enum IOSUIKitTimelineStatusBarScrimDiagnostic {
+    static let defaultsKey = "flux.diagnostic.statusBarScrimArm"
+
+    enum Arm: String, CaseIterable, Identifiable {
+        /// From iOS 27 the system tints each status bar element against its own
+        /// backdrop — observed switching independently within one bar — so the
+        /// gradient is only needed below that.
+        case automatic
+        case off
+        case subtle
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .automatic: return "Automatic (below iOS 27)"
+            case .off: return "Never"
+            case .subtle: return "Always"
+            }
+        }
+
+        var hidesScrim: Bool {
+            switch self {
+            case .off: return true
+            case .subtle: return false
+            case .automatic:
+                if #available(iOS 27.0, *) { return true } else { return false }
+            }
+        }
+    }
+
+    private static weak var scrim: UIView?
+
+    static var arm: Arm {
+        UserDefaults.standard.string(forKey: defaultsKey).flatMap(Arm.init(rawValue:)) ?? .automatic
+    }
+
+    static func adopt(_ view: UIView) {
+        scrim = view
+        view.isHidden = arm.hidesScrim
+    }
+
+    static func setArm(_ newArm: Arm) {
+        UserDefaults.standard.set(newArm.rawValue, forKey: defaultsKey)
+        scrim?.isHidden = newArm.hidesScrim
+    }
+}
+
+/// A vertical fade from the timeline background to nothing, sized to the status
+/// bar. `CAGradientLayer` holds `CGColor`s, which do not follow the interface
+/// style on their own, so they are resolved again on every style change.
+final class IOSUIKitTimelineTopScrimView: UIView {
+    override class var layerClass: AnyClass { CAGradientLayer.self }
+    private var gradient: CAGradientLayer { layer as! CAGradientLayer }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        gradient.startPoint = CGPoint(x: 0.5, y: 0)
+        gradient.endPoint = CGPoint(x: 0.5, y: 1)
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
+            self.updateColors()
+        }
+        updateColors()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func updateColors() {
+        let base = UIColor.systemBackground.resolvedColor(with: traitCollection)
+        gradient.colors = [
+            base.withAlphaComponent(0.65).cgColor,
+            base.withAlphaComponent(0).cgColor,
+        ]
     }
 }
 
@@ -193,6 +277,14 @@ struct IOSUIKitTimelineFrameHeadroomSnapshot: Equatable {
     /// Separate deceleration runs observed. If discontinuities track this count,
     /// the detector is reacting to gesture boundaries rather than to defects.
     let deceleratingRuns: UInt64
+    /// Rows currently holding an exact height — tells you whether a test was
+    /// deep enough to be meaningful.
+    let preparedRowHeights: Int
+    /// Rows whose height had to be measured synchronously during layout. Must be
+    /// zero; anything else means Core Text ran on the main actor while laying out.
+    let synchronousHeightFallbacks: UInt64
+    let lastHeightBatchRows: Int
+    let lastHeightBatchMilliseconds: Double
 
     var averageBusyNanoseconds: UInt64 {
         sampledFrames == 0 ? 0 : totalBusyNanoseconds / sampledFrames
@@ -352,6 +444,10 @@ final class IOSUIKitTimelineFrameHeadroomRecorder {
     private var deceleratingDiscontinuities: UInt64 = 0
     private var maximumDeceleratingExcess: Double = 0
     private var deceleratingRuns: UInt64 = 0
+    private var preparedRowHeights = 0
+    private var synchronousHeightFallbacks: UInt64 = 0
+    private var lastHeightBatchRows = 0
+    private var lastHeightBatchNanoseconds: UInt64 = 0
     private var frameEvents: IOSUIKitTimelineFrameEvents = []
     private var frameConfiguredCells = 0
     private var frameAssignedImages = 0
@@ -419,6 +515,19 @@ final class IOSUIKitTimelineFrameHeadroomRecorder {
         guard reversed || excess > 0 else { return }
         deceleratingDiscontinuities &+= 1
         maximumDeceleratingExcess = max(maximumDeceleratingExcess, reversed ? abs(delta) : excess)
+    }
+
+    func noteRowHeightInventory(_ count: Int) {
+        preparedRowHeights = count
+    }
+
+    func noteSynchronousHeightFallback() {
+        synchronousHeightFallbacks &+= 1
+    }
+
+    func noteHeightBatch(rows: Int, nanoseconds: UInt64) {
+        lastHeightBatchRows = rows
+        lastHeightBatchNanoseconds = nanoseconds
     }
 
     /// Call from `scrollViewDidScroll`. A stable list has a stable content
@@ -511,6 +620,11 @@ final class IOSUIKitTimelineFrameHeadroomRecorder {
         frameCommitNanoseconds = 0
         slowFrames.removeAll()
         slowFrameCauses.removeAll()
+        // `preparedRowHeights` is present state, not an accumulated count, so it
+        // survives a reset — showing zero until the next batch would mislead.
+        synchronousHeightFallbacks = 0
+        lastHeightBatchRows = 0
+        lastHeightBatchNanoseconds = 0
     }
 
     func snapshot() -> IOSUIKitTimelineFrameHeadroomSnapshot {
@@ -532,7 +646,11 @@ final class IOSUIKitTimelineFrameHeadroomRecorder {
             deceleratingSamples: deceleratingSamples,
             deceleratingDiscontinuities: deceleratingDiscontinuities,
             maximumDeceleratingExcess: maximumDeceleratingExcess,
-            deceleratingRuns: deceleratingRuns
+            deceleratingRuns: deceleratingRuns,
+            preparedRowHeights: preparedRowHeights,
+            synchronousHeightFallbacks: synchronousHeightFallbacks,
+            lastHeightBatchRows: lastHeightBatchRows,
+            lastHeightBatchMilliseconds: Double(lastHeightBatchNanoseconds) / 1_000_000
         )
     }
 
@@ -740,6 +858,11 @@ enum IOSUIKitTimelineFrameHeadroomDiagnostics {
                                 frame.commitWindowMilliseconds,
                                 frame.unaccountedMilliseconds))
         }
+        lines.append(String(format: "rowHeights prepared=%d syncFallbacks=%llu lastBatch=%d rows / %.0f ms",
+                            snapshot.preparedRowHeights,
+                            snapshot.synchronousHeightFallbacks,
+                            snapshot.lastHeightBatchRows,
+                            snapshot.lastHeightBatchMilliseconds))
         lines.append(String(format: "decel frames=%llu runs=%llu discontinuities=%llu maxExcess=%.1f pt",
                             snapshot.deceleratingSamples,
                             snapshot.deceleratingRuns,

@@ -814,6 +814,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private var scheduledPreparedWindowGeneration: UInt64?
     private var prefetchTasks: [Int64: (request: ArticleImageRequest, task: Task<Void, Never>)] = [:]
     private let refreshControl = UIRefreshControl()
+    // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
+    private let statusBarScrim = IOSUIKitTimelineTopScrimView()
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
     private let preparedLayoutCoordinator = IOSUIKitArticleLayoutPreparationCoordinator()
     /// Exact heights for every loaded row. Estimation is disabled, so a missing
@@ -909,6 +911,16 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
+        statusBarScrim.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(statusBarScrim)
+        NSLayoutConstraint.activate([
+            statusBarScrim.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            statusBarScrim.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            statusBarScrim.topAnchor.constraint(equalTo: view.topAnchor),
+            statusBarScrim.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 14),
+        ])
+        IOSUIKitTimelineStatusBarScrimDiagnostic.adopt(statusBarScrim)
+
         dataSource = UITableViewDiffableDataSource<Section, Int64>(tableView: tableView) { [weak self] tableView, indexPath, id in
             guard let self,
                   let item = self.renderedItem(for: id)
@@ -958,10 +970,13 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         let inputs = rowHeightInputs(for: missing)
         rowHeightTask?.cancel()
         rowHeightTask = Task { @MainActor [weak self] in
+            let startedAt = DispatchTime.now().uptimeNanoseconds
             let measured = await IOSUIKitArticleRowHeightMeasurement.heights(for: inputs)
             guard let self, !Task.isCancelled, self.rowHeightGeneration == generation else { return }
             self.rowHeightTask = nil
             self.rowHeights.store(measured, for: identity)
+            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.noteHeightBatch(rows: inputs.count, nanoseconds: DispatchTime.now().uptimeNanoseconds &- startedAt)
+            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.noteRowHeightInventory(self.rowHeights.preparedCount)
             _ = self.rowHeights.retireSupersededHeights(ifComplete: self.orderedIDs)
             if reloadWhenComplete { self.reloadPreservingAnchor() }
         }
@@ -1011,10 +1026,13 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         let inputs = rowHeightInputs(for: missing)
         pendingStructuralApply?.cancel()
         pendingStructuralApply = Task { @MainActor [weak self] in
+            let startedAt = DispatchTime.now().uptimeNanoseconds
             let measured = await IOSUIKitArticleRowHeightMeasurement.heights(for: inputs)
             guard let self, !Task.isCancelled else { return }
             self.pendingStructuralApply = nil
             self.rowHeights.store(measured, for: identity)
+            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.noteHeightBatch(rows: inputs.count, nanoseconds: DispatchTime.now().uptimeNanoseconds &- startedAt)
+            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.noteRowHeightInventory(self.rowHeights.preparedCount)
             IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.note(.snapshotApplied)
             self.dataSource.apply(snapshot, animatingDifferences: false, completion: nil)
         }
@@ -1030,6 +1048,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         let startedAt = DispatchTime.now().uptimeNanoseconds
         let metrics = preparedLayoutCoordinator.measureSynchronously(preparedLayoutInput(for: item), priority: .visible)
         performanceMetrics.recordDeterministicHeightFallback(durationNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt)
+        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.noteSynchronousHeightFallback()
 #if DEBUG
         synchronousRowHeightFallbackCountForTesting &+= 1
 #endif
@@ -1484,6 +1503,25 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         }
     }
 
+    func tableView(_ tableView: UITableView, previewForHighlightingContextMenuWithConfiguration configuration: UIContextMenuConfiguration) -> UITargetedPreview? {
+        contextMenuTargetedPreview(for: configuration)
+    }
+
+    func tableView(_ tableView: UITableView, previewForDismissingContextMenuWithConfiguration configuration: UIContextMenuConfiguration) -> UITargetedPreview? {
+        contextMenuTargetedPreview(for: configuration)
+    }
+
+    private func contextMenuTargetedPreview(for configuration: UIContextMenuConfiguration) -> UITargetedPreview? {
+        guard let identifier = configuration.identifier as? NSNumber,
+              let indexPath = dataSource.indexPath(for: identifier.int64Value),
+              let cell = tableView.cellForRow(at: indexPath)
+        else { return nil }
+        let parameters = UIPreviewParameters()
+        parameters.backgroundColor = .systemBackground
+        parameters.visiblePath = UIBezierPath(roundedRect: cell.bounds, cornerRadius: 16)
+        return UITargetedPreview(view: cell, parameters: parameters)
+    }
+
     private func contextNavigationActions(for item: IOSUIKitArticleTimelineItem) -> [UIMenuElement] {
         var actions: [UIMenuElement] = [
             UIAction(title: String(localized: "Open Original"), image: UIImage(systemName: "safari")) { [weak self] _ in self?.onArticleAction?(item.article, .original) },
@@ -1896,6 +1934,17 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var landscapeImageHeightConstraint: NSLayoutConstraint!
     private var commentsWidthConstraint: NSLayoutConstraint!
     private var commentsToStarSpacingConstraint: NSLayoutConstraint!
+    /// One step more contrast than `secondaryLabel` without reaching full
+    /// `label`, which would compete with the headline. Resolved per trait
+    /// collection so it still inverts in dark mode.
+    private static let supportingTextColor = UIColor { traits in
+        UIColor.label.resolvedColor(with: traits).withAlphaComponent(0.8)
+    }
+    /// Read articles dim by the same proportion as the headline, so the whole
+    /// row recedes together instead of only its title.
+    private static let supportingReadTextColor = UIColor { traits in
+        UIColor.label.resolvedColor(with: traits).withAlphaComponent(0.5)
+    }
     private var previewTopConstraint: NSLayoutConstraint!
     private var previewCollapseConstraint: NSLayoutConstraint!
     private var currentLayoutVariant: IOSUIKitArticleCellLayoutVariant?
@@ -1921,8 +1970,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
-        backgroundColor = .clear
-        contentView.backgroundColor = .clear
+        backgroundColor = .systemBackground
+        contentView.backgroundColor = .systemBackground
+        contentView.isOpaque = true
         contentView.preservesSuperviewLayoutMargins = false
         selectionStyle = .default
 
@@ -1973,14 +2023,14 @@ final class IOSUIKitArticleCell: UITableViewCell {
 
         feedTitleLabel.font = .preferredFont(forTextStyle: .subheadline).bold()
         feedTitleLabel.adjustsFontForContentSizeCategory = true
-        feedTitleLabel.textColor = .secondaryLabel
+        feedTitleLabel.textColor = Self.supportingTextColor
         feedTitleLabel.lineBreakMode = .byTruncatingTail
         feedTitleLabel.numberOfLines = 1
         feedTitleLabel.translatesAutoresizingMaskIntoConstraints = false
 
         commentsContainer.translatesAutoresizingMaskIntoConstraints = false
         commentsImageView.translatesAutoresizingMaskIntoConstraints = false
-        commentsImageView.tintColor = .secondaryLabel
+        commentsImageView.tintColor = Self.supportingTextColor
         commentsContainer.addSubview(commentsImageView)
         NSLayoutConstraint.activate([
             commentsImageView.centerXAnchor.constraint(equalTo: commentsContainer.centerXAnchor),
@@ -1989,7 +2039,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         starImageView.translatesAutoresizingMaskIntoConstraints = false
         dateLabel.font = UIFont.preferredFont(forTextStyle: .caption1)
         dateLabel.adjustsFontForContentSizeCategory = true
-        dateLabel.textColor = .secondaryLabel
+        dateLabel.textColor = Self.supportingTextColor
         dateLabel.numberOfLines = 1
 
         metadataRow.addSubview(unreadIndicator)
@@ -2020,7 +2070,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
 
         previewLabel.font = .preferredFont(forTextStyle: .subheadline)
         previewLabel.adjustsFontForContentSizeCategory = true
-        previewLabel.textColor = .secondaryLabel
+        previewLabel.textColor = Self.supportingTextColor
         previewLabel.numberOfLines = 3
 
         for label in [titleLabel, dateLabel, previewLabel] {
@@ -2051,7 +2101,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         articleImageView.translatesAutoresizingMaskIntoConstraints = false
         articleImageView.isHidden = true
         imagePlaceholder.translatesAutoresizingMaskIntoConstraints = false
-        imagePlaceholder.tintColor = .secondaryLabel
+        imagePlaceholder.tintColor = Self.supportingTextColor
         imagePlaceholder.contentMode = .center
         articleImageView.addSubview(imagePlaceholder)
         NSLayoutConstraint.activate([
@@ -2208,6 +2258,12 @@ final class IOSUIKitArticleCell: UITableViewCell {
         currentIsRead = isRead
         currentIsStarred = isStarred
         titleLabel.textColor = isRead ? .secondaryLabel : .label
+        // Colour only — never anything that could move a frame.
+        let supporting = isRead ? Self.supportingReadTextColor : Self.supportingTextColor
+        feedTitleLabel.textColor = supporting
+        dateLabel.textColor = supporting
+        previewLabel.textColor = supporting
+        commentsImageView.tintColor = supporting
         unreadIndicator.alpha = ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: isRead)
         // The fixed trailing slot remains allocated when the star is not visible.
         starImageView.alpha = isStarred ? 1 : 0

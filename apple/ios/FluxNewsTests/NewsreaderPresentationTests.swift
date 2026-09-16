@@ -86,7 +86,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     func testAdaptivePresentationUsesTransientNavigationWhenCompact() {
-        let presentation = AdaptivePresentationPolicy.presentation(horizontalSizeClass: .compact)
+        let presentation = AdaptivePresentationPolicy.presentation(horizontalSizeClass: .compact, verticalSizeClass: .regular)
         XCTAssertEqual(presentation, .compact)
         XCTAssertFalse(presentation.usesPersistentSplitNavigation)
     }
@@ -101,7 +101,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     func testAdaptivePresentationUsesSplitNavigationWhenRegularRegardlessOfDeviceIdentity() {
-        let presentation = AdaptivePresentationPolicy.presentation(horizontalSizeClass: .regular)
+        let presentation = AdaptivePresentationPolicy.presentation(horizontalSizeClass: .regular, verticalSizeClass: .regular)
         XCTAssertEqual(presentation, .regular)
         XCTAssertTrue(presentation.usesPersistentSplitNavigation)
     }
@@ -2571,7 +2571,8 @@ final class NewsreaderPresentationTests: XCTestCase {
             maximumBusyNanoseconds: 0, busyBuckets: buckets,
             contentHeightChanges: 0, maximumContentHeightJump: 0, totalContentHeightDrift: 0,
             deceleratingSamples: 0, deceleratingDiscontinuities: 0, maximumDeceleratingExcess: 0,
-            deceleratingRuns: 0
+            deceleratingRuns: 0, preparedRowHeights: 0, synchronousHeightFallbacks: 0,
+            lastHeightBatchRows: 0, lastHeightBatchMilliseconds: 0
         )
 
         XCTAssertEqual(snapshot.busyPercentileMilliseconds(0.50), 2.0 * (50.0 / 90.0), accuracy: 0.01)
@@ -2773,7 +2774,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     func testReaderPresentationFollowsAdaptivePresentationRatherThanDeviceIdentity() {
         XCTAssertEqual(AdaptivePresentation.compact.readerPresentationKind, .sheet)
         XCTAssertEqual(AdaptivePresentation.regular.readerPresentationKind, .inspector)
-        XCTAssertEqual(AdaptivePresentationPolicy.presentation(horizontalSizeClass: .regular).readerPresentationKind, .inspector)
+        XCTAssertEqual(AdaptivePresentationPolicy.presentation(horizontalSizeClass: .regular, verticalSizeClass: .regular).readerPresentationKind, .inspector)
     }
 
     func testReaderPresentationExposesTheExplicitDismissAction() {

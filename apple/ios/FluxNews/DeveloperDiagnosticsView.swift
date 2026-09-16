@@ -9,6 +9,7 @@ struct DeveloperDiagnosticsView: View {
     private var scrolloverOverlayArm = IOSUIKitTimelineScrolloverOverlayDiagnostic.Arm.material.rawValue
     @AppStorage(IOSUIKitTimelineNavigationChromeDiagnostic.defaultsKey)
     private var navigationChromeArm = IOSUIKitTimelineNavigationChromeDiagnostic.Arm.system.rawValue
+    @State private var statusBarScrimArm = IOSUIKitTimelineStatusBarScrimDiagnostic.arm
     @State private var frameHeadroom = IOSUIKitTimelineFrameHeadroomDiagnostics.formattedSnapshot()
 
     var body: some View {
@@ -47,6 +48,14 @@ struct DeveloperDiagnosticsView: View {
                         ForEach(IOSUIKitTimelineNavigationChromeDiagnostic.Arm.allCases) { arm in
                             Text(arm.label).tag(arm.rawValue)
                         }
+                    }
+                    Picker("Status bar scrim", selection: $statusBarScrimArm) {
+                        ForEach(IOSUIKitTimelineStatusBarScrimDiagnostic.Arm.allCases) { arm in
+                            Text(arm.label).tag(arm)
+                        }
+                    }
+                    .onChange(of: statusBarScrimArm) { _, newArm in
+                        IOSUIKitTimelineStatusBarScrimDiagnostic.setArm(newArm)
                     }
                     Text(frameHeadroom).font(.footnote.monospaced()).textSelection(.enabled)
                     Button("Refresh Frame Headroom") {
