@@ -1868,7 +1868,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
         }
     }
 
-    private let textStack = UIStackView()
+    // A plain container, not a `UIStackView`. Setting `isHidden` on an
+    // arranged subview makes the stack add and remove constraints, and
+    // `previewLabel.isHidden` is set on every `configure`.
+    private let textContainer = UIView()
     private let titleLabel = UILabel()
     private let starImageView = UIImageView(image: UIImage(systemName: "star.fill"))
     private let metadataRow = UIView()
@@ -1893,6 +1896,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var landscapeImageHeightConstraint: NSLayoutConstraint!
     private var commentsWidthConstraint: NSLayoutConstraint!
     private var commentsToStarSpacingConstraint: NSLayoutConstraint!
+    private var previewTopConstraint: NSLayoutConstraint!
+    private var previewCollapseConstraint: NSLayoutConstraint!
     private var currentLayoutVariant: IOSUIKitArticleCellLayoutVariant?
     private var imageTask: Task<Void, Never>?
     private var representedImageRequest: ArticleImageRequest?
@@ -1921,11 +1926,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
         contentView.preservesSuperviewLayoutMargins = false
         selectionStyle = .default
 
-        textStack.translatesAutoresizingMaskIntoConstraints = false
-        textStack.axis = .vertical
-        textStack.spacing = 7
-        textStack.alignment = .fill
-        textStack.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        textContainer.translatesAutoresizingMaskIntoConstraints = false
+        textContainer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
         titleLabel.font = .preferredFont(forTextStyle: .headline)
         titleLabel.adjustsFontForContentSizeCategory = true
@@ -2021,10 +2023,30 @@ final class IOSUIKitArticleCell: UITableViewCell {
         previewLabel.textColor = .secondaryLabel
         previewLabel.numberOfLines = 3
 
-        textStack.addArrangedSubview(titleLabel)
-        textStack.addArrangedSubview(metadataRow)
-        textStack.addArrangedSubview(dateLabel)
-        textStack.addArrangedSubview(previewLabel)
+        for label in [titleLabel, dateLabel, previewLabel] {
+            label.translatesAutoresizingMaskIntoConstraints = false
+            textContainer.addSubview(label)
+        }
+        textContainer.addSubview(metadataRow)
+        previewTopConstraint = previewLabel.topAnchor.constraint(equalTo: dateLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing)
+        // Collapsing by priority keeps the constraint graph untouched. Removing
+        // or deactivating it instead would mutate the graph on every reuse
+        // between an article with and without a preview.
+        previewCollapseConstraint = previewLabel.heightAnchor.constraint(equalToConstant: 0)
+        previewCollapseConstraint.priority = .defaultHigh
+        previewCollapseConstraint.isActive = true
+        var stackedConstraints: [NSLayoutConstraint] = [
+            titleLabel.topAnchor.constraint(equalTo: textContainer.topAnchor),
+            metadataRow.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            dateLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            previewTopConstraint,
+            previewLabel.bottomAnchor.constraint(equalTo: textContainer.bottomAnchor),
+        ]
+        for child in [titleLabel, metadataRow, dateLabel, previewLabel] as [UIView] {
+            stackedConstraints.append(child.leadingAnchor.constraint(equalTo: textContainer.leadingAnchor))
+            stackedConstraints.append(child.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor))
+        }
+        NSLayoutConstraint.activate(stackedConstraints)
 
         articleImageView.translatesAutoresizingMaskIntoConstraints = false
         articleImageView.isHidden = true
@@ -2037,7 +2059,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             imagePlaceholder.centerYAnchor.constraint(equalTo: articleImageView.centerYAnchor),
         ])
 
-        contentView.addSubview(textStack)
+        contentView.addSubview(textContainer)
         contentView.addSubview(articleImageView)
         preparePermanentLayoutConstraints()
         setArticleImagePresentation(loaded: false)
@@ -2062,20 +2084,20 @@ final class IOSUIKitArticleCell: UITableViewCell {
         landscapeImageHeightConstraint = articleImageView.heightAnchor.constraint(equalToConstant: 1)
 
         textOnlyConstraints = [
-            textStack.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
-            textStack.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
-            textStack.topAnchor.constraint(equalTo: margins.topAnchor),
-            textStack.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
+            textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
+            textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
         ]
         portraitConstraints = [
             articleImageView.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
             articleImageView.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
             articleImageView.topAnchor.constraint(equalTo: margins.topAnchor),
             portraitImageAspectConstraint,
-            textStack.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
-            textStack.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
-            textStack.topAnchor.constraint(equalTo: articleImageView.bottomAnchor, constant: 12),
-            textStack.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
+            textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textContainer.topAnchor.constraint(equalTo: articleImageView.bottomAnchor, constant: 12),
+            textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
         ]
         landscapeConstraints = [
             articleImageView.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
@@ -2083,10 +2105,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
             landscapeImageWidthConstraint,
             landscapeImageHeightConstraint,
             articleImageView.bottomAnchor.constraint(lessThanOrEqualTo: margins.bottomAnchor),
-            textStack.leadingAnchor.constraint(equalTo: articleImageView.trailingAnchor, constant: 14),
-            textStack.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
-            textStack.topAnchor.constraint(equalTo: margins.topAnchor),
-            textStack.bottomAnchor.constraint(lessThanOrEqualTo: margins.bottomAnchor),
+            textContainer.leadingAnchor.constraint(equalTo: articleImageView.trailingAnchor, constant: 14),
+            textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
+            textContainer.bottomAnchor.constraint(lessThanOrEqualTo: margins.bottomAnchor),
         ]
     }
 
@@ -2119,9 +2141,14 @@ final class IOSUIKitArticleCell: UITableViewCell {
         titleLabel.text = currentTitle
         feedTitleLabel.text = currentFeedTitle
         dateLabel.text = currentPublishedDate
+        let hasPreview = !item.content.article.preview.isEmpty
         previewLabel.text = item.content.article.preview
-        previewLabel.isHidden = item.content.article.preview.isEmpty
+        previewLabel.isHidden = !hasPreview
         previewLabel.numberOfLines = previewLines.rawValue
+        // Constants and priorities only — the constraint graph stays identical
+        // across every reuse, whatever the article contains.
+        previewTopConstraint.constant = hasPreview ? IOSUIKitArticleGeometry.textSpacing : 0
+        previewCollapseConstraint.priority = hasPreview ? UILayoutPriority(1) : .defaultHigh
         let hasComments = item.content.hasComments
         commentsContainer.isHidden = !hasComments
         commentsWidthConstraint.constant = hasComments ? IOSUIKitArticleGeometry.commentSlotSize : 0
@@ -2212,6 +2239,12 @@ final class IOSUIKitArticleCell: UITableViewCell {
     }
 
     var articleImageSlotFrameForTesting: CGRect { articleImageView.frame }
+#if DEBUG
+    private(set) var articleImageFadeCountForTesting = 0
+    var articleImageIsFadingForTesting: Bool {
+        articleImageView.layer.animation(forKey: Self.articleImageFadeKey) != nil
+    }
+#endif
     var articleImageForTesting: UIImage? { articleImageView.image }
     var articleImageSlotIsHiddenForTesting: Bool { articleImageView.isHidden }
 #if DEBUG
@@ -2244,7 +2277,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
 
     var layoutDiagnosticsForTesting: LayoutDiagnostics {
         func frame(_ view: UIView) -> CGRect { view.convert(view.bounds, to: contentView) }
-        return .init(contentBounds: contentView.bounds, margins: contentView.directionalLayoutMargins, variant: currentLayoutVariant, imageFrame: frame(articleImageView), textStackFrame: frame(textStack), titleFrame: frame(titleLabel), starFrame: frame(starImageView), metadataFrame: frame(metadataRow), unreadFrame: frame(unreadIndicator), feedIconFrame: frame(feedIconContainer), feedTitleFrame: frame(feedTitleLabel), commentsFrame: commentsContainer.isHidden ? nil : frame(commentsContainer), dateFrame: frame(dateLabel), previewFrame: previewLabel.isHidden ? nil : frame(previewLabel))
+        return .init(contentBounds: contentView.bounds, margins: contentView.directionalLayoutMargins, variant: currentLayoutVariant, imageFrame: frame(articleImageView), textStackFrame: frame(textContainer), titleFrame: frame(titleLabel), starFrame: frame(starImageView), metadataFrame: frame(metadataRow), unreadFrame: frame(unreadIndicator), feedIconFrame: frame(feedIconContainer), feedTitleFrame: frame(feedTitleLabel), commentsFrame: commentsContainer.isHidden ? nil : frame(commentsContainer), dateFrame: frame(dateLabel), previewFrame: previewLabel.isHidden ? nil : frame(previewLabel))
     }
 
     var portraitAspectConstraintDiagnosticsForTesting: (multiplier: CGFloat, constant: CGFloat, priority: UILayoutPriority, imageFrame: CGRect, contentBounds: CGRect, margins: NSDirectionalEdgeInsets, displayScale: CGFloat) {
@@ -2288,7 +2321,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
         guard let articleID = representedArticleID else { return }
         representedImageRequest = request
         if let cachedImage = articleImagePipeline.cachedImage(for: request) {
-            presentArticleImage(cachedImage, displayScale: displayScale)
+            // Already available before the cell is displayed: nothing to fade.
+            presentArticleImage(cachedImage, displayScale: displayScale, animated: false)
             return
         }
 
@@ -2303,7 +2337,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
                       self.representedArticleID == articleID,
                       self.representedImageRequest == request
                 else { return }
-                self.presentArticleImage(loadedImage, displayScale: displayScale)
+                // The cell is already on screen showing its placeholder. Swapping
+                // the pixels in one frame is a content jump, and at a steady 60 fps
+                // that reads as a stutter even though no frame was late.
+                self.presentArticleImage(loadedImage, displayScale: displayScale, animated: true)
             } catch {
                 guard !Task.isCancelled,
                       let self,
@@ -2316,8 +2353,20 @@ final class IOSUIKitArticleCell: UITableViewCell {
         }
     }
 
-    private func presentArticleImage(_ image: CGImage, displayScale: CGFloat) {
+    private static let articleImageFadeDuration: CFTimeInterval = 0.2
+    private static let articleImageFadeKey = "flux.articleImageFade"
+
+    private func presentArticleImage(_ image: CGImage, displayScale: CGFloat, animated: Bool) {
         IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.measuring(.articleImageAssigned) {
+            if animated {
+#if DEBUG
+                articleImageFadeCountForTesting &+= 1
+#endif
+                let fade = CATransition()
+                fade.type = .fade
+                fade.duration = Self.articleImageFadeDuration
+                articleImageView.layer.add(fade, forKey: Self.articleImageFadeKey)
+            }
             // Use the physical display scale for UIImage semantics. Fixed
             // image-view constraints remain authoritative for the slot.
             articleImageView.image = UIImage(cgImage: image, scale: displayScale, orientation: .up)
@@ -2328,6 +2377,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
     }
 
     private func clearArticleImagePresentation() {
+        articleImageView.layer.removeAnimation(forKey: Self.articleImageFadeKey)
         articleImageView.image = nil
         articleImageView.isOpaque = false
         imagePlaceholder.isHidden = false

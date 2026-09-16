@@ -549,6 +549,56 @@ struct ContentView: View {
     }
 }
 
+// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
+private struct ArticleListTitleCapsule: View {
+    let title: String
+    let subtitle: String?
+
+    var body: some View {
+        VStack(spacing: 1) {
+            Text(title)
+                .font(.headline)
+                .lineLimit(1)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 9)
+        .background { ArticleListTitleCapsuleBackground() }
+        .padding(.top, 6)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct ArticleListTitleCapsuleBackground: View {
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            ArticleListGlassCapsule()
+        } else {
+            // iOS 18 has no glass material; the closest stock equivalent.
+            Capsule().fill(.regularMaterial)
+        }
+    }
+}
+
+@available(iOS 26.0, *)
+private struct ArticleListGlassCapsule: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        let effect = UIGlassEffect(style: .regular)
+        effect.isInteractive = false
+        let view = UIVisualEffectView(effect: effect)
+        // Resolves the capsule shape without a mask layer.
+        view.cornerConfiguration = .capsule()
+        return view
+    }
+
+    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {}
+}
+
 enum ArticleListTitlePresentation {
     static func title(scope: BrowserScope, catalog: NavigationCatalog) -> String {
         scopeTitle(scope: scope, catalog: catalog)
@@ -615,12 +665,27 @@ enum IOSSyncButtonPresentation {
 private struct ArticleListNavigationChrome<Content: View>: View {
     var store: NewsreaderStore
     @ViewBuilder let content: () -> Content
+    // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
+    @AppStorage(IOSUIKitTimelineNavigationChromeDiagnostic.defaultsKey)
+    private var chromeArm = IOSUIKitTimelineNavigationChromeDiagnostic.Arm.system.rawValue
 
     var body: some View {
         let title = ArticleListTitlePresentation.title(scope: store.scope, catalog: store.catalog)
         let subtitle = ArticleListCounterPresentation.expandedLabel(scope: store.scope, unreadOnly: store.unreadOnly, count: store.selectionTotal)
 
-        if #available(iOS 26.0, *) {
+        if chromeArm == IOSUIKitTimelineNavigationChromeDiagnostic.Arm.glassCapsule.rawValue {
+            // The bar keeps its controls but carries no title, so it reserves no
+            // large-title strip for the edge effect to sample.
+            content()
+                .navigationTitle("")
+                .navigationBarTitleDisplayMode(.inline)
+                .overlay(alignment: .top) {
+                    ArticleListTitleCapsule(
+                        title: title,
+                        subtitle: ArticleListCounterPresentation.usesNativeSubtitle(showArticleCount: store.showArticleCount, supportsNativeSubtitle: true) ? subtitle : nil
+                    )
+                }
+        } else if #available(iOS 26.0, *) {
             if ArticleListCounterPresentation.usesNativeSubtitle(showArticleCount: store.showArticleCount, supportsNativeSubtitle: true) {
                 content()
                     .navigationTitle(title)

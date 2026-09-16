@@ -2519,6 +2519,98 @@ final class NewsreaderPresentationTests: XCTestCase {
     /// constraints would produce and asserts the engine agrees with it. That is
     /// the independent cross-check: if the two ever diverge, rows are laid out at
     /// a height their content does not fit.
+    /// The reason the text column is a plain container instead of a
+    /// `UIStackView`: setting `isHidden` on an arranged subview makes the stack
+    /// add and remove constraints, and `previewLabel.isHidden` is set on every
+    /// `configure`. Reuse must not touch the constraint graph at all.
+    @MainActor
+    func testReconfiguringBetweenArticlesWithAndWithoutPreviewLeavesTheConstraintGraphUnchanged() {
+        let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: 390, height: 1_000))
+        cell.setArticleImagePipelineForTesting(ArticleImagePipeline { _ in throw CancellationError() })
+        cell.articleImageUsesDisplayP3 = { false }
+
+        func configure(preview: String) {
+            let item = oracleItem(title: "Oracle title", preview: preview, hasImage: false, hasComments: false)
+            let input = IOSUIKitArticleLayoutInput(item: item, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 3, contentSizeCategory: .large, layoutDirection: .leftToRight)
+            cell.configure(item: item, mode: .visual, previewLines: .standard, metrics: .init(mode: .visual, containerWidth: 390), displayScale: 3, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
+            cell.setNeedsLayout()
+            cell.layoutIfNeeded()
+        }
+
+        configure(preview: "A preview that occupies the collapsible row.")
+        let baseline = totalConstraintCount(cell.contentView)
+        XCTAssertGreaterThan(baseline, 0)
+
+        configure(preview: "")
+        XCTAssertEqual(totalConstraintCount(cell.contentView), baseline)
+        XCTAssertNil(cell.layoutDiagnosticsForTesting.previewFrame)
+
+        configure(preview: "And back to a populated preview.")
+        XCTAssertEqual(totalConstraintCount(cell.contentView), baseline)
+        XCTAssertNotNil(cell.layoutDiagnosticsForTesting.previewFrame)
+    }
+
+    @MainActor
+    private func totalConstraintCount(_ view: UIView) -> Int {
+        view.constraints.count + view.subviews.reduce(0) { $0 + totalConstraintCount($1) }
+    }
+
+    /// The percentiles are read straight off the bucket histogram, so their
+    /// arithmetic has to be right before any A/B decision rests on them.
+    func testBusyPercentilesAndHalfBudgetRateAreDerivedFromTheBucketHistogram() {
+        let bounds = IOSUIKitTimelineFrameHeadroomRecorder.busyBucketUpperBoundsMilliseconds
+        // 100 frames: 90 at or below 2 ms, 5 in the 8-10 ms bucket, 5 above 20 ms.
+        var buckets = [UInt64](repeating: 0, count: bounds.count + 1)
+        buckets[0] = 90
+        buckets[4] = 5
+        buckets[8] = 5
+        let snapshot = IOSUIKitTimelineFrameHeadroomSnapshot(
+            sampledFrames: 100, skippedVSyncs: 0, callbackGapSamples: 100, lateCallbacks: 0,
+            missedRefreshes: 0, maximumCallbackGapMilliseconds: 0, unyieldedFrames: 0,
+            expectedFrameNanoseconds: 16_600_000, totalBusyNanoseconds: 0,
+            maximumBusyNanoseconds: 0, busyBuckets: buckets,
+            contentHeightChanges: 0, maximumContentHeightJump: 0, totalContentHeightDrift: 0,
+            deceleratingSamples: 0, deceleratingDiscontinuities: 0, maximumDeceleratingExcess: 0,
+            deceleratingRuns: 0
+        )
+
+        XCTAssertEqual(snapshot.busyPercentileMilliseconds(0.50), 2.0 * (50.0 / 90.0), accuracy: 0.01)
+        XCTAssertEqual(snapshot.busyPercentileMilliseconds(0.90), 2.0, accuracy: 0.01)
+        // 91st..95th frame sit in the 8-10 ms bucket.
+        XCTAssertEqual(snapshot.busyPercentileMilliseconds(0.93), 8.0 + 2.0 * (3.0 / 5.0), accuracy: 0.01)
+        XCTAssertGreaterThan(snapshot.busyPercentileMilliseconds(0.99), 16.7)
+
+        // Half of 16.6 ms is 8.3 ms, so only buckets whose lower bound is at or
+        // above that count: the 8-10 bucket starts at 8 and must not.
+        XCTAssertEqual(snapshot.framesOverHalfBudget, 5)
+    }
+
+    /// A cached image is set before the cell is displayed, so fading it would
+    /// add an animation to every appearing row. Only a late arrival replaces
+    /// pixels that are already on screen, and only that is a visible jump.
+    @MainActor
+    func testOnlyLateArrivingArticleImagesFadeIn() async throws {
+        let data = try imageData(width: 1_200, height: 700)
+        let counter = ImageLoadCounter(data: data)
+        let pipeline = ArticleImagePipeline { _ in await counter.load() }
+        let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
+
+        let arriving = configuredArticleImageTestCell(item: item, pipeline: pipeline)
+        await waitForArticleImagePresentation { arriving.articleImageForTesting != nil }
+        XCTAssertEqual(arriving.articleImageFadeCountForTesting, 1)
+
+        // Same request, now served from the pipeline cache during `configure`.
+        let cached = configuredArticleImageTestCell(item: item, pipeline: pipeline)
+        XCTAssertNotNil(cached.articleImageForTesting)
+        XCTAssertEqual(cached.articleImageFadeCountForTesting, 0)
+
+        // Whether the transition is still attached is not assertable here: a cell
+        // outside a window is never rendered, so Core Animation drops it at once.
+        // The contract under test is which path adds one.
+        arriving.prepareForReuse()
+        XCTAssertNil(arriving.articleImageForTesting)
+    }
+
     @MainActor
     private func measureUIKitArticleCell(_ cell: IOSUIKitArticleCell, width: CGFloat) -> CGFloat {
         cell.frame.size.width = width

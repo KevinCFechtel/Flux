@@ -7,6 +7,8 @@ struct DeveloperDiagnosticsView: View {
     @State private var scrollEdgeEffectArm = IOSUIKitTimelineScrollEdgeEffectDiagnostic.arm
     @AppStorage(IOSUIKitTimelineScrolloverOverlayDiagnostic.defaultsKey)
     private var scrolloverOverlayArm = IOSUIKitTimelineScrolloverOverlayDiagnostic.Arm.material.rawValue
+    @AppStorage(IOSUIKitTimelineNavigationChromeDiagnostic.defaultsKey)
+    private var navigationChromeArm = IOSUIKitTimelineNavigationChromeDiagnostic.Arm.system.rawValue
     @State private var frameHeadroom = IOSUIKitTimelineFrameHeadroomDiagnostics.formattedSnapshot()
 
     var body: some View {
@@ -38,6 +40,11 @@ struct DeveloperDiagnosticsView: View {
                     }
                     Picker("Scrollover Undo pill", selection: $scrolloverOverlayArm) {
                         ForEach(IOSUIKitTimelineScrolloverOverlayDiagnostic.Arm.allCases) { arm in
+                            Text(arm.label).tag(arm.rawValue)
+                        }
+                    }
+                    Picker("Title presentation", selection: $navigationChromeArm) {
+                        ForEach(IOSUIKitTimelineNavigationChromeDiagnostic.Arm.allCases) { arm in
                             Text(arm.label).tag(arm.rawValue)
                         }
                     }

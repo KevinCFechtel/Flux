@@ -124,6 +124,36 @@ enum IOSUIKitTimelineScrolloverOverlayDiagnostic {
     }
 }
 
+/// Runtime arm for how the Timeline's title is presented.
+///
+/// The measured cost of the scroll edge effect comes from continuously sampling
+/// a full-width strip of scrolling content. A floating capsule samples only its
+/// own bounds, so pairing `glassCapsule` with the edge effect switched off keeps
+/// the iOS 26 material while shrinking the sampled area to a fraction.
+enum IOSUIKitTimelineNavigationChromeDiagnostic {
+    static let defaultsKey = "flux.diagnostic.navigationChromeArm"
+
+    enum Arm: String, CaseIterable, Identifiable {
+        /// Shipping behaviour: large title with the native subtitle.
+        case system
+        /// Title and subtitle in a floating glass capsule; the bar carries no title.
+        case glassCapsule
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .system: return "Large title (shipping)"
+            case .glassCapsule: return "Glass capsule"
+            }
+        }
+    }
+
+    static var arm: Arm {
+        UserDefaults.standard.string(forKey: defaultsKey).flatMap(Arm.init(rawValue:)) ?? .system
+    }
+}
+
 struct IOSUIKitTimelineFrameHeadroomSnapshot: Equatable {
     /// Display frames in which the main thread ran at least once.
     let sampledFrames: UInt64
@@ -166,6 +196,58 @@ struct IOSUIKitTimelineFrameHeadroomSnapshot: Equatable {
 
     var averageBusyNanoseconds: UInt64 {
         sampledFrames == 0 ? 0 : totalBusyNanoseconds / sampledFrames
+    }
+
+    /// Main-thread occupancy at a given percentile, interpolated inside the
+    /// bucket it falls into.
+    ///
+    /// Counting missed frames means counting ~15 rare events per session, which
+    /// carries a ~26 % relative error — too coarse to resolve a change of the
+    /// size we are looking for. Occupancy is continuous and has one sample per
+    /// frame, so its upper percentiles resolve the same change in a single
+    /// session. This only sees render-server cost when the commit actually
+    /// blocks the main thread; a GPU that is behind without blocking stays
+    /// invisible to any in-process measurement.
+    func busyPercentileMilliseconds(_ percentile: Double) -> Double {
+        guard sampledFrames > 0 else { return 0 }
+        let bounds = IOSUIKitTimelineFrameHeadroomRecorder.busyBucketUpperBoundsMilliseconds
+        let target = Double(sampledFrames) * percentile
+        var cumulative = 0.0
+        for (index, count) in busyBuckets.enumerated() {
+            let next = cumulative + Double(count)
+            if next >= target, count > 0 {
+                let lower = index == 0 ? 0 : bounds[index - 1]
+                let upper = index < bounds.count ? bounds[index] : bounds[bounds.count - 1] * 1.5
+                return lower + (upper - lower) * ((target - cumulative) / Double(count))
+            }
+            cumulative = next
+        }
+        return bounds[bounds.count - 1]
+    }
+
+    /// The bucket edge actually used by `framesOverHalfBudget`. Buckets are
+    /// counted whole, so the effective threshold is the first edge at or above
+    /// half the budget — printed alongside the count so the number is not read
+    /// as something finer than it is.
+    var busyThresholdMilliseconds: Double {
+        guard expectedFrameNanoseconds > 0 else { return 0 }
+        let bounds = IOSUIKitTimelineFrameHeadroomRecorder.busyBucketUpperBoundsMilliseconds
+        let half = Double(expectedFrameNanoseconds) / 2_000_000
+        return bounds.first { $0 >= half } ?? half
+    }
+
+    /// Frames busier than `busyThresholdMilliseconds`. Several times as many
+    /// events as a missed frame, so the rate is correspondingly better resolved.
+    var framesOverHalfBudget: UInt64 {
+        guard expectedFrameNanoseconds > 0 else { return 0 }
+        let bounds = IOSUIKitTimelineFrameHeadroomRecorder.busyBucketUpperBoundsMilliseconds
+        let half = Double(expectedFrameNanoseconds) / 2_000_000
+        var total: UInt64 = 0
+        for (index, count) in busyBuckets.enumerated() {
+            let lower = index == 0 ? 0 : bounds[index - 1]
+            if lower >= half { total &+= count }
+        }
+        return total
     }
 
     /// Share of sampled frames whose main-thread work alone exceeded the frame
@@ -616,6 +698,16 @@ enum IOSUIKitTimelineFrameHeadroomDiagnostics {
         lines.append(String(format: "busy avg %.2f ms  max %.2f ms",
                             Double(snapshot.averageBusyNanoseconds) / 1_000_000,
                             Double(snapshot.maximumBusyNanoseconds) / 1_000_000))
+        lines.append(String(format: "busy p50 %.1f  p90 %.1f  p95 %.1f  p99 %.1f ms",
+                            snapshot.busyPercentileMilliseconds(0.50),
+                            snapshot.busyPercentileMilliseconds(0.90),
+                            snapshot.busyPercentileMilliseconds(0.95),
+                            snapshot.busyPercentileMilliseconds(0.99)))
+        let halfBudget = snapshot.framesOverHalfBudget
+        lines.append(String(format: "busyOver%.0fms %llu/%llu (%.2f %%)",
+                            snapshot.busyThresholdMilliseconds,
+                            halfBudget, snapshot.sampledFrames,
+                            snapshot.sampledFrames == 0 ? 0 : Double(halfBudget) / Double(snapshot.sampledFrames) * 100))
         if let rate = snapshot.mainThreadOverBudgetRate {
             lines.append(String(format: "mainThreadOverBudget %.2f %%", rate * 100))
         }
