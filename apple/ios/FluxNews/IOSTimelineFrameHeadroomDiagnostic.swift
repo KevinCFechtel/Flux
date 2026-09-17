@@ -249,6 +249,43 @@ final class IOSUIKitTimelineTopScrimView: UIView {
     }
 }
 
+/// Runtime arm for the title capsule's background material.
+///
+/// Blur cost is driven by sampled area and pass count, not by colour — but the
+/// glass reportedly switches between a milky and a near-clear appearance
+/// depending on its backdrop, and those may not cost the same. In light mode
+/// over bright content it would sit in the milky state almost permanently.
+/// These arms separate "the glass", "how strong the glass is" and "no glass".
+enum IOSUIKitTimelineCapsuleMaterialDiagnostic {
+    static let defaultsKey = "flux.diagnostic.capsuleMaterialArm"
+
+    enum Arm: String, CaseIterable, Identifiable {
+        /// Shipping behaviour.
+        case glassRegular
+        /// The cheaper-looking glass style, if it is also cheaper to render.
+        case glassClear
+        /// Pre-iOS-26 blur, for comparison against the glass.
+        case material
+        /// No backdrop sampling at all — the control case.
+        case opaque
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .glassRegular: return "Glass regular (shipping)"
+            case .glassClear: return "Glass clear"
+            case .material: return "Material"
+            case .opaque: return "Opaque"
+            }
+        }
+    }
+
+    static var arm: Arm {
+        UserDefaults.standard.string(forKey: defaultsKey).flatMap(Arm.init(rawValue:)) ?? .glassRegular
+    }
+}
+
 struct IOSUIKitTimelineFrameHeadroomSnapshot: Equatable {
     /// Display frames in which the main thread ran at least once.
     let sampledFrames: UInt64

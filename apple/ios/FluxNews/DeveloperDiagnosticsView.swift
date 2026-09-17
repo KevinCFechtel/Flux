@@ -9,6 +9,8 @@ struct DeveloperDiagnosticsView: View {
     private var scrolloverOverlayArm = IOSUIKitTimelineScrolloverOverlayDiagnostic.Arm.material.rawValue
     @AppStorage(IOSUIKitTimelineNavigationChromeDiagnostic.defaultsKey)
     private var navigationChromeArm = IOSUIKitTimelineNavigationChromeDiagnostic.Arm.system.rawValue
+    @AppStorage(IOSUIKitTimelineCapsuleMaterialDiagnostic.defaultsKey)
+    private var capsuleMaterialArm = IOSUIKitTimelineCapsuleMaterialDiagnostic.Arm.glassRegular.rawValue
     @State private var statusBarScrimArm = IOSUIKitTimelineStatusBarScrimDiagnostic.arm
     @State private var frameHeadroom = IOSUIKitTimelineFrameHeadroomDiagnostics.formattedSnapshot()
 
@@ -46,6 +48,11 @@ struct DeveloperDiagnosticsView: View {
                     }
                     Picker("Title presentation", selection: $navigationChromeArm) {
                         ForEach(IOSUIKitTimelineNavigationChromeDiagnostic.Arm.allCases) { arm in
+                            Text(arm.label).tag(arm.rawValue)
+                        }
+                    }
+                    Picker("Capsule material", selection: $capsuleMaterialArm) {
+                        ForEach(IOSUIKitTimelineCapsuleMaterialDiagnostic.Arm.allCases) { arm in
                             Text(arm.label).tag(arm.rawValue)
                         }
                     }

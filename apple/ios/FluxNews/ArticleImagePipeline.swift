@@ -20,6 +20,41 @@ enum IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic {
     }
 }
 
+/// Opaque colour the rounded corner cut-outs are filled with.
+///
+/// Baking the corners into the raster avoids a mask layer at composite time,
+/// but clearing them to transparent forces an alpha channel onto the whole
+/// bitmap — and Core Animation then blends every pixel of every article image
+/// in every frame, purely to show four corner arcs. Filling the corners with
+/// the opaque colour that sits behind the image instead lets the raster ship
+/// without alpha, so the layer can be marked opaque and skipped by the blender.
+///
+/// Quantised to 8 bits because that is the precision the bitmap stores anyway,
+/// which keeps the cache key stable against float noise.
+struct ArticleImageBackdrop: Hashable, Sendable {
+    let red: UInt8
+    let green: UInt8
+    let blue: UInt8
+
+    init(red: UInt8, green: UInt8, blue: UInt8) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+    }
+
+    /// The two colours `UIColor.systemBackground` actually resolves to, for the
+    /// rare case where it cannot be read as RGB.
+    static let white = ArticleImageBackdrop(red: UInt8(255), green: UInt8(255), blue: UInt8(255))
+    static let black = ArticleImageBackdrop(red: UInt8(0), green: UInt8(0), blue: UInt8(0))
+
+    init(components red: CGFloat, green: CGFloat, blue: CGFloat) {
+        func quantise(_ value: CGFloat) -> UInt8 {
+            UInt8(max(0, min(255, (value * 255).rounded())))
+        }
+        self.init(red: quantise(red), green: quantise(green), blue: quantise(blue))
+    }
+}
+
 struct ArticleImageRequest: Hashable, Sendable {
     let url: URL
     let maxPixelDimension: Int
@@ -31,6 +66,10 @@ struct ArticleImageRequest: Hashable, Sendable {
     /// to the pixel count. The raster is produced in the display's gamut so that
     /// conversion never happens.
     let usesDisplayP3: Bool
+    /// When set, the raster is produced without an alpha channel and the corner
+    /// cut-outs are filled with this colour. `nil` keeps the transparent-corner
+    /// behaviour, which callers that draw over an unknown background need.
+    let backdrop: ArticleImageBackdrop?
 
     init(
         url: URL,
@@ -38,7 +77,8 @@ struct ArticleImageRequest: Hashable, Sendable {
         displayScale: CGFloat,
         cornerRadius: CGFloat = 0,
         rasterScale: CGFloat? = nil,
-        usesDisplayP3: Bool = false
+        usesDisplayP3: Bool = false,
+        backdrop: ArticleImageBackdrop? = nil
     ) {
         let scale = max(rasterScale ?? displayScale, 1)
         let pixels = max(targetSize.width, targetSize.height) * scale
@@ -51,7 +91,17 @@ struct ArticleImageRequest: Hashable, Sendable {
         cornerRadiusPixels = max(0, (cornerRadius * scale).rounded())
         self.rasterScale = scale
         self.usesDisplayP3 = usesDisplayP3
+        self.backdrop = backdrop
         self.url = url
+    }
+
+    /// True when the produced raster carries no alpha channel, so the presenting
+    /// layer may be marked opaque.
+    var producesOpaqueRaster: Bool { backdrop != nil }
+
+    private var backdropKeyComponent: String {
+        guard let backdrop else { return "alpha" }
+        return "\(backdrop.red),\(backdrop.green),\(backdrop.blue)"
     }
 }
 
@@ -465,7 +515,8 @@ actor ArticleImagePipeline {
             image,
             targetPixelSize: request.targetPixelSize,
             cornerRadiusPixels: request.cornerRadiusPixels,
-            usesDisplayP3: request.usesDisplayP3
+            usesDisplayP3: request.usesDisplayP3,
+            backdrop: request.backdrop
         ) ?? image
     }
 
@@ -489,7 +540,8 @@ actor ArticleImagePipeline {
         _ image: CGImage,
         targetPixelSize: CGSize,
         cornerRadiusPixels: CGFloat,
-        usesDisplayP3: Bool
+        usesDisplayP3: Bool,
+        backdrop: ArticleImageBackdrop?
     ) -> CGImage? {
         let width = max(1, Int(targetPixelSize.width.rounded()))
         let height = max(1, Int(targetPixelSize.height.rounded()))
@@ -502,11 +554,24 @@ actor ArticleImagePipeline {
             bitsPerComponent: 8,
             bytesPerRow: 0,
             space: colorSpace,
-            bitmapInfo: displayBitmapInfo
+            bitmapInfo: backdrop == nil ? translucentBitmapInfo : displayBitmapInfo
         ) else { return nil }
         context.interpolationQuality = .medium
         let destination = CGRect(x: 0, y: 0, width: width, height: height)
-        context.clear(destination)
+        if let backdrop {
+            // The corners are the only pixels the photo does not cover, and they
+            // sit directly on this colour. Painting it here is what lets the
+            // raster ship without an alpha channel.
+            context.setFillColor(
+                red: CGFloat(backdrop.red) / 255,
+                green: CGFloat(backdrop.green) / 255,
+                blue: CGFloat(backdrop.blue) / 255,
+                alpha: 1
+            )
+            context.fill(destination)
+        } else {
+            context.clear(destination)
+        }
         if cornerRadiusPixels > 0 {
             let radius = min(cornerRadiusPixels, min(destination.width, destination.height) / 2)
             context.addPath(CGPath(
@@ -529,7 +594,14 @@ actor ArticleImagePipeline {
         return context.makeImage()
     }
 
+    /// Native 32-bit BGRX: the display's byte order, no alpha channel. Core
+    /// Animation neither converts nor blends a layer backed by this.
     private nonisolated static var displayBitmapInfo: UInt32 {
+        CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue
+    }
+
+    /// Native byte order with alpha, for callers that need transparent corners.
+    private nonisolated static var translucentBitmapInfo: UInt32 {
         CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
     }
 }
@@ -545,7 +617,7 @@ private extension ArticleImagePipeline.Demand {
 
 private extension ArticleImageRequest {
     var cacheKey: NSString {
-        "\(url.absoluteString)|\(maxPixelDimension)|\(Int(targetPixelSize.width))x\(Int(targetPixelSize.height))|\(Int(cornerRadiusPixels))|scale=\(Int((rasterScale * 100).rounded()))|p3=\(usesDisplayP3 ? 1 : 0)" as NSString
+        "\(url.absoluteString)|\(maxPixelDimension)|\(Int(targetPixelSize.width))x\(Int(targetPixelSize.height))|\(Int(cornerRadiusPixels))|scale=\(Int((rasterScale * 100).rounded()))|p3=\(usesDisplayP3 ? 1 : 0)|bg=\(backdropKeyComponent)" as NSString
     }
 }
 

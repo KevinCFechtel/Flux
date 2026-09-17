@@ -635,9 +635,27 @@ private struct ArticleListTitleCapsule: View {
 }
 
 private struct ArticleListTitleCapsuleBackground: View {
+    // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
+    @AppStorage(IOSUIKitTimelineCapsuleMaterialDiagnostic.defaultsKey)
+    private var arm = IOSUIKitTimelineCapsuleMaterialDiagnostic.Arm.glassRegular.rawValue
+
     var body: some View {
+        switch IOSUIKitTimelineCapsuleMaterialDiagnostic.Arm(rawValue: arm) ?? .glassRegular {
+        case .opaque:
+            Capsule().fill(Color(uiColor: .secondarySystemBackground))
+        case .material:
+            Capsule().fill(.regularMaterial)
+        case .glassClear:
+            glass(clear: true)
+        case .glassRegular:
+            glass(clear: false)
+        }
+    }
+
+    @ViewBuilder
+    private func glass(clear: Bool) -> some View {
         if #available(iOS 26.0, *) {
-            ArticleListGlassCapsule()
+            ArticleListGlassCapsule(clear: clear)
         } else {
             // iOS 18 has no glass material; the closest stock equivalent.
             Capsule().fill(.regularMaterial)
@@ -647,8 +665,10 @@ private struct ArticleListTitleCapsuleBackground: View {
 
 @available(iOS 26.0, *)
 private struct ArticleListGlassCapsule: UIViewRepresentable {
+    let clear: Bool
+
     func makeUIView(context: Context) -> UIVisualEffectView {
-        let effect = UIGlassEffect(style: .regular)
+        let effect = UIGlassEffect(style: clear ? .clear : .regular)
         effect.isInteractive = false
         let view = UIVisualEffectView(effect: effect)
         // Resolves the capsule shape without a mask layer.
@@ -656,7 +676,11 @@ private struct ArticleListGlassCapsule: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {}
+    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
+        let effect = UIGlassEffect(style: clear ? .clear : .regular)
+        effect.isInteractive = false
+        uiView.effect = effect
+    }
 
     /// A `UIVisualEffectView` has no useful intrinsic size, so the representable
     /// has to answer for it. Returning the proposal unchanged also returns

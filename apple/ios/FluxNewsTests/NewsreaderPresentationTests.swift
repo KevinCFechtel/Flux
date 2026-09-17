@@ -1148,6 +1148,66 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleImagePipeline.memoryCost(of: image), 722 * 406 * 4)
     }
 
+    func testBackdropRasterDropsTheAlphaChannelAndPaintsTheCornersWithTheBackdrop() throws {
+        let targetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
+        let request = ArticleImageRequest(
+            url: URL(string: "https://example.com/image.jpg")!,
+            targetSize: targetSize,
+            displayScale: 3,
+            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
+            backdrop: .black
+        )
+        XCTAssertTrue(request.producesOpaqueRaster)
+
+        let image = try ArticleImagePipeline.downsample(
+            data: horizontalBandPNGData(width: 10, height: 30),
+            request: request
+        )
+
+        // No alpha channel at all: this is what lets the presenting layer be
+        // marked opaque, so Core Animation skips blending the largest composited
+        // area in the cell.
+        XCTAssertEqual(image.alphaInfo, .noneSkipFirst)
+        XCTAssertTrue(image.bitmapInfo.contains(.byteOrder32Little))
+        XCTAssertEqual(ArticleImagePipeline.memoryCost(of: image), image.width * image.height * 4)
+
+        // The corner is outside the rounded clip and therefore carries the
+        // backdrop, where the translucent path would leave transparency.
+        let corner = pixel(at: .zero, in: image)
+        XCTAssertEqual(corner.red, 0)
+        XCTAssertEqual(corner.green, 0)
+        XCTAssertEqual(corner.blue, 0)
+
+        // The photo itself is untouched.
+        let centre = pixel(at: .init(x: image.width / 2, y: image.height / 2), in: image)
+        XCTAssertEqual(centre.red, 0)
+        XCTAssertEqual(centre.green, 255)
+        XCTAssertEqual(centre.blue, 0)
+    }
+
+    func testLightAndDarkRastersCannotAliasInTheMemoryCache() async throws {
+        let data = try imageData(width: 2_400, height: 1_200)
+        let counter = ImageLoadCounter(data: data)
+        let pipeline = ArticleImagePipeline { _ in await counter.load() }
+        let targetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
+        func request(_ backdrop: ArticleImageBackdrop?) -> ArticleImageRequest {
+            ArticleImageRequest(
+                url: URL(string: "https://example.com/image.jpg")!, targetSize: targetSize, displayScale: 3,
+                cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius, backdrop: backdrop
+            )
+        }
+
+        _ = try await pipeline.prefetch(request(.white))
+
+        // The appearance is baked into the corners, so serving the light raster
+        // to a dark cell would show white corners on black.
+        XCTAssertNotEqual(request(.white), request(.black))
+        XCTAssertNotNil(pipeline.cachedImage(for: request(.white)))
+        XCTAssertNil(pipeline.cachedImage(for: request(.black)))
+        XCTAssertNil(pipeline.cachedImage(for: request(nil)))
+        XCTAssertFalse(request(nil).producesOpaqueRaster)
+    }
+
     func testTwoXDiagnosticUsesRealLoaderCacheAndCannotAliasThreeXRaster() async throws {
         let data = try imageData(width: 2_400, height: 1_200)
         let counter = ImageLoadCounter(data: data)
@@ -1180,9 +1240,14 @@ final class NewsreaderPresentationTests: XCTestCase {
         let pipeline = ArticleImagePipeline { _ in await counter.load() }
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
         let metrics = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 390)
+        // The cell bakes its own appearance into the raster's corners, so the
+        // prefetched request only hits its cache if it resolves the same backdrop.
+        let backdrop = IOSUIKitArticleCell.articleImageBackdrop(
+            for: IOSUIKitArticleCell(frame: .zero).traitCollection
+        )
         let request = ArticleImageRequest(
             url: try XCTUnwrap(item.content.imageURL), targetSize: metrics.imageSize(hasImage: true), displayScale: 3,
-            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius, rasterScale: 2
+            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius, rasterScale: 2, backdrop: backdrop
         )
         let cached = try await pipeline.prefetch(request)
         let cell = configuredArticleImageTestCell(item: item, pipeline: pipeline, rasterScale: 2)

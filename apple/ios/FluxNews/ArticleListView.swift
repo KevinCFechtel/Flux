@@ -904,6 +904,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self, UITraitLayoutDirection.self]) { (self: Self, _) in
             self.updateGeometryIfNeeded()
         }
+        // The raster bakes the appearance's background into its corners, so a
+        // light/dark switch makes every cached raster stale. Geometry is
+        // unaffected, so only the image bindings need to run again.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
+            self.reconfigureVisibleCells(needsLayout: false)
+        }
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -1622,7 +1628,10 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             rasterScale: IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(
                 displayScale: view.traitCollection.displayScale
             ),
-            usesDisplayP3: view.traitCollection.displayGamut == .P3
+            usesDisplayP3: view.traitCollection.displayGamut == .P3,
+            // Must match the cell's request exactly, or every prefetched raster
+            // is cached under a key no cell ever asks for.
+            backdrop: IOSUIKitArticleCell.articleImageBackdrop(for: view.traitCollection)
         )
     }
 
@@ -1965,6 +1974,21 @@ final class IOSUIKitArticleCell: UITableViewCell {
     /// resolved base already carries the high-contrast variant, but multiplying
     /// it down again takes part of that away. Under high contrast the supporting
     /// text therefore runs at full strength.
+    /// The cell's own background, resolved for the current appearance. The image
+    /// sits directly on it, so filling the raster's corner cut-outs with it is
+    /// indistinguishable from leaving them transparent — while letting the
+    /// raster drop its alpha channel.
+    static func articleImageBackdrop(for traits: UITraitCollection) -> ArticleImageBackdrop {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        let resolved = UIColor.systemBackground.resolvedColor(with: traits)
+        guard resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            // Monochrome or unconvertible: fall back to the extremes the system
+            // background actually uses.
+            return traits.userInterfaceStyle == .dark ? .black : .white
+        }
+        return .init(components: red, green: green, blue: blue)
+    }
+
     private static let supportingTextColor = UIColor { traits in
         let alpha: CGFloat = traits.accessibilityContrast == .high ? 1 : 0.8
         return UIColor.label.resolvedColor(with: traits).withAlphaComponent(alpha)
@@ -2437,7 +2461,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
             displayScale: displayScale,
             cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
             rasterScale: articleImageRasterScale(displayScale),
-            usesDisplayP3: articleImageUsesDisplayP3?() ?? (traitCollection.displayGamut == .P3)
+            usesDisplayP3: articleImageUsesDisplayP3?() ?? (traitCollection.displayGamut == .P3),
+            backdrop: Self.articleImageBackdrop(for: traitCollection)
         )
         guard articleChanged || representedImageRequest != request else { return }
         performanceMetrics?.recordImageBinding()
@@ -2495,7 +2520,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
             // Use the physical display scale for UIImage semantics. Fixed
             // image-view constraints remain authoritative for the slot.
             articleImageView.image = UIImage(cgImage: image, scale: displayScale, orientation: .up)
-            articleImageView.isOpaque = false
+            // An alpha-free raster covering the whole slot lets Core Animation
+            // skip blending it — the single largest composited area per cell.
+            articleImageView.isOpaque = representedImageRequest?.producesOpaqueRaster ?? false
             imagePlaceholder.isHidden = true
             setArticleImagePresentation(loaded: true)
         }
@@ -2504,6 +2531,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private func clearArticleImagePresentation() {
         articleImageView.layer.removeAnimation(forKey: Self.articleImageFadeKey)
         articleImageView.image = nil
+        // The placeholder state has rounded corners of its own and must blend.
         articleImageView.isOpaque = false
         imagePlaceholder.isHidden = false
         setArticleImagePresentation(loaded: false)
@@ -2517,7 +2545,12 @@ final class IOSUIKitArticleCell: UITableViewCell {
         } else {
             articleImageView.layer.cornerRadius = IOSUIKitArticleGeometry.articleImageCornerRadius
         }
-        articleImageView.backgroundColor = loaded ? .clear : .tertiarySystemFill
+        // A view declared opaque must paint every pixel it owns, so the loaded
+        // state cannot keep a clear background.
+        let opaqueRaster = loaded && (representedImageRequest?.producesOpaqueRaster ?? false)
+        articleImageView.backgroundColor = loaded
+            ? (opaqueRaster ? .systemBackground : .clear)
+            : .tertiarySystemFill
     }
 
     private func setFeedIconPresentation(loaded: Bool) {
