@@ -352,6 +352,35 @@ final class IOSUIKitArticleLayoutPreparationCoordinator {
     }
 }
 
+/// Slot sizes for the metadata glyphs, grown with the text they accompany.
+///
+/// Apple's guidance is that glyphs beside text scale with it, but not without
+/// bound here: the feed icon is a bitmap prepared at a fixed size, and at the
+/// largest accessibility categories an unclamped slot would both dwarf the row
+/// and upscale that bitmap badly. The cap keeps the proportion sane and the
+/// raster acceptable; lifting it means threading the scaled size through the
+/// feed-icon pipeline as well.
+struct IOSUIKitArticleAccessoryMetrics: Equatable {
+    static let maximumScale: CGFloat = 1.5
+
+    let unread: CGFloat
+    let feedIcon: CGFloat
+    let star: CGFloat
+    let comments: CGFloat
+
+    init(contentSizeCategory: UIContentSizeCategory) {
+        let traits = UITraitCollection(preferredContentSizeCategory: contentSizeCategory)
+        let reference = IOSUIKitArticleGeometry.feedIconSize
+        let scaled = UIFontMetrics(forTextStyle: .subheadline).scaledValue(for: reference, compatibleWith: traits)
+        // Whole points keep every derived frame on a predictable grid.
+        let scale = min(Self.maximumScale, max(1, scaled / reference))
+        unread = (IOSUIKitArticleGeometry.unreadSize * scale).rounded()
+        feedIcon = (reference * scale).rounded()
+        star = (IOSUIKitArticleGeometry.starSlotSize * scale).rounded()
+        comments = (IOSUIKitArticleGeometry.commentSlotSize * scale).rounded()
+    }
+}
+
 /// The non-text geometry contract shared by the renderer and deterministic sizing.
 /// It deliberately has no presentation pixels or read/starred state.
 struct IOSUIKitArticleGeometry: Equatable {
@@ -407,26 +436,26 @@ struct IOSUIKitArticleGeometry: Equatable {
         return .init(width: availableWidth, height: availableWidth * (1 / ArticlePresentationLayout.portraitImageAspectRatio))
     }
 
-    func metadataLayout(width: CGFloat, hasComments: Bool, height: CGFloat) -> MetadataLayout {
-        let trailingAccessorySlots = staticAccessorySlotWidths(hasComments: hasComments)
+    func metadataLayout(width: CGFloat, hasComments: Bool, height: CGFloat, accessories: IOSUIKitArticleAccessoryMetrics) -> MetadataLayout {
+        let trailingAccessorySlots = staticAccessorySlotWidths(hasComments: hasComments, accessories: accessories)
         let commentsWidth = hasComments ? trailingAccessorySlots[0] : 0
         let trailingAccessoriesWidth = trailingAccessorySlots.reduce(0, +) + CGFloat(max(0, trailingAccessorySlots.count - 1)) * Self.metadataAccessorySpacing
-        let feedTitleWidth = max(0, width - Self.unreadSize - Self.metadataLeadingSpacing - Self.feedIconSize - Self.metadataLeadingSpacing - Self.metadataTitleSpacing - trailingAccessoriesWidth)
+        let feedTitleWidth = max(0, width - accessories.unread - Self.metadataLeadingSpacing - accessories.feedIcon - Self.metadataLeadingSpacing - Self.metadataTitleSpacing - trailingAccessoriesWidth)
         return .init(
             unreadX: 0,
-            feedIconX: Self.unreadSize + Self.metadataLeadingSpacing,
-            feedTitleX: Self.unreadSize + Self.metadataLeadingSpacing + Self.feedIconSize + Self.metadataLeadingSpacing,
+            feedIconX: accessories.unread + Self.metadataLeadingSpacing,
+            feedTitleX: accessories.unread + Self.metadataLeadingSpacing + accessories.feedIcon + Self.metadataLeadingSpacing,
             feedTitleWidth: feedTitleWidth,
-            commentsX: width - Self.starSlotSize - (hasComments ? Self.metadataAccessorySpacing + Self.commentSlotSize : 0),
+            commentsX: width - accessories.star - (hasComments ? Self.metadataAccessorySpacing + accessories.comments : 0),
             commentsWidth: commentsWidth,
-            starX: width - Self.starSlotSize,
+            starX: width - accessories.star,
             height: height
         )
     }
 
     /// Future immutable accessories append a fixed width before the permanent star slot.
-    func staticAccessorySlotWidths(hasComments: Bool) -> [CGFloat] {
-        (hasComments ? [Self.commentSlotSize] : []) + [Self.starSlotSize]
+    func staticAccessorySlotWidths(hasComments: Bool, accessories: IOSUIKitArticleAccessoryMetrics) -> [CGFloat] {
+        (hasComments ? [accessories.comments] : []) + [accessories.star]
     }
 
     struct MetadataLayout: Equatable {
@@ -456,9 +485,10 @@ enum IOSUIKitArticleLayoutEngine {
         }
         let textWidth = variant == .visualLandscape ? max(0, geometry.availableWidth - imageSize.width - IOSUIKitArticleGeometry.landscapeSpacing) : geometry.availableWidth
 
+        let accessories = IOSUIKitArticleAccessoryMetrics(contentSizeCategory: input.contentSizeCategory)
         let titleFont = font(.headline, category: input.contentSizeCategory, bold: false)
         let titleHeight = coreTextHeight(input.title, font: titleFont, width: textWidth, maximumLines: nil, displayScale: scale)
-        let metadataHeight = max(IOSUIKitArticleGeometry.feedIconSize, font(.subheadline, category: input.contentSizeCategory, bold: true).lineHeight)
+        let metadataHeight = max(accessories.feedIcon, font(.subheadline, category: input.contentSizeCategory, bold: true).lineHeight)
         let dateHeight = fixedLineHeight(input.publishedDate, font: font(.caption1, category: input.contentSizeCategory, bold: false))
         let previewHeight = coreTextHeight(input.preview, font: font(.subheadline, category: input.contentSizeCategory, bold: false), width: textWidth, maximumLines: input.previewLines.rawValue, displayScale: scale)
         let textBlockHeight = titleHeight + IOSUIKitArticleGeometry.textSpacing + metadataHeight + IOSUIKitArticleGeometry.textSpacing + dateHeight + (previewHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
@@ -476,13 +506,13 @@ enum IOSUIKitArticleLayoutEngine {
         let textOrigin = CGPoint(x: physicalX(logicalX: logicalTextX, width: textWidth, in: input.containerWidth, direction: input.layoutDirection), y: variant == .visualPortrait ? geometry.verticalPadding + imageSize.height + IOSUIKitArticleGeometry.portraitSpacing : geometry.verticalPadding)
         let titleFrame = CGRect(x: textOrigin.x, y: textOrigin.y, width: textWidth, height: titleHeight)
         let metadataFrame = CGRect(x: textOrigin.x, y: titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: textWidth, height: metadataHeight)
-        let metadataLayout = geometry.metadataLayout(width: textWidth, hasComments: input.hasComments, height: metadataHeight)
+        let metadataLayout = geometry.metadataLayout(width: textWidth, hasComments: input.hasComments, height: metadataHeight, accessories: accessories)
         func metadataX(_ logicalX: CGFloat, width: CGFloat) -> CGFloat { input.layoutDirection == .rightToLeft ? metadataFrame.maxX - logicalX - width : metadataFrame.minX + logicalX }
-        let unreadFrame = CGRect(x: metadataX(metadataLayout.unreadX, width: IOSUIKitArticleGeometry.unreadSize), y: metadataFrame.midY - IOSUIKitArticleGeometry.unreadSize / 2, width: IOSUIKitArticleGeometry.unreadSize, height: IOSUIKitArticleGeometry.unreadSize)
-        let feedIconFrame = CGRect(x: metadataX(metadataLayout.feedIconX, width: IOSUIKitArticleGeometry.feedIconSize), y: metadataFrame.midY - IOSUIKitArticleGeometry.feedIconSize / 2, width: IOSUIKitArticleGeometry.feedIconSize, height: IOSUIKitArticleGeometry.feedIconSize)
+        let unreadFrame = CGRect(x: metadataX(metadataLayout.unreadX, width: accessories.unread), y: metadataFrame.midY - accessories.unread / 2, width: accessories.unread, height: accessories.unread)
+        let feedIconFrame = CGRect(x: metadataX(metadataLayout.feedIconX, width: accessories.feedIcon), y: metadataFrame.midY - accessories.feedIcon / 2, width: accessories.feedIcon, height: accessories.feedIcon)
         let feedTitleFrame = CGRect(x: metadataX(metadataLayout.feedTitleX, width: metadataLayout.feedTitleWidth), y: metadataFrame.minY, width: metadataLayout.feedTitleWidth, height: metadataHeight)
-        let commentsFrame = input.hasComments ? CGRect(x: metadataX(metadataLayout.commentsX, width: IOSUIKitArticleGeometry.commentSlotSize), y: metadataFrame.midY - IOSUIKitArticleGeometry.commentSlotSize / 2, width: IOSUIKitArticleGeometry.commentSlotSize, height: IOSUIKitArticleGeometry.commentSlotSize) : nil
-        let starFrame = CGRect(x: metadataX(metadataLayout.starX, width: IOSUIKitArticleGeometry.starSlotSize), y: metadataFrame.midY - IOSUIKitArticleGeometry.starSlotSize / 2, width: IOSUIKitArticleGeometry.starSlotSize, height: IOSUIKitArticleGeometry.starSlotSize)
+        let commentsFrame = input.hasComments ? CGRect(x: metadataX(metadataLayout.commentsX, width: accessories.comments), y: metadataFrame.midY - accessories.comments / 2, width: accessories.comments, height: accessories.comments) : nil
+        let starFrame = CGRect(x: metadataX(metadataLayout.starX, width: accessories.star), y: metadataFrame.midY - accessories.star / 2, width: accessories.star, height: accessories.star)
         let dateFrame = CGRect(x: textOrigin.x, y: metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: textWidth, height: dateHeight)
         let previewFrame = previewHeight == 0 ? nil : CGRect(x: textOrigin.x, y: dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: textWidth, height: previewHeight)
         return .init(variant: variant, cellSize: .init(width: input.containerWidth, height: totalHeight), contentFrame: contentFrame, imageFrame: imageFrame, textFrame: CGRect(x: textOrigin.x, y: textOrigin.y, width: textWidth, height: textBlockHeight), titleFrame: titleFrame, metadataFrame: metadataFrame, unreadFrame: unreadFrame, feedIconFrame: feedIconFrame, feedTitleFrame: feedTitleFrame, commentsFrame: commentsFrame, starFrame: starFrame, dateFrame: dateFrame, previewFrame: previewFrame, horizontalInset: geometry.horizontalInset, verticalInset: geometry.verticalPadding, titleHeight: titleHeight, metadataHeight: metadataHeight, previewHeight: previewHeight, textBlockHeight: textBlockHeight)

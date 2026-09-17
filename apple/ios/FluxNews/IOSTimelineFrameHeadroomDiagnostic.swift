@@ -221,6 +221,11 @@ final class IOSUIKitTimelineTopScrimView: UIView {
         isUserInteractionEnabled = false
         gradient.startPoint = CGPoint(x: 0.5, y: 0)
         gradient.endPoint = CGPoint(x: 0.5, y: 1)
+        // A straight ramp has a constant slope, so the eye finds its lower edge.
+        // Holding almost full strength across the glyph band and then easing out
+        // makes the scrim read as shorter *and* softer than a linear one, without
+        // taking protection away from where the status bar actually sits.
+        gradient.locations = [0, 0.5, 0.75, 1]
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
             self.updateColors()
         }
@@ -229,10 +234,16 @@ final class IOSUIKitTimelineTopScrimView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// Strength at the very top. The remaining stops are fractions of it, so
+    /// this one number changes the whole scrim.
+    static let peakAlpha: CGFloat = 0.6
+
     private func updateColors() {
         let base = UIColor.systemBackground.resolvedColor(with: traitCollection)
         gradient.colors = [
-            base.withAlphaComponent(0.65).cgColor,
+            base.withAlphaComponent(Self.peakAlpha).cgColor,
+            base.withAlphaComponent(Self.peakAlpha * 0.9).cgColor,
+            base.withAlphaComponent(Self.peakAlpha * 0.4).cgColor,
             base.withAlphaComponent(0).cgColor,
         ]
     }

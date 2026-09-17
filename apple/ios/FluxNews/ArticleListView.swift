@@ -816,6 +816,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private let refreshControl = UIRefreshControl()
     // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
     private let statusBarScrim = IOSUIKitTimelineTopScrimView()
+    private var statusBarScrimHeight: NSLayoutConstraint!
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
     private let preparedLayoutCoordinator = IOSUIKitArticleLayoutPreparationCoordinator()
     /// Exact heights for every loaded row. Estimation is disabled, so a missing
@@ -824,6 +825,10 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private var rowHeightTask: Task<Void, Never>?
     private var rowHeightGeneration: UInt64 = 0
     private var pendingStructuralApply: Task<Void, Never>?
+    /// Held until the first layout pass resolves a geometry. Applying a snapshot
+    /// before then publishes rows whose heights cannot exist yet, and the table
+    /// answers by measuring every one of them synchronously while laying out.
+    private var deferredSnapshot: NSDiffableDataSourceSnapshot<Section, Int64>?
     private let performanceMetrics = IOSUIKitTimelinePerformanceMetrics()
 #if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
     private static let performanceSignposter = OSSignposter(
@@ -882,10 +887,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         tableView.separatorStyle = .none
         // A plain table reserves padding above its (absent) section header.
         tableView.sectionHeaderTopPadding = 0
-        // Unchanged from the collection view. The indicator would now be exact,
-        // because the content height no longer moves — enabling it is a separate
-        // product decision, not a side effect of this change.
-        tableView.showsVerticalScrollIndicator = false
         tableView.alwaysBounceVertical = true
         tableView.delegate = self
         tableView.prefetchDataSource = self
@@ -912,12 +913,17 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         ])
 
         statusBarScrim.translatesAutoresizingMaskIntoConstraints = false
+        // The safe area of this view starts below the *navigation bar*, not below
+        // the status bar, so anchoring to it would stretch the scrim across the
+        // capsule. The status bar's own frame is the exact measure, and it is
+        // zero in landscape, where there is nothing to protect.
+        statusBarScrimHeight = statusBarScrim.heightAnchor.constraint(equalToConstant: 0)
         view.addSubview(statusBarScrim)
         NSLayoutConstraint.activate([
             statusBarScrim.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             statusBarScrim.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             statusBarScrim.topAnchor.constraint(equalTo: view.topAnchor),
-            statusBarScrim.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 14),
+            statusBarScrimHeight,
         ])
         IOSUIKitTimelineStatusBarScrimDiagnostic.adopt(statusBarScrim)
 
@@ -936,7 +942,14 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        updateStatusBarScrimHeight()
         updateGeometryIfNeeded()
+    }
+
+    private func updateStatusBarScrimHeight() {
+        let height = view.window?.windowScene?.statusBarManager?.statusBarFrame.height ?? 0
+        guard statusBarScrimHeight.constant != height else { return }
+        statusBarScrimHeight.constant = height
     }
 
     private func updateGeometryIfNeeded() {
@@ -955,7 +968,14 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         // set is measured, so rotation and Dynamic Type never block a frame on a
         // full re-measurement of every loaded row.
         rowHeights.beginGeneration(newIdentity)
-        scheduleRowHeightMeasurement(reloadWhenComplete: true)
+        if let deferred = deferredSnapshot {
+            // First resolved geometry: publish the rows that were held back,
+            // through the same gate that measures their heights first.
+            deferredSnapshot = nil
+            applySnapshotWhenHeightsReady(deferred)
+        } else {
+            scheduleRowHeightMeasurement(reloadWhenComplete: true)
+        }
     }
 
     private func scheduleRowHeightMeasurement(reloadWhenComplete: Bool) {
@@ -1012,9 +1032,20 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     /// Rows are never published before their exact heights exist. Applying a
     /// snapshot whose heights are unknown would make the table measure text
     /// synchronously while laying out.
+    /// Built from `orderedIDs`, which the controller already maintains as the
+    /// authoritative order, rather than from the data source's current state.
+    /// The two diverge whenever a snapshot is still held back, and reading the
+    /// data source then yields an empty snapshot with no section at all.
+    private func currentSnapshot() -> NSDiffableDataSourceSnapshot<Section, Int64> {
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Int64>()
+        snapshot.appendSections([.main])
+        snapshot.appendItems(orderedIDs)
+        return snapshot
+    }
+
     private func applySnapshotWhenHeightsReady(_ snapshot: NSDiffableDataSourceSnapshot<Section, Int64>) {
         guard let identity = geometryIdentity else {
-            dataSource.apply(snapshot, animatingDifferences: false)
+            deferredSnapshot = snapshot
             return
         }
         let missing = rowHeights.missingIDs(in: snapshot.itemIdentifiers)
@@ -1112,9 +1143,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
                     presentationByID[item.article.id] = newPresentationBridge.articleState(for: item.article.id, fallback: item.article)
                 }
                 scrolloverGeometryTracker.appendSnapshot(appendedIDs)
-                var snapshot = dataSource.snapshot()
-                snapshot.appendItems(appendedIDs)
-                applySnapshotWhenHeightsReady(snapshot)
+                applySnapshotWhenHeightsReady(currentSnapshot())
                 structuralUpdate = .append(appended)
             } else if canApplyIncrementally, case let .remove(removedIDs) = structuralState.change {
                 let removed = removedIDs.filter { itemsByID[$0] != nil }
@@ -1129,9 +1158,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
                     scrolloverGeometryTracker.removeSnapshot(removed)
                     invalidateScrolloverGeometry()
                     rowHeights.remove(removed)
-                    var snapshot = dataSource.snapshot()
-                    snapshot.deleteItems(removed)
-                    applySnapshotWhenHeightsReady(snapshot)
+                    applySnapshotWhenHeightsReady(currentSnapshot())
                     structuralUpdate = .remove(removed)
                 }
             } else {
@@ -1144,10 +1171,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
                 })
                 scrolloverGeometryTracker.updateSnapshot(newIDs)
                 invalidateScrolloverGeometry()
-                var snapshot = NSDiffableDataSourceSnapshot<Section, Int64>()
-                snapshot.appendSections([.main])
-                snapshot.appendItems(newIDs)
-                applySnapshotWhenHeightsReady(snapshot)
+                applySnapshotWhenHeightsReady(currentSnapshot())
                 structuralUpdate = .replace
             }
             structuralRevision = structuralState.revision
@@ -1937,16 +1961,33 @@ final class IOSUIKitArticleCell: UITableViewCell {
     /// One step more contrast than `secondaryLabel` without reaching full
     /// `label`, which would compete with the headline. Resolved per trait
     /// collection so it still inverts in dark mode.
+    /// A fixed alpha would cap what "Increase Contrast" can give back: the
+    /// resolved base already carries the high-contrast variant, but multiplying
+    /// it down again takes part of that away. Under high contrast the supporting
+    /// text therefore runs at full strength.
     private static let supportingTextColor = UIColor { traits in
-        UIColor.label.resolvedColor(with: traits).withAlphaComponent(0.8)
+        let alpha: CGFloat = traits.accessibilityContrast == .high ? 1 : 0.8
+        return UIColor.label.resolvedColor(with: traits).withAlphaComponent(alpha)
     }
     /// Read articles dim by the same proportion as the headline, so the whole
     /// row recedes together instead of only its title.
     private static let supportingReadTextColor = UIColor { traits in
-        UIColor.label.resolvedColor(with: traits).withAlphaComponent(0.5)
+        let alpha: CGFloat = traits.accessibilityContrast == .high ? 0.75 : 0.5
+        return UIColor.label.resolvedColor(with: traits).withAlphaComponent(alpha)
     }
     private var previewTopConstraint: NSLayoutConstraint!
     private var previewCollapseConstraint: NSLayoutConstraint!
+    /// Driven from the prepared metrics, so the cell cannot disagree with the
+    /// engine about how large a scaled glyph slot is.
+    private var accessoryConstraints: [NSLayoutConstraint] = []
+    private var metadataMinimumHeight: NSLayoutConstraint!
+    private var unreadWidth: NSLayoutConstraint!
+    private var unreadHeight: NSLayoutConstraint!
+    private var feedIconWidth: NSLayoutConstraint!
+    private var feedIconHeight: NSLayoutConstraint!
+    private var starWidth: NSLayoutConstraint!
+    private var starHeight: NSLayoutConstraint!
+    private var commentsHeightConstraint: NSLayoutConstraint!
     private var currentLayoutVariant: IOSUIKitArticleCellLayoutVariant?
     private var imageTask: Task<Void, Never>?
     private var representedImageRequest: ArticleImageRequest?
@@ -1986,21 +2027,19 @@ final class IOSUIKitArticleCell: UITableViewCell {
         starImageView.alpha = 0
         starImageView.isAccessibilityElement = false
         metadataRow.translatesAutoresizingMaskIntoConstraints = false
-        metadataRow.heightAnchor.constraint(greaterThanOrEqualToConstant: IOSUIKitArticleGeometry.feedIconSize).isActive = true
+        metadataMinimumHeight = metadataRow.heightAnchor.constraint(greaterThanOrEqualToConstant: IOSUIKitArticleGeometry.feedIconSize)
+        metadataMinimumHeight.isActive = true
 
         unreadIndicator.translatesAutoresizingMaskIntoConstraints = false
         unreadIndicator.backgroundColor = .tintColor
-        unreadIndicator.layer.cornerRadius = 3
-        NSLayoutConstraint.activate([
-            unreadIndicator.widthAnchor.constraint(equalToConstant: 6),
-            unreadIndicator.heightAnchor.constraint(equalToConstant: 6),
-        ])
+        unreadWidth = unreadIndicator.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.unreadSize)
+        unreadHeight = unreadIndicator.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.unreadSize)
+        NSLayoutConstraint.activate([unreadWidth, unreadHeight])
 
         feedIconContainer.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            feedIconContainer.widthAnchor.constraint(equalToConstant: IOSFeedIconImagePreparation.displaySidePoints),
-            feedIconContainer.heightAnchor.constraint(equalToConstant: IOSFeedIconImagePreparation.displaySidePoints),
-        ])
+        feedIconWidth = feedIconContainer.widthAnchor.constraint(equalToConstant: IOSFeedIconImagePreparation.displaySidePoints)
+        feedIconHeight = feedIconContainer.heightAnchor.constraint(equalToConstant: IOSFeedIconImagePreparation.displaySidePoints)
+        NSLayoutConstraint.activate([feedIconWidth, feedIconHeight])
         feedIconImageView.translatesAutoresizingMaskIntoConstraints = false
         feedIconImageView.contentMode = .scaleAspectFit
         feedIconFallbackLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -2048,6 +2087,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
         metadataRow.addSubview(commentsContainer)
         metadataRow.addSubview(starImageView)
         commentsWidthConstraint = commentsContainer.widthAnchor.constraint(equalToConstant: 0)
+        commentsHeightConstraint = commentsContainer.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.commentSlotSize)
+        starWidth = starImageView.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize)
+        starHeight = starImageView.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize)
         commentsToStarSpacingConstraint = commentsContainer.trailingAnchor.constraint(equalTo: starImageView.leadingAnchor)
         NSLayoutConstraint.activate([
             unreadIndicator.leadingAnchor.constraint(equalTo: metadataRow.leadingAnchor),
@@ -2060,12 +2102,12 @@ final class IOSUIKitArticleCell: UITableViewCell {
             feedTitleLabel.bottomAnchor.constraint(equalTo: metadataRow.bottomAnchor),
             commentsContainer.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
             commentsWidthConstraint,
-            commentsContainer.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.commentSlotSize),
+            commentsHeightConstraint,
             commentsToStarSpacingConstraint,
             starImageView.trailingAnchor.constraint(equalTo: metadataRow.trailingAnchor),
             starImageView.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
-            starImageView.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize),
-            starImageView.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize),
+            starWidth,
+            starHeight,
         ])
 
         previewLabel.font = .preferredFont(forTextStyle: .subheadline)
@@ -2201,7 +2243,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         previewCollapseConstraint.priority = hasPreview ? UILayoutPriority(1) : .defaultHigh
         let hasComments = item.content.hasComments
         commentsContainer.isHidden = !hasComments
-        commentsWidthConstraint.constant = hasComments ? IOSUIKitArticleGeometry.commentSlotSize : 0
+        commentsWidthConstraint.constant = hasComments ? (preparedLayoutMetrics.commentsFrame?.width ?? IOSUIKitArticleGeometry.commentSlotSize) : 0
         commentsToStarSpacingConstraint.constant = hasComments ? -IOSUIKitArticleGeometry.metadataAccessorySpacing : 0
 
         let hasImage = mode.showsArticleImage && item.content.imageURL != nil
@@ -2219,7 +2261,34 @@ final class IOSUIKitArticleCell: UITableViewCell {
         contentView.setNeedsLayout()
     }
 
+    /// Slot sizes come from the prepared metrics rather than from constants, so
+    /// the scaled glyphs and the engine's frames cannot drift apart.
+    private func applyAccessoryMetrics(_ layout: IOSUIKitArticleLayoutMetrics) {
+        let unread = layout.unreadFrame.width
+        if unreadWidth.constant != unread {
+            unreadWidth.constant = unread
+            unreadHeight.constant = unread
+            unreadIndicator.layer.cornerRadius = unread / 2
+        }
+        let icon = layout.feedIconFrame.width
+        if feedIconWidth.constant != icon {
+            feedIconWidth.constant = icon
+            feedIconHeight.constant = icon
+            metadataMinimumHeight.constant = icon
+        }
+        let star = layout.starFrame.width
+        if starWidth.constant != star {
+            starWidth.constant = star
+            starHeight.constant = star
+        }
+        let comments = layout.commentsFrame?.width ?? IOSUIKitArticleGeometry.commentSlotSize
+        if commentsHeightConstraint.constant != comments {
+            commentsHeightConstraint.constant = comments
+        }
+    }
+
     private func applyLayout(metrics: Metrics, variant: IOSUIKitArticleCellLayoutVariant) {
+        if let preparedLayoutMetrics { applyAccessoryMetrics(preparedLayoutMetrics) }
         contentView.directionalLayoutMargins = NSDirectionalEdgeInsets(
             top: metrics.outerVerticalPadding,
             leading: metrics.horizontalInset,
@@ -2459,7 +2528,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         // container keeps its rounded background without masking — matching the
         // cold article-image placeholder next to it.
         feedIconContainer.clipsToBounds = false
-        feedIconContainer.layer.cornerRadius = loaded ? 0 : IOSFeedIconImagePreparation.cornerRadius
+        feedIconContainer.layer.cornerRadius = loaded ? 0 : feedIconWidth.constant / 2
     }
 
     private func invalidateImageBinding() {

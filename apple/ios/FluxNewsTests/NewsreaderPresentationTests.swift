@@ -2579,6 +2579,43 @@ final class NewsreaderPresentationTests: XCTestCase {
         view.constraints.count + view.subviews.reduce(0) { $0 + totalConstraintCount($1) }
     }
 
+    /// A device measurement found 366 synchronous height fallbacks in one
+    /// session: the first snapshot arrives before the view has a width, so it
+    /// used to be published with no heights at all and the table measured every
+    /// visible row while laying out. Exactly the path the height store exists to
+    /// avoid.
+    @MainActor
+    func testFirstSnapshotBeforeLayoutNeverMeasuresHeightsSynchronously() async {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = IOSUIKitArticleTimelineController()
+        let articles = (1...30).map { timelineArticle(id: Int64($0)) }
+        bridge.replaceArticleStates(Dictionary(uniqueKeysWithValues: articles.map { ($0.id, .init(isRead: false, isStarred: false, revision: 0)) }))
+
+        // No frame yet: this is the order SwiftUI uses on first presentation.
+        controller.update(
+            structuralState: timelineStructuralState(articles, revision: 1),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            feedIconRequestRevision: 0,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+        XCTAssertEqual(controller.tableViewForTesting.numberOfSections, 0)
+
+        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
+        controller.view.layoutIfNeeded()
+        await controller.settleForTesting()
+        controller.tableViewForTesting.layoutIfNeeded()
+
+        XCTAssertEqual(controller.synchronousRowHeightFallbackCountForTesting, 0)
+        XCTAssertEqual(controller.preparedRowHeightCountForTesting, articles.count)
+        XCTAssertEqual(controller.tableViewForTesting.numberOfRows(inSection: 0), articles.count)
+    }
+
     /// The percentiles are read straight off the bucket histogram, so their
     /// arithmetic has to be right before any A/B decision rests on them.
     func testBusyPercentilesAndHalfBudgetRateAreDerivedFromTheBucketHistogram() {
