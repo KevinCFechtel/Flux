@@ -617,9 +617,17 @@ private struct ArticleListTitleCapsule: View {
                         .lineLimit(1)
                 }
             }
+            if action != nil {
+                // Glass says "interactive", the chevron says what kind. No
+                // explicit colour: an inherited one still flips with the glass
+                // over dark content, a semantic one would not.
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .opacity(0.55)
+            }
         }
         .padding(.leading, action == nil ? 16 : 12)
-        .padding(.trailing, 16)
+        .padding(.trailing, action == nil ? 16 : 12)
         .padding(.vertical, 7)
         .background { ArticleListTitleCapsuleBackground() }
         .accessibilityElement(children: .combine)

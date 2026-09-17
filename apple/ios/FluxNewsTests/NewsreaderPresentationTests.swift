@@ -235,12 +235,23 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleListCounterPresentation.compactCount(1000), "1000")
     }
 
-    func testArticleListCounterUsesEnglishAndGermanPluralVariations() {
-        let english = Locale(identifier: "en")
-        let appBundle = Bundle(identifier: "dev.kevincfechtel.fluxNews.nativeDev")!
+    /// `locale:` only decides how numbers are formatted — the language comes
+    /// from the bundle. Passing `Locale(identifier: "en")` to the app bundle
+    /// therefore returned whatever language the host was running in.
+    func testArticleListCounterUsesEnglishAndGermanPluralVariations() throws {
+        let english = try localizationBundle("en")
+        let german = try localizationBundle("de")
 
-        XCTAssertEqual(String(localized: "\(1) article", bundle: appBundle, locale: english), "1 article")
-        XCTAssertEqual(String(localized: "\(2) article", bundle: appBundle, locale: english), "2 articles")
+        XCTAssertEqual(String(localized: "\(1) article", bundle: english), "1 article")
+        XCTAssertEqual(String(localized: "\(2) article", bundle: english), "2 articles")
+        XCTAssertEqual(String(localized: "\(1) article", bundle: german), "1 Artikel")
+        XCTAssertEqual(String(localized: "\(2) article", bundle: german), "2 Artikel")
+    }
+
+    private func localizationBundle(_ identifier: String) throws -> Bundle {
+        let appBundle = try XCTUnwrap(Bundle(identifier: "dev.kevincfechtel.fluxNews.nativeDev"))
+        let path = try XCTUnwrap(appBundle.path(forResource: identifier, ofType: "lproj"))
+        return try XCTUnwrap(Bundle(path: path))
     }
 
     func testArticleListCounterUsesGermanPluralVariations() throws {
@@ -2268,11 +2279,11 @@ final class NewsreaderPresentationTests: XCTestCase {
             XCTAssertEqual(actual, expected.cellSize.height, accuracy: 0.5, "case \(index) variant \(expected.variant) cell=\(diagnostics) engine title=\(expected.titleFrame) metadata=\(expected.metadataFrame) preview=\(String(describing: expected.previewFrame)) image=\(String(describing: expected.imageFrame))")
             assertFrameEqual(diagnostics.titleFrame, expected.titleFrame)
             assertFrameEqual(diagnostics.metadataFrame, expected.metadataFrame)
-            assertFrameEqual(diagnostics.unreadFrame, expected.unreadFrame)
-            assertFrameEqual(diagnostics.feedIconFrame, expected.feedIconFrame)
+            assertFrameEqual(diagnostics.unreadFrame, expected.unreadFrame, accuracy: Self.accessoryFrameAccuracy)
+            assertFrameEqual(diagnostics.feedIconFrame, expected.feedIconFrame, accuracy: Self.accessoryFrameAccuracy)
             assertFrameEqual(diagnostics.feedTitleFrame, expected.feedTitleFrame)
-            assertOptionalFrameEqual(diagnostics.commentsFrame, expected.commentsFrame)
-            assertFrameEqual(diagnostics.starFrame, expected.starFrame)
+            assertOptionalFrameEqual(diagnostics.commentsFrame, expected.commentsFrame, accuracy: Self.accessoryFrameAccuracy)
+            assertFrameEqual(diagnostics.starFrame, expected.starFrame, accuracy: Self.accessoryFrameAccuracy)
             assertFrameEqual(diagnostics.dateFrame, expected.dateFrame)
             assertOptionalFrameEqual(diagnostics.previewFrame, expected.previewFrame)
         }
@@ -2299,11 +2310,11 @@ final class NewsreaderPresentationTests: XCTestCase {
             XCTAssertEqual(expected.cellSize.height, ltr.cellSize.height, accuracy: 0.001)
             assertFrameEqual(diagnostics.titleFrame, expected.titleFrame)
             assertFrameEqual(diagnostics.metadataFrame, expected.metadataFrame)
-            assertFrameEqual(diagnostics.unreadFrame, expected.unreadFrame)
-            assertFrameEqual(diagnostics.feedIconFrame, expected.feedIconFrame)
+            assertFrameEqual(diagnostics.unreadFrame, expected.unreadFrame, accuracy: Self.accessoryFrameAccuracy)
+            assertFrameEqual(diagnostics.feedIconFrame, expected.feedIconFrame, accuracy: Self.accessoryFrameAccuracy)
             assertFrameEqual(diagnostics.feedTitleFrame, expected.feedTitleFrame)
-            assertOptionalFrameEqual(diagnostics.commentsFrame, expected.commentsFrame)
-            assertFrameEqual(diagnostics.starFrame, expected.starFrame)
+            assertOptionalFrameEqual(diagnostics.commentsFrame, expected.commentsFrame, accuracy: Self.accessoryFrameAccuracy)
+            assertFrameEqual(diagnostics.starFrame, expected.starFrame, accuracy: Self.accessoryFrameAccuracy)
             assertFrameEqual(diagnostics.dateFrame, expected.dateFrame)
             assertOptionalFrameEqual(diagnostics.previewFrame, expected.previewFrame)
         }
@@ -2410,10 +2421,23 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(actual.height, expected.height, accuracy: accuracy, message, file: file, line: line)
     }
 
-    private func assertOptionalFrameEqual(_ actual: CGRect?, _ expected: CGRect?, file: StaticString = #filePath, line: UInt = #line) {
+    private func assertOptionalFrameEqual(_ actual: CGRect?, _ expected: CGRect?, accuracy: CGFloat = 0.5, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertEqual(actual == nil, expected == nil, file: file, line: line)
-        if let actual, let expected { assertFrameEqual(actual, expected, file: file, line: line) }
+        if let actual, let expected { assertFrameEqual(actual, expected, accuracy: accuracy, file: file, line: line) }
     }
+
+    /// UIKit snaps a view's frame to the display grid. A centred view whose
+    /// height is an odd number of device pixels — the 17 pt star and comment
+    /// slots are 51 px at 3x — cannot sit centred *and* pixel-aligned, so UIKit
+    /// widens the frame by one pixel and shifts an edge. The rule is
+    /// undocumented and version-dependent: it resolved differently on iOS 26.5
+    /// than on 27.
+    ///
+    /// The engine owns the logical geometry; reproducing that snapping would be
+    /// a second implementation of an unpublished UIKit rule. This tolerance
+    /// absorbs one grid step for decorative accessories only — cell height and
+    /// every text frame stay at 0.5 pt.
+    private static let accessoryFrameAccuracy: CGFloat = 1.0
 
     private func layoutInput(mode: ArticlePresentationMode, width: CGFloat, hasImage: Bool, scale: CGFloat = 2) -> IOSUIKitArticleLayoutInput {
         .init(title: "A deliberately multiline article title that exercises deterministic bounded text measurement", feedTitle: "A feed title", publishedDate: "January 1", preview: "A preview long enough to occupy multiple lines and preserve the production card text stack.", hasImage: hasImage, hasComments: true, mode: mode, previewLines: .standard, containerWidth: width, displayScale: scale, contentSizeCategory: .large, layoutDirection: .leftToRight)
