@@ -12,7 +12,8 @@ enum PopoverLayout {
     static let animation: TimeInterval = 0.2
 
     static func contentWidth(for mode: ArticlePresentationMode) -> CGFloat {
-        mode == .visual ? visualWidth : compactWidth
+        // `visualCompact` carries a thumbnail too, so it needs the visual width.
+        mode == .compact ? compactWidth : visualWidth
     }
 
     static func width(mode: ArticlePresentationMode, sidebarVisible: Bool) -> CGFloat {

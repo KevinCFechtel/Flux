@@ -127,15 +127,11 @@ struct ContentView: View {
     @State private var markReadWorkflow: IOSMarkReadWorkflow = .read
     @State private var syncPresentation: IOSSyncButtonPresentation.State = .idle
     @State private var syncPresentationGeneration: UInt64 = 0
-    // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
-    @AppStorage(IOSUIKitTimelineNavigationChromeDiagnostic.defaultsKey)
-    private var chromeArm = IOSUIKitTimelineNavigationChromeDiagnostic.Arm.system.rawValue
 
     /// The capsule already opens the scope chooser, so a second control for the
     /// same action would be pure redundancy.
     private var capsuleCarriesScopeAction: Bool {
-        chromeArm == IOSUIKitTimelineNavigationChromeDiagnostic.Arm.glassCapsule.rawValue
-            && !adaptivePresentation.usesPersistentSplitNavigation
+        !adaptivePresentation.usesPersistentSplitNavigation
     }
 
     private var adaptivePresentation: AdaptivePresentation {
@@ -635,27 +631,9 @@ private struct ArticleListTitleCapsule: View {
 }
 
 private struct ArticleListTitleCapsuleBackground: View {
-    // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
-    @AppStorage(IOSUIKitTimelineCapsuleMaterialDiagnostic.defaultsKey)
-    private var arm = IOSUIKitTimelineCapsuleMaterialDiagnostic.Arm.glassRegular.rawValue
-
     var body: some View {
-        switch IOSUIKitTimelineCapsuleMaterialDiagnostic.Arm(rawValue: arm) ?? .glassRegular {
-        case .opaque:
-            Capsule().fill(Color(uiColor: .secondarySystemBackground))
-        case .material:
-            Capsule().fill(.regularMaterial)
-        case .glassClear:
-            glass(clear: true)
-        case .glassRegular:
-            glass(clear: false)
-        }
-    }
-
-    @ViewBuilder
-    private func glass(clear: Bool) -> some View {
         if #available(iOS 26.0, *) {
-            ArticleListGlassCapsule(clear: clear)
+            ArticleListGlassCapsule()
         } else {
             // iOS 18 has no glass material; the closest stock equivalent.
             Capsule().fill(.regularMaterial)
@@ -665,10 +643,9 @@ private struct ArticleListTitleCapsuleBackground: View {
 
 @available(iOS 26.0, *)
 private struct ArticleListGlassCapsule: UIViewRepresentable {
-    let clear: Bool
 
     func makeUIView(context: Context) -> UIVisualEffectView {
-        let effect = UIGlassEffect(style: clear ? .clear : .regular)
+        let effect = UIGlassEffect(style: .regular)
         effect.isInteractive = false
         let view = UIVisualEffectView(effect: effect)
         // Resolves the capsule shape without a mask layer.
@@ -677,7 +654,7 @@ private struct ArticleListGlassCapsule: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
-        let effect = UIGlassEffect(style: clear ? .clear : .regular)
+        let effect = UIGlassEffect(style: .regular)
         effect.isInteractive = false
         uiView.effect = effect
     }
@@ -765,9 +742,6 @@ private struct ArticleListNavigationChrome<Content: View>: View {
     /// Absent when a persistent sidebar already offers scope selection.
     var onSelectScope: (() -> Void)?
     @ViewBuilder let content: () -> Content
-    // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
-    @AppStorage(IOSUIKitTimelineNavigationChromeDiagnostic.defaultsKey)
-    private var chromeArm = IOSUIKitTimelineNavigationChromeDiagnostic.Arm.system.rawValue
 
     private func capsuleSubtitle(_ subtitle: String) -> String? {
         ArticleListCounterPresentation.usesNativeSubtitle(showArticleCount: store.showArticleCount, supportsNativeSubtitle: true) ? subtitle : nil
@@ -800,31 +774,7 @@ private struct ArticleListNavigationChrome<Content: View>: View {
         // it, so the whole bar would jump.
         let subtitle = store.isSyncing ? String(localized: "Syncing…") : countLabel
 
-        if chromeArm == IOSUIKitTimelineNavigationChromeDiagnostic.Arm.glassCapsule.rawValue {
-            capsuleOnlyChrome(title: title, subtitle: subtitle)
-        } else if #available(iOS 26.0, *) {
-            if ArticleListCounterPresentation.usesNativeSubtitle(showArticleCount: store.showArticleCount, supportsNativeSubtitle: true) {
-                content()
-                    .navigationTitle(title)
-                    .navigationSubtitle(Text(subtitle))
-            } else {
-                content()
-                    .navigationTitle(title)
-            }
-        } else {
-            content()
-                .navigationTitle(title)
-                .toolbar {
-                    if ArticleListCounterPresentation.usesToolbarFallback(showArticleCount: store.showArticleCount, supportsNativeSubtitle: false) {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Text(ArticleListCounterPresentation.compactCount(store.selectionTotal))
-                                .foregroundStyle(.secondary)
-                                .accessibilityLabel(countLabel)
-                        }
-                    }
-                }
-        }
-    }
+        capsuleOnlyChrome(title: title, subtitle: subtitle)    }
 }
 
 extension ContentView {

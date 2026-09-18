@@ -1077,9 +1077,14 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     func testArticlePresentationModesAreStableAndVisualIsFirst() {
-        XCTAssertEqual(ArticlePresentationMode.allCases, [.visual, .compact])
+        XCTAssertEqual(ArticlePresentationMode.allCases, [.visual, .visualCompact, .compact])
+        // The raw values persist in UserDefaults and sync through the core, so
+        // they are part of the contract, not an implementation detail.
         XCTAssertEqual(ArticlePresentationMode(rawValue: "visual"), .visual)
+        XCTAssertEqual(ArticlePresentationMode(rawValue: "visualCompact"), .visualCompact)
         XCTAssertEqual(ArticlePresentationMode(rawValue: "compact"), .compact)
+        // Only the text-only mode drops the image.
+        XCTAssertEqual(ArticlePresentationMode.allCases.filter(\.showsArticleImage), [.visual, .visualCompact])
     }
 
     func testUIKitTimelineUsesStructuralSnapshotsOnlyForMembershipOrOrderChanges() {
@@ -1917,6 +1922,45 @@ final class NewsreaderPresentationTests: XCTestCase {
     /// the cell never resolves its own size. What must still hold is that the
     /// cell's own constraints agree with the engine — otherwise rows would be
     /// laid out at a height their content does not fit.
+    @MainActor
+    func testVisualCompactVariantFramesMatchTheEngine() {
+        assertSideTitleFramesMatchTheEngine(width: 414, expecting: .visualSideTitle)
+        // Wide container: the preview joins the column beside the image, so the
+        // image can become the lowest element in the row.
+        assertSideTitleFramesMatchTheEngine(width: 834, expecting: .visualSideTitleWide)
+    }
+
+    @MainActor
+    private func assertSideTitleFramesMatchTheEngine(
+        width: CGFloat,
+        expecting variant: IOSUIKitArticleCellLayoutVariant,
+        line: UInt = #line
+    ) {
+        let cell = makeUIKitArticleCell(mode: .visualCompact, width: width)
+        let measured = measureUIKitArticleCell(cell, width: width)
+        guard let expected = cell.preparedLayoutMetrics else {
+            return XCTFail("no prepared metrics", line: line)
+        }
+
+        XCTAssertEqual(expected.variant, variant, line: line)
+        XCTAssertEqual(measured, expected.cellSize.height, accuracy: 0.5, "cell height", line: line)
+
+        let actual = cell.layoutDiagnosticsForTesting
+        XCTAssertEqual(actual.variant, variant, line: line)
+        // The date must sit directly under the title, never pushed down by slack
+        // the engine budgeted elsewhere.
+        XCTAssertEqual(actual.titleFrame.origin.y, expected.titleFrame.origin.y, accuracy: 0.5, "title y", line: line)
+        XCTAssertEqual(actual.titleFrame.height, expected.titleFrame.height, accuracy: 0.5, "title height", line: line)
+        XCTAssertEqual(actual.dateFrame.origin.y, expected.dateFrame.origin.y, accuracy: 0.5, "date y", line: line)
+        XCTAssertEqual(actual.metadataFrame.origin.y, expected.metadataFrame.origin.y, accuracy: 0.5, "metadata y", line: line)
+        XCTAssertEqual(actual.metadataFrame.width, expected.metadataFrame.width, accuracy: 0.5, "metadata width", line: line)
+        XCTAssertEqual(actual.imageFrame.origin.y, expected.imageFrame?.origin.y ?? -1, accuracy: 0.5, "image y", line: line)
+        XCTAssertEqual(actual.imageFrame.width, expected.imageFrame?.width ?? -1, accuracy: 0.5, "image width", line: line)
+        if let previewActual = actual.previewFrame, let previewExpected = expected.previewFrame {
+            XCTAssertEqual(previewActual.origin.y, previewExpected.origin.y, accuracy: 0.5, "preview y", line: line)
+        }
+    }
+
     @MainActor
     func testArticleRowHeightMatchesTheCellConstraintsWithoutSelfSizing() {
         let cell = makeUIKitArticleCell(mode: .visual, width: 390)

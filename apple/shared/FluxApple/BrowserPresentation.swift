@@ -84,9 +84,19 @@ enum ArticleListPresentationPolicy {
     }
 }
 
-enum ArticlePresentationMode: String, CaseIterable { case visual, compact }
+enum ArticlePresentationMode: String, CaseIterable { case visual, visualCompact, compact }
 extension ArticlePresentationMode {
-    var showsArticleImage: Bool { self == .visual }
+    var showsArticleImage: Bool { self != .compact }
+
+    /// Localisation key. Not derived from `rawValue`, which would produce
+    /// "Visualcompact".
+    var displayNameKey: String {
+        switch self {
+        case .visual: return "Visual"
+        case .visualCompact: return "Visual compact"
+        case .compact: return "Compact"
+        }
+    }
 }
 enum ArticlePresentationLayout {
     static let portraitImageAspectRatio: CGFloat = 16.0 / 9.0

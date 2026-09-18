@@ -10,7 +10,7 @@ struct ArticlesSettingsView: View {
                 Text("Reader").tag(ClickOnNews.openDetailView)
             }
             Picker("Presentation", selection: Binding(get: { store.articlePresentationMode }, set: store.setArticlePresentationMode)) {
-                ForEach(ArticlePresentationMode.allCases, id: \.self) { Text(String(localized: String.LocalizationValue($0.rawValue.capitalized))).tag($0) }
+                ForEach(ArticlePresentationMode.allCases, id: \.self) { Text(String(localized: String.LocalizationValue($0.displayNameKey))).tag($0) }
             }
             Picker("Preview lines", selection: Binding(get: { store.articlePreviewLines }, set: store.setArticlePreviewLines)) {
                 ForEach(ArticlePreviewLines.allCases, id: \.self) { Text(String(format: String(localized: "%lld lines"), $0.rawValue)).tag($0) }

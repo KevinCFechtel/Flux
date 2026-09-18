@@ -1965,6 +1965,17 @@
         }
       }
     },
+    "Visual compact": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visuell kompakt"
+          }
+        }
+      }
+    },
     "·": {},
     "•": {}
   },

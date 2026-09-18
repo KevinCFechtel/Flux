@@ -895,11 +895,18 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             .visualTextOnly,
             .visualPortrait,
             .visualLandscape,
+            .visualSideTitle,
+            .visualSideTitleWide,
         ] {
             tableView.register(IOSUIKitArticleCell.self, forCellReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant))
         }
-        // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
-        IOSUIKitTimelineScrollEdgeEffectDiagnostic.adopt(tableView)
+        // The timeline scrolls under both bars, so iOS 26 would fade its edges
+        // into them. Measured on device, that progressive blur resamples the
+        // full list width every frame; the list ends at a clean edge instead.
+        if #available(iOS 26.0, *) {
+            tableView.topEdgeEffect.isHidden = true
+            tableView.bottomEdgeEffect.isHidden = true
+        }
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self, UITraitLayoutDirection.self]) { (self: Self, _) in
             self.updateGeometryIfNeeded()
@@ -931,7 +938,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             statusBarScrim.topAnchor.constraint(equalTo: view.topAnchor),
             statusBarScrimHeight,
         ])
-        IOSUIKitTimelineStatusBarScrimDiagnostic.adopt(statusBarScrim)
+        // iOS 27 adapts the status bar's own elements to what sits behind them,
+        // so the gradient is only needed below that.
+        if #available(iOS 27.0, *) { statusBarScrim.isHidden = true }
 
         dataSource = UITableViewDiffableDataSource<Section, Int64>(tableView: tableView) { [weak self] tableView, indexPath, id in
             guard let self,
@@ -1774,6 +1783,13 @@ enum IOSUIKitArticleCellLayoutVariant: Hashable {
     case visualTextOnly
     case visualPortrait
     case visualLandscape
+    /// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. Image beside the title,
+    /// metadata/date/preview full width underneath. Candidate for a "Visual
+    /// compact" presentation mode.
+    case visualSideTitle
+    /// The same arrangement on a wide container: the preview joins the column
+    /// beside the image instead of running underneath it.
+    case visualSideTitleWide
 }
 
 struct IOSUIKitTimelinePerformanceSnapshot: Equatable {
@@ -1912,6 +1928,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
         case .visualTextOnly: return "IOSUIKitArticleCell.visualTextOnly"
         case .visualPortrait: return "IOSUIKitArticleCell.visualPortrait"
         case .visualLandscape: return "IOSUIKitArticleCell.visualLandscape"
+        case .visualSideTitle: return "IOSUIKitArticleCell.visualSideTitle"
+        case .visualSideTitleWide: return "IOSUIKitArticleCell.visualSideTitleWide"
         }
     }
 
@@ -1963,6 +1981,16 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var landscapeConstraints: [NSLayoutConstraint] = []
     private var activeLayoutConstraints: [NSLayoutConstraint] = []
     private var portraitImageAspectConstraint: NSLayoutConstraint!
+    // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
+    private var sideTitleConstraints: [NSLayoutConstraint] = []
+    private var defaultStackConstraints: [NSLayoutConstraint] = []
+    private var sideTitleWideConstraints: [NSLayoutConstraint] = []
+    private var previewBottomDefaultConstraint: NSLayoutConstraint!
+    private var previewTrailingDefaultConstraint: NSLayoutConstraint!
+    /// Preview top in the side-title variant: it must clear the image as well as
+    /// the date, and its spacing collapses with the preview itself.
+    private var sideTitlePreviewBelowDateConstraint: NSLayoutConstraint!
+    private var sideTitlePreviewBelowImageConstraint: NSLayoutConstraint!
     private var landscapeImageWidthConstraint: NSLayoutConstraint!
     private var landscapeImageHeightConstraint: NSLayoutConstraint!
     private var commentsWidthConstraint: NSLayoutConstraint!
@@ -2047,6 +2075,14 @@ final class IOSUIKitArticleCell: UITableViewCell {
         titleLabel.font = .preferredFont(forTextStyle: .headline)
         titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.numberOfLines = 0
+        // The engine owns the row height, so a cell can carry slack its natural
+        // content does not fill — in the side-title variant whenever the image is
+        // taller than the title-and-date column. Without a firm hugging priority
+        // Auto Layout absorbs that slack into these labels, which pushes the date
+        // away from the headline it belongs to. Let it land in the gap above the
+        // preview instead, which is where the engine put it.
+        titleLabel.setContentHuggingPriority(UILayoutPriority(999), for: .vertical)
+        dateLabel.setContentHuggingPriority(UILayoutPriority(999), for: .vertical)
         starImageView.tintColor = .systemYellow
         starImageView.alpha = 0
         starImageView.isAccessibilityElement = false
@@ -2116,10 +2152,12 @@ final class IOSUIKitArticleCell: UITableViewCell {
         starHeight = starImageView.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize)
         commentsToStarSpacingConstraint = commentsContainer.trailingAnchor.constraint(equalTo: starImageView.leadingAnchor)
         NSLayoutConstraint.activate([
-            unreadIndicator.leadingAnchor.constraint(equalTo: metadataRow.leadingAnchor),
-            unreadIndicator.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
-            feedIconContainer.leadingAnchor.constraint(equalTo: unreadIndicator.trailingAnchor, constant: IOSUIKitArticleGeometry.metadataLeadingSpacing),
+            // Leading edge: feed icon, then the feed name.
+            feedIconContainer.leadingAnchor.constraint(equalTo: metadataRow.leadingAnchor),
             feedIconContainer.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
+            // Trailing edge, outermost first: unread dot, then star.
+            unreadIndicator.trailingAnchor.constraint(equalTo: metadataRow.trailingAnchor),
+            unreadIndicator.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
             feedTitleLabel.leadingAnchor.constraint(equalTo: feedIconContainer.trailingAnchor, constant: IOSUIKitArticleGeometry.metadataLeadingSpacing),
             feedTitleLabel.trailingAnchor.constraint(equalTo: commentsContainer.leadingAnchor, constant: -IOSUIKitArticleGeometry.metadataTitleSpacing),
             feedTitleLabel.topAnchor.constraint(equalTo: metadataRow.topAnchor),
@@ -2128,7 +2166,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
             commentsWidthConstraint,
             commentsHeightConstraint,
             commentsToStarSpacingConstraint,
-            starImageView.trailingAnchor.constraint(equalTo: metadataRow.trailingAnchor),
+            starImageView.trailingAnchor.constraint(
+                equalTo: unreadIndicator.leadingAnchor,
+                constant: -IOSUIKitArticleGeometry.metadataAccessorySpacing
+            ),
             starImageView.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
             starWidth,
             starHeight,
@@ -2151,16 +2192,28 @@ final class IOSUIKitArticleCell: UITableViewCell {
         previewCollapseConstraint = previewLabel.heightAnchor.constraint(equalToConstant: 0)
         previewCollapseConstraint.priority = .defaultHigh
         previewCollapseConstraint.isActive = true
-        var stackedConstraints: [NSLayoutConstraint] = [
+        // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. The side-title
+        // variant reorders the text block and narrows part of it, so the
+        // vertical order and the trailing edges are owned by the variant groups.
+        // Only the leading edge and the container's bottom are shared.
+        previewBottomDefaultConstraint = previewLabel.bottomAnchor.constraint(equalTo: textContainer.bottomAnchor)
+        previewTrailingDefaultConstraint = previewLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor)
+
+        defaultStackConstraints = [
+            previewBottomDefaultConstraint,
+            previewTrailingDefaultConstraint,
             titleLabel.topAnchor.constraint(equalTo: textContainer.topAnchor),
+            titleLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
             metadataRow.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
             dateLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            dateLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
             previewTopConstraint,
-            previewLabel.bottomAnchor.constraint(equalTo: textContainer.bottomAnchor),
         ]
+
+        var stackedConstraints: [NSLayoutConstraint] = []
         for child in [titleLabel, metadataRow, dateLabel, previewLabel] as [UIView] {
             stackedConstraints.append(child.leadingAnchor.constraint(equalTo: textContainer.leadingAnchor))
-            stackedConstraints.append(child.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor))
         }
         NSLayoutConstraint.activate(stackedConstraints)
 
@@ -2200,12 +2253,16 @@ final class IOSUIKitArticleCell: UITableViewCell {
         landscapeImageHeightConstraint = articleImageView.heightAnchor.constraint(equalToConstant: 1)
 
         textOnlyConstraints = [
+        ] + defaultStackConstraints + [
+
             textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
             textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
             textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
             textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
         ]
         portraitConstraints = [
+        ] + defaultStackConstraints + [
+
             articleImageView.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
             articleImageView.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
             articleImageView.topAnchor.constraint(equalTo: margins.topAnchor),
@@ -2216,6 +2273,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
             textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
         ]
         landscapeConstraints = [
+        ] + defaultStackConstraints + [
+
             articleImageView.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
             articleImageView.topAnchor.constraint(equalTo: margins.topAnchor),
             landscapeImageWidthConstraint,
@@ -2225,6 +2284,117 @@ final class IOSUIKitArticleCell: UITableViewCell {
             textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
             textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
             textContainer.bottomAnchor.constraint(lessThanOrEqualTo: margins.bottomAnchor),
+        ]
+
+        // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. Order, top to bottom:
+        //
+        //   ● icon  Feed name              ★ 💬     full width
+        //   Headline …                    ┌─────┐
+        //   Date                          │ IMG │
+        //                                 └─────┘
+        //   Preview …                               full width
+        //
+        // The metadata bar keeps the full width because the feed name is the
+        // element that suffers first: in the narrow column it would fall from
+        // 275 pt to 147 pt, and the accessories around it grow with Dynamic Type
+        // while the column does not.
+        //
+        // The image is trailing so every headline starts at the same edge,
+        // including rows that have no image at all (`visualTextOnly`).
+        //
+        // The image reuses the landscape size constraints; only one variant
+        // group is ever active, so they cannot collide.
+        sideTitlePreviewBelowDateConstraint = previewLabel.topAnchor.constraint(
+            greaterThanOrEqualTo: dateLabel.bottomAnchor,
+            constant: IOSUIKitArticleGeometry.textSpacing
+        )
+        sideTitlePreviewBelowImageConstraint = previewLabel.topAnchor.constraint(
+            greaterThanOrEqualTo: articleImageView.bottomAnchor,
+            constant: IOSUIKitArticleGeometry.textSpacing
+        )
+        // Pulls the preview up to the date when the text column is the taller of
+        // the two. Together with the two required constraints above this is the
+        // max() the engine computes.
+        let previewPrefersDate = previewLabel.topAnchor.constraint(
+            equalTo: dateLabel.bottomAnchor,
+            constant: IOSUIKitArticleGeometry.textSpacing
+        )
+        previewPrefersDate.priority = .defaultLow
+        let titleTrailingToImage = titleLabel.trailingAnchor.constraint(
+            equalTo: articleImageView.leadingAnchor,
+            constant: -IOSUIKitArticleGeometry.sideTitleSpacing
+        )
+        let dateTrailingToImage = dateLabel.trailingAnchor.constraint(
+            equalTo: articleImageView.leadingAnchor,
+            constant: -IOSUIKitArticleGeometry.sideTitleSpacing
+        )
+        sideTitleConstraints = [
+            textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
+            textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
+
+            metadataRow.topAnchor.constraint(equalTo: textContainer.topAnchor),
+            metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+
+            titleLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            titleTrailingToImage,
+            dateLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            dateTrailingToImage,
+
+            articleImageView.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            articleImageView.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            landscapeImageWidthConstraint,
+            landscapeImageHeightConstraint,
+
+            sideTitlePreviewBelowDateConstraint,
+            sideTitlePreviewBelowImageConstraint,
+            previewPrefersDate,
+            previewBottomDefaultConstraint,
+            previewTrailingDefaultConstraint,
+        ]
+
+        // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. Wide container: the
+        // preview joins the column beside the image rather than running under it.
+        //
+        //   ● icon  Feed name              ★ 💬     full width
+        //   Headline …                    ┌─────┐
+        //   Date                          │ IMG │
+        //   Preview …                     └─────┘
+        //
+        // The image can now be the lowest element in the row, so the container's
+        // bottom is only an upper bound for both — the engine fixes the height.
+        sideTitleWideConstraints = [
+            textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
+            textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
+
+            metadataRow.topAnchor.constraint(equalTo: textContainer.topAnchor),
+            metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+
+            titleLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            titleLabel.trailingAnchor.constraint(
+                equalTo: articleImageView.leadingAnchor,
+                constant: -IOSUIKitArticleGeometry.sideTitleSpacing
+            ),
+            dateLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            dateLabel.trailingAnchor.constraint(
+                equalTo: articleImageView.leadingAnchor,
+                constant: -IOSUIKitArticleGeometry.sideTitleSpacing
+            ),
+            previewTopConstraint,
+            previewLabel.trailingAnchor.constraint(
+                equalTo: articleImageView.leadingAnchor,
+                constant: -IOSUIKitArticleGeometry.sideTitleSpacing
+            ),
+            previewLabel.bottomAnchor.constraint(lessThanOrEqualTo: textContainer.bottomAnchor),
+
+            articleImageView.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            articleImageView.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            articleImageView.bottomAnchor.constraint(lessThanOrEqualTo: textContainer.bottomAnchor),
+            landscapeImageWidthConstraint,
+            landscapeImageHeightConstraint,
         ]
     }
 
@@ -2264,6 +2434,12 @@ final class IOSUIKitArticleCell: UITableViewCell {
         // Constants and priorities only — the constraint graph stays identical
         // across every reuse, whatever the article contains.
         previewTopConstraint.constant = hasPreview ? IOSUIKitArticleGeometry.textSpacing : 0
+        // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. Same collapse for the
+        // side-title variant's pair, or a preview-less row keeps a gap below the
+        // image that the engine did not budget for.
+        let previewSpacing = hasPreview ? IOSUIKitArticleGeometry.textSpacing : 0
+        sideTitlePreviewBelowDateConstraint.constant = previewSpacing
+        sideTitlePreviewBelowImageConstraint.constant = previewSpacing
         previewCollapseConstraint.priority = hasPreview ? UILayoutPriority(1) : .defaultHigh
         let hasComments = item.content.hasComments
         commentsContainer.isHidden = !hasComments
@@ -2292,7 +2468,14 @@ final class IOSUIKitArticleCell: UITableViewCell {
         if unreadWidth.constant != unread {
             unreadWidth.constant = unread
             unreadHeight.constant = unread
-            unreadIndicator.layer.cornerRadius = unread / 2
+        }
+        // Guarded on its own value, not on the size: at the default text size the
+        // computed width equals the constant the constraint was created with, so
+        // folding this into the branch above left the radius at 0 and the dot
+        // rendered as a square.
+        let unreadRadius = unread / 2
+        if unreadIndicator.layer.cornerRadius != unreadRadius {
+            unreadIndicator.layer.cornerRadius = unreadRadius
         }
         let icon = layout.feedIconFrame.width
         if feedIconWidth.constant != icon {
@@ -2320,7 +2503,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             trailing: metrics.horizontalInset
         )
 
-        if variant == .visualLandscape {
+        if variant == .visualLandscape || variant == .visualSideTitle || variant == .visualSideTitleWide {
             let imageSize = metrics.imageSize(hasImage: true)
             landscapeImageWidthConstraint.constant = imageSize.width
             landscapeImageHeightConstraint.constant = imageSize.height
@@ -2339,6 +2522,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
             activeLayoutConstraints = portraitConstraints
         case .visualLandscape:
             activeLayoutConstraints = landscapeConstraints
+        case .visualSideTitle:
+            activeLayoutConstraints = sideTitleConstraints
+        case .visualSideTitleWide:
+            activeLayoutConstraints = sideTitleWideConstraints
         }
         NSLayoutConstraint.activate(activeLayoutConstraints)
         currentLayoutVariant = variant
@@ -2662,19 +2849,6 @@ private struct ArticleListBottomOverlay: View {
     }
 }
 
-// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
-private struct ScrolloverUndoBackground: ViewModifier {
-    let arm: String
-
-    func body(content: Content) -> some View {
-        if arm == IOSUIKitTimelineScrolloverOverlayDiagnostic.Arm.opaque.rawValue {
-            content.background(Color(uiColor: .secondarySystemBackground), in: Capsule())
-        } else {
-            content.background(.regularMaterial, in: Capsule())
-        }
-    }
-}
-
 enum ScrolloverUndoPresentationPolicy {
     static func shouldTriggerFeedback(previouslyVisible: Bool, currentlyVisible: Bool) -> Bool {
         !previouslyVisible && currentlyVisible
@@ -2683,11 +2857,6 @@ enum ScrolloverUndoPresentationPolicy {
 
 private struct ScrolloverUndoPresentation: View {
     var store: NewsreaderStore
-    // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. `@AppStorage` keeps the
-    // pill re-rendering when the arm changes while it is already visible.
-    @AppStorage(IOSUIKitTimelineScrolloverOverlayDiagnostic.defaultsKey)
-    private var overlayArm = IOSUIKitTimelineScrolloverOverlayDiagnostic.Arm.material.rawValue
-
     var body: some View {
         HStack(spacing: 10) {
             Text(scrolloverUndoCountLabel)
@@ -2697,7 +2866,7 @@ private struct ScrolloverUndoPresentation: View {
         .font(.callout)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .modifier(ScrolloverUndoBackground(arm: overlayArm))
+        .background(.regularMaterial, in: Capsule())
         .padding(.bottom, 12)
     }
 
@@ -2872,6 +3041,11 @@ private struct ArticleRowContentBody: View {
             } else {
                 portraitVisual
             }
+        case .visualCompact:
+            // The UIKit timeline owns this mode's real layout. This SwiftUI body
+            // is the search and fallback renderer, where the side-image
+            // arrangement is the closest existing equivalent.
+            landscapeVisual
         case .compact:
             articleText
                 .padding(.vertical, ArticleRowContentLayout.compactVerticalPadding)
