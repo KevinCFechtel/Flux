@@ -53,7 +53,6 @@ struct NewsNavigationView: View {
     @State private var addDestination: IOSNavigationAddDestination?
     @State private var feedSettingsTarget: IOSFeedSettingsTarget?
     @State private var expansionState = NewsNavigationExpansionState()
-    @State private var searchRequested = false
 
     init(store: NewsreaderStore, sheetPresented: Binding<Bool>, presentation: NewsNavigationPresentation, onSearch: @escaping () -> Void = {}) {
         self.store = store
@@ -72,11 +71,6 @@ struct NewsNavigationView: View {
         .sheet(item: $feedSettingsTarget) { target in NavigationStack { IOSFeedSettingsView(store: store, target: target) } }
         .onAppear(perform: ensureSelectedFeedIsExpanded)
         .onChange(of: store.scope) { _, _ in ensureSelectedFeedIsExpanded() }
-        .onDisappear {
-            guard presentation == .sheet, searchRequested else { return }
-            searchRequested = false
-            onSearch()
-        }
     }
 
     private var listContent: some View {
@@ -156,12 +150,10 @@ struct NewsNavigationView: View {
     }
 
     private func requestSearch() {
-        if presentation == .sheet {
-            searchRequested = true
-            sheetPresented = false
-        } else {
-            onSearch()
-        }
+        // The host sequences this: it owns the sheet and therefore its dismissal
+        // callback, which fires reliably — unlike this view's `onDisappear`,
+        // which runs while the sheet is being torn down.
+        onSearch()
     }
 
     private func scopeRow(_ title: String, systemImage: String, scope: BrowserScope, count: UInt64) -> some View {

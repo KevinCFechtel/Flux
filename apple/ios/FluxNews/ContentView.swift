@@ -109,6 +109,9 @@ struct ContentView: View {
     @StateObject private var searchStore = IOSSearchStore()
     @State private var navigationPresented = false
     @State private var searchPresented = false
+    /// Set while the navigation sheet is closing so that search opens once it is
+    /// actually gone.
+    @State private var searchPendingAfterNavigationSheet = false
     @State private var diagnosticsPresented = false
     @State private var settingsPresented = false
     @State private var splitColumnVisibility: NavigationSplitViewVisibility = .all
@@ -150,11 +153,32 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $diagnosticsPresented) { DeveloperDiagnosticsView(bootstrapper: bootstrapper) }
-        .sheet(item: $browser) { item in IOSInAppBrowser(url: item.url) }
-        .sheet(item: readerSheetBinding) { item in
+        // A sheet rather than a pushed destination: the timeline is the detail
+        // column of a split view that collapses on a phone, and a destination
+        // registered there did not activate. A sheet behaves identically in both
+        // size classes and needs no sequencing against the navigation sheet.
+        .sheet(isPresented: $searchPresented) {
+            NavigationStack {
+                searchView
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Done") { searchPresented = false }
+                        }
+                    }
+            }
+            // Only one sheet can be presented per view, so what the results open
+            // has to hang off the search sheet while it is up.
+            .sheet(item: gatedBrowser(active: true)) { item in IOSInAppBrowser(url: item.url) }
+            .sheet(item: gatedReaderSheet(active: true)) { item in
+                NavigationStack { readerView(for: item.article) }
+            }
+            .sheet(item: gatedShare(active: true)) { payload in IOSShareSheet(items: payload.items) }
+        }
+        .sheet(item: gatedBrowser(active: !searchPresented)) { item in IOSInAppBrowser(url: item.url) }
+        .sheet(item: gatedReaderSheet(active: !searchPresented)) { item in
             NavigationStack { readerView(for: item.article) }
         }
-        .sheet(item: $sharePayload) { payload in IOSShareSheet(items: payload.items) }
+        .sheet(item: gatedShare(active: !searchPresented)) { payload in IOSShareSheet(items: payload.items) }
         .alert("Unable to Open Article", isPresented: Binding(get: { articleOpenError != nil }, set: { if !$0 { articleOpenError = nil } })) {
             Button("OK", role: .cancel) { articleOpenError = nil }
         } message: { Text(articleOpenError ?? "") }
@@ -196,7 +220,11 @@ struct ContentView: View {
             adaptiveDetail
         }
         // These presentations outlive an article-navigation reset.
-        .sheet(isPresented: $navigationPresented) {
+        .sheet(isPresented: $navigationPresented, onDismiss: {
+            guard searchPendingAfterNavigationSheet else { return }
+            searchPendingAfterNavigationSheet = false
+            searchPresented = true
+        }) {
             NavigationStack {
                 NewsNavigationView(store: newsreaderStore, sheetPresented: $navigationPresented, presentation: .sheet, onSearch: openSearch)
                     .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { navigationPresented = false } } }
@@ -208,9 +236,6 @@ struct ContentView: View {
     private var adaptiveDetail: some View {
         Group {
             articleList
-                // Registered on the list itself, ahead of the inspector: the
-                // destination has to sit inside the navigation stack.
-                .navigationDestination(isPresented: $searchPresented) { searchView }
                 .inspector(isPresented: readerInspectorBinding) {
                     // Presentation and content derive from the same optional. If
                     // the article is gone the panel closes itself rather than
@@ -348,8 +373,14 @@ struct ContentView: View {
     }
 
     private func openSearch() {
+        // Presenting while the navigation sheet is still dismissing loses the
+        // presentation, so its dismissal callback performs it.
+        guard navigationPresented else {
+            searchPresented = true
+            return
+        }
+        searchPendingAfterNavigationSheet = true
         navigationPresented = false
-        searchPresented = true
     }
 
     private func normalizeAdaptiveShell(for presentation: AdaptivePresentation) {
@@ -570,7 +601,6 @@ struct ContentView: View {
     }
 }
 
-// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
 private struct ArticleListTitleCapsule: View {
     let title: String
     let subtitle: String?
@@ -790,12 +820,24 @@ extension ContentView {
         adaptivePresentation.readerPresentationKind == .inspector
     }
 
-    private var readerSheetBinding: Binding<IOSReaderArticle?> {
+    /// The browser, reader and share sheets follow whichever surface is
+    /// frontmost. A view can present only one sheet, so exactly one side — the
+    /// root or the search sheet — is active at a time.
+    private func gatedBrowser(active: Bool) -> Binding<IOSBrowserURL?> {
+        Binding(get: { active ? browser : nil }, set: { if active { browser = $0 } })
+    }
+
+    private func gatedShare(active: Bool) -> Binding<IOSSharePayload?> {
+        Binding(get: { active ? sharePayload : nil }, set: { if active { sharePayload = $0 } })
+    }
+
+    private func gatedReaderSheet(active: Bool) -> Binding<IOSReaderArticle?> {
         Binding(
-            get: { usesReaderInspector ? nil : readerArticle },
-            set: { if $0 == nil, !usesReaderInspector { dismissReader() } }
+            get: { active && !usesReaderInspector ? readerArticle : nil },
+            set: { if $0 == nil, active, !usesReaderInspector { dismissReader() } }
         )
     }
+
 
     private var readerInspectorBinding: Binding<Bool> {
         Binding(

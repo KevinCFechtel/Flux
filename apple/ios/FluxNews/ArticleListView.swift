@@ -767,7 +767,6 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
 }
 
 @MainActor
-// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
 /// Softens the status bar against scrolling content below iOS 27, which
 /// adapts the bar's own elements to their backdrop.
 final class IOSUIKitTimelineTopScrimView: UIView {
@@ -848,7 +847,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private var scheduledPreparedWindowGeneration: UInt64?
     private var prefetchTasks: [Int64: (request: ArticleImageRequest, task: Task<Void, Never>)] = [:]
     private let refreshControl = UIRefreshControl()
-    // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
     private let statusBarScrim = IOSUIKitTimelineTopScrimView()
     private var statusBarScrimHeight: NSLayoutConstraint!
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
@@ -1430,13 +1428,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
 
     private func setScrolloverPhase(_ phase: IOSScrolloverPresentationPhase) {
         guard scrolloverPhase != phase else { return }
-        let wasIdle = scrolloverPhase == .idle
         scrolloverPhase = phase
-        // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. The phase already
-        // brackets every scroll, including when Scrollover itself is disabled.
-        if phase == .idle {
-        } else if wasIdle {
-        }
         // Every phase boundary restarts the ballistic baseline.
         scrolloverGeometryTracker.setPhase(phase)
         onScrolloverPhase?(phase)
@@ -1777,9 +1769,8 @@ enum IOSUIKitArticleCellLayoutVariant: Hashable {
     case visualTextOnly
     case visualPortrait
     case visualLandscape
-    /// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. Image beside the title,
-    /// metadata/date/preview full width underneath. Candidate for a "Visual
-    /// compact" presentation mode.
+    /// `Visual compact`: image beside the title, metadata/date/preview full
+    /// width underneath.
     case visualSideTitle
     /// The same arrangement on a wide container: the preview joins the column
     /// beside the image instead of running underneath it.
@@ -1975,7 +1966,6 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var landscapeConstraints: [NSLayoutConstraint] = []
     private var activeLayoutConstraints: [NSLayoutConstraint] = []
     private var portraitImageAspectConstraint: NSLayoutConstraint!
-    // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
     private var sideTitleConstraints: [NSLayoutConstraint] = []
     private var defaultStackConstraints: [NSLayoutConstraint] = []
     private var sideTitleWideConstraints: [NSLayoutConstraint] = []
@@ -2188,7 +2178,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         previewCollapseConstraint = previewLabel.heightAnchor.constraint(equalToConstant: 0)
         previewCollapseConstraint.priority = .defaultHigh
         previewCollapseConstraint.isActive = true
-        // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. The side-title
+        // The side-title
         // variant reorders the text block and narrows part of it, so the
         // vertical order and the trailing edges are owned by the variant groups.
         // Only the leading edge and the container's bottom are shared.
@@ -2282,7 +2272,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             textContainer.bottomAnchor.constraint(lessThanOrEqualTo: margins.bottomAnchor),
         ]
 
-        // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. Order, top to bottom:
+        // Order, top to bottom:
         //
         //   ● icon  Feed name              ★ 💬     full width
         //   Headline …                    ┌─────┐
@@ -2350,7 +2340,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             previewTrailingDefaultConstraint,
         ]
 
-        // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. Wide container: the
+        // Wide container: the
         // preview joins the column beside the image rather than running under it.
         //
         //   ● icon  Feed name              ★ 💬     full width
@@ -2430,7 +2420,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         // Constants and priorities only — the constraint graph stays identical
         // across every reuse, whatever the article contains.
         previewTopConstraint.constant = hasPreview ? IOSUIKitArticleGeometry.textSpacing : 0
-        // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. Same collapse for the
+        // Same collapse for the
         // side-title variant's pair, or a preview-less row keeps a gap below the
         // image that the engine did not budget for.
         let previewSpacing = hasPreview ? IOSUIKitArticleGeometry.textSpacing : 0
