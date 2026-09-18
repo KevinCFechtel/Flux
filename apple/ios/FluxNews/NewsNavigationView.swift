@@ -86,7 +86,11 @@ struct NewsNavigationView: View {
                 scopeRow("All News", systemImage: "newspaper", scope: .all, count: store.unreadTotal)
                 scopeRow("Starred", systemImage: "star", scope: .starred, count: store.starredTotal)
                 searchRow
-                if presentation == .sheet { scopeRow("Listening List", systemImage: "headphones", scope: .listeningList, count: 0) }
+                // The Listening List has no implementation yet: selecting it
+                // maps to the `.all` query (`NewsreaderStore.articleQuery`), so
+                // the row would show every article under a title promising
+                // something else. The scope case and its store handling stay in
+                // place for the port; only the entry point is withheld.
             }
             Section("Feeds") {
                 ForEach(groups) { group in

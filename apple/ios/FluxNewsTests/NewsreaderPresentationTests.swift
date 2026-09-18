@@ -1119,21 +1119,15 @@ final class NewsreaderPresentationTests: XCTestCase {
     /// device, so the shipping path uses the physical display scale again. The
     /// reduced-raster mechanism stays covered while the scaffolding exists.
     @MainActor
-    func testArticleImageRasterScaleUsesDisplayScaleWithTwoXDiagnosticRetired() {
-        XCTAssertFalse(IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.useTwoXArticleImageRasterForPerformanceDiagnosis)
-        XCTAssertEqual(IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(displayScale: 3), 3)
-        XCTAssertEqual(IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(displayScale: 2), 2)
-        XCTAssertEqual(IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(displayScale: 3, diagnosticEnabled: true), 2)
-    }
 
-    func testTwoXDiagnosticUsesExactSlotBGRARasterWithReducedRepresentativeGeometry() throws {
+    func testReducedRasterScaleProducesAnExactSlotBGRARaster() throws {
         let targetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
         let request = ArticleImageRequest(
             url: URL(string: "https://example.com/image.jpg")!,
             targetSize: targetSize,
             displayScale: 3,
             cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
-            rasterScale: IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(displayScale: 3, diagnosticEnabled: true)
+            rasterScale: 2
         )
 
         XCTAssertEqual(targetSize, .init(width: 361, height: 203.0625))
@@ -1213,7 +1207,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(request(nil).producesOpaqueRaster)
     }
 
-    func testTwoXDiagnosticUsesRealLoaderCacheAndCannotAliasThreeXRaster() async throws {
+    func testDifferentRasterScalesCannotAliasInTheMemoryCache() async throws {
         let data = try imageData(width: 2_400, height: 1_200)
         let counter = ImageLoadCounter(data: data)
         let pipeline = ArticleImagePipeline { _ in await counter.load() }
@@ -1239,7 +1233,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testTwoXDiagnosticPresentsCachedExactRasterImmediatelyAtPhysicalDisplayScale() async throws {
+    func testCachedExactRasterIsPresentedImmediatelyAtPhysicalDisplayScale() async throws {
         let data = try imageData(width: 1_600, height: 800)
         let counter = ImageLoadCounter(data: data)
         let pipeline = ArticleImagePipeline { _ in await counter.load() }
@@ -1744,12 +1738,12 @@ final class NewsreaderPresentationTests: XCTestCase {
         } catch {}
     }
 
-    func testNormalDisplayScaleExactSlotRasterRemainsAvailableWhenDiagnosticIsDisabled() throws {
+    func testDisplayScaleRasterRemainsAvailableAtTheExactSlot() throws {
         let representativeTargetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
         let normalRepresentative = ArticleImageRequest(
             url: URL(string: "https://example.com/image.jpg")!, targetSize: representativeTargetSize, displayScale: 3,
             cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
-            rasterScale: IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(displayScale: 3, diagnosticEnabled: false)
+            rasterScale: 3
         )
         XCTAssertEqual(normalRepresentative.rasterScale, 3)
         XCTAssertEqual(normalRepresentative.maxPixelDimension, 1_088)
@@ -2192,7 +2186,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(coordinator.snapshot().cancellations, 1)
 
         await gate.releaseAll()
-        for _ in 0..<100 where coordinator.snapshot().discardedResults == 0 { await Task.yield() }
+        await waitUntil { coordinator.snapshot().discardedResults > 0 }
         XCTAssertEqual(coordinator.snapshot().measurementsCompleted, 0)
     }
 
@@ -2206,7 +2200,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         coordinator.replaceWindow(with: Array(repeating: input, count: 100), visibleCount: 1)
         await gate.waitUntilStarted(count: 1)
         await gate.releaseAll()
-        for _ in 0..<100 where coordinator.snapshot().measurementsCompleted == 0 { await Task.yield() }
+        await waitUntil { coordinator.snapshot().measurementsCompleted > 0 }
         let snapshot = coordinator.snapshot()
         XCTAssertEqual(snapshot.requests, UInt64(IOSUIKitArticleLayoutPreparationCoordinator.nearbyWindowLimit + 1))
         XCTAssertEqual(snapshot.measurementsStarted, 1)
@@ -2235,8 +2229,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         let startedAfterReplacement = await gate.startedTitles()
         XCTAssertEqual(startedAfterReplacement, ["far", "visible", "replacement"])
         await gate.releaseAll()
-        for _ in 0..<100 where coordinator.snapshot().discardedResults == 0 { await Task.yield() }
-        for _ in 0..<100 where coordinator.snapshot().measurementsCompleted == 0 { await Task.yield() }
+        await waitUntil { coordinator.snapshot().discardedResults > 0 }
+        await waitUntil { coordinator.snapshot().measurementsCompleted > 0 }
         let snapshot = coordinator.snapshot()
         XCTAssertGreaterThanOrEqual(snapshot.cancellations, 1)
         XCTAssertGreaterThanOrEqual(snapshot.discardedResults, 1)
@@ -2260,7 +2254,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         await gate.releaseAll()
         await gate.waitUntilStarted(count: 2)
         await gate.releaseAll()
-        for _ in 0..<100 where coordinator.snapshot().measurementsCompleted == 0 { await Task.yield() }
+        await waitUntil { coordinator.snapshot().measurementsCompleted > 0 }
 
         XCTAssertNil(cache.metrics(for: .init(first)))
         XCTAssertNil(cache.metrics(for: .init(second)))
@@ -2570,6 +2564,16 @@ final class NewsreaderPresentationTests: XCTestCase {
         return cell
     }
 
+    /// `Task.yield()` only reschedules on the current executor, so a bounded
+    /// yield loop races work that runs elsewhere — it passed most of the time and
+    /// failed under load. This waits on the condition in real time instead.
+    @MainActor
+    private func waitUntil(_ condition: () -> Bool) async {
+        for _ in 0..<400 where !condition() {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+    }
+
     @MainActor
     private func waitForArticleImagePresentation(_ condition: () -> Bool) async {
         for _ in 0..<200 where !condition() {
@@ -2725,36 +2729,6 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(controller.tableViewForTesting.numberOfRows(inSection: 0), articles.count)
     }
 
-    /// The percentiles are read straight off the bucket histogram, so their
-    /// arithmetic has to be right before any A/B decision rests on them.
-    func testBusyPercentilesAndHalfBudgetRateAreDerivedFromTheBucketHistogram() {
-        let bounds = IOSUIKitTimelineFrameHeadroomRecorder.busyBucketUpperBoundsMilliseconds
-        // 100 frames: 90 at or below 2 ms, 5 in the 8-10 ms bucket, 5 above 20 ms.
-        var buckets = [UInt64](repeating: 0, count: bounds.count + 1)
-        buckets[0] = 90
-        buckets[4] = 5
-        buckets[8] = 5
-        let snapshot = IOSUIKitTimelineFrameHeadroomSnapshot(
-            sampledFrames: 100, skippedVSyncs: 0, callbackGapSamples: 100, lateCallbacks: 0,
-            missedRefreshes: 0, maximumCallbackGapMilliseconds: 0, unyieldedFrames: 0,
-            expectedFrameNanoseconds: 16_600_000, totalBusyNanoseconds: 0,
-            maximumBusyNanoseconds: 0, busyBuckets: buckets,
-            contentHeightChanges: 0, maximumContentHeightJump: 0, totalContentHeightDrift: 0,
-            deceleratingSamples: 0, deceleratingDiscontinuities: 0, maximumDeceleratingExcess: 0,
-            deceleratingRuns: 0, preparedRowHeights: 0, synchronousHeightFallbacks: 0,
-            lastHeightBatchRows: 0, lastHeightBatchMilliseconds: 0
-        )
-
-        XCTAssertEqual(snapshot.busyPercentileMilliseconds(0.50), 2.0 * (50.0 / 90.0), accuracy: 0.01)
-        XCTAssertEqual(snapshot.busyPercentileMilliseconds(0.90), 2.0, accuracy: 0.01)
-        // 91st..95th frame sit in the 8-10 ms bucket.
-        XCTAssertEqual(snapshot.busyPercentileMilliseconds(0.93), 8.0 + 2.0 * (3.0 / 5.0), accuracy: 0.01)
-        XCTAssertGreaterThan(snapshot.busyPercentileMilliseconds(0.99), 16.7)
-
-        // Half of 16.6 ms is 8.3 ms, so only buckets whose lower bound is at or
-        // above that count: the 8-10 bucket starts at 8 and must not.
-        XCTAssertEqual(snapshot.framesOverHalfBudget, 5)
-    }
 
     /// A cached image is set before the cell is displayed, so fading it would
     /// add an animation to every appearing row. Only a late arrival replaces

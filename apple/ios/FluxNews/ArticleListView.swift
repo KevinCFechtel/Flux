@@ -768,11 +768,45 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
 
 @MainActor
 // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
-final class IOSUIKitTimelineInstrumentedTableView: UITableView {
-    override func layoutSubviews() {
-        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.timing(.tableLayout) { super.layoutSubviews() }
+/// Softens the status bar against scrolling content below iOS 27, which
+/// adapts the bar's own elements to their backdrop.
+final class IOSUIKitTimelineTopScrimView: UIView {
+    override class var layerClass: AnyClass { CAGradientLayer.self }
+    private var gradient: CAGradientLayer { layer as! CAGradientLayer }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        gradient.startPoint = CGPoint(x: 0.5, y: 0)
+        gradient.endPoint = CGPoint(x: 0.5, y: 1)
+        // A straight ramp has a constant slope, so the eye finds its lower edge.
+        // Holding almost full strength across the glyph band and then easing out
+        // makes the scrim read as shorter *and* softer than a linear one, without
+        // taking protection away from where the status bar actually sits.
+        gradient.locations = [0, 0.5, 0.75, 1]
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
+            self.updateColors()
+        }
+        updateColors()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Strength at the very top. The remaining stops are fractions of it, so
+    /// this one number changes the whole scrim.
+    static let peakAlpha: CGFloat = 0.6
+
+    private func updateColors() {
+        let base = UIColor.systemBackground.resolvedColor(with: traitCollection)
+        gradient.colors = [
+            base.withAlphaComponent(Self.peakAlpha).cgColor,
+            base.withAlphaComponent(Self.peakAlpha * 0.9).cgColor,
+            base.withAlphaComponent(Self.peakAlpha * 0.4).cgColor,
+            base.withAlphaComponent(0).cgColor,
+        ]
     }
 }
+
 
 final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDelegate, UITableViewDataSourcePrefetching {
     private enum Section: Hashable { case main }
@@ -872,7 +906,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         view.backgroundColor = .systemBackground
         view.isOpaque = true
 
-        tableView = IOSUIKitTimelineInstrumentedTableView(frame: .zero, style: .plain)
+        tableView = UITableView(frame: .zero, style: .plain)
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.backgroundColor = .systemBackground
         tableView.isOpaque = true
@@ -1005,13 +1039,10 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         let inputs = rowHeightInputs(for: missing)
         rowHeightTask?.cancel()
         rowHeightTask = Task { @MainActor [weak self] in
-            let startedAt = DispatchTime.now().uptimeNanoseconds
             let measured = await IOSUIKitArticleRowHeightMeasurement.heights(for: inputs)
             guard let self, !Task.isCancelled, self.rowHeightGeneration == generation else { return }
             self.rowHeightTask = nil
             self.rowHeights.store(measured, for: identity)
-            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.noteHeightBatch(rows: inputs.count, nanoseconds: DispatchTime.now().uptimeNanoseconds &- startedAt)
-            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.noteRowHeightInventory(self.rowHeights.preparedCount)
             _ = self.rowHeights.retireSupersededHeights(ifComplete: self.orderedIDs)
             if reloadWhenComplete { self.reloadPreservingAnchor() }
         }
@@ -1029,7 +1060,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     /// the new content size happens to put it.
     private func reloadPreservingAnchor() {
         let anchor = currentScrollAnchor()
-        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.note(.hardReload)
         dataSource.applySnapshotUsingReloadData(dataSource.snapshot(), completion: nil)
         guard let anchor, let row = orderedIDs.firstIndex(of: anchor.id) else { return }
         tableView.layoutIfNeeded()
@@ -1065,21 +1095,16 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         }
         let missing = rowHeights.missingIDs(in: snapshot.itemIdentifiers)
         guard !missing.isEmpty else {
-            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.note(.snapshotApplied)
             dataSource.apply(snapshot, animatingDifferences: false)
             return
         }
         let inputs = rowHeightInputs(for: missing)
         pendingStructuralApply?.cancel()
         pendingStructuralApply = Task { @MainActor [weak self] in
-            let startedAt = DispatchTime.now().uptimeNanoseconds
             let measured = await IOSUIKitArticleRowHeightMeasurement.heights(for: inputs)
             guard let self, !Task.isCancelled else { return }
             self.pendingStructuralApply = nil
             self.rowHeights.store(measured, for: identity)
-            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.noteHeightBatch(rows: inputs.count, nanoseconds: DispatchTime.now().uptimeNanoseconds &- startedAt)
-            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.noteRowHeightInventory(self.rowHeights.preparedCount)
-            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.note(.snapshotApplied)
             self.dataSource.apply(snapshot, animatingDifferences: false, completion: nil)
         }
     }
@@ -1094,7 +1119,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         let startedAt = DispatchTime.now().uptimeNanoseconds
         let metrics = preparedLayoutCoordinator.measureSynchronously(preparedLayoutInput(for: item), priority: .visible)
         performanceMetrics.recordDeterministicHeightFallback(durationNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt)
-        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.noteSynchronousHeightFallback()
 #if DEBUG
         synchronousRowHeightFallbackCountForTesting &+= 1
 #endif
@@ -1252,22 +1276,15 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             performanceMetrics.recordDeterministicHeightFallback(durationNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt)
         }
         cell.performanceMetrics = performanceMetrics
-        cell.articleImageRasterScale = { displayScale in
-            IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(
-                displayScale: displayScale
-            )
-        }
         performanceMetrics.recordConfigure()
-        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.measuring(.cellConfigured) {
-            cell.configure(
-                item: item,
-                mode: mode,
-                previewLines: previewLines,
-                metrics: metrics,
-                displayScale: view.traitCollection.displayScale,
-                preparedLayoutMetrics: layoutMetrics
-            )
-        }
+        cell.configure(
+            item: item,
+            mode: mode,
+            previewLines: previewLines,
+            metrics: metrics,
+            displayScale: view.traitCollection.displayScale,
+            preparedLayoutMetrics: layoutMetrics
+        )
         onRequestFeedIcon?(item.content.article.feedId, iconVariant, view.traitCollection.displayScale)
     }
 
@@ -1280,7 +1297,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     func applyArticlePresentation(_ delta: IOSUIKitArticlePresentationDelta) {
         guard let current = presentationByID[delta.articleID], delta.state.revision >= current.revision else { return }
         articlePresentationApplicationCount &+= 1
-        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.note(.presentationApplied)
         presentationByID[delta.articleID] = delta.state
         if delta.rearmScrollover {
             scrolloverGeometryTracker.rearm([delta.articleID])
@@ -1294,7 +1310,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     func applyFeedIconPresentation(_ delta: IOSUIKitFeedIconPresentationDelta) {
         guard delta.key.variant == iconVariant else { return }
         feedIconPresentationApplicationCount &+= 1
-        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.note(.feedIconApplied)
         applyFeedIconPresentation(delta, to: tableView.visibleCells.compactMap { $0 as? IOSUIKitArticleCell })
     }
 
@@ -1362,7 +1377,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         }
         prepareVisibleLayoutMetrics()
         guard !orderedIDs.isEmpty, indexPath.row >= max(0, orderedIDs.count - 5) else { return }
-        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.note(.paginationRequested)
         onApproachingEnd?()
     }
 
@@ -1397,16 +1411,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard scrolloverPhase.isScrolling else { return }
-        // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP.
-        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.recordContentHeight(scrollView.contentSize.height)
-        if scrolloverPhase == .decelerating {
-            let top = -scrollView.adjustedContentInset.top
-            let bottom = max(top, scrollView.contentSize.height + scrollView.adjustedContentInset.bottom - scrollView.bounds.height)
-            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.recordDeceleratingOffset(
-                scrollView.contentOffset.y,
-                isBouncing: scrollView.contentOffset.y < top || scrollView.contentOffset.y > bottom
-            )
-        }
         sampleScrolloverGeometry()
     }
 
@@ -1431,12 +1435,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         // TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. The phase already
         // brackets every scroll, including when Scrollover itself is disabled.
         if phase == .idle {
-            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.stop()
         } else if wasIdle {
-            IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.start()
         }
         // Every phase boundary restarts the ballistic baseline.
-        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.resetDecelerationBaseline(beginningRun: phase == .decelerating)
         scrolloverGeometryTracker.setPhase(phase)
         onScrolloverPhase?(phase)
     }
@@ -1464,10 +1465,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
 
     private func sampleScrolloverGeometry() {
         guard markReadOnScrolloverEnabled, tableView.bounds.height > 0 else { return }
-        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.timing(.scrolloverSample) { sampleScrolloverGeometryBody() }
-    }
-
-    private func sampleScrolloverGeometryBody() {
 
         let effectiveTop = tableView.contentOffset.y + tableView.adjustedContentInset.top
         let effectiveBottom = tableView.contentOffset.y + tableView.bounds.height - tableView.adjustedContentInset.bottom
@@ -1634,9 +1631,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             targetSize: targetSize,
             displayScale: view.traitCollection.displayScale,
             cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
-            rasterScale: IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic.effectiveRasterScale(
-                displayScale: view.traitCollection.displayScale
-            ),
             usesDisplayP3: view.traitCollection.displayGamut == .P3,
             // Must match the cell's request exactly, or every prefetched raster
             // is cached under a key no cell ever asks for.
@@ -2053,6 +2047,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private(set) var preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics?
 
     weak var performanceMetrics: IOSUIKitTimelinePerformanceMetrics?
+    /// Test seam: lets a test request a raster at a scale other than the
+    /// display's, to prove those rasters cannot alias in the cache.
     var articleImageRasterScale: (CGFloat) -> CGFloat = { $0 }
     /// Production derives this from the display's gamut; tests pin it so a
     /// request built in the test matches the one the cell builds.
@@ -2694,25 +2690,23 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private static let articleImageFadeKey = "flux.articleImageFade"
 
     private func presentArticleImage(_ image: CGImage, displayScale: CGFloat, animated: Bool) {
-        IOSUIKitTimelineFrameHeadroomDiagnostics.recorder.measuring(.articleImageAssigned) {
-            if animated {
+        if animated {
 #if DEBUG
-                articleImageFadeCountForTesting &+= 1
+            articleImageFadeCountForTesting &+= 1
 #endif
-                let fade = CATransition()
-                fade.type = .fade
-                fade.duration = Self.articleImageFadeDuration
-                articleImageView.layer.add(fade, forKey: Self.articleImageFadeKey)
-            }
-            // Use the physical display scale for UIImage semantics. Fixed
-            // image-view constraints remain authoritative for the slot.
-            articleImageView.image = UIImage(cgImage: image, scale: displayScale, orientation: .up)
-            // An alpha-free raster covering the whole slot lets Core Animation
-            // skip blending it — the single largest composited area per cell.
-            articleImageView.isOpaque = representedImageRequest?.producesOpaqueRaster ?? false
-            imagePlaceholder.isHidden = true
-            setArticleImagePresentation(loaded: true)
+            let fade = CATransition()
+            fade.type = .fade
+            fade.duration = Self.articleImageFadeDuration
+            articleImageView.layer.add(fade, forKey: Self.articleImageFadeKey)
         }
+        // Use the physical display scale for UIImage semantics. Fixed
+        // image-view constraints remain authoritative for the slot.
+        articleImageView.image = UIImage(cgImage: image, scale: displayScale, orientation: .up)
+        // An alpha-free raster covering the whole slot lets Core Animation
+        // skip blending it — the single largest composited area per cell.
+        articleImageView.isOpaque = representedImageRequest?.producesOpaqueRaster ?? false
+        imagePlaceholder.isHidden = true
+        setArticleImagePresentation(loaded: true)
     }
 
     private func clearArticleImagePresentation() {
@@ -3042,10 +3036,7 @@ private struct ArticleRowContentBody: View {
                 portraitVisual
             }
         case .visualCompact:
-            // The UIKit timeline owns this mode's real layout. This SwiftUI body
-            // is the search and fallback renderer, where the side-image
-            // arrangement is the closest existing equivalent.
-            landscapeVisual
+            visualCompact
         case .compact:
             articleText
                 .padding(.vertical, ArticleRowContentLayout.compactVerticalPadding)
@@ -3067,6 +3058,39 @@ private struct ArticleRowContentBody: View {
             articleText.frame(width: portraitContentWidth, alignment: .leading)
         }
         .frame(width: portraitContentWidth, alignment: .leading)
+    }
+
+    /// Mirrors the UIKit timeline's `visualSideTitle` arrangement: metadata bar
+    /// across the top, thumbnail beside the title, preview full width below. The
+    /// date sits inside the metadata row here rather than under the title —
+    /// this renderer has no separate date element to move.
+    private var visualCompact: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ViewThatFits(in: .horizontal) {
+                ArticleMetadataRow(content: content, fallbackRead: fallbackRead, rowState: rowState, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
+                ArticleMetadataColumn(content: content, fallbackRead: fallbackRead, rowState: rowState, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
+            }
+            HStack(alignment: .top, spacing: IOSUIKitArticleGeometry.sideTitleSpacing) {
+                ArticleTitlePresentation(title: content.article.title, rowState: rowState, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let imageURL = content.imageURL {
+                    let side = (contentWidth * IOSUIKitArticleGeometry.sideTitleImageAllocation).rounded()
+                    ArticleImageView(
+                        url: imageURL,
+                        targetSize: CGSize(width: side, height: (side / IOSUIKitArticleGeometry.sideTitleImageAspectRatio).rounded())
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+            if !content.article.preview.isEmpty {
+                Text(content.article.preview)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(previewLines.rawValue)
+                    .multilineTextAlignment(.leading)
+            }
+        }
+        .frame(width: contentWidth, alignment: .leading)
     }
 
     private var landscapeVisual: some View {

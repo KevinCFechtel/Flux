@@ -2,23 +2,6 @@ import Foundation
 import ImageIO
 import SwiftUI
 
-// TEMPORARY PERFORMANCE DIAGNOSTIC — MUST NOT SHIP. This isolates the pixel
-// volume of distinct Standard Timeline article rasters without changing their
-// exact-slot rendering or UIKit presentation behavior.
-enum IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic {
-    // Physical iPhone 15 result: 2x was not meaningfully smoother than 3x, so
-    // article raster pixel volume is not the driver of the residual unevenness.
-    // Restored to the shipping display scale; the scaffolding stays only until
-    // the temporary diagnostics are removed together.
-    static let useTwoXArticleImageRasterForPerformanceDiagnosis = false
-
-    static func effectiveRasterScale(
-        displayScale: CGFloat,
-        diagnosticEnabled: Bool = useTwoXArticleImageRasterForPerformanceDiagnosis
-    ) -> CGFloat {
-        diagnosticEnabled ? 2 : max(displayScale, 1)
-    }
-}
 
 /// Opaque colour the rounded corner cut-outs are filled with.
 ///

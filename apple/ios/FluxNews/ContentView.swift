@@ -208,19 +208,26 @@ struct ContentView: View {
     private var adaptiveDetail: some View {
         Group {
             articleList
+                // Registered on the list itself, ahead of the inspector: the
+                // destination has to sit inside the navigation stack.
+                .navigationDestination(isPresented: $searchPresented) { searchView }
                 .inspector(isPresented: readerInspectorBinding) {
                     // Presentation and content derive from the same optional. If
                     // the article is gone the panel closes itself rather than
                     // standing there empty.
+                    //
+                    // Gated on the presentation kind as well: where the reader is
+                    // a sheet, building this content anyway put `readerView`'s
+                    // toolbar into the timeline's navigation bar — a second Done
+                    // button that shoved the title capsule aside.
                     Group {
-                        if let article = readerArticle?.article {
+                        if usesReaderInspector, let article = readerArticle?.article {
                             NavigationStack { readerView(for: article) }
-                        } else {
+                        } else if usesReaderInspector {
                             Color.clear.onAppear { dismissReader() }
                         }
                     }
                 }
-                .navigationDestination(isPresented: $searchPresented) { searchView }
                 .toolbar {
                     if !adaptivePresentation.usesPersistentSplitNavigation, !capsuleCarriesScopeAction {
                         ToolbarItem(placement: .topBarLeading) {
@@ -774,7 +781,8 @@ private struct ArticleListNavigationChrome<Content: View>: View {
         // it, so the whole bar would jump.
         let subtitle = store.isSyncing ? String(localized: "Syncing…") : countLabel
 
-        capsuleOnlyChrome(title: title, subtitle: subtitle)    }
+        capsuleOnlyChrome(title: title, subtitle: subtitle)
+    }
 }
 
 extension ContentView {
