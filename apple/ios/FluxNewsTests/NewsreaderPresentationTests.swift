@@ -2772,29 +2772,32 @@ final class NewsreaderPresentationTests: XCTestCase {
 
 
     /// A cached image is set before the cell is displayed, so fading it would
-    /// add an animation to every appearing row. Only a late arrival replaces
-    /// pixels that are already on screen, and only that is a visible jump.
+    /// add an animation to every appearing row. Late arrivals fade only while
+    /// the timeline is idle; during active movement pixels still appear
+    /// immediately but without the Core Animation transition.
     @MainActor
-    func testOnlyLateArrivingArticleImagesFadeIn() async throws {
+    func testLateArrivingArticleImagesFadeOnlyWhenEnabled() async throws {
         let data = try imageData(width: 1_200, height: 700)
-        let counter = ImageLoadCounter(data: data)
-        let pipeline = ArticleImagePipeline { _ in await counter.load() }
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
 
-        let arriving = configuredArticleImageTestCell(item: item, pipeline: pipeline)
-        await waitForArticleImagePresentation { arriving.articleImageForTesting != nil }
-        XCTAssertEqual(arriving.articleImageFadeCountForTesting, 1)
+        let idleCounter = ImageLoadCounter(data: data)
+        let idlePipeline = ArticleImagePipeline { _ in await idleCounter.load() }
+        let idleArrival = configuredArticleImageTestCell(item: item, pipeline: idlePipeline)
+        await waitForArticleImagePresentation { idleArrival.articleImageForTesting != nil }
+        XCTAssertEqual(idleArrival.articleImageFadeCountForTesting, 1)
+
+        let scrollingCounter = ImageLoadCounter(data: data)
+        let scrollingPipeline = ArticleImagePipeline { _ in await scrollingCounter.load() }
+        let scrollingArrival = configuredArticleImageTestCell(item: item, pipeline: scrollingPipeline)
+        scrollingArrival.setArticleImageArrivalAnimationsEnabled(false)
+        await waitForArticleImagePresentation { scrollingArrival.articleImageForTesting != nil }
+        XCTAssertNotNil(scrollingArrival.articleImageForTesting)
+        XCTAssertEqual(scrollingArrival.articleImageFadeCountForTesting, 0)
 
         // Same request, now served from the pipeline cache during `configure`.
-        let cached = configuredArticleImageTestCell(item: item, pipeline: pipeline)
+        let cached = configuredArticleImageTestCell(item: item, pipeline: idlePipeline)
         XCTAssertNotNil(cached.articleImageForTesting)
         XCTAssertEqual(cached.articleImageFadeCountForTesting, 0)
-
-        // Whether the transition is still attached is not assertable here: a cell
-        // outside a window is never rendered, so Core Animation drops it at once.
-        // The contract under test is which path adds one.
-        arriving.prepareForReuse()
-        XCTAssertNil(arriving.articleImageForTesting)
     }
 
     @MainActor
