@@ -17,8 +17,19 @@ enum AdaptivePresentation: Equatable {
 }
 
 enum AdaptivePresentationPolicy {
-    static func presentation(horizontalSizeClass: UserInterfaceSizeClass?) -> AdaptivePresentation {
-        horizontalSizeClass == .regular ? .regular : .compact
+    /// Persistent split navigation belongs to a tablet-sized canvas, not to a
+    /// phone turned sideways.
+    ///
+    /// A phone in landscape reports regular *width* but compact *height*; an
+    /// iPad reports regular for both, and so does a foldable that is open.
+    /// Deciding on both classes therefore separates "wide enough" from "wide
+    /// because it is lying down" — and covers every form factor, including a
+    /// folding phone in either state, without naming a single device.
+    static func presentation(
+        horizontalSizeClass: UserInterfaceSizeClass?,
+        verticalSizeClass: UserInterfaceSizeClass?
+    ) -> AdaptivePresentation {
+        horizontalSizeClass == .regular && verticalSizeClass == .regular ? .regular : .compact
     }
 }
 

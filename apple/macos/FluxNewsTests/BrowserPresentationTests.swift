@@ -41,7 +41,12 @@ final class BrowserPresentationTests: XCTestCase {
     }
 
     func testArticlePresentationModesUseVisualAsDefaultAndCanonicalValues() {
-        XCTAssertEqual(ArticlePresentationMode.allCases, [.visual, .compact])
+        XCTAssertEqual(ArticlePresentationMode.allCases, [.visual, .visualCompact, .compact])
+        // macOS has no side-title layout, so it renders `visualCompact` as the
+        // visual presentation — but it must still accept the value, which syncs
+        // from iOS through the core settings.
+        XCTAssertEqual(ArticlePresentationMode(rawValue: "visualCompact"), .visualCompact)
+        XCTAssertTrue(ArticlePresentationMode.visualCompact.showsArticleImage)
         XCTAssertEqual(ArticlePresentationMode(rawValue: "visual"), .visual)
         XCTAssertEqual(ArticlePresentationMode(rawValue: "compact"), .compact)
         XCTAssertTrue(ArticlePresentationMode.visual.showsArticleImage)

@@ -27,6 +27,7 @@
 		A25 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B27 /* SettingsView.swift */; };
 		A26 /* ArticlesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B28 /* ArticlesSettingsView.swift */; };
 		A27 /* NavigationSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B29 /* NavigationSettingsView.swift */; };
+		A3 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3 /* ContentView.swift */; };
 		A30 /* FeedManagementViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30 /* FeedManagementViews.swift */; };
 		A31 /* FluxNews/ArticleImagePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = B31 /* FluxNews/ArticleImagePipeline.swift */; };
 		A32 /* FluxNews/IOSErrorPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B32 /* FluxNews/IOSErrorPresentation.swift */; };
@@ -34,7 +35,6 @@
 		A34 /* FluxNews/IOSUIKitArticleLayoutEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B34 /* FluxNews/IOSUIKitArticleLayoutEngine.swift */; };
 		A35 /* ../shared/FluxApple/AppleCoreExecution.swift in Sources */ = {isa = PBXBuildFile; fileRef = B35 /* ../shared/FluxApple/AppleCoreExecution.swift */; };
 		A36 /* FluxNewsTests/AppleCoreExecutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36 /* FluxNewsTests/AppleCoreExecutionTests.swift */; };
-		A3 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3 /* ContentView.swift */; };
 		A4 /* flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4 /* flux_uniffi.swift */; };
 		A5 /* LegacyStateDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5 /* LegacyStateDiscovery.swift */; };
 		A6 /* FluxNewsTests/LegacyStateDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8 /* FluxNewsTests/LegacyStateDiscoveryTests.swift */; };
@@ -95,6 +95,7 @@
 		B27 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		B28 /* ArticlesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArticlesSettingsView.swift; sourceTree = "<group>"; };
 		B29 /* NavigationSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationSettingsView.swift; sourceTree = "<group>"; };
+		B3 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		B30 /* FeedManagementViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedManagementViews.swift; sourceTree = "<group>"; };
 		B31 /* FluxNews/ArticleImagePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/ArticleImagePipeline.swift; sourceTree = "<group>"; };
 		B32 /* FluxNews/IOSErrorPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSErrorPresentation.swift; sourceTree = "<group>"; };
@@ -102,7 +103,6 @@
 		B34 /* FluxNews/IOSUIKitArticleLayoutEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSUIKitArticleLayoutEngine.swift; sourceTree = "<group>"; };
 		B35 /* ../shared/FluxApple/AppleCoreExecution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/AppleCoreExecution.swift; sourceTree = "<group>"; };
 		B36 /* FluxNewsTests/AppleCoreExecutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/AppleCoreExecutionTests.swift; sourceTree = "<group>"; };
-		B3 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		B4 /* flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = flux_uniffi.swift; path = ../Build/Products/FluxUniFFI/Sources/flux_uniffi.swift; sourceTree = "<group>"; };
 		B5 /* LegacyStateDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyStateDiscovery.swift; sourceTree = "<group>"; };
 		B6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -173,6 +173,7 @@
 				B36 /* FluxNewsTests/AppleCoreExecutionTests.swift */,
 				E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */,
 				E17F743230471C1900698DA5 /* Recovered References */,
+				G4 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
@@ -393,7 +394,7 @@
 				FLUX_STORAGE_NAMESPACE = FluxNewsNativeDev;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FluxNews/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -421,7 +422,7 @@
 				FLUX_STORAGE_NAMESPACE = FluxNewsNativeDev;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FluxNews/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -463,7 +464,7 @@
 				FLUX_STORAGE_NAMESPACE = FluxNewsNativeUpgradeTest;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FluxNews/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -486,7 +487,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev.tests;
 				PRODUCT_NAME = FluxNewsTests;
 				SDKROOT = iphoneos;
@@ -505,7 +506,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev.tests;
 				PRODUCT_NAME = FluxNewsTests;
 				SDKROOT = iphoneos;

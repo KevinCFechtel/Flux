@@ -103,12 +103,15 @@ enum IOSArticleNavigationPresentation {
 
 struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @ObservedObject var bootstrapper: CoreBootstrapper
     var newsreaderStore: NewsreaderStore
     @StateObject private var searchStore = IOSSearchStore()
     @State private var navigationPresented = false
     @State private var searchPresented = false
+    /// Set while the navigation sheet is closing so that search opens once it is
+    /// actually gone.
+    @State private var searchPendingAfterNavigationSheet = false
     @State private var diagnosticsPresented = false
     @State private var settingsPresented = false
     @State private var splitColumnVisibility: NavigationSplitViewVisibility = .all
@@ -128,8 +131,17 @@ struct ContentView: View {
     @State private var syncPresentation: IOSSyncButtonPresentation.State = .idle
     @State private var syncPresentationGeneration: UInt64 = 0
 
+    /// The capsule already opens the scope chooser, so a second control for the
+    /// same action would be pure redundancy.
+    private var capsuleCarriesScopeAction: Bool {
+        !adaptivePresentation.usesPersistentSplitNavigation
+    }
+
     private var adaptivePresentation: AdaptivePresentation {
-        AdaptivePresentationPolicy.presentation(horizontalSizeClass: horizontalSizeClass)
+        AdaptivePresentationPolicy.presentation(
+            horizontalSizeClass: horizontalSizeClass,
+            verticalSizeClass: verticalSizeClass
+        )
     }
 
     var body: some View {
@@ -141,16 +153,32 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $diagnosticsPresented) { DeveloperDiagnosticsView(bootstrapper: bootstrapper) }
-        .sheet(item: $browser) { item in IOSInAppBrowser(url: item.url) }
-        .sheet(item: readerSheetBinding) { item in
+        // A sheet rather than a pushed destination: the timeline is the detail
+        // column of a split view that collapses on a phone, and a destination
+        // registered there did not activate. A sheet behaves identically in both
+        // size classes and needs no sequencing against the navigation sheet.
+        .sheet(isPresented: $searchPresented) {
+            NavigationStack {
+                searchView
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Done") { searchPresented = false }
+                        }
+                    }
+            }
+            // Only one sheet can be presented per view, so what the results open
+            // has to hang off the search sheet while it is up.
+            .sheet(item: gatedBrowser(active: true)) { item in IOSInAppBrowser(url: item.url) }
+            .sheet(item: gatedReaderSheet(active: true)) { item in
+                NavigationStack { readerView(for: item.article) }
+            }
+            .sheet(item: gatedShare(active: true)) { payload in IOSShareSheet(items: payload.items) }
+        }
+        .sheet(item: gatedBrowser(active: !searchPresented)) { item in IOSInAppBrowser(url: item.url) }
+        .sheet(item: gatedReaderSheet(active: !searchPresented)) { item in
             NavigationStack { readerView(for: item.article) }
         }
-        .inspector(isPresented: readerInspectorBinding) {
-            if let article = readerArticle?.article {
-                NavigationStack { readerView(for: article) }
-            }
-        }
-        .sheet(item: $sharePayload) { payload in IOSShareSheet(items: payload.items) }
+        .sheet(item: gatedShare(active: !searchPresented)) { payload in IOSShareSheet(items: payload.items) }
         .alert("Unable to Open Article", isPresented: Binding(get: { articleOpenError != nil }, set: { if !$0 { articleOpenError = nil } })) {
             Button("OK", role: .cancel) { articleOpenError = nil }
         } message: { Text(articleOpenError ?? "") }
@@ -192,7 +220,11 @@ struct ContentView: View {
             adaptiveDetail
         }
         // These presentations outlive an article-navigation reset.
-        .sheet(isPresented: $navigationPresented) {
+        .sheet(isPresented: $navigationPresented, onDismiss: {
+            guard searchPendingAfterNavigationSheet else { return }
+            searchPendingAfterNavigationSheet = false
+            searchPresented = true
+        }) {
             NavigationStack {
                 NewsNavigationView(store: newsreaderStore, sheetPresented: $navigationPresented, presentation: .sheet, onSearch: openSearch)
                     .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { navigationPresented = false } } }
@@ -204,9 +236,25 @@ struct ContentView: View {
     private var adaptiveDetail: some View {
         Group {
             articleList
-                .navigationDestination(isPresented: $searchPresented) { searchView }
+                .inspector(isPresented: readerInspectorBinding) {
+                    // Presentation and content derive from the same optional. If
+                    // the article is gone the panel closes itself rather than
+                    // standing there empty.
+                    //
+                    // Gated on the presentation kind as well: where the reader is
+                    // a sheet, building this content anyway put `readerView`'s
+                    // toolbar into the timeline's navigation bar — a second Done
+                    // button that shoved the title capsule aside.
+                    Group {
+                        if usesReaderInspector, let article = readerArticle?.article {
+                            NavigationStack { readerView(for: article) }
+                        } else if usesReaderInspector {
+                            Color.clear.onAppear { dismissReader() }
+                        }
+                    }
+                }
                 .toolbar {
-                    if !adaptivePresentation.usesPersistentSplitNavigation {
+                    if !adaptivePresentation.usesPersistentSplitNavigation, !capsuleCarriesScopeAction {
                         ToolbarItem(placement: .topBarLeading) {
                             Button { navigationPresented = true } label: {
                                 Image(IOSNavigationButtonPresentation.imageName)
@@ -223,23 +271,21 @@ struct ContentView: View {
     }
 
     private var articleList: some View {
-        ArticleListNavigationChrome(store: newsreaderStore) {
+        ArticleListNavigationChrome(
+            store: newsreaderStore,
+            onSelectScope: adaptivePresentation.usesPersistentSplitNavigation ? nil : { navigationPresented = true }
+        ) {
             ArticleListView(store: newsreaderStore, onArticleTap: openArticle, onArticleAction: handleArticleAction)
         }
             .navigationBarTitleDisplayMode(IOSArticleNavigationPresentation.titleDisplayMode)
+            // A collapsed split view pushes the detail and offers a back button.
+            // The Timeline is the root of this app's navigation: the branded
+            // button opens the scope chooser, there is nothing to go back to.
+            .navigationBarBackButtonHidden(true)
             .toolbar {
                 ToolbarItemGroup(placement: .bottomBar) {
                     Button { Task { await performManualSync() } } label: {
                         Image(systemName: IOSSyncButtonPresentation.symbolName(for: syncPresentation))
-                            .rotationEffect(.degrees(IOSSyncButtonPresentation.rotationDegrees(for: syncPresentation, reduceMotion: accessibilityReduceMotion)))
-                            .animation(
-                                accessibilityReduceMotion
-                                    ? .default
-                                    : syncPresentation == .syncing
-                                        ? .linear(duration: 1).repeatForever(autoreverses: false)
-                                        : .default,
-                                value: syncPresentation
-                            )
                             .frame(width: 24, height: 24)
                     }
                     .disabled(newsreaderStore.isSyncing)
@@ -327,8 +373,14 @@ struct ContentView: View {
     }
 
     private func openSearch() {
+        // Presenting while the navigation sheet is still dismissing loses the
+        // presentation, so its dismissal callback performs it.
+        guard navigationPresented else {
+            searchPresented = true
+            return
+        }
+        searchPendingAfterNavigationSheet = true
         navigationPresented = false
-        searchPresented = true
     }
 
     private func normalizeAdaptiveShell(for presentation: AdaptivePresentation) {
@@ -549,6 +601,140 @@ struct ContentView: View {
     }
 }
 
+private struct ArticleListTitleCapsule: View {
+    let title: String
+    let subtitle: String?
+    var action: (() -> Void)?
+    // Read so the derived glyph height is recomputed when the text size changes.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// The combined height of the two lines, from the same font metrics that lay
+    /// them out. A fixed point size would drift apart from them under Dynamic
+    /// Type, and a flexible frame would let the glyph drive the capsule's height.
+    private var glyphHeight: CGFloat {
+        let titleHeight = UIFont.preferredFont(forTextStyle: .headline).lineHeight
+        guard subtitle != nil else { return titleHeight }
+        return titleHeight + 1 + UIFont.preferredFont(forTextStyle: .caption1).lineHeight
+    }
+
+    var body: some View {
+        // This capsule replaced the navigation title, so it has to carry that
+        // role too: the label is what the screen *is* (the scope), the value is
+        // its state, and the hint is what tapping does. Announcing the action as
+        // the label would put the least useful part first.
+        //
+        // `.isHeader` restores what `.navigationTitle("")` gave up — without it
+        // VoiceOver's heading rotor finds nothing on this screen.
+        if let action {
+            Button(action: action) { capsule }
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(title)
+                .accessibilityValue(subtitle ?? "")
+                .accessibilityHint(IOSNavigationButtonPresentation.accessibilityLabel)
+                .accessibilityAddTraits(.isHeader)
+        } else {
+            // No action on a persistent sidebar, but the two lines would still be
+            // read as separate, role-less elements without this.
+            capsule
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(title)
+                .accessibilityValue(subtitle ?? "")
+                .accessibilityAddTraits(.isHeader)
+        }
+    }
+
+    private var capsule: some View {
+        HStack(spacing: 8) {
+            if action != nil {
+                Image(IOSNavigationButtonPresentation.imageName)
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: glyphHeight, height: glyphHeight)
+                    // `.plain` hands its content the label colour. The brand mark
+                    // keeps the accent it had as a standalone button.
+                    .foregroundStyle(Color.accentColor)
+            }
+            VStack(spacing: 1) {
+                Text(title)
+                    .font(.headline)
+                    .lineLimit(1)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .lineLimit(1)
+                }
+            }
+            if action != nil {
+                // Glass says "interactive", the chevron says what kind. No
+                // explicit colour: an inherited one still flips with the glass
+                // over dark content, a semantic one would not.
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .opacity(0.55)
+            }
+        }
+        .padding(.leading, action == nil ? 16 : 12)
+        .padding(.trailing, action == nil ? 16 : 12)
+        .padding(.vertical, 7)
+        .background { ArticleListTitleCapsuleBackground() }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct ArticleListTitleCapsuleBackground: View {
+    /// Whether the system is asked to avoid see-through backgrounds. Glass is
+    /// exactly that, and the title has to stay legible over scrolling articles,
+    /// so this substitutes an opaque fill rather than trusting the effect to
+    /// adapt on its own.
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        if reduceTransparency {
+            Capsule().fill(Color(uiColor: .secondarySystemBackground))
+        } else if #available(iOS 26.0, *) {
+            ArticleListGlassCapsule()
+        } else {
+            // iOS 18 has no glass material; the closest stock equivalent.
+            Capsule().fill(.regularMaterial)
+        }
+    }
+}
+
+@available(iOS 26.0, *)
+private struct ArticleListGlassCapsule: UIViewRepresentable {
+
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        let effect = UIGlassEffect(style: .regular)
+        effect.isInteractive = false
+        let view = UIVisualEffectView(effect: effect)
+        // Resolves the capsule shape without a mask layer.
+        view.cornerConfiguration = .capsule()
+        return view
+    }
+
+    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
+        let effect = UIGlassEffect(style: .regular)
+        effect.isInteractive = false
+        uiView.effect = effect
+    }
+
+    /// A `UIVisualEffectView` has no useful intrinsic size, so the representable
+    /// has to answer for it. Returning the proposal unchanged also returns
+    /// `.infinity` when the container offers unbounded space, and the effect then
+    /// claims everything it is given — which is how a capsule background can end
+    /// up as a full-height panel. Unbounded proposals collapse to zero instead;
+    /// as a background it is always handed the concrete foreground size.
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIVisualEffectView, context: Context) -> CGSize? {
+        let size = proposal.replacingUnspecifiedDimensions(by: .zero)
+        return CGSize(
+            width: size.width.isFinite ? size.width : 0,
+            height: size.height.isFinite ? size.height : 0
+        )
+    }
+}
+
 enum ArticleListTitlePresentation {
     static func title(scope: BrowserScope, catalog: NavigationCatalog) -> String {
         scopeTitle(scope: scope, catalog: catalog)
@@ -614,34 +800,42 @@ enum IOSSyncButtonPresentation {
 
 private struct ArticleListNavigationChrome<Content: View>: View {
     var store: NewsreaderStore
+    /// Absent when a persistent sidebar already offers scope selection.
+    var onSelectScope: (() -> Void)?
     @ViewBuilder let content: () -> Content
+
+    private func capsuleSubtitle(_ subtitle: String) -> String? {
+        ArticleListCounterPresentation.usesNativeSubtitle(showArticleCount: store.showArticleCount, supportsNativeSubtitle: true) ? subtitle : nil
+    }
+
+    /// A large title cannot hand over to the capsule. Toolbar placements are
+    /// additive — `largeTitle` and `principal` render side by side rather than as
+    /// two states of one title — so the capsule owns the title outright.
+    @ViewBuilder
+    private func capsuleOnlyChrome(title: String, subtitle: String) -> some View {
+        content()
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    ArticleListTitleCapsule(
+                        title: title,
+                        subtitle: capsuleSubtitle(subtitle),
+                        action: onSelectScope
+                    )
+                }
+            }
+    }
 
     var body: some View {
         let title = ArticleListTitlePresentation.title(scope: store.scope, catalog: store.catalog)
-        let subtitle = ArticleListCounterPresentation.expandedLabel(scope: store.scope, unreadOnly: store.unreadOnly, count: store.selectionTotal)
+        let countLabel = ArticleListCounterPresentation.expandedLabel(scope: store.scope, unreadOnly: store.unreadOnly, count: store.selectionTotal)
+        // Only ever a substitution inside an existing subtitle: adding a line
+        // mid-sync would change the capsule's height, and the glyph scales with
+        // it, so the whole bar would jump.
+        let subtitle = store.isSyncing ? String(localized: "Syncing…") : countLabel
 
-        if #available(iOS 26.0, *) {
-            if ArticleListCounterPresentation.usesNativeSubtitle(showArticleCount: store.showArticleCount, supportsNativeSubtitle: true) {
-                content()
-                    .navigationTitle(title)
-                    .navigationSubtitle(Text(subtitle))
-            } else {
-                content()
-                    .navigationTitle(title)
-            }
-        } else {
-            content()
-                .navigationTitle(title)
-                .toolbar {
-                    if ArticleListCounterPresentation.usesToolbarFallback(showArticleCount: store.showArticleCount, supportsNativeSubtitle: false) {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Text(ArticleListCounterPresentation.compactCount(store.selectionTotal))
-                                .foregroundStyle(.secondary)
-                                .accessibilityLabel(subtitle)
-                        }
-                    }
-                }
-        }
+        capsuleOnlyChrome(title: title, subtitle: subtitle)
     }
 }
 
@@ -650,12 +844,24 @@ extension ContentView {
         adaptivePresentation.readerPresentationKind == .inspector
     }
 
-    private var readerSheetBinding: Binding<IOSReaderArticle?> {
+    /// The browser, reader and share sheets follow whichever surface is
+    /// frontmost. A view can present only one sheet, so exactly one side — the
+    /// root or the search sheet — is active at a time.
+    private func gatedBrowser(active: Bool) -> Binding<IOSBrowserURL?> {
+        Binding(get: { active ? browser : nil }, set: { if active { browser = $0 } })
+    }
+
+    private func gatedShare(active: Bool) -> Binding<IOSSharePayload?> {
+        Binding(get: { active ? sharePayload : nil }, set: { if active { sharePayload = $0 } })
+    }
+
+    private func gatedReaderSheet(active: Bool) -> Binding<IOSReaderArticle?> {
         Binding(
-            get: { usesReaderInspector ? nil : readerArticle },
-            set: { if $0 == nil, !usesReaderInspector { dismissReader() } }
+            get: { active && !usesReaderInspector ? readerArticle : nil },
+            set: { if $0 == nil, active, !usesReaderInspector { dismissReader() } }
         )
     }
+
 
     private var readerInspectorBinding: Binding<Bool> {
         Binding(

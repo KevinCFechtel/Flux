@@ -53,7 +53,6 @@ struct NewsNavigationView: View {
     @State private var addDestination: IOSNavigationAddDestination?
     @State private var feedSettingsTarget: IOSFeedSettingsTarget?
     @State private var expansionState = NewsNavigationExpansionState()
-    @State private var searchRequested = false
 
     init(store: NewsreaderStore, sheetPresented: Binding<Bool>, presentation: NewsNavigationPresentation, onSearch: @escaping () -> Void = {}) {
         self.store = store
@@ -72,11 +71,6 @@ struct NewsNavigationView: View {
         .sheet(item: $feedSettingsTarget) { target in NavigationStack { IOSFeedSettingsView(store: store, target: target) } }
         .onAppear(perform: ensureSelectedFeedIsExpanded)
         .onChange(of: store.scope) { _, _ in ensureSelectedFeedIsExpanded() }
-        .onDisappear {
-            guard presentation == .sheet, searchRequested else { return }
-            searchRequested = false
-            onSearch()
-        }
     }
 
     private var listContent: some View {
@@ -86,7 +80,11 @@ struct NewsNavigationView: View {
                 scopeRow("All News", systemImage: "newspaper", scope: .all, count: store.unreadTotal)
                 scopeRow("Starred", systemImage: "star", scope: .starred, count: store.starredTotal)
                 searchRow
-                if presentation == .sheet { scopeRow("Listening List", systemImage: "headphones", scope: .listeningList, count: 0) }
+                // The Listening List has no implementation yet: selecting it
+                // maps to the `.all` query (`NewsreaderStore.articleQuery`), so
+                // the row would show every article under a title promising
+                // something else. The scope case and its store handling stay in
+                // place for the port; only the entry point is withheld.
             }
             Section("Feeds") {
                 ForEach(groups) { group in
@@ -152,12 +150,10 @@ struct NewsNavigationView: View {
     }
 
     private func requestSearch() {
-        if presentation == .sheet {
-            searchRequested = true
-            sheetPresented = false
-        } else {
-            onSearch()
-        }
+        // The host sequences this: it owns the sheet and therefore its dismissal
+        // callback, which fires reliably — unlike this view's `onDisappear`,
+        // which runs while the sheet is being torn down.
+        onSearch()
     }
 
     private func scopeRow(_ title: String, systemImage: String, scope: BrowserScope, count: UInt64) -> some View {

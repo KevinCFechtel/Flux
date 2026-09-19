@@ -92,6 +92,7 @@ xcodebuild_args=(
   -allowProvisioningUpdates
   CODE_SIGN_STYLE=Automatic
   CURRENT_PROJECT_VERSION="${BUILD_NUMBER}"
+  SWIFT_COMPILATION_MODE=wholemodule
 )
 if [[ -n "${DEVELOPMENT_TEAM:-}" ]]; then
   xcodebuild_args+=(DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM}")

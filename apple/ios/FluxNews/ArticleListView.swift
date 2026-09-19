@@ -298,21 +298,30 @@ struct IOSUIKitScrolloverGeometryResult: Equatable {
 struct IOSUIKitResolvedScrolloverFrameStore {
     static let capacity = 96
     private var framesByID: [Int64: CGRect] = [:]
+    private var slotByID: [Int64: Int] = [:]
+    private var slots = Array<Int64?>(repeating: nil, count: capacity)
+    private var nextSlot = 0
 
     var frames: [Int64: CGRect] { framesByID }
     var count: Int { framesByID.count }
 
-    mutating func record(articleID: Int64, frame: CGRect, viewportTop: CGFloat) {
+    mutating func record(articleID: Int64, frame: CGRect) {
         framesByID[articleID] = frame
-        guard framesByID.count > Self.capacity else { return }
-        let retained = framesByID
-            .sorted { abs($0.value.midY - viewportTop) < abs($1.value.midY - viewportTop) }
-            .prefix(Self.capacity)
-        framesByID = Dictionary(uniqueKeysWithValues: retained.map { ($0.key, $0.value) })
+        guard slotByID[articleID] == nil else { return }
+        if let evictedID = slots[nextSlot] {
+            framesByID[evictedID] = nil
+            slotByID[evictedID] = nil
+        }
+        slots[nextSlot] = articleID
+        slotByID[articleID] = nextSlot
+        nextSlot = (nextSlot + 1) % Self.capacity
     }
 
     mutating func removeAll() {
         framesByID.removeAll(keepingCapacity: true)
+        slotByID.removeAll(keepingCapacity: true)
+        slots = Array(repeating: nil, count: Self.capacity)
+        nextSlot = 0
     }
 }
 
@@ -321,18 +330,35 @@ struct IOSUIKitResolvedScrolloverFrameStore {
 /// interaction and then crossed the effective upper viewport boundary while moving forward.
 final class IOSUIKitScrolloverGeometryTracker {
     private static let bottomTolerance: CGFloat = 0.5
-    private static let maximumRetainedGeometryCount = 96
+
+    /// The previous scalar geometry and a private bounded frame copy. Keeping this
+    /// separate from the source sample is intentional: retaining `rowFrames`
+    /// directly would share the frame store's dictionary buffer and force a
+    /// copy-on-write of that bounded store on its next mutation.
+    private struct PreviousGeometry {
+        let contentOffsetY: CGFloat
+        let effectiveTop: CGFloat
+        let effectiveBottom: CGFloat
+        let layoutGeneration: UInt64
+
+        init(_ sample: IOSUIKitScrolloverGeometrySample) {
+            contentOffsetY = sample.contentOffsetY
+            effectiveTop = sample.effectiveTop
+            effectiveBottom = sample.effectiveBottom
+            layoutGeneration = sample.layoutGeneration
+        }
+    }
 
     private var positions: [Int64: Int] = [:]
     private var nextPosition = 0
     private var emittedIDs = Set<Int64>()
     private var observedVisibleIDs = Set<Int64>()
-    private var retainedFrames: [Int64: CGRect] = [:]
-    private var previousSample: IOSUIKitScrolloverGeometrySample?
+    private var previousGeometry: PreviousGeometry?
+    private var previousFrames: [Int64: CGRect] = [:]
     private var phase: IOSScrolloverPresentationPhase = .idle
     private var wasAtBottom = false
 
-    var retainedGeometryCount: Int { retainedFrames.count }
+    var retainedPreviousFrameCount: Int { previousFrames.count }
 
     func updateSnapshot(_ ids: [Int64]) {
         positions = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset) })
@@ -355,9 +381,8 @@ final class IOSUIKitScrolloverGeometryTracker {
             positions[id] = nil
             emittedIDs.remove(id)
             observedVisibleIDs.remove(id)
-            retainedFrames[id] = nil
         }
-        previousSample = nil
+        clearPreviousGeometry()
         wasAtBottom = false
     }
 
@@ -370,8 +395,7 @@ final class IOSUIKitScrolloverGeometryTracker {
     }
 
     func invalidateGeometry() {
-        retainedFrames.removeAll(keepingCapacity: true)
-        previousSample = nil
+        clearPreviousGeometry()
         wasAtBottom = false
     }
 
@@ -381,18 +405,18 @@ final class IOSUIKitScrolloverGeometryTracker {
 
     func receive(_ sample: IOSUIKitScrolloverGeometrySample, enabled: Bool) -> IOSUIKitScrolloverGeometryResult {
         guard phase.isScrolling else {
-            previousSample = sample
+            storePrevious(sample)
             wasAtBottom = isAtBottom(sample)
             return .init(direction: nil, batch: .init(articleIDs: []))
         }
 
-        guard let previous = previousSample,
+        guard let previous = previousGeometry,
               previous.layoutGeneration == sample.layoutGeneration else {
             rebaseline(with: sample, enabled: enabled)
             return .init(direction: nil, batch: .init(articleIDs: []))
         }
 
-        guard !hasMaterialLayoutChange(from: previous, to: sample) else {
+        guard !hasMaterialLayoutChange(from: previousFrames, to: sample) else {
             rebaseline(with: sample, enabled: enabled)
             return .init(direction: nil, batch: .init(articleIDs: []))
         }
@@ -403,35 +427,36 @@ final class IOSUIKitScrolloverGeometryTracker {
         else if delta < 0 { direction = .backward }
         else { direction = nil }
 
-        let visibleIDs = visibleIDs(in: sample)
-
-        var candidates = Set<Int64>()
+        var candidates: [Int64] = []
         if enabled, direction == .forward {
             for id in observedVisibleIDs where !emittedIDs.contains(id) {
-                guard let frame = sample.rowFrames[id] ?? retainedFrames[id] else { continue }
+                guard let frame = sample.rowFrames[id] ?? previousFrames[id] else { continue }
                 if previous.effectiveTop < frame.maxY,
                    sample.effectiveTop >= frame.maxY {
-                    candidates.insert(id)
+                    candidates.append(id)
                 }
             }
 
             let atBottom = isAtBottom(sample)
             if !wasAtBottom, atBottom {
-                candidates.formUnion(visibleIDs.intersection(observedVisibleIDs))
+                for (id, frame) in sample.rowFrames where observedVisibleIDs.contains(id) && isVisible(frame, in: sample) {
+                    if !candidates.contains(id) { candidates.append(id) }
+                }
             }
             wasAtBottom = atBottom
         } else {
             wasAtBottom = isAtBottom(sample)
         }
 
-        retainBoundedGeometry(sample.rowFrames, viewportTop: sample.effectiveTop)
         if enabled {
-            observedVisibleIDs.formUnion(visibleIDs)
+            for (id, frame) in sample.rowFrames where isVisible(frame, in: sample) {
+                observedVisibleIDs.insert(id)
+            }
         } else {
             observedVisibleIDs.removeAll(keepingCapacity: true)
         }
-        observedVisibleIDs.formIntersection(Set(retainedFrames.keys).union(visibleIDs))
-        previousSample = sample
+        pruneObservedIDs(current: sample.rowFrames, previous: previousFrames)
+        storePrevious(sample)
 
         let ids = candidates
             .filter { emittedIDs.insert($0).inserted }
@@ -440,20 +465,18 @@ final class IOSUIKitScrolloverGeometryTracker {
     }
 
     private func rebaseline(with sample: IOSUIKitScrolloverGeometrySample, enabled: Bool) {
-        let visible = visibleIDs(in: sample)
         observedVisibleIDs.removeAll(keepingCapacity: true)
-        if enabled { observedVisibleIDs.formUnion(visible) }
-        retainBoundedGeometry(sample.rowFrames, viewportTop: sample.effectiveTop)
-        observedVisibleIDs.formIntersection(Set(retainedFrames.keys).union(visible))
-        previousSample = sample
+        if enabled {
+            for (id, frame) in sample.rowFrames where isVisible(frame, in: sample) {
+                observedVisibleIDs.insert(id)
+            }
+        }
+        storePrevious(sample)
         wasAtBottom = isAtBottom(sample)
     }
 
-    private func visibleIDs(in sample: IOSUIKitScrolloverGeometrySample) -> Set<Int64> {
-        Set(sample.rowFrames.compactMap { id, frame in
-            guard frame.maxY > sample.effectiveTop, frame.minY < sample.effectiveBottom else { return nil }
-            return id
-        })
+    private func isVisible(_ frame: CGRect, in sample: IOSUIKitScrolloverGeometrySample) -> Bool {
+        frame.maxY > sample.effectiveTop && frame.minY < sample.effectiveBottom
     }
 
     private func isAtBottom(_ sample: IOSUIKitScrolloverGeometrySample) -> Bool {
@@ -461,23 +484,39 @@ final class IOSUIKitScrolloverGeometryTracker {
     }
 
     private func hasMaterialLayoutChange(
-        from previous: IOSUIKitScrolloverGeometrySample,
+        from previous: [Int64: CGRect],
         to sample: IOSUIKitScrolloverGeometrySample
     ) -> Bool {
-        for (id, oldFrame) in previous.rowFrames {
+        for (id, oldFrame) in previous {
             guard let newFrame = sample.rowFrames[id], oldFrame != newFrame else { continue }
             return true
         }
         return false
     }
 
-    private func retainBoundedGeometry(_ frames: [Int64: CGRect], viewportTop: CGFloat) {
-        retainedFrames.merge(frames) { _, new in new }
-        guard retainedFrames.count > Self.maximumRetainedGeometryCount else { return }
-        let retained = retainedFrames
-            .sorted { abs($0.value.midY - viewportTop) < abs($1.value.midY - viewportTop) }
-            .prefix(Self.maximumRetainedGeometryCount)
-        retainedFrames = Dictionary(uniqueKeysWithValues: retained.map { ($0.key, $0.value) })
+    private func pruneObservedIDs(current: [Int64: CGRect], previous: [Int64: CGRect]) {
+        var staleIDs: [Int64]?
+        for id in observedVisibleIDs where current[id] == nil && previous[id] == nil {
+            if staleIDs == nil { staleIDs = [id] }
+            else { staleIDs!.append(id) }
+        }
+        if let staleIDs {
+            for id in staleIDs { observedVisibleIDs.remove(id) }
+        }
+    }
+
+    private func storePrevious(_ sample: IOSUIKitScrolloverGeometrySample) {
+        previousGeometry = .init(sample)
+        previousFrames.removeAll(keepingCapacity: true)
+        previousFrames.reserveCapacity(min(sample.rowFrames.count, IOSUIKitResolvedScrolloverFrameStore.capacity))
+        for (id, frame) in sample.rowFrames.prefix(IOSUIKitResolvedScrolloverFrameStore.capacity) {
+            previousFrames[id] = frame
+        }
+    }
+
+    private func clearPreviousGeometry() {
+        previousGeometry = nil
+        previousFrames.removeAll(keepingCapacity: true)
     }
 }
 
@@ -728,7 +767,47 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
 }
 
 @MainActor
-final class IOSUIKitArticleTimelineController: UIViewController, UICollectionViewDelegate, UICollectionViewDataSourcePrefetching {
+/// Softens the status bar against scrolling content below iOS 27, which
+/// adapts the bar's own elements to their backdrop.
+final class IOSUIKitTimelineTopScrimView: UIView {
+    override class var layerClass: AnyClass { CAGradientLayer.self }
+    private var gradient: CAGradientLayer { layer as! CAGradientLayer }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        gradient.startPoint = CGPoint(x: 0.5, y: 0)
+        gradient.endPoint = CGPoint(x: 0.5, y: 1)
+        // A straight ramp has a constant slope, so the eye finds its lower edge.
+        // Holding almost full strength across the glyph band and then easing out
+        // makes the scrim read as shorter *and* softer than a linear one, without
+        // taking protection away from where the status bar actually sits.
+        gradient.locations = [0, 0.5, 0.75, 1]
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
+            self.updateColors()
+        }
+        updateColors()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Strength at the very top. The remaining stops are fractions of it, so
+    /// this one number changes the whole scrim.
+    static let peakAlpha: CGFloat = 0.6
+
+    private func updateColors() {
+        let base = UIColor.systemBackground.resolvedColor(with: traitCollection)
+        gradient.colors = [
+            base.withAlphaComponent(Self.peakAlpha).cgColor,
+            base.withAlphaComponent(Self.peakAlpha * 0.9).cgColor,
+            base.withAlphaComponent(Self.peakAlpha * 0.4).cgColor,
+            base.withAlphaComponent(0).cgColor,
+        ]
+    }
+}
+
+
+final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDelegate, UITableViewDataSourcePrefetching {
     private enum Section: Hashable { case main }
 
     var onArticleTap: ((ArticleSummary) -> Void)?
@@ -743,8 +822,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     var onScrolloverDirection: ((IOSArticleScrollDirection) -> Void)?
     var onScrolloverPhase: ((IOSScrolloverPresentationPhase) -> Void)?
 
-    private var collectionView: UICollectionView!
-    private var dataSource: UICollectionViewDiffableDataSource<Section, Int64>!
+    private var tableView: UITableView!
+    private var dataSource: UITableViewDiffableDataSource<Section, Int64>!
     private var orderedIDs: [Int64] = []
     private var itemsByID: [Int64: IOSUIKitArticleTimelineStructuralItem] = [:]
     private var presentationByID: [Int64: IOSUIKitArticlePresentationState] = [:]
@@ -768,8 +847,20 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private var scheduledPreparedWindowGeneration: UInt64?
     private var prefetchTasks: [Int64: (request: ArticleImageRequest, task: Task<Void, Never>)] = [:]
     private let refreshControl = UIRefreshControl()
+    private let statusBarScrim = IOSUIKitTimelineTopScrimView()
+    private var statusBarScrimHeight: NSLayoutConstraint!
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
     private let preparedLayoutCoordinator = IOSUIKitArticleLayoutPreparationCoordinator()
+    /// Exact heights for every loaded row. Estimation is disabled, so a missing
+    /// entry would force Core Text onto the main actor during layout.
+    private let rowHeights = IOSUIKitArticleRowHeightStore()
+    private var rowHeightTask: Task<Void, Never>?
+    private var rowHeightGeneration: UInt64 = 0
+    private var pendingStructuralApply: Task<Void, Never>?
+    /// Held until the first layout pass resolves a geometry. Applying a snapshot
+    /// before then publishes rows whose heights cannot exist yet, and the table
+    /// answers by measuring every one of them synchronously while laying out.
+    private var deferredSnapshot: NSDiffableDataSourceSnapshot<Section, Int64>?
     private let performanceMetrics = IOSUIKitTimelinePerformanceMetrics()
 #if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
     private static let performanceSignposter = OSSignposter(
@@ -786,72 +877,127 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private(set) var fullPrefetchCancellationCountForTesting = 0
     private(set) var layoutInvalidationCountForTesting = 0
     private(set) var visibleCellReconfigurationPassCountForTesting = 0
+    private(set) var layoutPrefetchInputCountForTesting = 0
+    var articleImagePrefetchTaskCountForTesting: Int { prefetchTasks.count }
+    var tableViewForTesting: UITableView { tableView }
+    var preparedRowHeightCountForTesting: Int { rowHeights.preparedCount }
+    private(set) var synchronousRowHeightFallbackCountForTesting = 0
+    /// Structural updates and geometry changes measure heights off the main
+    /// actor before they are applied. Tests await that work instead of polling.
+    func settleForTesting() async {
+        while pendingStructuralApply != nil || rowHeightTask != nil {
+            await pendingStructuralApply?.value
+            await rowHeightTask?.value
+        }
+    }
 #endif
 #if DEBUG
     private(set) var scrollResetApplicationCountForTesting = 0
     private(set) var lastScrollResetOffsetForTesting: CGPoint?
-    var contentOffsetForTesting: CGPoint { collectionView.contentOffset }
+    var contentOffsetForTesting: CGPoint { tableView.contentOffset }
     var scrolloverLayoutGenerationForTesting: UInt64 { scrolloverLayoutGeneration }
     var orderedArticleIDsForTesting: [Int64] { orderedIDs }
 #endif
 
-    private static func makeListLayout() -> UICollectionViewLayout {
-        var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
-        configuration.showsSeparators = false
-        configuration.backgroundColor = .clear
-        return UICollectionViewCompositionalLayout.list(using: configuration)
-    }
-
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .clear
+        view.backgroundColor = .systemBackground
+        view.isOpaque = true
 
-        collectionView = UICollectionView(
-            frame: .zero,
-            collectionViewLayout: Self.makeListLayout()
-        )
-        collectionView.translatesAutoresizingMaskIntoConstraints = false
-        collectionView.backgroundColor = .clear
-        collectionView.contentInsetAdjustmentBehavior = .automatic
-        collectionView.showsVerticalScrollIndicator = false
-        collectionView.alwaysBounceVertical = true
-        collectionView.delegate = self
-        collectionView.prefetchDataSource = self
+        tableView = UITableView(frame: .zero, style: .plain)
+        tableView.translatesAutoresizingMaskIntoConstraints = false
+        tableView.backgroundColor = .systemBackground
+        tableView.isOpaque = true
+        tableView.contentInsetAdjustmentBehavior = .automatic
+        // Every row height comes from the deterministic engine, so estimation is
+        // switched off entirely. Estimated self-sizing rewrites `contentSize`
+        // while the list scrolls, which moves the running deceleration target.
+        tableView.estimatedRowHeight = 0
+        tableView.estimatedSectionHeaderHeight = 0
+        tableView.estimatedSectionFooterHeight = 0
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.separatorStyle = .none
+        // A plain table reserves padding above its (absent) section header.
+        tableView.sectionHeaderTopPadding = 0
+        tableView.alwaysBounceVertical = true
+        tableView.delegate = self
+        tableView.prefetchDataSource = self
         for variant in [
             IOSUIKitArticleCellLayoutVariant.compact,
             .visualTextOnly,
             .visualPortrait,
             .visualLandscape,
+            .visualSideTitle,
+            .visualSideTitleWide,
+            .visualSideTitleTextOnly,
         ] {
-            collectionView.register(IOSUIKitArticleCell.self, forCellWithReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant))
+            tableView.register(IOSUIKitArticleCell.self, forCellReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant))
+        }
+        // The timeline scrolls under both bars, so iOS 26 would fade its edges
+        // into them. Measured on device, that progressive blur resamples the
+        // full list width every frame; the list ends at a clean edge instead.
+        if #available(iOS 26.0, *) {
+            tableView.topEdgeEffect.isHidden = true
+            tableView.bottomEdgeEffect.isHidden = true
         }
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self, UITraitLayoutDirection.self]) { (self: Self, _) in
             self.updateGeometryIfNeeded()
         }
-        view.addSubview(collectionView)
+        // The raster bakes the appearance's background into its corners, so a
+        // light/dark switch makes every cached raster stale. Geometry is
+        // unaffected, so only the image bindings need to run again.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
+            self.reconfigureVisibleCells(needsLayout: false)
+        }
+        view.addSubview(tableView)
         NSLayoutConstraint.activate([
-            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            collectionView.topAnchor.constraint(equalTo: view.topAnchor),
-            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            tableView.topAnchor.constraint(equalTo: view.topAnchor),
+            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
-        dataSource = UICollectionViewDiffableDataSource<Section, Int64>(collectionView: collectionView) { [weak self] collectionView, indexPath, id in
+        statusBarScrim.translatesAutoresizingMaskIntoConstraints = false
+        // The safe area of this view starts below the *navigation bar*, not below
+        // the status bar, so anchoring to it would stretch the scrim across the
+        // capsule. The status bar's own frame is the exact measure, and it is
+        // zero in landscape, where there is nothing to protect.
+        statusBarScrimHeight = statusBarScrim.heightAnchor.constraint(equalToConstant: 0)
+        view.addSubview(statusBarScrim)
+        NSLayoutConstraint.activate([
+            statusBarScrim.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            statusBarScrim.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            statusBarScrim.topAnchor.constraint(equalTo: view.topAnchor),
+            statusBarScrimHeight,
+        ])
+        // iOS 27 adapts the status bar's own elements to what sits behind them,
+        // so the gradient is only needed below that.
+        if #available(iOS 27.0, *) { statusBarScrim.isHidden = true }
+
+        dataSource = UITableViewDiffableDataSource<Section, Int64>(tableView: tableView) { [weak self] tableView, indexPath, id in
             guard let self,
                   let item = self.renderedItem(for: id)
             else { return nil }
-            let metrics = IOSUIKitArticleCell.Metrics(mode: self.mode, containerWidth: collectionView.bounds.width)
+            let metrics = IOSUIKitArticleCell.Metrics(mode: self.mode, containerWidth: tableView.bounds.width)
             let variant = metrics.layoutVariant(hasImage: self.mode.showsArticleImage && item.content.imageURL != nil)
-            guard let cell = collectionView.dequeueReusableCell(withReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant), for: indexPath) as? IOSUIKitArticleCell else { return nil }
+            guard let cell = tableView.dequeueReusableCell(withIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant), for: indexPath) as? IOSUIKitArticleCell else { return nil }
             self.configure(cell, item: item)
             return cell
         }
+        dataSource.defaultRowAnimation = .none
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        updateStatusBarScrimHeight()
         updateGeometryIfNeeded()
+    }
+
+    private func updateStatusBarScrimHeight() {
+        let height = view.window?.windowScene?.statusBarManager?.statusBarFrame.height ?? 0
+        guard statusBarScrimHeight.constant != height else { return }
+        statusBarScrimHeight.constant = height
     }
 
     private func updateGeometryIfNeeded() {
@@ -865,8 +1011,118 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         invalidateScrolloverGeometry()
         cancelIncompatibleImagePrefetch()
         reconfigureVisibleCells(needsLayout: true)
-        collectionView.collectionViewLayout.invalidateLayout()
         schedulePreparedLayoutWindow(for: newIdentity)
+        // The store keeps serving the superseded heights while the replacement
+        // set is measured, so rotation and Dynamic Type never block a frame on a
+        // full re-measurement of every loaded row.
+        rowHeights.beginGeneration(newIdentity)
+        if let deferred = deferredSnapshot {
+            // First resolved geometry: publish the rows that were held back,
+            // through the same gate that measures their heights first.
+            deferredSnapshot = nil
+            applySnapshotWhenHeightsReady(deferred)
+        } else {
+            scheduleRowHeightMeasurement(reloadWhenComplete: true)
+        }
+    }
+
+    private func scheduleRowHeightMeasurement(reloadWhenComplete: Bool) {
+        guard let identity = geometryIdentity else { return }
+        let missing = rowHeights.missingIDs(in: orderedIDs)
+        guard !missing.isEmpty else {
+            if reloadWhenComplete { reloadPreservingAnchor() }
+            return
+        }
+        rowHeightGeneration &+= 1
+        let generation = rowHeightGeneration
+        let inputs = rowHeightInputs(for: missing)
+        rowHeightTask?.cancel()
+        rowHeightTask = Task { @MainActor [weak self] in
+            let measured = await IOSUIKitArticleRowHeightMeasurement.heights(for: inputs)
+            guard let self, !Task.isCancelled, self.rowHeightGeneration == generation else { return }
+            self.rowHeightTask = nil
+            self.rowHeights.store(measured, for: identity)
+            _ = self.rowHeights.retireSupersededHeights(ifComplete: self.orderedIDs)
+            if reloadWhenComplete { self.reloadPreservingAnchor() }
+        }
+    }
+
+    private func rowHeightInputs(for ids: [Int64]) -> [(id: Int64, input: IOSUIKitArticleLayoutInput)] {
+        ids.compactMap { id in
+            guard let item = renderedItem(for: id) else { return nil }
+            return (id, preparedLayoutInput(for: item))
+        }
+    }
+
+    /// A reload with exact heights rewrites every row position at once, so the
+    /// visible article is re-anchored explicitly instead of being left wherever
+    /// the new content size happens to put it.
+    private func reloadPreservingAnchor() {
+        let anchor = currentScrollAnchor()
+        dataSource.applySnapshotUsingReloadData(dataSource.snapshot(), completion: nil)
+        guard let anchor, let row = orderedIDs.firstIndex(of: anchor.id) else { return }
+        tableView.layoutIfNeeded()
+        let rect = tableView.rectForRow(at: IndexPath(row: row, section: 0))
+        tableView.setContentOffset(CGPoint(x: tableView.contentOffset.x, y: rect.minY - anchor.offset), animated: false)
+    }
+
+    private func currentScrollAnchor() -> (id: Int64, offset: CGFloat)? {
+        guard let indexPath = tableView.indexPathsForVisibleRows?.first,
+              indexPath.row < orderedIDs.count
+        else { return nil }
+        return (orderedIDs[indexPath.row], tableView.rectForRow(at: indexPath).minY - tableView.contentOffset.y)
+    }
+
+    /// Rows are never published before their exact heights exist. Applying a
+    /// snapshot whose heights are unknown would make the table measure text
+    /// synchronously while laying out.
+    /// Built from `orderedIDs`, which the controller already maintains as the
+    /// authoritative order, rather than from the data source's current state.
+    /// The two diverge whenever a snapshot is still held back, and reading the
+    /// data source then yields an empty snapshot with no section at all.
+    private func currentSnapshot() -> NSDiffableDataSourceSnapshot<Section, Int64> {
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Int64>()
+        snapshot.appendSections([.main])
+        snapshot.appendItems(orderedIDs)
+        return snapshot
+    }
+
+    private func applySnapshotWhenHeightsReady(_ snapshot: NSDiffableDataSourceSnapshot<Section, Int64>) {
+        guard let identity = geometryIdentity else {
+            deferredSnapshot = snapshot
+            return
+        }
+        let missing = rowHeights.missingIDs(in: snapshot.itemIdentifiers)
+        guard !missing.isEmpty else {
+            dataSource.apply(snapshot, animatingDifferences: false)
+            return
+        }
+        let inputs = rowHeightInputs(for: missing)
+        pendingStructuralApply?.cancel()
+        pendingStructuralApply = Task { @MainActor [weak self] in
+            let measured = await IOSUIKitArticleRowHeightMeasurement.heights(for: inputs)
+            guard let self, !Task.isCancelled else { return }
+            self.pendingStructuralApply = nil
+            self.rowHeights.store(measured, for: identity)
+            self.dataSource.apply(snapshot, animatingDifferences: false, completion: nil)
+        }
+    }
+
+    func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+        guard let id = dataSource.itemIdentifier(for: indexPath) else { return UITableView.automaticDimension }
+        if let height = rowHeights.height(for: id) { return height }
+        // Last resort: a prepared height is missing. Worth counting rather than
+        // silently absorbing, because this is the one path that can put Core Text
+        // on the main actor during layout.
+        guard let item = renderedItem(for: id) else { return UITableView.automaticDimension }
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let metrics = preparedLayoutCoordinator.measureSynchronously(preparedLayoutInput(for: item), priority: .visible)
+        performanceMetrics.recordDeterministicHeightFallback(durationNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt)
+#if DEBUG
+        synchronousRowHeightFallbackCountForTesting &+= 1
+#endif
+        if let identity = geometryIdentity { rowHeights.store([id: metrics.cellSize.height], for: identity) }
+        return metrics.cellSize.height
     }
 
     func update(
@@ -899,7 +1155,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         scrollResetRevision = newScrollResetRevision
         markReadOnScrolloverEnabled = newMarkReadOnScrolloverEnabled
         showsRefreshControl = newShowsRefreshControl
-        collectionView.refreshControl = showsRefreshControl ? refreshControl : nil
+        tableView.refreshControl = showsRefreshControl ? refreshControl : nil
         if presentationBridge !== newPresentationBridge {
             presentationBridge?.unsubscribeArticles(self)
             presentationBridge = newPresentationBridge
@@ -925,9 +1181,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
                     presentationByID[item.article.id] = newPresentationBridge.articleState(for: item.article.id, fallback: item.article)
                 }
                 scrolloverGeometryTracker.appendSnapshot(appendedIDs)
-                var snapshot = dataSource.snapshot()
-                snapshot.appendItems(appendedIDs)
-                dataSource.apply(snapshot, animatingDifferences: false)
+                applySnapshotWhenHeightsReady(currentSnapshot())
                 structuralUpdate = .append(appended)
             } else if canApplyIncrementally, case let .remove(removedIDs) = structuralState.change {
                 let removed = removedIDs.filter { itemsByID[$0] != nil }
@@ -941,9 +1195,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
                     }
                     scrolloverGeometryTracker.removeSnapshot(removed)
                     invalidateScrolloverGeometry()
-                    var snapshot = dataSource.snapshot()
-                    snapshot.deleteItems(removed)
-                    dataSource.apply(snapshot, animatingDifferences: false)
+                    rowHeights.remove(removed)
+                    applySnapshotWhenHeightsReady(currentSnapshot())
                     structuralUpdate = .remove(removed)
                 }
             } else {
@@ -956,10 +1209,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
                 })
                 scrolloverGeometryTracker.updateSnapshot(newIDs)
                 invalidateScrolloverGeometry()
-                var snapshot = NSDiffableDataSourceSnapshot<Section, Int64>()
-                snapshot.appendSections([.main])
-                snapshot.appendItems(newIDs)
-                dataSource.apply(snapshot, animatingDifferences: false)
+                applySnapshotWhenHeightsReady(currentSnapshot())
                 structuralUpdate = .replace
             }
             structuralRevision = structuralState.revision
@@ -983,7 +1233,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 #if DEBUG
             layoutInvalidationCountForTesting &+= 1
 #endif
-            collectionView.collectionViewLayout.invalidateLayout()
         } else if case let .append(appended)? = structuralUpdate {
             // Keep the existing visible/nearby window and prepare only the new
             // immutable inputs. UIKit prefetch will promote rows as they approach.
@@ -998,8 +1247,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         if feedIconRequestChanged { requestFeedIconsForVisibleCells() }
         if resetChanged {
             invalidateScrolloverGeometry()
-            let naturalTop = CGPoint(x: 0, y: -collectionView.adjustedContentInset.top)
-            collectionView.setContentOffset(naturalTop, animated: false)
+            let naturalTop = CGPoint(x: 0, y: -tableView.adjustedContentInset.top)
+            tableView.setContentOffset(naturalTop, animated: false)
 #if DEBUG
             scrollResetApplicationCountForTesting &+= 1
             lastScrollResetOffsetForTesting = naturalTop
@@ -1014,7 +1263,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func configure(_ cell: IOSUIKitArticleCell, item: IOSUIKitArticleTimelineItem) {
-        let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: collectionView.bounds.width)
+        let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: tableView.bounds.width)
         let layoutInput = preparedLayoutInput(for: item)
         let layoutMetrics: IOSUIKitArticleLayoutMetrics
         if let prepared = preparedLayoutCoordinator.metrics(for: layoutInput, priority: .visible) {
@@ -1053,14 +1302,14 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             scrolloverRearmCount &+= 1
         }
         guard let indexPath = dataSource.indexPath(for: delta.articleID),
-              let cell = collectionView.cellForItem(at: indexPath) as? IOSUIKitArticleCell else { return }
+              let cell = tableView.cellForRow(at: indexPath) as? IOSUIKitArticleCell else { return }
         cell.updateStatus(isRead: delta.state.isRead, isStarred: delta.state.isStarred)
     }
 
     func applyFeedIconPresentation(_ delta: IOSUIKitFeedIconPresentationDelta) {
         guard delta.key.variant == iconVariant else { return }
         feedIconPresentationApplicationCount &+= 1
-        applyFeedIconPresentation(delta, to: collectionView.visibleCells.compactMap { $0 as? IOSUIKitArticleCell })
+        applyFeedIconPresentation(delta, to: tableView.visibleCells.compactMap { $0 as? IOSUIKitArticleCell })
     }
 
     func applyFeedIconPresentation(_ delta: IOSUIKitFeedIconPresentationDelta, to cells: [IOSUIKitArticleCell]) {
@@ -1073,7 +1322,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 
     func clearFeedIconPresentation() {
         feedIconPresentationApplicationCount &+= 1
-        clearFeedIconPresentation(to: collectionView.visibleCells.compactMap { $0 as? IOSUIKitArticleCell })
+        clearFeedIconPresentation(to: tableView.visibleCells.compactMap { $0 as? IOSUIKitArticleCell })
     }
 
     func clearFeedIconPresentation(to cells: [IOSUIKitArticleCell]) {
@@ -1084,7 +1333,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func requestFeedIconsForVisibleCells() {
-        for cell in collectionView.visibleCells {
+        for cell in tableView.visibleCells {
             guard let id = (cell as? IOSUIKitArticleCell)?.representedArticleID,
                   let item = itemsByID[id]
             else { continue }
@@ -1096,7 +1345,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
 #if DEBUG
         visibleCellReconfigurationPassCountForTesting &+= 1
 #endif
-        for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
+        for case let cell as IOSUIKitArticleCell in tableView.visibleCells {
             guard let id = cell.representedArticleID, let item = renderedItem(for: id) else { continue }
             configure(cell, item: item)
             if needsLayout { cell.setNeedsLayout() }
@@ -1114,19 +1363,19 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         }
     }
 
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        defer { collectionView.deselectItem(at: indexPath, animated: true) }
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        defer { tableView.deselectRow(at: indexPath, animated: true) }
         guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return }
         onArticleTap?(item.article)
     }
 
-    func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+    func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
         recordResolvedScrolloverFrame(for: cell)
         if let articleCell = cell as? IOSUIKitArticleCell {
             reconcilePresentationForDisplay(articleCell)
         }
         prepareVisibleLayoutMetrics()
-        guard !orderedIDs.isEmpty, indexPath.item >= max(0, orderedIDs.count - 5) else { return }
+        guard !orderedIDs.isEmpty, indexPath.row >= max(0, orderedIDs.count - 5) else { return }
         onApproachingEnd?()
     }
 
@@ -1144,7 +1393,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         )
     }
 
-    func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+    func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
         // Keep the resolved frame briefly so either lifecycle/scroll callback order
         // can still prove a crossing using the same content-coordinate geometry.
         recordResolvedScrolloverFrame(for: cell)
@@ -1181,6 +1430,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     private func setScrolloverPhase(_ phase: IOSScrolloverPresentationPhase) {
         guard scrolloverPhase != phase else { return }
         scrolloverPhase = phase
+        // Every phase boundary restarts the ballistic baseline.
         scrolloverGeometryTracker.setPhase(phase)
         onScrolloverPhase?(phase)
     }
@@ -1191,36 +1441,35 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         scrolloverGeometryTracker.invalidateGeometry()
     }
 
-    private func recordResolvedScrolloverFrame(for cell: UICollectionViewCell) {
+    private func recordResolvedScrolloverFrame(for cell: UITableViewCell) {
         guard let articleCell = cell as? IOSUIKitArticleCell,
               let articleID = articleCell.representedArticleID else { return }
         resolvedScrolloverFrames.record(
             articleID: articleID,
-            frame: articleCell.frame,
-            viewportTop: collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+            frame: articleCell.frame
         )
     }
 
     private func refreshResolvedVisibleScrolloverFrames() {
-        for case let cell as IOSUIKitArticleCell in collectionView.visibleCells {
+        for case let cell as IOSUIKitArticleCell in tableView.visibleCells {
             recordResolvedScrolloverFrame(for: cell)
         }
     }
 
     private func sampleScrolloverGeometry() {
-        guard markReadOnScrolloverEnabled, collectionView.bounds.height > 0 else { return }
+        guard markReadOnScrolloverEnabled, tableView.bounds.height > 0 else { return }
 
-        let effectiveTop = collectionView.contentOffset.y + collectionView.adjustedContentInset.top
-        let effectiveBottom = collectionView.contentOffset.y + collectionView.bounds.height - collectionView.adjustedContentInset.bottom
+        let effectiveTop = tableView.contentOffset.y + tableView.adjustedContentInset.top
+        let effectiveBottom = tableView.contentOffset.y + tableView.bounds.height - tableView.adjustedContentInset.bottom
         // `visibleCells` are UIKit-resolved geometry. The retained source covers a
         // cell whose didEndDisplaying arrives on either side of this scroll callback.
         refreshResolvedVisibleScrolloverFrames()
 
         let sample = IOSUIKitScrolloverGeometrySample(
-            contentOffsetY: collectionView.contentOffset.y,
+            contentOffsetY: tableView.contentOffset.y,
             effectiveTop: effectiveTop,
             effectiveBottom: effectiveBottom,
-            contentHeight: collectionView.contentSize.height,
+            contentHeight: tableView.contentSize.height,
             rowFrames: resolvedScrolloverFrames.frames,
             layoutGeneration: scrolloverLayoutGeneration
         )
@@ -1229,7 +1478,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         if !result.batch.articleIDs.isEmpty { onScrolloverBatch?(result.batch) }
     }
 
-    func collectionView(_ collectionView: UICollectionView, leadingSwipeActionsConfigurationForItemAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+    func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
         let newValue = !item.isRead
         let action = UIContextualAction(style: .normal, title: newValue ? String(localized: "Mark as Read") : String(localized: "Mark as Unread")) { [weak self] _, _, completion in
@@ -1243,7 +1492,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         return configuration
     }
 
-    func collectionView(_ collectionView: UICollectionView, trailingSwipeActionsConfigurationForItemAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+    func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
         let newValue = !item.isStarred
         let action = UIContextualAction(style: .normal, title: newValue ? String(localized: "Star") : String(localized: "Unstar")) { [weak self] _, _, completion in
@@ -1257,7 +1506,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         return configuration
     }
 
-    func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
+    func tableView(_ tableView: UITableView, contextMenuConfigurationForRowAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
         guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
         return UIContextMenuConfiguration(identifier: NSNumber(value: id), previewProvider: nil) { [weak self] _ in
             guard let self, let current = self.renderedItem(for: id) else { return nil }
@@ -1281,6 +1530,25 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
             }
             return UIMenu(children: actions)
         }
+    }
+
+    func tableView(_ tableView: UITableView, previewForHighlightingContextMenuWithConfiguration configuration: UIContextMenuConfiguration) -> UITargetedPreview? {
+        contextMenuTargetedPreview(for: configuration)
+    }
+
+    func tableView(_ tableView: UITableView, previewForDismissingContextMenuWithConfiguration configuration: UIContextMenuConfiguration) -> UITargetedPreview? {
+        contextMenuTargetedPreview(for: configuration)
+    }
+
+    private func contextMenuTargetedPreview(for configuration: UIContextMenuConfiguration) -> UITargetedPreview? {
+        guard let identifier = configuration.identifier as? NSNumber,
+              let indexPath = dataSource.indexPath(for: identifier.int64Value),
+              let cell = tableView.cellForRow(at: indexPath)
+        else { return nil }
+        let parameters = UIPreviewParameters()
+        parameters.backgroundColor = .systemBackground
+        parameters.visiblePath = UIBezierPath(roundedRect: cell.bounds, cornerRadius: 16)
+        return UITargetedPreview(view: cell, parameters: parameters)
     }
 
     private func contextNavigationActions(for item: IOSUIKitArticleTimelineItem) -> [UIMenuElement] {
@@ -1309,11 +1577,14 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         onSetStarred?(item.article, value)
     }
 
-    func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
+    func tableView(_ tableView: UITableView, prefetchRowsAt indexPaths: [IndexPath]) {
         let layoutInputs = indexPaths.compactMap { indexPath -> IOSUIKitArticleLayoutInput? in
             guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
             return preparedLayoutInput(for: item)
         }
+#if DEBUG
+        layoutPrefetchInputCountForTesting += layoutInputs.count
+#endif
         preparedLayoutCoordinator.prepare(layoutInputs, priority: .prefetch)
         guard mode.showsArticleImage else { return }
         for indexPath in indexPaths {
@@ -1334,7 +1605,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
         }
     }
 
-    func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
+    func tableView(_ tableView: UITableView, cancelPrefetchingForRowsAt indexPaths: [IndexPath]) {
         for indexPath in indexPaths {
             guard let id = dataSource.itemIdentifier(for: indexPath) else { continue }
             prefetchTasks.removeValue(forKey: id)?.task.cancel()
@@ -1342,11 +1613,22 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func imageRequest(for item: IOSUIKitArticleTimelineItem) -> ArticleImageRequest? {
-        guard mode.showsArticleImage, let url = item.content.imageURL else { return nil }
-        let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: collectionView.bounds.width)
+        guard mode.showsArticleImage,
+              let url = item.content.imageURL
+        else { return nil }
+        let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: tableView.bounds.width)
         let targetSize = metrics.imageSize(hasImage: true)
         guard targetSize.width > 0, targetSize.height > 0 else { return nil }
-        return ArticleImageRequest(url: url, targetSize: targetSize, displayScale: view.traitCollection.displayScale)
+        return ArticleImageRequest(
+            url: url,
+            targetSize: targetSize,
+            displayScale: view.traitCollection.displayScale,
+            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
+            usesDisplayP3: view.traitCollection.displayGamut == .P3,
+            // Must match the cell's request exactly, or every prefetched raster
+            // is cached under a key no cell ever asks for.
+            backdrop: IOSUIKitArticleCell.articleImageBackdrop(for: view.traitCollection)
+        )
     }
 
     private func cancelAllPrefetch() {
@@ -1386,15 +1668,15 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     func performanceSnapshot() -> IOSUIKitTimelinePerformanceSnapshot { performanceMetrics.snapshot(preparation: preparedLayoutCoordinator.snapshot()) }
 
     private func preparedLayoutInput(for item: IOSUIKitArticleTimelineItem) -> IOSUIKitArticleLayoutInput {
-        .init(item: item, mode: mode, previewLines: previewLines, containerWidth: collectionView.bounds.width, displayScale: view.traitCollection.displayScale, contentSizeCategory: view.traitCollection.preferredContentSizeCategory, localeIdentifier: Locale.current.identifier, layoutDirection: view.effectiveUserInterfaceLayoutDirection)
+        .init(item: item, mode: mode, previewLines: previewLines, containerWidth: tableView.bounds.width, displayScale: view.traitCollection.displayScale, contentSizeCategory: view.traitCollection.preferredContentSizeCategory, layoutDirection: view.effectiveUserInterfaceLayoutDirection)
     }
 
     private func currentGeometryIdentity() -> IOSUIKitTimelineGeometryIdentity? {
-        guard collectionView.bounds.width > 0 else { return nil }
+        guard tableView.bounds.width > 0 else { return nil }
         return .init(
             mode: mode,
             previewLines: previewLines,
-            containerWidth: collectionView.bounds.width,
+            containerWidth: tableView.bounds.width,
             displayScale: view.traitCollection.displayScale,
             contentSizeCategory: view.traitCollection.preferredContentSizeCategory,
             layoutDirection: view.effectiveUserInterfaceLayoutDirection
@@ -1429,9 +1711,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func replacePreparedLayoutWindow() {
-        guard collectionView.bounds.width > 0 else { return }
-        let visibleIndexes = collectionView.indexPathsForVisibleItems.map(\.item).sorted()
-        let visibleIDs = visibleIndexes.compactMap { dataSource.itemIdentifier(for: .init(item: $0, section: 0)) }
+        guard tableView.bounds.width > 0 else { return }
+        let visibleIndexes = (tableView.indexPathsForVisibleRows ?? []).map(\.row).sorted()
+        let visibleIDs = visibleIndexes.compactMap { dataSource.itemIdentifier(for: .init(row: $0, section: 0)) }
         let nextIndex = min(orderedIDs.count, (visibleIndexes.last ?? -1) + 1)
         let nearbyIDs = orderedIDs.dropFirst(nextIndex).prefix(IOSUIKitArticleLayoutPreparationCoordinator.nearbyWindowLimit)
         let ids = Array(visibleIDs + nearbyIDs.filter { !visibleIDs.contains($0) })
@@ -1439,7 +1721,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UICollectionVie
     }
 
     private func prepareVisibleLayoutMetrics() {
-        let ids = collectionView.indexPathsForVisibleItems.sorted { $0.item < $1.item }.compactMap(dataSource.itemIdentifier(for:))
+        let ids = (tableView.indexPathsForVisibleRows ?? []).sorted { $0.row < $1.row }.compactMap(dataSource.itemIdentifier(for:))
         preparedLayoutCoordinator.prepare(ids.compactMap { renderedItem(for: $0).map(preparedLayoutInput(for:)) }, priority: .visible)
     }
 }
@@ -1488,6 +1770,23 @@ enum IOSUIKitArticleCellLayoutVariant: Hashable {
     case visualTextOnly
     case visualPortrait
     case visualLandscape
+    /// `Visual compact`: image beside the title, metadata/date/preview full
+    /// width underneath.
+    case visualSideTitle
+    /// The same arrangement on a wide container: the preview joins the column
+    /// beside the image instead of running underneath it.
+    case visualSideTitleWide
+    /// `Visual compact` for an article without an image: same order, full width.
+    case visualSideTitleTextOnly
+
+    /// Whether the cell shows its image view at all. Derived rather than listed
+    /// at each call site, so a new variant cannot silently default to "shown".
+    var showsImageSlot: Bool {
+        switch self {
+        case .compact, .visualTextOnly, .visualSideTitleTextOnly: return false
+        case .visualPortrait, .visualLandscape, .visualSideTitle, .visualSideTitleWide: return true
+        }
+    }
 }
 
 struct IOSUIKitTimelinePerformanceSnapshot: Equatable {
@@ -1619,13 +1918,16 @@ final class IOSUIKitTimelinePerformanceMetrics {
 }
 
 @MainActor
-final class IOSUIKitArticleCell: UICollectionViewCell {
+final class IOSUIKitArticleCell: UITableViewCell {
     static func reuseIdentifier(for variant: IOSUIKitArticleCellLayoutVariant) -> String {
         switch variant {
         case .compact: return "IOSUIKitArticleCell.compact"
         case .visualTextOnly: return "IOSUIKitArticleCell.visualTextOnly"
         case .visualPortrait: return "IOSUIKitArticleCell.visualPortrait"
         case .visualLandscape: return "IOSUIKitArticleCell.visualLandscape"
+        case .visualSideTitle: return "IOSUIKitArticleCell.visualSideTitle"
+        case .visualSideTitleWide: return "IOSUIKitArticleCell.visualSideTitleWide"
+        case .visualSideTitleTextOnly: return "IOSUIKitArticleCell.visualSideTitleTextOnly"
         }
     }
 
@@ -1653,7 +1955,10 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         }
     }
 
-    private let textStack = UIStackView()
+    // A plain container, not a `UIStackView`. Setting `isHidden` on an
+    // arranged subview makes the stack add and remove constraints, and
+    // `previewLabel.isHidden` is set on every `configure`.
+    private let textContainer = UIView()
     private let titleLabel = UILabel()
     private let starImageView = UIImageView(image: UIImage(systemName: "star.fill"))
     private let metadataRow = UIView()
@@ -1674,13 +1979,69 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     private var landscapeConstraints: [NSLayoutConstraint] = []
     private var activeLayoutConstraints: [NSLayoutConstraint] = []
     private var portraitImageAspectConstraint: NSLayoutConstraint!
+    private var sideTitleConstraints: [NSLayoutConstraint] = []
+    private var defaultStackConstraints: [NSLayoutConstraint] = []
+    private var sideTitleWideConstraints: [NSLayoutConstraint] = []
+    private var sideTitleTextOnlyConstraints: [NSLayoutConstraint] = []
+    private var previewBottomDefaultConstraint: NSLayoutConstraint!
+    private var previewTrailingDefaultConstraint: NSLayoutConstraint!
+    /// Preview top in the side-title variant: it must clear the image as well as
+    /// the date, and its spacing collapses with the preview itself.
+    private var sideTitlePreviewBelowDateConstraint: NSLayoutConstraint!
+    private var sideTitlePreviewBelowImageConstraint: NSLayoutConstraint!
     private var landscapeImageWidthConstraint: NSLayoutConstraint!
     private var landscapeImageHeightConstraint: NSLayoutConstraint!
     private var commentsWidthConstraint: NSLayoutConstraint!
     private var commentsToStarSpacingConstraint: NSLayoutConstraint!
+    /// One step more contrast than `secondaryLabel` without reaching full
+    /// `label`, which would compete with the headline. Resolved per trait
+    /// collection so it still inverts in dark mode.
+    /// A fixed alpha would cap what "Increase Contrast" can give back: the
+    /// resolved base already carries the high-contrast variant, but multiplying
+    /// it down again takes part of that away. Under high contrast the supporting
+    /// text therefore runs at full strength.
+    /// The cell's own background, resolved for the current appearance. The image
+    /// sits directly on it, so filling the raster's corner cut-outs with it is
+    /// indistinguishable from leaving them transparent — while letting the
+    /// raster drop its alpha channel.
+    static func articleImageBackdrop(for traits: UITraitCollection) -> ArticleImageBackdrop {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        let resolved = UIColor.systemBackground.resolvedColor(with: traits)
+        guard resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            // Monochrome or unconvertible: fall back to the extremes the system
+            // background actually uses.
+            return traits.userInterfaceStyle == .dark ? .black : .white
+        }
+        return .init(components: red, green: green, blue: blue)
+    }
+
+    private static let supportingTextColor = UIColor { traits in
+        let alpha: CGFloat = traits.accessibilityContrast == .high ? 1 : 0.8
+        return UIColor.label.resolvedColor(with: traits).withAlphaComponent(alpha)
+    }
+    /// Read articles dim by the same proportion as the headline, so the whole
+    /// row recedes together instead of only its title.
+    private static let supportingReadTextColor = UIColor { traits in
+        let alpha: CGFloat = traits.accessibilityContrast == .high ? 0.75 : 0.5
+        return UIColor.label.resolvedColor(with: traits).withAlphaComponent(alpha)
+    }
+    private var previewTopConstraint: NSLayoutConstraint!
+    private var previewCollapseConstraint: NSLayoutConstraint!
+    /// Driven from the prepared metrics, so the cell cannot disagree with the
+    /// engine about how large a scaled glyph slot is.
+    private var accessoryConstraints: [NSLayoutConstraint] = []
+    private var metadataMinimumHeight: NSLayoutConstraint!
+    private var unreadWidth: NSLayoutConstraint!
+    private var unreadHeight: NSLayoutConstraint!
+    private var feedIconWidth: NSLayoutConstraint!
+    private var feedIconHeight: NSLayoutConstraint!
+    private var starWidth: NSLayoutConstraint!
+    private var starHeight: NSLayoutConstraint!
+    private var commentsHeightConstraint: NSLayoutConstraint!
     private var currentLayoutVariant: IOSUIKitArticleCellLayoutVariant?
     private var imageTask: Task<Void, Never>?
     private var representedImageRequest: ArticleImageRequest?
+    private var articleImagePipeline = ArticleImagePipeline.shared
     private var imageBindingGeneration: UInt64 = 0
     private var currentTitle = ""
     private var currentFeedTitle = ""
@@ -1690,46 +2051,55 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     private(set) var preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics?
 
     weak var performanceMetrics: IOSUIKitTimelinePerformanceMetrics?
+    /// Test seam: lets a test request a raster at a scale other than the
+    /// display's, to prove those rasters cannot alias in the cache.
+    var articleImageRasterScale: (CGFloat) -> CGFloat = { $0 }
+    /// Production derives this from the display's gamut; tests pin it so a
+    /// request built in the test matches the one the cell builds.
+    var articleImageUsesDisplayP3: (() -> Bool)?
     private(set) var representedArticleID: Int64?
     private(set) var layoutVariantRevision: UInt64 = 0
     private(set) var measurementSolveCount = 0
 
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundColor = .clear
-        contentView.backgroundColor = .clear
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        backgroundColor = .systemBackground
+        contentView.backgroundColor = .systemBackground
+        contentView.isOpaque = true
         contentView.preservesSuperviewLayoutMargins = false
+        selectionStyle = .default
 
-        textStack.translatesAutoresizingMaskIntoConstraints = false
-        textStack.axis = .vertical
-        textStack.spacing = 7
-        textStack.alignment = .fill
-        textStack.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        textContainer.translatesAutoresizingMaskIntoConstraints = false
+        textContainer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
         titleLabel.font = .preferredFont(forTextStyle: .headline)
         titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.numberOfLines = 0
+        // The engine owns the row height, so a cell can carry slack its natural
+        // content does not fill — in the side-title variant whenever the image is
+        // taller than the title-and-date column. Without a firm hugging priority
+        // Auto Layout absorbs that slack into these labels, which pushes the date
+        // away from the headline it belongs to. Let it land in the gap above the
+        // preview instead, which is where the engine put it.
+        titleLabel.setContentHuggingPriority(UILayoutPriority(999), for: .vertical)
+        dateLabel.setContentHuggingPriority(UILayoutPriority(999), for: .vertical)
         starImageView.tintColor = .systemYellow
         starImageView.alpha = 0
         starImageView.isAccessibilityElement = false
         metadataRow.translatesAutoresizingMaskIntoConstraints = false
-        metadataRow.heightAnchor.constraint(greaterThanOrEqualToConstant: IOSUIKitArticleGeometry.feedIconSize).isActive = true
+        metadataMinimumHeight = metadataRow.heightAnchor.constraint(greaterThanOrEqualToConstant: IOSUIKitArticleGeometry.feedIconSize)
+        metadataMinimumHeight.isActive = true
 
         unreadIndicator.translatesAutoresizingMaskIntoConstraints = false
         unreadIndicator.backgroundColor = .tintColor
-        unreadIndicator.layer.cornerRadius = 3
-        NSLayoutConstraint.activate([
-            unreadIndicator.widthAnchor.constraint(equalToConstant: 6),
-            unreadIndicator.heightAnchor.constraint(equalToConstant: 6),
-        ])
+        unreadWidth = unreadIndicator.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.unreadSize)
+        unreadHeight = unreadIndicator.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.unreadSize)
+        NSLayoutConstraint.activate([unreadWidth, unreadHeight])
 
         feedIconContainer.translatesAutoresizingMaskIntoConstraints = false
-        feedIconContainer.clipsToBounds = true
-        feedIconContainer.layer.cornerRadius = 11
-        NSLayoutConstraint.activate([
-            feedIconContainer.widthAnchor.constraint(equalToConstant: 22),
-            feedIconContainer.heightAnchor.constraint(equalToConstant: 22),
-        ])
+        feedIconWidth = feedIconContainer.widthAnchor.constraint(equalToConstant: IOSFeedIconImagePreparation.displaySidePoints)
+        feedIconHeight = feedIconContainer.heightAnchor.constraint(equalToConstant: IOSFeedIconImagePreparation.displaySidePoints)
+        NSLayoutConstraint.activate([feedIconWidth, feedIconHeight])
         feedIconImageView.translatesAutoresizingMaskIntoConstraints = false
         feedIconImageView.contentMode = .scaleAspectFit
         feedIconFallbackLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1752,14 +2122,14 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
 
         feedTitleLabel.font = .preferredFont(forTextStyle: .subheadline).bold()
         feedTitleLabel.adjustsFontForContentSizeCategory = true
-        feedTitleLabel.textColor = .secondaryLabel
+        feedTitleLabel.textColor = Self.supportingTextColor
         feedTitleLabel.lineBreakMode = .byTruncatingTail
         feedTitleLabel.numberOfLines = 1
         feedTitleLabel.translatesAutoresizingMaskIntoConstraints = false
 
         commentsContainer.translatesAutoresizingMaskIntoConstraints = false
         commentsImageView.translatesAutoresizingMaskIntoConstraints = false
-        commentsImageView.tintColor = .secondaryLabel
+        commentsImageView.tintColor = Self.supportingTextColor
         commentsContainer.addSubview(commentsImageView)
         NSLayoutConstraint.activate([
             commentsImageView.centerXAnchor.constraint(equalTo: commentsContainer.centerXAnchor),
@@ -1768,7 +2138,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         starImageView.translatesAutoresizingMaskIntoConstraints = false
         dateLabel.font = UIFont.preferredFont(forTextStyle: .caption1)
         dateLabel.adjustsFontForContentSizeCategory = true
-        dateLabel.textColor = .secondaryLabel
+        dateLabel.textColor = Self.supportingTextColor
         dateLabel.numberOfLines = 1
 
         metadataRow.addSubview(unreadIndicator)
@@ -1777,44 +2147,80 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         metadataRow.addSubview(commentsContainer)
         metadataRow.addSubview(starImageView)
         commentsWidthConstraint = commentsContainer.widthAnchor.constraint(equalToConstant: 0)
+        commentsHeightConstraint = commentsContainer.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.commentSlotSize)
+        starWidth = starImageView.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize)
+        starHeight = starImageView.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize)
         commentsToStarSpacingConstraint = commentsContainer.trailingAnchor.constraint(equalTo: starImageView.leadingAnchor)
         NSLayoutConstraint.activate([
-            unreadIndicator.leadingAnchor.constraint(equalTo: metadataRow.leadingAnchor),
-            unreadIndicator.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
-            feedIconContainer.leadingAnchor.constraint(equalTo: unreadIndicator.trailingAnchor, constant: IOSUIKitArticleGeometry.metadataLeadingSpacing),
+            // Leading edge: feed icon, then the feed name.
+            feedIconContainer.leadingAnchor.constraint(equalTo: metadataRow.leadingAnchor),
             feedIconContainer.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
+            // Trailing edge, outermost first: unread dot, then star.
+            unreadIndicator.trailingAnchor.constraint(equalTo: metadataRow.trailingAnchor),
+            unreadIndicator.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
             feedTitleLabel.leadingAnchor.constraint(equalTo: feedIconContainer.trailingAnchor, constant: IOSUIKitArticleGeometry.metadataLeadingSpacing),
             feedTitleLabel.trailingAnchor.constraint(equalTo: commentsContainer.leadingAnchor, constant: -IOSUIKitArticleGeometry.metadataTitleSpacing),
             feedTitleLabel.topAnchor.constraint(equalTo: metadataRow.topAnchor),
             feedTitleLabel.bottomAnchor.constraint(equalTo: metadataRow.bottomAnchor),
             commentsContainer.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
             commentsWidthConstraint,
-            commentsContainer.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.commentSlotSize),
+            commentsHeightConstraint,
             commentsToStarSpacingConstraint,
-            starImageView.trailingAnchor.constraint(equalTo: metadataRow.trailingAnchor),
+            starImageView.trailingAnchor.constraint(
+                equalTo: unreadIndicator.leadingAnchor,
+                constant: -IOSUIKitArticleGeometry.metadataAccessorySpacing
+            ),
             starImageView.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
-            starImageView.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize),
-            starImageView.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize),
+            starWidth,
+            starHeight,
         ])
 
         previewLabel.font = .preferredFont(forTextStyle: .subheadline)
         previewLabel.adjustsFontForContentSizeCategory = true
-        previewLabel.textColor = .secondaryLabel
+        previewLabel.textColor = Self.supportingTextColor
         previewLabel.numberOfLines = 3
 
-        textStack.addArrangedSubview(titleLabel)
-        textStack.addArrangedSubview(metadataRow)
-        textStack.addArrangedSubview(dateLabel)
-        textStack.addArrangedSubview(previewLabel)
+        for label in [titleLabel, dateLabel, previewLabel] {
+            label.translatesAutoresizingMaskIntoConstraints = false
+            textContainer.addSubview(label)
+        }
+        textContainer.addSubview(metadataRow)
+        previewTopConstraint = previewLabel.topAnchor.constraint(equalTo: dateLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing)
+        // Collapsing by priority keeps the constraint graph untouched. Removing
+        // or deactivating it instead would mutate the graph on every reuse
+        // between an article with and without a preview.
+        previewCollapseConstraint = previewLabel.heightAnchor.constraint(equalToConstant: 0)
+        previewCollapseConstraint.priority = .defaultHigh
+        previewCollapseConstraint.isActive = true
+        // The side-title
+        // variant reorders the text block and narrows part of it, so the
+        // vertical order and the trailing edges are owned by the variant groups.
+        // Only the leading edge and the container's bottom are shared.
+        previewBottomDefaultConstraint = previewLabel.bottomAnchor.constraint(equalTo: textContainer.bottomAnchor)
+        previewTrailingDefaultConstraint = previewLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor)
+
+        defaultStackConstraints = [
+            previewBottomDefaultConstraint,
+            previewTrailingDefaultConstraint,
+            titleLabel.topAnchor.constraint(equalTo: textContainer.topAnchor),
+            titleLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            metadataRow.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            dateLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            dateLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            previewTopConstraint,
+        ]
+
+        var stackedConstraints: [NSLayoutConstraint] = []
+        for child in [titleLabel, metadataRow, dateLabel, previewLabel] as [UIView] {
+            stackedConstraints.append(child.leadingAnchor.constraint(equalTo: textContainer.leadingAnchor))
+        }
+        NSLayoutConstraint.activate(stackedConstraints)
 
         articleImageView.translatesAutoresizingMaskIntoConstraints = false
-        articleImageView.contentMode = .scaleAspectFill
-        articleImageView.clipsToBounds = true
-        articleImageView.layer.cornerRadius = 12
-        articleImageView.backgroundColor = .tertiarySystemFill
         articleImageView.isHidden = true
         imagePlaceholder.translatesAutoresizingMaskIntoConstraints = false
-        imagePlaceholder.tintColor = .secondaryLabel
+        imagePlaceholder.tintColor = Self.supportingTextColor
         imagePlaceholder.contentMode = .center
         articleImageView.addSubview(imagePlaceholder)
         NSLayoutConstraint.activate([
@@ -1822,9 +2228,11 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             imagePlaceholder.centerYAnchor.constraint(equalTo: articleImageView.centerYAnchor),
         ])
 
-        contentView.addSubview(textStack)
+        contentView.addSubview(textContainer)
         contentView.addSubview(articleImageView)
         preparePermanentLayoutConstraints()
+        setArticleImagePresentation(loaded: false)
+        setFeedIconPresentation(loaded: false)
 
         isAccessibilityElement = true
         accessibilityTraits = .button
@@ -1845,40 +2253,170 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         landscapeImageHeightConstraint = articleImageView.heightAnchor.constraint(equalToConstant: 1)
 
         textOnlyConstraints = [
-            textStack.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
-            textStack.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
-            textStack.topAnchor.constraint(equalTo: margins.topAnchor),
-            textStack.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
+        ] + defaultStackConstraints + [
+
+            textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
+            textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
         ]
         portraitConstraints = [
+        ] + defaultStackConstraints + [
+
             articleImageView.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
             articleImageView.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
             articleImageView.topAnchor.constraint(equalTo: margins.topAnchor),
             portraitImageAspectConstraint,
-            textStack.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
-            textStack.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
-            textStack.topAnchor.constraint(equalTo: articleImageView.bottomAnchor, constant: 12),
-            textStack.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
+            textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textContainer.topAnchor.constraint(equalTo: articleImageView.bottomAnchor, constant: 12),
+            textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
         ]
         landscapeConstraints = [
+        ] + defaultStackConstraints + [
+
             articleImageView.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
             articleImageView.topAnchor.constraint(equalTo: margins.topAnchor),
             landscapeImageWidthConstraint,
             landscapeImageHeightConstraint,
             articleImageView.bottomAnchor.constraint(lessThanOrEqualTo: margins.bottomAnchor),
-            textStack.leadingAnchor.constraint(equalTo: articleImageView.trailingAnchor, constant: 14),
-            textStack.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
-            textStack.topAnchor.constraint(equalTo: margins.topAnchor),
-            textStack.bottomAnchor.constraint(lessThanOrEqualTo: margins.bottomAnchor),
+            textContainer.leadingAnchor.constraint(equalTo: articleImageView.trailingAnchor, constant: 14),
+            textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
+            textContainer.bottomAnchor.constraint(lessThanOrEqualTo: margins.bottomAnchor),
         ]
-    }
 
-    override func preferredLayoutAttributesFitting(_ layoutAttributes: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes {
-        performanceMetrics?.recordFittingCall()
-        guard let attributes = layoutAttributes.copy() as? UICollectionViewLayoutAttributes else { return layoutAttributes }
-        guard let preparedLayoutMetrics else { return attributes }
-        attributes.size.height = preparedLayoutMetrics.cellSize.height
-        return attributes
+        // Order, top to bottom:
+        //
+        //   ● icon  Feed name              ★ 💬     full width
+        //   Headline …                    ┌─────┐
+        //   Date                          │ IMG │
+        //                                 └─────┘
+        //   Preview …                               full width
+        //
+        // The metadata bar keeps the full width because the feed name is the
+        // element that suffers first: in the narrow column it would fall from
+        // 275 pt to 147 pt, and the accessories around it grow with Dynamic Type
+        // while the column does not.
+        //
+        // The image is trailing so every headline starts at the same edge,
+        // including rows that have no image at all (`visualTextOnly`).
+        //
+        // The image reuses the landscape size constraints; only one variant
+        // group is ever active, so they cannot collide.
+        sideTitlePreviewBelowDateConstraint = previewLabel.topAnchor.constraint(
+            greaterThanOrEqualTo: dateLabel.bottomAnchor,
+            constant: IOSUIKitArticleGeometry.textSpacing
+        )
+        sideTitlePreviewBelowImageConstraint = previewLabel.topAnchor.constraint(
+            greaterThanOrEqualTo: articleImageView.bottomAnchor,
+            constant: IOSUIKitArticleGeometry.textSpacing
+        )
+        // Pulls the preview up to the date when the text column is the taller of
+        // the two. Together with the two required constraints above this is the
+        // max() the engine computes.
+        let previewPrefersDate = previewLabel.topAnchor.constraint(
+            equalTo: dateLabel.bottomAnchor,
+            constant: IOSUIKitArticleGeometry.textSpacing
+        )
+        previewPrefersDate.priority = .defaultLow
+        let titleTrailingToImage = titleLabel.trailingAnchor.constraint(
+            equalTo: articleImageView.leadingAnchor,
+            constant: -IOSUIKitArticleGeometry.sideTitleSpacing
+        )
+        let dateTrailingToImage = dateLabel.trailingAnchor.constraint(
+            equalTo: articleImageView.leadingAnchor,
+            constant: -IOSUIKitArticleGeometry.sideTitleSpacing
+        )
+        sideTitleConstraints = [
+            textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
+            textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
+
+            metadataRow.topAnchor.constraint(equalTo: textContainer.topAnchor),
+            metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+
+            titleLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            titleTrailingToImage,
+            dateLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            dateTrailingToImage,
+
+            articleImageView.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            articleImageView.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            landscapeImageWidthConstraint,
+            landscapeImageHeightConstraint,
+
+            sideTitlePreviewBelowDateConstraint,
+            sideTitlePreviewBelowImageConstraint,
+            previewPrefersDate,
+            previewBottomDefaultConstraint,
+            previewTrailingDefaultConstraint,
+        ]
+
+        // Wide container: the
+        // preview joins the column beside the image rather than running under it.
+        //
+        //   ● icon  Feed name              ★ 💬     full width
+        //   Headline …                    ┌─────┐
+        //   Date                          │ IMG │
+        //   Preview …                     └─────┘
+        //
+        // The image can now be the lowest element in the row, so the container's
+        // bottom is only an upper bound for both — the engine fixes the height.
+        sideTitleWideConstraints = [
+            textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
+            textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
+
+            metadataRow.topAnchor.constraint(equalTo: textContainer.topAnchor),
+            metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+
+            titleLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            titleLabel.trailingAnchor.constraint(
+                equalTo: articleImageView.leadingAnchor,
+                constant: -IOSUIKitArticleGeometry.sideTitleSpacing
+            ),
+            dateLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            dateLabel.trailingAnchor.constraint(
+                equalTo: articleImageView.leadingAnchor,
+                constant: -IOSUIKitArticleGeometry.sideTitleSpacing
+            ),
+            previewTopConstraint,
+            previewLabel.trailingAnchor.constraint(
+                equalTo: articleImageView.leadingAnchor,
+                constant: -IOSUIKitArticleGeometry.sideTitleSpacing
+            ),
+            previewLabel.bottomAnchor.constraint(lessThanOrEqualTo: textContainer.bottomAnchor),
+
+            articleImageView.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            articleImageView.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            articleImageView.bottomAnchor.constraint(lessThanOrEqualTo: textContainer.bottomAnchor),
+            landscapeImageWidthConstraint,
+            landscapeImageHeightConstraint,
+        ]
+
+        // `Visual compact` without an image: the same order — metadata bar,
+        // then title, date, preview — at full width, with no image slot.
+        sideTitleTextOnlyConstraints = [
+            textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
+            textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
+
+            metadataRow.topAnchor.constraint(equalTo: textContainer.topAnchor),
+            metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+
+            titleLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            titleLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            dateLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            dateLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+
+            previewTopConstraint,
+            previewBottomDefaultConstraint,
+            previewTrailingDefaultConstraint,
+        ]
     }
 
     override func prepareForReuse() {
@@ -1888,8 +2426,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         representedImageRequest = nil
         representedArticleID = nil
         preparedLayoutMetrics = nil
-        articleImageView.image = nil
-        imagePlaceholder.isHidden = false
+        clearArticleImagePresentation()
     }
 
     func configure(
@@ -1911,12 +2448,23 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         titleLabel.text = currentTitle
         feedTitleLabel.text = currentFeedTitle
         dateLabel.text = currentPublishedDate
+        let hasPreview = !item.content.article.preview.isEmpty
         previewLabel.text = item.content.article.preview
-        previewLabel.isHidden = item.content.article.preview.isEmpty
+        previewLabel.isHidden = !hasPreview
         previewLabel.numberOfLines = previewLines.rawValue
+        // Constants and priorities only — the constraint graph stays identical
+        // across every reuse, whatever the article contains.
+        previewTopConstraint.constant = hasPreview ? IOSUIKitArticleGeometry.textSpacing : 0
+        // Same collapse for the
+        // side-title variant's pair, or a preview-less row keeps a gap below the
+        // image that the engine did not budget for.
+        let previewSpacing = hasPreview ? IOSUIKitArticleGeometry.textSpacing : 0
+        sideTitlePreviewBelowDateConstraint.constant = previewSpacing
+        sideTitlePreviewBelowImageConstraint.constant = previewSpacing
+        previewCollapseConstraint.priority = hasPreview ? UILayoutPriority(1) : .defaultHigh
         let hasComments = item.content.hasComments
         commentsContainer.isHidden = !hasComments
-        commentsWidthConstraint.constant = hasComments ? IOSUIKitArticleGeometry.commentSlotSize : 0
+        commentsWidthConstraint.constant = hasComments ? (preparedLayoutMetrics.commentsFrame?.width ?? IOSUIKitArticleGeometry.commentSlotSize) : 0
         commentsToStarSpacingConstraint.constant = hasComments ? -IOSUIKitArticleGeometry.metadataAccessorySpacing : 0
 
         let hasImage = mode.showsArticleImage && item.content.imageURL != nil
@@ -1925,11 +2473,50 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
 
         updateFeedIcon(image: item.feedIconImage, title: item.content.article.feedTitle)
         updateStatus(isRead: item.isRead, isStarred: item.isStarred)
-        configureArticleImage(url: item.content.imageURL, targetSize: imageSize, displayScale: displayScale, articleChanged: articleChanged)
+        configureArticleImage(
+            url: item.content.imageURL,
+            targetSize: imageSize,
+            displayScale: displayScale,
+            articleChanged: articleChanged
+        )
         contentView.setNeedsLayout()
     }
 
+    /// Slot sizes come from the prepared metrics rather than from constants, so
+    /// the scaled glyphs and the engine's frames cannot drift apart.
+    private func applyAccessoryMetrics(_ layout: IOSUIKitArticleLayoutMetrics) {
+        let unread = layout.unreadFrame.width
+        if unreadWidth.constant != unread {
+            unreadWidth.constant = unread
+            unreadHeight.constant = unread
+        }
+        // Guarded on its own value, not on the size: at the default text size the
+        // computed width equals the constant the constraint was created with, so
+        // folding this into the branch above left the radius at 0 and the dot
+        // rendered as a square.
+        let unreadRadius = unread / 2
+        if unreadIndicator.layer.cornerRadius != unreadRadius {
+            unreadIndicator.layer.cornerRadius = unreadRadius
+        }
+        let icon = layout.feedIconFrame.width
+        if feedIconWidth.constant != icon {
+            feedIconWidth.constant = icon
+            feedIconHeight.constant = icon
+            metadataMinimumHeight.constant = icon
+        }
+        let star = layout.starFrame.width
+        if starWidth.constant != star {
+            starWidth.constant = star
+            starHeight.constant = star
+        }
+        let comments = layout.commentsFrame?.width ?? IOSUIKitArticleGeometry.commentSlotSize
+        if commentsHeightConstraint.constant != comments {
+            commentsHeightConstraint.constant = comments
+        }
+    }
+
     private func applyLayout(metrics: Metrics, variant: IOSUIKitArticleCellLayoutVariant) {
+        if let preparedLayoutMetrics { applyAccessoryMetrics(preparedLayoutMetrics) }
         contentView.directionalLayoutMargins = NSDirectionalEdgeInsets(
             top: metrics.outerVerticalPadding,
             leading: metrics.horizontalInset,
@@ -1937,14 +2524,14 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             trailing: metrics.horizontalInset
         )
 
-        if variant == .visualLandscape {
+        if variant == .visualLandscape || variant == .visualSideTitle || variant == .visualSideTitleWide {
             let imageSize = metrics.imageSize(hasImage: true)
             landscapeImageWidthConstraint.constant = imageSize.width
             landscapeImageHeightConstraint.constant = imageSize.height
         }
 
         guard currentLayoutVariant != variant else {
-            articleImageView.isHidden = variant == .compact || variant == .visualTextOnly
+            articleImageView.isHidden = !variant.showsImageSlot
             return
         }
 
@@ -1956,18 +2543,30 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             activeLayoutConstraints = portraitConstraints
         case .visualLandscape:
             activeLayoutConstraints = landscapeConstraints
+        case .visualSideTitle:
+            activeLayoutConstraints = sideTitleConstraints
+        case .visualSideTitleWide:
+            activeLayoutConstraints = sideTitleWideConstraints
+        case .visualSideTitleTextOnly:
+            activeLayoutConstraints = sideTitleTextOnlyConstraints
         }
         NSLayoutConstraint.activate(activeLayoutConstraints)
         currentLayoutVariant = variant
         layoutVariantRevision &+= 1
         performanceMetrics?.recordVariantSwitch()
-        articleImageView.isHidden = variant == .compact || variant == .visualTextOnly
+        articleImageView.isHidden = !variant.showsImageSlot
     }
 
     func updateStatus(isRead: Bool, isStarred: Bool) {
         currentIsRead = isRead
         currentIsStarred = isStarred
         titleLabel.textColor = isRead ? .secondaryLabel : .label
+        // Colour only — never anything that could move a frame.
+        let supporting = isRead ? Self.supportingReadTextColor : Self.supportingTextColor
+        feedTitleLabel.textColor = supporting
+        dateLabel.textColor = supporting
+        previewLabel.textColor = supporting
+        commentsImageView.tintColor = supporting
         unreadIndicator.alpha = ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: isRead)
         // The fixed trailing slot remains allocated when the star is not visible.
         starImageView.alpha = isStarred ? 1 : 0
@@ -1980,12 +2579,14 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             feedIconImageView.isHidden = false
             feedIconFallbackLabel.isHidden = true
             feedIconContainer.backgroundColor = .clear
+            setFeedIconPresentation(loaded: true)
         } else {
             feedIconImageView.image = nil
             feedIconImageView.isHidden = true
             feedIconFallbackLabel.isHidden = false
             feedIconFallbackLabel.text = title.prefix(1).uppercased()
             feedIconContainer.backgroundColor = .tintColor
+            setFeedIconPresentation(loaded: false)
         }
     }
 
@@ -1993,9 +2594,28 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
     func applyArticleImagePixelsForTesting(_ image: UIImage?) {
         articleImageView.image = image
         imagePlaceholder.isHidden = image != nil
+        setArticleImagePresentation(loaded: image != nil)
     }
 
     var articleImageSlotFrameForTesting: CGRect { articleImageView.frame }
+#if DEBUG
+    private(set) var articleImageFadeCountForTesting = 0
+    var articleImageIsFadingForTesting: Bool {
+        articleImageView.layer.animation(forKey: Self.articleImageFadeKey) != nil
+    }
+#endif
+    var articleImageForTesting: UIImage? { articleImageView.image }
+    var articleImageSlotIsHiddenForTesting: Bool { articleImageView.isHidden }
+#if DEBUG
+    var articleImageRasterForTesting: CGImage? { articleImageView.image?.cgImage }
+    func setArticleImagePipelineForTesting(_ pipeline: ArticleImagePipeline) { articleImagePipeline = pipeline }
+#endif
+    var articleImagePresentationForTesting: (placeholderHidden: Bool, contentMode: UIView.ContentMode, clipsToBounds: Bool, cornerRadius: CGFloat) {
+        (imagePlaceholder.isHidden, articleImageView.contentMode, articleImageView.clipsToBounds, articleImageView.layer.cornerRadius)
+    }
+    var feedIconPresentationForTesting: (imageHidden: Bool, fallbackHidden: Bool, clipsToBounds: Bool, cornerRadius: CGFloat) {
+        (feedIconImageView.isHidden, feedIconFallbackLabel.isHidden, feedIconContainer.clipsToBounds, feedIconContainer.layer.cornerRadius)
+    }
 
     struct LayoutDiagnostics: Equatable {
         let contentBounds: CGRect
@@ -2016,7 +2636,7 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
 
     var layoutDiagnosticsForTesting: LayoutDiagnostics {
         func frame(_ view: UIView) -> CGRect { view.convert(view.bounds, to: contentView) }
-        return .init(contentBounds: contentView.bounds, margins: contentView.directionalLayoutMargins, variant: currentLayoutVariant, imageFrame: frame(articleImageView), textStackFrame: frame(textStack), titleFrame: frame(titleLabel), starFrame: frame(starImageView), metadataFrame: frame(metadataRow), unreadFrame: frame(unreadIndicator), feedIconFrame: frame(feedIconContainer), feedTitleFrame: frame(feedTitleLabel), commentsFrame: commentsContainer.isHidden ? nil : frame(commentsContainer), dateFrame: frame(dateLabel), previewFrame: previewLabel.isHidden ? nil : frame(previewLabel))
+        return .init(contentBounds: contentView.bounds, margins: contentView.directionalLayoutMargins, variant: currentLayoutVariant, imageFrame: frame(articleImageView), textStackFrame: frame(textContainer), titleFrame: frame(titleLabel), starFrame: frame(starImageView), metadataFrame: frame(metadataRow), unreadFrame: frame(unreadIndicator), feedIconFrame: frame(feedIconContainer), feedTitleFrame: frame(feedTitleLabel), commentsFrame: commentsContainer.isHidden ? nil : frame(commentsContainer), dateFrame: frame(dateLabel), previewFrame: previewLabel.isHidden ? nil : frame(previewLabel))
     }
 
     var portraitAspectConstraintDiagnosticsForTesting: (multiplier: CGFloat, constant: CGFloat, priority: UILayoutPriority, imageFrame: CGRect, contentBounds: CGRect, margins: NSDirectionalEdgeInsets, displayScale: CGFloat) {
@@ -2028,7 +2648,12 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
         (feedTitleLabel.numberOfLines, feedTitleLabel.lineBreakMode)
     }
 
-    private func configureArticleImage(url: URL?, targetSize: CGSize, displayScale: CGFloat, articleChanged: Bool) {
+    private func configureArticleImage(
+        url: URL?,
+        targetSize: CGSize,
+        displayScale: CGFloat,
+        articleChanged: Bool
+    ) {
         guard let url, targetSize.width > 0, targetSize.height > 0 else {
             guard representedImageRequest != nil else { return }
             performanceMetrics?.recordImageBinding()
@@ -2036,35 +2661,46 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
             representedImageRequest = nil
             articleImageView.image = nil
             imagePlaceholder.isHidden = false
+            setArticleImagePresentation(loaded: false)
             return
         }
 
-        let request = ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale)
+        let request = ArticleImageRequest(
+            url: url,
+            targetSize: targetSize,
+            displayScale: displayScale,
+            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
+            rasterScale: articleImageRasterScale(displayScale),
+            usesDisplayP3: articleImageUsesDisplayP3?() ?? (traitCollection.displayGamut == .P3),
+            backdrop: Self.articleImageBackdrop(for: traitCollection)
+        )
         guard articleChanged || representedImageRequest != request else { return }
         performanceMetrics?.recordImageBinding()
         invalidateImageBinding()
         let bindingGeneration = imageBindingGeneration
         guard let articleID = representedArticleID else { return }
         representedImageRequest = request
-        if let cachedImage = ArticleImagePipeline.shared.cachedImage(for: request) {
-            articleImageView.image = UIImage(cgImage: cachedImage, scale: displayScale, orientation: .up)
-            imagePlaceholder.isHidden = true
+        if let cachedImage = articleImagePipeline.cachedImage(for: request) {
+            // Already available before the cell is displayed: nothing to fade.
+            presentArticleImage(cachedImage, displayScale: displayScale, animated: false)
             return
         }
 
-        articleImageView.image = nil
-        imagePlaceholder.isHidden = false
-        imageTask = Task { @MainActor [weak self] in
+        clearArticleImagePresentation()
+        let pipeline = articleImagePipeline
+        imageTask = Task { @MainActor [weak self, pipeline] in
             do {
-                let loadedImage = try await ArticleImagePipeline.shared.image(for: request, cacheWasChecked: true)
+                let loadedImage = try await pipeline.image(for: request, cacheWasChecked: true)
                 guard !Task.isCancelled,
                       let self,
                       self.imageBindingGeneration == bindingGeneration,
                       self.representedArticleID == articleID,
                       self.representedImageRequest == request
                 else { return }
-                self.articleImageView.image = UIImage(cgImage: loadedImage, scale: displayScale, orientation: .up)
-                self.imagePlaceholder.isHidden = true
+                // The cell is already on screen showing its placeholder. Swapping
+                // the pixels in one frame is a content jump, and at a steady 60 fps
+                // that reads as a stutter even though no frame was late.
+                self.presentArticleImage(loadedImage, displayScale: displayScale, animated: true)
             } catch {
                 guard !Task.isCancelled,
                       let self,
@@ -2072,10 +2708,68 @@ final class IOSUIKitArticleCell: UICollectionViewCell {
                       self.representedArticleID == articleID,
                       self.representedImageRequest == request
                 else { return }
-                self.articleImageView.image = nil
-                self.imagePlaceholder.isHidden = false
+                self.clearArticleImagePresentation()
             }
         }
+    }
+
+    private static let articleImageFadeDuration: CFTimeInterval = 0.2
+    private static let articleImageFadeKey = "flux.articleImageFade"
+
+    private func presentArticleImage(_ image: CGImage, displayScale: CGFloat, animated: Bool) {
+        if animated {
+#if DEBUG
+            articleImageFadeCountForTesting &+= 1
+#endif
+            let fade = CATransition()
+            fade.type = .fade
+            fade.duration = Self.articleImageFadeDuration
+            articleImageView.layer.add(fade, forKey: Self.articleImageFadeKey)
+        }
+        // Use the physical display scale for UIImage semantics. Fixed
+        // image-view constraints remain authoritative for the slot.
+        articleImageView.image = UIImage(cgImage: image, scale: displayScale, orientation: .up)
+        // An alpha-free raster covering the whole slot lets Core Animation
+        // skip blending it — the single largest composited area per cell.
+        articleImageView.isOpaque = representedImageRequest?.producesOpaqueRaster ?? false
+        imagePlaceholder.isHidden = true
+        setArticleImagePresentation(loaded: true)
+    }
+
+    private func clearArticleImagePresentation() {
+        articleImageView.layer.removeAnimation(forKey: Self.articleImageFadeKey)
+        articleImageView.image = nil
+        // The placeholder state has rounded corners of its own and must blend.
+        articleImageView.isOpaque = false
+        imagePlaceholder.isHidden = false
+        setArticleImagePresentation(loaded: false)
+    }
+
+    private func setArticleImagePresentation(loaded: Bool) {
+        articleImageView.contentMode = .scaleAspectFill
+        articleImageView.clipsToBounds = loaded
+        if loaded {
+            articleImageView.layer.cornerRadius = 0
+        } else {
+            articleImageView.layer.cornerRadius = IOSUIKitArticleGeometry.articleImageCornerRadius
+        }
+        // A view declared opaque must paint every pixel it owns, so the loaded
+        // state cannot keep a clear background.
+        let opaqueRaster = loaded && (representedImageRequest?.producesOpaqueRaster ?? false)
+        articleImageView.backgroundColor = loaded
+            ? (opaqueRaster ? .systemBackground : .clear)
+            : .tertiarySystemFill
+    }
+
+    private func setFeedIconPresentation(loaded: Bool) {
+        feedIconImageView.contentMode = loaded ? .scaleToFill : .scaleAspectFit
+        // Core Animation resolves a rounded background analytically, but a
+        // rounded mask over a sublayer needs an offscreen pass. The fallback
+        // letter is centred inside the circle and never overflows it, so the
+        // container keeps its rounded background without masking — matching the
+        // cold article-image placeholder next to it.
+        feedIconContainer.clipsToBounds = false
+        feedIconContainer.layer.cornerRadius = loaded ? 0 : feedIconWidth.constant / 2
     }
 
     private func invalidateImageBinding() {
@@ -2184,7 +2878,6 @@ enum ScrolloverUndoPresentationPolicy {
 
 private struct ScrolloverUndoPresentation: View {
     var store: NewsreaderStore
-
     var body: some View {
         HStack(spacing: 10) {
             Text(scrolloverUndoCountLabel)
@@ -2204,313 +2897,14 @@ private struct ScrolloverUndoPresentation: View {
     }
 }
 
-struct ArticlePresentationView: View, Equatable {
-    let content: ArticleRowContent
-    let fallbackRead: Bool
-    let fallbackStarred: Bool
-    let rowState: ArticleRowPresentationState?
-    let mode: ArticlePresentationMode
-    let previewLines: ArticlePreviewLines
-    let availableWidth: CGFloat
-    let feedIcon: IOSFeedIconPresentationState
-    let iconVariant: FeedIconVariant
-    let onRequestFeedIcon: () -> Void
-    let onTap: () -> Void
-    let onAction: (IOSArticleContextAction) -> Void
-    let onSetRead: (Bool) -> Void
-    let onSetStarred: (Bool) -> Void
 
-    static func == (lhs: ArticlePresentationView, rhs: ArticlePresentationView) -> Bool {
-        lhs.content == rhs.content &&
-            (lhs.rowState != nil || rhs.rowState != nil || (lhs.fallbackRead == rhs.fallbackRead && lhs.fallbackStarred == rhs.fallbackStarred)) &&
-            lhs.rowState === rhs.rowState &&
-            lhs.mode == rhs.mode &&
-            lhs.previewLines == rhs.previewLines &&
-            lhs.availableWidth == rhs.availableWidth &&
-            lhs.feedIcon === rhs.feedIcon &&
-            lhs.iconVariant == rhs.iconVariant
-    }
 
-    var body: some View {
-        ArticleRowStateInteractions(
-            content: content,
-            fallbackRead: fallbackRead,
-            fallbackStarred: fallbackStarred,
-            rowState: rowState,
-            mode: mode,
-            previewLines: previewLines,
-            availableWidth: availableWidth,
-            feedIcon: feedIcon,
-            onRequestFeedIcon: onRequestFeedIcon,
-            onTap: onTap,
-            onAction: onAction,
-            onSetRead: onSetRead,
-            onSetStarred: onSetStarred
-        )
-    }
-}
 
-private struct ArticleRowStateInteractions: View {
-    let content: ArticleRowContent
-    let fallbackRead: Bool
-    let fallbackStarred: Bool
-    let rowState: ArticleRowPresentationState?
-    let mode: ArticlePresentationMode
-    let previewLines: ArticlePreviewLines
-    let availableWidth: CGFloat
-    let feedIcon: IOSFeedIconPresentationState
-    let onRequestFeedIcon: () -> Void
-    let onTap: () -> Void
-    let onAction: (IOSArticleContextAction) -> Void
-    let onSetRead: (Bool) -> Void
-    let onSetStarred: (Bool) -> Void
 
-    var body: some View {
-        let isRead = rowState?.isRead ?? fallbackRead
-        let isStarred = rowState?.isStarred ?? fallbackStarred
-        ArticleRowSurface(
-            content: content,
-            fallbackRead: fallbackRead,
-            fallbackStarred: fallbackStarred,
-            rowState: rowState,
-            mode: mode,
-            previewLines: previewLines,
-            availableWidth: availableWidth,
-            feedIcon: feedIcon,
-            onRequestFeedIcon: onRequestFeedIcon,
-            onTap: onTap
-        )
-        .equatable()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(content.article.title), \(content.article.feedTitle), \(content.publishedDate), \(isRead ? String(localized: "Read") : String(localized: "Unread"))\(isStarred ? String(localized: ", starred") : "")")
-        .accessibilityValue(isRead ? (isStarred ? String(localized: "Read, starred") : String(localized: "Read")) : (isStarred ? String(localized: "Unread, starred") : String(localized: "Unread")))
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint(String(localized: "Opens the article"))
-        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-            Button { onSetRead(!isRead) } label: {
-                Label(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: isRead ? "envelope" : "envelope.open")
-            }
-            .tint(.accentColor)
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button { onSetStarred(!isStarred) } label: {
-                Label(isStarred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: isStarred ? "star.slash" : "star")
-            }
-            .tint(.orange)
-        }
-        .contextMenu {
-            Button { onSetStarred(!isStarred) } label: { Label(isStarred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: isStarred ? "star.slash" : "star") }
-            Button { onSetRead(!isRead) } label: { Label(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: isRead ? "envelope" : "envelope.open") }
-            Divider()
-            Button { onAction(.original) } label: { Label("Open Original", systemImage: "safari") }
-            Button { onAction(.reader) } label: { Label("Open in Reader", systemImage: "doc.text") }
-            Button { onAction(.miniflux) } label: { Label("Open in Miniflux", systemImage: "arrow.up.forward.app") }
-            if content.hasComments { Button { onAction(.comments) } label: { Label("Open Comments", systemImage: "bubble.left") } }
-            Button { onAction(.copyLink) } label: { Label("Copy Link", systemImage: "doc.on.doc") }
-            Button { onAction(.share) } label: { Label("Share", systemImage: "square.and.arrow.up") }
-            Divider()
-            Button { onAction(.saveToService) } label: { Label("Save to Third-Party Service", systemImage: "tray.and.arrow.down") }
-        }
-    }
-}
 
-private struct ArticleRowSurface: View, Equatable {
-    let content: ArticleRowContent
-    let fallbackRead: Bool
-    let fallbackStarred: Bool
-    let rowState: ArticleRowPresentationState?
-    let mode: ArticlePresentationMode
-    let previewLines: ArticlePreviewLines
-    let availableWidth: CGFloat
-    let feedIcon: IOSFeedIconPresentationState
-    let onRequestFeedIcon: () -> Void
-    let onTap: () -> Void
 
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.content == rhs.content &&
-            (lhs.rowState != nil || rhs.rowState != nil || (lhs.fallbackRead == rhs.fallbackRead && lhs.fallbackStarred == rhs.fallbackStarred)) &&
-            lhs.rowState === rhs.rowState && lhs.mode == rhs.mode && lhs.previewLines == rhs.previewLines && lhs.availableWidth == rhs.availableWidth && lhs.feedIcon === rhs.feedIcon
-    }
 
-    var body: some View {
-        ArticleRowContentBody(
-            content: content,
-            fallbackRead: fallbackRead,
-            fallbackStarred: fallbackStarred,
-            rowState: rowState,
-            mode: mode,
-            previewLines: previewLines,
-            availableWidth: availableWidth,
-            feedIcon: feedIcon,
-            onRequestFeedIcon: onRequestFeedIcon
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 16))
-        .onTapGesture(perform: onTap)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
 
-private struct ArticleRowContentBody: View {
-    let content: ArticleRowContent
-    let fallbackRead: Bool
-    let fallbackStarred: Bool
-    let rowState: ArticleRowPresentationState?
-    let mode: ArticlePresentationMode
-    let previewLines: ArticlePreviewLines
-    let availableWidth: CGFloat
-    let feedIcon: IOSFeedIconPresentationState
-    let onRequestFeedIcon: () -> Void
-
-    var body: some View {
-        switch mode {
-        case .visual:
-            if ArticlePresentationLayout.usesLandscapeVisual(mode: mode, availableWidth: availableWidth) {
-                landscapeVisual
-            } else {
-                portraitVisual
-            }
-        case .compact:
-            articleText
-                .padding(.vertical, ArticleRowContentLayout.compactVerticalPadding)
-                .padding(.horizontal, ArticleRowContentLayout.compactHorizontalPadding)
-                .frame(width: articleWidth, alignment: .leading)
-        }
-    }
-
-    private var articleWidth: CGFloat { ArticlePresentationLayout.boundedArticleWidth(availableWidth) }
-    private var contentWidth: CGFloat { ArticlePresentationLayout.articleContentWidth(articleWidth) }
-    private var portraitContentWidth: CGFloat { ArticlePresentationLayout.visualPortraitContentWidth(articleWidth) }
-
-    private var portraitVisual: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let imageURL = content.imageURL {
-                ArticleImageView(url: imageURL, targetSize: CGSize(width: portraitContentWidth, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: portraitContentWidth)))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            articleText.frame(width: portraitContentWidth, alignment: .leading)
-        }
-        .frame(width: portraitContentWidth, alignment: .leading)
-    }
-
-    private var landscapeVisual: some View {
-        HStack(alignment: .top, spacing: 14) {
-            let imageWidth = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
-            if let imageURL = content.imageURL {
-                ArticleImageView(url: imageURL, targetSize: CGSize(width: imageWidth, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: imageWidth)))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            articleText.frame(width: content.imageURL == nil ? contentWidth : ArticlePresentationLayout.landscapeTextWidth(availableWidth: availableWidth, imageWidth: imageWidth, interColumnSpacing: 14), alignment: .leading)
-        }
-        .frame(width: contentWidth, alignment: .leading)
-    }
-
-    private var articleText: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            ArticleTitlePresentation(title: content.article.title, rowState: rowState, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred)
-            ViewThatFits(in: .horizontal) {
-                ArticleMetadataRow(content: content, fallbackRead: fallbackRead, rowState: rowState, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
-                ArticleMetadataColumn(content: content, fallbackRead: fallbackRead, rowState: rowState, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
-            }
-            if !content.article.preview.isEmpty {
-                Text(content.article.preview)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(previewLines.rawValue)
-                    .multilineTextAlignment(.leading)
-            }
-        }
-    }
-}
-
-private enum ArticleRowContentLayout {
-    static let compactHorizontalPadding: CGFloat = 1
-    static let compactVerticalPadding: CGFloat = 2
-}
-
-private struct ArticleTitlePresentation: View {
-    let title: String
-    let rowState: ArticleRowPresentationState?
-    let fallbackRead: Bool
-    let fallbackStarred: Bool
-
-    var body: some View {
-        let isRead = rowState?.isRead ?? fallbackRead
-        let isStarred = rowState?.isStarred ?? fallbackStarred
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(isRead ? .secondary : .primary)
-                .multilineTextAlignment(.leading)
-            Spacer(minLength: 0)
-            if isStarred {
-                Image(systemName: "star.fill")
-                    .foregroundStyle(.yellow)
-                    .accessibilityLabel(String(localized: "Starred"))
-            }
-        }
-    }
-}
-
-private struct ArticleMetadataRow: View {
-    let content: ArticleRowContent
-    let fallbackRead: Bool
-    let rowState: ArticleRowPresentationState?
-    let feedIcon: IOSFeedIconPresentationState
-    let onRequestFeedIcon: () -> Void
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ArticleUnreadIndicator(rowState: rowState, fallback: fallbackRead)
-            FeedIconView(feedID: content.article.feedId, title: content.article.feedTitle, state: feedIcon, onRequest: onRequestFeedIcon)
-            Text(content.article.feedTitle).font(.subheadline.weight(.medium))
-            Text("•")
-            Text(content.publishedDate)
-            commentsIndicator
-        }
-        .foregroundStyle(.secondary)
-        .font(.caption)
-        .lineLimit(1)
-    }
-
-    @ViewBuilder private var commentsIndicator: some View {
-        if content.hasComments { Image(systemName: "bubble.left").accessibilityLabel(String(localized: "Comments available")) }
-    }
-}
-
-private struct ArticleMetadataColumn: View {
-    let content: ArticleRowContent
-    let fallbackRead: Bool
-    let rowState: ArticleRowPresentationState?
-    let feedIcon: IOSFeedIconPresentationState
-    let onRequestFeedIcon: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                ArticleUnreadIndicator(rowState: rowState, fallback: fallbackRead)
-                FeedIconView(feedID: content.article.feedId, title: content.article.feedTitle, state: feedIcon, onRequest: onRequestFeedIcon)
-                Text(content.article.feedTitle).font(.subheadline.weight(.medium))
-                if content.hasComments { Image(systemName: "bubble.left").accessibilityLabel(String(localized: "Comments available")) }
-            }
-            Text(content.publishedDate)
-        }
-        .foregroundStyle(.secondary)
-        .font(.caption)
-    }
-}
-
-private struct ArticleUnreadIndicator: View {
-    let rowState: ArticleRowPresentationState?
-    let fallback: Bool
-
-    var body: some View {
-        Circle()
-            .fill(Color.accentColor)
-            .frame(width: 6, height: 6)
-            .opacity(ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: rowState?.isRead ?? fallback))
-            .accessibilityHidden(true)
-    }
-}
 
 struct FeedIconView: View {
     let feedID: Int64

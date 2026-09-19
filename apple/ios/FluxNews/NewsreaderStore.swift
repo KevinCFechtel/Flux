@@ -23,30 +23,40 @@ enum IOSFeedIconLoadState: Equatable {
     var image: UIImage?
     private(set) var loadState: IOSFeedIconLoadState = .idle
     private(set) var revision: UInt64 = 0
+#if DEBUG
+    @ObservationIgnored private var testStateWaiters: [(IOSFeedIconLoadState, CheckedContinuation<Void, Never>)] = []
+#endif
 
-    func beginLoading() { loadState = .loading }
+    func beginLoading() {
+        loadState = .loading
+        notifyTestStateWaiters()
+    }
 
     func setAvailable(_ image: UIImage) {
         self.image = image
         loadState = .available
         revision &+= 1
+        notifyTestStateWaiters()
     }
 
     func setUnavailable() {
         image = nil
         loadState = .unavailable
         revision &+= 1
+        notifyTestStateWaiters()
     }
 
     func setRetryableFailure(retryAfter: TimeInterval) {
         image = nil
         loadState = .retryableFailure(retryAfter: retryAfter)
         revision &+= 1
+        notifyTestStateWaiters()
     }
 
     func invalidateLoading() {
         guard loadState == .loading else { return }
         loadState = .idle
+        notifyTestStateWaiters()
     }
 
     func canRequest(at time: TimeInterval) -> Bool {
@@ -59,6 +69,24 @@ enum IOSFeedIconLoadState: Equatable {
             false
         }
     }
+
+#if DEBUG
+    func waitForLoadStateForTesting(_ expected: IOSFeedIconLoadState) async {
+        guard loadState != expected else { return }
+        await withCheckedContinuation { continuation in
+            testStateWaiters.append((expected, continuation))
+        }
+    }
+
+    private func notifyTestStateWaiters() {
+        let matching = testStateWaiters.indices.reversed().filter { testStateWaiters[$0].0 == loadState }
+        for index in matching {
+            testStateWaiters.remove(at: index).1.resume()
+        }
+    }
+#else
+    private func notifyTestStateWaiters() {}
+#endif
 }
 
 enum IOSFeedIconPresentation {
@@ -83,6 +111,7 @@ struct IOSPreparedFeedIcon: @unchecked Sendable {
 
 enum IOSFeedIconImagePreparation {
     static let displaySidePoints: CGFloat = 22
+    static let cornerRadius = displaySidePoints / 2
 
     static func prepare(data: Data, displayScale: CGFloat) throws -> IOSPreparedFeedIcon {
         let scale = max(displayScale, 1)
@@ -99,27 +128,54 @@ enum IOSFeedIconImagePreparation {
         guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else {
             throw IOSFeedIconImagePreparationError.invalidImageData
         }
-        let displayReady = decompressed(thumbnail) ?? thumbnail
+        let displayReady = renderDisplayReady(
+            thumbnail,
+            pixelSide: maxPixelDimension,
+            cornerRadiusPixels: CGFloat(maxPixelDimension) / 2
+        ) ?? thumbnail
         return .init(
             image: UIImage(cgImage: displayReady, scale: scale, orientation: .up),
             pixelSize: .init(width: displayReady.width, height: displayReady.height)
         )
     }
 
-    private static func decompressed(_ image: CGImage) -> CGImage? {
+    private static func renderDisplayReady(
+        _ image: CGImage,
+        pixelSide: Int,
+        cornerRadiusPixels: CGFloat
+    ) -> CGImage? {
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
         guard let context = CGContext(
             data: nil,
-            width: image.width,
-            height: image.height,
+            width: pixelSide,
+            height: pixelSide,
             bitsPerComponent: 8,
             bytesPerRow: 0,
             space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            bitmapInfo: displayBitmapInfo
         ) else { return nil }
-        context.interpolationQuality = .high
-        context.draw(image, in: .init(x: 0, y: 0, width: image.width, height: image.height))
+        context.interpolationQuality = .medium
+        let destination = CGRect(x: 0, y: 0, width: pixelSide, height: pixelSide)
+        context.clear(destination)
+        let radius = min(cornerRadiusPixels, CGFloat(pixelSide) / 2)
+        context.addPath(CGPath(roundedRect: destination, cornerWidth: radius, cornerHeight: radius, transform: nil))
+        context.clip()
+        let scale = min(destination.width / CGFloat(image.width), destination.height / CGFloat(image.height))
+        let drawSize = CGSize(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
+        context.draw(
+            image,
+            in: .init(
+                x: destination.midX - drawSize.width / 2,
+                y: destination.midY - drawSize.height / 2,
+                width: drawSize.width,
+                height: drawSize.height
+            )
+        )
         return context.makeImage()
+    }
+
+    private static var displayBitmapInfo: UInt32 {
+        CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
     }
 }
 

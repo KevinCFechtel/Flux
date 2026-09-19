@@ -15,10 +15,9 @@ struct IOSUIKitArticleLayoutInput: Hashable {
     let containerWidth: CGFloat
     let displayScale: CGFloat
     let contentSizeCategory: UIContentSizeCategory
-    let localeIdentifier: String
     let layoutDirection: UIUserInterfaceLayoutDirection
 
-    init(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, localeIdentifier: String, layoutDirection: UIUserInterfaceLayoutDirection) {
+    init(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
         title = item.content.article.title
         feedTitle = item.content.article.feedTitle
         publishedDate = item.content.publishedDate
@@ -30,15 +29,14 @@ struct IOSUIKitArticleLayoutInput: Hashable {
         self.containerWidth = containerWidth
         self.displayScale = displayScale
         self.contentSizeCategory = contentSizeCategory
-        self.localeIdentifier = localeIdentifier
         self.layoutDirection = layoutDirection
     }
 
-    init(title: String, feedTitle: String, publishedDate: String, preview: String, hasImage: Bool, hasComments: Bool, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, localeIdentifier: String, layoutDirection: UIUserInterfaceLayoutDirection) {
+    init(title: String, feedTitle: String, publishedDate: String, preview: String, hasImage: Bool, hasComments: Bool, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
         self.title = title; self.feedTitle = feedTitle; self.publishedDate = publishedDate; self.preview = preview
         self.hasImage = hasImage; self.hasComments = hasComments; self.mode = mode; self.previewLines = previewLines
         self.containerWidth = containerWidth; self.displayScale = displayScale; self.contentSizeCategory = contentSizeCategory
-        self.localeIdentifier = localeIdentifier; self.layoutDirection = layoutDirection
+        self.layoutDirection = layoutDirection
     }
 }
 
@@ -354,10 +352,42 @@ final class IOSUIKitArticleLayoutPreparationCoordinator {
     }
 }
 
+/// Slot sizes for the metadata glyphs, grown with the text they accompany.
+///
+/// Apple's guidance is that glyphs beside text scale with it, but not without
+/// bound here: the feed icon is a bitmap prepared at a fixed size, and at the
+/// largest accessibility categories an unclamped slot would both dwarf the row
+/// and upscale that bitmap badly. The cap keeps the proportion sane and the
+/// raster acceptable; lifting it means threading the scaled size through the
+/// feed-icon pipeline as well.
+struct IOSUIKitArticleAccessoryMetrics: Equatable {
+    static let maximumScale: CGFloat = 1.5
+
+    let unread: CGFloat
+    let feedIcon: CGFloat
+    let star: CGFloat
+    let comments: CGFloat
+
+    init(contentSizeCategory: UIContentSizeCategory) {
+        let traits = UITraitCollection(preferredContentSizeCategory: contentSizeCategory)
+        let reference = IOSUIKitArticleGeometry.feedIconSize
+        let scaled = UIFontMetrics(forTextStyle: .subheadline).scaledValue(for: reference, compatibleWith: traits)
+        // Whole points keep every derived frame on a predictable grid.
+        let scale = min(Self.maximumScale, max(1, scaled / reference))
+        unread = (IOSUIKitArticleGeometry.unreadSize * scale).rounded()
+        feedIcon = (reference * scale).rounded()
+        star = (IOSUIKitArticleGeometry.starSlotSize * scale).rounded()
+        comments = (IOSUIKitArticleGeometry.commentSlotSize * scale).rounded()
+    }
+}
+
 /// The non-text geometry contract shared by the renderer and deterministic sizing.
 /// It deliberately has no presentation pixels or read/starred state.
 struct IOSUIKitArticleGeometry: Equatable {
     static let wideInsetThreshold: CGFloat = 700
+    /// Mirrors `ArticlePresentationLayout.usesLandscapeVisual`, which applies the
+    /// same threshold to the `.visual` mode.
+    static let wideContainerThreshold: CGFloat = 600
     static let compactInset: CGFloat = 10
     static let visualInset: CGFloat = 16
     static let wideInset: CGFloat = 28
@@ -366,9 +396,15 @@ struct IOSUIKitArticleGeometry: Equatable {
     static let landscapeVerticalPadding: CGFloat = 13
     static let textSpacing: CGFloat = 7
     static let portraitSpacing: CGFloat = 12
+    // "Visual compact": a thumbnail beside the title, with the metadata bar above
+    // and — on a narrow container — the preview underneath.
+    static let sideTitleImageAllocation: CGFloat = 0.32
+    static let sideTitleImageAspectRatio: CGFloat = 4.0 / 3
+    static let sideTitleSpacing: CGFloat = 12
     static let landscapeSpacing: CGFloat = 14
     static let unreadSize: CGFloat = 6
     static let feedIconSize: CGFloat = 22
+    static let articleImageCornerRadius: CGFloat = 12
     static let starSlotSize: CGFloat = 17
     static let commentSlotSize: CGFloat = 17
     static let metadataLeadingSpacing: CGFloat = 6
@@ -380,6 +416,9 @@ struct IOSUIKitArticleGeometry: Equatable {
     let horizontalInset: CGFloat
     let availableWidth: CGFloat
     let isLandscapeVisual: Bool
+    /// `Visual compact`: a thumbnail beside the title instead of a full-width image.
+    let usesSideTitle: Bool
+    let isWideContainer: Bool
     let verticalPadding: CGFloat
 
     init(mode: ArticlePresentationMode, containerWidth: CGFloat) {
@@ -388,17 +427,32 @@ struct IOSUIKitArticleGeometry: Equatable {
         horizontalInset = containerWidth > Self.wideInsetThreshold ? Self.wideInset : mode == .compact ? Self.compactInset : Self.visualInset
         availableWidth = max(0, containerWidth - horizontalInset * 2)
         isLandscapeVisual = ArticlePresentationLayout.usesLandscapeVisual(mode: mode, availableWidth: availableWidth)
+        usesSideTitle = mode == .visualCompact
+        // `isLandscapeVisual` is false for every mode but `.visual`, so the
+        // side-title variants need the width test on its own.
+        isWideContainer = availableWidth > Self.wideContainerThreshold
         verticalPadding = mode == .compact ? Self.compactVerticalPadding : isLandscapeVisual ? Self.landscapeVerticalPadding : Self.portraitVerticalPadding
     }
 
     func variant(hasImage: Bool) -> IOSUIKitArticleCellLayoutVariant {
-        guard mode == .visual else { return .compact }
-        guard hasImage else { return .visualTextOnly }
+        guard mode.showsArticleImage else { return .compact }
+        // Without an image the ordinary visual modes lead with the title, but
+        // `Visual compact` must keep the metadata bar on top either way —
+        // otherwise rows with and without an image disagree about what comes
+        // first, and the list reads as two different designs.
+        guard hasImage else { return usesSideTitle ? .visualSideTitleTextOnly : .visualTextOnly }
+        // On a wide container the preview has room to sit beside the image.
+        if usesSideTitle { return isWideContainer ? .visualSideTitleWide : .visualSideTitle }
         return isLandscapeVisual ? .visualLandscape : .visualPortrait
     }
 
     func imageSize(hasImage: Bool) -> CGSize {
         guard hasImage, mode.showsArticleImage else { return .zero }
+        if usesSideTitle {
+            // Same proportion at every width; only what sits beside it changes.
+            let width = (availableWidth * Self.sideTitleImageAllocation).rounded()
+            return .init(width: width, height: (width / Self.sideTitleImageAspectRatio).rounded())
+        }
         if isLandscapeVisual {
             let width = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
             return .init(width: width, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: width))
@@ -408,26 +462,31 @@ struct IOSUIKitArticleGeometry: Equatable {
         return .init(width: availableWidth, height: availableWidth * (1 / ArticlePresentationLayout.portraitImageAspectRatio))
     }
 
-    func metadataLayout(width: CGFloat, hasComments: Bool, height: CGFloat) -> MetadataLayout {
-        let trailingAccessorySlots = staticAccessorySlotWidths(hasComments: hasComments)
+    func metadataLayout(width: CGFloat, hasComments: Bool, height: CGFloat, accessories: IOSUIKitArticleAccessoryMetrics) -> MetadataLayout {
+        let trailingAccessorySlots = staticAccessorySlotWidths(hasComments: hasComments, accessories: accessories)
         let commentsWidth = hasComments ? trailingAccessorySlots[0] : 0
         let trailingAccessoriesWidth = trailingAccessorySlots.reduce(0, +) + CGFloat(max(0, trailingAccessorySlots.count - 1)) * Self.metadataAccessorySpacing
-        let feedTitleWidth = max(0, width - Self.unreadSize - Self.metadataLeadingSpacing - Self.feedIconSize - Self.metadataLeadingSpacing - Self.metadataTitleSpacing - trailingAccessoriesWidth)
+        // Leading edge: feed icon, then the feed name. Trailing edge, outermost
+        // first: unread dot, star, then the remaining accessories.
+        let feedTitleWidth = max(0, width - accessories.feedIcon - Self.metadataLeadingSpacing - Self.metadataTitleSpacing - trailingAccessoriesWidth)
+        let unreadX = width - accessories.unread
+        let starX = unreadX - Self.metadataAccessorySpacing - accessories.star
         return .init(
-            unreadX: 0,
-            feedIconX: Self.unreadSize + Self.metadataLeadingSpacing,
-            feedTitleX: Self.unreadSize + Self.metadataLeadingSpacing + Self.feedIconSize + Self.metadataLeadingSpacing,
+            unreadX: unreadX,
+            feedIconX: 0,
+            feedTitleX: accessories.feedIcon + Self.metadataLeadingSpacing,
             feedTitleWidth: feedTitleWidth,
-            commentsX: width - Self.starSlotSize - (hasComments ? Self.metadataAccessorySpacing + Self.commentSlotSize : 0),
+            commentsX: starX - (hasComments ? Self.metadataAccessorySpacing + accessories.comments : 0),
             commentsWidth: commentsWidth,
-            starX: width - Self.starSlotSize,
+            starX: starX,
             height: height
         )
     }
 
-    /// Future immutable accessories append a fixed width before the permanent star slot.
-    func staticAccessorySlotWidths(hasComments: Bool) -> [CGFloat] {
-        (hasComments ? [Self.commentSlotSize] : []) + [Self.starSlotSize]
+    /// Trailing accessories in leading-to-trailing order. Future immutable
+    /// accessories append before the star, which keeps the unread dot outermost.
+    func staticAccessorySlotWidths(hasComments: Bool, accessories: IOSUIKitArticleAccessoryMetrics) -> [CGFloat] {
+        (hasComments ? [accessories.comments] : []) + [accessories.star, accessories.unread]
     }
 
     struct MetadataLayout: Equatable {
@@ -456,13 +515,47 @@ enum IOSUIKitArticleLayoutEngine {
             imageSize.height = pixelAligned(imageSize.height, scale: scale)
         }
         let textWidth = variant == .visualLandscape ? max(0, geometry.availableWidth - imageSize.width - IOSUIKitArticleGeometry.landscapeSpacing) : geometry.availableWidth
+        // In the side-title variant the image sits beside the title and the date,
+        // so those two are narrower. The metadata bar and the preview keep the
+        // full width — the metadata because the feed name is squeezed first, the
+        // preview because it needs the room to read as a paragraph.
+        let isSideTitleVariant = variant == .visualSideTitle || variant == .visualSideTitleWide
+        // The image-less side-title variant shares the ordering but not the
+        // narrowed title column.
+        let metadataLeads = isSideTitleVariant || variant == .visualSideTitleTextOnly
+        let titleWidth = isSideTitleVariant
+            ? max(0, geometry.availableWidth - imageSize.width - IOSUIKitArticleGeometry.sideTitleSpacing)
+            : textWidth
+        let infoWidth = textWidth
+        // On a wide container the preview joins the column beside the image
+        // rather than running underneath it.
+        let previewWidth = variant == .visualSideTitleWide ? titleWidth : infoWidth
 
+        let accessories = IOSUIKitArticleAccessoryMetrics(contentSizeCategory: input.contentSizeCategory)
         let titleFont = font(.headline, category: input.contentSizeCategory, bold: false)
-        let titleHeight = coreTextHeight(input.title, font: titleFont, width: textWidth, maximumLines: nil, displayScale: scale)
-        let metadataHeight = max(IOSUIKitArticleGeometry.feedIconSize, font(.subheadline, category: input.contentSizeCategory, bold: true).lineHeight)
+        let titleHeight = coreTextHeight(input.title, font: titleFont, width: titleWidth, maximumLines: nil, displayScale: scale)
+        let metadataHeight = max(accessories.feedIcon, font(.subheadline, category: input.contentSizeCategory, bold: true).lineHeight)
         let dateHeight = fixedLineHeight(input.publishedDate, font: font(.caption1, category: input.contentSizeCategory, bold: false))
-        let previewHeight = coreTextHeight(input.preview, font: font(.subheadline, category: input.contentSizeCategory, bold: false), width: textWidth, maximumLines: input.previewLines.rawValue, displayScale: scale)
-        let textBlockHeight = titleHeight + IOSUIKitArticleGeometry.textSpacing + metadataHeight + IOSUIKitArticleGeometry.textSpacing + dateHeight + (previewHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
+        let previewHeight = coreTextHeight(input.preview, font: font(.subheadline, category: input.contentSizeCategory, bold: false), width: previewWidth, maximumLines: input.previewLines.rawValue, displayScale: scale)
+        let textBlockHeight: CGFloat
+        // The column that shares its row with the image. On a wide container the
+        // preview belongs to it, so it is part of the height the image competes
+        // with; otherwise the preview follows below the whole row.
+        let sideTitleColumnHeight = titleHeight + IOSUIKitArticleGeometry.textSpacing + dateHeight
+            + (variant == .visualSideTitleWide && previewHeight > 0
+                ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
+        // What that row occupies: the taller of the column and the image.
+        let sideTitleRowHeight = max(sideTitleColumnHeight, imageSize.height)
+        if variant == .visualSideTitleWide {
+            textBlockHeight = metadataHeight + IOSUIKitArticleGeometry.textSpacing + sideTitleRowHeight
+        } else if variant == .visualSideTitle || variant == .visualSideTitleTextOnly {
+            textBlockHeight = metadataHeight + IOSUIKitArticleGeometry.textSpacing + sideTitleRowHeight
+                + (previewHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
+        } else {
+            textBlockHeight = titleHeight + IOSUIKitArticleGeometry.textSpacing + metadataHeight
+                + IOSUIKitArticleGeometry.textSpacing + dateHeight
+                + (previewHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
+        }
         let contentHeight: CGFloat
         switch variant {
         case .visualPortrait: contentHeight = imageSize.height + IOSUIKitArticleGeometry.portraitSpacing + textBlockHeight
@@ -471,22 +564,47 @@ enum IOSUIKitArticleLayoutEngine {
         }
         let totalHeight = ceil(contentHeight + geometry.verticalPadding * 2)
         let contentFrame = CGRect(x: geometry.horizontalInset, y: geometry.verticalPadding, width: geometry.availableWidth, height: contentHeight)
-        let logicalImageX = geometry.horizontalInset
-        let imageFrame: CGRect? = imageSize == .zero ? nil : CGRect(x: physicalX(logicalX: logicalImageX, width: imageSize.width, in: input.containerWidth, direction: input.layoutDirection), y: geometry.verticalPadding, width: imageSize.width, height: imageSize.height)
+        let logicalImageX = isSideTitleVariant
+            ? geometry.horizontalInset + geometry.availableWidth - imageSize.width
+            : geometry.horizontalInset
+        // In the side-title variant the image starts below the metadata bar.
+        let logicalImageY = isSideTitleVariant
+            ? geometry.verticalPadding + metadataHeight + IOSUIKitArticleGeometry.textSpacing
+            : geometry.verticalPadding
+        let imageFrame: CGRect? = imageSize == .zero ? nil : CGRect(x: physicalX(logicalX: logicalImageX, width: imageSize.width, in: input.containerWidth, direction: input.layoutDirection), y: logicalImageY, width: imageSize.width, height: imageSize.height)
         let logicalTextX = variant == .visualLandscape ? geometry.horizontalInset + imageSize.width + IOSUIKitArticleGeometry.landscapeSpacing : geometry.horizontalInset
         let textOrigin = CGPoint(x: physicalX(logicalX: logicalTextX, width: textWidth, in: input.containerWidth, direction: input.layoutDirection), y: variant == .visualPortrait ? geometry.verticalPadding + imageSize.height + IOSUIKitArticleGeometry.portraitSpacing : geometry.verticalPadding)
-        let titleFrame = CGRect(x: textOrigin.x, y: textOrigin.y, width: textWidth, height: titleHeight)
-        let metadataFrame = CGRect(x: textOrigin.x, y: titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: textWidth, height: metadataHeight)
-        let metadataLayout = geometry.metadataLayout(width: textWidth, hasComments: input.hasComments, height: metadataHeight)
+        // Side-title order is metadata, then title and date beside the image.
+        // Every other variant keeps title, metadata, date.
+        let isSideTitle = metadataLeads
+        let titleTop = isSideTitle
+            ? textOrigin.y + metadataHeight + IOSUIKitArticleGeometry.textSpacing
+            : textOrigin.y
+        let titleFrame = CGRect(x: textOrigin.x, y: titleTop, width: titleWidth, height: titleHeight)
+        let metadataTop = isSideTitle ? textOrigin.y : titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing
+        let metadataFrame = CGRect(x: textOrigin.x, y: metadataTop, width: infoWidth, height: metadataHeight)
+        let metadataLayout = geometry.metadataLayout(width: infoWidth, hasComments: input.hasComments, height: metadataHeight, accessories: accessories)
         func metadataX(_ logicalX: CGFloat, width: CGFloat) -> CGFloat { input.layoutDirection == .rightToLeft ? metadataFrame.maxX - logicalX - width : metadataFrame.minX + logicalX }
-        let unreadFrame = CGRect(x: metadataX(metadataLayout.unreadX, width: IOSUIKitArticleGeometry.unreadSize), y: metadataFrame.midY - IOSUIKitArticleGeometry.unreadSize / 2, width: IOSUIKitArticleGeometry.unreadSize, height: IOSUIKitArticleGeometry.unreadSize)
-        let feedIconFrame = CGRect(x: metadataX(metadataLayout.feedIconX, width: IOSUIKitArticleGeometry.feedIconSize), y: metadataFrame.midY - IOSUIKitArticleGeometry.feedIconSize / 2, width: IOSUIKitArticleGeometry.feedIconSize, height: IOSUIKitArticleGeometry.feedIconSize)
+        let unreadFrame = CGRect(x: metadataX(metadataLayout.unreadX, width: accessories.unread), y: metadataFrame.midY - accessories.unread / 2, width: accessories.unread, height: accessories.unread)
+        let feedIconFrame = CGRect(x: metadataX(metadataLayout.feedIconX, width: accessories.feedIcon), y: metadataFrame.midY - accessories.feedIcon / 2, width: accessories.feedIcon, height: accessories.feedIcon)
         let feedTitleFrame = CGRect(x: metadataX(metadataLayout.feedTitleX, width: metadataLayout.feedTitleWidth), y: metadataFrame.minY, width: metadataLayout.feedTitleWidth, height: metadataHeight)
-        let commentsFrame = input.hasComments ? CGRect(x: metadataX(metadataLayout.commentsX, width: IOSUIKitArticleGeometry.commentSlotSize), y: metadataFrame.midY - IOSUIKitArticleGeometry.commentSlotSize / 2, width: IOSUIKitArticleGeometry.commentSlotSize, height: IOSUIKitArticleGeometry.commentSlotSize) : nil
-        let starFrame = CGRect(x: metadataX(metadataLayout.starX, width: IOSUIKitArticleGeometry.starSlotSize), y: metadataFrame.midY - IOSUIKitArticleGeometry.starSlotSize / 2, width: IOSUIKitArticleGeometry.starSlotSize, height: IOSUIKitArticleGeometry.starSlotSize)
-        let dateFrame = CGRect(x: textOrigin.x, y: metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: textWidth, height: dateHeight)
-        let previewFrame = previewHeight == 0 ? nil : CGRect(x: textOrigin.x, y: dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: textWidth, height: previewHeight)
-        return .init(variant: variant, cellSize: .init(width: input.containerWidth, height: totalHeight), contentFrame: contentFrame, imageFrame: imageFrame, textFrame: CGRect(x: textOrigin.x, y: textOrigin.y, width: textWidth, height: textBlockHeight), titleFrame: titleFrame, metadataFrame: metadataFrame, unreadFrame: unreadFrame, feedIconFrame: feedIconFrame, feedTitleFrame: feedTitleFrame, commentsFrame: commentsFrame, starFrame: starFrame, dateFrame: dateFrame, previewFrame: previewFrame, horizontalInset: geometry.horizontalInset, verticalInset: geometry.verticalPadding, titleHeight: titleHeight, metadataHeight: metadataHeight, previewHeight: previewHeight, textBlockHeight: textBlockHeight)
+        let commentsFrame = input.hasComments ? CGRect(x: metadataX(metadataLayout.commentsX, width: accessories.comments), y: metadataFrame.midY - accessories.comments / 2, width: accessories.comments, height: accessories.comments) : nil
+        let starFrame = CGRect(x: metadataX(metadataLayout.starX, width: accessories.star), y: metadataFrame.midY - accessories.star / 2, width: accessories.star, height: accessories.star)
+        let dateFrame = isSideTitle
+            ? CGRect(x: textOrigin.x, y: titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: titleWidth, height: dateHeight)
+            : CGRect(x: textOrigin.x, y: metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: infoWidth, height: dateHeight)
+        // Wide side-title keeps the preview in the column, so it follows the date
+        // directly. Narrow side-title puts it under the whole row, which means it
+        // has to clear the image as well as the date.
+        let previewTop: CGFloat
+        switch variant {
+        case .visualSideTitleWide: previewTop = dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing
+        case .visualSideTitle, .visualSideTitleTextOnly:
+            previewTop = titleTop + sideTitleRowHeight + IOSUIKitArticleGeometry.textSpacing
+        default: previewTop = dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing
+        }
+        let previewFrame = previewHeight == 0 ? nil : CGRect(x: textOrigin.x, y: previewTop, width: previewWidth, height: previewHeight)
+        return .init(variant: variant, cellSize: .init(width: input.containerWidth, height: totalHeight), contentFrame: contentFrame, imageFrame: imageFrame, textFrame: CGRect(x: textOrigin.x, y: textOrigin.y, width: infoWidth, height: textBlockHeight), titleFrame: titleFrame, metadataFrame: metadataFrame, unreadFrame: unreadFrame, feedIconFrame: feedIconFrame, feedTitleFrame: feedTitleFrame, commentsFrame: commentsFrame, starFrame: starFrame, dateFrame: dateFrame, previewFrame: previewFrame, horizontalInset: geometry.horizontalInset, verticalInset: geometry.verticalPadding, titleHeight: titleHeight, metadataHeight: metadataHeight, previewHeight: previewHeight, textBlockHeight: textBlockHeight)
     }
 
     private static func pixelAligned(_ length: CGFloat, scale: CGFloat) -> CGFloat {
@@ -531,5 +649,91 @@ enum IOSUIKitArticleLayoutEngine {
         // resolves the final label extent on the display-pixel grid.
         let height = CGFloat(lineCount) * font.lineHeight + CGFloat(max(0, lineCount - 1)) * font.leading
         return ceil(height * displayScale) / displayScale
+    }
+}
+
+/// Exact row heights for every loaded article.
+///
+/// A table with estimation disabled asks for the height of *every* row before it
+/// can lay out, so a bounded cache is not sufficient: a miss would run Core Text
+/// synchronously on the main actor. This store keeps one height per loaded
+/// article and, while a new geometry generation is being measured, keeps serving
+/// the superseded heights. A rotation or Dynamic Type change therefore never
+/// blocks a frame waiting for a full re-measurement.
+@MainActor
+final class IOSUIKitArticleRowHeightStore {
+    private(set) var identity: IOSUIKitTimelineGeometryIdentity?
+    private var current: [Int64: CGFloat] = [:]
+    private var superseded: [Int64: CGFloat] = [:]
+
+    var preparedCount: Int { current.count }
+    var isServingSupersededHeights: Bool { !superseded.isEmpty }
+
+    /// An exact height for the active identity, or the superseded one while a
+    /// replacement generation is still being measured.
+    func height(for id: Int64) -> CGFloat? {
+        current[id] ?? superseded[id]
+    }
+
+    func hasExactHeight(for id: Int64) -> Bool { current[id] != nil }
+
+    /// Starts a new generation. Existing heights keep serving until `store`
+    /// replaces them, so the caller can measure without blocking.
+    func beginGeneration(_ newIdentity: IOSUIKitTimelineGeometryIdentity) {
+        guard identity != newIdentity else { return }
+        if !current.isEmpty { superseded = current }
+        current = [:]
+        identity = newIdentity
+    }
+
+    /// Results measured for a stale identity are dropped rather than mixed in.
+    func store(_ measured: [Int64: CGFloat], for measuredIdentity: IOSUIKitTimelineGeometryIdentity) {
+        guard measuredIdentity == identity else { return }
+        current.merge(measured) { _, new in new }
+    }
+
+    /// Superseded heights are only safe to drop once every loaded row has an
+    /// exact height for the active identity.
+    func retireSupersededHeights(ifComplete ids: [Int64]) -> Bool {
+        guard !superseded.isEmpty else { return false }
+        guard ids.allSatisfy({ current[$0] != nil }) else { return false }
+        superseded.removeAll()
+        return true
+    }
+
+    func missingIDs(in ids: [Int64]) -> [Int64] {
+        ids.filter { current[$0] == nil }
+    }
+
+    func remove(_ ids: some Sequence<Int64>) {
+        for id in ids {
+            current[id] = nil
+            superseded[id] = nil
+        }
+    }
+
+    func removeAll() {
+        current.removeAll()
+        superseded.removeAll()
+        identity = nil
+    }
+}
+
+/// Measures whole pages of rows off the main actor.
+///
+/// Heights are the only value needed to lay the table out; the full per-subview
+/// metrics stay with the existing preparation coordinator, which the cell uses
+/// when it is actually configured.
+enum IOSUIKitArticleRowHeightMeasurement {
+    static func heights(for inputs: [(id: Int64, input: IOSUIKitArticleLayoutInput)]) async -> [Int64: CGFloat] {
+        guard !inputs.isEmpty else { return [:] }
+        let payload = inputs.map { ($0.id, $0.input) }
+        return await Task.detached(priority: .userInitiated) {
+            var result = [Int64: CGFloat](minimumCapacity: payload.count)
+            for (id, input) in payload {
+                result[id] = IOSUIKitArticleLayoutEngine.metrics(for: input).cellSize.height
+            }
+            return result
+        }.value
     }
 }

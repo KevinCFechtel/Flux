@@ -12,7 +12,8 @@ enum PopoverLayout {
     static let animation: TimeInterval = 0.2
 
     static func contentWidth(for mode: ArticlePresentationMode) -> CGFloat {
-        mode == .visual ? visualWidth : compactWidth
+        // `visualCompact` carries a thumbnail too, so it needs the visual width.
+        mode == .compact ? compactWidth : visualWidth
     }
 
     static func width(mode: ArticlePresentationMode, sidebarVisible: Bool) -> CGFloat {
@@ -20,7 +21,7 @@ enum PopoverLayout {
     }
 
     static func height(for mode: ArticlePresentationMode) -> CGFloat {
-        mode == .visual ? visualHeight : compactHeight
+        mode == .compact ? compactHeight : visualHeight
     }
 }
 
@@ -892,7 +893,7 @@ private struct ArticleItem: View {
     let onHoverChanged: (Bool) -> Void
     @State private var hovered = false
 
-    var body: some View { mode == .visual ? AnyView(visual) : AnyView(compact) }
+    var body: some View { mode == .compact ? AnyView(compact) : AnyView(visual) }
     private var visual: some View {
         VStack(alignment: .leading, spacing: 0) {
             if mode.showsArticleImage, article.imageUrl != nil, !store.unavailableArticleThumbnails.contains(store.articleThumbnailKey(article)) {
@@ -1700,7 +1701,7 @@ private struct ReadingSettingsView: View {
                 Text("Visual").tag(ArticlePresentationMode.visual)
                 Text("Compact").tag(ArticlePresentationMode.compact)
             }
-            Text(store.articlePresentationMode == .visual ? "Image-forward article presentation." : "Text-focused presentation with higher information density.")
+            Text(store.articlePresentationMode == .compact ? "Text-focused presentation with higher information density." : "Image-forward article presentation.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Picker("Preview Lines", selection: Binding(get: { store.articlePreviewLines }, set: { store.setArticlePreviewLines($0) })) {

@@ -2,15 +2,89 @@ import Foundation
 import ImageIO
 import SwiftUI
 
+
+/// Opaque colour the rounded corner cut-outs are filled with.
+///
+/// Baking the corners into the raster avoids a mask layer at composite time,
+/// but clearing them to transparent forces an alpha channel onto the whole
+/// bitmap — and Core Animation then blends every pixel of every article image
+/// in every frame, purely to show four corner arcs. Filling the corners with
+/// the opaque colour that sits behind the image instead lets the raster ship
+/// without alpha, so the layer can be marked opaque and skipped by the blender.
+///
+/// Quantised to 8 bits because that is the precision the bitmap stores anyway,
+/// which keeps the cache key stable against float noise.
+struct ArticleImageBackdrop: Hashable, Sendable {
+    let red: UInt8
+    let green: UInt8
+    let blue: UInt8
+
+    init(red: UInt8, green: UInt8, blue: UInt8) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+    }
+
+    /// The two colours `UIColor.systemBackground` actually resolves to, for the
+    /// rare case where it cannot be read as RGB.
+    static let white = ArticleImageBackdrop(red: UInt8(255), green: UInt8(255), blue: UInt8(255))
+    static let black = ArticleImageBackdrop(red: UInt8(0), green: UInt8(0), blue: UInt8(0))
+
+    init(components red: CGFloat, green: CGFloat, blue: CGFloat) {
+        func quantise(_ value: CGFloat) -> UInt8 {
+            UInt8(max(0, min(255, (value * 255).rounded())))
+        }
+        self.init(red: quantise(red), green: quantise(green), blue: quantise(blue))
+    }
+}
+
 struct ArticleImageRequest: Hashable, Sendable {
     let url: URL
     let maxPixelDimension: Int
+    let targetPixelSize: CGSize
+    let cornerRadiusPixels: CGFloat
+    let rasterScale: CGFloat
+    /// Core Animation colour-matches layer contents whose colour space differs
+    /// from the display's — on the main thread, during the commit, proportional
+    /// to the pixel count. The raster is produced in the display's gamut so that
+    /// conversion never happens.
+    let usesDisplayP3: Bool
+    /// When set, the raster is produced without an alpha channel and the corner
+    /// cut-outs are filled with this colour. `nil` keeps the transparent-corner
+    /// behaviour, which callers that draw over an unknown background need.
+    let backdrop: ArticleImageBackdrop?
 
-    init(url: URL, targetSize: CGSize, displayScale: CGFloat) {
-        let pixels = max(targetSize.width, targetSize.height) * max(displayScale, 1)
+    init(
+        url: URL,
+        targetSize: CGSize,
+        displayScale: CGFloat,
+        cornerRadius: CGFloat = 0,
+        rasterScale: CGFloat? = nil,
+        usesDisplayP3: Bool = false,
+        backdrop: ArticleImageBackdrop? = nil
+    ) {
+        let scale = max(rasterScale ?? displayScale, 1)
+        let pixels = max(targetSize.width, targetSize.height) * scale
         // Bucketing upward prevents tiny layout changes from creating duplicate decodes.
         maxPixelDimension = max(64, Int((ceil(pixels) / 64).rounded(.up)) * 64)
+        targetPixelSize = .init(
+            width: max(1, (targetSize.width * scale).rounded()),
+            height: max(1, (targetSize.height * scale).rounded())
+        )
+        cornerRadiusPixels = max(0, (cornerRadius * scale).rounded())
+        self.rasterScale = scale
+        self.usesDisplayP3 = usesDisplayP3
+        self.backdrop = backdrop
         self.url = url
+    }
+
+    /// True when the produced raster carries no alpha channel, so the presenting
+    /// layer may be marked opaque.
+    var producesOpaqueRaster: Bool { backdrop != nil }
+
+    private var backdropKeyComponent: String {
+        guard let backdrop else { return "alpha" }
+        return "\(backdrop.red),\(backdrop.green),\(backdrop.blue)"
     }
 }
 
@@ -72,7 +146,7 @@ private final class ArticleImageCache: NSObject, NSCacheDelegate, @unchecked Sen
         lock.lock()
         insertions += 1
         lock.unlock()
-        storage.setObject(ArticleImageCacheEntry(image: image), forKey: key, cost: image.width * image.height * 4)
+        storage.setObject(ArticleImageCacheEntry(image: image), forKey: key, cost: ArticleImagePipeline.memoryCost(of: image))
     }
 
     func snapshot() -> ArticleImageCacheMetrics {
@@ -142,7 +216,9 @@ actor ArticleImagePipeline {
     static let maximumConcurrentOperations = 3
     // A visual card is commonly about 1.5-2.5 MiB decoded at @3x. This retains
     // a useful scrolling runway without allowing unbounded image memory.
-    static let memoryCacheCostLimit = 64 * 1024 * 1024
+    /// Display-ready rasters are retained for warm/back scrolling. 128 MiB keeps
+    /// that reuse useful without making the cache unbounded under memory pressure.
+    static let memoryCacheCostLimit = 128 * 1024 * 1024
     private static let maximumQueuedRequests = 48
     private static let maximumQueuedPrefetchRequests = 32
 
@@ -168,6 +244,10 @@ actor ArticleImagePipeline {
 
     nonisolated func cachedImage(for request: ArticleImageRequest) -> CGImage? {
         cache.lookup(request.cacheKey, source: .visible)
+    }
+
+    nonisolated static func memoryCost(of image: CGImage) -> Int {
+        image.width * image.height * 4
     }
 
     func image(for request: ArticleImageRequest, demand: Demand = .visible, cacheWasChecked: Bool = false) async throws -> CGImage {
@@ -327,7 +407,7 @@ actor ArticleImagePipeline {
             let priority: TaskPriority = job.demand == .visible ? .userInitiated : .utility
             let operation = Task.detached(priority: priority) {
                 let data = try await loader(queued.request.url)
-                return try Self.downsample(data: data, maxPixelDimension: queued.request.maxPixelDimension)
+                return try Self.downsample(data: data, request: queued.request)
             }
             job.operation = operation
             job.state = .active
@@ -412,7 +492,18 @@ actor ArticleImagePipeline {
         return data
     }
 
-    nonisolated static func downsample(data: Data, maxPixelDimension: Int) throws -> CGImage {
+    nonisolated static func downsample(data: Data, request: ArticleImageRequest) throws -> CGImage {
+        let image = try thumbnail(data: data, maxPixelDimension: request.maxPixelDimension)
+        return renderDisplayReady(
+            image,
+            targetPixelSize: request.targetPixelSize,
+            cornerRadiusPixels: request.cornerRadiusPixels,
+            usesDisplayP3: request.usesDisplayP3,
+            backdrop: request.backdrop
+        ) ?? image
+    }
+
+    private nonisolated static func thumbnail(data: Data, maxPixelDimension: Int) throws -> CGImage {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             throw ArticleImageError.invalidImageData
         }
@@ -425,23 +516,76 @@ actor ArticleImagePipeline {
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else {
             throw ArticleImageError.invalidImageData
         }
-        return decompressed(image) ?? image
+        return image
     }
 
-    private nonisolated static func decompressed(_ image: CGImage) -> CGImage? {
-        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+    private nonisolated static func renderDisplayReady(
+        _ image: CGImage,
+        targetPixelSize: CGSize,
+        cornerRadiusPixels: CGFloat,
+        usesDisplayP3: Bool,
+        backdrop: ArticleImageBackdrop?
+    ) -> CGImage? {
+        let width = max(1, Int(targetPixelSize.width.rounded()))
+        let height = max(1, Int(targetPixelSize.height.rounded()))
+        let preferredColorSpace = usesDisplayP3 ? CGColorSpace.displayP3 : CGColorSpace.sRGB
+        let colorSpace = CGColorSpace(name: preferredColorSpace) ?? image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
         guard let context = CGContext(
             data: nil,
-            width: image.width,
-            height: image.height,
+            width: width,
+            height: height,
             bitsPerComponent: 8,
             bytesPerRow: 0,
             space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            bitmapInfo: backdrop == nil ? translucentBitmapInfo : displayBitmapInfo
         ) else { return nil }
-        context.interpolationQuality = .high
-        context.draw(image, in: .init(x: 0, y: 0, width: image.width, height: image.height))
+        context.interpolationQuality = .medium
+        let destination = CGRect(x: 0, y: 0, width: width, height: height)
+        if let backdrop {
+            // The corners are the only pixels the photo does not cover, and they
+            // sit directly on this colour. Painting it here is what lets the
+            // raster ship without an alpha channel.
+            context.setFillColor(
+                red: CGFloat(backdrop.red) / 255,
+                green: CGFloat(backdrop.green) / 255,
+                blue: CGFloat(backdrop.blue) / 255,
+                alpha: 1
+            )
+            context.fill(destination)
+        } else {
+            context.clear(destination)
+        }
+        if cornerRadiusPixels > 0 {
+            let radius = min(cornerRadiusPixels, min(destination.width, destination.height) / 2)
+            context.addPath(CGPath(
+                roundedRect: destination,
+                cornerWidth: radius,
+                cornerHeight: radius,
+                transform: nil
+            ))
+            context.clip()
+        }
+        let scale = max(destination.width / CGFloat(image.width), destination.height / CGFloat(image.height))
+        let drawSize = CGSize(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
+        let drawRect = CGRect(
+            x: destination.midX - drawSize.width / 2,
+            y: destination.midY - drawSize.height / 2,
+            width: drawSize.width,
+            height: drawSize.height
+        )
+        context.draw(image, in: drawRect)
         return context.makeImage()
+    }
+
+    /// Native 32-bit BGRX: the display's byte order, no alpha channel. Core
+    /// Animation neither converts nor blends a layer backed by this.
+    private nonisolated static var displayBitmapInfo: UInt32 {
+        CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue
+    }
+
+    /// Native byte order with alpha, for callers that need transparent corners.
+    private nonisolated static var translucentBitmapInfo: UInt32 {
+        CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
     }
 }
 
@@ -455,55 +599,15 @@ private extension ArticleImagePipeline.Demand {
 }
 
 private extension ArticleImageRequest {
-    var cacheKey: NSString { "\(url.absoluteString)|\(maxPixelDimension)" as NSString }
+    var cacheKey: NSString {
+        "\(url.absoluteString)|\(maxPixelDimension)|\(Int(targetPixelSize.width))x\(Int(targetPixelSize.height))|\(Int(cornerRadiusPixels))|scale=\(Int((rasterScale * 100).rounded()))|p3=\(usesDisplayP3 ? 1 : 0)|bg=\(backdropKeyComponent)" as NSString
+    }
 }
 
 private enum ArticleImageError: Error {
     case invalidImageData
 }
 
-struct ArticleImageView: View {
-    let url: URL
-    let targetSize: CGSize
-
-    @Environment(\.displayScale) private var displayScale
-    @State private var image: CGImage?
-
-    var body: some View {
-        let request = ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale)
-        let displayedImage = image ?? ArticleImagePipeline.shared.cachedImage(for: request)
-        Group {
-            if let displayedImage {
-                Image(decorative: displayedImage, scale: displayScale, orientation: .up)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                Rectangle()
-                    .fill(.quaternary)
-                    .overlay { Image(systemName: "photo").font(.title).foregroundStyle(.secondary) }
-            }
-        }
-        .frame(width: targetSize.width, height: targetSize.height)
-        .clipped()
-        .task(id: request) {
-            if let cachedImage = ArticleImagePipeline.shared.cachedImage(for: request) {
-                image = cachedImage
-                return
-            }
-            image = nil
-            do {
-                let loadedImage = try await ArticleImagePipeline.shared.image(for: request, cacheWasChecked: true)
-                try Task.checkCancellation()
-                image = loadedImage
-            } catch is CancellationError {
-                // The shared load remains available to other card views and the cache.
-            } catch {
-                image = nil
-            }
-        }
-        .accessibilityHidden(true)
-    }
-}
 
 extension UIFont {
     func bold() -> UIFont {

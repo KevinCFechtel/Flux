@@ -516,13 +516,104 @@ prefetch, and prepared layout metrics are retained. Full replacement or a real
 geometry change remains responsible for broader cancellation and layout
 invalidation. A synchronous prepared-metrics miss is retained in the same
 generation-safe cache, so it does not cause a second equivalent asynchronous
-measurement. Feed-icon PNGs are decoded, downsampled to the fixed 22-point
-display slot, and rasterized off-main before presentation. The existing native
-cell uses stable registrations for compact/text-only, portrait, and landscape
-constraint variants to avoid ordinary reuse switching between those graphs. The
-article-image pipeline prioritizes visible decode work over prefetch, returns
-display-ready decoded pixels, and keeps its bounded cache. U3.7.5 manual cell
-layout remains deferred pending device evidence.
+measurement. The frame-headroom hardening pass keeps append/removal from
+fanning out into unrelated visible-cell configuration, prefetch cancellation,
+or broad layout invalidation. Feed-icon PNGs and article images are decoded,
+downsampled, corner-composed, and rasterized off-main into sRGB BGRA
+premultiplied-first display-ready pixels. The final raster interpolation is
+`.medium`, appropriate for reduced RSS preview assets. Actual prepared-image
+presentation no longer depends on a rounded clipping layer, while transparent
+corners preserve adaptive backgrounds; the cold article placeholder keeps its
+rounded background without clipping its centred symbol. The timeline collection surface is explicitly opaque over the
+system background. The existing native cell uses stable registrations for
+compact/text-only, portrait, and landscape constraint variants to avoid
+ordinary reuse switching between those graphs. The article-image pipeline
+prioritizes visible decode work over prefetch and keeps a bounded 128 MiB cache
+for warm/back-scroll reuse without making image memory unbounded. Scrollover's
+per-scroll geometry state uses bounded ordered frame slots, scalar previous
+geometry, and a private bounded previous-frame copy. It no longer retains a
+sample dictionary that shares the mutable frame-store buffer, avoiding the
+per-scroll copy-on-write of resolved frames; stale-ID storage is allocated only
+when pruning is actually needed. Archive Release builds enable
+whole-module Swift compilation through the archive script only; normal simulator
+execution remains Debug and performance diagnostics remain dynamically injected
+by the diagnostics build command. Diagnostics builds are instrumented and are
+not assumed bit-identical to the shipped archive. U3.7.5 manual cell layout
+remains deferred pending device evidence; this pass does not claim a new
+physical-device result.
+
+#### Temporary article-image raster-scale diagnostic — concluded
+
+Physical iPhone 15 testing of `2c3ecd8` found that presenting real, roughly
+@3x ImageIO thumbnails directly — without Flux's exact-slot
+`renderDisplayReady` stage — was not meaningfully smoother than the normal
+pipeline and was subjectively more uneven than diagnostic C's shared full-size
+opaque raster. Exact-slot prerasterization is therefore downgraded as the
+primary explanation for the residual image-rich scrolling unevenness. This does
+not establish any particular lower-level cause.
+
+> **Resolved and removed (18 September 2026).** The 2x experiment ran on the
+> physical iPhone 15 and was not meaningfully smoother than 3x, so raster pixel
+> volume is not the driver. The switch described below no longer exists; the
+> production pipeline keeps the physical display scale. The investigation ended
+> with the `Visual compact` presentation mode instead of a performance fix — see
+> `IOS_TIMELINE_PERFORMANCE_DIAGNOSTIC_CLEANUP.md` for the closing audit and the
+> final production decision. The paragraph is kept for the record.
+
+The next temporary, source-level diagnostic is
+`IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic`, enabled with
+`useTwoXArticleImageRasterForPerformanceDiagnosis = true`. It tests the narrower
+hypothesis that scrolling cost materially scales with the pixel/byte volume of
+the distinct article rasters being presented. Standard Timeline article-image
+requests use an effective raster scale of exactly 2.0 rather than the physical
+display scale (normally 3.0 on iPhone 15). It affects both ImageIO's
+`maxPixelDimension` and `renderDisplayReady`'s exact `targetPixelSize`; it does
+not change the logical UIKit image slot, card geometry, or presentation timing.
+2x is diagnostic-only and is not a proposed shipping quality level.
+
+For a 393 pt-wide iPhone 15 Standard portrait card, the fixed 361 pt × 203 pt
+slot normally produces a 1083 × 609 @3x BGRA raster (about 2.5 MiB) after an
+1088-pixel ImageIO thumbnail request. The diagnostic produces a 722 × 406 @2x
+BGRA raster (about 1.1 MiB) after a 768-pixel request: approximately 56% fewer
+display-ready pixel bytes. Both paths retain ImageIO decoding,
+`renderDisplayReady`, exact aspect-fill crop, baked 12 pt-equivalent rounded
+corners, sRGB BGRA premultiplied-first pixels, and `.medium` interpolation.
+Cache identity includes effective raster scale as well as raster geometry, so
+2x and 3x entries cannot alias.
+
+UIKit still creates `UIImage(cgImage:scale:orientation:)` with the physical
+display scale, not the diagnostic 2x raster scale. The existing fixed
+point-sized `UIImageView` constraints and `.scaleAspectFill` remain authoritative
+for layout, so the lower-resolution raster fills the unchanged logical slot.
+Real URL loading, HTTP/cache behavior, 128 MiB cache budget, visible/prefetch
+scheduling, immediate cache-hit and completion assignment, normal reuse, and
+Compact behavior remain unchanged. No A-prime presentation suppression,
+diagnostic-C shared raster, or decoded-thumbnail direct-presentation behavior is
+active.
+
+Physical iPhone 15 testing found 2x **not meaningfully smoother than 3x**.
+Article raster pixel volume — and with it ImageIO decode cost, texture upload
+and image memory footprint — is therefore downgraded as a driver of the residual
+unevenness. `useTwoXArticleImageRasterForPerformanceDiagnosis` is restored to
+`false`, so the shipping display scale is active again; the scaffolding remains
+only until the temporary diagnostics are removed together.
+
+This result does **not** exonerate article-image *composition*. The composited
+area of a card is its on-screen slot (361 × 203 pt), which is identical at 2x
+and 3x, so the experiment never varied the per-frame blend cost. The exact-slot
+raster still carries an alpha channel with transparent rounded corners
+(`ArticleImagePipeline.renderDisplayReady`, `premultipliedFirst`), so the
+largest layer in the Timeline is alpha-composited every frame. An opaque raster
+whose corners are filled with the Timeline background remains an open,
+unmeasured candidate; it would require the effective `UIUserInterfaceStyle` in
+the raster cache identity.
+
+No Core Animation, texture upload, IOSurface, Render Server, memory-bandwidth,
+or other specific mechanism has been proven. The next step is the two-part
+attribution measurement in `docs/Flux_iOS_Frame_Headroom_Messprotokoll.md`,
+which separates main-thread from render-server frame deficits and quantifies the
+fixed cost of the iOS 26 scroll edge effect over the scrolling Timeline. That
+effect is a product decision and is measured, not changed.
 
 On iOS, a semantic scope/filter/sort reset stays within the existing UIKit
 Timeline controller: it resets the collection view to its natural top position
