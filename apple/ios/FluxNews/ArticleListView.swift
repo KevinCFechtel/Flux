@@ -1979,6 +1979,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var landscapeConstraints: [NSLayoutConstraint] = []
     private var activeLayoutConstraints: [NSLayoutConstraint] = []
     private var portraitImageAspectConstraint: NSLayoutConstraint!
+    private var portraitImageWidthConstraint: NSLayoutConstraint!
     private var sideTitleConstraints: [NSLayoutConstraint] = []
     private var defaultStackConstraints: [NSLayoutConstraint] = []
     private var sideTitleWideConstraints: [NSLayoutConstraint] = []
@@ -2249,6 +2250,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             equalTo: articleImageView.widthAnchor,
             multiplier: 1 / ArticlePresentationLayout.portraitImageAspectRatio
         )
+        portraitImageWidthConstraint = articleImageView.widthAnchor.constraint(equalToConstant: 1)
         landscapeImageWidthConstraint = articleImageView.widthAnchor.constraint(equalToConstant: 1)
         landscapeImageHeightConstraint = articleImageView.heightAnchor.constraint(equalToConstant: 1)
 
@@ -2260,17 +2262,41 @@ final class IOSUIKitArticleCell: UITableViewCell {
             textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
             textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
         ]
+        // Standard Visual portrait:
+        //
+        //   Headline
+        //      ┌───────────────┐
+        //      │  HERO IMAGE   │   centered, 85% of content width
+        //      └───────────────┘
+        //   ● icon  Feed name              ★ 💬
+        //   Date
+        //   Preview …
+        //
+        // Existing metadata/date/preview rows stay intact; only their vertical
+        // ordering relative to the image changes.
         portraitConstraints = [
-        ] + defaultStackConstraints + [
-
-            articleImageView.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
-            articleImageView.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
-            articleImageView.topAnchor.constraint(equalTo: margins.topAnchor),
-            portraitImageAspectConstraint,
             textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
             textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
-            textContainer.topAnchor.constraint(equalTo: articleImageView.bottomAnchor, constant: 12),
+            textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
             textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
+
+            titleLabel.topAnchor.constraint(equalTo: textContainer.topAnchor),
+            titleLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+
+            articleImageView.centerXAnchor.constraint(equalTo: margins.centerXAnchor),
+            articleImageView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.portraitSpacing),
+            portraitImageWidthConstraint,
+            portraitImageAspectConstraint,
+
+            metadataRow.topAnchor.constraint(equalTo: articleImageView.bottomAnchor, constant: IOSUIKitArticleGeometry.portraitSpacing),
+            metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+
+            dateLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            dateLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+
+            previewTopConstraint,
+            previewBottomDefaultConstraint,
+            previewTrailingDefaultConstraint,
         ]
         landscapeConstraints = [
         ] + defaultStackConstraints + [
@@ -2524,7 +2550,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
             trailing: metrics.horizontalInset
         )
 
-        if variant == .visualLandscape || variant == .visualSideTitle || variant == .visualSideTitleWide {
+        if variant == .visualPortrait {
+            portraitImageWidthConstraint.constant = metrics.imageSize(hasImage: true).width
+        } else if variant == .visualLandscape || variant == .visualSideTitle || variant == .visualSideTitleWide {
             let imageSize = metrics.imageSize(hasImage: true)
             landscapeImageWidthConstraint.constant = imageSize.width
             landscapeImageHeightConstraint.constant = imageSize.height
