@@ -4,8 +4,10 @@ struct DeveloperDiagnosticsView: View {
     @ObservedObject var bootstrapper: CoreBootstrapper
     @State private var legacyResult = LegacyStateDiscovery.probe()
     @State private var imageMode = IOSArticleImageABDiagnostic.shared.mode
+    @State private var imageDiagnosticRevision: UInt64 = 0
 
     var body: some View {
+        let _ = imageDiagnosticRevision
         NavigationStack {
             Form {
                 Section("Rust Core") {
@@ -48,6 +50,9 @@ struct DeveloperDiagnosticsView: View {
 #endif
             }
             .navigationTitle("Developer Diagnostics")
+            .onReceive(NotificationCenter.default.publisher(for: IOSArticleImageABDiagnostic.changed)) { _ in
+                imageDiagnosticRevision &+= 1
+            }
         }
     }
 

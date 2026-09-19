@@ -17,12 +17,14 @@ final class IOSArticleImageABDiagnostic {
         case normal
         case sharedRaster
         case independentRasters
+        case preparedRealImages
         var id: Self { self }
         var title: String {
             switch self {
             case .normal: return String(localized: "Normal")
             case .sharedRaster: return String(localized: "A – Shared Raster")
             case .independentRasters: return String(localized: "B – Independent Rasters")
+            case .preparedRealImages: return String(localized: "C – Prepared Real Images")
             }
         }
     }
@@ -30,78 +32,129 @@ final class IOSArticleImageABDiagnostic {
     static let shared = IOSArticleImageABDiagnostic()
     static let changed = Notification.Name("IOSArticleImageABDiagnostic.changed")
     private(set) var mode: Mode = .normal
+    private(set) var activeMode: Mode = .normal
     private(set) var preparationDescription = String(localized: "Normal article images")
     private(set) var revision: UInt64 = 0
-    private var images: [Int64: CGImage] = [:]
-    private var preparedKey: (CGSize, CGFloat)?
-    private var preparingKey: (CGSize, CGFloat)?
+    private var sharedImage: CGImage?
+    private var independentImages: [Int64: CGImage] = [:]
+    private var realImages: [Int64: CGImage] = [:]
+    private var preparedKey: String?
+    private var preparingKey: String?
+    private var preparedArticleIDs = Set<Int64>()
+    private var preparationTask: Task<Void, Never>?
     private let maximumBytes = 64 * 1024 * 1024
 
     func select(_ newMode: Mode, ids: [Int64] = [], size: CGSize = .zero, scale: CGFloat = 1) {
         mode = newMode
         revision &+= 1
         if newMode == .normal {
-            images = [:]
-            preparedKey = nil
-            preparingKey = nil
+            preparationTask?.cancel(); preparationTask = nil
+            sharedImage = nil; independentImages = [:]; realImages = [:]
+            preparedKey = nil; preparingKey = nil; preparedArticleIDs = []
+            activeMode = .normal
             preparationDescription = String(localized: "Normal article images")
-        } else if size.width > 0, size.height > 0 {
-            prepare(ids: ids, size: size, scale: scale)
         } else {
-            preparationDescription = String(localized: "Open a Visual Portrait timeline to prepare the comparison.")
+            if preparedKey != nil {
+                preparationDescription = String(localized: "Ready; switch pending timeline idle.")
+            } else {
+                preparationDescription = String(localized: "Open a Visual Portrait timeline to prepare the comparison.")
+            }
         }
         NotificationCenter.default.post(name: Self.changed, object: self)
     }
 
-    func image(for articleID: Int64, size: CGSize, scale: CGFloat) -> CGImage? {
-        guard mode != .normal, preparedKey?.0 == size, preparedKey?.1 == scale else { return nil }
-        return images[articleID]
+    func image(for articleID: Int64) -> CGImage? {
+        guard preparedArticleIDs.contains(articleID) else { return nil }
+        switch activeMode {
+        case .sharedRaster: return sharedImage
+        case .independentRasters: return independentImages[articleID]
+        case .preparedRealImages: return realImages[articleID]
+        case .normal: return nil
+        }
     }
 
-    func prepare(ids: [Int64], size: CGSize, scale: CGFloat) {
-        guard mode != .normal,
-              preparedKey?.0 != size || preparedKey?.1 != scale || images.isEmpty,
-              preparingKey?.0 != size || preparingKey?.1 != scale else { return }
-        let width = max(1, Int((size.width * scale).rounded()))
-        let height = max(1, Int((size.height * scale).rounded()))
-        let bytes = width * height * 4
-        let limit = max(1, min(ids.count, maximumBytes / bytes))
-        let selected = Array(ids.prefix(limit))
-        let requestedMode = mode
-        preparationDescription = String(localized: "Preparing \(selected.count) rows (maximum 64 MiB)…")
-        preparingKey = (size, scale)
+    var isActive: Bool { activeMode != .normal }
+    var suppressesNormalImages: Bool { mode != .normal }
+    var needsActivation: Bool { activeMode != mode }
+    func contains(_ articleID: Int64) -> Bool { preparedArticleIDs.contains(articleID) }
+    func activateRequestedModeIfPrepared() {
+        guard mode == .normal || preparedKey != nil else { return }
+        guard activeMode != mode else { return }
+        activeMode = mode
+        NotificationCenter.default.post(name: Self.changed, object: self)
+    }
+
+    func invalidatePreparedImages() {
+        guard preparedKey != nil || preparingKey != nil else { return }
+        preparationTask?.cancel(); preparationTask = nil
+        sharedImage = nil; independentImages = [:]; realImages = [:]
+        preparedKey = nil; preparingKey = nil; preparedArticleIDs = []
+        if mode != .normal {
+            preparationDescription = String(localized: "Image geometry changed; preparing the comparison again.")
+        }
+        revision &+= 1
+        NotificationCenter.default.post(name: Self.changed, object: self)
+    }
+
+    func prepare(_ requests: [(Int64, ArticleImageRequest)], identity: String) {
+        guard mode != .normal, preparedKey != identity, preparingKey != identity else { return }
+        preparationTask?.cancel()
+        let candidates = Array(requests.prefix(24))
+        guard candidates.count >= 2 else { preparationDescription = String(localized: "At least two article images are required."); return }
+        preparationDescription = String(localized: "Preparing image comparison…")
         revision &+= 1
         let generation = revision
-        Task.detached { [weak self] in
-            let base = Self.makeTexture(width: width, height: height)!
-            var result: [Int64: CGImage] = [:]
-            for id in selected {
-                result[id] = requestedMode == .sharedRaster ? base : Self.copy(base)
+        preparingKey = identity
+        preparationTask = Task { @MainActor [weak self] in
+            defer {
+                if let self, self.preparingKey == identity {
+                    self.preparingKey = nil
+                    self.preparationTask = nil
+                }
             }
-            await MainActor.run {
-                guard let self, self.revision == generation, self.mode == requestedMode else { return }
-                self.images = result
-                self.preparedKey = (size, scale)
-                self.preparingKey = nil
-                self.preparationDescription = String(localized: "Prepared \(result.count) rows; rows outside this range are not a valid A/B comparison.")
-                self.revision &+= 1
+            var real: [Int64: CGImage] = [:]
+            let first = candidates[0]
+            let base: CGImage?
+            if let cached = ArticleImagePipeline.shared.cachedImage(for: first.1) {
+                base = cached
+            } else {
+                base = try? await ArticleImagePipeline.shared.image(for: first.1)
+            }
+            guard let base else { return }
+            let maximumBytes = self?.maximumBytes ?? 0
+            let maximumCount = min(candidates.count, maximumBytes / max(1, 2 * Self.rasterBytes(base)))
+            guard maximumCount >= 2 else { return }
+            let selected = Array(candidates.prefix(maximumCount))
+            real[first.0] = base
+            for (id, request) in selected.dropFirst() {
+                guard !Task.isCancelled else { return }
+                if let image = ArticleImagePipeline.shared.cachedImage(for: request) {
+                    real[id] = image
+                } else if let image = try? await ArticleImagePipeline.shared.image(for: request) {
+                    real[id] = image
+                }
+            }
+            guard let self, !Task.isCancelled, self.revision == generation, self.preparingKey == identity, real.count == selected.count else { return }
+            var independent: [Int64: CGImage] = [:]
+            for (id, _) in selected { guard let copy = Self.copy(base) else { return }; independent[id] = copy }
+            // A's shared image is C's first raster, so it introduces no separate backing.
+            let bytes = independent.values.reduce(0) { $0 + Self.rasterBytes($1) } + real.values.reduce(0) { $0 + Self.rasterBytes($1) }
+            guard bytes <= self.maximumBytes else {
+                self.preparationDescription = String(localized: "The prepared image set exceeds 64 MiB.")
                 NotificationCenter.default.post(name: Self.changed, object: self)
+                return
             }
-        }
+            self.sharedImage = base; self.independentImages = independent; self.realImages = real
+            self.preparedKey = identity
+            self.preparedArticleIDs = Set(selected.map(\.0))
+            self.activeMode = self.mode
+            self.preparationDescription = String(localized: "Ready: \(selected.count) rows, \(bytes / 1_048_576) MiB. Outside the test range is invalid.")
+            self.revision &+= 1
+            NotificationCenter.default.post(name: Self.changed, object: self)
+            }
     }
 
-    nonisolated private static func makeTexture(width: Int, height: Int) -> CGImage? {
-        let space = CGColorSpace(name: CGColorSpace.sRGB)!
-        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4, space: space, bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue) else { return nil }
-        for y in stride(from: 0, to: height, by: 24) {
-            context.setFillColor(CGColor(red: CGFloat((y / 24) % 5) / 5, green: 0.25, blue: 0.55, alpha: 1))
-            context.fill(CGRect(x: 0, y: y, width: width, height: 12))
-        }
-        context.setStrokeColor(UIColor.white.cgColor)
-        context.setLineWidth(3)
-        for x in stride(from: -height, to: width, by: 36) { context.stroke(CGRect(x: x, y: 0, width: height, height: height)) }
-        return context.makeImage()
-    }
+    nonisolated private static func rasterBytes(_ image: CGImage) -> Int { image.bytesPerRow * image.height }
 
     nonisolated private static func copy(_ image: CGImage) -> CGImage? {
         let space = image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
@@ -927,6 +980,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private var prefetchTasks: [Int64: (request: ArticleImageRequest, task: Task<Void, Never>)] = [:]
     private let refreshControl = UIRefreshControl()
     private let statusBarScrim = IOSUIKitTimelineTopScrimView()
+    private let imageDiagnosticBanner = UILabel()
     private var statusBarScrimHeight: NSLayoutConstraint!
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
     private var imageABObserver: NSObjectProtocol?
@@ -1023,12 +1077,14 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         }
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self, UITraitLayoutDirection.self]) { (self: Self, _) in
+            IOSArticleImageABDiagnostic.shared.invalidatePreparedImages()
             self.updateGeometryIfNeeded()
         }
         // The raster bakes the appearance's background into its corners, so a
         // light/dark switch makes every cached raster stale. Geometry is
         // unaffected, so only the image bindings need to run again.
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
+            IOSArticleImageABDiagnostic.shared.invalidatePreparedImages()
             self.reconfigureVisibleCells(needsLayout: false)
         }
         view.addSubview(tableView)
@@ -1067,14 +1123,20 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             return cell
         }
         dataSource.defaultRowAnimation = .none
+        imageDiagnosticBanner.font = .preferredFont(forTextStyle: .caption2)
+        imageDiagnosticBanner.textAlignment = .center
+        imageDiagnosticBanner.backgroundColor = .secondarySystemBackground
+        imageDiagnosticBanner.isHidden = true
+        imageDiagnosticBanner.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(imageDiagnosticBanner)
+        NSLayoutConstraint.activate([
+            imageDiagnosticBanner.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            imageDiagnosticBanner.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            imageDiagnosticBanner.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            imageDiagnosticBanner.heightAnchor.constraint(equalToConstant: 22),
+        ])
         imageABObserver = NotificationCenter.default.addObserver(forName: IOSArticleImageABDiagnostic.changed, object: nil, queue: .main) { [weak self] _ in
-            guard let self else { return }
-            guard self.scrolloverPhase == .idle else {
-                self.imageABRefreshPending = true
-                return
-            }
-            self.invalidateScrolloverGeometry()
-            self.reconfigureVisibleCells(needsLayout: false)
+            Task { @MainActor [weak self] in self?.applyImageDiagnosticChangeIfIdle() }
         }
     }
 
@@ -1373,7 +1435,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             metrics: metrics,
             displayScale: view.traitCollection.displayScale,
             preparedLayoutMetrics: layoutMetrics,
-            diagnosticImage: imageABImage(for: item, metrics: metrics)
+            diagnosticImage: imageABImage(for: item, metrics: metrics),
+            diagnosticSuppressesNormalImage: IOSArticleImageABDiagnostic.shared.suppressesNormalImages
         )
         onRequestFeedIcon?(item.content.article.feedId, iconVariant, view.traitCollection.displayScale)
     }
@@ -1384,8 +1447,13 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
               item.content.imageURL != nil else { return nil }
         let size = metrics.imageSize(hasImage: true)
         let diagnostic = IOSArticleImageABDiagnostic.shared
-        diagnostic.prepare(ids: orderedIDs, size: size, scale: view.traitCollection.displayScale)
-        return diagnostic.image(for: item.article.id, size: size, scale: view.traitCollection.displayScale)
+        let requests = orderedIDs.compactMap { id -> (Int64, ArticleImageRequest)? in
+            guard let candidate = renderedItem(for: id), let request = imageRequest(for: candidate) else { return nil }
+            return (id, request)
+        }
+        let identity = "\(orderedIDs)|\(size)|\(view.traitCollection.displayScale)|\(traitCollection.userInterfaceStyle.rawValue)"
+        diagnostic.prepare(requests, identity: identity)
+        return diagnostic.image(for: item.article.id)
     }
 
     func applyPresentationBridgeState(_ bridge: IOSUIKitArticleTimelinePresentationBridge) {
@@ -1536,9 +1604,18 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         onScrolloverPhase?(phase)
         if phase == .idle, imageABRefreshPending {
             imageABRefreshPending = false
-            invalidateScrolloverGeometry()
-            reconfigureVisibleCells(needsLayout: false)
+            applyImageDiagnosticChangeIfIdle()
         }
+    }
+
+    private func applyImageDiagnosticChangeIfIdle() {
+        guard scrolloverPhase == .idle else { imageABRefreshPending = true; return }
+        let diagnostic = IOSArticleImageABDiagnostic.shared
+        if diagnostic.needsActivation { diagnostic.activateRequestedModeIfPrepared() }
+        imageDiagnosticBanner.text = diagnostic.mode == .normal ? nil : "\(diagnostic.activeMode.title) · \(diagnostic.preparationDescription)"
+        imageDiagnosticBanner.isHidden = diagnostic.mode == .normal
+        invalidateScrolloverGeometry()
+        reconfigureVisibleCells(needsLayout: false)
     }
 
     private func invalidateScrolloverGeometry() {
@@ -1697,8 +1774,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             guard let id = dataSource.itemIdentifier(for: indexPath),
                   let item = renderedItem(for: id), let request = imageRequest(for: item)
             else { continue }
-            let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: tableView.bounds.width)
-            if imageABImage(for: item, metrics: metrics) != nil { continue }
+            if IOSArticleImageABDiagnostic.shared.suppressesNormalImages { continue }
             if let existing = prefetchTasks[id], existing.request == request { continue }
             prefetchTasks.removeValue(forKey: id)?.task.cancel()
             let task = Task { [weak self] in
@@ -2547,7 +2623,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
         metrics: Metrics,
         displayScale: CGFloat,
         preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics,
-        diagnosticImage: CGImage? = nil
+        diagnosticImage: CGImage? = nil,
+        diagnosticSuppressesNormalImage: Bool = false
     ) {
         let articleChanged = representedArticleID != item.article.id
         representedArticleID = item.article.id
@@ -2590,7 +2667,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
             targetSize: imageSize,
             displayScale: displayScale,
             articleChanged: articleChanged,
-            diagnosticImage: diagnosticImage
+            diagnosticImage: diagnosticImage,
+            diagnosticSuppressesNormalImage: diagnosticSuppressesNormalImage
         )
         contentView.setNeedsLayout()
     }
@@ -2766,7 +2844,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
         targetSize: CGSize,
         displayScale: CGFloat,
         articleChanged: Bool,
-        diagnosticImage: CGImage?
+        diagnosticImage: CGImage?,
+        diagnosticSuppressesNormalImage: Bool
     ) {
         if let diagnosticImage {
             guard representedDiagnosticImage !== diagnosticImage else { return }
@@ -2775,6 +2854,13 @@ final class IOSUIKitArticleCell: UITableViewCell {
             representedImageRequest = nil
             representedDiagnosticImage = diagnosticImage
             presentArticleImage(diagnosticImage, displayScale: displayScale, animated: false)
+            return
+        }
+        if diagnosticSuppressesNormalImage {
+            invalidateImageBinding()
+            representedImageRequest = nil
+            representedDiagnosticImage = nil
+            clearArticleImagePresentation()
             return
         }
         representedDiagnosticImage = nil

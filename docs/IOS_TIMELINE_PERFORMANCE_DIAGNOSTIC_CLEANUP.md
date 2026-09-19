@@ -19,20 +19,21 @@ Physical-device subjective comparison and Instruments traces were subsequently u
 
 ## Current targeted image-backing A/B exception
 
-Developer Diagnostics now exposes exactly three non-persistent modes, defaulting
-to **Normal** on every app launch: **Normal**, **A - Shared Raster**, and **B -
-Independent Rasters**. It is available in Release/TestFlight builds. It applies
+Developer Diagnostics now exposes four non-persistent modes, defaulting
+to **Normal** on every app launch: **Normal**, **A - Shared Raster**, **B -
+Independent Rasters**, and **C - Prepared Real Images**. It is available in Release/TestFlight builds. It applies
 only to Visual Portrait image rows; other presentations remain normal and are
 explicitly not a comparison.
 
-Both arms use one deterministic, detailed sRGB opaque texture at identical pixel
-geometry. A reuses one `CGImage` for a geometry; B creates independent backing
-images with the same pixels and keeps the article-ID assignment stable. The
-prepared pool is capped at 64 MiB and reports its valid row range. Prepared rows
-bypass article-image requests, decode, cache and raster generation and suppress
-the normal fade. Rows outside the stated range are not an A/B result. Switching
-waits for idle, retains the scroll anchor, invalidates reuse-safe bindings, and
-does not alter article geometry or read state.
+Preparation first obtains C's real display-ready rasters through the normal
+image pipeline. A reuses one of those rasters; B draws its exact pixels into a
+separate CPU backing for each article ID; C retains the individual real rasters.
+All arms therefore use the same production request geometry, gamut, bitmap
+format, opaque backdrop, rounded corners and image-view configuration. The
+64-MiB budget counts `bytesPerRow * height` for unique held images. Prepared
+rows bypass new article-image work and suppress the normal fade. Rows outside
+the stated range are not an A/B result. This C is distinct from the historical
+"Diagnostic C" experiment below.
 
 This is not a revival of the removed frame recorder or prior multi-arm
 infrastructure. It exists solely to compare shared versus independent image
