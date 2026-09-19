@@ -399,7 +399,7 @@ struct IOSUIKitArticleGeometry: Equatable {
     // Standard Visual portrait uses an inset hero image below the title. Keeping
     // the allocation here makes the renderer and deterministic height engine
     // share exactly the same geometry contract.
-    static let visualHeroImageAllocation: CGFloat = 0.85
+    static let visualHeroImageAllocation: CGFloat = 0.80
     // "Visual compact": a thumbnail beside the title, with the metadata bar above
     // and — on a narrow container — the preview underneath.
     static let sideTitleImageAllocation: CGFloat = 0.32
@@ -564,11 +564,11 @@ enum IOSUIKitArticleLayoutEngine {
         let contentHeight: CGFloat
         switch variant {
         case .visualPortrait:
-            // Title -> inset hero image -> metadata -> date -> preview.
+            // Title -> metadata -> inset hero image -> date -> preview.
             contentHeight = titleHeight
+                + IOSUIKitArticleGeometry.textSpacing + metadataHeight
                 + IOSUIKitArticleGeometry.portraitSpacing + imageSize.height
-                + IOSUIKitArticleGeometry.portraitSpacing + metadataHeight
-                + IOSUIKitArticleGeometry.textSpacing + dateHeight
+                + IOSUIKitArticleGeometry.portraitSpacing + dateHeight
                 + (previewHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
         case .visualLandscape: contentHeight = max(imageSize.height, textBlockHeight)
         default: contentHeight = textBlockHeight
@@ -584,12 +584,16 @@ enum IOSUIKitArticleLayoutEngine {
             logicalImageX = geometry.horizontalInset
         }
         // Side-title starts below metadata. Standard Visual portrait puts the
-        // inset hero image directly below the headline.
+        // inset hero image below the headline and the unchanged metadata row.
         let logicalImageY: CGFloat
         if isSideTitleVariant {
             logicalImageY = geometry.verticalPadding + metadataHeight + IOSUIKitArticleGeometry.textSpacing
         } else if variant == .visualPortrait {
-            logicalImageY = geometry.verticalPadding + titleHeight + IOSUIKitArticleGeometry.portraitSpacing
+            logicalImageY = geometry.verticalPadding
+                + titleHeight
+                + IOSUIKitArticleGeometry.textSpacing
+                + metadataHeight
+                + IOSUIKitArticleGeometry.portraitSpacing
         } else {
             logicalImageY = geometry.verticalPadding
         }
@@ -597,7 +601,7 @@ enum IOSUIKitArticleLayoutEngine {
         let logicalTextX = variant == .visualLandscape ? geometry.horizontalInset + imageSize.width + IOSUIKitArticleGeometry.landscapeSpacing : geometry.horizontalInset
         let textOrigin = CGPoint(x: physicalX(logicalX: logicalTextX, width: textWidth, in: input.containerWidth, direction: input.layoutDirection), y: geometry.verticalPadding)
         // Side-title order is metadata then title/date. Standard Visual portrait
-        // is title -> image -> metadata -> date -> preview. All other variants
+        // is title -> metadata -> image -> date -> preview. All other variants
         // retain their existing ordering.
         let isSideTitle = metadataLeads
         let titleTop = isSideTitle
@@ -607,8 +611,6 @@ enum IOSUIKitArticleLayoutEngine {
         let metadataTop: CGFloat
         if isSideTitle {
             metadataTop = textOrigin.y
-        } else if variant == .visualPortrait {
-            metadataTop = logicalImageY + imageSize.height + IOSUIKitArticleGeometry.portraitSpacing
         } else {
             metadataTop = titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing
         }
@@ -620,9 +622,19 @@ enum IOSUIKitArticleLayoutEngine {
         let feedTitleFrame = CGRect(x: metadataX(metadataLayout.feedTitleX, width: metadataLayout.feedTitleWidth), y: metadataFrame.minY, width: metadataLayout.feedTitleWidth, height: metadataHeight)
         let commentsFrame = input.hasComments ? CGRect(x: metadataX(metadataLayout.commentsX, width: accessories.comments), y: metadataFrame.midY - accessories.comments / 2, width: accessories.comments, height: accessories.comments) : nil
         let starFrame = CGRect(x: metadataX(metadataLayout.starX, width: accessories.star), y: metadataFrame.midY - accessories.star / 2, width: accessories.star, height: accessories.star)
-        let dateFrame = isSideTitle
-            ? CGRect(x: textOrigin.x, y: titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: titleWidth, height: dateHeight)
-            : CGRect(x: textOrigin.x, y: metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: infoWidth, height: dateHeight)
+        let dateFrame: CGRect
+        if isSideTitle {
+            dateFrame = CGRect(x: textOrigin.x, y: titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: titleWidth, height: dateHeight)
+        } else if variant == .visualPortrait {
+            dateFrame = CGRect(
+                x: textOrigin.x,
+                y: logicalImageY + imageSize.height + IOSUIKitArticleGeometry.portraitSpacing,
+                width: infoWidth,
+                height: dateHeight
+            )
+        } else {
+            dateFrame = CGRect(x: textOrigin.x, y: metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: infoWidth, height: dateHeight)
+        }
         // Wide side-title keeps the preview in the column, so it follows the date
         // directly. Narrow side-title puts it under the whole row, which means it
         // has to clear the image as well as the date.
