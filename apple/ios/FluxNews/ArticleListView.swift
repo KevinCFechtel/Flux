@@ -1293,6 +1293,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             performanceMetrics.recordDeterministicHeightFallback(durationNanoseconds: DispatchTime.now().uptimeNanoseconds - startedAt)
         }
         cell.performanceMetrics = performanceMetrics
+        cell.setArticleImageArrivalAnimationsEnabled(!scrolloverPhase.isScrolling)
         performanceMetrics.recordConfigure()
         cell.configure(
             item: item,
@@ -1448,6 +1449,10 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private func setScrolloverPhase(_ phase: IOSScrolloverPresentationPhase) {
         guard scrolloverPhase != phase else { return }
         scrolloverPhase = phase
+        let animationsEnabled = !phase.isScrolling
+        for case let cell as IOSUIKitArticleCell in tableView.visibleCells {
+            cell.setArticleImageArrivalAnimationsEnabled(animationsEnabled)
+        }
         // Every phase boundary restarts the ballistic baseline.
         scrolloverGeometryTracker.setPhase(phase)
         onScrolloverPhase?(phase)
@@ -2067,6 +2072,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var currentPublishedDate = ""
     private var currentIsRead = false
     private var currentIsStarred = false
+    /// Late image arrivals normally fade in. The timeline disables that
+    /// transition while the table is actively moving so image pixels still
+    /// appear immediately without adding overlapping Core Animation work.
+    private var articleImageArrivalAnimationsEnabled = true
     private(set) var preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics?
 
     weak var performanceMetrics: IOSUIKitTimelinePerformanceMetrics?
@@ -2656,6 +2665,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
     var articleImageRasterForTesting: CGImage? { articleImageView.image?.cgImage }
     func setArticleImagePipelineForTesting(_ pipeline: ArticleImagePipeline) { articleImagePipeline = pipeline }
 #endif
+    func setArticleImageArrivalAnimationsEnabled(_ enabled: Bool) {
+        articleImageArrivalAnimationsEnabled = enabled
+    }
     var articleImagePresentationForTesting: (placeholderHidden: Bool, contentMode: UIView.ContentMode, clipsToBounds: Bool, cornerRadius: CGFloat) {
         (imagePlaceholder.isHidden, articleImageView.contentMode, articleImageView.clipsToBounds, articleImageView.layer.cornerRadius)
     }
@@ -2746,7 +2758,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
                 // The cell is already on screen showing its placeholder. Swapping
                 // the pixels in one frame is a content jump, and at a steady 60 fps
                 // that reads as a stutter even though no frame was late.
-                self.presentArticleImage(loadedImage, animated: true)
+                self.presentArticleImage(
+                    loadedImage,
+                    animated: self.articleImageArrivalAnimationsEnabled
+                )
             } catch {
                 guard !Task.isCancelled,
                       let self,
