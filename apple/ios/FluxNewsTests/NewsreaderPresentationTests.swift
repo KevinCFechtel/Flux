@@ -2081,6 +2081,21 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(layoutMetrics(mode: .visual, width: 760, hasImage: true).variant, .visualLandscape)
     }
 
+    func testVisualPortraitUsesInsetHeroBetweenTitleAndMetadata() {
+        let metrics = layoutMetrics(mode: .visual, width: 390, hasImage: true)
+        guard let image = metrics.imageFrame, let preview = metrics.previewFrame else {
+            return XCTFail("Visual portrait should expose image and preview frames")
+        }
+
+        XCTAssertEqual(metrics.variant, .visualPortrait)
+        XCTAssertEqual(image.width, (metrics.contentFrame.width * IOSUIKitArticleGeometry.visualHeroImageAllocation).rounded(), accuracy: 0.5)
+        XCTAssertEqual(image.midX, metrics.contentFrame.midX, accuracy: 0.5)
+        XCTAssertLessThan(metrics.titleFrame.maxY, image.minY)
+        XCTAssertLessThan(image.maxY, metrics.metadataFrame.minY)
+        XCTAssertLessThan(metrics.metadataFrame.maxY, metrics.dateFrame.minY)
+        XCTAssertLessThan(metrics.dateFrame.maxY, preview.minY)
+    }
+
     func testDeterministicArticleLayoutEngineUsesCurrentWidthTransitionsAndPixelRounding() {
         let narrow = layoutMetrics(mode: .visual, width: 401, hasImage: false, scale: 3)
         let wide = layoutMetrics(mode: .visual, width: 402, hasImage: false, scale: 3)
