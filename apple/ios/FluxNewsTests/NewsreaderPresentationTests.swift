@@ -902,6 +902,50 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testNewerStructuralStateSupersedesPendingSnapshotPublication() async {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(
+            articles: [timelineArticle(id: 1), timelineArticle(id: 2), timelineArticle(id: 3)],
+            presentationBridge: bridge,
+            feedIconBridge: bridge
+        )
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
+        controller.view.layoutIfNeeded()
+        await controller.settleForTesting()
+
+        controller.update(
+            structuralState: timelineStructuralState([timelineArticle(id: 1), timelineArticle(id: 2), timelineArticle(id: 3), timelineArticle(id: 4)], revision: 2),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            feedIconRequestRevision: 0,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+        controller.update(
+            structuralState: timelineStructuralState([timelineArticle(id: 1), timelineArticle(id: 2)], revision: 3),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            feedIconRequestRevision: 0,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+
+        await controller.settleForTesting()
+
+        XCTAssertEqual(controller.orderedArticleIDsForTesting, [1, 2])
+        XCTAssertEqual(controller.tableViewForTesting.numberOfRows(inSection: 0), 2)
+    }
+
+    @MainActor
     func testStructuralOrderChangeAppliesAnotherSnapshot() {
         let bridge = IOSUIKitArticleTimelinePresentationBridge()
         let controller = makeTimelineController(bridge: bridge)
@@ -1096,10 +1140,10 @@ final class NewsreaderPresentationTests: XCTestCase {
             rasterScale: 2
         )
 
-        XCTAssertEqual(targetSize, .init(width: 361, height: 203.0625))
+        XCTAssertEqual(targetSize, .init(width: 307, height: 172.6875))
         XCTAssertEqual(request.rasterScale, 2)
-        XCTAssertEqual(request.maxPixelDimension, 768)
-        XCTAssertEqual(request.targetPixelSize, .init(width: 722, height: 406))
+        XCTAssertEqual(request.maxPixelDimension, 640)
+        XCTAssertEqual(request.targetPixelSize, .init(width: 614, height: 345))
 
         let image = try ArticleImagePipeline.downsample(
             data: horizontalBandPNGData(width: 10, height: 30),
@@ -1110,7 +1154,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(image.bitmapInfo.contains(.byteOrder32Little))
         XCTAssertEqual(pixel(at: .zero, in: image).alpha, 0)
         XCTAssertEqual(pixel(at: .init(x: image.width / 2, y: image.height / 2), in: image), .init(blue: 0, green: 255, red: 0, alpha: 255))
-        XCTAssertEqual(ArticleImagePipeline.memoryCost(of: image), 722 * 406 * 4)
+        XCTAssertEqual(ArticleImagePipeline.memoryCost(of: image), 614 * 345 * 4)
     }
 
     func testBackdropRasterDropsTheAlphaChannelAndPaintsTheCornersWithTheBackdrop() throws {
