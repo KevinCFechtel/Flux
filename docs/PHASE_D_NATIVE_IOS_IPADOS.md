@@ -552,6 +552,14 @@ opaque raster. Exact-slot prerasterization is therefore downgraded as the
 primary explanation for the residual image-rich scrolling unevenness. This does
 not establish any particular lower-level cause.
 
+> **Resolved and removed (18 September 2026).** The 2x experiment ran on the
+> physical iPhone 15 and was not meaningfully smoother than 3x, so raster pixel
+> volume is not the driver. The switch described below no longer exists; the
+> production pipeline keeps the physical display scale. The investigation ended
+> with the `Visual compact` presentation mode instead of a performance fix — see
+> `IOS_TIMELINE_PERFORMANCE_DIAGNOSTIC_CLEANUP.md` for the closing audit and the
+> final production decision. The paragraph is kept for the record.
+
 The next temporary, source-level diagnostic is
 `IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic`, enabled with
 `useTwoXArticleImageRasterForPerformanceDiagnosis = true`. It tests the narrower

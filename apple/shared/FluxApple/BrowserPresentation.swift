@@ -126,7 +126,6 @@ enum ArticlePresentationLayout {
 
     static func landscapeImageWidth(availableWidth: CGFloat) -> CGFloat {
         articleContentWidth(availableWidth) * landscapeImageAllocation
-        //min(260, articleContentWidth(availableWidth) * landscapeImageAllocation)
     }
 
     static func landscapeTextWidth(availableWidth: CGFloat, imageWidth: CGFloat, interColumnSpacing: CGFloat) -> CGFloat {

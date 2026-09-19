@@ -589,40 +589,9 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(state.content.article.title, "Updated")
     }
 
-    func testFallbackReadChangeInvalidatesPresentationWithoutRowState() {
-        let article = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
-        let unread = makePresentation(article: article, fallbackRead: false, fallbackStarred: false, rowState: nil)
-        let read = makePresentation(article: article, fallbackRead: true, fallbackStarred: false, rowState: nil)
 
-        XCTAssertFalse(unread == read)
-    }
 
-    func testFallbackStarredChangeInvalidatesPresentationWithoutRowState() {
-        let article = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
-        let unstarred = makePresentation(article: article, fallbackRead: false, fallbackStarred: false, rowState: nil)
-        let starred = makePresentation(article: article, fallbackRead: false, fallbackStarred: true, rowState: nil)
 
-        XCTAssertFalse(unstarred == starred)
-    }
-
-    func testRowStatePresentationIgnoresFallbackStatusChanges() {
-        let article = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
-        let state = ArticleRowPresentationState(article: article)
-        let feedIcon = IOSFeedIconPresentationState()
-        let first = makePresentation(article: article, fallbackRead: false, fallbackStarred: false, rowState: state, feedIcon: feedIcon)
-        let second = makePresentation(article: article, fallbackRead: true, fallbackStarred: true, rowState: state, feedIcon: feedIcon)
-
-        XCTAssertTrue(first == second)
-    }
-
-    func testImmutableContentChangeInvalidatesStaticPresentation() {
-        let original = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
-        let updated = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Updated", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
-        let first = makePresentation(article: original, fallbackRead: false, fallbackStarred: false, rowState: nil)
-        let second = makePresentation(article: updated, fallbackRead: false, fallbackStarred: false, rowState: nil)
-
-        XCTAssertFalse(first == second)
-    }
 
     @MainActor
     func testTargetedReadAndStarredDeltasDoNotReconcileStructuralTimelineInput() {
@@ -990,9 +959,6 @@ final class NewsreaderPresentationTests: XCTestCase {
         .init(id: id, feedId: feedID, categoryId: 20, feedTitle: "Feed \(feedID)", title: "Article \(id)", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: imageURL)
     }
 
-    private func makePresentation(article: ArticleSummary, fallbackRead: Bool, fallbackStarred: Bool, rowState: ArticleRowPresentationState?, feedIcon: IOSFeedIconPresentationState? = nil) -> ArticlePresentationView {
-        ArticlePresentationView(content: ArticleRowContent(article: article), fallbackRead: fallbackRead, fallbackStarred: fallbackStarred, rowState: rowState, mode: .compact, previewLines: .standard, availableWidth: 320, feedIcon: feedIcon ?? IOSFeedIconPresentationState(), iconVariant: .normal, onRequestFeedIcon: {}, onTap: {}, onAction: { _ in }, onSetRead: { _ in }, onSetStarred: { _ in })
-    }
 
     func testScrolloverUndoFeedbackTriggersOnlyForNewlyVisiblePresentation() {
         XCTAssertFalse(ScrolloverUndoPresentationPolicy.shouldTriggerFeedback(previouslyVisible: false, currentlyVisible: false))
@@ -1919,6 +1885,9 @@ final class NewsreaderPresentationTests: XCTestCase {
     @MainActor
     func testVisualCompactVariantFramesMatchTheEngine() {
         assertSideTitleFramesMatchTheEngine(width: 414, expecting: .visualSideTitle)
+        // Without an image the metadata bar must still lead, or rows with and
+        // without an image would order their content differently.
+        assertSideTitleFramesMatchTheEngine(width: 414, expecting: .visualSideTitleTextOnly, hasImage: false)
         // Wide container: the preview joins the column beside the image, so the
         // image can become the lowest element in the row.
         assertSideTitleFramesMatchTheEngine(width: 834, expecting: .visualSideTitleWide)
@@ -1928,9 +1897,10 @@ final class NewsreaderPresentationTests: XCTestCase {
     private func assertSideTitleFramesMatchTheEngine(
         width: CGFloat,
         expecting variant: IOSUIKitArticleCellLayoutVariant,
+        hasImage: Bool = true,
         line: UInt = #line
     ) {
-        let cell = makeUIKitArticleCell(mode: .visualCompact, width: width)
+        let cell = makeUIKitArticleCell(mode: .visualCompact, width: width, hasImage: hasImage)
         let measured = measureUIKitArticleCell(cell, width: width)
         guard let expected = cell.preparedLayoutMetrics else {
             return XCTFail("no prepared metrics", line: line)
@@ -1947,9 +1917,15 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(actual.titleFrame.height, expected.titleFrame.height, accuracy: 0.5, "title height", line: line)
         XCTAssertEqual(actual.dateFrame.origin.y, expected.dateFrame.origin.y, accuracy: 0.5, "date y", line: line)
         XCTAssertEqual(actual.metadataFrame.origin.y, expected.metadataFrame.origin.y, accuracy: 0.5, "metadata y", line: line)
+        XCTAssertLessThan(expected.metadataFrame.origin.y, expected.titleFrame.origin.y, "metadata must lead", line: line)
         XCTAssertEqual(actual.metadataFrame.width, expected.metadataFrame.width, accuracy: 0.5, "metadata width", line: line)
-        XCTAssertEqual(actual.imageFrame.origin.y, expected.imageFrame?.origin.y ?? -1, accuracy: 0.5, "image y", line: line)
-        XCTAssertEqual(actual.imageFrame.width, expected.imageFrame?.width ?? -1, accuracy: 0.5, "image width", line: line)
+        if hasImage {
+            XCTAssertEqual(actual.imageFrame.origin.y, expected.imageFrame?.origin.y ?? -1, accuracy: 0.5, "image y", line: line)
+            XCTAssertEqual(actual.imageFrame.width, expected.imageFrame?.width ?? -1, accuracy: 0.5, "image width", line: line)
+        } else {
+            XCTAssertNil(expected.imageFrame, "no image slot", line: line)
+            XCTAssertFalse(variant.showsImageSlot, "variant must not show an image", line: line)
+        }
         if let previewActual = actual.previewFrame, let previewExpected = expected.previewFrame {
             XCTAssertEqual(previewActual.origin.y, previewExpected.origin.y, accuracy: 0.5, "preview y", line: line)
         }
@@ -2606,6 +2582,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         width: CGFloat,
         articleID: Int64 = 1,
         feedID: Int64 = 10,
+        hasImage: Bool = true,
         layoutDirection: UIUserInterfaceLayoutDirection = .leftToRight
     ) -> IOSUIKitArticleCell {
         let article = ArticleSummary(
@@ -2620,7 +2597,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             isRead: false,
             isStarred: false,
             preview: "A preview long enough to occupy multiple lines and preserve the production card text stack.",
-            imageUrl: "https://example.com/image.jpg"
+            imageUrl: hasImage ? "https://example.com/image.jpg" : nil
         )
         let item = IOSUIKitArticleTimelineItem(
             article: article,

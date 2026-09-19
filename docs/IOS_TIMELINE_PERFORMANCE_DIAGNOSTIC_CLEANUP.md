@@ -1,6 +1,8 @@
 # iOS Timeline Performance Diagnostics — Experiment Record and Cleanup Contract
 
-Status: **temporary diagnostic inventory / cleanup required before merge or release**
+Status: **cleanup complete — 18 September 2026.** Every temporary diagnostic listed
+below has been removed. This file remains as the historical experiment record and
+as the audit that closed it.
 
 Branch during investigation: `perf/ios-frame-headroom`
 
@@ -98,9 +100,17 @@ A later diagnostic was planned to restore the normal exact-slot pipeline and cha
 
 Purpose: isolate whether scrolling unevenness scales materially with the pixel/byte volume of distinct image rasters.
 
-**Current repository state and the physical-device outcome of this experiment must be verified from commits/documentation after the investigation continued elsewhere. Do not infer its result from this document.**
+**Resolved.** The experiment ran on the physical iPhone 15: 2x was not meaningfully
+smoother than 3x. Article-raster pixel volume is therefore not the driver of the
+residual unevenness, and the production architecture keeps the physical display
+scale.
 
-Cleanup requirement: any `IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic`, `useTwoXArticleImageRasterForPerformanceDiagnosis`, forced 2x scale, or equivalent experiment must be removed unless the final production architecture explicitly adopts a non-native raster scale.
+`IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic` and
+`useTwoXArticleImageRasterForPerformanceDiagnosis` were removed on 18 September
+2026. The tests that used the switch only to inject a non-native scale were kept
+and renamed: they assert pipeline properties — exact-slot BGRA output, and that
+rasters of different scales cannot alias in the memory cache — which still hold.
+The cell keeps a documented `articleImageRasterScale` test seam for that purpose.
 
 ## Evidence that should remain after cleanup
 
@@ -152,3 +162,55 @@ After cleanup:
 - repository-standard Core/iOS tests, app build, archive, and `git diff --check` pass.
 
 This file should remain as the historical experiment/cleanup record even after diagnostic code is removed, updated with the final cleanup commit and final production decision.
+
+## Final cleanup audit — 18 September 2026
+
+The search terms above were run against the iOS sources and tests. Experiments 1
+through 6 produce no matches. `MUST NOT SHIP` appears nowhere in the Swift
+sources.
+
+Removed in this pass:
+
+- `IOSUIKitTimelineFrameHeadroomRecorder` and the whole
+  `IOSTimelineFrameHeadroomDiagnostic.swift` file, its project entry, its ~20
+  call sites, its Developer Diagnostics section, and its test;
+- `IOSUIKitTimelineInstrumentedTableView`, a `UITableView` subclass that existed
+  only to time `layoutSubviews`;
+- the six runtime A/B arms (scroll edge effect, Scrollover undo pill, title
+  presentation, capsule material, status bar scrim, article image size) and
+  their Settings pickers;
+- `IOSUIKitTimelineArticleImageRasterScalePerformanceDiagnostic`;
+- a dead `if phase == .idle { } else if wasIdle { }` left behind by the recorder
+  removal, which no compiler warning would have surfaced.
+
+Deliberately retained, classified per the three categories above:
+
+| Symbol | Class | Reason |
+|---|---|---|
+| `IOSUIKitTimelineTopScrimView` | Promote | The status bar gradient is now shipping behaviour below iOS 27. Moved out of the diagnostic file into `ArticleListView.swift`. |
+| `IOSUIKitTimelinePerformanceMetrics` | Promote | The oracle tests assert `systemLayoutSizeFittingCalls == 0` and `preferredLayoutAttributesFittingCalls == 0` through it. That is the proof that the cell never self-sizes — the core invariant of the UITableView migration. Removing the counters would delete the proof. |
+| `IOSUIKitTimelinePerformanceDiagnostics` | Retain as tooling | Console readout for the above. Its UI is behind `#if DEBUG \|\| FLUX_PERFORMANCE_DIAGNOSTICS` and cannot be reached in Release; the static controller reference is `weak`. The counter increments themselves do run in Release. |
+| `articleImageRasterScale` on the cell | Retain as tooling | Test seam, documented as such, no production assignment. |
+
+## Final production decision
+
+The investigation ended with a presentation decision rather than a performance
+fix, and the evidence for that is recorded in the measurement caveat above.
+
+Fixed chrome, no longer switchable: scroll edge effect disabled, Scrollover undo
+pill in `.regularMaterial`, the title as a Liquid Glass capsule
+(`UIGlassEffect(style: .regular)`, `.regularMaterial` below iOS 26), status bar
+gradient below iOS 27 only.
+
+New presentation mode **Visual compact** (`ArticlePresentationMode.visualCompact`):
+a 4:3 thumbnail beside the title, metadata bar full width above, preview below —
+and on containers wider than 600 pt the preview joins the column beside the
+image. It is a normal user setting alongside Visual and Compact, not a
+diagnostic.
+
+The reason it exists is perceptual, not computational. A full-width image edge
+travelling vertically is the strongest judder cue available; breaking that edge
+makes the same dropped frames stop being visible. Screen-recording comparisons
+of the two layouts differed by 0.04 percentage points — and per the measurement
+caveat at the top of this document, that metric is not a valid KPI in either
+direction.

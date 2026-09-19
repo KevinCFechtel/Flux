@@ -618,13 +618,29 @@ private struct ArticleListTitleCapsule: View {
     }
 
     var body: some View {
+        // This capsule replaced the navigation title, so it has to carry that
+        // role too: the label is what the screen *is* (the scope), the value is
+        // its state, and the hint is what tapping does. Announcing the action as
+        // the label would put the least useful part first.
+        //
+        // `.isHeader` restores what `.navigationTitle("")` gave up — without it
+        // VoiceOver's heading rotor finds nothing on this screen.
         if let action {
             Button(action: action) { capsule }
                 .buttonStyle(.plain)
-                .accessibilityLabel(IOSNavigationButtonPresentation.accessibilityLabel)
-                .accessibilityValue(subtitle.map { "\(title), \($0)" } ?? title)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(title)
+                .accessibilityValue(subtitle ?? "")
+                .accessibilityHint(IOSNavigationButtonPresentation.accessibilityLabel)
+                .accessibilityAddTraits(.isHeader)
         } else {
+            // No action on a persistent sidebar, but the two lines would still be
+            // read as separate, role-less elements without this.
             capsule
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(title)
+                .accessibilityValue(subtitle ?? "")
+                .accessibilityAddTraits(.isHeader)
         }
     }
 
@@ -668,8 +684,16 @@ private struct ArticleListTitleCapsule: View {
 }
 
 private struct ArticleListTitleCapsuleBackground: View {
+    /// Whether the system is asked to avoid see-through backgrounds. Glass is
+    /// exactly that, and the title has to stay legible over scrolling articles,
+    /// so this substitutes an opaque fill rather than trusting the effect to
+    /// adapt on its own.
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     var body: some View {
-        if #available(iOS 26.0, *) {
+        if reduceTransparency {
+            Capsule().fill(Color(uiColor: .secondarySystemBackground))
+        } else if #available(iOS 26.0, *) {
             ArticleListGlassCapsule()
         } else {
             // iOS 18 has no glass material; the closest stock equivalent.

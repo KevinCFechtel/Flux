@@ -929,6 +929,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             .visualLandscape,
             .visualSideTitle,
             .visualSideTitleWide,
+            .visualSideTitleTextOnly,
         ] {
             tableView.register(IOSUIKitArticleCell.self, forCellReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant))
         }
@@ -1775,6 +1776,17 @@ enum IOSUIKitArticleCellLayoutVariant: Hashable {
     /// The same arrangement on a wide container: the preview joins the column
     /// beside the image instead of running underneath it.
     case visualSideTitleWide
+    /// `Visual compact` for an article without an image: same order, full width.
+    case visualSideTitleTextOnly
+
+    /// Whether the cell shows its image view at all. Derived rather than listed
+    /// at each call site, so a new variant cannot silently default to "shown".
+    var showsImageSlot: Bool {
+        switch self {
+        case .compact, .visualTextOnly, .visualSideTitleTextOnly: return false
+        case .visualPortrait, .visualLandscape, .visualSideTitle, .visualSideTitleWide: return true
+        }
+    }
 }
 
 struct IOSUIKitTimelinePerformanceSnapshot: Equatable {
@@ -1915,6 +1927,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         case .visualLandscape: return "IOSUIKitArticleCell.visualLandscape"
         case .visualSideTitle: return "IOSUIKitArticleCell.visualSideTitle"
         case .visualSideTitleWide: return "IOSUIKitArticleCell.visualSideTitleWide"
+        case .visualSideTitleTextOnly: return "IOSUIKitArticleCell.visualSideTitleTextOnly"
         }
     }
 
@@ -1969,6 +1982,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var sideTitleConstraints: [NSLayoutConstraint] = []
     private var defaultStackConstraints: [NSLayoutConstraint] = []
     private var sideTitleWideConstraints: [NSLayoutConstraint] = []
+    private var sideTitleTextOnlyConstraints: [NSLayoutConstraint] = []
     private var previewBottomDefaultConstraint: NSLayoutConstraint!
     private var previewTrailingDefaultConstraint: NSLayoutConstraint!
     /// Preview top in the side-title variant: it must clear the image as well as
@@ -2382,6 +2396,27 @@ final class IOSUIKitArticleCell: UITableViewCell {
             landscapeImageWidthConstraint,
             landscapeImageHeightConstraint,
         ]
+
+        // `Visual compact` without an image: the same order — metadata bar,
+        // then title, date, preview — at full width, with no image slot.
+        sideTitleTextOnlyConstraints = [
+            textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
+            textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
+
+            metadataRow.topAnchor.constraint(equalTo: textContainer.topAnchor),
+            metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+
+            titleLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            titleLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            dateLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            dateLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+
+            previewTopConstraint,
+            previewBottomDefaultConstraint,
+            previewTrailingDefaultConstraint,
+        ]
     }
 
     override func prepareForReuse() {
@@ -2496,7 +2531,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         }
 
         guard currentLayoutVariant != variant else {
-            articleImageView.isHidden = variant == .compact || variant == .visualTextOnly
+            articleImageView.isHidden = !variant.showsImageSlot
             return
         }
 
@@ -2512,12 +2547,14 @@ final class IOSUIKitArticleCell: UITableViewCell {
             activeLayoutConstraints = sideTitleConstraints
         case .visualSideTitleWide:
             activeLayoutConstraints = sideTitleWideConstraints
+        case .visualSideTitleTextOnly:
+            activeLayoutConstraints = sideTitleTextOnlyConstraints
         }
         NSLayoutConstraint.activate(activeLayoutConstraints)
         currentLayoutVariant = variant
         layoutVariantRevision &+= 1
         performanceMetrics?.recordVariantSwitch()
-        articleImageView.isHidden = variant == .compact || variant == .visualTextOnly
+        articleImageView.isHidden = !variant.showsImageSlot
     }
 
     func updateStatus(isRead: Bool, isStarred: Bool) {
@@ -2860,348 +2897,14 @@ private struct ScrolloverUndoPresentation: View {
     }
 }
 
-struct ArticlePresentationView: View, Equatable {
-    let content: ArticleRowContent
-    let fallbackRead: Bool
-    let fallbackStarred: Bool
-    let rowState: ArticleRowPresentationState?
-    let mode: ArticlePresentationMode
-    let previewLines: ArticlePreviewLines
-    let availableWidth: CGFloat
-    let feedIcon: IOSFeedIconPresentationState
-    let iconVariant: FeedIconVariant
-    let onRequestFeedIcon: () -> Void
-    let onTap: () -> Void
-    let onAction: (IOSArticleContextAction) -> Void
-    let onSetRead: (Bool) -> Void
-    let onSetStarred: (Bool) -> Void
 
-    static func == (lhs: ArticlePresentationView, rhs: ArticlePresentationView) -> Bool {
-        lhs.content == rhs.content &&
-            (lhs.rowState != nil || rhs.rowState != nil || (lhs.fallbackRead == rhs.fallbackRead && lhs.fallbackStarred == rhs.fallbackStarred)) &&
-            lhs.rowState === rhs.rowState &&
-            lhs.mode == rhs.mode &&
-            lhs.previewLines == rhs.previewLines &&
-            lhs.availableWidth == rhs.availableWidth &&
-            lhs.feedIcon === rhs.feedIcon &&
-            lhs.iconVariant == rhs.iconVariant
-    }
 
-    var body: some View {
-        ArticleRowStateInteractions(
-            content: content,
-            fallbackRead: fallbackRead,
-            fallbackStarred: fallbackStarred,
-            rowState: rowState,
-            mode: mode,
-            previewLines: previewLines,
-            availableWidth: availableWidth,
-            feedIcon: feedIcon,
-            onRequestFeedIcon: onRequestFeedIcon,
-            onTap: onTap,
-            onAction: onAction,
-            onSetRead: onSetRead,
-            onSetStarred: onSetStarred
-        )
-    }
-}
 
-private struct ArticleRowStateInteractions: View {
-    let content: ArticleRowContent
-    let fallbackRead: Bool
-    let fallbackStarred: Bool
-    let rowState: ArticleRowPresentationState?
-    let mode: ArticlePresentationMode
-    let previewLines: ArticlePreviewLines
-    let availableWidth: CGFloat
-    let feedIcon: IOSFeedIconPresentationState
-    let onRequestFeedIcon: () -> Void
-    let onTap: () -> Void
-    let onAction: (IOSArticleContextAction) -> Void
-    let onSetRead: (Bool) -> Void
-    let onSetStarred: (Bool) -> Void
 
-    var body: some View {
-        let isRead = rowState?.isRead ?? fallbackRead
-        let isStarred = rowState?.isStarred ?? fallbackStarred
-        ArticleRowSurface(
-            content: content,
-            fallbackRead: fallbackRead,
-            fallbackStarred: fallbackStarred,
-            rowState: rowState,
-            mode: mode,
-            previewLines: previewLines,
-            availableWidth: availableWidth,
-            feedIcon: feedIcon,
-            onRequestFeedIcon: onRequestFeedIcon,
-            onTap: onTap
-        )
-        .equatable()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(content.article.title), \(content.article.feedTitle), \(content.publishedDate), \(isRead ? String(localized: "Read") : String(localized: "Unread"))\(isStarred ? String(localized: ", starred") : "")")
-        .accessibilityValue(isRead ? (isStarred ? String(localized: "Read, starred") : String(localized: "Read")) : (isStarred ? String(localized: "Unread, starred") : String(localized: "Unread")))
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint(String(localized: "Opens the article"))
-        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-            Button { onSetRead(!isRead) } label: {
-                Label(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: isRead ? "envelope" : "envelope.open")
-            }
-            .tint(.accentColor)
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button { onSetStarred(!isStarred) } label: {
-                Label(isStarred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: isStarred ? "star.slash" : "star")
-            }
-            .tint(.orange)
-        }
-        .contextMenu {
-            Button { onSetStarred(!isStarred) } label: { Label(isStarred ? String(localized: "Unstar") : String(localized: "Star"), systemImage: isStarred ? "star.slash" : "star") }
-            Button { onSetRead(!isRead) } label: { Label(isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read"), systemImage: isRead ? "envelope" : "envelope.open") }
-            Divider()
-            Button { onAction(.original) } label: { Label("Open Original", systemImage: "safari") }
-            Button { onAction(.reader) } label: { Label("Open in Reader", systemImage: "doc.text") }
-            Button { onAction(.miniflux) } label: { Label("Open in Miniflux", systemImage: "arrow.up.forward.app") }
-            if content.hasComments { Button { onAction(.comments) } label: { Label("Open Comments", systemImage: "bubble.left") } }
-            Button { onAction(.copyLink) } label: { Label("Copy Link", systemImage: "doc.on.doc") }
-            Button { onAction(.share) } label: { Label("Share", systemImage: "square.and.arrow.up") }
-            Divider()
-            Button { onAction(.saveToService) } label: { Label("Save to Third-Party Service", systemImage: "tray.and.arrow.down") }
-        }
-    }
-}
 
-private struct ArticleRowSurface: View, Equatable {
-    let content: ArticleRowContent
-    let fallbackRead: Bool
-    let fallbackStarred: Bool
-    let rowState: ArticleRowPresentationState?
-    let mode: ArticlePresentationMode
-    let previewLines: ArticlePreviewLines
-    let availableWidth: CGFloat
-    let feedIcon: IOSFeedIconPresentationState
-    let onRequestFeedIcon: () -> Void
-    let onTap: () -> Void
 
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.content == rhs.content &&
-            (lhs.rowState != nil || rhs.rowState != nil || (lhs.fallbackRead == rhs.fallbackRead && lhs.fallbackStarred == rhs.fallbackStarred)) &&
-            lhs.rowState === rhs.rowState && lhs.mode == rhs.mode && lhs.previewLines == rhs.previewLines && lhs.availableWidth == rhs.availableWidth && lhs.feedIcon === rhs.feedIcon
-    }
 
-    var body: some View {
-        ArticleRowContentBody(
-            content: content,
-            fallbackRead: fallbackRead,
-            fallbackStarred: fallbackStarred,
-            rowState: rowState,
-            mode: mode,
-            previewLines: previewLines,
-            availableWidth: availableWidth,
-            feedIcon: feedIcon,
-            onRequestFeedIcon: onRequestFeedIcon
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 16))
-        .onTapGesture(perform: onTap)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
 
-private struct ArticleRowContentBody: View {
-    let content: ArticleRowContent
-    let fallbackRead: Bool
-    let fallbackStarred: Bool
-    let rowState: ArticleRowPresentationState?
-    let mode: ArticlePresentationMode
-    let previewLines: ArticlePreviewLines
-    let availableWidth: CGFloat
-    let feedIcon: IOSFeedIconPresentationState
-    let onRequestFeedIcon: () -> Void
-
-    var body: some View {
-        switch mode {
-        case .visual:
-            if ArticlePresentationLayout.usesLandscapeVisual(mode: mode, availableWidth: availableWidth) {
-                landscapeVisual
-            } else {
-                portraitVisual
-            }
-        case .visualCompact:
-            visualCompact
-        case .compact:
-            articleText
-                .padding(.vertical, ArticleRowContentLayout.compactVerticalPadding)
-                .padding(.horizontal, ArticleRowContentLayout.compactHorizontalPadding)
-                .frame(width: articleWidth, alignment: .leading)
-        }
-    }
-
-    private var articleWidth: CGFloat { ArticlePresentationLayout.boundedArticleWidth(availableWidth) }
-    private var contentWidth: CGFloat { ArticlePresentationLayout.articleContentWidth(articleWidth) }
-    private var portraitContentWidth: CGFloat { ArticlePresentationLayout.visualPortraitContentWidth(articleWidth) }
-
-    private var portraitVisual: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let imageURL = content.imageURL {
-                ArticleImageView(url: imageURL, targetSize: CGSize(width: portraitContentWidth, height: ArticlePresentationLayout.portraitImageHeight(contentWidth: portraitContentWidth)))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            articleText.frame(width: portraitContentWidth, alignment: .leading)
-        }
-        .frame(width: portraitContentWidth, alignment: .leading)
-    }
-
-    /// Mirrors the UIKit timeline's `visualSideTitle` arrangement: metadata bar
-    /// across the top, thumbnail beside the title, preview full width below. The
-    /// date sits inside the metadata row here rather than under the title —
-    /// this renderer has no separate date element to move.
-    private var visualCompact: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            ViewThatFits(in: .horizontal) {
-                ArticleMetadataRow(content: content, fallbackRead: fallbackRead, rowState: rowState, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
-                ArticleMetadataColumn(content: content, fallbackRead: fallbackRead, rowState: rowState, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
-            }
-            HStack(alignment: .top, spacing: IOSUIKitArticleGeometry.sideTitleSpacing) {
-                ArticleTitlePresentation(title: content.article.title, rowState: rowState, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if let imageURL = content.imageURL {
-                    let side = (contentWidth * IOSUIKitArticleGeometry.sideTitleImageAllocation).rounded()
-                    ArticleImageView(
-                        url: imageURL,
-                        targetSize: CGSize(width: side, height: (side / IOSUIKitArticleGeometry.sideTitleImageAspectRatio).rounded())
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-            }
-            if !content.article.preview.isEmpty {
-                Text(content.article.preview)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(previewLines.rawValue)
-                    .multilineTextAlignment(.leading)
-            }
-        }
-        .frame(width: contentWidth, alignment: .leading)
-    }
-
-    private var landscapeVisual: some View {
-        HStack(alignment: .top, spacing: 14) {
-            let imageWidth = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
-            if let imageURL = content.imageURL {
-                ArticleImageView(url: imageURL, targetSize: CGSize(width: imageWidth, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: imageWidth)))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            articleText.frame(width: content.imageURL == nil ? contentWidth : ArticlePresentationLayout.landscapeTextWidth(availableWidth: availableWidth, imageWidth: imageWidth, interColumnSpacing: 14), alignment: .leading)
-        }
-        .frame(width: contentWidth, alignment: .leading)
-    }
-
-    private var articleText: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            ArticleTitlePresentation(title: content.article.title, rowState: rowState, fallbackRead: fallbackRead, fallbackStarred: fallbackStarred)
-            ViewThatFits(in: .horizontal) {
-                ArticleMetadataRow(content: content, fallbackRead: fallbackRead, rowState: rowState, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
-                ArticleMetadataColumn(content: content, fallbackRead: fallbackRead, rowState: rowState, feedIcon: feedIcon, onRequestFeedIcon: onRequestFeedIcon)
-            }
-            if !content.article.preview.isEmpty {
-                Text(content.article.preview)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(previewLines.rawValue)
-                    .multilineTextAlignment(.leading)
-            }
-        }
-    }
-}
-
-private enum ArticleRowContentLayout {
-    static let compactHorizontalPadding: CGFloat = 1
-    static let compactVerticalPadding: CGFloat = 2
-}
-
-private struct ArticleTitlePresentation: View {
-    let title: String
-    let rowState: ArticleRowPresentationState?
-    let fallbackRead: Bool
-    let fallbackStarred: Bool
-
-    var body: some View {
-        let isRead = rowState?.isRead ?? fallbackRead
-        let isStarred = rowState?.isStarred ?? fallbackStarred
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(isRead ? .secondary : .primary)
-                .multilineTextAlignment(.leading)
-            Spacer(minLength: 0)
-            if isStarred {
-                Image(systemName: "star.fill")
-                    .foregroundStyle(.yellow)
-                    .accessibilityLabel(String(localized: "Starred"))
-            }
-        }
-    }
-}
-
-private struct ArticleMetadataRow: View {
-    let content: ArticleRowContent
-    let fallbackRead: Bool
-    let rowState: ArticleRowPresentationState?
-    let feedIcon: IOSFeedIconPresentationState
-    let onRequestFeedIcon: () -> Void
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ArticleUnreadIndicator(rowState: rowState, fallback: fallbackRead)
-            FeedIconView(feedID: content.article.feedId, title: content.article.feedTitle, state: feedIcon, onRequest: onRequestFeedIcon)
-            Text(content.article.feedTitle).font(.subheadline.weight(.medium))
-            Text("•")
-            Text(content.publishedDate)
-            commentsIndicator
-        }
-        .foregroundStyle(.secondary)
-        .font(.caption)
-        .lineLimit(1)
-    }
-
-    @ViewBuilder private var commentsIndicator: some View {
-        if content.hasComments { Image(systemName: "bubble.left").accessibilityLabel(String(localized: "Comments available")) }
-    }
-}
-
-private struct ArticleMetadataColumn: View {
-    let content: ArticleRowContent
-    let fallbackRead: Bool
-    let rowState: ArticleRowPresentationState?
-    let feedIcon: IOSFeedIconPresentationState
-    let onRequestFeedIcon: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                ArticleUnreadIndicator(rowState: rowState, fallback: fallbackRead)
-                FeedIconView(feedID: content.article.feedId, title: content.article.feedTitle, state: feedIcon, onRequest: onRequestFeedIcon)
-                Text(content.article.feedTitle).font(.subheadline.weight(.medium))
-                if content.hasComments { Image(systemName: "bubble.left").accessibilityLabel(String(localized: "Comments available")) }
-            }
-            Text(content.publishedDate)
-        }
-        .foregroundStyle(.secondary)
-        .font(.caption)
-    }
-}
-
-private struct ArticleUnreadIndicator: View {
-    let rowState: ArticleRowPresentationState?
-    let fallback: Bool
-
-    var body: some View {
-        Circle()
-            .fill(Color.accentColor)
-            .frame(width: 6, height: 6)
-            .opacity(ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: rowState?.isRead ?? fallback))
-            .accessibilityHidden(true)
-    }
-}
 
 struct FeedIconView: View {
     let feedID: Int64

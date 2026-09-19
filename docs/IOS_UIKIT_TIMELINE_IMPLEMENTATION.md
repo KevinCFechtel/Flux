@@ -227,6 +227,17 @@ Keeping a SwiftUI renderer used by the separate Search screen is not keeping
 two Timeline implementations. Remove genuinely unused Timeline types only after
 checking all call sites. Keep English/German localization and existing actions.
 
+> **Closed (19 September 2026).** Search no longer has its own renderer:
+> `SearchView` embeds `IOSUIKitArticleTimelineView` with Scrollover and the
+> refresh control switched off. With that call site gone, the SwiftUI row chain
+> — `ArticlePresentationView`, `ArticleRowStateInteractions`, `ArticleRowSurface`,
+> `ArticleRowContentBody`, `ArticleMetadataRow`, `ArticleMetadataColumn`,
+> `ArticleTitlePresentation`, `ArticleUnreadIndicator`, `ArticleRowContentLayout`
+> and `ArticleImageView` — had no production caller at all and was deleted
+> (~410 lines), along with four tests that only asserted its `Equatable`
+> conformance. `FeedIconView` stays: the navigation sidebar uses it. The table
+> above still describes the planning baseline and is not updated.
+
 ## 5. Ordered implementation packages
 
 These packages build one permanent replacement. They are not competing renderer

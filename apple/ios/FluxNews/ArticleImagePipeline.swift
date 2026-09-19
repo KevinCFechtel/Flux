@@ -608,48 +608,6 @@ private enum ArticleImageError: Error {
     case invalidImageData
 }
 
-struct ArticleImageView: View {
-    let url: URL
-    let targetSize: CGSize
-
-    @Environment(\.displayScale) private var displayScale
-    @State private var image: CGImage?
-
-    var body: some View {
-        let request = ArticleImageRequest(url: url, targetSize: targetSize, displayScale: displayScale)
-        let displayedImage = image ?? ArticleImagePipeline.shared.cachedImage(for: request)
-        Group {
-            if let displayedImage {
-                Image(decorative: displayedImage, scale: displayScale, orientation: .up)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                Rectangle()
-                    .fill(.quaternary)
-                    .overlay { Image(systemName: "photo").font(.title).foregroundStyle(.secondary) }
-            }
-        }
-        .frame(width: targetSize.width, height: targetSize.height)
-        .clipped()
-        .task(id: request) {
-            if let cachedImage = ArticleImagePipeline.shared.cachedImage(for: request) {
-                image = cachedImage
-                return
-            }
-            image = nil
-            do {
-                let loadedImage = try await ArticleImagePipeline.shared.image(for: request, cacheWasChecked: true)
-                try Task.checkCancellation()
-                image = loadedImage
-            } catch is CancellationError {
-                // The shared load remains available to other card views and the cache.
-            } catch {
-                image = nil
-            }
-        }
-        .accessibilityHidden(true)
-    }
-}
 
 extension UIFont {
     func bold() -> UIFont {

@@ -227,6 +227,11 @@ An ordinary `Release` build omits the condition, so the Timeline Performance
 controls, diagnostics owner, Scrollover diagnostic logging, and signposts are
 not compiled into the production app.
 
+> **Note (18 September 2026):** the Frame Headroom section of Developer
+> Diagnostics was removed with the rest of the temporary instrumentation. The
+> procedure below is no longer executable; see
+> `IOS_TIMELINE_PERFORMANCE_DIAGNOSTIC_CLEANUP.md`.
+
 In a diagnostic build, open **Settings → Developer Diagnostics**. **Reset
 Timeline Metrics** clears the Timeline, prepared-layout, and image-pipeline
 counters; **Print Timeline Metrics** emits one local snapshot. Instruments can

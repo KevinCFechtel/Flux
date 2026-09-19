@@ -436,7 +436,11 @@ struct IOSUIKitArticleGeometry: Equatable {
 
     func variant(hasImage: Bool) -> IOSUIKitArticleCellLayoutVariant {
         guard mode.showsArticleImage else { return .compact }
-        guard hasImage else { return .visualTextOnly }
+        // Without an image the ordinary visual modes lead with the title, but
+        // `Visual compact` must keep the metadata bar on top either way —
+        // otherwise rows with and without an image disagree about what comes
+        // first, and the list reads as two different designs.
+        guard hasImage else { return usesSideTitle ? .visualSideTitleTextOnly : .visualTextOnly }
         // On a wide container the preview has room to sit beside the image.
         if usesSideTitle { return isWideContainer ? .visualSideTitleWide : .visualSideTitle }
         return isLandscapeVisual ? .visualLandscape : .visualPortrait
@@ -516,6 +520,9 @@ enum IOSUIKitArticleLayoutEngine {
         // full width — the metadata because the feed name is squeezed first, the
         // preview because it needs the room to read as a paragraph.
         let isSideTitleVariant = variant == .visualSideTitle || variant == .visualSideTitleWide
+        // The image-less side-title variant shares the ordering but not the
+        // narrowed title column.
+        let metadataLeads = isSideTitleVariant || variant == .visualSideTitleTextOnly
         let titleWidth = isSideTitleVariant
             ? max(0, geometry.availableWidth - imageSize.width - IOSUIKitArticleGeometry.sideTitleSpacing)
             : textWidth
@@ -541,7 +548,7 @@ enum IOSUIKitArticleLayoutEngine {
         let sideTitleRowHeight = max(sideTitleColumnHeight, imageSize.height)
         if variant == .visualSideTitleWide {
             textBlockHeight = metadataHeight + IOSUIKitArticleGeometry.textSpacing + sideTitleRowHeight
-        } else if variant == .visualSideTitle {
+        } else if variant == .visualSideTitle || variant == .visualSideTitleTextOnly {
             textBlockHeight = metadataHeight + IOSUIKitArticleGeometry.textSpacing + sideTitleRowHeight
                 + (previewHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
         } else {
@@ -569,7 +576,7 @@ enum IOSUIKitArticleLayoutEngine {
         let textOrigin = CGPoint(x: physicalX(logicalX: logicalTextX, width: textWidth, in: input.containerWidth, direction: input.layoutDirection), y: variant == .visualPortrait ? geometry.verticalPadding + imageSize.height + IOSUIKitArticleGeometry.portraitSpacing : geometry.verticalPadding)
         // Side-title order is metadata, then title and date beside the image.
         // Every other variant keeps title, metadata, date.
-        let isSideTitle = isSideTitleVariant
+        let isSideTitle = metadataLeads
         let titleTop = isSideTitle
             ? textOrigin.y + metadataHeight + IOSUIKitArticleGeometry.textSpacing
             : textOrigin.y
@@ -592,7 +599,8 @@ enum IOSUIKitArticleLayoutEngine {
         let previewTop: CGFloat
         switch variant {
         case .visualSideTitleWide: previewTop = dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing
-        case .visualSideTitle: previewTop = titleTop + sideTitleRowHeight + IOSUIKitArticleGeometry.textSpacing
+        case .visualSideTitle, .visualSideTitleTextOnly:
+            previewTop = titleTop + sideTitleRowHeight + IOSUIKitArticleGeometry.textSpacing
         default: previewTop = dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing
         }
         let previewFrame = previewHeight == 0 ? nil : CGRect(x: textOrigin.x, y: previewTop, width: previewWidth, height: previewHeight)
