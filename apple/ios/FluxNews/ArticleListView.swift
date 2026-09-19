@@ -9,6 +9,108 @@ enum IOSArticleScrollDirection: Equatable {
     case backward
 }
 
+/// Release-visible, deliberately narrow diagnostic. It never persists and only
+/// supplies already prepared pixels to Visual Portrait rows.
+@MainActor
+final class IOSArticleImageABDiagnostic {
+    enum Mode: String, CaseIterable, Identifiable {
+        case normal
+        case sharedRaster
+        case independentRasters
+        var id: Self { self }
+        var title: String {
+            switch self {
+            case .normal: return String(localized: "Normal")
+            case .sharedRaster: return String(localized: "A – Shared Raster")
+            case .independentRasters: return String(localized: "B – Independent Rasters")
+            }
+        }
+    }
+
+    static let shared = IOSArticleImageABDiagnostic()
+    static let changed = Notification.Name("IOSArticleImageABDiagnostic.changed")
+    private(set) var mode: Mode = .normal
+    private(set) var preparationDescription = String(localized: "Normal article images")
+    private(set) var revision: UInt64 = 0
+    private var images: [Int64: CGImage] = [:]
+    private var preparedKey: (CGSize, CGFloat)?
+    private var preparingKey: (CGSize, CGFloat)?
+    private let maximumBytes = 64 * 1024 * 1024
+
+    func select(_ newMode: Mode, ids: [Int64] = [], size: CGSize = .zero, scale: CGFloat = 1) {
+        mode = newMode
+        revision &+= 1
+        if newMode == .normal {
+            images = [:]
+            preparedKey = nil
+            preparingKey = nil
+            preparationDescription = String(localized: "Normal article images")
+        } else if size.width > 0, size.height > 0 {
+            prepare(ids: ids, size: size, scale: scale)
+        } else {
+            preparationDescription = String(localized: "Open a Visual Portrait timeline to prepare the comparison.")
+        }
+        NotificationCenter.default.post(name: Self.changed, object: self)
+    }
+
+    func image(for articleID: Int64, size: CGSize, scale: CGFloat) -> CGImage? {
+        guard mode != .normal, preparedKey?.0 == size, preparedKey?.1 == scale else { return nil }
+        return images[articleID]
+    }
+
+    func prepare(ids: [Int64], size: CGSize, scale: CGFloat) {
+        guard mode != .normal,
+              preparedKey?.0 != size || preparedKey?.1 != scale || images.isEmpty,
+              preparingKey?.0 != size || preparingKey?.1 != scale else { return }
+        let width = max(1, Int((size.width * scale).rounded()))
+        let height = max(1, Int((size.height * scale).rounded()))
+        let bytes = width * height * 4
+        let limit = max(1, min(ids.count, maximumBytes / bytes))
+        let selected = Array(ids.prefix(limit))
+        let requestedMode = mode
+        preparationDescription = String(localized: "Preparing \(selected.count) rows (maximum 64 MiB)…")
+        preparingKey = (size, scale)
+        revision &+= 1
+        let generation = revision
+        Task.detached { [weak self] in
+            let base = Self.makeTexture(width: width, height: height)!
+            var result: [Int64: CGImage] = [:]
+            for id in selected {
+                result[id] = requestedMode == .sharedRaster ? base : Self.copy(base)
+            }
+            await MainActor.run {
+                guard let self, self.revision == generation, self.mode == requestedMode else { return }
+                self.images = result
+                self.preparedKey = (size, scale)
+                self.preparingKey = nil
+                self.preparationDescription = String(localized: "Prepared \(result.count) rows; rows outside this range are not a valid A/B comparison.")
+                self.revision &+= 1
+                NotificationCenter.default.post(name: Self.changed, object: self)
+            }
+        }
+    }
+
+    nonisolated private static func makeTexture(width: Int, height: Int) -> CGImage? {
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4, space: space, bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue) else { return nil }
+        for y in stride(from: 0, to: height, by: 24) {
+            context.setFillColor(CGColor(red: CGFloat((y / 24) % 5) / 5, green: 0.25, blue: 0.55, alpha: 1))
+            context.fill(CGRect(x: 0, y: y, width: width, height: 12))
+        }
+        context.setStrokeColor(UIColor.white.cgColor)
+        context.setLineWidth(3)
+        for x in stride(from: -height, to: width, by: 36) { context.stroke(CGRect(x: x, y: 0, width: height, height: height)) }
+        return context.makeImage()
+    }
+
+    nonisolated private static func copy(_ image: CGImage) -> CGImage? {
+        let space = image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4, space: space, bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue) else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return context.makeImage()
+    }
+}
+
 enum IOSArticleImagePrefetchPolicy {
     static func candidateIDs(
         orderedIDs: [Int64],
@@ -330,11 +432,11 @@ struct IOSUIKitResolvedScrolloverFrameStore {
 /// interaction and then crossed the effective upper viewport boundary while moving forward.
 final class IOSUIKitScrolloverGeometryTracker {
     private static let bottomTolerance: CGFloat = 0.5
+    private static let trackedRowLimit = 16
 
-    /// The previous scalar geometry and a private bounded frame copy. Keeping this
-    /// separate from the source sample is intentional: retaining `rowFrames`
-    /// directly would share the frame store's dictionary buffer and force a
-    /// copy-on-write of that bounded store on its next mutation.
+    /// The deterministic table owns row frames. The tracker retains only the
+    /// scalar viewport baseline; the controller's bounded frame source bridges a
+    /// just-exited cell without rebuilding a second frame cache on every scroll.
     private struct PreviousGeometry {
         let contentOffsetY: CGFloat
         let effectiveTop: CGFloat
@@ -354,11 +456,10 @@ final class IOSUIKitScrolloverGeometryTracker {
     private var emittedIDs = Set<Int64>()
     private var observedVisibleIDs = Set<Int64>()
     private var previousGeometry: PreviousGeometry?
-    private var previousFrames: [Int64: CGRect] = [:]
     private var phase: IOSScrolloverPresentationPhase = .idle
     private var wasAtBottom = false
 
-    var retainedPreviousFrameCount: Int { previousFrames.count }
+    var retainedPreviousFrameCount: Int { 0 }
 
     func updateSnapshot(_ ids: [Int64]) {
         positions = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset) })
@@ -416,11 +517,6 @@ final class IOSUIKitScrolloverGeometryTracker {
             return .init(direction: nil, batch: .init(articleIDs: []))
         }
 
-        guard !hasMaterialLayoutChange(from: previousFrames, to: sample) else {
-            rebaseline(with: sample, enabled: enabled)
-            return .init(direction: nil, batch: .init(articleIDs: []))
-        }
-
         let delta = sample.contentOffsetY - previous.contentOffsetY
         let direction: IOSArticleScrollDirection?
         if delta > 0 { direction = .forward }
@@ -430,7 +526,7 @@ final class IOSUIKitScrolloverGeometryTracker {
         var candidates: [Int64] = []
         if enabled, direction == .forward {
             for id in observedVisibleIDs where !emittedIDs.contains(id) {
-                guard let frame = sample.rowFrames[id] ?? previousFrames[id] else { continue }
+                guard let frame = sample.rowFrames[id] else { continue }
                 if previous.effectiveTop < frame.maxY,
                    sample.effectiveTop >= frame.maxY {
                     candidates.append(id)
@@ -455,7 +551,7 @@ final class IOSUIKitScrolloverGeometryTracker {
         } else {
             observedVisibleIDs.removeAll(keepingCapacity: true)
         }
-        pruneObservedIDs(current: sample.rowFrames, previous: previousFrames)
+        pruneObservedIDs(current: sample.rowFrames)
         storePrevious(sample)
 
         let ids = candidates
@@ -483,20 +579,9 @@ final class IOSUIKitScrolloverGeometryTracker {
         sample.effectiveBottom >= sample.contentHeight - Self.bottomTolerance
     }
 
-    private func hasMaterialLayoutChange(
-        from previous: [Int64: CGRect],
-        to sample: IOSUIKitScrolloverGeometrySample
-    ) -> Bool {
-        for (id, oldFrame) in previous {
-            guard let newFrame = sample.rowFrames[id], oldFrame != newFrame else { continue }
-            return true
-        }
-        return false
-    }
-
-    private func pruneObservedIDs(current: [Int64: CGRect], previous: [Int64: CGRect]) {
+    private func pruneObservedIDs(current: [Int64: CGRect]) {
         var staleIDs: [Int64]?
-        for id in observedVisibleIDs where current[id] == nil && previous[id] == nil {
+        for id in observedVisibleIDs where current[id] == nil {
             if staleIDs == nil { staleIDs = [id] }
             else { staleIDs!.append(id) }
         }
@@ -507,16 +592,10 @@ final class IOSUIKitScrolloverGeometryTracker {
 
     private func storePrevious(_ sample: IOSUIKitScrolloverGeometrySample) {
         previousGeometry = .init(sample)
-        previousFrames.removeAll(keepingCapacity: true)
-        previousFrames.reserveCapacity(min(sample.rowFrames.count, IOSUIKitResolvedScrolloverFrameStore.capacity))
-        for (id, frame) in sample.rowFrames.prefix(IOSUIKitResolvedScrolloverFrameStore.capacity) {
-            previousFrames[id] = frame
-        }
     }
 
     private func clearPreviousGeometry() {
         previousGeometry = nil
-        previousFrames.removeAll(keepingCapacity: true)
     }
 }
 
@@ -850,6 +929,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private let statusBarScrim = IOSUIKitTimelineTopScrimView()
     private var statusBarScrimHeight: NSLayoutConstraint!
     private let scrolloverGeometryTracker = IOSUIKitScrolloverGeometryTracker()
+    private var imageABObserver: NSObjectProtocol?
+    private var imageABRefreshPending = false
     private let preparedLayoutCoordinator = IOSUIKitArticleLayoutPreparationCoordinator()
     /// Exact heights for every loaded row. Estimation is disabled, so a missing
     /// entry would force Core Text onto the main actor during layout.
@@ -986,6 +1067,15 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             return cell
         }
         dataSource.defaultRowAnimation = .none
+        imageABObserver = NotificationCenter.default.addObserver(forName: IOSArticleImageABDiagnostic.changed, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            guard self.scrolloverPhase == .idle else {
+                self.imageABRefreshPending = true
+                return
+            }
+            self.invalidateScrolloverGeometry()
+            self.reconfigureVisibleCells(needsLayout: false)
+        }
     }
 
     override func viewDidLayoutSubviews() {
@@ -1282,9 +1372,20 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             previewLines: previewLines,
             metrics: metrics,
             displayScale: view.traitCollection.displayScale,
-            preparedLayoutMetrics: layoutMetrics
+            preparedLayoutMetrics: layoutMetrics,
+            diagnosticImage: imageABImage(for: item, metrics: metrics)
         )
         onRequestFeedIcon?(item.content.article.feedId, iconVariant, view.traitCollection.displayScale)
+    }
+
+    private func imageABImage(for item: IOSUIKitArticleTimelineItem, metrics: IOSUIKitArticleCell.Metrics) -> CGImage? {
+        guard mode == .visual,
+              metrics.layoutVariant(hasImage: true) == .visualPortrait,
+              item.content.imageURL != nil else { return nil }
+        let size = metrics.imageSize(hasImage: true)
+        let diagnostic = IOSArticleImageABDiagnostic.shared
+        diagnostic.prepare(ids: orderedIDs, size: size, scale: view.traitCollection.displayScale)
+        return diagnostic.image(for: item.article.id, size: size, scale: view.traitCollection.displayScale)
     }
 
     func applyPresentationBridgeState(_ bridge: IOSUIKitArticleTimelinePresentationBridge) {
@@ -1433,6 +1534,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         // Every phase boundary restarts the ballistic baseline.
         scrolloverGeometryTracker.setPhase(phase)
         onScrolloverPhase?(phase)
+        if phase == .idle, imageABRefreshPending {
+            imageABRefreshPending = false
+            invalidateScrolloverGeometry()
+            reconfigureVisibleCells(needsLayout: false)
+        }
     }
 
     private func invalidateScrolloverGeometry() {
@@ -1591,6 +1697,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             guard let id = dataSource.itemIdentifier(for: indexPath),
                   let item = renderedItem(for: id), let request = imageRequest(for: item)
             else { continue }
+            let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: tableView.bounds.width)
+            if imageABImage(for: item, metrics: metrics) != nil { continue }
             if let existing = prefetchTasks[id], existing.request == request { continue }
             prefetchTasks.removeValue(forKey: id)?.task.cancel()
             let task = Task { [weak self] in
@@ -1650,6 +1758,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     }
 
     deinit {
+        if let imageABObserver { NotificationCenter.default.removeObserver(imageABObserver) }
         preparedWindowTask?.cancel()
         for prefetch in prefetchTasks.values { prefetch.task.cancel() }
     }
@@ -2041,6 +2150,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var currentLayoutVariant: IOSUIKitArticleCellLayoutVariant?
     private var imageTask: Task<Void, Never>?
     private var representedImageRequest: ArticleImageRequest?
+    private var representedDiagnosticImage: CGImage?
     private var articleImagePipeline = ArticleImagePipeline.shared
     private var imageBindingGeneration: UInt64 = 0
     private var currentTitle = ""
@@ -2424,6 +2534,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         performanceMetrics?.recordReuse()
         invalidateImageBinding()
         representedImageRequest = nil
+        representedDiagnosticImage = nil
         representedArticleID = nil
         preparedLayoutMetrics = nil
         clearArticleImagePresentation()
@@ -2435,7 +2546,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
         previewLines: ArticlePreviewLines,
         metrics: Metrics,
         displayScale: CGFloat,
-        preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics
+        preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics,
+        diagnosticImage: CGImage? = nil
     ) {
         let articleChanged = representedArticleID != item.article.id
         representedArticleID = item.article.id
@@ -2477,7 +2589,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
             url: item.content.imageURL,
             targetSize: imageSize,
             displayScale: displayScale,
-            articleChanged: articleChanged
+            articleChanged: articleChanged,
+            diagnosticImage: diagnosticImage
         )
         contentView.setNeedsLayout()
     }
@@ -2652,8 +2765,19 @@ final class IOSUIKitArticleCell: UITableViewCell {
         url: URL?,
         targetSize: CGSize,
         displayScale: CGFloat,
-        articleChanged: Bool
+        articleChanged: Bool,
+        diagnosticImage: CGImage?
     ) {
+        if let diagnosticImage {
+            guard representedDiagnosticImage !== diagnosticImage else { return }
+            performanceMetrics?.recordImageBinding()
+            invalidateImageBinding()
+            representedImageRequest = nil
+            representedDiagnosticImage = diagnosticImage
+            presentArticleImage(diagnosticImage, displayScale: displayScale, animated: false)
+            return
+        }
+        representedDiagnosticImage = nil
         guard let url, targetSize.width > 0, targetSize.height > 0 else {
             guard representedImageRequest != nil else { return }
             performanceMetrics?.recordImageBinding()
@@ -2731,7 +2855,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         articleImageView.image = UIImage(cgImage: image, scale: displayScale, orientation: .up)
         // An alpha-free raster covering the whole slot lets Core Animation
         // skip blending it — the single largest composited area per cell.
-        articleImageView.isOpaque = representedImageRequest?.producesOpaqueRaster ?? false
+        articleImageView.isOpaque = representedDiagnosticImage != nil || representedImageRequest?.producesOpaqueRaster == true
         imagePlaceholder.isHidden = true
         setArticleImagePresentation(loaded: true)
     }

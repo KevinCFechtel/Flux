@@ -3,6 +3,7 @@ import SwiftUI
 struct DeveloperDiagnosticsView: View {
     @ObservedObject var bootstrapper: CoreBootstrapper
     @State private var legacyResult = LegacyStateDiscovery.probe()
+    @State private var imageMode = IOSArticleImageABDiagnostic.shared.mode
 
     var body: some View {
         NavigationStack {
@@ -18,6 +19,22 @@ struct DeveloperDiagnosticsView: View {
                         LabeledContent(localizedDiagnosticLabel(key), value: value)
                     }
                     Text("Read-only discovery; no legacy data is imported or modified.").font(.footnote).foregroundStyle(.secondary)
+                }
+                Section("Visual Portrait Image A/B") {
+                    Picker("Image source", selection: $imageMode) {
+                        ForEach(IOSArticleImageABDiagnostic.Mode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .onChange(of: imageMode) { _, mode in
+                        IOSArticleImageABDiagnostic.shared.select(mode)
+                    }
+                    Text(IOSArticleImageABDiagnostic.shared.preparationDescription)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text("Only Visual Portrait is supported. Other layouts keep normal images and are not a comparison.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 #if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
                 Section("Timeline Performance") {

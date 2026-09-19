@@ -1,6 +1,6 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: D1-D4 BASELINE COMPLETE / UIKIT TIMELINE AMENDMENT ACCEPTED, IMPLEMENTATION PENDING / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D4 BASELINE COMPLETE / UIKIT TIMELINE AMENDMENT ACCEPTED / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
 > replaces the existing Flutter iOS/iPadOS client with a native Swift client:
@@ -12,7 +12,7 @@
 > not be reintroduced without a product decision.
 >
 > On 2026-09-11, the owner approved replacing the Article Timeline with an owned
-> `UICollectionView` and native UIKit cells. Only the previous Timeline renderer,
+> `UITableView` and native UIKit cells. Only the previous Timeline renderer,
 > geometry integration, and associated mutation scheduling are reopened. The
 > remaining completed architecture and product rules stay frozen. The contract
 > amendment is complete; its implementation and device acceptance are not.
@@ -176,9 +176,8 @@ presentation state.
 ### iOS/iPadOS Article Timeline — UIKit
 
 The target Article Timeline is an owned UIKit view controller containing a
-`UICollectionView`, embedded through a narrow bridge in the SwiftUI app shell.
-Use stable Article IDs and a collection-view list configuration with native
-UIKit article cells. Compact and visual modes, portrait/landscape image slots,
+`UITableView`, embedded through a narrow bridge in the SwiftUI app shell.
+Use stable Article IDs and native UIKit article cells. Compact and visual modes, portrait/landscape image slots,
 preview-line choices, Dynamic Type, VoiceOver, and adaptive compact/regular
 presentation remain supported. Cell structure and content sizing are reused
 when their layout inputs have not changed.

@@ -142,7 +142,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertTrue(tracker.receive(uikitGeometry(y: 40, frames: frames), enabled: true).batch.articleIDs.isEmpty)
     }
 
-    func testUIKitPreviousFrameOwnershipRemainsBoundedAcrossLongFeeds() {
+    func testUIKitDoesNotCopyFrameStoreAcrossLongFeeds() {
         let tracker = IOSUIKitScrolloverGeometryTracker()
         tracker.updateSnapshot((1...8_000).map(Int64.init))
         tracker.setPhase(.interacting)
@@ -151,7 +151,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         })
         _ = tracker.receive(uikitGeometry(y: 0, frames: frames, contentHeight: 100_000), enabled: true)
 
-        XCTAssertEqual(tracker.retainedPreviousFrameCount, IOSUIKitResolvedScrolloverFrameStore.capacity)
+        XCTAssertEqual(tracker.retainedPreviousFrameCount, 0)
     }
 
     func testResolvedFrameSourceRetainsExitedCellForEitherCallbackOrder() {

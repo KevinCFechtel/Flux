@@ -1,8 +1,9 @@
 # iOS Timeline Performance Diagnostics — Experiment Record and Cleanup Contract
 
-Status: **cleanup complete — 18 September 2026.** Every temporary diagnostic listed
-below has been removed. This file remains as the historical experiment record and
-as the audit that closed it.
+Status: **cleanup complete — 18 September 2026; targeted A/B exception added 19
+September 2026.** Every historical temporary diagnostic listed below has been
+removed. The narrowly scoped Visual Portrait image-backing comparison described
+below is a deliberate Release/TestFlight Developer Diagnostics exception.
 
 Branch during investigation: `perf/ios-frame-headroom`
 
@@ -15,6 +16,27 @@ The experiment history is useful evidence and should remain documented. The diag
 An early screen-recording analysis treated pixel-identical repeated ReplayKit frames as dropped display frames. The original Flux recording produced a value around 5.6%, but an Apple Calendar control produced roughly 13% with the same method. Therefore the repeated-frame percentage and the earlier `<1%` target are **not valid application-performance KPIs** and must not be used as release gates.
 
 Physical-device subjective comparison and Instruments traces were subsequently used only as diagnostic evidence. Simulator Time Profiler data is useful for locating CPU work, but it is not proof of physical-device frame pacing.
+
+## Current targeted image-backing A/B exception
+
+Developer Diagnostics now exposes exactly three non-persistent modes, defaulting
+to **Normal** on every app launch: **Normal**, **A - Shared Raster**, and **B -
+Independent Rasters**. It is available in Release/TestFlight builds. It applies
+only to Visual Portrait image rows; other presentations remain normal and are
+explicitly not a comparison.
+
+Both arms use one deterministic, detailed sRGB opaque texture at identical pixel
+geometry. A reuses one `CGImage` for a geometry; B creates independent backing
+images with the same pixels and keeps the article-ID assignment stable. The
+prepared pool is capped at 64 MiB and reports its valid row range. Prepared rows
+bypass article-image requests, decode, cache and raster generation and suppress
+the normal fade. Rows outside the stated range are not an A/B result. Switching
+waits for idle, retains the scroll anchor, invalidates reuse-safe bindings, and
+does not alter article geometry or read state.
+
+This is not a revival of the removed frame recorder or prior multi-arm
+infrastructure. It exists solely to compare shared versus independent image
+backings and is not evidence for a diagnosed scrolling cause.
 
 ## Baseline hardening that is not diagnostic by itself
 
