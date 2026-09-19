@@ -1140,10 +1140,10 @@ final class NewsreaderPresentationTests: XCTestCase {
             rasterScale: 2
         )
 
-        XCTAssertEqual(targetSize, .init(width: 307, height: 172.6875))
+        XCTAssertEqual(targetSize, .init(width: 289, height: 162.5625))
         XCTAssertEqual(request.rasterScale, 2)
         XCTAssertEqual(request.maxPixelDimension, 640)
-        XCTAssertEqual(request.targetPixelSize, .init(width: 614, height: 345))
+        XCTAssertEqual(request.targetPixelSize, .init(width: 578, height: 325))
 
         let image = try ArticleImagePipeline.downsample(
             data: horizontalBandPNGData(width: 10, height: 30),
@@ -1154,7 +1154,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(image.bitmapInfo.contains(.byteOrder32Little))
         XCTAssertEqual(pixel(at: .zero, in: image).alpha, 0)
         XCTAssertEqual(pixel(at: .init(x: image.width / 2, y: image.height / 2), in: image), .init(blue: 0, green: 255, red: 0, alpha: 255))
-        XCTAssertEqual(ArticleImagePipeline.memoryCost(of: image), 614 * 345 * 4)
+        XCTAssertEqual(ArticleImagePipeline.memoryCost(of: image), 578 * 325 * 4)
     }
 
     func testBackdropRasterDropsTheAlphaChannelAndPaintsTheCornersWithTheBackdrop() throws {
@@ -2125,18 +2125,19 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(layoutMetrics(mode: .visual, width: 760, hasImage: true).variant, .visualLandscape)
     }
 
-    func testVisualPortraitUsesInsetHeroBetweenTitleAndMetadata() {
+    func testVisualPortraitUsesMetadataAboveInsetHero() {
         let metrics = layoutMetrics(mode: .visual, width: 390, hasImage: true)
         guard let image = metrics.imageFrame, let preview = metrics.previewFrame else {
             return XCTFail("Visual portrait should expose image and preview frames")
         }
 
         XCTAssertEqual(metrics.variant, .visualPortrait)
+        XCTAssertEqual(IOSUIKitArticleGeometry.visualHeroImageAllocation, 0.80)
         XCTAssertEqual(image.width, (metrics.contentFrame.width * IOSUIKitArticleGeometry.visualHeroImageAllocation).rounded(), accuracy: 0.5)
         XCTAssertEqual(image.midX, metrics.contentFrame.midX, accuracy: 0.5)
-        XCTAssertLessThan(metrics.titleFrame.maxY, image.minY)
-        XCTAssertLessThan(image.maxY, metrics.metadataFrame.minY)
-        XCTAssertLessThan(metrics.metadataFrame.maxY, metrics.dateFrame.minY)
+        XCTAssertLessThan(metrics.titleFrame.maxY, metrics.metadataFrame.minY)
+        XCTAssertLessThan(metrics.metadataFrame.maxY, image.minY)
+        XCTAssertLessThan(image.maxY, metrics.dateFrame.minY)
         XCTAssertLessThan(metrics.dateFrame.maxY, preview.minY)
     }
 
