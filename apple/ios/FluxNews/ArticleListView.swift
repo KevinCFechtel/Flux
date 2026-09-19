@@ -2744,7 +2744,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private static let articleImageFadeDuration: CFTimeInterval = 0.2
     private static let articleImageFadeKey = "flux.articleImageFade"
 
-    private func presentArticleImage(_ image: UIImage, animated: Bool) {
+    private func presentArticleImage(_ image: CGImage, animated: Bool) {
         if animated {
 #if DEBUG
             articleImageFadeCountForTesting &+= 1
@@ -2754,7 +2754,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
             fade.duration = Self.articleImageFadeDuration
             articleImageView.layer.add(fade, forKey: Self.articleImageFadeKey)
         }
-        articleImageView.image = image
+        // Use the physical display scale for UIImage semantics. Fixed
+        // image-view constraints remain authoritative for the slot.
+        articleImageView.image = UIImage(cgImage: image, scale: traitCollection.displayScale, orientation: .up)
         // An alpha-free raster covering the whole slot lets Core Animation
         // skip blending it — the single largest composited area per cell.
         articleImageView.isOpaque = representedImageRequest?.producesOpaqueRaster ?? false
