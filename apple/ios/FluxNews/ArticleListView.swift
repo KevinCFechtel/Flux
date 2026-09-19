@@ -2283,10 +2283,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
         // Standard Visual portrait:
         //
         //   Headline
-        //      ┌───────────────┐
-        //      │  HERO IMAGE   │   centered, 85% of content width
-        //      └───────────────┘
         //   ● icon  Feed name              ★ 💬
+        //      ┌───────────────┐
+        //      │  HERO IMAGE   │   centered, 80% of content width
+        //      └───────────────┘
         //   Date
         //   Preview …
         //
@@ -2301,15 +2301,15 @@ final class IOSUIKitArticleCell: UITableViewCell {
             titleLabel.topAnchor.constraint(equalTo: textContainer.topAnchor),
             titleLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
 
+            metadataRow.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+
             articleImageView.centerXAnchor.constraint(equalTo: margins.centerXAnchor),
-            articleImageView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.portraitSpacing),
+            articleImageView.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.portraitSpacing),
             portraitImageWidthConstraint,
             portraitImageAspectConstraint,
 
-            metadataRow.topAnchor.constraint(equalTo: articleImageView.bottomAnchor, constant: IOSUIKitArticleGeometry.portraitSpacing),
-            metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
-
-            dateLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            dateLabel.topAnchor.constraint(equalTo: articleImageView.bottomAnchor, constant: IOSUIKitArticleGeometry.portraitSpacing),
             dateLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
 
             previewTopConstraint,
