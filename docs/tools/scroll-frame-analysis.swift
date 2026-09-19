@@ -6,8 +6,14 @@
 //   /tmp/sfa docs/ScreenRecording1.MP4 --csv              # per-frame CSV (single file)
 //
 // Requires a recording whose frame rate matches the device refresh rate
-// (60 fps recording on a 60 Hz device). Under that condition a pixel-identical
-// consecutive frame is exactly one dropped display frame.
+// (60 fps recording on a 60 Hz device).
+//
+// WHAT THE OUTPUT IS NOT: a repeated frame is not reliably a dropped display
+// frame. A control run over Apple Calendar produced roughly 13 % with this
+// method while Flux produced about 5 %, so the absolute rate is dominated by
+// how ReplayKit captures, not by how the app scrolls. Read the numbers only as
+// a comparison between two arms recorded in the same sitting, and never as a
+// release gate or a quality figure.
 //
 // Method: each frame is reduced to a 640-entry luminance profile along the axis
 // the content scrolls on. The scroll offset between consecutive frames is

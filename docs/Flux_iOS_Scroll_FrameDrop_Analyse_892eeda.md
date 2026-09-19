@@ -1,5 +1,20 @@
 # Flux iOS Timeline — Frame-Drop-Analyse aus Bildschirmaufnahme
 
+> **Die Kernannahme dieses Dokuments ist widerlegt (19. September 2026).**
+> Ein pixelidentisch wiederholter Frame ist **nicht** zuverlässig ein
+> verworfener Display-Frame. Eine Kontrollmessung an **Apple Kalender ergab mit
+> derselben Methode rund 13 %**, Flux lag bei etwa 5 %. Die absolute Rate wird
+> also von der Aufnahmemechanik bestimmt, nicht vom Scrollverhalten der App.
+>
+> **Der unten genannte Zielwert „< 1 % bei Bewegung" ist damit kein gültiges
+> Freigabekriterium und darf nicht als Regressionsmetrik verwendet werden.**
+> Die Messwerte bleiben als Vergleichsgröße zwischen zwei Armen **einer**
+> Sitzung brauchbar, als Qualitätszahl nicht.
+>
+> Das Dokument bleibt als datierter Befund zu `892eeda` stehen. Die
+> abschließende Einordnung steht in
+> `IOS_TIMELINE_PERFORMANCE_DIAGNOSTIC_CLEANUP.md`.
+
 Geprüfter Stand: `892eeda` (`main`, 14. September 2026)
 Grundlage: `docs/ScreenRecording1.MP4` (45,81 s, 1180 × 2556, 60,09 fps, 2754 Frames) plus Quelltextprüfung.
 Gerät laut vorherigem Review: iPhone 15, iOS 26. **60 Hz ⇒ Frame-Budget 16,7 ms.**
@@ -44,7 +59,9 @@ swiftc -O docs/tools/scroll-frame-analysis.swift -o /tmp/sfa
 /tmp/sfa docs/ScreenRecording1.MP4 > frames.csv
 ```
 
-**Das ist die Regressionsmetrik für alle folgenden Änderungen.** Gleiche Liste, gleicher Wischablauf, Drop-Rate vorher/nachher. Zielwert: < 1 % bei Bewegung.
+~~**Das ist die Regressionsmetrik für alle folgenden Änderungen.** Gleiche Liste, gleicher Wischablauf, Drop-Rate vorher/nachher. Zielwert: < 1 % bei Bewegung.~~
+**Zurückgezogen** — siehe den Kasten am Dokumentanfang. Weder die Metrik noch
+der Zielwert sind gültig.
 
 ---
 
@@ -288,9 +305,20 @@ Ebenfalls offen und billig: `textStack` ist ein `UIStackView` mit vier arrangier
 
 ## 6. Empfohlene Reihenfolge
 
-**Schritt 0 — Messkette schließen (Stunden).**
+> **Nicht mehr befolgen.** Dieser Plan hängt am Bezugswert aus dem Kasten am
+> Dokumentanfang, der zurückgezogen ist. Er ist als Protokoll der damaligen
+> Planung erhalten.
+>
+> Tatsächlich passiert ist: `wholemodule` gilt im Release-Archiv,
+> `FLUX_PERFORMANCE_DIAGNOSTICS` wurde **nie** im Release gesetzt, und die
+> Diagnose-Oberfläche, die es freigeschaltet hätte, ist am 18. September
+> entfernt worden. Die Untersuchung endete mit einer Darstellungsentscheidung
+> statt mit einer Leistungskorrektur — siehe
+> `IOS_TIMELINE_PERFORMANCE_DIAGNOSTIC_CLEANUP.md`.
+
+~~**Schritt 0 — Messkette schließen (Stunden).**
 `SWIFT_COMPILATION_MODE = wholemodule` und `SWIFT_ACTIVE_COMPILATION_CONDITIONS = FLUX_PERFORMANCE_DIAGNOSTICS` in Release (Befund 6). Danach eine Referenzaufnahme mit demselben Wischablauf. Aktueller Bezugswert: **5,6 % verworfene Frames bei Bewegung, 1 Drop je 281 pt.**
-WMO ist gleichzeitig schon eine Optimierung, die Referenzaufnahme also nach dem Umstellen erstellen.
+WMO ist gleichzeitig schon eine Optimierung, die Referenzaufnahme also nach dem Umstellen erstellen.~~
 
 **Schritt 1 — Kompositionskosten senken (Befund 1, 2, 3).**
 Ein zusammenhängender Änderungssatz, weil alle drei denselben Bildpfad betreffen: kompositionsfertige Bitmaps in exakter Slotgröße, mit eingebackenen Ecken, im nativen BGRA-Format; danach die Offscreen-Auslöser aus den Views entfernen und die Komposition opak machen. Nach Abschnitt 2 ist das der Änderungssatz mit dem größten erwarteten Effekt auf die flache Drop-Rate. Messen.
