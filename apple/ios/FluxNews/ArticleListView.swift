@@ -857,6 +857,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private var rowHeightTask: Task<Void, Never>?
     private var rowHeightGeneration: UInt64 = 0
     private var pendingStructuralApply: Task<Void, Never>?
+    /// Monotonically identifies the newest structural snapshot publication.
+    /// Cancellation alone is not sufficient because the detached height
+    /// measurement may finish after cancellation; the generation check prevents
+    /// such stale work from publishing an older diffable snapshot afterwards.
+    private var structuralApplyGeneration: UInt64 = 0
     /// Held until the first layout pass resolves a geometry. Applying a snapshot
     /// before then publishes rows whose heights cannot exist yet, and the table
     /// answers by measuring every one of them synchronously while laying out.
@@ -1088,6 +1093,17 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     }
 
     private func applySnapshotWhenHeightsReady(_ snapshot: NSDiffableDataSourceSnapshot<Section, Int64>) {
+        // Every newer structural state supersedes every older pending
+        // publication, including when the new snapshot can be applied
+        // immediately. Without this, an older height-measurement task can finish
+        // later and republish identifiers that have already been removed from
+        // itemsByID, causing the diffable cell provider to return nil and UIKit
+        // to abort.
+        structuralApplyGeneration &+= 1
+        let generation = structuralApplyGeneration
+        pendingStructuralApply?.cancel()
+        pendingStructuralApply = nil
+
         guard let identity = geometryIdentity else {
             deferredSnapshot = snapshot
             return
@@ -1098,10 +1114,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             return
         }
         let inputs = rowHeightInputs(for: missing)
-        pendingStructuralApply?.cancel()
         pendingStructuralApply = Task { @MainActor [weak self] in
             let measured = await IOSUIKitArticleRowHeightMeasurement.heights(for: inputs)
-            guard let self, !Task.isCancelled else { return }
+            guard let self,
+                  !Task.isCancelled,
+                  self.structuralApplyGeneration == generation
+            else { return }
             self.pendingStructuralApply = nil
             self.rowHeights.store(measured, for: identity)
             self.dataSource.apply(snapshot, animatingDifferences: false, completion: nil)
