@@ -1,6 +1,6 @@
 import Foundation
 import ImageIO
-import UIKit
+import SwiftUI
 
 
 /// Opaque colour the rounded corner cut-outs are filled with.
@@ -43,9 +43,6 @@ struct ArticleImageRequest: Hashable, Sendable {
     let maxPixelDimension: Int
     let targetPixelSize: CGSize
     let cornerRadiusPixels: CGFloat
-    /// The logical UIKit scale. This can differ from `rasterScale` during a
-    /// raster-resolution diagnostic while the image slot remains display-sized.
-    let displayScale: CGFloat
     let rasterScale: CGFloat
     /// Core Animation colour-matches layer contents whose colour space differs
     /// from the display's — on the main thread, during the commit, proportional
@@ -66,8 +63,7 @@ struct ArticleImageRequest: Hashable, Sendable {
         usesDisplayP3: Bool = false,
         backdrop: ArticleImageBackdrop? = nil
     ) {
-        let logicalDisplayScale = max(displayScale, 1)
-        let scale = max(rasterScale ?? logicalDisplayScale, 1)
+        let scale = max(rasterScale ?? displayScale, 1)
         let pixels = max(targetSize.width, targetSize.height) * scale
         // Bucketing upward prevents tiny layout changes from creating duplicate decodes.
         maxPixelDimension = max(64, Int((ceil(pixels) / 64).rounded(.up)) * 64)
@@ -76,7 +72,6 @@ struct ArticleImageRequest: Hashable, Sendable {
             height: max(1, (targetSize.height * scale).rounded())
         )
         cornerRadiusPixels = max(0, (cornerRadius * scale).rounded())
-        self.displayScale = logicalDisplayScale
         self.rasterScale = scale
         self.usesDisplayP3 = usesDisplayP3
         self.backdrop = backdrop
@@ -94,9 +89,9 @@ struct ArticleImageRequest: Hashable, Sendable {
 }
 
 private final class ArticleImageCacheEntry: NSObject {
-    let image: UIImage
+    let image: CGImage
 
-    init(image: UIImage) {
+    init(image: CGImage) {
         self.image = image
     }
 }
@@ -130,11 +125,11 @@ private final class ArticleImageCache: NSObject, NSCacheDelegate, @unchecked Sen
         storage.delegate = self
     }
 
-    func image(for key: NSString) -> UIImage? {
+    func image(for key: NSString) -> CGImage? {
         storage.object(forKey: key)?.image
     }
 
-    func lookup(_ key: NSString, source: ArticleImageCacheLookupSource) -> UIImage? {
+    func lookup(_ key: NSString, source: ArticleImageCacheLookupSource) -> CGImage? {
         let image = image(for: key)
         lock.lock()
         switch (source, image == nil) {
@@ -147,7 +142,7 @@ private final class ArticleImageCache: NSObject, NSCacheDelegate, @unchecked Sen
         return image
     }
 
-    func insert(_ image: UIImage, for key: NSString) {
+    func insert(_ image: CGImage, for key: NSString) {
         lock.lock()
         insertions += 1
         lock.unlock()
@@ -206,8 +201,8 @@ actor ArticleImagePipeline {
         enum State { case queued, active, retiring }
 
         let generation: UUID
-        var waiters: [UUID: CheckedContinuation<UIImage, Error>] = [:]
-        var operation: Task<UIImage, Error>?
+        var waiters: [UUID: CheckedContinuation<CGImage, Error>] = [:]
+        var operation: Task<CGImage, Error>?
         var state: State = .queued
         var demand: Demand
     }
@@ -247,20 +242,15 @@ actor ArticleImagePipeline {
         cache.storage.totalCostLimit = max(1, memoryCacheCostLimit)
     }
 
-    nonisolated func cachedImage(for request: ArticleImageRequest) -> UIImage? {
+    nonisolated func cachedImage(for request: ArticleImageRequest) -> CGImage? {
         cache.lookup(request.cacheKey, source: .visible)
-    }
-
-    nonisolated static func memoryCost(of image: UIImage) -> Int {
-        guard let raster = image.cgImage else { return 0 }
-        return memoryCost(of: raster)
     }
 
     nonisolated static func memoryCost(of image: CGImage) -> Int {
         image.width * image.height * 4
     }
 
-    func image(for request: ArticleImageRequest, demand: Demand = .visible, cacheWasChecked: Bool = false) async throws -> UIImage {
+    func image(for request: ArticleImageRequest, demand: Demand = .visible, cacheWasChecked: Bool = false) async throws -> CGImage {
         let cacheKey = request.cacheKey
         if let image = cacheWasChecked ? cache.image(for: cacheKey) : cache.lookup(cacheKey, source: demand.cacheLookupSource) {
             return image
@@ -276,7 +266,7 @@ actor ArticleImagePipeline {
         }
     }
 
-    func prefetch(_ request: ArticleImageRequest) async throws -> UIImage {
+    func prefetch(_ request: ArticleImageRequest) async throws -> CGImage {
         try await image(for: request, demand: .prefetch)
     }
 
@@ -319,7 +309,7 @@ actor ArticleImagePipeline {
         consumerID: UUID,
         to request: ArticleImageRequest,
         demand: Demand,
-        continuation: CheckedContinuation<UIImage, Error>
+        continuation: CheckedContinuation<CGImage, Error>
     ) {
         guard !Task.isCancelled else {
             continuation.resume(throwing: CancellationError())
@@ -417,11 +407,7 @@ actor ArticleImagePipeline {
             let priority: TaskPriority = job.demand == .visible ? .userInitiated : .utility
             let operation = Task.detached(priority: priority) {
                 let data = try await loader(queued.request.url)
-                let raster = try Self.downsample(data: data, request: queued.request)
-                let image = UIImage(cgImage: raster, scale: queued.request.displayScale, orientation: .up)
-                // This bounded detached operation is the only display-preparation
-                // stage, so cells never synchronously prepare an arriving image.
-                return image.preparingForDisplay() ?? image
+                return try Self.downsample(data: data, request: queued.request)
             }
             job.operation = operation
             job.state = .active
@@ -431,7 +417,7 @@ actor ArticleImagePipeline {
             maximumActiveOperations = max(maximumActiveOperations, activeOperationCount)
             if job.demand == .visible { visibleStarts += 1 } else { prefetchStarts += 1 }
             Task { [weak self] in
-                let result: Result<UIImage, Error>
+                let result: Result<CGImage, Error>
                 do { result = .success(try await operation.value) }
                 catch { result = .failure(error) }
                 await self?.complete(queued, result: result)
@@ -445,7 +431,7 @@ actor ArticleImagePipeline {
         return nil
     }
 
-    private func complete(_ queued: QueuedJob, result: Result<UIImage, Error>) {
+    private func complete(_ queued: QueuedJob, result: Result<CGImage, Error>) {
         guard let job = removeJob(for: queued.request, generation: queued.generation) else { return }
         activeOperationCount -= 1
         completedOperations += 1
@@ -614,7 +600,7 @@ private extension ArticleImagePipeline.Demand {
 
 private extension ArticleImageRequest {
     var cacheKey: NSString {
-        "\(url.absoluteString)|\(maxPixelDimension)|\(Int(targetPixelSize.width))x\(Int(targetPixelSize.height))|\(Int(cornerRadiusPixels))|displayScale=\(Int((displayScale * 100).rounded()))|scale=\(Int((rasterScale * 100).rounded()))|p3=\(usesDisplayP3 ? 1 : 0)|bg=\(backdropKeyComponent)" as NSString
+        "\(url.absoluteString)|\(maxPixelDimension)|\(Int(targetPixelSize.width))x\(Int(targetPixelSize.height))|\(Int(cornerRadiusPixels))|scale=\(Int((rasterScale * 100).rounded()))|p3=\(usesDisplayP3 ? 1 : 0)|bg=\(backdropKeyComponent)" as NSString
     }
 }
 
