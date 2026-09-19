@@ -1188,7 +1188,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
 
         let image = try await pipeline.prefetch(twoX)
-        XCTAssertEqual(CGSize(width: image.width, height: image.height), twoX.targetPixelSize)
+        XCTAssertEqual(CGSize(width: image.cgImage?.width ?? 0, height: image.cgImage?.height ?? 0), twoX.targetPixelSize)
         XCTAssertNotEqual(twoX, threeX)
         XCTAssertNil(pipeline.cachedImage(for: threeX))
         XCTAssertNotNil(pipeline.cachedImage(for: twoX))
@@ -1217,8 +1217,12 @@ final class NewsreaderPresentationTests: XCTestCase {
         let cached = try await pipeline.prefetch(request)
         let cell = configuredArticleImageTestCell(item: item, pipeline: pipeline, rasterScale: 2)
 
-        XCTAssertTrue(cell.articleImageRasterForTesting === cached)
+        XCTAssertTrue(cell.articleImageForTesting === cached)
         XCTAssertEqual(cell.articleImageForTesting?.scale, 3)
+        let raster = try XCTUnwrap(cached.cgImage)
+        XCTAssertEqual(raster.width, Int(request.targetPixelSize.width))
+        XCTAssertEqual(raster.height, Int(request.targetPixelSize.height))
+        XCTAssertEqual(ArticleImagePipeline.memoryCost(of: cached), raster.width * raster.height * 4)
         let presentation = cell.articleImagePresentationForTesting
         XCTAssertTrue(presentation.placeholderHidden)
         XCTAssertEqual(presentation.contentMode, .scaleAspectFill)
@@ -1551,7 +1555,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         let image = try await pipeline.image(for: large)
         let largerCalls = await counter.callCount()
         XCTAssertEqual(largerCalls, 2)
-        XCTAssertGreaterThan(image.width, small.maxPixelDimension)
+        XCTAssertGreaterThan(image.cgImage?.width ?? 0, small.maxPixelDimension)
     }
 
     func testArticleImagePipelinePrefetchMakesTheSameCanonicalVisibleRequestAnImmediateMemoryHit() async throws {

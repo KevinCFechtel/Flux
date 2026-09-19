@@ -2682,7 +2682,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         representedImageRequest = request
         if let cachedImage = articleImagePipeline.cachedImage(for: request) {
             // Already available before the cell is displayed: nothing to fade.
-            presentArticleImage(cachedImage, displayScale: displayScale, animated: false)
+            presentArticleImage(cachedImage, animated: false)
             return
         }
 
@@ -2700,7 +2700,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
                 // The cell is already on screen showing its placeholder. Swapping
                 // the pixels in one frame is a content jump, and at a steady 60 fps
                 // that reads as a stutter even though no frame was late.
-                self.presentArticleImage(loadedImage, displayScale: displayScale, animated: true)
+                self.presentArticleImage(loadedImage, animated: true)
             } catch {
                 guard !Task.isCancelled,
                       let self,
@@ -2716,7 +2716,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private static let articleImageFadeDuration: CFTimeInterval = 0.2
     private static let articleImageFadeKey = "flux.articleImageFade"
 
-    private func presentArticleImage(_ image: CGImage, displayScale: CGFloat, animated: Bool) {
+    private func presentArticleImage(_ image: UIImage, animated: Bool) {
         if animated {
 #if DEBUG
             articleImageFadeCountForTesting &+= 1
@@ -2726,9 +2726,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             fade.duration = Self.articleImageFadeDuration
             articleImageView.layer.add(fade, forKey: Self.articleImageFadeKey)
         }
-        // Use the physical display scale for UIImage semantics. Fixed
-        // image-view constraints remain authoritative for the slot.
-        articleImageView.image = UIImage(cgImage: image, scale: displayScale, orientation: .up)
+        articleImageView.image = image
         // An alpha-free raster covering the whole slot lets Core Animation
         // skip blending it — the single largest composited area per cell.
         articleImageView.isOpaque = representedImageRequest?.producesOpaqueRaster ?? false
