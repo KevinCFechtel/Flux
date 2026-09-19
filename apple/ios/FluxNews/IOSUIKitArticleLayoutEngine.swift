@@ -396,6 +396,10 @@ struct IOSUIKitArticleGeometry: Equatable {
     static let landscapeVerticalPadding: CGFloat = 13
     static let textSpacing: CGFloat = 7
     static let portraitSpacing: CGFloat = 12
+    // Standard Visual portrait uses an inset hero image below the title. Keeping
+    // the allocation here makes the renderer and deterministic height engine
+    // share exactly the same geometry contract.
+    static let visualHeroImageAllocation: CGFloat = 0.85
     // "Visual compact": a thumbnail beside the title, with the metadata bar above
     // and — on a narrow container — the preview underneath.
     static let sideTitleImageAllocation: CGFloat = 0.32
@@ -457,9 +461,10 @@ struct IOSUIKitArticleGeometry: Equatable {
             let width = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
             return .init(width: width, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: width))
         }
-        // Match the NSLayoutConstraint multiplier used by the cell, rather than
-        // the image-request helper's independently rounded target height.
-        return .init(width: availableWidth, height: availableWidth * (1 / ArticlePresentationLayout.portraitImageAspectRatio))
+        // Standard Visual portrait: centered inset hero image. Keep the 16:9
+        // aspect contract while shortening the long horizontal moving edge.
+        let width = (availableWidth * Self.visualHeroImageAllocation).rounded()
+        return .init(width: width, height: width * (1 / ArticlePresentationLayout.portraitImageAspectRatio))
     }
 
     func metadataLayout(width: CGFloat, hasComments: Bool, height: CGFloat, accessories: IOSUIKitArticleAccessoryMetrics) -> MetadataLayout {
@@ -558,30 +563,55 @@ enum IOSUIKitArticleLayoutEngine {
         }
         let contentHeight: CGFloat
         switch variant {
-        case .visualPortrait: contentHeight = imageSize.height + IOSUIKitArticleGeometry.portraitSpacing + textBlockHeight
+        case .visualPortrait:
+            // Title -> inset hero image -> metadata -> date -> preview.
+            contentHeight = titleHeight
+                + IOSUIKitArticleGeometry.portraitSpacing + imageSize.height
+                + IOSUIKitArticleGeometry.portraitSpacing + metadataHeight
+                + IOSUIKitArticleGeometry.textSpacing + dateHeight
+                + (previewHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
         case .visualLandscape: contentHeight = max(imageSize.height, textBlockHeight)
         default: contentHeight = textBlockHeight
         }
         let totalHeight = ceil(contentHeight + geometry.verticalPadding * 2)
         let contentFrame = CGRect(x: geometry.horizontalInset, y: geometry.verticalPadding, width: geometry.availableWidth, height: contentHeight)
-        let logicalImageX = isSideTitleVariant
-            ? geometry.horizontalInset + geometry.availableWidth - imageSize.width
-            : geometry.horizontalInset
-        // In the side-title variant the image starts below the metadata bar.
-        let logicalImageY = isSideTitleVariant
-            ? geometry.verticalPadding + metadataHeight + IOSUIKitArticleGeometry.textSpacing
-            : geometry.verticalPadding
+        let logicalImageX: CGFloat
+        if isSideTitleVariant {
+            logicalImageX = geometry.horizontalInset + geometry.availableWidth - imageSize.width
+        } else if variant == .visualPortrait {
+            logicalImageX = geometry.horizontalInset + (geometry.availableWidth - imageSize.width) / 2
+        } else {
+            logicalImageX = geometry.horizontalInset
+        }
+        // Side-title starts below metadata. Standard Visual portrait puts the
+        // inset hero image directly below the headline.
+        let logicalImageY: CGFloat
+        if isSideTitleVariant {
+            logicalImageY = geometry.verticalPadding + metadataHeight + IOSUIKitArticleGeometry.textSpacing
+        } else if variant == .visualPortrait {
+            logicalImageY = geometry.verticalPadding + titleHeight + IOSUIKitArticleGeometry.portraitSpacing
+        } else {
+            logicalImageY = geometry.verticalPadding
+        }
         let imageFrame: CGRect? = imageSize == .zero ? nil : CGRect(x: physicalX(logicalX: logicalImageX, width: imageSize.width, in: input.containerWidth, direction: input.layoutDirection), y: logicalImageY, width: imageSize.width, height: imageSize.height)
         let logicalTextX = variant == .visualLandscape ? geometry.horizontalInset + imageSize.width + IOSUIKitArticleGeometry.landscapeSpacing : geometry.horizontalInset
-        let textOrigin = CGPoint(x: physicalX(logicalX: logicalTextX, width: textWidth, in: input.containerWidth, direction: input.layoutDirection), y: variant == .visualPortrait ? geometry.verticalPadding + imageSize.height + IOSUIKitArticleGeometry.portraitSpacing : geometry.verticalPadding)
-        // Side-title order is metadata, then title and date beside the image.
-        // Every other variant keeps title, metadata, date.
+        let textOrigin = CGPoint(x: physicalX(logicalX: logicalTextX, width: textWidth, in: input.containerWidth, direction: input.layoutDirection), y: geometry.verticalPadding)
+        // Side-title order is metadata then title/date. Standard Visual portrait
+        // is title -> image -> metadata -> date -> preview. All other variants
+        // retain their existing ordering.
         let isSideTitle = metadataLeads
         let titleTop = isSideTitle
             ? textOrigin.y + metadataHeight + IOSUIKitArticleGeometry.textSpacing
             : textOrigin.y
         let titleFrame = CGRect(x: textOrigin.x, y: titleTop, width: titleWidth, height: titleHeight)
-        let metadataTop = isSideTitle ? textOrigin.y : titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing
+        let metadataTop: CGFloat
+        if isSideTitle {
+            metadataTop = textOrigin.y
+        } else if variant == .visualPortrait {
+            metadataTop = logicalImageY + imageSize.height + IOSUIKitArticleGeometry.portraitSpacing
+        } else {
+            metadataTop = titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing
+        }
         let metadataFrame = CGRect(x: textOrigin.x, y: metadataTop, width: infoWidth, height: metadataHeight)
         let metadataLayout = geometry.metadataLayout(width: infoWidth, hasComments: input.hasComments, height: metadataHeight, accessories: accessories)
         func metadataX(_ logicalX: CGFloat, width: CGFloat) -> CGFloat { input.layoutDirection == .rightToLeft ? metadataFrame.maxX - logicalX - width : metadataFrame.minX + logicalX }
