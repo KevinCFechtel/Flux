@@ -449,11 +449,6 @@ struct ArticleRowContent: Equatable, Sendable {
     private var scrolloverUndoLastSuccessAt: TimeInterval?
     private var recentSuccessfulScrolloverReads: [(id: Int64, time: TimeInterval)] = []
     private var scrolloverCountsPending = false
-    // A scrollover count response is presentation feedback, not persistence. Keep
-    // only the newest response while UIKit is moving; an older response must not
-    // overwrite a later count/navigation request after the next gesture begins.
-    private var scrolloverCountPublicationRevision: UInt64 = 0
-    private var pendingScrolloverCounts: (revision: UInt64, selectionRequest: IOSNewsreaderReadRequest?, selection: UInt64?, navigationRequest: IOSNewsreaderReadRequest?, navigation: NavigationProjection?)?
     private var pendingScrolloverIDs: [Int64] = []
     private var pendingScrolloverIDSet = Set<Int64>()
     // These revisions protect only rows whose deferred read presentation was
@@ -887,7 +882,6 @@ struct ArticleRowContent: Equatable, Sendable {
             publishPendingScrolloverReadPresentation()
             drainScrolloverMutations()
             flushPendingSuccessfulScrolloverUndoPresentation()
-            publishPendingScrolloverCountsIfCurrent()
             reloadScrolloverCountsIfReady()
         }
     }
@@ -984,20 +978,7 @@ struct ArticleRowContent: Equatable, Sendable {
               pendingScrolloverIDs.isEmpty,
               scrolloverCountsPending else { return }
         scrolloverCountsPending = false
-        reloadCounts(scrolloverTriggered: true)
-    }
-
-    private func publishPendingScrolloverCountsIfCurrent() {
-        guard scrolloverPresentationPhase == .idle,
-              let pending = pendingScrolloverCounts else { return }
-        pendingScrolloverCounts = nil
-        guard pending.revision == scrolloverCountPublicationRevision else { return }
-        if let selection = pending.selection,
-           let request = pending.selectionRequest,
-           readLifecycle.isCurrentSelectionCount(request) { selectionTotal = selection }
-        if let navigation = pending.navigation,
-           let request = pending.navigationRequest,
-           readLifecycle.isCurrentNavigation(request) { publishNavigationProjection(navigation) }
+        reloadCounts()
     }
 
     private func recordSuccessfulScrolloverUndo(_ ids: [Int64], now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
@@ -1153,8 +1134,6 @@ struct ArticleRowContent: Equatable, Sendable {
         // The structural snapshot change independently clears tracker emissions.
         clearScrolloverUndoGroup(rearmTracker: false)
         scrolloverCountsPending = false
-        pendingScrolloverCounts = nil
-        scrolloverCountPublicationRevision &+= 1
         publishedScrolloverPresentationRevisions = [:]
         pendingScrolloverReadPresentationIDs = []
         hasForwardPendingScrolloverPresentation = false
@@ -1590,10 +1569,8 @@ struct ArticleRowContent: Equatable, Sendable {
     @MainActor
     var scrolloverSessionGenerationForTesting: UInt64 { scrolloverSessionGeneration }
 
-    private func reloadCounts(scrolloverTriggered: Bool = false) {
+    private func reloadCounts() {
         guard let core else { return }
-        scrolloverCountPublicationRevision &+= 1
-        let publicationRevision = scrolloverCountPublicationRevision
         let navigationRequest = readLifecycle.beginNavigation()
         let request = readLifecycle.beginSelectionCount()
         let selectionQuery = query()
@@ -1607,17 +1584,9 @@ struct ArticleRowContent: Equatable, Sendable {
             guard let self else { return }
             switch result {
             case let .success(counts):
-                let selection = self.readLifecycle.isCurrentSelectionCount(request) ? counts.0 : nil
-                let navigation = self.readLifecycle.isCurrentNavigation(navigationRequest) ? counts.1 : nil
-                guard selection != nil || navigation != nil else { return }
-                if scrolloverTriggered, self.scrolloverPresentationPhase.isScrolling {
-                    // One bounded slot is enough: the request lifecycle and this
-                    // revision make a late result incapable of superseding newer UI.
-                    guard self.pendingScrolloverCounts?.revision ?? 0 <= publicationRevision else { return }
-                    self.pendingScrolloverCounts = (publicationRevision, selection == nil ? nil : request, selection, navigation == nil ? nil : navigationRequest, navigation)
-                } else if publicationRevision == self.scrolloverCountPublicationRevision {
-                    if let selection { self.selectionTotal = selection }
-                    if let navigation { self.publishNavigationProjection(navigation) }
+                if readLifecycle.isCurrentSelectionCount(request) { selectionTotal = counts.0 }
+                if readLifecycle.isCurrentNavigation(navigationRequest) {
+                    publishNavigationProjection(counts.1)
                 }
                 if readLifecycle.ownsError(request) { errorMessage = nil }
             case let .failure(error):
@@ -1627,17 +1596,12 @@ struct ArticleRowContent: Equatable, Sendable {
     }
 
     private func publishNavigationProjection(_ projection: NavigationProjection) {
-        let catalogChanged = catalog != projection.catalog
-        let newCategoryCounts = Dictionary(uniqueKeysWithValues: projection.categoryCounts.map { ($0.id, $0.count) })
-        let newFeedCounts = Dictionary(uniqueKeysWithValues: projection.feedCounts.map { ($0.id, $0.count) })
-        let countsChanged = unreadTotal != projection.unreadTotal || starredTotal != projection.starredTotal || categoryCounts != newCategoryCounts || feedCounts != newFeedCounts
-        guard catalogChanged || countsChanged else { return }
         catalog = projection.catalog
         unreadTotal = projection.unreadTotal
         starredTotal = projection.starredTotal
-        categoryCounts = newCategoryCounts
-        feedCounts = newFeedCounts
-        if catalogChanged { invalidateFeedIconAvailabilityAfterNavigationRefresh() }
+        categoryCounts = Dictionary(uniqueKeysWithValues: projection.categoryCounts.map { ($0.id, $0.count) })
+        feedCounts = Dictionary(uniqueKeysWithValues: projection.feedCounts.map { ($0.id, $0.count) })
+        invalidateFeedIconAvailabilityAfterNavigationRefresh()
         pending.removeAbsentFeeds(Set(projection.catalog.feeds.map(\.id)))
         publishPending()
     }

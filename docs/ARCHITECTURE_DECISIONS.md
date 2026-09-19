@@ -186,9 +186,9 @@ predictable layout, and direct control of updates take priority over preserving
 the current SwiftUI implementation or minimizing the replacement effort.
 
 The selected target is an owned UIKit view controller containing a
-`UITableView`, embedded in the SwiftUI shell. Article cells use native UIKit
-views and reusable cell instances. Use native table swipe actions and reusable
-cell content.
+`UICollectionView`, embedded in the SwiftUI shell. Article cells use native
+UIKit views and reusable cell instances. Use a collection-view list
+configuration to retain system swipe actions and customizable cell content.
 The production Timeline must not use SwiftUI `List`, `ScrollView`/`LazyVStack`,
 or SwiftUI-hosted article cells through `UIHostingConfiguration` or per-cell
 `UIHostingController`. SwiftUI remains appropriate for navigation, Settings,

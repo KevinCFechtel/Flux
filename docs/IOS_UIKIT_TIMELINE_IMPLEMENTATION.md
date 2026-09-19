@@ -2,7 +2,7 @@
 
 > **Decision accepted: 2026-09-11. U2 Native Timeline: COMPLETE. U3-U5: PENDING.**
 >
-> Build the Article Timeline using an owned `UITableView` and native UIKit
+> Build the Article Timeline using an owned `UICollectionView` and native UIKit
 > article cells. This is the selected architecture, not a proposal to benchmark
 > against the existing SwiftUI `List`. This file explains the amended contracts
 > and provides an executable work sequence for a subsequent coding agent.
@@ -46,7 +46,7 @@ the existing Flutter production user's data.
 
 | Responsibility | Required implementation |
 |---|---|
-| Timeline ownership | One UIKit view controller owning one `UITableView`, embedded in the SwiftUI shell through a narrow representable bridge. |
+| Timeline ownership | One UIKit view controller owning one `UICollectionView`, embedded in the SwiftUI shell through a narrow representable bridge. |
 | Cell rendering | Native UIKit labels, image views, and status/accessibility presentation in reusable cells. Use a list configuration and list cells/custom native content to preserve system swipe actions. |
 | Structural data | Stable Article IDs in a diffable data source, with presentation content keyed by ID. Apply structural snapshots only for actual snapshot adoption/reset/membership/order changes. |
 | Read/starred state | One coherent native presentation overlay over the Core snapshot, keyed by ID. Update only relevant status and actions on a matching cell. |
