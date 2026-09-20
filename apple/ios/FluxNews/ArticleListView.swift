@@ -2215,6 +2215,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var portraitPublishedAgeHeightConstraint: NSLayoutConstraint!
     private var portraitReadingTimeHeightConstraint: NSLayoutConstraint!
     private var portraitReadingGroupSpacingConstraint: NSLayoutConstraint!
+    private var portraitReadingLabelSpacingConstraint: NSLayoutConstraint!
     private var portraitAccessoryRailWidthConstraint: NSLayoutConstraint!
     private var portraitAccessoryRailHeightConstraint: NSLayoutConstraint!
     private var portraitPreviewBelowImageConstraint: NSLayoutConstraint!
@@ -2412,6 +2413,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
             equalTo: portraitPublishedAgeLabel.bottomAnchor,
             constant: IOSUIKitArticleGeometry.portraitInfoGroupSpacing
         )
+        portraitReadingLabelSpacingConstraint = portraitReadingTimeLabel.topAnchor.constraint(
+            equalTo: portraitReadingTimeIconView.bottomAnchor,
+            constant: IOSUIKitArticleGeometry.portraitInfoLabelSpacing
+        )
         portraitRailUnreadWidth = portraitUnreadIndicator.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.unreadSize)
         portraitRailUnreadHeight = portraitUnreadIndicator.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.unreadSize)
         portraitRailStarWidth = portraitStarImageView.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize)
@@ -2471,10 +2476,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             portraitRailReadingIconWidth,
             portraitRailReadingIconHeight,
 
-            portraitReadingTimeLabel.topAnchor.constraint(
-                equalTo: portraitReadingTimeIconView.bottomAnchor,
-                constant: IOSUIKitArticleGeometry.portraitInfoLabelSpacing
-            ),
+            portraitReadingLabelSpacingConstraint,
             portraitReadingTimeLabel.leadingAnchor.constraint(equalTo: portraitAccessoryRail.leadingAnchor),
             portraitReadingTimeLabel.trailingAnchor.constraint(equalTo: portraitAccessoryRail.trailingAnchor),
             portraitReadingTimeHeightConstraint,
@@ -2962,9 +2964,13 @@ final class IOSUIKitArticleCell: UITableViewCell {
         portraitRailReadingIconWidth.constant = readingIcon?.width ?? 0
         portraitRailReadingIconHeight.constant = readingIcon?.height ?? 0
         portraitReadingTimeHeightConstraint.constant = layout.readingTimeFrame?.height ?? 0
-        portraitReadingGroupSpacingConstraint.constant = layout.readingTimeFrame == nil
-            ? 0
-            : IOSUIKitArticleGeometry.portraitInfoGroupSpacing
+        let hasReadingTimeFrame = layout.readingTimeFrame != nil
+        portraitReadingGroupSpacingConstraint.constant = hasReadingTimeFrame
+            ? IOSUIKitArticleGeometry.portraitInfoGroupSpacing
+            : 0
+        portraitReadingLabelSpacingConstraint.constant = hasReadingTimeFrame
+            ? IOSUIKitArticleGeometry.portraitInfoLabelSpacing
+            : 0
     }
 
     private func applyLayout(metrics: Metrics, variant: IOSUIKitArticleCellLayoutVariant) {
