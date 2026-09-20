@@ -120,6 +120,15 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(presentation.usesPersistentSplitNavigation)
     }
 
+    func testNavigationExpansionStateAllowsExplicitCollapseOfSelectedCategory() {
+        var expansion = NewsNavigationExpansionState()
+        expansion.setExpanded(true, categoryID: 7)
+        XCTAssertTrue(expansion.isExpanded(7))
+
+        expansion.setExpanded(false, categoryID: 7)
+        XCTAssertFalse(expansion.isExpanded(7))
+    }
+
     @MainActor
     func testAdaptivePresentationDoesNotChangeSemanticScrollResetRevision() {
         let store = NewsreaderStore(defaults: UserDefaults())
