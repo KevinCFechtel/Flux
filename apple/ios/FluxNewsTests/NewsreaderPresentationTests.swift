@@ -442,7 +442,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     @MainActor
     func testRowReadStateDoesNotInvalidateTheStructuralArticleSnapshot() {
         let store = NewsreaderStore(defaults: UserDefaults())
-        store.setArticlesForTesting([.init(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "", imageUrl: nil)])
+        store.setArticlesForTesting([.init(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, readingTimeMinutes: 0, preview: "", imageUrl: nil)])
         let articleListInvalidated = ObservationFlag()
 
         withObservationTracking {
@@ -461,8 +461,8 @@ final class NewsreaderPresentationTests: XCTestCase {
     @MainActor
     func testTimelinePageAppendPreservesExistingRowStateAndAddsOnlyNewIDs() {
         let store = NewsreaderStore(defaults: UserDefaults())
-        let first = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "First", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "", imageUrl: nil)
-        let second = ArticleSummary(id: 2, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Second", url: "https://example.com/2", commentsUrl: "", publishedAt: "2026-01-02T00:00:00Z", isRead: false, isStarred: false, preview: "", imageUrl: nil)
+        let first = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "First", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, readingTimeMinutes: 0, preview: "", imageUrl: nil)
+        let second = ArticleSummary(id: 2, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Second", url: "https://example.com/2", commentsUrl: "", publishedAt: "2026-01-02T00:00:00Z", isRead: false, isStarred: false, readingTimeMinutes: 0, preview: "", imageUrl: nil)
         store.setArticlesForTesting([first])
         store.applyReadMutationForTesting([1], read: true)
         let revision = store.rowPresentationStateForTesting(1)!.mutationRevision
@@ -624,7 +624,7 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     @MainActor
     func testRowStatusMutationsDoNotInvalidateImmutableRowContent() {
-        let article = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "https://example.com/comments", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: "https://example.com/image.jpg")
+        let article = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "https://example.com/comments", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, readingTimeMinutes: 0, preview: "Preview", imageUrl: "https://example.com/image.jpg")
         let rowState = ArticleRowPresentationState(article: article)
         let invalidated = ObservationFlag()
 
@@ -646,11 +646,11 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     @MainActor
     func testReadOnlySnapshotReconciliationKeepsImmutableContent() {
-        let original = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
+        let original = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, readingTimeMinutes: 0, preview: "Preview", imageUrl: nil)
         let state = ArticleRowPresentationState(article: original)
         let content = state.content
 
-        state.reconcile(with: ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: true, isStarred: false, preview: "Preview", imageUrl: nil))
+        state.reconcile(with: ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: true, isStarred: false, readingTimeMinutes: 0, preview: "Preview", imageUrl: nil))
 
         XCTAssertEqual(state.content, content)
         XCTAssertTrue(state.isRead)
@@ -658,11 +658,11 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     @MainActor
     func testStarredOnlySnapshotReconciliationKeepsImmutableContent() {
-        let original = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
+        let original = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, readingTimeMinutes: 0, preview: "Preview", imageUrl: nil)
         let state = ArticleRowPresentationState(article: original)
         let content = state.content
 
-        state.reconcile(with: ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: true, preview: "Preview", imageUrl: nil))
+        state.reconcile(with: ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: true, readingTimeMinutes: 0, preview: "Preview", imageUrl: nil))
 
         XCTAssertEqual(state.content, content)
         XCTAssertTrue(state.isStarred)
@@ -670,10 +670,10 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     @MainActor
     func testImmutableSnapshotReconciliationUpdatesContent() {
-        let original = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil)
+        let original = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, readingTimeMinutes: 0, preview: "Preview", imageUrl: nil)
         let state = ArticleRowPresentationState(article: original)
 
-        state.reconcile(with: ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Updated", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: nil))
+        state.reconcile(with: ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Updated", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, readingTimeMinutes: 0, preview: "Preview", imageUrl: nil))
 
         XCTAssertEqual(state.content.article.title, "Updated")
     }
@@ -1089,7 +1089,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     private func timelineArticle(id: Int64, feedID: Int64 = 10, imageURL: String? = nil) -> ArticleSummary {
-        .init(id: id, feedId: feedID, categoryId: 20, feedTitle: "Feed \(feedID)", title: "Article \(id)", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "Preview", imageUrl: imageURL)
+        .init(id: id, feedId: feedID, categoryId: 20, feedTitle: "Feed \(feedID)", title: "Article \(id)", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, readingTimeMinutes: 0, preview: "Preview", imageUrl: imageURL)
     }
 
 
@@ -1601,7 +1601,7 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     func testPrefetchMetadataReusesAnUnchangedStructuralSnapshot() {
         func article(_ id: Int64, imageURL: String? = nil) -> ArticleSummary {
-            ArticleSummary(id: id, feedId: 1, categoryId: 1, feedTitle: "Feed", title: "Article", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "", imageUrl: imageURL)
+            ArticleSummary(id: id, feedId: 1, categoryId: 1, feedTitle: "Feed", title: "Article", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, readingTimeMinutes: 0, preview: "", imageUrl: imageURL)
         }
         var metadata = IOSArticleImagePrefetchMetadata()
         XCTAssertTrue(metadata.update(articles: [article(1), article(2, imageURL: "https://example.com/2.jpg")]))
@@ -2896,7 +2896,7 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     @MainActor
     private func oracleItem(title: String, preview: String, hasImage: Bool, hasComments: Bool, feedTitle: String = "Oracle Feed", articleID: Int64 = 91, imageURL: String? = nil) -> IOSUIKitArticleTimelineItem {
-        let article = ArticleSummary(id: articleID, feedId: 10, categoryId: 20, feedTitle: feedTitle, title: title, url: "https://example.com/article", commentsUrl: hasComments ? "https://example.com/comments" : "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: preview, imageUrl: hasImage ? (imageURL ?? "https://example.com/image.jpg") : nil)
+        let article = ArticleSummary(id: articleID, feedId: 10, categoryId: 20, feedTitle: feedTitle, title: title, url: "https://example.com/article", commentsUrl: hasComments ? "https://example.com/comments" : "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, readingTimeMinutes: 0, preview: preview, imageUrl: hasImage ? (imageURL ?? "https://example.com/image.jpg") : nil)
         return .init(article: article, content: .init(article: article), isRead: false, isStarred: false, feedIconImage: nil)
     }
 
@@ -2967,8 +2967,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             commentsUrl: "https://example.com/comments",
             publishedAt: "2026-01-01T00:00:00Z",
             isRead: false,
-            isStarred: false,
-            preview: "A preview long enough to occupy multiple lines and preserve the production card text stack.",
+            isStarred: false, readingTimeMinutes: 0, preview: "A preview long enough to occupy multiple lines and preserve the production card text stack.",
             imageUrl: hasImage ? "https://example.com/image.jpg" : nil
         )
         let item = IOSUIKitArticleTimelineItem(
