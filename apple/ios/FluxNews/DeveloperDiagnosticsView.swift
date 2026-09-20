@@ -3,9 +3,7 @@ import SwiftUI
 struct DeveloperDiagnosticsView: View {
     @ObservedObject var bootstrapper: CoreBootstrapper
     @State private var legacyResult = LegacyStateDiscovery.probe()
-#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
     @State private var imageCacheDiagnostics: ArticleImageCacheDiagnosticsSnapshot?
-#endif
 
     var body: some View {
         NavigationStack {
@@ -22,7 +20,6 @@ struct DeveloperDiagnosticsView: View {
                     }
                     Text("Read-only discovery; no legacy data is imported or modified.").font(.footnote).foregroundStyle(.secondary)
                 }
-#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
                 Section("Article Image Cache") {
                     if let imageCacheDiagnostics {
                         LabeledContent("Visible hits", value: "\(imageCacheDiagnostics.visibleHits)")
@@ -52,6 +49,7 @@ struct DeveloperDiagnosticsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
                 Section("Timeline Performance") {
                     Button("Reset Timeline Metrics") {
                         Task {
@@ -66,21 +64,17 @@ struct DeveloperDiagnosticsView: View {
 #endif
             }
             .navigationTitle("Developer Diagnostics")
-#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
             .task {
                 await refreshImageCacheDiagnostics()
             }
-#endif
         }
     }
 
-#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
     private func refreshImageCacheDiagnostics() async {
         imageCacheDiagnostics = ArticleImageCacheDiagnosticsSnapshot(
             metrics: await ArticleImagePipeline.shared.metrics()
         )
     }
-#endif
 
     private func localizedDiagnosticLabel(_ key: String) -> String {
         String(localized: String.LocalizationValue(key))
@@ -88,7 +82,6 @@ struct DeveloperDiagnosticsView: View {
 }
 
 
-#if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
 struct ArticleImageCacheDiagnosticsSnapshot: Equatable {
     let visibleHits: Int
     let visibleMisses: Int
@@ -119,4 +112,3 @@ struct ArticleImageCacheDiagnosticsSnapshot: Equatable {
         return String(format: "%.1f%%", visibleHitRate * 100)
     }
 }
-#endif
