@@ -1501,6 +1501,7 @@ mod tests {
                     is_read: false,
                     is_starred: false,
                     raw_html_content: "<p>Equivalent content</p>".into(),
+                    reading_time_minutes: 0,
                     preview: "Remote preview".into(),
                     image_url: None,
                 },
