@@ -3,7 +3,7 @@ import XCTest
 
 final class NewsreaderD23MutationTests: XCTestCase {
     private func article(_ id: Int64, read: Bool = false, starred: Bool = false) -> ArticleSummary {
-        ArticleSummary(id: id, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article \(id)", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: read, isStarred: starred, preview: "Preview", imageUrl: nil)
+        ArticleSummary(id: id, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article \(id)", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: read, isStarred: starred, readingTimeMinutes: 0, preview: "Preview", imageUrl: nil)
     }
 
     @MainActor
