@@ -2216,6 +2216,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var portraitReadingTimeHeightConstraint: NSLayoutConstraint!
     private var portraitReadingGroupSpacingConstraint: NSLayoutConstraint!
     private var portraitReadingLabelSpacingConstraint: NSLayoutConstraint!
+    private var portraitInfoBottomConstraint: NSLayoutConstraint!
+    private var portraitAgeBottomConstraint: NSLayoutConstraint!
     private var portraitAccessoryRailWidthConstraint: NSLayoutConstraint!
     private var portraitAccessoryRailHeightConstraint: NSLayoutConstraint!
     private var portraitPreviewBelowImageConstraint: NSLayoutConstraint!
@@ -2417,6 +2419,12 @@ final class IOSUIKitArticleCell: UITableViewCell {
             equalTo: portraitReadingTimeIconView.bottomAnchor,
             constant: IOSUIKitArticleGeometry.portraitInfoLabelSpacing
         )
+        portraitInfoBottomConstraint = portraitReadingTimeLabel.bottomAnchor.constraint(
+            equalTo: portraitAccessoryRail.bottomAnchor
+        )
+        portraitAgeBottomConstraint = portraitPublishedAgeLabel.bottomAnchor.constraint(
+            equalTo: portraitAccessoryRail.bottomAnchor
+        )
         portraitRailUnreadWidth = portraitUnreadIndicator.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.unreadSize)
         portraitRailUnreadHeight = portraitUnreadIndicator.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.unreadSize)
         portraitRailStarWidth = portraitStarImageView.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize)
@@ -2455,10 +2463,6 @@ final class IOSUIKitArticleCell: UITableViewCell {
             portraitRailCommentsWidth,
             portraitRailCommentsHeight,
 
-            portraitPublishedAgeIconView.topAnchor.constraint(
-                equalTo: portraitCommentsContainer.bottomAnchor,
-                constant: IOSUIKitArticleGeometry.portraitInfoStartSpacing
-            ),
             portraitPublishedAgeIconView.leadingAnchor.constraint(equalTo: portraitAccessoryRail.leadingAnchor),
             portraitRailInfoIconWidth,
             portraitRailInfoIconHeight,
@@ -2480,7 +2484,15 @@ final class IOSUIKitArticleCell: UITableViewCell {
             portraitReadingTimeLabel.leadingAnchor.constraint(equalTo: portraitAccessoryRail.leadingAnchor),
             portraitReadingTimeLabel.trailingAnchor.constraint(equalTo: portraitAccessoryRail.trailingAnchor),
             portraitReadingTimeHeightConstraint,
-            portraitReadingTimeLabel.bottomAnchor.constraint(lessThanOrEqualTo: portraitAccessoryRail.bottomAnchor),
+            portraitInfoBottomConstraint,
+
+            // Keep a safety gap between the top status group and the bottom
+            // temporal group. Under large Dynamic Type the rail itself may grow
+            // beyond the hero height rather than allowing overlap.
+            portraitPublishedAgeIconView.topAnchor.constraint(
+                greaterThanOrEqualTo: portraitCommentsContainer.bottomAnchor,
+                constant: IOSUIKitArticleGeometry.portraitInfoStartSpacing
+            ),
         ])
 
         starImageView.translatesAutoresizingMaskIntoConstraints = false
@@ -2642,7 +2654,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
         //   icon  Feed name
         //   ┌───────────────┐   ● unread
         //   │  HERO IMAGE   │   ★ star
-        //   │      85%      │   💬 comments
+        //   │      80%      │   💬 comments
+        //   │               │
         //   │               │   ◷ relative age
         //   └───────────────┘   ▤ reading time
         //   Preview … (full content width)
@@ -2890,6 +2903,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
         let hasReadingTime = item.content.readingTime != nil
         portraitReadingTimeIconView.isHidden = !hasReadingTime
         portraitReadingTimeLabel.isHidden = !hasReadingTime
+        portraitInfoBottomConstraint.isActive = hasReadingTime
+        portraitAgeBottomConstraint.isActive = !hasReadingTime
 
         let hasImage = mode.showsArticleImage && item.content.imageURL != nil
         let imageSize = metrics.imageSize(hasImage: hasImage)
