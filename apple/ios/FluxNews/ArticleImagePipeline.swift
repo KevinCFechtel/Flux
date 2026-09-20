@@ -407,6 +407,10 @@ actor ArticleImagePipeline {
             let priority: TaskPriority = job.demand == .visible ? .userInitiated : .utility
             let operation = Task.detached(priority: priority) {
                 let data = try await loader(queued.request.url)
+                // Some loaders cannot abandon an in-flight response immediately.
+                // Once the last consumer has retired the job, do not turn bytes
+                // that just arrived into an expensive display raster.
+                try Task.checkCancellation()
                 return try Self.downsample(data: data, request: queued.request)
             }
             job.operation = operation
@@ -493,14 +497,23 @@ actor ArticleImagePipeline {
     }
 
     nonisolated static func downsample(data: Data, request: ArticleImageRequest) throws -> CGImage {
+        try Task.checkCancellation()
         let image = try thumbnail(data: data, maxPixelDimension: request.maxPixelDimension)
-        return renderDisplayReady(
+        // ImageIO thumbnail creation is the first CPU-heavy stage. If the cell
+        // was rebound while it ran, skip the second full-slot CGContext raster.
+        try Task.checkCancellation()
+        let rendered = renderDisplayReady(
             image,
             targetPixelSize: request.targetPixelSize,
             cornerRadiusPixels: request.cornerRadiusPixels,
             usesDisplayP3: request.usesDisplayP3,
             backdrop: request.backdrop
         ) ?? image
+        // A cancellation that arrives during CGContext drawing cannot interrupt
+        // Core Graphics itself, but it must still keep the obsolete raster out
+        // of the cache and away from consumers.
+        try Task.checkCancellation()
+        return rendered
     }
 
     private nonisolated static func thumbnail(data: Data, maxPixelDimension: Int) throws -> CGImage {
