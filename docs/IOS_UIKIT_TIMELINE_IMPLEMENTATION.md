@@ -1,11 +1,15 @@
 # iOS UIKit Timeline — Decision and Implementation Handoff
 
-> **Decision accepted: 2026-09-11. U2 Native Timeline: COMPLETE. U3-U5: PENDING.**
+> **Decision accepted: 2026-09-11. U1-U2 COMPLETE. U3 IN PROGRESS. U4 PARTIALLY IMPLEMENTED / OPEN. U5 IN PROGRESS / OPEN.**
 >
 > Build the Article Timeline using an owned `UICollectionView` and native UIKit
 > article cells. This is the selected architecture, not a proposal to benchmark
-> against the existing SwiftUI `List`. This file explains the amended contracts
-> and provides an executable work sequence for a subsequent coding agent.
+> against the existing SwiftUI `List`. This file records the amended contracts
+> and the remaining completion sequence. The current UIKit implementation is not
+> architecture-frozen: unresolved physical-device performance work may still
+> justify fundamental changes to Timeline layout, cell construction, image
+> presentation, preparation/scheduling, or adjacent UIKit integration while
+> preserving the frozen product semantics.
 
 ## 1. Read first: intent and authority
 
@@ -244,29 +248,40 @@ These packages build one permanent replacement. They are not competing renderer
 experiments. Each implementation package includes its relevant tests/build;
 do not defer correctness until the final package.
 
-| Package | Scope and completion gate | Status at this amendment |
+| Package | Scope and completion gate | Current status — 20 September 2026 |
 |---|---|---|
-| U1 — Contract | Record UIKit container/native cells, rationale, boundaries, behavior, and this handoff. | COMPLETE — documentation only |
-| U2 — Native Timeline | Implement the owned controller, bridge, native reusable cells, stable ID snapshots, sizing, image consumers, system swipes/context menus/refresh, and existing shell integration. Register sources and preserve Search dependencies. | COMPLETE — validated Debug simulator build/XCTest baseline. Status-only read/starred changes target matching visible native cells by stable ID without a structural snapshot; structural membership/order changes use diffable snapshots. The UIKit Timeline intentionally has no production Scrollover detector yet. |
-| U3 — Geometry and status | Implement the coherent UIKit detector and targeted status path. Connect it to existing mutation entry points; cover the geometry regression cases below and stable heights/membership. | PENDING |
-| U4 — Session mutation worker | Complete queue lifetime, origin attribution, bounded drains, explicit-action ordering, lifecycle and failure handling using a controllably blocked real writer path in tests. | PENDING |
-| U5 — Cleanup and acceptance | Remove superseded Timeline code, verify complete interaction/localization/accessibility behavior, run native checks and focused device traces, record actual remaining limitations. | PENDING |
+| U1 — Contract | Record UIKit container/native cells, rationale, boundaries, behavior, and this handoff. | **COMPLETE** — documentation contract established. |
+| U2 — Native Timeline | Implement the owned controller, bridge, native reusable cells, stable ID snapshots, sizing, image consumers, system swipes/context menus/refresh, and existing shell integration. Register sources and preserve Search dependencies. | **COMPLETE as the native Timeline baseline.** The owned UIKit controller/cells and structural/status split are productive. Search now also uses the UIKit Timeline. Completion of U2 does not freeze later performance-sensitive internals. |
+| U3 — Geometry, status and performance-sensitive renderer work | Implement coherent UIKit Scrollover geometry and targeted status presentation; establish stable/bounded layout, image and update behavior and close the required performance/correctness regressions. | **IN PROGRESS.** Productive UIKit Scrollover geometry, targeted status updates, deterministic sizing/prepared metrics, incremental pagination/updates and substantial image/layout hardening exist. Physical-device performance remains unresolved enough that fundamental renderer/layout/cell/image/scheduling changes are still permitted. U3 is therefore not merely waiting for acceptance. |
+| U4 — Session mutation worker | Complete queue lifetime, origin attribution, bounded drains, explicit-action ordering, lifecycle and failure handling using a controllably blocked real writer path in tests. | **PARTIALLY IMPLEMENTED / OPEN.** Current code has bounded 64-ID batches, serial running state, session/presentation generations, conflict handling and lifecycle flush hooks, but the complete contracted worker semantics and productive blocked-writer tests remain completion gates. |
+| U5 — Cleanup and acceptance | Remove superseded Timeline code, verify complete interaction/localization/accessibility behavior, run native checks and focused device traces, record actual remaining limitations. | **IN PROGRESS / OPEN.** Search migration and old SwiftUI article-row cleanup are complete, and diagnostic cleanup has progressed. Final cleanup and device/runtime acceptance remain blocked on settling U3 performance architecture and completing U4. |
 
 The selected architecture already includes U2-U4; no new architecture approval
-is required simply because UIKit replaces the old implementation. If the user
-requests one package, implement that package and its validation without silently
-expanding to unrelated phases. Temporary work-in-progress on a branch is not a
-supported production fallback. Do not mark the amendment complete until the
-replacement and required acceptance are complete.
+is required simply because UIKit replaces the old implementation. However, this
+does **not** pre-approve every current internal implementation detail. While U3
+remains open, measured performance evidence may justify fundamental changes
+inside the Timeline renderer, layout, cell, image-presentation, preparation, or
+scheduling boundaries without reopening frozen product semantics or unrelated
+Core/macOS architecture. If the user requests one package, implement that package
+and its validation without silently expanding to unrelated phases. Temporary
+work-in-progress on a branch is not a supported production fallback. Do not mark
+the amendment complete until U3 performance/correctness, U4 worker semantics, and
+U5 cleanup/device acceptance are all complete.
 
-### U2 baseline
+### U2 baseline and subsequent evolution
 
-The production Timeline now has the owned UIKit collection-view baseline before
-U3: scrolling, native cell reuse, image consumers/prefetching, and ordinary
-article interactions operate without Scrollover sensing. The legacy
-`IOSScrolloverGeometryController` remains only as temporary regression-test
-reference and does not drive this UICollectionView. U3 must add its new UIKit
-geometry detector without coupling it to the retired SwiftUI callback path.
+U2 established the owned UIKit collection-view baseline: native cell reuse,
+image consumers/prefetching, ordinary article interactions, stable IDs, and the
+structural-versus-status update boundary. Since that baseline, U3 added the
+productive UIKit Scrollover geometry path and substantial deterministic
+layout/performance work. The legacy `IOSScrolloverGeometryController` is only a
+historical/regression-test reference and does not drive the production
+collection view.
+
+Do not interpret the current productive U3 implementation as frozen. The purpose
+of the remaining U3 work is to make the selected UIKit Timeline robust on real
+hardware, and evidence from that work may still require structural changes to
+cells, layout, image presentation, preparation, or scheduling.
 
 ## 6. Required regression cases
 
