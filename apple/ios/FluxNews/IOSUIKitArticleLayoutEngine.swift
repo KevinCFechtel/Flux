@@ -783,10 +783,17 @@ enum IOSUIKitArticleLayoutEngine {
                 : nil
 
             let railBottomY = logicalImageY + portraitRailHeight
-            let ageLabelY: CGFloat
-            let ageIconY: CGFloat
+            // Publication age is always the bottom-most information. Reading
+            // time, when present, sits immediately above it.
+            let ageLabelY = railBottomY - publishedAgeHeight
+            let ageIconY = ageLabelY
+                - IOSUIKitArticleGeometry.portraitInfoLabelSpacing
+                - accessories.infoIcon
+
             if let readingTime = input.readingTime, !readingTime.isEmpty {
-                let readingLabelY = railBottomY - readingTimeHeight
+                let readingLabelY = ageIconY
+                    - IOSUIKitArticleGeometry.portraitInfoGroupSpacing
+                    - readingTimeHeight
                 readingTimeFrame = CGRect(
                     x: physicalX(
                         logicalX: portraitRailLeading,
@@ -807,19 +814,9 @@ enum IOSUIKitArticleLayoutEngine {
                     width: accessories.infoIcon,
                     height: accessories.infoIcon
                 )
-                ageLabelY = readingIconY
-                    - IOSUIKitArticleGeometry.portraitInfoGroupSpacing
-                    - publishedAgeHeight
-                ageIconY = ageLabelY
-                    - IOSUIKitArticleGeometry.portraitInfoLabelSpacing
-                    - accessories.infoIcon
             } else {
                 readingTimeIconFrame = nil
                 readingTimeFrame = nil
-                ageLabelY = railBottomY - publishedAgeHeight
-                ageIconY = ageLabelY
-                    - IOSUIKitArticleGeometry.portraitInfoLabelSpacing
-                    - accessories.infoIcon
             }
 
             publishedAgeIconFrame = CGRect(
