@@ -48,6 +48,37 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.inlineMinimumContentWidth, 160)
     }
 
+    func testLandscapeCounterLabelExplainsCountSemantics() {
+        let german = Locale(identifier: "de_DE")
+        XCTAssertEqual(
+            ArticleListCounterPresentation.inlineLandscapeLabel(
+                scope: .all,
+                unreadOnly: true,
+                count: 79,
+                locale: german
+            ),
+            "79 ungelesen"
+        )
+        XCTAssertEqual(
+            ArticleListCounterPresentation.inlineLandscapeLabel(
+                scope: .all,
+                unreadOnly: false,
+                count: 79,
+                locale: german
+            ),
+            "79 Artikel"
+        )
+        XCTAssertEqual(
+            ArticleListCounterPresentation.inlineLandscapeLabel(
+                scope: .starred,
+                unreadOnly: true,
+                count: 79,
+                locale: german
+            ),
+            "79 Artikel"
+        )
+    }
+
     func testPersistentSplitModesShareTopToolbarPlacement() {
         XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: .persistentSplit), .topBarTrailing)
         XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: .persistentSplitCollapsed), .topBarTrailing)
