@@ -46,6 +46,9 @@ pub struct Article {
     pub is_read: bool,
     pub is_starred: bool,
     pub raw_html_content: String,
+    /// Miniflux-provided estimated reading duration in whole minutes. Zero means
+    /// unavailable/unknown and is not synthesized by the Core.
+    pub reading_time_minutes: u32,
     pub preview: String,
     pub image_url: Option<String>,
 }
@@ -339,6 +342,7 @@ pub struct ArticleSummary {
     pub published_at: String,
     pub is_read: bool,
     pub is_starred: bool,
+    pub reading_time_minutes: u32,
     pub preview: String,
     pub image_url: Option<String>,
 }
