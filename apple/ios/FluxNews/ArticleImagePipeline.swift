@@ -1,6 +1,7 @@
 import Foundation
 import ImageIO
 import SwiftUI
+import UIKit
 
 
 /// Opaque colour the rounded corner cut-outs are filled with.
@@ -132,9 +133,23 @@ private final class ArticleImageCache: @unchecked Sendable {
     private var prefetchMisses = 0
     private var insertions = 0
     private var evictions = 0
+    private var memoryWarningObserver: NSObjectProtocol?
 
     init(totalCostLimit: Int) {
         self.totalCostLimit = max(1, totalCostLimit)
+        memoryWarningObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.removeAll()
+        }
+    }
+
+    deinit {
+        if let memoryWarningObserver {
+            NotificationCenter.default.removeObserver(memoryWarningObserver)
+        }
     }
 
     func image(for key: NSString) -> CGImage? {
