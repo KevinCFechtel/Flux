@@ -2505,6 +2505,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         dateLabel.adjustsFontForContentSizeCategory = true
         dateLabel.textColor = Self.supportingTextColor
         dateLabel.numberOfLines = 1
+        dateLabel.lineBreakMode = .byTruncatingTail
 
         landscapeReadingTimeContainer.translatesAutoresizingMaskIntoConstraints = false
         landscapeReadingTimeContainer.isHidden = true
@@ -2739,8 +2740,11 @@ final class IOSUIKitArticleCell: UITableViewCell {
             constant: -IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing
         )
 
-        landscapeConstraints = [
-        ] + defaultStackConstraints + [
+        let landscapeStackConstraints = defaultStackConstraints.filter {
+            $0 !== defaultDateTrailingConstraint
+        }
+        landscapeConstraints = landscapeStackConstraints + [
+            landscapeDateTrailingConstraint,
 
             articleImageView.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
             articleImageView.topAnchor.constraint(equalTo: margins.topAnchor),
@@ -2761,7 +2765,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         //
         //   ● icon  Feed name              ★ 💬     full width
         //   Headline …                    ┌─────┐
-        //   Date                          │ IMG │
+        //   Date              ▤ 4 min    │ IMG │
         //                                 └─────┘
         //   Preview …                               full width
         //
@@ -3061,9 +3065,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
         let usesLandscapeReadingTime = variant == .visualLandscape && currentReadingTime != nil
         metadataFeedTitleDefaultTrailingConstraint.isActive = !usesPortraitRail
         metadataFeedTitlePortraitTrailingConstraint.isActive = usesPortraitRail
-        defaultDateTrailingConstraint.isActive = !usesLandscapeReadingTime
-        landscapeDateTrailingConstraint.isActive = usesLandscapeReadingTime
         landscapeReadingTimeContainer.isHidden = !usesLandscapeReadingTime
+        landscapeDateTrailingConstraint.constant = usesLandscapeReadingTime
+            ? -IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing
+            : 0
         unreadIndicator.isHidden = usesPortraitRail
         starImageView.isHidden = usesPortraitRail
         commentsContainer.isHidden = usesPortraitRail || !currentHasComments
