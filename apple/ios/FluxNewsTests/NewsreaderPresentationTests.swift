@@ -2405,10 +2405,18 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleAccessoryOrdering.horizontalLeadingToTrailing, [.audio, .comments, .star, .unread])
     }
 
-    func testVisualPortraitUsesEditorialMetadataHeroRailAndFullWidthPreview() {
-        let metrics = layoutMetrics(mode: .visual, width: 390, hasImage: true)
-        guard let image = metrics.imageFrame, let preview = metrics.previewFrame else {
-            return XCTFail("Visual portrait should expose image and preview frames")
+    func testVisualPortraitUsesHeroInfoRailAndFullWidthPreview() {
+        let metrics = layoutMetrics(mode: .visual, width: 390, hasImage: true, readingTime: "4 min")
+        guard
+            let image = metrics.imageFrame,
+            let rail = metrics.portraitAccessoryRailFrame,
+            let ageIcon = metrics.publishedAgeIconFrame,
+            let age = metrics.publishedAgeFrame,
+            let readingIcon = metrics.readingTimeIconFrame,
+            let reading = metrics.readingTimeFrame,
+            let preview = metrics.previewFrame
+        else {
+            return XCTFail("Visual portrait should expose hero, info rail and preview frames")
         }
 
         XCTAssertEqual(metrics.variant, .visualPortrait)
@@ -2418,33 +2426,39 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(image.minX, metrics.contentFrame.minX, accuracy: 0.5)
         XCTAssertEqual(preview.minX, metrics.contentFrame.minX, accuracy: 0.5)
         XCTAssertEqual(preview.width, metrics.contentFrame.width, accuracy: 0.5)
+        XCTAssertEqual(metrics.dateFrame, .zero)
 
         XCTAssertLessThan(metrics.titleFrame.maxY, metrics.metadataFrame.minY)
-        XCTAssertEqual(metrics.dateFrame.minX, metrics.feedTitleFrame.minX, accuracy: 0.5)
         XCTAssertEqual(
-            metrics.dateFrame.minY - metrics.metadataFrame.maxY,
-            IOSUIKitArticleGeometry.portraitMetadataDateSpacing,
-            accuracy: 0.5
-        )
-        XCTAssertEqual(
-            image.minY - metrics.dateFrame.maxY,
+            image.minY - metrics.metadataFrame.maxY,
             IOSUIKitArticleGeometry.portraitSpacing,
             accuracy: 0.5
         )
         XCTAssertEqual(
-            preview.minY - image.maxY,
-            IOSUIKitArticleGeometry.portraitSpacing,
-            accuracy: 0.5
-        )
-
-        XCTAssertEqual(
-            metrics.starFrame.minX - image.maxX,
+            rail.minX - image.maxX,
             IOSUIKitArticleGeometry.portraitAccessoryRailSpacing,
             accuracy: 0.5
         )
+        XCTAssertEqual(rail.minY, image.minY, accuracy: 0.5)
+        XCTAssertEqual(ageIcon.minX, rail.minX, accuracy: 0.5)
+        XCTAssertEqual(age.minX, rail.minX, accuracy: 0.5)
+        XCTAssertEqual(readingIcon.minX, rail.minX, accuracy: 0.5)
+        XCTAssertEqual(reading.minX, rail.minX, accuracy: 0.5)
+        XCTAssertLessThan(ageIcon.minY, age.minY)
+        XCTAssertLessThan(age.maxY, readingIcon.minY)
+        XCTAssertLessThan(readingIcon.minY, reading.minY)
+
+        let visualBottom = max(image.maxY, rail.maxY)
+        XCTAssertEqual(
+            preview.minY - visualBottom,
+            IOSUIKitArticleGeometry.portraitSpacing,
+            accuracy: 0.5
+        )
+
+        XCTAssertEqual(metrics.starFrame.minX, rail.minX, accuracy: 0.5)
         XCTAssertLessThan(metrics.unreadFrame.minY, metrics.starFrame.minY)
         if let comments = metrics.commentsFrame {
-            XCTAssertEqual(comments.minX, metrics.starFrame.minX, accuracy: 0.5)
+            XCTAssertEqual(comments.minX, rail.minX, accuracy: 0.5)
             XCTAssertLessThan(metrics.starFrame.minY, comments.minY)
         }
     }
@@ -2860,8 +2874,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(nearestMatches, 10)
     }
 
-    private func layoutMetrics(mode: ArticlePresentationMode, width: CGFloat, hasImage: Bool, scale: CGFloat = 2) -> IOSUIKitArticleLayoutMetrics {
-        IOSUIKitArticleLayoutEngine.metrics(for: layoutInput(mode: mode, width: width, hasImage: hasImage, scale: scale))
+    private func layoutMetrics(mode: ArticlePresentationMode, width: CGFloat, hasImage: Bool, scale: CGFloat = 2, readingTime: String? = nil) -> IOSUIKitArticleLayoutMetrics {
+        IOSUIKitArticleLayoutEngine.metrics(
+            for: layoutInput(mode: mode, width: width, hasImage: hasImage, scale: scale, readingTime: readingTime)
+        )
     }
 
     private func assertFrameEqual(_ actual: CGRect, _ expected: CGRect, accuracy: CGFloat = 0.5, file: StaticString = #filePath, line: UInt = #line) {
@@ -2890,8 +2906,23 @@ final class NewsreaderPresentationTests: XCTestCase {
     /// every text frame stay at 0.5 pt.
     private static let accessoryFrameAccuracy: CGFloat = 1.0
 
-    private func layoutInput(mode: ArticlePresentationMode, width: CGFloat, hasImage: Bool, scale: CGFloat = 2) -> IOSUIKitArticleLayoutInput {
-        .init(title: "A deliberately multiline article title that exercises deterministic bounded text measurement", feedTitle: "A feed title", publishedDate: "January 1", preview: "A preview long enough to occupy multiple lines and preserve the production card text stack.", hasImage: hasImage, hasComments: true, mode: mode, previewLines: .standard, containerWidth: width, displayScale: scale, contentSizeCategory: .large, layoutDirection: .leftToRight)
+    private func layoutInput(mode: ArticlePresentationMode, width: CGFloat, hasImage: Bool, scale: CGFloat = 2, readingTime: String? = nil) -> IOSUIKitArticleLayoutInput {
+        .init(
+            title: "A deliberately multiline article title that exercises deterministic bounded text measurement",
+            feedTitle: "A feed title",
+            publishedDate: "January 1",
+            publishedAge: "6 hr ago",
+            readingTime: readingTime,
+            preview: "A preview long enough to occupy multiple lines and preserve the production card text stack.",
+            hasImage: hasImage,
+            hasComments: true,
+            mode: mode,
+            previewLines: .standard,
+            containerWidth: width,
+            displayScale: scale,
+            contentSizeCategory: .large,
+            layoutDirection: .leftToRight
+        )
     }
 
     @MainActor
