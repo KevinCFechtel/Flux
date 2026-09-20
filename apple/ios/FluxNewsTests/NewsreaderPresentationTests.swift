@@ -1776,8 +1776,9 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertNotNil(pipeline.cachedImage(for: third))
 
         let metrics = await pipeline.metrics()
+        let calls = await counter.callCount()
         XCTAssertEqual(metrics.memoryCacheEvictions, 1)
-        XCTAssertEqual(await counter.callCount(), 3)
+        XCTAssertEqual(calls, 3)
     }
 
     func testArticleImagePipelineDeduplicatesEquivalentInFlightRequests() async throws {
