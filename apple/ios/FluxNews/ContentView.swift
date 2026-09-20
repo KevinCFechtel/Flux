@@ -71,6 +71,11 @@ enum IOSArticleListTitleCapsuleMetrics {
     /// bar owns the real available space and compresses this leading item only
     /// when the trailing controls actually require it.
     static let inlineMinimumContentWidth: CGFloat = 160
+    /// Count semantics are more important than preserving every character of a
+    /// long scope/feed title. The count therefore resists horizontal compression
+    /// first and the title yields by truncating at its tail.
+    static let inlineTitlePriority: Double = 1
+    static let inlineCountPriority: Double = 2
 }
 
 enum IOSMoreAction: Equatable {
@@ -778,15 +783,20 @@ private struct ArticleListTitleCapsule: View {
                     .font(.headline)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .layoutPriority(2)
+                    .layoutPriority(IOSArticleListTitleCapsuleMetrics.inlineTitlePriority)
                 if let subtitle {
-                    Text("·")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(subtitle)
-                        .font(.caption)
-                        .lineLimit(1)
-                        .layoutPriority(1)
+                    HStack(spacing: 4) {
+                        Text("·")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(subtitle)
+                            .font(.caption)
+                            .lineLimit(1)
+                    }
+                    // Keep the semantic count intact. On a constrained toolbar
+                    // the scope/feed title truncates before the count does.
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(IOSArticleListTitleCapsuleMetrics.inlineCountPriority)
                 }
             }
             // Let the title use its natural width. The navigation bar already
