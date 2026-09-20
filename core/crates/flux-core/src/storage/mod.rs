@@ -4106,6 +4106,7 @@ mod tests {
             is_read,
             is_starred,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: None,
         };
@@ -4255,6 +4256,7 @@ mod tests {
             is_read: false,
             is_starred: false,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: Some("https://example.test/article.jpg".into()),
         };
@@ -4491,7 +4493,7 @@ mod tests {
         let connection = store.connection.lock().unwrap();
         let row: (i64, String, Option<String>, String, bool, bool, i64, i64) = connection.query_row("SELECT content_processing_version,preview,image_url,raw_html_content,is_read,is_starred,feed_id,(SELECT COUNT(*) FROM pending_mutations) FROM articles WHERE id=3", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).unwrap();
         drop(connection);
-        assert_eq!(store.schema_version().unwrap(), 17);
+        assert_eq!(store.schema_version().unwrap(), 18);
         assert_eq!(row.0, crate::article::PROCESSING_VERSION);
         assert_eq!(row.1, "Hello world");
         assert_eq!(row.2.as_deref(), Some("https://example.test/cover.jpg"));
@@ -4515,7 +4517,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 17);
+        assert_eq!(store.schema_version().unwrap(), 18);
         assert_eq!(
             store.feed_preferences(2).unwrap(),
             FeedPreferences {
@@ -4628,7 +4630,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 17);
+        assert_eq!(store.schema_version().unwrap(), 18);
         assert_eq!(
             store.feed_preferences(123).unwrap(),
             FeedPreferences {
@@ -4679,7 +4681,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 17);
+        assert_eq!(store.schema_version().unwrap(), 18);
         let connection = store.connection.lock().unwrap();
         assert_eq!(
             connection
@@ -4733,6 +4735,7 @@ mod tests {
             is_read: false,
             is_starred: false,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: None,
         }];
@@ -4839,6 +4842,7 @@ mod tests {
             is_read: false,
             is_starred: false,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: None,
         };
@@ -4945,7 +4949,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 17);
+        assert_eq!(store.schema_version().unwrap(), 18);
         assert!(!store.enclosure(10).unwrap().unwrap().remote_present);
         assert_eq!(
             store
@@ -4986,7 +4990,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 17);
+        assert_eq!(store.schema_version().unwrap(), 18);
         // existing B1/B2/B3 data survives
         assert!(store.saved_media(10).unwrap().is_some());
         assert_eq!(store.playback_state(10).unwrap().unwrap().position_ms, 5000);
@@ -5025,7 +5029,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 17);
+        assert_eq!(store.schema_version().unwrap(), 18);
         // Existing valid v13 rows survive intact.
         let requested = store.media_download(10).unwrap().unwrap();
         assert_eq!(requested.state, DownloadState::Requested);
@@ -5280,7 +5284,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 17);
+        assert_eq!(store.schema_version().unwrap(), 18);
         let connection = store.connection.lock().unwrap();
         let foreign_key_count: i64 = connection
             .query_row(
@@ -5540,6 +5544,7 @@ mod tests {
             is_read: false,
             is_starred: true,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: None,
         });
@@ -5820,6 +5825,7 @@ mod tests {
             is_read: false,
             is_starred: false,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: None,
         }];
@@ -5915,6 +5921,7 @@ mod tests {
             is_read: false,
             is_starred: false,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: None,
         };
@@ -5985,6 +5992,7 @@ mod tests {
             is_read: false,
             is_starred: false,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: None,
         };
@@ -6355,6 +6363,7 @@ mod tests {
             is_read: false,
             is_starred: false,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: None,
         }];
@@ -6549,6 +6558,7 @@ mod tests {
             is_read: false,
             is_starred: false,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: None,
         };
@@ -6914,6 +6924,7 @@ mod tests {
             is_read: true,
             is_starred: false,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: None,
         };
