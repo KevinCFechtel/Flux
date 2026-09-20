@@ -5,6 +5,7 @@ struct DeveloperDiagnosticsView: View {
     @State private var legacyResult = LegacyStateDiscovery.probe()
     @State private var imageCacheDiagnostics: ArticleImageCacheDiagnosticsSnapshot?
     @State private var imagePresentationDiagnostics: ArticleImagePresentationDiagnosticsSnapshot?
+    @State private var displayReadyRasterEnabled = ArticleImageRenderingDiagnostics.displayReadyRasterEnabled
 
     var body: some View {
         NavigationStack {
@@ -21,6 +22,24 @@ struct DeveloperDiagnosticsView: View {
                     }
                     Text("Read-only discovery; no legacy data is imported or modified.").font(.footnote).foregroundStyle(.secondary)
                 }
+                Section("Article Image Rendering A/B") {
+                    Toggle("Display-ready raster", isOn: $displayReadyRasterEnabled)
+                        .onChange(of: displayReadyRasterEnabled) { _, enabled in
+                            ArticleImageRenderingDiagnostics.setDisplayReadyRasterEnabled(enabled)
+                        }
+
+                    LabeledContent(
+                        "Current path",
+                        value: displayReadyRasterEnabled
+                            ? "ImageIO + CGContext exact-slot raster"
+                            : "ImageIO + UIImageView aspect-fill"
+                    )
+
+                    Text("Use this only for the Hero-image performance comparison. The off path skips the second exact-slot CGContext raster; UIImageView/Core Animation performs the final crop and rounded clipping instead. The cache key includes the selected mode, so A and B cannot reuse each other's rasters.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Article Image Presentation") {
                     if let imagePresentationDiagnostics {
                         LabeledContent("Queued ready images", value: "\(imagePresentationDiagnostics.queued)")
