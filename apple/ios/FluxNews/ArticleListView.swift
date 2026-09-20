@@ -960,6 +960,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
             self.reconfigureVisibleCells(needsLayout: false)
         }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(articleImageRenderingModeDidChange),
+            name: ArticleImageRenderingDiagnostics.didChangeNotification,
+            object: nil
+        )
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -1656,7 +1662,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             usesDisplayP3: view.traitCollection.displayGamut == .P3,
             // Must match the cell's request exactly, or every prefetched raster
             // is cached under a key no cell ever asks for.
-            backdrop: IOSUIKitArticleCell.articleImageBackdrop(for: view.traitCollection)
+            backdrop: IOSUIKitArticleCell.articleImageBackdrop(for: view.traitCollection),
+            renderingMode: ArticleImageRenderingDiagnostics.mode
         )
     }
 
@@ -1679,8 +1686,18 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     }
 
     deinit {
+        NotificationCenter.default.removeObserver(
+            self,
+            name: ArticleImageRenderingDiagnostics.didChangeNotification,
+            object: nil
+        )
         preparedWindowTask?.cancel()
         for prefetch in prefetchTasks.values { prefetch.task.cancel() }
+    }
+
+    @objc private func articleImageRenderingModeDidChange() {
+        cancelAllPrefetch()
+        reconfigureVisibleCells(needsLayout: false)
     }
 
     func detachPresentationBridges() {
@@ -2883,7 +2900,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
             cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
             rasterScale: articleImageRasterScale(displayScale),
             usesDisplayP3: articleImageUsesDisplayP3?() ?? (traitCollection.displayGamut == .P3),
-            backdrop: Self.articleImageBackdrop(for: traitCollection)
+            backdrop: Self.articleImageBackdrop(for: traitCollection),
+            renderingMode: ArticleImageRenderingDiagnostics.mode
         )
         guard articleChanged || representedImageRequest != request else { return }
         performanceMetrics?.recordImageBinding()
@@ -2997,7 +3015,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
         articleImageView.contentMode = .scaleAspectFill
         articleImageView.clipsToBounds = loaded
         if loaded {
-            articleImageView.layer.cornerRadius = 0
+            articleImageView.layer.cornerRadius = representedImageRequest?.renderingMode == .imageViewScaled
+                ? IOSUIKitArticleGeometry.articleImageCornerRadius
+                : 0
         } else {
             articleImageView.layer.cornerRadius = IOSUIKitArticleGeometry.articleImageCornerRadius
         }
