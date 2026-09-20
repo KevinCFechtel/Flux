@@ -879,7 +879,18 @@ enum ArticleListTitlePresentation {
 }
 
 enum ArticleListCounterPresentation {
-    static func compactCount(_ count: UInt64) -> String { String(count) }
+    static func inlineLandscapeLabel(
+        scope: BrowserScope,
+        unreadOnly: Bool,
+        count: UInt64,
+        locale: Locale = .current
+    ) -> String {
+        if unreadOnly && scope != .starred {
+            return String(localized: "\(Int(count)) unread", locale: locale)
+        }
+        return String(localized: "\(Int(count)) article", locale: locale)
+    }
+
     static func isVisible(showArticleCount: Bool) -> Bool { showArticleCount }
     static func usesNativeSubtitle(showArticleCount: Bool, supportsNativeSubtitle: Bool) -> Bool {
         showArticleCount && supportsNativeSubtitle
@@ -1013,7 +1024,11 @@ private struct ArticleListNavigationChrome<Content: View>: View {
         let portraitSubtitle = store.isSyncing ? String(localized: "Syncing…") : countLabel
         let landscapeSubtitle = store.isSyncing
             ? String(localized: "Syncing…")
-            : ArticleListCounterPresentation.compactCount(store.selectionTotal)
+            : ArticleListCounterPresentation.inlineLandscapeLabel(
+                scope: store.scope,
+                unreadOnly: store.unreadOnly,
+                count: store.selectionTotal
+            )
 
         switch chromeMode {
         case .compactPortrait:
