@@ -1454,6 +1454,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private func setScrolloverPhase(_ phase: IOSScrolloverPresentationPhase) {
         guard scrolloverPhase != phase else { return }
         scrolloverPhase = phase
+        IOSArticleImagePresentationScheduler.shared.setScrolling(phase.isScrolling)
         let animationsEnabled = !phase.isScrolling
         for case let cell as IOSUIKitArticleCell in tableView.visibleCells {
             cell.setArticleImageArrivalAnimationsEnabled(animationsEnabled)
@@ -1942,6 +1943,152 @@ final class IOSUIKitTimelinePerformanceMetrics {
             if seen >= target { return UInt64(1) << index }
         }
         return systemLayoutSizeFittingMaxNanoseconds
+    }
+}
+
+@MainActor
+final class IOSArticleImagePresentationScheduler {
+    struct Metrics: Equatable {
+        let queued: Int
+        let maximumQueued: Int
+        let presented: Int
+        let discarded: Int
+        let averageDelayMilliseconds: Double
+        let maximumDelayMilliseconds: Double
+    }
+
+    static let shared = IOSArticleImagePresentationScheduler()
+
+    private struct PendingPresentation {
+        let enqueuedAt: CFTimeInterval
+        let isStillValid: () -> Bool
+        let present: () -> Void
+    }
+
+    private final class DisplayLinkTarget: NSObject {
+        weak var owner: IOSArticleImagePresentationScheduler?
+
+        @objc func tick(_ displayLink: CADisplayLink) {
+            owner?.displayLinkDidFire()
+        }
+    }
+
+    private var queue: [PendingPresentation] = []
+    private var isScrolling = false
+    private var displayLink: CADisplayLink?
+    private let displayLinkTarget = DisplayLinkTarget()
+    private var maximumQueued = 0
+    private var presented = 0
+    private var discarded = 0
+    private var totalDelay: CFTimeInterval = 0
+    private var maximumDelay: CFTimeInterval = 0
+
+    private init() {
+        displayLinkTarget.owner = self
+    }
+
+    func setScrolling(_ scrolling: Bool) {
+        guard isScrolling != scrolling else { return }
+        isScrolling = scrolling
+        if scrolling {
+            startDisplayLinkIfNeeded()
+        } else {
+            stopDisplayLink()
+            drainImmediately()
+        }
+    }
+
+    func enqueue(
+        isStillValid: @escaping () -> Bool,
+        present: @escaping () -> Void
+    ) {
+        guard isScrolling else {
+            guard isStillValid() else {
+                discarded += 1
+                return
+            }
+            present()
+            presented += 1
+            return
+        }
+
+        queue.append(.init(
+            enqueuedAt: CACurrentMediaTime(),
+            isStillValid: isStillValid,
+            present: present
+        ))
+        maximumQueued = max(maximumQueued, queue.count)
+        startDisplayLinkIfNeeded()
+    }
+
+    func metrics() -> Metrics {
+        .init(
+            queued: queue.count,
+            maximumQueued: maximumQueued,
+            presented: presented,
+            discarded: discarded,
+            averageDelayMilliseconds: presented > 0 ? (totalDelay / Double(presented)) * 1_000 : 0,
+            maximumDelayMilliseconds: maximumDelay * 1_000
+        )
+    }
+
+    func resetMetrics() {
+        maximumQueued = queue.count
+        presented = 0
+        discarded = 0
+        totalDelay = 0
+        maximumDelay = 0
+    }
+
+    private func displayLinkDidFire() {
+        guard isScrolling else { return }
+        presentNextValid()
+        if queue.isEmpty {
+            stopDisplayLink()
+        }
+    }
+
+    private func presentNextValid() {
+        while !queue.isEmpty {
+            let pending = queue.removeFirst()
+            guard pending.isStillValid() else {
+                discarded += 1
+                continue
+            }
+            let delay = CACurrentMediaTime() - pending.enqueuedAt
+            pending.present()
+            presented += 1
+            totalDelay += delay
+            maximumDelay = max(maximumDelay, delay)
+            return
+        }
+    }
+
+    private func drainImmediately() {
+        while !queue.isEmpty {
+            let pending = queue.removeFirst()
+            guard pending.isStillValid() else {
+                discarded += 1
+                continue
+            }
+            let delay = CACurrentMediaTime() - pending.enqueuedAt
+            pending.present()
+            presented += 1
+            totalDelay += delay
+            maximumDelay = max(maximumDelay, delay)
+        }
+    }
+
+    private func startDisplayLinkIfNeeded() {
+        guard isScrolling, !queue.isEmpty, displayLink == nil else { return }
+        let link = CADisplayLink(target: displayLinkTarget, selector: #selector(DisplayLinkTarget.tick(_:)))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    private func stopDisplayLink() {
+        displayLink?.invalidate()
+        displayLink = nil
     }
 }
 
@@ -2760,12 +2907,21 @@ final class IOSUIKitArticleCell: UITableViewCell {
                       self.representedArticleID == articleID,
                       self.representedImageRequest == request
                 else { return }
-                // The cell is already on screen showing its placeholder. Swapping
-                // the pixels in one frame is a content jump, and at a steady 60 fps
-                // that reads as a stutter even though no frame was late.
-                self.presentArticleImage(
-                    loadedImage,
-                    animated: self.articleImageArrivalAnimationsEnabled
+                let presentationScheduler = IOSArticleImagePresentationScheduler.shared
+                presentationScheduler.enqueue(
+                    isStillValid: { [weak self] in
+                        guard let self else { return false }
+                        return self.imageBindingGeneration == bindingGeneration
+                            && self.representedArticleID == articleID
+                            && self.representedImageRequest == request
+                    },
+                    present: { [weak self] in
+                        guard let self else { return }
+                        self.presentArticleImage(
+                            loadedImage,
+                            animated: self.articleImageArrivalAnimationsEnabled
+                        )
+                    }
                 )
             } catch {
                 guard !Task.isCancelled,
