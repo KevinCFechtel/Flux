@@ -89,14 +89,19 @@ struct NewsNavigationView: View {
             Section("Feeds") {
                 ForEach(groups) { group in
                     if let categoryID = group.categoryID {
-                        DisclosureGroup(isExpanded: expansionBinding(for: categoryID)) {
+                        categoryNavigationRow(
+                            categoryID: categoryID,
+                            title: group.title,
+                            count: store.categoryCounts[categoryID] ?? 0
+                        )
+                        .tag(BrowserScope.category(categoryID))
+
+                        if expansionState.isExpanded(categoryID) {
                             ForEach(group.feeds, id: \.id) { feed in
                                 feedRow(feedTitle(feed.id), feedID: feed.id, count: store.feedCounts[feed.id] ?? 0)
+                                    .padding(.leading, 22)
                             }
-                        } label: {
-                            categoryRow(categoryID: categoryID, title: group.title, count: store.categoryCounts[categoryID] ?? 0)
                         }
-                        .tag(BrowserScope.category(categoryID))
                     } else {
                         ForEach(group.feeds, id: \.id) { feed in
                             feedRow(feedTitle(feed.id), feedID: feed.id, count: store.feedCounts[feed.id] ?? 0)
@@ -162,13 +167,33 @@ struct NewsNavigationView: View {
         .accessibilityValue(count == 0 ? String(localized: "No unread articles") : String(localized: "\(count) unread article"))
     }
 
-    private func categoryRow(categoryID: Int64, title: String, count: UInt64) -> some View {
-        let presentation = NewsNavigationSelection.categoryPresentation(categoryID: categoryID, activeScope: store.scope, catalog: store.catalog)
-        return Label { labelTitle(title, count: count) } icon: {
-            Image(systemName: presentation == .containsSelectedFeed ? "folder.fill" : "folder")
+    private func categoryNavigationRow(categoryID: Int64, title: String, count: UInt64) -> some View {
+        let categoryPresentation = NewsNavigationSelection.categoryPresentation(
+            categoryID: categoryID,
+            activeScope: store.scope,
+            catalog: store.catalog
+        )
+        let expanded = expansionState.isExpanded(categoryID)
+
+        return HStack(spacing: 6) {
+            Button {
+                expansionState.setExpanded(!expanded, categoryID: categoryID)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .frame(width: 16, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(expanded ? String(localized: "Collapse category") : String(localized: "Expand category"))
+            .accessibilityValue(title)
+
+            Label { labelTitle(title, count: count) } icon: {
+                Image(systemName: categoryPresentation == .containsSelectedFeed ? "folder.fill" : "folder")
+            }
+            .fontWeight(categoryPresentation == .containsSelectedFeed ? .medium : .regular)
         }
-        .fontWeight(presentation == .containsSelectedFeed ? .medium : .regular)
-        .tag(BrowserScope.category(categoryID))
     }
 
     private func feedRow(_ title: String, feedID: Int64?, count: UInt64) -> some View {
@@ -188,10 +213,6 @@ struct NewsNavigationView: View {
     }
 
     private var iconVariant: FeedIconVariant { IOSFeedIconPresentation.variant(isDark: colorScheme == .dark) }
-
-    private func expansionBinding(for categoryID: Int64) -> Binding<Bool> {
-        Binding(get: { expansionState.isExpanded(categoryID) }, set: { expansionState.setExpanded($0, categoryID: categoryID) })
-    }
 
     private func ensureSelectedFeedIsExpanded() {
         expansionState.ensureSelectedFeedIsExpanded(scope: store.scope, catalog: store.catalog)
