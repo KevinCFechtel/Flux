@@ -2396,7 +2396,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleAccessoryOrdering.horizontalLeadingToTrailing, [.audio, .comments, .star, .unread])
     }
 
-    func testVisualPortraitUsesLeadingHeroAccessoryRailAndMatchingPreviewColumn() {
+    func testVisualPortraitUsesLeadingHeroAccessoryRailAndFullWidthPreview() {
         let metrics = layoutMetrics(mode: .visual, width: 390, hasImage: true)
         guard let image = metrics.imageFrame, let preview = metrics.previewFrame else {
             return XCTFail("Visual portrait should expose image and preview frames")
@@ -2406,8 +2406,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSUIKitArticleGeometry.visualHeroImageAllocation, 0.85)
         XCTAssertEqual(image.width, (metrics.contentFrame.width * IOSUIKitArticleGeometry.visualHeroImageAllocation).rounded(), accuracy: 0.5)
         XCTAssertEqual(image.minX, metrics.contentFrame.minX, accuracy: 0.5)
-        XCTAssertEqual(preview.minX, image.minX, accuracy: 0.5)
-        XCTAssertEqual(preview.width, image.width, accuracy: 0.5)
+        XCTAssertEqual(preview.minX, metrics.contentFrame.minX, accuracy: 0.5)
+        XCTAssertEqual(preview.width, metrics.contentFrame.width, accuracy: 0.5)
 
         XCTAssertLessThan(metrics.titleFrame.maxY, metrics.metadataFrame.minY)
         XCTAssertLessThan(metrics.metadataFrame.maxY, metrics.dateFrame.minY)
