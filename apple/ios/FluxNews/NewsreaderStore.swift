@@ -1487,7 +1487,14 @@ struct ArticleRowContent: Equatable, Sendable {
     func setArticlesForTesting(_ value: [ArticleSummary]) { replaceArticles(value) }
     @MainActor
     func appendArticlesForTesting(_ value: [ArticleSummary]) {
-        appendTimelinePage(.init(page: .init(articles: value, total: nil, nextCursor: nil), contents: value.map(ArticleRowContent.init(article:))))
+        appendTimelinePage(
+            .init(
+                page: .init(articles: value, total: nil, nextCursor: nil),
+                contents: value.map {
+                    ArticleRowContent(article: $0, referenceDate: timelineRelativeDateReference)
+                }
+            )
+        )
     }
     @MainActor
     var timelineStructuralItemCountForTesting: Int { timelineStructuralStorage.items.count }
