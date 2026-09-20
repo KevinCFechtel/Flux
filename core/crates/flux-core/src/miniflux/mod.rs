@@ -1493,6 +1493,29 @@ impl IconDto {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn entry_reading_time_reaches_article_summary() {
+        let entry: EntryDto = serde_json::from_str(
+            r#"{
+                "id": 42,
+                "feed_id": 7,
+                "published_at": "2026-09-20T12:00:00Z",
+                "reading_time": 6,
+                "feed": {
+                    "id": 7,
+                    "title": "Example Feed",
+                    "feed_url": "https://example.test/feed",
+                    "disabled": false,
+                    "category": { "id": 3 }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let summary = search_article_summary(entry).unwrap();
+        assert_eq!(summary.reading_time_minutes, 6);
+    }
     use std::io::{BufRead, BufReader, Write};
     use std::net::{SocketAddr, TcpListener};
     use std::thread;
