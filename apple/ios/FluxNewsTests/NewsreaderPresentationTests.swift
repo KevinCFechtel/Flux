@@ -474,6 +474,38 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testUIKitPrefetchKeepsLayoutPreparationButSkipsOffscreenArticleImages() async {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let articles = (1...8).map {
+            timelineArticle(id: Int64($0), imageURL: "https://example.com/image-\($0).jpg")
+        }
+        let controller = makeTimelineController(
+            articles: articles,
+            presentationBridge: bridge,
+            feedIconBridge: bridge
+        )
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
+        controller.view.layoutIfNeeded()
+        await controller.settleForTesting()
+
+        let initialLayoutPrefetchCount = controller.layoutPrefetchInputCountForTesting
+        controller.tableView(
+            controller.tableViewForTesting,
+            prefetchRowsAt: [
+                IndexPath(row: 5, section: 0),
+                IndexPath(row: 6, section: 0),
+            ]
+        )
+
+        XCTAssertEqual(
+            controller.layoutPrefetchInputCountForTesting,
+            initialLayoutPrefetchCount + 2
+        )
+        XCTAssertEqual(controller.articleImagePrefetchTaskCountForTesting, 0)
+    }
+
+    @MainActor
     func testIncrementalTimelineChangesDoNotPerformFullReplacementCleanup() {
         let bridge = IOSUIKitArticleTimelinePresentationBridge()
         let first = timelineArticle(id: 1)
