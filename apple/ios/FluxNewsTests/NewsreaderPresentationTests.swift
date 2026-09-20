@@ -2453,7 +2453,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         }
 
         XCTAssertEqual(metrics.variant, .visualPortrait)
-        XCTAssertEqual(IOSUIKitArticleGeometry.visualHeroImageAllocation, 0.85)
+        XCTAssertEqual(IOSUIKitArticleGeometry.visualHeroImageAllocation, 0.80)
         XCTAssertEqual(IOSUIKitArticleGeometry.articleImageCornerRadius, 10)
         XCTAssertEqual(image.width, (metrics.contentFrame.width * IOSUIKitArticleGeometry.visualHeroImageAllocation).rounded(), accuracy: 0.5)
         XCTAssertEqual(image.minX, metrics.contentFrame.minX, accuracy: 0.5)
@@ -2473,6 +2473,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             accuracy: 0.5
         )
         XCTAssertEqual(rail.minY, image.minY, accuracy: 0.5)
+        XCTAssertEqual(rail.height, image.height, accuracy: 0.5)
         XCTAssertEqual(ageIcon.minX, rail.minX, accuracy: 0.5)
         XCTAssertEqual(age.minX, rail.minX, accuracy: 0.5)
         XCTAssertEqual(readingIcon.minX, rail.minX, accuracy: 0.5)
@@ -2480,6 +2481,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertLessThan(ageIcon.minY, age.minY)
         XCTAssertLessThan(age.maxY, readingIcon.minY)
         XCTAssertLessThan(readingIcon.minY, reading.minY)
+        XCTAssertEqual(reading.maxY, image.maxY, accuracy: 0.5)
 
         let visualBottom = max(image.maxY, rail.maxY)
         XCTAssertEqual(
@@ -2494,6 +2496,22 @@ final class NewsreaderPresentationTests: XCTestCase {
             XCTAssertEqual(comments.minX, rail.minX, accuracy: 0.5)
             XCTAssertLessThan(metrics.starFrame.minY, comments.minY)
         }
+    }
+
+    func testVisualPortraitAgeAloneAlignsWithHeroBottom() {
+        let metrics = layoutMetrics(mode: .visual, width: 390, hasImage: true)
+        guard
+            let image = metrics.imageFrame,
+            let rail = metrics.portraitAccessoryRailFrame,
+            let age = metrics.publishedAgeFrame
+        else {
+            return XCTFail("Visual portrait should expose hero and age rail")
+        }
+
+        XCTAssertNil(metrics.readingTimeIconFrame)
+        XCTAssertNil(metrics.readingTimeFrame)
+        XCTAssertEqual(rail.height, image.height, accuracy: 0.5)
+        XCTAssertEqual(age.maxY, image.maxY, accuracy: 0.5)
     }
 
     func testDeterministicArticleLayoutEngineUsesCurrentWidthTransitionsAndPixelRounding() {
