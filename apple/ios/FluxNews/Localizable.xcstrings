@@ -1977,7 +1977,23 @@
       }
     },
     "·": {},
-    "•": {}
+    "•": {},
+    "Reading time": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lesezeit"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading time"
+          }
+        }
+      }
+    }
   },
   "version": "1.0"
 }
