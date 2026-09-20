@@ -35,13 +35,25 @@ enum IOSArticleListActionPlacement: Equatable {
     case topBarTrailing
 }
 
+enum IOSArticleListChromeMode: Equatable {
+    case compactPortrait
+    case compactLandscape
+    case persistentSplit
+}
+
 enum IOSArticleListChromePresentation {
-    static func actionPlacement(for presentation: AdaptivePresentation) -> IOSArticleListActionPlacement {
-        presentation.usesPersistentSplitNavigation ? .topBarTrailing : .bottomBar
+    static func mode(
+        for presentation: AdaptivePresentation,
+        verticalSizeClass: UserInterfaceSizeClass?
+    ) -> IOSArticleListChromeMode {
+        if presentation.usesPersistentSplitNavigation {
+            return .persistentSplit
+        }
+        return verticalSizeClass == .compact ? .compactLandscape : .compactPortrait
     }
 
-    static func showsTitleCapsule(for presentation: AdaptivePresentation) -> Bool {
-        !presentation.usesPersistentSplitNavigation
+    static func actionPlacement(for mode: IOSArticleListChromeMode) -> IOSArticleListActionPlacement {
+        mode == .compactPortrait ? .bottomBar : .topBarTrailing
     }
 }
 
@@ -155,6 +167,13 @@ struct ContentView: View {
     private var adaptivePresentation: AdaptivePresentation {
         AdaptivePresentationPolicy.presentation(
             horizontalSizeClass: horizontalSizeClass,
+            verticalSizeClass: verticalSizeClass
+        )
+    }
+
+    private var articleListChromeMode: IOSArticleListChromeMode {
+        IOSArticleListChromePresentation.mode(
+            for: adaptivePresentation,
             verticalSizeClass: verticalSizeClass
         )
     }
@@ -289,7 +308,7 @@ struct ContentView: View {
         ArticleListNavigationChrome(
             store: newsreaderStore,
             onSelectScope: adaptivePresentation.usesPersistentSplitNavigation ? nil : { navigationPresented = true },
-            showsTitleCapsule: IOSArticleListChromePresentation.showsTitleCapsule(for: adaptivePresentation)
+            chromeMode: articleListChromeMode
         ) {
             ArticleListView(store: newsreaderStore, onArticleTap: openArticle, onArticleAction: handleArticleAction)
         }
@@ -354,7 +373,7 @@ struct ContentView: View {
     }
 
     private var articleListActionToolbarPlacement: ToolbarItemPlacement {
-        switch IOSArticleListChromePresentation.actionPlacement(for: adaptivePresentation) {
+        switch IOSArticleListChromePresentation.actionPlacement(for: articleListChromeMode) {
         case .bottomBar: .bottomBar
         case .topBarTrailing: .topBarTrailing
         }
@@ -624,9 +643,15 @@ struct ContentView: View {
     }
 }
 
+private enum ArticleListTitleCapsuleLayout {
+    case stacked
+    case inline
+}
+
 private struct ArticleListTitleCapsule: View {
     let title: String
     let subtitle: String?
+    let layout: ArticleListTitleCapsuleLayout
     var action: (() -> Void)?
     // Read so the derived glyph height is recomputed when the text size changes.
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -636,7 +661,7 @@ private struct ArticleListTitleCapsule: View {
     /// Type, and a flexible frame would let the glyph drive the capsule's height.
     private var glyphHeight: CGFloat {
         let titleHeight = UIFont.preferredFont(forTextStyle: .headline).lineHeight
-        guard subtitle != nil else { return titleHeight }
+        guard layout == .stacked, subtitle != nil else { return titleHeight }
         return titleHeight + 1 + UIFont.preferredFont(forTextStyle: .caption1).lineHeight
     }
 
@@ -679,16 +704,7 @@ private struct ArticleListTitleCapsule: View {
                     // keeps the accent it had as a standalone button.
                     .foregroundStyle(Color.accentColor)
             }
-            VStack(spacing: 1) {
-                Text(title)
-                    .font(.headline)
-                    .lineLimit(1)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.caption)
-                        .lineLimit(1)
-                }
-            }
+            titleAndSubtitle
             if action != nil {
                 // Glass says "interactive", the chevron says what kind. No
                 // explicit colour: an inherited one still flips with the glass
@@ -700,9 +716,42 @@ private struct ArticleListTitleCapsule: View {
         }
         .padding(.leading, action == nil ? 16 : 12)
         .padding(.trailing, action == nil ? 16 : 12)
-        .padding(.vertical, 7)
+        .padding(.vertical, layout == .inline ? 5 : 7)
         .background { ArticleListTitleCapsuleBackground() }
         .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var titleAndSubtitle: some View {
+        switch layout {
+        case .stacked:
+            VStack(spacing: 1) {
+                Text(title)
+                    .font(.headline)
+                    .lineLimit(1)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .lineLimit(1)
+                }
+            }
+        case .inline:
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if let subtitle {
+                    Text("·")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(subtitle)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                }
+            }
+        }
     }
 }
 
@@ -825,7 +874,7 @@ private struct ArticleListNavigationChrome<Content: View>: View {
     var store: NewsreaderStore
     /// Absent when a persistent sidebar already offers scope selection.
     var onSelectScope: (() -> Void)?
-    var showsTitleCapsule: Bool
+    var chromeMode: IOSArticleListChromeMode
     @ViewBuilder let content: () -> Content
 
     private func capsuleSubtitle(_ subtitle: String) -> String? {
@@ -833,10 +882,10 @@ private struct ArticleListNavigationChrome<Content: View>: View {
     }
 
     /// A large title cannot hand over to the capsule. Toolbar placements are
-    /// additive — `largeTitle` and `principal` render side by side rather than as
-    /// two states of one title — so the capsule owns the title outright.
+    /// additive, so each compact-height mode gives the capsule one explicit
+    /// toolbar slot while the persistent split uses a native inline title.
     @ViewBuilder
-    private func capsuleOnlyChrome(title: String, subtitle: String) -> some View {
+    private func portraitCapsuleChrome(title: String, subtitle: String) -> some View {
         content()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -845,6 +894,24 @@ private struct ArticleListNavigationChrome<Content: View>: View {
                     ArticleListTitleCapsule(
                         title: title,
                         subtitle: capsuleSubtitle(subtitle),
+                        layout: .stacked,
+                        action: onSelectScope
+                    )
+                }
+            }
+    }
+
+    @ViewBuilder
+    private func landscapeCapsuleChrome(title: String, subtitle: String) -> some View {
+        content()
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    ArticleListTitleCapsule(
+                        title: title,
+                        subtitle: capsuleSubtitle(subtitle),
+                        layout: .inline,
                         action: onSelectScope
                     )
                 }
@@ -854,14 +921,17 @@ private struct ArticleListNavigationChrome<Content: View>: View {
     var body: some View {
         let title = ArticleListTitlePresentation.title(scope: store.scope, catalog: store.catalog)
         let countLabel = ArticleListCounterPresentation.expandedLabel(scope: store.scope, unreadOnly: store.unreadOnly, count: store.selectionTotal)
-        // Only ever a substitution inside an existing subtitle: adding a line
-        // mid-sync would change the capsule's height, and the glyph scales with
-        // it, so the whole bar would jump.
+        // The same scope count remains available in both phone orientations.
+        // During Sync it keeps the existing transient substitution instead of
+        // adding a second line or changing the toolbar geometry.
         let subtitle = store.isSyncing ? String(localized: "Syncing…") : countLabel
 
-        if showsTitleCapsule {
-            capsuleOnlyChrome(title: title, subtitle: subtitle)
-        } else {
+        switch chromeMode {
+        case .compactPortrait:
+            portraitCapsuleChrome(title: title, subtitle: subtitle)
+        case .compactLandscape:
+            landscapeCapsuleChrome(title: title, subtitle: subtitle)
+        case .persistentSplit:
             // A persistent sidebar already communicates the selected scope and
             // provides its navigation affordance. Keep only the native inline
             // title on iPad and leave the trailing toolbar for article actions.
