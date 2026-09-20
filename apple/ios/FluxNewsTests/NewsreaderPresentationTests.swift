@@ -1741,6 +1741,45 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertNil(pipeline.cachedImage(for: differentSizeRequest))
     }
 
+    func testArticleImagePipelineLRURetainsRecentRastersUntilBudgetRequiresEviction() async throws {
+        let data = try imageData(width: 800, height: 400)
+        let counter = ImageLoadCounter(data: data)
+        let rasterCost = 100 * 50 * 4
+        let pipeline = ArticleImagePipeline(
+            loader: { _ in await counter.load() },
+            memoryCacheCostLimit: rasterCost * 2 + 1
+        )
+
+        let first = ArticleImageRequest(
+            url: URL(string: "https://example.com/first.jpg")!,
+            targetSize: CGSize(width: 100, height: 50),
+            displayScale: 1
+        )
+        let second = ArticleImageRequest(
+            url: URL(string: "https://example.com/second.jpg")!,
+            targetSize: CGSize(width: 100, height: 50),
+            displayScale: 1
+        )
+        let third = ArticleImageRequest(
+            url: URL(string: "https://example.com/third.jpg")!,
+            targetSize: CGSize(width: 100, height: 50),
+            displayScale: 1
+        )
+
+        _ = try await pipeline.image(for: first)
+        _ = try await pipeline.image(for: second)
+        XCTAssertNotNil(pipeline.cachedImage(for: first)) // promote first to MRU
+        _ = try await pipeline.image(for: third)
+
+        XCTAssertNotNil(pipeline.cachedImage(for: first))
+        XCTAssertNil(pipeline.cachedImage(for: second))
+        XCTAssertNotNil(pipeline.cachedImage(for: third))
+
+        let metrics = await pipeline.metrics()
+        XCTAssertEqual(metrics.memoryCacheEvictions, 1)
+        XCTAssertEqual(await counter.callCount(), 3)
+    }
+
     func testArticleImagePipelineDeduplicatesEquivalentInFlightRequests() async throws {
         let gate = ImageLoadGate(data: try imageData(width: 800, height: 400))
         let pipeline = ArticleImagePipeline { _ in try await gate.load() }
@@ -1788,20 +1827,20 @@ final class NewsreaderPresentationTests: XCTestCase {
         let activePrefetches = requests.prefix(3).map { request in
             Task { try await pipeline.prefetch(request) }
         }
-        await gate.waitUntilStarted(count: 3)
+        await gate.waitUntilStarted(count: 2)
         let queuedPrefetch = Task { try await pipeline.prefetch(requests[3]) }
         let visible = Task { try await pipeline.image(for: requests[4]) }
         for _ in 0..<8 { await Task.yield() }
 
         let saturated = await pipeline.metrics()
-        XCTAssertEqual(ArticleImagePipeline.maximumConcurrentOperations, 3)
-        XCTAssertEqual(saturated.activeOperations, 3)
+        XCTAssertEqual(ArticleImagePipeline.maximumConcurrentOperations, 2)
+        XCTAssertEqual(saturated.activeOperations, 2)
         XCTAssertEqual(saturated.queuedVisibleRequests, 1)
-        XCTAssertEqual(saturated.queuedPrefetchRequests, 1)
+        XCTAssertEqual(saturated.queuedPrefetchRequests, 2)
         XCTAssertEqual(saturated.trackedRequests, 5)
 
         await gate.releaseOne()
-        await gate.waitUntilStarted(count: 4)
+        await gate.waitUntilStarted(count: 3)
         let startedURLs = await gate.startedURLs()
         XCTAssertEqual(startedURLs.last, requests[4].url)
 
