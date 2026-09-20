@@ -2206,6 +2206,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var portraitRailStarHeight: NSLayoutConstraint!
     private var portraitRailCommentsWidth: NSLayoutConstraint!
     private var portraitRailCommentsHeight: NSLayoutConstraint!
+    private var portraitAccessoryRailWidthConstraint: NSLayoutConstraint!
     /// One step more contrast than `secondaryLabel` without reaching full
     /// `label`, which would compete with the headline. Resolved per trait
     /// collection so it still inverts in dark mode.
@@ -2530,6 +2531,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
             multiplier: 1 / ArticlePresentationLayout.portraitImageAspectRatio
         )
         portraitImageWidthConstraint = articleImageView.widthAnchor.constraint(equalToConstant: 1)
+        portraitAccessoryRailWidthConstraint = portraitAccessoryRail.widthAnchor.constraint(
+            equalToConstant: IOSUIKitArticleGeometry.commentSlotSize
+        )
         landscapeImageWidthConstraint = articleImageView.widthAnchor.constraint(equalToConstant: 1)
         landscapeImageHeightConstraint = articleImageView.heightAnchor.constraint(equalToConstant: 1)
         portraitPreviewTopConstraint = previewLabel.topAnchor.constraint(
@@ -2583,9 +2587,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
                 equalTo: articleImageView.trailingAnchor,
                 constant: IOSUIKitArticleGeometry.portraitAccessoryRailSpacing
             ),
-            portraitAccessoryRail.widthAnchor.constraint(
-                equalToConstant: IOSUIKitArticleGeometry.commentSlotSize
-            ),
+            portraitAccessoryRailWidthConstraint,
             portraitAccessoryRail.topAnchor.constraint(equalTo: articleImageView.topAnchor),
             portraitAccessoryRail.bottomAnchor.constraint(lessThanOrEqualTo: articleImageView.bottomAnchor),
 
@@ -2850,6 +2852,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
         if portraitRailCommentsWidth.constant != comments {
             portraitRailCommentsWidth.constant = comments
             portraitRailCommentsHeight.constant = comments
+        }
+        let railWidth = max(unread, star, comments)
+        if portraitAccessoryRailWidthConstraint.constant != railWidth {
+            portraitAccessoryRailWidthConstraint.constant = railWidth
         }
     }
 
