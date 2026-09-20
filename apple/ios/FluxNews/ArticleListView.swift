@@ -2871,10 +2871,6 @@ final class IOSUIKitArticleCell: UITableViewCell {
         let usesPortraitRail = variant == .visualPortrait
         metadataFeedTitleDefaultTrailingConstraint.isActive = !usesPortraitRail
         metadataFeedTitlePortraitTrailingConstraint.isActive = usesPortraitRail
-        defaultDateLeadingConstraint.isActive = !usesPortraitRail
-        defaultDateTopConstraint.isActive = !usesPortraitRail
-        portraitDateLeadingConstraint.isActive = usesPortraitRail
-        portraitDateTopConstraint.isActive = usesPortraitRail
         unreadIndicator.isHidden = usesPortraitRail
         starImageView.isHidden = usesPortraitRail
         commentsContainer.isHidden = usesPortraitRail || !currentHasComments
@@ -2895,6 +2891,15 @@ final class IOSUIKitArticleCell: UITableViewCell {
         }
 
         NSLayoutConstraint.deactivate(activeLayoutConstraints)
+        // The default date anchors live outside the variant arrays because they
+        // are shared by the text-only layouts. Switch them only after the old
+        // variant is inactive so reuse/rotation never has two competing date
+        // positions at once.
+        defaultDateLeadingConstraint.isActive = !usesPortraitRail
+        defaultDateTopConstraint.isActive = !usesPortraitRail
+        portraitDateLeadingConstraint.isActive = usesPortraitRail
+        portraitDateTopConstraint.isActive = usesPortraitRail
+
         switch variant {
         case .compact, .visualTextOnly:
             activeLayoutConstraints = textOnlyConstraints
