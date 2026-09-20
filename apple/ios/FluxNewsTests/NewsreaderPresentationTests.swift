@@ -2391,7 +2391,12 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(layoutMetrics(mode: .visual, width: 760, hasImage: true).variant, .visualLandscape)
     }
 
-    func testVisualPortraitUsesMetadataAndDateAboveInsetHero() {
+    func testArticleAccessoryOrderingIsStableAcrossHorizontalAndVerticalLayouts() {
+        XCTAssertEqual(IOSArticleAccessoryOrdering.outerToInner, [.unread, .star, .comments, .audio])
+        XCTAssertEqual(IOSArticleAccessoryOrdering.horizontalLeadingToTrailing, [.audio, .comments, .star, .unread])
+    }
+
+    func testVisualPortraitUsesLeadingHeroAccessoryRailAndMatchingPreviewColumn() {
         let metrics = layoutMetrics(mode: .visual, width: 390, hasImage: true)
         guard let image = metrics.imageFrame, let preview = metrics.previewFrame else {
             return XCTFail("Visual portrait should expose image and preview frames")
@@ -2400,11 +2405,22 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(metrics.variant, .visualPortrait)
         XCTAssertEqual(IOSUIKitArticleGeometry.visualHeroImageAllocation, 0.85)
         XCTAssertEqual(image.width, (metrics.contentFrame.width * IOSUIKitArticleGeometry.visualHeroImageAllocation).rounded(), accuracy: 0.5)
-        XCTAssertEqual(image.midX, metrics.contentFrame.midX, accuracy: 0.5)
+        XCTAssertEqual(image.minX, metrics.contentFrame.minX, accuracy: 0.5)
+        XCTAssertEqual(preview.minX, image.minX, accuracy: 0.5)
+        XCTAssertEqual(preview.width, image.width, accuracy: 0.5)
+
         XCTAssertLessThan(metrics.titleFrame.maxY, metrics.metadataFrame.minY)
         XCTAssertLessThan(metrics.metadataFrame.maxY, metrics.dateFrame.minY)
         XCTAssertLessThan(metrics.dateFrame.maxY, image.minY)
         XCTAssertLessThan(image.maxY, preview.minY)
+
+        XCTAssertGreaterThan(metrics.unreadFrame.minX, image.maxX)
+        XCTAssertGreaterThan(metrics.starFrame.minX, image.maxX)
+        XCTAssertLessThan(metrics.unreadFrame.minY, metrics.starFrame.minY)
+        if let comments = metrics.commentsFrame {
+            XCTAssertGreaterThan(comments.minX, image.maxX)
+            XCTAssertLessThan(metrics.starFrame.minY, comments.minY)
+        }
     }
 
     func testDeterministicArticleLayoutEngineUsesCurrentWidthTransitionsAndPixelRounding() {
