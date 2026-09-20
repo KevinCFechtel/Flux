@@ -396,7 +396,7 @@ enum IOSArticleAccessoryOrdering {
 
     /// UIKit lays a horizontal trailing group from leading to trailing, so the
     /// semantic order appears reversed in coordinate order.
-    static let horizontalLeadingToTrailing: [IOSArticleAccessoryKind] = outerToInner.reversed()
+    static let horizontalLeadingToTrailing: [IOSArticleAccessoryKind] = Array(outerToInner.reversed())
 }
 
 /// The non-text geometry contract shared by the renderer and deterministic sizing.
@@ -483,7 +483,7 @@ struct IOSUIKitArticleGeometry: Equatable {
             let width = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
             return .init(width: width, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: width))
         }
-        // Standard Visual portrait: centered inset hero image. Keep the 16:9
+        // Standard Visual portrait: leading inset hero image. Keep the 16:9
         // aspect contract while shortening the long horizontal moving edge.
         let width = (availableWidth * Self.visualHeroImageAllocation).rounded()
         return .init(width: width, height: width * (1 / ArticlePresentationLayout.portraitImageAspectRatio))
