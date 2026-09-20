@@ -77,12 +77,16 @@ struct IOSUIKitArticleLayoutKey: Hashable {
         let geometry = IOSUIKitArticleGeometry(mode: input.mode, containerWidth: input.containerWidth)
         title = input.title
         feedTitle = input.feedTitle
-        publishedDate = input.publishedDate
-        publishedAge = input.publishedAge
-        readingTime = input.readingTime
+        let resolvedVariant = geometry.variant(hasImage: input.hasImage && input.mode.showsArticleImage)
+        variant = resolvedVariant
+        // Only retain text that can affect geometry in the resolved variant.
+        // Visual portrait hides the absolute date; every other variant hides the
+        // relative-age/reading-time rail.
+        publishedDate = resolvedVariant == .visualPortrait ? "" : input.publishedDate
+        publishedAge = resolvedVariant == .visualPortrait ? input.publishedAge : ""
+        readingTime = resolvedVariant == .visualPortrait ? input.readingTime : nil
         preview = input.preview
         hasComments = input.hasComments
-        variant = geometry.variant(hasImage: input.hasImage && input.mode.showsArticleImage)
         previewLines = input.previewLines
         containerWidthPixels = Self.canonicalContainerWidthPixels(input.containerWidth, displayScale: scale)
         displayScaleHundredths = Self.canonicalDisplayScaleHundredths(scale)
