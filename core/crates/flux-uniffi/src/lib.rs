@@ -102,6 +102,7 @@ pub struct ArticleSummary {
     pub published_at: String,
     pub is_read: bool,
     pub is_starred: bool,
+    pub reading_time_minutes: u32,
     pub preview: String,
     pub image_url: Option<String>,
 }
@@ -1947,6 +1948,7 @@ impl From<domain::ArticleSummary> for ArticleSummary {
             published_at: value.published_at,
             is_read: value.is_read,
             is_starred: value.is_starred,
+            reading_time_minutes: value.reading_time_minutes,
             preview: value.preview,
             image_url: value.image_url,
         }
