@@ -487,7 +487,6 @@ impl FluxCore {
         &self,
         feed_id: i64,
         raw_html_content: &str,
-        reading_time_minutes: 0,
         url: &str,
         image_url: Option<&str>,
     ) -> Result<ReaderDocument, CoreError> {
