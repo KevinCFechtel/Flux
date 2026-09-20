@@ -2216,7 +2216,6 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var portraitReadingTimeHeightConstraint: NSLayoutConstraint!
     private var portraitReadingGroupSpacingConstraint: NSLayoutConstraint!
     private var portraitReadingLabelSpacingConstraint: NSLayoutConstraint!
-    private var portraitInfoBottomConstraint: NSLayoutConstraint!
     private var portraitAgeBottomConstraint: NSLayoutConstraint!
     private var portraitAccessoryRailWidthConstraint: NSLayoutConstraint!
     private var portraitAccessoryRailHeightConstraint: NSLayoutConstraint!
@@ -2411,16 +2410,13 @@ final class IOSUIKitArticleCell: UITableViewCell {
         portraitAccessoryRail.addSubview(portraitReadingTimeIconView)
         portraitAccessoryRail.addSubview(portraitReadingTimeLabel)
 
-        portraitReadingGroupSpacingConstraint = portraitReadingTimeIconView.topAnchor.constraint(
-            equalTo: portraitPublishedAgeLabel.bottomAnchor,
-            constant: IOSUIKitArticleGeometry.portraitInfoGroupSpacing
-        )
         portraitReadingLabelSpacingConstraint = portraitReadingTimeLabel.topAnchor.constraint(
             equalTo: portraitReadingTimeIconView.bottomAnchor,
             constant: IOSUIKitArticleGeometry.portraitInfoLabelSpacing
         )
-        portraitInfoBottomConstraint = portraitReadingTimeLabel.bottomAnchor.constraint(
-            equalTo: portraitAccessoryRail.bottomAnchor
+        portraitReadingGroupSpacingConstraint = portraitPublishedAgeIconView.topAnchor.constraint(
+            equalTo: portraitReadingTimeLabel.bottomAnchor,
+            constant: IOSUIKitArticleGeometry.portraitInfoGroupSpacing
         )
         portraitAgeBottomConstraint = portraitPublishedAgeLabel.bottomAnchor.constraint(
             equalTo: portraitAccessoryRail.bottomAnchor
@@ -2463,6 +2459,16 @@ final class IOSUIKitArticleCell: UITableViewCell {
             portraitRailCommentsWidth,
             portraitRailCommentsHeight,
 
+            portraitReadingTimeIconView.leadingAnchor.constraint(equalTo: portraitAccessoryRail.leadingAnchor),
+            portraitRailReadingIconWidth,
+            portraitRailReadingIconHeight,
+
+            portraitReadingLabelSpacingConstraint,
+            portraitReadingTimeLabel.leadingAnchor.constraint(equalTo: portraitAccessoryRail.leadingAnchor),
+            portraitReadingTimeLabel.trailingAnchor.constraint(equalTo: portraitAccessoryRail.trailingAnchor),
+            portraitReadingTimeHeightConstraint,
+
+            portraitReadingGroupSpacingConstraint,
             portraitPublishedAgeIconView.leadingAnchor.constraint(equalTo: portraitAccessoryRail.leadingAnchor),
             portraitRailInfoIconWidth,
             portraitRailInfoIconHeight,
@@ -2474,22 +2480,12 @@ final class IOSUIKitArticleCell: UITableViewCell {
             portraitPublishedAgeLabel.leadingAnchor.constraint(equalTo: portraitAccessoryRail.leadingAnchor),
             portraitPublishedAgeLabel.trailingAnchor.constraint(equalTo: portraitAccessoryRail.trailingAnchor),
             portraitPublishedAgeHeightConstraint,
-
-            portraitReadingGroupSpacingConstraint,
-            portraitReadingTimeIconView.leadingAnchor.constraint(equalTo: portraitAccessoryRail.leadingAnchor),
-            portraitRailReadingIconWidth,
-            portraitRailReadingIconHeight,
-
-            portraitReadingLabelSpacingConstraint,
-            portraitReadingTimeLabel.leadingAnchor.constraint(equalTo: portraitAccessoryRail.leadingAnchor),
-            portraitReadingTimeLabel.trailingAnchor.constraint(equalTo: portraitAccessoryRail.trailingAnchor),
-            portraitReadingTimeHeightConstraint,
-            portraitInfoBottomConstraint,
+            portraitAgeBottomConstraint,
 
             // Keep a safety gap between the top status group and the bottom
             // temporal group. Under large Dynamic Type the rail itself may grow
             // beyond the hero height rather than allowing overlap.
-            portraitPublishedAgeIconView.topAnchor.constraint(
+            portraitReadingTimeIconView.topAnchor.constraint(
                 greaterThanOrEqualTo: portraitCommentsContainer.bottomAnchor,
                 constant: IOSUIKitArticleGeometry.portraitInfoStartSpacing
             ),
@@ -2903,8 +2899,6 @@ final class IOSUIKitArticleCell: UITableViewCell {
         let hasReadingTime = item.content.readingTime != nil
         portraitReadingTimeIconView.isHidden = !hasReadingTime
         portraitReadingTimeLabel.isHidden = !hasReadingTime
-        portraitInfoBottomConstraint.isActive = hasReadingTime
-        portraitAgeBottomConstraint.isActive = !hasReadingTime
 
         let hasImage = mode.showsArticleImage && item.content.imageURL != nil
         let imageSize = metrics.imageSize(hasImage: hasImage)
