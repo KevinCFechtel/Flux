@@ -70,7 +70,7 @@ enum IOSArticleListTitleCapsuleMetrics {
     /// present. There is deliberately no app-level maximum width: the navigation
     /// bar owns the real available space and compresses this leading item only
     /// when the trailing controls actually require it.
-    static let inlineMinimumContentWidth: CGFloat = 160
+    static let inlineMinimumContentWidth: CGFloat = 280
     /// Count semantics are more important than preserving every character of a
     /// long scope/feed title. The count therefore resists horizontal compression
     /// first and the title yields by truncating at its tail.
