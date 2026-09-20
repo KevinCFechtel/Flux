@@ -59,6 +59,14 @@ enum IOSArticleListChromePresentation {
     }
 }
 
+enum IOSArticleListTitleCapsuleMetrics {
+    /// Landscape must keep a useful title even when the trailing action group is
+    /// present. There is deliberately no app-level maximum width: the navigation
+    /// bar owns the real available space and compresses this leading item only
+    /// when the trailing controls actually require it.
+    static let inlineMinimumContentWidth: CGFloat = 160
+}
+
 enum IOSMoreAction: Equatable {
     case markAllRead
     case markAllReadAndNext
@@ -763,10 +771,14 @@ private struct ArticleListTitleCapsule: View {
                         .layoutPriority(1)
                 }
             }
-            // A leading navigation-bar item is compressed before the trailing
-            // action group. Reserve enough intrinsic width that the scope title
-            // cannot collapse to zero while still allowing long names to truncate.
-            .frame(minWidth: 120, maxWidth: 260, alignment: .leading)
+            // Let the title use its natural width. The navigation bar already
+            // knows how much room the trailing Sync/Filter/More group needs, so
+            // an app-level maximum would only cause premature truncation on wide
+            // landscape phones.
+            .frame(
+                minWidth: IOSArticleListTitleCapsuleMetrics.inlineMinimumContentWidth,
+                alignment: .leading
+            )
         }
     }
 }
