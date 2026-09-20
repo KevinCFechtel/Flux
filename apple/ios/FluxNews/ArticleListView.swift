@@ -845,6 +845,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private var preparedWindowTask: Task<Void, Never>?
     private var preparedWindowGeneration: UInt64 = 0
     private var scheduledPreparedWindowGeneration: UInt64?
+    /// Diagnostic parity with the smooth Flutter timeline: keep UIKit's row/layout
+    /// prefetching, but do not speculatively fetch/decode/raster article images
+    /// before their cells become visible. Visible cells still request images
+    /// immediately through ArticleImagePipeline.
+    private static let offscreenArticleImagePrefetchEnabled = false
     private var prefetchTasks: [Int64: (request: ArticleImageRequest, task: Task<Void, Never>)] = [:]
     private let refreshControl = UIRefreshControl()
     private let statusBarScrim = IOSUIKitTimelineTopScrimView()
@@ -1609,7 +1614,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         layoutPrefetchInputCountForTesting += layoutInputs.count
 #endif
         preparedLayoutCoordinator.prepare(layoutInputs, priority: .prefetch)
-        guard mode.showsArticleImage else { return }
+        guard Self.offscreenArticleImagePrefetchEnabled, mode.showsArticleImage else { return }
         for indexPath in indexPaths {
             guard let id = dataSource.itemIdentifier(for: indexPath),
                   let item = renderedItem(for: id), let request = imageRequest(for: item)
