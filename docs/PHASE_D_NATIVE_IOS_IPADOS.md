@@ -340,8 +340,11 @@ iPhone landscape moves the same action group to the trailing top toolbar and
 uses a compact leading interactive scope capsule that preserves the configured
 current-scope article count in compact numeric form (or the existing transient
 `Syncing…` substitution).
-Persistent iPad split navigation also uses the trailing top toolbar but replaces
-the interactive title capsule with a native inline scope title;
+Persistent iPad split navigation also uses the trailing top toolbar and keeps
+the detail navigation bar title-free because the persistent sidebar already
+communicates the selected scope. Category selection and category expansion are
+separate sidebar interactions so a selected category can still be expanded or
+collapsed independently;
 active manual Sync is indicated by continuous symbol rotation, and successful
 manual Sync briefly presents a checkmark before returning to the idle symbol.
 Failure returns directly to the idle symbol. This is native transient
