@@ -311,6 +311,7 @@ mod tests {
             is_read: true,
             is_starred: false,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: None,
         }
@@ -399,6 +400,7 @@ mod tests {
             is_read: true,
             is_starred: false,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: None,
         };
@@ -587,6 +589,7 @@ mod tests {
             is_read: true,
             is_starred: false,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: None,
         };
@@ -706,6 +709,7 @@ mod tests {
             is_read: true,
             is_starred: false,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: None,
         };
@@ -839,6 +843,7 @@ mod tests {
             is_read: true,
             is_starred: false,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: None,
         };
@@ -957,6 +962,7 @@ mod tests {
             is_read: false,
             is_starred: false,
             raw_html_content: String::new(),
+            reading_time_minutes: 0,
             preview: String::new(),
             image_url: None,
         };
