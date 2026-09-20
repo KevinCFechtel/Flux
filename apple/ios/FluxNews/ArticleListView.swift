@@ -2161,10 +2161,13 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private let feedIconFallbackLabel = UILabel()
     private let feedTitleLabel = UILabel()
     private let dateLabel = UILabel()
+    private let landscapeReadingTimeContainer = UIView()
+    private let landscapeReadingTimeIconView = UIImageView(image: UIImage(systemName: "doc.text"))
+    private let landscapeReadingTimeLabel = UILabel()
     private let commentsContainer = UIView()
     private let commentsImageView = UIImageView(image: UIImage(systemName: "bubble.left"))
     /// Visual portrait keeps the normal metadata row feed-only and projects the
-    /// stable accessory order into the 15% gutter beside the hero.
+    /// stable accessory order into the 20% rail beside the hero.
     private let portraitAccessoryRail = UIView()
     private let portraitUnreadIndicator = UIView()
     private let portraitStarImageView = UIImageView(image: UIImage(systemName: "star.fill"))
@@ -2202,6 +2205,12 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var metadataFeedTitlePortraitTrailingConstraint: NSLayoutConstraint!
     private var defaultDateLeadingConstraint: NSLayoutConstraint!
     private var defaultDateTopConstraint: NSLayoutConstraint!
+    private var defaultDateTrailingConstraint: NSLayoutConstraint!
+    private var landscapeDateTrailingConstraint: NSLayoutConstraint!
+    private var landscapeReadingContainerWidthConstraint: NSLayoutConstraint!
+    private var landscapeReadingIconWidthConstraint: NSLayoutConstraint!
+    private var landscapeReadingIconHeightConstraint: NSLayoutConstraint!
+    private var landscapeReadingLabelWidthConstraint: NSLayoutConstraint!
     private var portraitRailUnreadWidth: NSLayoutConstraint!
     private var portraitRailUnreadHeight: NSLayoutConstraint!
     private var portraitRailStarWidth: NSLayoutConstraint!
@@ -2497,6 +2506,37 @@ final class IOSUIKitArticleCell: UITableViewCell {
         dateLabel.textColor = Self.supportingTextColor
         dateLabel.numberOfLines = 1
 
+        landscapeReadingTimeContainer.translatesAutoresizingMaskIntoConstraints = false
+        landscapeReadingTimeContainer.isHidden = true
+        landscapeReadingTimeIconView.translatesAutoresizingMaskIntoConstraints = false
+        landscapeReadingTimeIconView.tintColor = Self.supportingTextColor
+        landscapeReadingTimeLabel.translatesAutoresizingMaskIntoConstraints = false
+        landscapeReadingTimeLabel.font = .preferredFont(forTextStyle: .caption1)
+        landscapeReadingTimeLabel.adjustsFontForContentSizeCategory = true
+        landscapeReadingTimeLabel.textColor = Self.supportingTextColor
+        landscapeReadingTimeLabel.numberOfLines = 1
+        landscapeReadingTimeContainer.addSubview(landscapeReadingTimeIconView)
+        landscapeReadingTimeContainer.addSubview(landscapeReadingTimeLabel)
+        landscapeReadingContainerWidthConstraint = landscapeReadingTimeContainer.widthAnchor.constraint(equalToConstant: 0)
+        landscapeReadingIconWidthConstraint = landscapeReadingTimeIconView.widthAnchor.constraint(equalToConstant: 0)
+        landscapeReadingIconHeightConstraint = landscapeReadingTimeIconView.heightAnchor.constraint(equalToConstant: 0)
+        landscapeReadingLabelWidthConstraint = landscapeReadingTimeLabel.widthAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([
+            landscapeReadingContainerWidthConstraint,
+            landscapeReadingTimeIconView.leadingAnchor.constraint(equalTo: landscapeReadingTimeContainer.leadingAnchor),
+            landscapeReadingTimeIconView.centerYAnchor.constraint(equalTo: landscapeReadingTimeContainer.centerYAnchor),
+            landscapeReadingIconWidthConstraint,
+            landscapeReadingIconHeightConstraint,
+            landscapeReadingTimeLabel.leadingAnchor.constraint(
+                equalTo: landscapeReadingTimeIconView.trailingAnchor,
+                constant: IOSUIKitArticleGeometry.landscapeReadingTimeIconTextSpacing
+            ),
+            landscapeReadingTimeLabel.trailingAnchor.constraint(equalTo: landscapeReadingTimeContainer.trailingAnchor),
+            landscapeReadingTimeLabel.topAnchor.constraint(equalTo: landscapeReadingTimeContainer.topAnchor),
+            landscapeReadingTimeLabel.bottomAnchor.constraint(equalTo: landscapeReadingTimeContainer.bottomAnchor),
+            landscapeReadingLabelWidthConstraint,
+        ])
+
         metadataRow.addSubview(unreadIndicator)
         metadataRow.addSubview(feedIconContainer)
         metadataRow.addSubview(feedTitleLabel)
@@ -2546,6 +2586,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             textContainer.addSubview(label)
         }
         textContainer.addSubview(metadataRow)
+        textContainer.addSubview(landscapeReadingTimeContainer)
         previewTopConstraint = previewLabel.topAnchor.constraint(equalTo: dateLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing)
         // Collapsing by priority keeps the constraint graph untouched. Removing
         // or deactivating it instead would mutate the graph on every reuse
@@ -2564,6 +2605,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             equalTo: metadataRow.bottomAnchor,
             constant: IOSUIKitArticleGeometry.textSpacing
         )
+        defaultDateTrailingConstraint = dateLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor)
         defaultStackConstraints = [
             previewBottomDefaultConstraint,
             previewTrailingDefaultConstraint,
@@ -2572,7 +2614,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             metadataRow.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
             metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
             defaultDateTopConstraint,
-            dateLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            defaultDateTrailingConstraint,
             previewTopConstraint,
         ]
 
@@ -2692,6 +2734,11 @@ final class IOSUIKitArticleCell: UITableViewCell {
             previewTrailingDefaultConstraint,
             previewBottomDefaultConstraint,
         ]
+        landscapeDateTrailingConstraint = dateLabel.trailingAnchor.constraint(
+            equalTo: landscapeReadingTimeContainer.leadingAnchor,
+            constant: -IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing
+        )
+
         landscapeConstraints = [
         ] + defaultStackConstraints + [
 
@@ -2704,6 +2751,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
             textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
             textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
             textContainer.bottomAnchor.constraint(lessThanOrEqualTo: margins.bottomAnchor),
+
+            landscapeReadingTimeContainer.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            landscapeReadingTimeContainer.topAnchor.constraint(equalTo: dateLabel.topAnchor),
+            landscapeReadingTimeContainer.bottomAnchor.constraint(equalTo: dateLabel.bottomAnchor),
         ]
 
         // Order, top to bottom:
@@ -2870,6 +2921,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         titleLabel.text = currentTitle
         feedTitleLabel.text = currentFeedTitle
         dateLabel.text = currentPublishedDate
+        landscapeReadingTimeLabel.text = item.content.readingTime
         portraitPublishedAgeLabel.text = item.content.publishedAge
         portraitReadingTimeLabel.text = item.content.readingTime
         let hasPreview = !item.content.article.preview.isEmpty
@@ -2980,6 +3032,20 @@ final class IOSUIKitArticleCell: UITableViewCell {
         portraitReadingLabelSpacingConstraint.constant = hasReadingTimeFrame
             ? IOSUIKitArticleGeometry.portraitInfoLabelSpacing
             : 0
+
+        if let container = layout.landscapeReadingTimeContainerFrame,
+           let icon = layout.landscapeReadingTimeIconFrame,
+           let text = layout.landscapeReadingTimeFrame {
+            landscapeReadingContainerWidthConstraint.constant = container.width
+            landscapeReadingIconWidthConstraint.constant = icon.width
+            landscapeReadingIconHeightConstraint.constant = icon.height
+            landscapeReadingLabelWidthConstraint.constant = text.width
+        } else {
+            landscapeReadingContainerWidthConstraint.constant = 0
+            landscapeReadingIconWidthConstraint.constant = 0
+            landscapeReadingIconHeightConstraint.constant = 0
+            landscapeReadingLabelWidthConstraint.constant = 0
+        }
     }
 
     private func applyLayout(metrics: Metrics, variant: IOSUIKitArticleCellLayoutVariant) {
@@ -2992,8 +3058,12 @@ final class IOSUIKitArticleCell: UITableViewCell {
         )
 
         let usesPortraitRail = variant == .visualPortrait
+        let usesLandscapeReadingTime = variant == .visualLandscape && currentReadingTime != nil
         metadataFeedTitleDefaultTrailingConstraint.isActive = !usesPortraitRail
         metadataFeedTitlePortraitTrailingConstraint.isActive = usesPortraitRail
+        defaultDateTrailingConstraint.isActive = !usesLandscapeReadingTime
+        landscapeDateTrailingConstraint.isActive = usesLandscapeReadingTime
+        landscapeReadingTimeContainer.isHidden = !usesLandscapeReadingTime
         unreadIndicator.isHidden = usesPortraitRail
         starImageView.isHidden = usesPortraitRail
         commentsContainer.isHidden = usesPortraitRail || !currentHasComments
@@ -3053,6 +3123,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
         let supporting = isRead ? Self.supportingReadTextColor : Self.supportingTextColor
         feedTitleLabel.textColor = supporting
         dateLabel.textColor = supporting
+        landscapeReadingTimeIconView.tintColor = supporting
+        landscapeReadingTimeLabel.textColor = supporting
         previewLabel.textColor = supporting
         commentsImageView.tintColor = supporting
         portraitCommentsImageView.tintColor = supporting
@@ -3130,6 +3202,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
         let feedTitleFrame: CGRect
         let commentsFrame: CGRect?
         let dateFrame: CGRect
+        let landscapeReadingTimeContainerFrame: CGRect?
+        let landscapeReadingTimeIconFrame: CGRect?
+        let landscapeReadingTimeFrame: CGRect?
         let portraitAccessoryRailFrame: CGRect?
         let publishedAgeIconFrame: CGRect?
         let publishedAgeFrame: CGRect?
@@ -3155,6 +3230,15 @@ final class IOSUIKitArticleCell: UITableViewCell {
             feedTitleFrame: frame(feedTitleLabel),
             commentsFrame: currentHasComments ? frame(usesPortraitRail ? portraitCommentsContainer : commentsContainer) : nil,
             dateFrame: usesPortraitRail ? .zero : frame(dateLabel),
+            landscapeReadingTimeContainerFrame: currentLayoutVariant == .visualLandscape && currentReadingTime != nil
+                ? frame(landscapeReadingTimeContainer)
+                : nil,
+            landscapeReadingTimeIconFrame: currentLayoutVariant == .visualLandscape && currentReadingTime != nil
+                ? frame(landscapeReadingTimeIconView)
+                : nil,
+            landscapeReadingTimeFrame: currentLayoutVariant == .visualLandscape && currentReadingTime != nil
+                ? frame(landscapeReadingTimeLabel)
+                : nil,
             portraitAccessoryRailFrame: usesPortraitRail ? frame(portraitAccessoryRail) : nil,
             publishedAgeIconFrame: usesPortraitRail ? frame(portraitPublishedAgeIconView) : nil,
             publishedAgeFrame: usesPortraitRail ? frame(portraitPublishedAgeLabel) : nil,
