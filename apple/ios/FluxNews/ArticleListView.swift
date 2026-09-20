@@ -2220,6 +2220,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         return UIColor.label.resolvedColor(with: traits).withAlphaComponent(alpha)
     }
     private var previewTopConstraint: NSLayoutConstraint!
+    private var portraitPreviewTopConstraint: NSLayoutConstraint!
     private var previewCollapseConstraint: NSLayoutConstraint!
     /// Driven from the prepared metrics, so the cell cannot disagree with the
     /// engine about how large a scaled glyph slot is.
@@ -2450,6 +2451,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
         portraitImageWidthConstraint = articleImageView.widthAnchor.constraint(equalToConstant: 1)
         landscapeImageWidthConstraint = articleImageView.widthAnchor.constraint(equalToConstant: 1)
         landscapeImageHeightConstraint = articleImageView.heightAnchor.constraint(equalToConstant: 1)
+        portraitPreviewTopConstraint = previewLabel.topAnchor.constraint(
+            equalTo: articleImageView.bottomAnchor,
+            constant: IOSUIKitArticleGeometry.portraitSpacing
+        )
 
         textOnlyConstraints = [
         ] + defaultStackConstraints + [
@@ -2463,14 +2468,14 @@ final class IOSUIKitArticleCell: UITableViewCell {
         //
         //   Headline
         //   ● icon  Feed name              ★ 💬
+        //   Date
         //      ┌───────────────┐
         //      │  HERO IMAGE   │   centered, 85% of content width
         //      └───────────────┘
-        //   Date
         //   Preview …
         //
-        // Existing metadata/date/preview rows stay intact; only their vertical
-        // ordering relative to the image changes.
+        // Keep all supporting text above the image as one information block;
+        // the preview then starts cleanly below the visual block.
         portraitConstraints = [
             textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
             textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
@@ -2483,15 +2488,15 @@ final class IOSUIKitArticleCell: UITableViewCell {
             metadataRow.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
             metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
 
+            dateLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            dateLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+
             articleImageView.centerXAnchor.constraint(equalTo: margins.centerXAnchor),
-            articleImageView.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.portraitSpacing),
+            articleImageView.topAnchor.constraint(equalTo: dateLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.portraitSpacing),
             portraitImageWidthConstraint,
             portraitImageAspectConstraint,
 
-            dateLabel.topAnchor.constraint(equalTo: articleImageView.bottomAnchor, constant: IOSUIKitArticleGeometry.portraitSpacing),
-            dateLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
-
-            previewTopConstraint,
+            portraitPreviewTopConstraint,
             previewBottomDefaultConstraint,
             previewTrailingDefaultConstraint,
         ]
@@ -2678,6 +2683,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         // Constants and priorities only — the constraint graph stays identical
         // across every reuse, whatever the article contains.
         previewTopConstraint.constant = hasPreview ? IOSUIKitArticleGeometry.textSpacing : 0
+        portraitPreviewTopConstraint.constant = hasPreview ? IOSUIKitArticleGeometry.portraitSpacing : 0
         // Same collapse for the
         // side-title variant's pair, or a preview-less row keeps a gap below the
         // image that the engine did not budget for.
