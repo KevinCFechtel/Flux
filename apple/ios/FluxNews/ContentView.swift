@@ -48,8 +48,14 @@ enum IOSArticleListChromePresentation {
         verticalSizeClass: UserInterfaceSizeClass?,
         splitColumnVisibility: NavigationSplitViewVisibility
     ) -> IOSArticleListChromeMode {
+        // Actual visible split chrome wins over the nominal size-class mode. This
+        // prevents duplicate scope UI during a transient/system-driven split
+        // transition: if a sidebar is visible, the title capsule must disappear.
+        if splitColumnVisibility != .detailOnly {
+            return .persistentSplit
+        }
         if presentation.usesPersistentSplitNavigation {
-            return splitColumnVisibility == .detailOnly ? .persistentSplitCollapsed : .persistentSplit
+            return .persistentSplitCollapsed
         }
         return verticalSizeClass == .compact ? .compactLandscape : .compactPortrait
     }
@@ -189,6 +195,18 @@ struct ContentView: View {
         )
     }
 
+    private var adaptiveSplitColumnVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: { splitColumnVisibility },
+            set: { requested in
+                splitColumnVisibility = AdaptiveShellTransitionPolicy.constrainedSplitColumnVisibility(
+                    requested: requested,
+                    presentation: adaptivePresentation
+                )
+            }
+        )
+    }
+
     var body: some View {
         Group {
             if case .ready = bootstrapper.state, newsreaderStore.core != nil {
@@ -253,7 +271,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private var newsreader: some View {
-        NavigationSplitView(columnVisibility: $splitColumnVisibility) {
+        NavigationSplitView(columnVisibility: adaptiveSplitColumnVisibility) {
             NewsNavigationView(
                 store: newsreaderStore,
                 sheetPresented: $navigationPresented,
@@ -736,7 +754,7 @@ private struct ArticleListTitleCapsule: View {
         .padding(.leading, action == nil ? 16 : 12)
         .padding(.trailing, action == nil ? 16 : 12)
         .padding(.vertical, layout == .inline ? 5 : 7)
-        .background { ArticleListTitleCapsuleBackground() }
+        .background { ArticleListTitleCapsuleBackground(layout: layout) }
         .accessibilityElement(children: .combine)
     }
 
@@ -784,14 +802,22 @@ private struct ArticleListTitleCapsule: View {
 }
 
 private struct ArticleListTitleCapsuleBackground: View {
+    let layout: ArticleListTitleCapsuleLayout
+
     /// Whether the system is asked to avoid see-through backgrounds. Glass is
     /// exactly that, and the title has to stay legible over scrolling articles,
     /// so this substitutes an opaque fill rather than trusting the effect to
     /// adapt on its own.
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
+    @ViewBuilder
     var body: some View {
-        if reduceTransparency {
+        if #available(iOS 26.0, *), layout == .inline {
+            // Inline toolbar items already receive the system's toolbar glass on
+            // iOS 26. Drawing our own glass inside it produces the visible
+            // double-capsule/ring seen on wide iPhone landscape.
+            Color.clear
+        } else if reduceTransparency {
             Capsule().fill(Color(uiColor: .secondarySystemBackground))
         } else if #available(iOS 26.0, *) {
             ArticleListGlassCapsule()
