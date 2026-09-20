@@ -801,7 +801,7 @@ private extension ArticleImagePipeline.Demand {
 
 private extension ArticleImageRequest {
     var cacheKey: NSString {
-        "\(url.absoluteString)|\(maxPixelDimension)|\(Int(targetPixelSize.width))x\(Int(targetPixelSize.height))|\(Int(cornerRadiusPixels))|scale=\(Int((rasterScale * 100).rounded()))|p3=\(usesDisplayP3 ? 1 : 0)|bg=\(backdropKeyComponent)" as NSString
+        "\(url.absoluteString)|\(maxPixelDimension)|\(Int(targetPixelSize.width))x\(Int(targetPixelSize.height))|\(Int(cornerRadiusPixels))|scale=\(Int((rasterScale * 100).rounded()))|mode=\(renderingMode.rawValue)|p3=\(usesDisplayP3 ? 1 : 0)|bg=\(backdropKeyComponent)" as NSString
     }
 }
 
