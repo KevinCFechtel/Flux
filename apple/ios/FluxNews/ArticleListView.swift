@@ -1965,6 +1965,7 @@ final class IOSArticleImagePresentationScheduler {
         let present: () -> Void
     }
 
+    @MainActor
     private final class DisplayLinkTarget: NSObject {
         weak var owner: IOSArticleImagePresentationScheduler?
 
