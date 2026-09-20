@@ -213,7 +213,10 @@ actor ArticleImagePipeline {
     }
 
     static let shared = ArticleImagePipeline()
-    static let maximumConcurrentOperations = 3
+    // Physical-device A/B test for residual cold-scroll hitches: keep every
+    // other image-pipeline and presentation behavior unchanged while allowing
+    // only one loader/downsample operation to be active at a time.
+    static let maximumConcurrentOperations = 1
     // A visual card is commonly about 1.5-2.5 MiB decoded at @3x. This retains
     // a useful scrolling runway without allowing unbounded image memory.
     /// Display-ready rasters are retained for warm/back scrolling. 128 MiB keeps
