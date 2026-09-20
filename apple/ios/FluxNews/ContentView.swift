@@ -352,65 +352,69 @@ struct ContentView: View {
             // button opens the scope chooser, there is nothing to go back to.
             .navigationBarBackButtonHidden(true)
             .toolbar {
-                ToolbarItemGroup(placement: articleListActionToolbarPlacement) {
-                    Button { Task { await performManualSync() } } label: {
-                        Image(systemName: IOSSyncButtonPresentation.symbolName(for: syncPresentation))
-                            .frame(width: 24, height: 24)
+                if IOSArticleListChromePresentation.actionPlacement(for: articleListChromeMode) == .bottomBar {
+                    ToolbarItemGroup(placement: .bottomBar) {
+                        articleListActionButtons
                     }
-                    .disabled(newsreaderStore.isSyncing)
-                    .accessibilityLabel(String(localized: "Sync news"))
-                    .accessibilityValue(IOSSyncButtonPresentation.accessibilityValue(for: syncPresentation))
-
-                    Menu {
-                        Section("Show") {
-                            Button { newsreaderStore.setUnreadOnly(true) } label: {
-                                filterMenuLabel(String(localized: "Unread Only"), selected: newsreaderStore.unreadOnly)
-                            }
-                            Button { newsreaderStore.setUnreadOnly(false) } label: {
-                                filterMenuLabel(String(localized: "All Articles"), selected: !newsreaderStore.unreadOnly)
-                            }
-                        }
-                        Section("Sort") {
-                            Button { newsreaderStore.setNewestFirst(true) } label: {
-                                filterMenuLabel(String(localized: "Newest First"), selected: newsreaderStore.newestFirst)
-                            }
-                            Button { newsreaderStore.setNewestFirst(false) } label: {
-                                filterMenuLabel(String(localized: "Oldest First"), selected: !newsreaderStore.newestFirst)
-                            }
-                        }
-                    } label: {
-                        Label("Filter and Sort", systemImage: "line.3.horizontal.decrease.circle")
+                } else {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        articleListActionButtons
                     }
-                    .accessibilityIdentifier("articleList.filterSort")
-
-                    Menu {
-                        ForEach(IOSMoreAction.actions(for: newsreaderStore.scope, hasNextScope: nextScope != nil), id: \.self) { action in
-                            switch action {
-                            case .markAllRead:
-                                Button("Mark All as Read", role: .destructive) { presentMarkReadConfirmation(.read) }
-                            case .markAllReadAndNext:
-                                Button("Mark All as Read and Continue", role: .destructive) { presentMarkReadConfirmation(.readAndNext) }
-                            case .settings:
-                                Divider()
-                                Button { settingsPresented = true } label: {
-                                    Label("Settings", systemImage: "gearshape")
-                                }
-                            }
-                        }
-                    } label: {
-                        Label("More", systemImage: "ellipsis.circle")
-                    }
-                    .accessibilityLabel(String(localized: "More"))
-                    .accessibilityIdentifier("articleList.more")
                 }
             }
     }
 
-    private var articleListActionToolbarPlacement: ToolbarItemPlacement {
-        switch IOSArticleListChromePresentation.actionPlacement(for: articleListChromeMode) {
-        case .bottomBar: .bottomBar
-        case .topBarTrailing: .topBarTrailing
+    @ViewBuilder
+    private var articleListActionButtons: some View {
+        Button { Task { await performManualSync() } } label: {
+            Image(systemName: IOSSyncButtonPresentation.symbolName(for: syncPresentation))
+                .frame(width: 24, height: 24)
         }
+        .disabled(newsreaderStore.isSyncing)
+        .accessibilityLabel(String(localized: "Sync news"))
+        .accessibilityValue(IOSSyncButtonPresentation.accessibilityValue(for: syncPresentation))
+
+        Menu {
+            Section("Show") {
+                Button { newsreaderStore.setUnreadOnly(true) } label: {
+                    filterMenuLabel(String(localized: "Unread Only"), selected: newsreaderStore.unreadOnly)
+                }
+                Button { newsreaderStore.setUnreadOnly(false) } label: {
+                    filterMenuLabel(String(localized: "All Articles"), selected: !newsreaderStore.unreadOnly)
+                }
+            }
+            Section("Sort") {
+                Button { newsreaderStore.setNewestFirst(true) } label: {
+                    filterMenuLabel(String(localized: "Newest First"), selected: newsreaderStore.newestFirst)
+                }
+                Button { newsreaderStore.setNewestFirst(false) } label: {
+                    filterMenuLabel(String(localized: "Oldest First"), selected: !newsreaderStore.newestFirst)
+                }
+            }
+        } label: {
+            Label("Filter and Sort", systemImage: "line.3.horizontal.decrease.circle")
+        }
+        .accessibilityIdentifier("articleList.filterSort")
+
+        Menu {
+            ForEach(IOSMoreAction.actions(for: newsreaderStore.scope, hasNextScope: nextScope != nil), id: \.self) { action in
+                switch action {
+                case .markAllRead:
+                    Button("Mark All as Read", role: .destructive) { presentMarkReadConfirmation(.read) }
+                case .markAllReadAndNext:
+                    Button("Mark All as Read and Continue", role: .destructive) { presentMarkReadConfirmation(.readAndNext) }
+                case .settings:
+                    Divider()
+                    Button { settingsPresented = true } label: {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                }
+            }
+        } label: {
+            Label("More", systemImage: "ellipsis.circle")
+        }
+        .accessibilityLabel(String(localized: "More"))
+        .accessibilityIdentifier("articleList.more")
     }
 
     private func presentArticleListNavigation() {
