@@ -911,7 +911,8 @@ private struct ArticleListNavigationChrome<Content: View>: View {
 
     /// A large title cannot hand over to the capsule. Toolbar placements are
     /// additive, so each compact-height mode gives the capsule one explicit
-    /// toolbar slot while the persistent split uses a native inline title.
+    /// toolbar slot. Persistent split navigation keeps that leading slot stable
+    /// even while the sidebar is visible; only the capsule's visibility changes.
     @ViewBuilder
     private func portraitCapsuleChrome(title: String, subtitle: String) -> some View {
         content()
@@ -946,6 +947,37 @@ private struct ArticleListNavigationChrome<Content: View>: View {
             }
     }
 
+    @ViewBuilder
+    private func persistentSplitCapsuleChrome(
+        title: String,
+        subtitle: String,
+        capsuleVisible: Bool
+    ) -> some View {
+        content()
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    ArticleListTitleCapsule(
+                        title: title,
+                        subtitle: capsuleSubtitle(subtitle),
+                        layout: .inline,
+                        action: onSelectScope
+                    )
+                    // Keep the toolbar slot and its measured width alive while
+                    // the sidebar is visible. Inserting/removing the item during
+                    // the split-view animation makes iPadOS re-layout the nav bar
+                    // and can visibly disturb the UIKit timeline underneath.
+                    .opacity(capsuleVisible ? 1 : 0)
+                    .allowsHitTesting(capsuleVisible)
+                    .accessibilityHidden(!capsuleVisible)
+                    .transaction { transaction in
+                        transaction.animation = nil
+                    }
+                }
+            }
+    }
+
     var body: some View {
         let title = ArticleListTitlePresentation.title(scope: store.scope, catalog: store.catalog)
         let countLabel = ArticleListCounterPresentation.expandedLabel(scope: store.scope, unreadOnly: store.unreadOnly, count: store.selectionTotal)
@@ -962,19 +994,15 @@ private struct ArticleListNavigationChrome<Content: View>: View {
             portraitCapsuleChrome(title: title, subtitle: portraitSubtitle)
         case .compactLandscape:
             landscapeCapsuleChrome(title: title, subtitle: landscapeSubtitle)
-        case .persistentSplitCollapsed:
-            // When iPadOS temporarily hides the sidebar, restore an explicit
-            // navigation affordance instead of relying on the edge gesture.
-            // The same compact count remains visible because it is a product
-            // feature rather than a phone-only decoration.
-            landscapeCapsuleChrome(title: title, subtitle: landscapeSubtitle)
-        case .persistentSplit:
-            // The persistent sidebar already communicates the selected scope.
-            // Keep the detail navigation bar title-free and reserve its trailing
-            // side for the article actions.
-            content()
-                .navigationTitle("")
-                .navigationBarTitleDisplayMode(.inline)
+        case .persistentSplit, .persistentSplitCollapsed:
+            // Both iPad split states intentionally share the same toolbar tree.
+            // The hidden state reserves the leading slot so collapsing/revealing
+            // the sidebar does not structurally rebuild the navigation bar.
+            persistentSplitCapsuleChrome(
+                title: title,
+                subtitle: landscapeSubtitle,
+                capsuleVisible: chromeMode == .persistentSplitCollapsed
+            )
         }
     }
 }
