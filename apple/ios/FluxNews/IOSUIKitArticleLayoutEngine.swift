@@ -413,14 +413,18 @@ struct IOSUIKitArticleGeometry: Equatable {
     static let portraitVerticalPadding: CGFloat = 15
     static let landscapeVerticalPadding: CGFloat = 13
     static let textSpacing: CGFloat = 7
-    static let portraitSpacing: CGFloat = 12
+    /// Visual portrait keeps feed/date as one compact metadata block while the
+    /// rest of the presentation modes retain the general text spacing.
+    static let portraitMetadataDateSpacing: CGFloat = 3
+    /// Used between date and hero and between hero and preview.
+    static let portraitSpacing: CGFloat = 10
     // Standard Visual portrait uses an inset hero image below the title. Keeping
     // the allocation here makes the renderer and deterministic height engine
     // share exactly the same geometry contract.
     static let visualHeroImageAllocation: CGFloat = 0.85
     /// The remaining width becomes an intentional accessory gutter rather than
     /// symmetric dead space around the performance-motivated 85% hero.
-    static let portraitAccessoryRailSpacing: CGFloat = 6
+    static let portraitAccessoryRailSpacing: CGFloat = 10
     static let portraitAccessoryVerticalSpacing: CGFloat = 10
     // "Visual compact": a thumbnail beside the title, with the metadata bar above
     // and — on a narrow container — the preview underneath.
@@ -430,7 +434,7 @@ struct IOSUIKitArticleGeometry: Equatable {
     static let landscapeSpacing: CGFloat = 14
     static let unreadSize: CGFloat = 6
     static let feedIconSize: CGFloat = 22
-    static let articleImageCornerRadius: CGFloat = 12
+    static let articleImageCornerRadius: CGFloat = 10
     static let starSlotSize: CGFloat = 17
     static let commentSlotSize: CGFloat = 17
     static let metadataLeadingSpacing: CGFloat = 6
@@ -615,7 +619,7 @@ enum IOSUIKitArticleLayoutEngine {
             // Title -> metadata -> date -> inset hero image -> preview.
             contentHeight = titleHeight
                 + IOSUIKitArticleGeometry.textSpacing + metadataHeight
-                + IOSUIKitArticleGeometry.textSpacing + dateHeight
+                + IOSUIKitArticleGeometry.portraitMetadataDateSpacing + dateHeight
                 + IOSUIKitArticleGeometry.portraitSpacing + imageSize.height
                 + (previewHeight > 0 ? IOSUIKitArticleGeometry.portraitSpacing + previewHeight : 0)
         case .visualLandscape: contentHeight = max(imageSize.height, textBlockHeight)
@@ -642,7 +646,7 @@ enum IOSUIKitArticleLayoutEngine {
                 + titleHeight
                 + IOSUIKitArticleGeometry.textSpacing
                 + metadataHeight
-                + IOSUIKitArticleGeometry.textSpacing
+                + IOSUIKitArticleGeometry.portraitMetadataDateSpacing
                 + dateHeight
                 + IOSUIKitArticleGeometry.portraitSpacing
         } else {
@@ -678,9 +682,8 @@ enum IOSUIKitArticleLayoutEngine {
         let commentsFrame: CGRect?
         if variant == .visualPortrait {
             let railLeading = logicalImageX + imageSize.width + IOSUIKitArticleGeometry.portraitAccessoryRailSpacing
-            let contentTrailing = geometry.horizontalInset + geometry.availableWidth
-            let railWidth = max(0, contentTrailing - railLeading)
-            let railCenterX = railLeading + railWidth / 2
+            let railSlotWidth = max(accessories.unread, accessories.star, accessories.comments)
+            let railCenterX = railLeading + railSlotWidth / 2
             func railX(_ width: CGFloat) -> CGFloat {
                 physicalX(
                     logicalX: railCenterX - width / 2,
@@ -708,10 +711,17 @@ enum IOSUIKitArticleLayoutEngine {
         if isSideTitle {
             dateFrame = CGRect(x: textOrigin.x, y: titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: titleWidth, height: dateHeight)
         } else if variant == .visualPortrait {
+            let dateLogicalInset = metadataLayout.feedTitleX
+            let dateWidth = max(0, infoWidth - dateLogicalInset)
             dateFrame = CGRect(
-                x: textOrigin.x,
-                y: metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing,
-                width: infoWidth,
+                x: physicalX(
+                    logicalX: logicalTextX + dateLogicalInset,
+                    width: dateWidth,
+                    in: input.containerWidth,
+                    direction: input.layoutDirection
+                ),
+                y: metadataFrame.maxY + IOSUIKitArticleGeometry.portraitMetadataDateSpacing,
+                width: dateWidth,
                 height: dateHeight
             )
         } else {
