@@ -39,9 +39,17 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(lifecycle.isCurrent(second))
     }
 
-    func testDefaultBottomActionsAreSyncFilterAndMore() {
+    func testDefaultArticleListActionsAreSyncFilterAndMore() {
         XCTAssertEqual(IOSBottomAction.defaultActions, [.sync, .filterAndSort, .more])
         XCTAssertFalse(IOSBottomAction.defaultActions.contains(.settings))
+    }
+
+    func testArticleListChromeMovesActionsAndDropsCapsuleForPersistentNavigation() {
+        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: .compact), .bottomBar)
+        XCTAssertTrue(IOSArticleListChromePresentation.showsTitleCapsule(for: .compact))
+
+        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: .regular), .topBarTrailing)
+        XCTAssertFalse(IOSArticleListChromePresentation.showsTitleCapsule(for: .regular))
     }
 
     func testMoreActionsKeepSettingsAndOnlyOfferNextForSupportedScopes() {
