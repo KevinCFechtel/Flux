@@ -442,9 +442,9 @@ struct IOSUIKitArticleGeometry: Equatable {
     // Standard Visual portrait uses an inset hero image below the title. Keeping
     // the allocation here makes the renderer and deterministic height engine
     // share exactly the same geometry contract.
-    static let visualHeroImageAllocation: CGFloat = 0.85
-    /// The remaining width becomes an intentional accessory gutter rather than
-    /// symmetric dead space around the performance-motivated 85% hero.
+    static let visualHeroImageAllocation: CGFloat = 0.80
+    /// The remaining width becomes an intentional information rail rather than
+    /// symmetric dead space around the 80% hero.
     static let portraitAccessoryRailSpacing: CGFloat = 10
     static let portraitAccessoryVerticalSpacing: CGFloat = 10
     static let portraitInfoStartSpacing: CGFloat = 12
@@ -607,7 +607,7 @@ enum IOSUIKitArticleLayoutEngine {
             previewWidth = titleWidth
         } else {
             // Visual portrait deliberately keeps the preview at the historical
-            // full content width. The 85/15 split belongs only to hero + rail,
+            // full content width. The 80/20 split belongs only to hero + rail,
             // so preview wrapping and deterministic row-height semantics do not
             // change merely because the hero moved to the leading edge.
             previewWidth = infoWidth
@@ -656,14 +656,21 @@ enum IOSUIKitArticleLayoutEngine {
             + IOSUIKitArticleGeometry.portraitInfoLabelSpacing
             + readingTimeHeight
         )
-        let portraitRailContentHeight = variant == .visualPortrait
+        let portraitRailRequiredHeight = variant == .visualPortrait
             ? statusRailHeight
                 + IOSUIKitArticleGeometry.portraitInfoStartSpacing
                 + publishedInfoHeight
                 + readingInfoHeight
             : 0
+        // At normal text sizes the rail deliberately matches the hero height:
+        // status stays pinned to the top while temporal information is pinned to
+        // the hero's lower edge. Extreme Dynamic Type may grow the rail so the
+        // two groups never overlap.
+        let portraitRailHeight = variant == .visualPortrait
+            ? max(imageSize.height, portraitRailRequiredHeight)
+            : 0
         let portraitVisualBlockHeight = variant == .visualPortrait
-            ? max(imageSize.height, portraitRailContentHeight)
+            ? portraitRailHeight
             : imageSize.height
 
         let textBlockHeight: CGFloat
@@ -706,7 +713,7 @@ enum IOSUIKitArticleLayoutEngine {
             logicalImageX = geometry.horizontalInset + geometry.availableWidth - imageSize.width
         } else {
             // Visual portrait deliberately uses the logical leading edge. The
-            // remaining 15% is the accessory gutter, rather than symmetric
+            // remaining 20% is the information rail, rather than symmetric
             // whitespace that makes the hero look accidentally undersized.
             logicalImageX = geometry.horizontalInset
         }
@@ -775,14 +782,52 @@ enum IOSUIKitArticleLayoutEngine {
                 ? CGRect(x: railX(accessories.comments), y: commentsSlotY, width: accessories.comments, height: accessories.comments)
                 : nil
 
-            let ageIconY = commentsSlotY + accessories.comments + IOSUIKitArticleGeometry.portraitInfoStartSpacing
+            let railBottomY = logicalImageY + portraitRailHeight
+            let ageLabelY: CGFloat
+            let ageIconY: CGFloat
+            if let readingTime = input.readingTime, !readingTime.isEmpty {
+                let readingLabelY = railBottomY - readingTimeHeight
+                readingTimeFrame = CGRect(
+                    x: physicalX(
+                        logicalX: portraitRailLeading,
+                        width: portraitRailWidth,
+                        in: input.containerWidth,
+                        direction: input.layoutDirection
+                    ),
+                    y: readingLabelY,
+                    width: portraitRailWidth,
+                    height: readingTimeHeight
+                )
+                let readingIconY = readingLabelY
+                    - IOSUIKitArticleGeometry.portraitInfoLabelSpacing
+                    - accessories.infoIcon
+                readingTimeIconFrame = CGRect(
+                    x: railX(accessories.infoIcon),
+                    y: readingIconY,
+                    width: accessories.infoIcon,
+                    height: accessories.infoIcon
+                )
+                ageLabelY = readingIconY
+                    - IOSUIKitArticleGeometry.portraitInfoGroupSpacing
+                    - publishedAgeHeight
+                ageIconY = ageLabelY
+                    - IOSUIKitArticleGeometry.portraitInfoLabelSpacing
+                    - accessories.infoIcon
+            } else {
+                readingTimeIconFrame = nil
+                readingTimeFrame = nil
+                ageLabelY = railBottomY - publishedAgeHeight
+                ageIconY = ageLabelY
+                    - IOSUIKitArticleGeometry.portraitInfoLabelSpacing
+                    - accessories.infoIcon
+            }
+
             publishedAgeIconFrame = CGRect(
                 x: railX(accessories.infoIcon),
                 y: ageIconY,
                 width: accessories.infoIcon,
                 height: accessories.infoIcon
             )
-            let ageLabelY = ageIconY + accessories.infoIcon + IOSUIKitArticleGeometry.portraitInfoLabelSpacing
             publishedAgeFrame = CGRect(
                 x: physicalX(
                     logicalX: portraitRailLeading,
@@ -795,30 +840,6 @@ enum IOSUIKitArticleLayoutEngine {
                 height: publishedAgeHeight
             )
 
-            if let readingTime = input.readingTime, !readingTime.isEmpty {
-                let readingIconY = ageLabelY + publishedAgeHeight + IOSUIKitArticleGeometry.portraitInfoGroupSpacing
-                readingTimeIconFrame = CGRect(
-                    x: railX(accessories.infoIcon),
-                    y: readingIconY,
-                    width: accessories.infoIcon,
-                    height: accessories.infoIcon
-                )
-                readingTimeFrame = CGRect(
-                    x: physicalX(
-                        logicalX: portraitRailLeading,
-                        width: portraitRailWidth,
-                        in: input.containerWidth,
-                        direction: input.layoutDirection
-                    ),
-                    y: readingIconY + accessories.infoIcon + IOSUIKitArticleGeometry.portraitInfoLabelSpacing,
-                    width: portraitRailWidth,
-                    height: readingTimeHeight
-                )
-            } else {
-                readingTimeIconFrame = nil
-                readingTimeFrame = nil
-            }
-
             portraitAccessoryRailFrame = CGRect(
                 x: physicalX(
                     logicalX: portraitRailLeading,
@@ -828,7 +849,7 @@ enum IOSUIKitArticleLayoutEngine {
                 ),
                 y: logicalImageY,
                 width: portraitRailWidth,
-                height: portraitRailContentHeight
+                height: portraitRailHeight
             )
         } else {
             unreadFrame = CGRect(x: metadataX(metadataLayout.unreadX, width: accessories.unread), y: metadataFrame.midY - accessories.unread / 2, width: accessories.unread, height: accessories.unread)
