@@ -2196,6 +2196,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var commentsToStarSpacingConstraint: NSLayoutConstraint!
     private var metadataFeedTitleDefaultTrailingConstraint: NSLayoutConstraint!
     private var metadataFeedTitlePortraitTrailingConstraint: NSLayoutConstraint!
+    private var portraitDateLeadingConstraint: NSLayoutConstraint!
+    private var portraitDateTopConstraint: NSLayoutConstraint!
+    private var defaultDateLeadingConstraint: NSLayoutConstraint!
+    private var defaultDateTopConstraint: NSLayoutConstraint!
     private var portraitRailUnreadWidth: NSLayoutConstraint!
     private var portraitRailUnreadHeight: NSLayoutConstraint!
     private var portraitRailStarWidth: NSLayoutConstraint!
@@ -2460,6 +2464,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
         previewBottomDefaultConstraint = previewLabel.bottomAnchor.constraint(equalTo: textContainer.bottomAnchor)
         previewTrailingDefaultConstraint = previewLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor)
 
+        defaultDateTopConstraint = dateLabel.topAnchor.constraint(
+            equalTo: metadataRow.bottomAnchor,
+            constant: IOSUIKitArticleGeometry.textSpacing
+        )
         defaultStackConstraints = [
             previewBottomDefaultConstraint,
             previewTrailingDefaultConstraint,
@@ -2467,16 +2475,26 @@ final class IOSUIKitArticleCell: UITableViewCell {
             titleLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
             metadataRow.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
             metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
-            dateLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            defaultDateTopConstraint,
             dateLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
             previewTopConstraint,
         ]
 
         var stackedConstraints: [NSLayoutConstraint] = []
-        for child in [titleLabel, metadataRow, dateLabel, previewLabel] as [UIView] {
+        for child in [titleLabel, metadataRow, previewLabel] as [UIView] {
             stackedConstraints.append(child.leadingAnchor.constraint(equalTo: textContainer.leadingAnchor))
         }
+        defaultDateLeadingConstraint = dateLabel.leadingAnchor.constraint(equalTo: textContainer.leadingAnchor)
+        stackedConstraints.append(defaultDateLeadingConstraint)
         NSLayoutConstraint.activate(stackedConstraints)
+
+        portraitDateLeadingConstraint = dateLabel.leadingAnchor.constraint(
+            equalTo: feedTitleLabel.leadingAnchor
+        )
+        portraitDateTopConstraint = dateLabel.topAnchor.constraint(
+            equalTo: metadataRow.bottomAnchor,
+            constant: IOSUIKitArticleGeometry.portraitMetadataDateSpacing
+        )
 
         articleImageView.translatesAutoresizingMaskIntoConstraints = false
         articleImageView.isHidden = true
@@ -2552,7 +2570,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
             metadataRow.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
             metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
 
-            dateLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            portraitDateTopConstraint,
+            portraitDateLeadingConstraint,
             dateLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
 
             articleImageView.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
@@ -2564,7 +2583,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
                 equalTo: articleImageView.trailingAnchor,
                 constant: IOSUIKitArticleGeometry.portraitAccessoryRailSpacing
             ),
-            portraitAccessoryRail.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            portraitAccessoryRail.widthAnchor.constraint(
+                equalToConstant: IOSUIKitArticleGeometry.commentSlotSize
+            ),
             portraitAccessoryRail.topAnchor.constraint(equalTo: articleImageView.topAnchor),
             portraitAccessoryRail.bottomAnchor.constraint(lessThanOrEqualTo: articleImageView.bottomAnchor),
 
@@ -2844,6 +2865,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
         let usesPortraitRail = variant == .visualPortrait
         metadataFeedTitleDefaultTrailingConstraint.isActive = !usesPortraitRail
         metadataFeedTitlePortraitTrailingConstraint.isActive = usesPortraitRail
+        defaultDateLeadingConstraint.isActive = !usesPortraitRail
+        defaultDateTopConstraint.isActive = !usesPortraitRail
+        portraitDateLeadingConstraint.isActive = usesPortraitRail
+        portraitDateTopConstraint.isActive = usesPortraitRail
         unreadIndicator.isHidden = usesPortraitRail
         starImageView.isHidden = usesPortraitRail
         commentsContainer.isHidden = usesPortraitRail || !currentHasComments
