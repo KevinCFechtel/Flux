@@ -2015,7 +2015,7 @@ impl Store {
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let tx = connection.transaction().map_err(sql_error)?;
         tx.execute(
-            "INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11,?12) ON CONFLICT(id) DO NOTHING",
+            "INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,reading_time_minutes,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11,?12,?13) ON CONFLICT(id) DO NOTHING",
             params![article.id, article.feed_id, article.title, article.url, article.comments_url, article.published_at, article.is_read, article.is_starred, article.raw_html_content, article.reading_time_minutes, article.preview, article.image_url, crate::article::PROCESSING_VERSION],
         )
         .map_err(sql_error)?;
