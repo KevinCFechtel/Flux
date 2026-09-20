@@ -307,6 +307,7 @@ or exact internal types.
 | Async image completion after cell reuse or prefetch cancellation, including another consumer of the same request. | Correct article/request image, no canceled visible consumer, no height jump or unbounded cache/history. |
 | Core events, counts and Undo updates while scrolling. | Ignored events are filtered before main-thread dispatch; no structural article reload from ordinary feedback. |
 | Native swipes/full swipe, menus, refresh, routing, Large Titles, iPad split view, Dynamic Type, VoiceOver, Reduce Motion and localization. | Existing product behavior remains usable and correct across compact/visual layouts. |
+| Article accessory geometry. | Unread is always outermost/topmost, followed by Star, Comments, then Audio with optional duration. Visual portrait uses the 15% trailing gutter beside the leading 85% hero as a vertical rail and aligns Preview to the hero column; Compact, Visual compact and Visual landscape keep the corresponding horizontal order. Audio stays unrendered until it is supplied by a batched Timeline projection; never fetch enclosure state from each visible cell. |
 
 Queue tests must exercise the actual running flag/serialization and asynchronous
 continuation through an injectable, controllably blocked writer. Calling a
