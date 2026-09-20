@@ -26,9 +26,9 @@ final class IOSSearchStoreTests: XCTestCase {
     }
 
     func testPaginationDeduplicatesArticleIDs() {
-        let first = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "First", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "", imageUrl: nil)
-        let duplicate = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Duplicate", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "", imageUrl: nil)
-        let second = ArticleSummary(id: 2, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Second", url: "https://example.com/2", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, preview: "", imageUrl: nil)
+        let first = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "First", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, readingTimeMinutes: 0, preview: "", imageUrl: nil)
+        let duplicate = ArticleSummary(id: 1, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Duplicate", url: "https://example.com/1", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, readingTimeMinutes: 0, preview: "", imageUrl: nil)
+        let second = ArticleSummary(id: 2, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Second", url: "https://example.com/2", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: false, isStarred: false, readingTimeMinutes: 0, preview: "", imageUrl: nil)
         XCTAssertEqual(IOSSearchPaginationPolicy.deduplicated([first, duplicate, second]).map(\.id), [1, 2])
     }
 
