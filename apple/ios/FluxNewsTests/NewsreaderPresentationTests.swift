@@ -2638,21 +2638,17 @@ final class NewsreaderPresentationTests: XCTestCase {
 
             XCTAssertEqual(withReading.variant, expectedVariant)
             XCTAssertGreaterThan(withReading.titleFrame.height, 0)
-            XCTAssertNotNil(withReading.landscapeReadingTimeContainerFrame)
-            XCTAssertNotNil(withReading.landscapeReadingTimeIconFrame)
-            XCTAssertNotNil(withReading.landscapeReadingTimeFrame)
+            guard
+                let readingContainer = withReading.landscapeReadingTimeContainerFrame,
+                withReading.landscapeReadingTimeIconFrame != nil,
+                withReading.landscapeReadingTimeFrame != nil
+            else {
+                return XCTFail("Date-row reading time should be present for \(expectedVariant)")
+            }
             XCTAssertNil(withoutReading.landscapeReadingTimeContainerFrame)
             XCTAssertEqual(withReading.cellSize.height, withoutReading.cellSize.height, accuracy: 0.5)
-            XCTAssertEqual(
-                withReading.landscapeReadingTimeContainerFrame?.minY,
-                withReading.dateFrame.minY,
-                accuracy: 0.5
-            )
-            XCTAssertEqual(
-                withReading.landscapeReadingTimeContainerFrame?.height,
-                withReading.dateFrame.height,
-                accuracy: 0.5
-            )
+            XCTAssertEqual(readingContainer.minY, withReading.dateFrame.minY, accuracy: 0.5)
+            XCTAssertEqual(readingContainer.height, withReading.dateFrame.height, accuracy: 0.5)
         }
     }
 
