@@ -39,12 +39,40 @@ struct ArticleImageBackdrop: Hashable, Sendable {
     }
 }
 
+enum ArticleImageRenderingMode: String, Hashable, Sendable {
+    /// Production path: ImageIO decode followed by an exact-slot CGContext
+    /// raster with crop, colour space, backdrop and rounded corners baked in.
+    case displayReady
+    /// Diagnostic A/B path: ImageIO only. UIImageView/Core Animation performs
+    /// the final aspect-fill crop and rounded clipping at presentation time.
+    case imageViewScaled
+}
+
+enum ArticleImageRenderingDiagnostics {
+    static let didChangeNotification = Notification.Name("FluxArticleImageRenderingModeDidChange")
+    private static let userDefaultsKey = "developer.articleImageDisplayReadyRasterEnabled"
+
+    static var mode: ArticleImageRenderingMode {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: userDefaultsKey) != nil else { return .displayReady }
+        return defaults.bool(forKey: userDefaultsKey) ? .displayReady : .imageViewScaled
+    }
+
+    static var displayReadyRasterEnabled: Bool { mode == .displayReady }
+
+    static func setDisplayReadyRasterEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: userDefaultsKey)
+        NotificationCenter.default.post(name: didChangeNotification, object: nil)
+    }
+}
+
 struct ArticleImageRequest: Hashable, Sendable {
     let url: URL
     let maxPixelDimension: Int
     let targetPixelSize: CGSize
     let cornerRadiusPixels: CGFloat
     let rasterScale: CGFloat
+    let renderingMode: ArticleImageRenderingMode
     /// Core Animation colour-matches layer contents whose colour space differs
     /// from the display's — on the main thread, during the commit, proportional
     /// to the pixel count. The raster is produced in the display's gamut so that
@@ -62,7 +90,8 @@ struct ArticleImageRequest: Hashable, Sendable {
         cornerRadius: CGFloat = 0,
         rasterScale: CGFloat? = nil,
         usesDisplayP3: Bool = false,
-        backdrop: ArticleImageBackdrop? = nil
+        backdrop: ArticleImageBackdrop? = nil,
+        renderingMode: ArticleImageRenderingMode = .displayReady
     ) {
         let scale = max(rasterScale ?? displayScale, 1)
         let pixels = max(targetSize.width, targetSize.height) * scale
@@ -74,6 +103,7 @@ struct ArticleImageRequest: Hashable, Sendable {
         )
         cornerRadiusPixels = max(0, (cornerRadius * scale).rounded())
         self.rasterScale = scale
+        self.renderingMode = renderingMode
         self.usesDisplayP3 = usesDisplayP3
         self.backdrop = backdrop
         self.url = url
@@ -81,7 +111,7 @@ struct ArticleImageRequest: Hashable, Sendable {
 
     /// True when the produced raster carries no alpha channel, so the presenting
     /// layer may be marked opaque.
-    var producesOpaqueRaster: Bool { backdrop != nil }
+    var producesOpaqueRaster: Bool { renderingMode == .displayReady && backdrop != nil }
 
     private var backdropKeyComponent: String {
         guard let backdrop else { return "alpha" }
@@ -619,10 +649,19 @@ actor ArticleImagePipeline {
 
     nonisolated static func downsample(data: Data, request: ArticleImageRequest) throws -> CGImage {
         try Task.checkCancellation()
-        let image = try thumbnail(data: data, maxPixelDimension: request.maxPixelDimension)
+        let image: CGImage
+        switch request.renderingMode {
+        case .displayReady:
+            image = try thumbnail(data: data, maxPixelDimension: request.maxPixelDimension)
+        case .imageViewScaled:
+            image = try aspectFillThumbnail(data: data, targetPixelSize: request.targetPixelSize)
+        }
+
         // ImageIO thumbnail creation is the first CPU-heavy stage. If the cell
-        // was rebound while it ran, skip the second full-slot CGContext raster.
+        // was rebound while it ran, skip any remaining presentation preparation.
         try Task.checkCancellation()
+        guard request.renderingMode == .displayReady else { return image }
+
         let rendered = renderDisplayReady(
             image,
             targetPixelSize: request.targetPixelSize,
@@ -641,6 +680,34 @@ actor ArticleImagePipeline {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             throw ArticleImageError.invalidImageData
         }
+        return try thumbnail(source: source, maxPixelDimension: maxPixelDimension)
+    }
+
+    /// ImageIO's max-pixel option constrains the longest source dimension. For
+    /// the renderer-driven A/B path we instead need enough decoded pixels for
+    /// UIImageView's aspect-fill to cover both slot dimensions without upscaling.
+    private nonisolated static func aspectFillThumbnail(data: Data, targetPixelSize: CGSize) throws -> CGImage {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue,
+              width > 0, height > 0
+        else {
+            throw ArticleImageError.invalidImageData
+        }
+
+        let targetWidth = max(1, targetPixelSize.width)
+        let targetHeight = max(1, targetPixelSize.height)
+        let scale = max(targetWidth / width, targetHeight / height)
+        let requiredLongestSide = Int(ceil(max(width, height) * scale))
+        let sourceLongestSide = Int(ceil(max(width, height)))
+        return try thumbnail(
+            source: source,
+            maxPixelDimension: min(sourceLongestSide, max(1, requiredLongestSide))
+        )
+    }
+
+    private nonisolated static func thumbnail(source: CGImageSource, maxPixelDimension: Int) throws -> CGImage {
         let options: CFDictionary = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceThumbnailMaxPixelSize: maxPixelDimension,
