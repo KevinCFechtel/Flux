@@ -28,7 +28,7 @@ use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
 
-const SCHEMA_VERSION: i64 = 17;
+const SCHEMA_VERSION: i64 = 18;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingSavedMediaReplication {
@@ -560,7 +560,7 @@ impl Store {
         }
         for a in articles {
             let existing = tx
-                .query_row("SELECT feed_id,title,url,comments_url,published_at,remote_is_read,remote_is_starred,raw_html_content,preview,image_url FROM articles WHERE id=?1", [a.id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, bool>(5)?, row.get::<_, bool>(6)?, row.get::<_, String>(7)?, row.get::<_, String>(8)?, row.get::<_, Option<String>>(9)?)))
+                .query_row("SELECT feed_id,title,url,comments_url,published_at,remote_is_read,remote_is_starred,raw_html_content,reading_time_minutes,preview,image_url FROM articles WHERE id=?1", [a.id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, bool>(5)?, row.get::<_, bool>(6)?, row.get::<_, String>(7)?, row.get::<_, u32>(8)?, row.get::<_, String>(9)?, row.get::<_, Option<String>>(10)?)))
                 .optional()
                 .map_err(sql_error)?;
             match existing {
@@ -583,6 +583,7 @@ impl Store {
                             a.is_read,
                             a.is_starred,
                             a.raw_html_content.clone(),
+                            a.reading_time_minutes,
                             a.preview.clone(),
                             a.image_url.clone(),
                         ) =>
@@ -591,7 +592,7 @@ impl Store {
                 }
                 Some(_) => {}
             }
-            tx.execute("INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11,?12) ON CONFLICT(id) DO UPDATE SET feed_id=excluded.feed_id,title=excluded.title,url=excluded.url,comments_url=excluded.comments_url,published_at=excluded.published_at,remote_is_read=excluded.remote_is_read,remote_is_starred=excluded.remote_is_starred,is_read=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='read') THEN articles.is_read ELSE excluded.is_read END,is_starred=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='starred') THEN articles.is_starred ELSE excluded.is_starred END,raw_html_content=excluded.raw_html_content,preview=excluded.preview,image_url=excluded.image_url,content_processing_version=excluded.content_processing_version", params![a.id,a.feed_id,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.raw_html_content,a.preview,a.image_url,crate::article::PROCESSING_VERSION]).map_err(sql_error)?;
+            tx.execute("INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,reading_time_minutes,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11,?12,?13) ON CONFLICT(id) DO UPDATE SET feed_id=excluded.feed_id,title=excluded.title,url=excluded.url,comments_url=excluded.comments_url,published_at=excluded.published_at,remote_is_read=excluded.remote_is_read,remote_is_starred=excluded.remote_is_starred,is_read=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='read') THEN articles.is_read ELSE excluded.is_read END,is_starred=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='starred') THEN articles.is_starred ELSE excluded.is_starred END,raw_html_content=excluded.raw_html_content,reading_time_minutes=excluded.reading_time_minutes,preview=excluded.preview,image_url=excluded.image_url,content_processing_version=excluded.content_processing_version", params![a.id,a.feed_id,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.raw_html_content,a.reading_time_minutes,a.preview,a.image_url,crate::article::PROCESSING_VERSION]).map_err(sql_error)?;
         }
         let new_live_enclosures = if matches!(discovery_mode, DiscoveryMode::LiveDiscovery) {
             enclosures
@@ -1113,7 +1114,7 @@ impl Store {
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let tx = connection.transaction().map_err(sql_error)?;
-        tx.execute("INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11,?12) ON CONFLICT(id) DO NOTHING", params![article.id,article.feed_id,article.title,article.url,article.comments_url,article.published_at,article.is_read,article.is_starred,article.raw_html_content,article.preview,article.image_url,crate::article::PROCESSING_VERSION]).map_err(sql_error)?;
+        tx.execute("INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,reading_time_minutes,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11,?12,?13) ON CONFLICT(id) DO NOTHING", params![article.id,article.feed_id,article.title,article.url,article.comments_url,article.published_at,article.is_read,article.is_starred,article.raw_html_content,article.preview,article.image_url,crate::article::PROCESSING_VERSION]).map_err(sql_error)?;
         upsert_remote_enclosures(&tx, std::slice::from_ref(enclosure))?;
         save_media(&tx, enclosure.id, added_at)?;
         tx.commit().map_err(sql_error)
@@ -2015,7 +2016,7 @@ impl Store {
         let tx = connection.transaction().map_err(sql_error)?;
         tx.execute(
             "INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11,?12) ON CONFLICT(id) DO NOTHING",
-            params![article.id, article.feed_id, article.title, article.url, article.comments_url, article.published_at, article.is_read, article.is_starred, article.raw_html_content, article.preview, article.image_url, crate::article::PROCESSING_VERSION],
+            params![article.id, article.feed_id, article.title, article.url, article.comments_url, article.published_at, article.is_read, article.is_starred, article.raw_html_content, article.reading_time_minutes, article.preview, article.image_url, crate::article::PROCESSING_VERSION],
         )
         .map_err(sql_error)?;
         upsert_remote_enclosures(&tx, std::slice::from_ref(enclosure))?;
@@ -2923,7 +2924,7 @@ impl Store {
         connection: &Connection,
         query: &ArticleQuery,
     ) -> Result<Vec<ArticleSummary>, CoreError> {
-        let (mut sql,mut values)=article_filter_sql("SELECT a.id,a.feed_id,f.category_id,f.title,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.preview,a.image_url FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE 1=1".into(),query);
+        let (mut sql,mut values)=article_filter_sql("SELECT a.id,a.feed_id,f.category_id,f.title,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.reading_time_minutes,a.preview,a.image_url FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE 1=1".into(),query);
         let descending = query.sort == ArticleSort::NewestFirst;
         if let Some(cursor) = &query.cursor {
             let op = if descending { "<" } else { ">" };
@@ -2956,8 +2957,9 @@ impl Store {
                     published_at: r.get(7)?,
                     is_read: r.get(8)?,
                     is_starred: r.get(9)?,
-                    preview: r.get(10)?,
-                    image_url: r.get(11)?,
+                    reading_time_minutes: r.get::<_, u32>(10)?,
+                    preview: r.get(11)?,
+                    image_url: r.get(12)?,
                 })
             })
             .map_err(sql_error)?
@@ -3253,6 +3255,11 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
     if current < 17 {
         let tx = connection.transaction().map_err(sql_error)?;
         tx.execute_batch("CREATE TABLE listening_list (article_id INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE, added_at TEXT NOT NULL); CREATE INDEX listening_list_added_at ON listening_list(added_at DESC,article_id DESC); PRAGMA user_version=17;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
+    if current < 18 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute_batch("ALTER TABLE articles ADD COLUMN reading_time_minutes INTEGER NOT NULL DEFAULT 0 CHECK(reading_time_minutes >= 0); PRAGMA user_version=18;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
     Ok(())
