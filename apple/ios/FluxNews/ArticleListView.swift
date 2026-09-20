@@ -2170,6 +2170,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private let portraitStarImageView = UIImageView(image: UIImage(systemName: "star.fill"))
     private let portraitCommentsContainer = UIView()
     private let portraitCommentsImageView = UIImageView(image: UIImage(systemName: "bubble.left"))
+    private let portraitPublishedAgeIconView = UIImageView(image: UIImage(systemName: "clock.arrow.circlepath"))
+    private let portraitPublishedAgeLabel = UILabel()
+    private let portraitReadingTimeIconView = UIImageView(image: UIImage(systemName: "doc.text"))
+    private let portraitReadingTimeLabel = UILabel()
     private let previewLabel = UILabel()
     private let articleImageView = UIImageView()
     private let imagePlaceholder = UIImageView(image: UIImage(systemName: "photo"))
@@ -2196,8 +2200,6 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var commentsToStarSpacingConstraint: NSLayoutConstraint!
     private var metadataFeedTitleDefaultTrailingConstraint: NSLayoutConstraint!
     private var metadataFeedTitlePortraitTrailingConstraint: NSLayoutConstraint!
-    private var portraitDateLeadingConstraint: NSLayoutConstraint!
-    private var portraitDateTopConstraint: NSLayoutConstraint!
     private var defaultDateLeadingConstraint: NSLayoutConstraint!
     private var defaultDateTopConstraint: NSLayoutConstraint!
     private var portraitRailUnreadWidth: NSLayoutConstraint!
@@ -2206,7 +2208,17 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var portraitRailStarHeight: NSLayoutConstraint!
     private var portraitRailCommentsWidth: NSLayoutConstraint!
     private var portraitRailCommentsHeight: NSLayoutConstraint!
+    private var portraitRailInfoIconWidth: NSLayoutConstraint!
+    private var portraitRailInfoIconHeight: NSLayoutConstraint!
+    private var portraitRailReadingIconWidth: NSLayoutConstraint!
+    private var portraitRailReadingIconHeight: NSLayoutConstraint!
+    private var portraitPublishedAgeHeightConstraint: NSLayoutConstraint!
+    private var portraitReadingTimeHeightConstraint: NSLayoutConstraint!
+    private var portraitReadingGroupSpacingConstraint: NSLayoutConstraint!
     private var portraitAccessoryRailWidthConstraint: NSLayoutConstraint!
+    private var portraitAccessoryRailHeightConstraint: NSLayoutConstraint!
+    private var portraitPreviewBelowImageConstraint: NSLayoutConstraint!
+    private var portraitPreviewBelowRailConstraint: NSLayoutConstraint!
     /// One step more contrast than `secondaryLabel` without reaching full
     /// `label`, which would compete with the headline. Resolved per trait
     /// collection so it still inverts in dark mode.
@@ -2367,33 +2379,104 @@ final class IOSUIKitArticleCell: UITableViewCell {
         portraitCommentsImageView.translatesAutoresizingMaskIntoConstraints = false
         portraitCommentsImageView.tintColor = Self.supportingTextColor
         portraitCommentsContainer.addSubview(portraitCommentsImageView)
+
+        portraitPublishedAgeIconView.translatesAutoresizingMaskIntoConstraints = false
+        portraitPublishedAgeIconView.tintColor = Self.supportingTextColor
+        portraitPublishedAgeLabel.translatesAutoresizingMaskIntoConstraints = false
+        portraitPublishedAgeLabel.font = .preferredFont(forTextStyle: .caption2)
+        portraitPublishedAgeLabel.adjustsFontForContentSizeCategory = true
+        portraitPublishedAgeLabel.textColor = Self.supportingTextColor
+        portraitPublishedAgeLabel.numberOfLines = 2
+        portraitPublishedAgeLabel.lineBreakMode = .byWordWrapping
+
+        portraitReadingTimeIconView.translatesAutoresizingMaskIntoConstraints = false
+        portraitReadingTimeIconView.tintColor = Self.supportingTextColor
+        portraitReadingTimeLabel.translatesAutoresizingMaskIntoConstraints = false
+        portraitReadingTimeLabel.font = .preferredFont(forTextStyle: .caption2)
+        portraitReadingTimeLabel.adjustsFontForContentSizeCategory = true
+        portraitReadingTimeLabel.textColor = Self.supportingTextColor
+        portraitReadingTimeLabel.numberOfLines = 1
+        portraitReadingTimeLabel.lineBreakMode = .byTruncatingTail
+
         portraitAccessoryRail.addSubview(portraitUnreadIndicator)
         portraitAccessoryRail.addSubview(portraitStarImageView)
         portraitAccessoryRail.addSubview(portraitCommentsContainer)
-        NSLayoutConstraint.activate([
-            portraitCommentsImageView.centerXAnchor.constraint(equalTo: portraitCommentsContainer.centerXAnchor),
-            portraitCommentsImageView.centerYAnchor.constraint(equalTo: portraitCommentsContainer.centerYAnchor),
-            portraitUnreadIndicator.topAnchor.constraint(equalTo: portraitAccessoryRail.topAnchor),
-            portraitUnreadIndicator.centerXAnchor.constraint(equalTo: portraitAccessoryRail.centerXAnchor),
-            portraitStarImageView.topAnchor.constraint(equalTo: portraitUnreadIndicator.bottomAnchor, constant: IOSUIKitArticleGeometry.portraitAccessoryVerticalSpacing),
-            portraitStarImageView.centerXAnchor.constraint(equalTo: portraitAccessoryRail.centerXAnchor),
-            portraitCommentsContainer.topAnchor.constraint(equalTo: portraitStarImageView.bottomAnchor, constant: IOSUIKitArticleGeometry.portraitAccessoryVerticalSpacing),
-            portraitCommentsContainer.centerXAnchor.constraint(equalTo: portraitAccessoryRail.centerXAnchor),
-            portraitCommentsContainer.bottomAnchor.constraint(lessThanOrEqualTo: portraitAccessoryRail.bottomAnchor),
-        ])
+        portraitAccessoryRail.addSubview(portraitPublishedAgeIconView)
+        portraitAccessoryRail.addSubview(portraitPublishedAgeLabel)
+        portraitAccessoryRail.addSubview(portraitReadingTimeIconView)
+        portraitAccessoryRail.addSubview(portraitReadingTimeLabel)
+
+        portraitReadingGroupSpacingConstraint = portraitReadingTimeIconView.topAnchor.constraint(
+            equalTo: portraitPublishedAgeLabel.bottomAnchor,
+            constant: IOSUIKitArticleGeometry.portraitInfoGroupSpacing
+        )
         portraitRailUnreadWidth = portraitUnreadIndicator.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.unreadSize)
         portraitRailUnreadHeight = portraitUnreadIndicator.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.unreadSize)
         portraitRailStarWidth = portraitStarImageView.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize)
         portraitRailStarHeight = portraitStarImageView.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize)
         portraitRailCommentsWidth = portraitCommentsContainer.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.commentSlotSize)
         portraitRailCommentsHeight = portraitCommentsContainer.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.commentSlotSize)
+        portraitRailInfoIconWidth = portraitPublishedAgeIconView.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.portraitInfoIconSize)
+        portraitRailInfoIconHeight = portraitPublishedAgeIconView.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.portraitInfoIconSize)
+        portraitRailReadingIconWidth = portraitReadingTimeIconView.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.portraitInfoIconSize)
+        portraitRailReadingIconHeight = portraitReadingTimeIconView.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.portraitInfoIconSize)
+        portraitPublishedAgeHeightConstraint = portraitPublishedAgeLabel.heightAnchor.constraint(equalToConstant: 1)
+        portraitReadingTimeHeightConstraint = portraitReadingTimeLabel.heightAnchor.constraint(equalToConstant: 0)
+
         NSLayoutConstraint.activate([
+            portraitCommentsImageView.centerXAnchor.constraint(equalTo: portraitCommentsContainer.centerXAnchor),
+            portraitCommentsImageView.centerYAnchor.constraint(equalTo: portraitCommentsContainer.centerYAnchor),
+
+            portraitUnreadIndicator.topAnchor.constraint(equalTo: portraitAccessoryRail.topAnchor),
+            portraitUnreadIndicator.leadingAnchor.constraint(equalTo: portraitAccessoryRail.leadingAnchor),
             portraitRailUnreadWidth,
             portraitRailUnreadHeight,
+
+            portraitStarImageView.topAnchor.constraint(
+                equalTo: portraitUnreadIndicator.bottomAnchor,
+                constant: IOSUIKitArticleGeometry.portraitAccessoryVerticalSpacing
+            ),
+            portraitStarImageView.leadingAnchor.constraint(equalTo: portraitAccessoryRail.leadingAnchor),
             portraitRailStarWidth,
             portraitRailStarHeight,
+
+            portraitCommentsContainer.topAnchor.constraint(
+                equalTo: portraitStarImageView.bottomAnchor,
+                constant: IOSUIKitArticleGeometry.portraitAccessoryVerticalSpacing
+            ),
+            portraitCommentsContainer.leadingAnchor.constraint(equalTo: portraitAccessoryRail.leadingAnchor),
             portraitRailCommentsWidth,
             portraitRailCommentsHeight,
+
+            portraitPublishedAgeIconView.topAnchor.constraint(
+                equalTo: portraitCommentsContainer.bottomAnchor,
+                constant: IOSUIKitArticleGeometry.portraitInfoStartSpacing
+            ),
+            portraitPublishedAgeIconView.leadingAnchor.constraint(equalTo: portraitAccessoryRail.leadingAnchor),
+            portraitRailInfoIconWidth,
+            portraitRailInfoIconHeight,
+
+            portraitPublishedAgeLabel.topAnchor.constraint(
+                equalTo: portraitPublishedAgeIconView.bottomAnchor,
+                constant: IOSUIKitArticleGeometry.portraitInfoLabelSpacing
+            ),
+            portraitPublishedAgeLabel.leadingAnchor.constraint(equalTo: portraitAccessoryRail.leadingAnchor),
+            portraitPublishedAgeLabel.trailingAnchor.constraint(equalTo: portraitAccessoryRail.trailingAnchor),
+            portraitPublishedAgeHeightConstraint,
+
+            portraitReadingGroupSpacingConstraint,
+            portraitReadingTimeIconView.leadingAnchor.constraint(equalTo: portraitAccessoryRail.leadingAnchor),
+            portraitRailReadingIconWidth,
+            portraitRailReadingIconHeight,
+
+            portraitReadingTimeLabel.topAnchor.constraint(
+                equalTo: portraitReadingTimeIconView.bottomAnchor,
+                constant: IOSUIKitArticleGeometry.portraitInfoLabelSpacing
+            ),
+            portraitReadingTimeLabel.leadingAnchor.constraint(equalTo: portraitAccessoryRail.leadingAnchor),
+            portraitReadingTimeLabel.trailingAnchor.constraint(equalTo: portraitAccessoryRail.trailingAnchor),
+            portraitReadingTimeHeightConstraint,
+            portraitReadingTimeLabel.bottomAnchor.constraint(lessThanOrEqualTo: portraitAccessoryRail.bottomAnchor),
         ])
 
         starImageView.translatesAutoresizingMaskIntoConstraints = false
@@ -2489,14 +2572,6 @@ final class IOSUIKitArticleCell: UITableViewCell {
         stackedConstraints.append(defaultDateLeadingConstraint)
         NSLayoutConstraint.activate(stackedConstraints)
 
-        portraitDateLeadingConstraint = dateLabel.leadingAnchor.constraint(
-            equalTo: feedTitleLabel.leadingAnchor
-        )
-        portraitDateTopConstraint = dateLabel.topAnchor.constraint(
-            equalTo: metadataRow.bottomAnchor,
-            constant: IOSUIKitArticleGeometry.portraitMetadataDateSpacing
-        )
-
         articleImageView.translatesAutoresizingMaskIntoConstraints = false
         articleImageView.isHidden = true
         imagePlaceholder.translatesAutoresizingMaskIntoConstraints = false
@@ -2531,13 +2606,21 @@ final class IOSUIKitArticleCell: UITableViewCell {
             multiplier: 1 / ArticlePresentationLayout.portraitImageAspectRatio
         )
         portraitImageWidthConstraint = articleImageView.widthAnchor.constraint(equalToConstant: 1)
-        portraitAccessoryRailWidthConstraint = portraitAccessoryRail.widthAnchor.constraint(
-            equalToConstant: IOSUIKitArticleGeometry.commentSlotSize
-        )
+        portraitAccessoryRailWidthConstraint = portraitAccessoryRail.widthAnchor.constraint(equalToConstant: 1)
+        portraitAccessoryRailHeightConstraint = portraitAccessoryRail.heightAnchor.constraint(equalToConstant: 1)
         landscapeImageWidthConstraint = articleImageView.widthAnchor.constraint(equalToConstant: 1)
         landscapeImageHeightConstraint = articleImageView.heightAnchor.constraint(equalToConstant: 1)
         portraitPreviewTopConstraint = previewLabel.topAnchor.constraint(
             equalTo: articleImageView.bottomAnchor,
+            constant: IOSUIKitArticleGeometry.portraitSpacing
+        )
+        portraitPreviewTopConstraint.priority = .defaultLow
+        portraitPreviewBelowImageConstraint = previewLabel.topAnchor.constraint(
+            greaterThanOrEqualTo: articleImageView.bottomAnchor,
+            constant: IOSUIKitArticleGeometry.portraitSpacing
+        )
+        portraitPreviewBelowRailConstraint = previewLabel.topAnchor.constraint(
+            greaterThanOrEqualTo: portraitAccessoryRail.bottomAnchor,
             constant: IOSUIKitArticleGeometry.portraitSpacing
         )
 
@@ -2553,15 +2636,15 @@ final class IOSUIKitArticleCell: UITableViewCell {
         //
         //   Headline
         //   icon  Feed name
-        //   Date
         //   ┌───────────────┐   ● unread
         //   │  HERO IMAGE   │   ★ star
         //   │      85%      │   💬 comments
-        //   └───────────────┘   ♫ audio (+ optional duration, future projection)
-        //   Preview … (full content width, preserving historical wrapping)
+        //   │               │   ◷ relative age
+        //   └───────────────┘   ▤ reading time
+        //   Preview … (full content width)
         //
-        // The performance-motivated 85% hero is therefore an intentional main
-        // content column with an accessory gutter, not a centered undersized card.
+        // Publication age is frozen for the structural Timeline generation; no
+        // timer mutates visible rows while scrolling.
         portraitConstraints = [
             textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
             textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
@@ -2574,12 +2657,11 @@ final class IOSUIKitArticleCell: UITableViewCell {
             metadataRow.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
             metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
 
-            portraitDateTopConstraint,
-            portraitDateLeadingConstraint,
-            dateLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
-
             articleImageView.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
-            articleImageView.topAnchor.constraint(equalTo: dateLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.portraitSpacing),
+            articleImageView.topAnchor.constraint(
+                equalTo: metadataRow.bottomAnchor,
+                constant: IOSUIKitArticleGeometry.portraitSpacing
+            ),
             portraitImageWidthConstraint,
             portraitImageAspectConstraint,
 
@@ -2588,10 +2670,12 @@ final class IOSUIKitArticleCell: UITableViewCell {
                 constant: IOSUIKitArticleGeometry.portraitAccessoryRailSpacing
             ),
             portraitAccessoryRailWidthConstraint,
+            portraitAccessoryRailHeightConstraint,
             portraitAccessoryRail.topAnchor.constraint(equalTo: articleImageView.topAnchor),
-            portraitAccessoryRail.bottomAnchor.constraint(lessThanOrEqualTo: articleImageView.bottomAnchor),
 
             portraitPreviewTopConstraint,
+            portraitPreviewBelowImageConstraint,
+            portraitPreviewBelowRailConstraint,
             previewTrailingDefaultConstraint,
             previewBottomDefaultConstraint,
         ]
@@ -2771,6 +2855,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
         titleLabel.text = currentTitle
         feedTitleLabel.text = currentFeedTitle
         dateLabel.text = currentPublishedDate
+        portraitPublishedAgeLabel.text = item.content.publishedAge
+        portraitReadingTimeLabel.text = item.content.readingTime
         let hasPreview = !item.content.article.preview.isEmpty
         previewLabel.text = item.content.article.preview
         previewLabel.isHidden = !hasPreview
@@ -2778,7 +2864,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
         // Constants and priorities only — the constraint graph stays identical
         // across every reuse, whatever the article contains.
         previewTopConstraint.constant = hasPreview ? IOSUIKitArticleGeometry.textSpacing : 0
-        portraitPreviewTopConstraint.constant = hasPreview ? IOSUIKitArticleGeometry.portraitSpacing : 0
+        let portraitPreviewSpacing = hasPreview ? IOSUIKitArticleGeometry.portraitSpacing : 0
+        portraitPreviewTopConstraint.constant = portraitPreviewSpacing
+        portraitPreviewBelowImageConstraint.constant = portraitPreviewSpacing
+        portraitPreviewBelowRailConstraint.constant = portraitPreviewSpacing
         // Same collapse for the
         // side-title variant's pair, or a preview-less row keeps a gap below the
         // image that the engine did not budget for.
@@ -2792,6 +2881,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
         portraitCommentsContainer.isHidden = !hasComments
         commentsWidthConstraint.constant = hasComments ? (preparedLayoutMetrics.commentsFrame?.width ?? IOSUIKitArticleGeometry.commentSlotSize) : 0
         commentsToStarSpacingConstraint.constant = hasComments ? -IOSUIKitArticleGeometry.metadataAccessorySpacing : 0
+        let hasReadingTime = item.content.readingTime != nil
+        portraitReadingTimeIconView.isHidden = !hasReadingTime
+        portraitReadingTimeLabel.isHidden = !hasReadingTime
 
         let hasImage = mode.showsArticleImage && item.content.imageURL != nil
         let imageSize = metrics.imageSize(hasImage: hasImage)
@@ -2853,10 +2945,22 @@ final class IOSUIKitArticleCell: UITableViewCell {
             portraitRailCommentsWidth.constant = comments
             portraitRailCommentsHeight.constant = comments
         }
-        let railWidth = max(unread, star, comments)
-        if portraitAccessoryRailWidthConstraint.constant != railWidth {
-            portraitAccessoryRailWidthConstraint.constant = railWidth
+        if let ageIcon = layout.publishedAgeIconFrame {
+            portraitRailInfoIconWidth.constant = ageIcon.width
+            portraitRailInfoIconHeight.constant = ageIcon.height
         }
+        if let rail = layout.portraitAccessoryRailFrame {
+            portraitAccessoryRailWidthConstraint.constant = rail.width
+            portraitAccessoryRailHeightConstraint.constant = rail.height
+        }
+        portraitPublishedAgeHeightConstraint.constant = layout.publishedAgeFrame?.height ?? 0
+        let readingIcon = layout.readingTimeIconFrame
+        portraitRailReadingIconWidth.constant = readingIcon?.width ?? 0
+        portraitRailReadingIconHeight.constant = readingIcon?.height ?? 0
+        portraitReadingTimeHeightConstraint.constant = layout.readingTimeFrame?.height ?? 0
+        portraitReadingGroupSpacingConstraint.constant = layout.readingTimeFrame == nil
+            ? 0
+            : IOSUIKitArticleGeometry.portraitInfoGroupSpacing
     }
 
     private func applyLayout(metrics: Metrics, variant: IOSUIKitArticleCellLayoutVariant) {
@@ -2897,8 +3001,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
         // positions at once.
         defaultDateLeadingConstraint.isActive = !usesPortraitRail
         defaultDateTopConstraint.isActive = !usesPortraitRail
-        portraitDateLeadingConstraint.isActive = usesPortraitRail
-        portraitDateTopConstraint.isActive = usesPortraitRail
+        dateLabel.isHidden = usesPortraitRail
+        portraitPublishedAgeIconView.isHidden = !usesPortraitRail
+        portraitPublishedAgeLabel.isHidden = !usesPortraitRail
 
         switch variant {
         case .compact, .visualTextOnly:
@@ -2932,6 +3037,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
         previewLabel.textColor = supporting
         commentsImageView.tintColor = supporting
         portraitCommentsImageView.tintColor = supporting
+        portraitPublishedAgeIconView.tintColor = supporting
+        portraitPublishedAgeLabel.textColor = supporting
+        portraitReadingTimeIconView.tintColor = supporting
+        portraitReadingTimeLabel.textColor = supporting
         let unreadOpacity = ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: isRead)
         unreadIndicator.alpha = unreadOpacity
         portraitUnreadIndicator.alpha = unreadOpacity
