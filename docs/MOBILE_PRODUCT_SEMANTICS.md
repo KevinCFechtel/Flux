@@ -144,7 +144,7 @@ Mobile UI actions should have stable semantic identities independent of where a 
 - `settings`;
 - `more`.
 
-The default iOS/iPadOS Article List actions are Sync, Filter/Sort, and More. iPhone portrait exposes them in the Bottom Action Bar. iPhone landscape moves the same actions to the trailing top toolbar and keeps an interactive compact leading title capsule with the current-scope article count in compact numeric form. When persistent split navigation is visible, iPadOS also uses the trailing top toolbar but replaces the interactive capsule with a native inline scope title. This Apple layout is not an Android requirement.
+The default iOS/iPadOS Article List actions are Sync, Filter/Sort, and More. iPhone portrait exposes them in the Bottom Action Bar. iPhone landscape moves the same actions to the trailing top toolbar and keeps an interactive compact leading title capsule with the current-scope article count in compact numeric form. When persistent split navigation is visible, iPadOS also uses the trailing top toolbar and leaves the detail navigation bar title-free because the sidebar already communicates the selected scope. In the sidebar, category selection and category expansion are separate interactions so expanding or collapsing a selected category does not depend on List-selection behavior. This Apple layout is not an Android requirement.
 
 Future toolbar/action configurability may promote supported semantic actions into direct slots. An always-available overflow path must preserve access to actions that are not shown directly. Do not persist concrete SwiftUI/Compose control identities as the configuration model.
 
