@@ -381,6 +381,24 @@ struct IOSUIKitArticleAccessoryMetrics: Equatable {
     }
 }
 
+enum IOSArticleAccessoryKind: Equatable, CaseIterable {
+    case unread
+    case star
+    case comments
+    case audio
+}
+
+enum IOSArticleAccessoryOrdering {
+    /// Semantic order measured from the visual outer edge inward, or from the
+    /// top of a vertical rail downward. Audio owns its optional duration and
+    /// therefore remains one accessory rather than two independent slots.
+    static let outerToInner: [IOSArticleAccessoryKind] = [.unread, .star, .comments, .audio]
+
+    /// UIKit lays a horizontal trailing group from leading to trailing, so the
+    /// semantic order appears reversed in coordinate order.
+    static let horizontalLeadingToTrailing: [IOSArticleAccessoryKind] = outerToInner.reversed()
+}
+
 /// The non-text geometry contract shared by the renderer and deterministic sizing.
 /// It deliberately has no presentation pixels or read/starred state.
 struct IOSUIKitArticleGeometry: Equatable {
@@ -400,6 +418,10 @@ struct IOSUIKitArticleGeometry: Equatable {
     // the allocation here makes the renderer and deterministic height engine
     // share exactly the same geometry contract.
     static let visualHeroImageAllocation: CGFloat = 0.85
+    /// The remaining width becomes an intentional accessory gutter rather than
+    /// symmetric dead space around the performance-motivated 85% hero.
+    static let portraitAccessoryRailSpacing: CGFloat = 6
+    static let portraitAccessoryVerticalSpacing: CGFloat = 10
     // "Visual compact": a thumbnail beside the title, with the metadata bar above
     // and — on a narrow container — the preview underneath.
     static let sideTitleImageAllocation: CGFloat = 0.32
@@ -469,10 +491,11 @@ struct IOSUIKitArticleGeometry: Equatable {
 
     func metadataLayout(width: CGFloat, hasComments: Bool, height: CGFloat, accessories: IOSUIKitArticleAccessoryMetrics) -> MetadataLayout {
         let trailingAccessorySlots = staticAccessorySlotWidths(hasComments: hasComments, accessories: accessories)
-        let commentsWidth = hasComments ? trailingAccessorySlots[0] : 0
+        let commentsWidth = hasComments ? accessories.comments : 0
         let trailingAccessoriesWidth = trailingAccessorySlots.reduce(0, +) + CGFloat(max(0, trailingAccessorySlots.count - 1)) * Self.metadataAccessorySpacing
-        // Leading edge: feed icon, then the feed name. Trailing edge, outermost
-        // first: unread dot, star, then the remaining accessories.
+        // Leading edge: feed icon, then the feed name. Trailing edge is the
+        // horizontal projection of the stable semantic accessory order:
+        // unread outermost, then star, comments, and eventually audio.
         let feedTitleWidth = max(0, width - accessories.feedIcon - Self.metadataLeadingSpacing - Self.metadataTitleSpacing - trailingAccessoriesWidth)
         let unreadX = width - accessories.unread
         let starX = unreadX - Self.metadataAccessorySpacing - accessories.star
@@ -488,8 +511,24 @@ struct IOSUIKitArticleGeometry: Equatable {
         )
     }
 
-    /// Trailing accessories in leading-to-trailing order. Future immutable
-    /// accessories append before the star, which keeps the unread dot outermost.
+    /// Visual portrait moves the accessories beside the hero. Its metadata line
+    /// therefore belongs entirely to the feed identity.
+    func feedOnlyMetadataLayout(width: CGFloat, height: CGFloat, accessories: IOSUIKitArticleAccessoryMetrics) -> MetadataLayout {
+        .init(
+            unreadX: width,
+            feedIconX: 0,
+            feedTitleX: accessories.feedIcon + Self.metadataLeadingSpacing,
+            feedTitleWidth: max(0, width - accessories.feedIcon - Self.metadataLeadingSpacing),
+            commentsX: width,
+            commentsWidth: 0,
+            starX: width,
+            height: height
+        )
+    }
+
+    /// Existing horizontal slots in coordinate order. A future audio slot is
+    /// inserted on the leading/inner side of comments; it must never displace
+    /// unread from the outer edge or star from the second position.
     func staticAccessorySlotWidths(hasComments: Bool, accessories: IOSUIKitArticleAccessoryMetrics) -> [CGFloat] {
         (hasComments ? [accessories.comments] : []) + [accessories.star, accessories.unread]
     }
@@ -534,7 +573,14 @@ enum IOSUIKitArticleLayoutEngine {
         let infoWidth = textWidth
         // On a wide container the preview joins the column beside the image
         // rather than running underneath it.
-        let previewWidth = variant == .visualSideTitleWide ? titleWidth : infoWidth
+        let previewWidth: CGFloat
+        if variant == .visualPortrait {
+            previewWidth = imageSize.width
+        } else if variant == .visualSideTitleWide {
+            previewWidth = titleWidth
+        } else {
+            previewWidth = infoWidth
+        }
 
         let accessories = IOSUIKitArticleAccessoryMetrics(contentSizeCategory: input.contentSizeCategory)
         let titleFont = font(.headline, category: input.contentSizeCategory, bold: false)
@@ -578,9 +624,10 @@ enum IOSUIKitArticleLayoutEngine {
         let logicalImageX: CGFloat
         if isSideTitleVariant {
             logicalImageX = geometry.horizontalInset + geometry.availableWidth - imageSize.width
-        } else if variant == .visualPortrait {
-            logicalImageX = geometry.horizontalInset + (geometry.availableWidth - imageSize.width) / 2
         } else {
+            // Visual portrait deliberately uses the logical leading edge. The
+            // remaining 15% is the accessory gutter, rather than symmetric
+            // whitespace that makes the hero look accidentally undersized.
             logicalImageX = geometry.horizontalInset
         }
         // Side-title starts below metadata. Standard Visual portrait puts the
@@ -617,13 +664,44 @@ enum IOSUIKitArticleLayoutEngine {
             metadataTop = titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing
         }
         let metadataFrame = CGRect(x: textOrigin.x, y: metadataTop, width: infoWidth, height: metadataHeight)
-        let metadataLayout = geometry.metadataLayout(width: infoWidth, hasComments: input.hasComments, height: metadataHeight, accessories: accessories)
+        let metadataLayout = variant == .visualPortrait
+            ? geometry.feedOnlyMetadataLayout(width: infoWidth, height: metadataHeight, accessories: accessories)
+            : geometry.metadataLayout(width: infoWidth, hasComments: input.hasComments, height: metadataHeight, accessories: accessories)
         func metadataX(_ logicalX: CGFloat, width: CGFloat) -> CGFloat { input.layoutDirection == .rightToLeft ? metadataFrame.maxX - logicalX - width : metadataFrame.minX + logicalX }
-        let unreadFrame = CGRect(x: metadataX(metadataLayout.unreadX, width: accessories.unread), y: metadataFrame.midY - accessories.unread / 2, width: accessories.unread, height: accessories.unread)
         let feedIconFrame = CGRect(x: metadataX(metadataLayout.feedIconX, width: accessories.feedIcon), y: metadataFrame.midY - accessories.feedIcon / 2, width: accessories.feedIcon, height: accessories.feedIcon)
         let feedTitleFrame = CGRect(x: metadataX(metadataLayout.feedTitleX, width: metadataLayout.feedTitleWidth), y: metadataFrame.minY, width: metadataLayout.feedTitleWidth, height: metadataHeight)
-        let commentsFrame = input.hasComments ? CGRect(x: metadataX(metadataLayout.commentsX, width: accessories.comments), y: metadataFrame.midY - accessories.comments / 2, width: accessories.comments, height: accessories.comments) : nil
-        let starFrame = CGRect(x: metadataX(metadataLayout.starX, width: accessories.star), y: metadataFrame.midY - accessories.star / 2, width: accessories.star, height: accessories.star)
+
+        let unreadFrame: CGRect
+        let starFrame: CGRect
+        let commentsFrame: CGRect?
+        if variant == .visualPortrait {
+            let railLeading = logicalImageX + imageSize.width + IOSUIKitArticleGeometry.portraitAccessoryRailSpacing
+            let contentTrailing = geometry.horizontalInset + geometry.availableWidth
+            let railWidth = max(0, contentTrailing - railLeading)
+            let railCenterX = railLeading + railWidth / 2
+            func railX(_ width: CGFloat) -> CGFloat {
+                physicalX(
+                    logicalX: railCenterX - width / 2,
+                    width: width,
+                    in: input.containerWidth,
+                    direction: input.layoutDirection
+                )
+            }
+            let unreadY = logicalImageY
+            unreadFrame = CGRect(x: railX(accessories.unread), y: unreadY, width: accessories.unread, height: accessories.unread)
+            let starY = unreadFrame.maxY + IOSUIKitArticleGeometry.portraitAccessoryVerticalSpacing
+            starFrame = CGRect(x: railX(accessories.star), y: starY, width: accessories.star, height: accessories.star)
+            if input.hasComments {
+                let commentsY = starFrame.maxY + IOSUIKitArticleGeometry.portraitAccessoryVerticalSpacing
+                commentsFrame = CGRect(x: railX(accessories.comments), y: commentsY, width: accessories.comments, height: accessories.comments)
+            } else {
+                commentsFrame = nil
+            }
+        } else {
+            unreadFrame = CGRect(x: metadataX(metadataLayout.unreadX, width: accessories.unread), y: metadataFrame.midY - accessories.unread / 2, width: accessories.unread, height: accessories.unread)
+            commentsFrame = input.hasComments ? CGRect(x: metadataX(metadataLayout.commentsX, width: accessories.comments), y: metadataFrame.midY - accessories.comments / 2, width: accessories.comments, height: accessories.comments) : nil
+            starFrame = CGRect(x: metadataX(metadataLayout.starX, width: accessories.star), y: metadataFrame.midY - accessories.star / 2, width: accessories.star, height: accessories.star)
+        }
         let dateFrame: CGRect
         if isSideTitle {
             dateFrame = CGRect(x: textOrigin.x, y: titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: titleWidth, height: dateHeight)
@@ -651,7 +729,8 @@ enum IOSUIKitArticleLayoutEngine {
         default:
             previewTop = dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing
         }
-        let previewFrame = previewHeight == 0 ? nil : CGRect(x: textOrigin.x, y: previewTop, width: previewWidth, height: previewHeight)
+        let previewX = variant == .visualPortrait ? (imageFrame?.minX ?? textOrigin.x) : textOrigin.x
+        let previewFrame = previewHeight == 0 ? nil : CGRect(x: previewX, y: previewTop, width: previewWidth, height: previewHeight)
         return .init(variant: variant, cellSize: .init(width: input.containerWidth, height: totalHeight), contentFrame: contentFrame, imageFrame: imageFrame, textFrame: CGRect(x: textOrigin.x, y: textOrigin.y, width: infoWidth, height: textBlockHeight), titleFrame: titleFrame, metadataFrame: metadataFrame, unreadFrame: unreadFrame, feedIconFrame: feedIconFrame, feedTitleFrame: feedTitleFrame, commentsFrame: commentsFrame, starFrame: starFrame, dateFrame: dateFrame, previewFrame: previewFrame, horizontalInset: geometry.horizontalInset, verticalInset: geometry.verticalPadding, titleHeight: titleHeight, metadataHeight: metadataHeight, previewHeight: previewHeight, textBlockHeight: textBlockHeight)
     }
 
