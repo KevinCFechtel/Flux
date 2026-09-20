@@ -46,6 +46,10 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     func testLandscapeTitleCapsuleKeepsUsefulMinimumWidthWithoutNarrowMaximumContract() {
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.inlineMinimumContentWidth, 160)
+        XCTAssertGreaterThan(
+            IOSArticleListTitleCapsuleMetrics.inlineCountPriority,
+            IOSArticleListTitleCapsuleMetrics.inlineTitlePriority
+        )
     }
 
     func testLandscapeCounterLabelExplainsCountSemantics() {
