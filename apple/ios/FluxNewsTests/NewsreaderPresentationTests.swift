@@ -2405,7 +2405,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleAccessoryOrdering.horizontalLeadingToTrailing, [.audio, .comments, .star, .unread])
     }
 
-    func testVisualPortraitUsesLeadingHeroAccessoryRailAndFullWidthPreview() {
+    func testVisualPortraitUsesEditorialMetadataHeroRailAndFullWidthPreview() {
         let metrics = layoutMetrics(mode: .visual, width: 390, hasImage: true)
         guard let image = metrics.imageFrame, let preview = metrics.previewFrame else {
             return XCTFail("Visual portrait should expose image and preview frames")
@@ -2413,21 +2413,38 @@ final class NewsreaderPresentationTests: XCTestCase {
 
         XCTAssertEqual(metrics.variant, .visualPortrait)
         XCTAssertEqual(IOSUIKitArticleGeometry.visualHeroImageAllocation, 0.85)
+        XCTAssertEqual(IOSUIKitArticleGeometry.articleImageCornerRadius, 10)
         XCTAssertEqual(image.width, (metrics.contentFrame.width * IOSUIKitArticleGeometry.visualHeroImageAllocation).rounded(), accuracy: 0.5)
         XCTAssertEqual(image.minX, metrics.contentFrame.minX, accuracy: 0.5)
         XCTAssertEqual(preview.minX, metrics.contentFrame.minX, accuracy: 0.5)
         XCTAssertEqual(preview.width, metrics.contentFrame.width, accuracy: 0.5)
 
         XCTAssertLessThan(metrics.titleFrame.maxY, metrics.metadataFrame.minY)
-        XCTAssertLessThan(metrics.metadataFrame.maxY, metrics.dateFrame.minY)
-        XCTAssertLessThan(metrics.dateFrame.maxY, image.minY)
-        XCTAssertLessThan(image.maxY, preview.minY)
+        XCTAssertEqual(metrics.dateFrame.minX, metrics.feedTitleFrame.minX, accuracy: 0.5)
+        XCTAssertEqual(
+            metrics.dateFrame.minY - metrics.metadataFrame.maxY,
+            IOSUIKitArticleGeometry.portraitMetadataDateSpacing,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(
+            image.minY - metrics.dateFrame.maxY,
+            IOSUIKitArticleGeometry.portraitSpacing,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(
+            preview.minY - image.maxY,
+            IOSUIKitArticleGeometry.portraitSpacing,
+            accuracy: 0.5
+        )
 
-        XCTAssertGreaterThan(metrics.unreadFrame.minX, image.maxX)
-        XCTAssertGreaterThan(metrics.starFrame.minX, image.maxX)
+        XCTAssertEqual(
+            metrics.starFrame.minX - image.maxX,
+            IOSUIKitArticleGeometry.portraitAccessoryRailSpacing,
+            accuracy: 0.5
+        )
         XCTAssertLessThan(metrics.unreadFrame.minY, metrics.starFrame.minY)
         if let comments = metrics.commentsFrame {
-            XCTAssertGreaterThan(comments.minX, image.maxX)
+            XCTAssertEqual(comments.minX, metrics.starFrame.minX, accuracy: 0.5)
             XCTAssertLessThan(metrics.starFrame.minY, comments.minY)
         }
     }
