@@ -7,6 +7,8 @@ struct IOSUIKitArticleLayoutInput: Hashable {
     let title: String
     let feedTitle: String
     let publishedDate: String
+    let publishedAge: String
+    let readingTime: String?
     let preview: String
     let hasImage: Bool
     let hasComments: Bool
@@ -21,6 +23,8 @@ struct IOSUIKitArticleLayoutInput: Hashable {
         title = item.content.article.title
         feedTitle = item.content.article.feedTitle
         publishedDate = item.content.publishedDate
+        publishedAge = item.content.publishedAge
+        readingTime = item.content.readingTime
         preview = item.content.article.preview
         hasImage = item.content.imageURL != nil
         hasComments = item.content.hasComments
@@ -32,8 +36,13 @@ struct IOSUIKitArticleLayoutInput: Hashable {
         self.layoutDirection = layoutDirection
     }
 
-    init(title: String, feedTitle: String, publishedDate: String, preview: String, hasImage: Bool, hasComments: Bool, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
-        self.title = title; self.feedTitle = feedTitle; self.publishedDate = publishedDate; self.preview = preview
+    init(title: String, feedTitle: String, publishedDate: String, publishedAge: String? = nil, readingTime: String? = nil, preview: String, hasImage: Bool, hasComments: Bool, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
+        self.title = title
+        self.feedTitle = feedTitle
+        self.publishedDate = publishedDate
+        self.publishedAge = publishedAge ?? publishedDate
+        self.readingTime = readingTime
+        self.preview = preview
         self.hasImage = hasImage; self.hasComments = hasComments; self.mode = mode; self.previewLines = previewLines
         self.containerWidth = containerWidth; self.displayScale = displayScale; self.contentSizeCategory = contentSizeCategory
         self.layoutDirection = layoutDirection
@@ -44,6 +53,8 @@ struct IOSUIKitArticleLayoutKey: Hashable {
     let title: String
     let feedTitle: String
     let publishedDate: String
+    let publishedAge: String
+    let readingTime: String?
     let preview: String
     let hasComments: Bool
     let variant: IOSUIKitArticleCellLayoutVariant
@@ -67,6 +78,8 @@ struct IOSUIKitArticleLayoutKey: Hashable {
         title = input.title
         feedTitle = input.feedTitle
         publishedDate = input.publishedDate
+        publishedAge = input.publishedAge
+        readingTime = input.readingTime
         preview = input.preview
         hasComments = input.hasComments
         variant = geometry.variant(hasImage: input.hasImage && input.mode.showsArticleImage)
@@ -113,6 +126,11 @@ struct IOSUIKitArticleLayoutMetrics: Equatable {
     let commentsFrame: CGRect?
     let starFrame: CGRect
     let dateFrame: CGRect
+    let portraitAccessoryRailFrame: CGRect?
+    let publishedAgeIconFrame: CGRect?
+    let publishedAgeFrame: CGRect?
+    let readingTimeIconFrame: CGRect?
+    let readingTimeFrame: CGRect?
     let previewFrame: CGRect?
     let horizontalInset: CGFloat
     let verticalInset: CGFloat
@@ -367,6 +385,7 @@ struct IOSUIKitArticleAccessoryMetrics: Equatable {
     let feedIcon: CGFloat
     let star: CGFloat
     let comments: CGFloat
+    let infoIcon: CGFloat
 
     init(contentSizeCategory: UIContentSizeCategory) {
         let traits = UITraitCollection(preferredContentSizeCategory: contentSizeCategory)
@@ -378,6 +397,7 @@ struct IOSUIKitArticleAccessoryMetrics: Equatable {
         feedIcon = (reference * scale).rounded()
         star = (IOSUIKitArticleGeometry.starSlotSize * scale).rounded()
         comments = (IOSUIKitArticleGeometry.commentSlotSize * scale).rounded()
+        infoIcon = (IOSUIKitArticleGeometry.portraitInfoIconSize * scale).rounded()
     }
 }
 
@@ -413,10 +433,7 @@ struct IOSUIKitArticleGeometry: Equatable {
     static let portraitVerticalPadding: CGFloat = 15
     static let landscapeVerticalPadding: CGFloat = 13
     static let textSpacing: CGFloat = 7
-    /// Visual portrait keeps feed/date as one compact metadata block while the
-    /// rest of the presentation modes retain the general text spacing.
-    static let portraitMetadataDateSpacing: CGFloat = 3
-    /// Used between date and hero and between hero and preview.
+    /// Visual portrait places its compact information rail beside the hero.
     static let portraitSpacing: CGFloat = 10
     // Standard Visual portrait uses an inset hero image below the title. Keeping
     // the allocation here makes the renderer and deterministic height engine
@@ -426,6 +443,10 @@ struct IOSUIKitArticleGeometry: Equatable {
     /// symmetric dead space around the performance-motivated 85% hero.
     static let portraitAccessoryRailSpacing: CGFloat = 10
     static let portraitAccessoryVerticalSpacing: CGFloat = 10
+    static let portraitInfoStartSpacing: CGFloat = 12
+    static let portraitInfoIconSize: CGFloat = 14
+    static let portraitInfoLabelSpacing: CGFloat = 2
+    static let portraitInfoGroupSpacing: CGFloat = 8
     // "Visual compact": a thumbnail beside the title, with the metadata bar above
     // and — on a narrow container — the preview underneath.
     static let sideTitleImageAllocation: CGFloat = 0.32
@@ -594,6 +615,53 @@ enum IOSUIKitArticleLayoutEngine {
         let metadataHeight = max(accessories.feedIcon, font(.subheadline, category: input.contentSizeCategory, bold: true).lineHeight)
         let dateHeight = fixedLineHeight(input.publishedDate, font: font(.caption1, category: input.contentSizeCategory, bold: false))
         let previewHeight = coreTextHeight(input.preview, font: font(.subheadline, category: input.contentSizeCategory, bold: false), width: previewWidth, maximumLines: input.previewLines.rawValue, displayScale: scale)
+
+        let portraitRailLeading = geometry.horizontalInset + imageSize.width + IOSUIKitArticleGeometry.portraitAccessoryRailSpacing
+        let portraitRailTrailing = geometry.horizontalInset + geometry.availableWidth
+        let portraitRailWidth = variant == .visualPortrait ? max(0, portraitRailTrailing - portraitRailLeading) : 0
+        let publishedAgeHeight = variant == .visualPortrait
+            ? coreTextHeight(
+                input.publishedAge,
+                font: font(.caption2, category: input.contentSizeCategory, bold: false),
+                width: portraitRailWidth,
+                maximumLines: 2,
+                displayScale: scale
+            )
+            : 0
+        let readingTimeHeight = variant == .visualPortrait && input.readingTime != nil
+            ? coreTextHeight(
+                input.readingTime ?? "",
+                font: font(.caption2, category: input.contentSizeCategory, bold: false),
+                width: portraitRailWidth,
+                maximumLines: 1,
+                displayScale: scale
+            )
+            : 0
+        let reservedCommentSlot = accessories.comments
+        let statusRailHeight = accessories.unread
+            + IOSUIKitArticleGeometry.portraitAccessoryVerticalSpacing
+            + accessories.star
+            + IOSUIKitArticleGeometry.portraitAccessoryVerticalSpacing
+            + reservedCommentSlot
+        let publishedInfoHeight = accessories.infoIcon
+            + IOSUIKitArticleGeometry.portraitInfoLabelSpacing
+            + publishedAgeHeight
+        let readingInfoHeight = input.readingTime == nil ? 0 : (
+            IOSUIKitArticleGeometry.portraitInfoGroupSpacing
+            + accessories.infoIcon
+            + IOSUIKitArticleGeometry.portraitInfoLabelSpacing
+            + readingTimeHeight
+        )
+        let portraitRailContentHeight = variant == .visualPortrait
+            ? statusRailHeight
+                + IOSUIKitArticleGeometry.portraitInfoStartSpacing
+                + publishedInfoHeight
+                + readingInfoHeight
+            : 0
+        let portraitVisualBlockHeight = variant == .visualPortrait
+            ? max(imageSize.height, portraitRailContentHeight)
+            : imageSize.height
+
         let textBlockHeight: CGFloat
         // The column that shares its row with the image. On a wide container the
         // preview belongs to it, so it is part of the height the image competes
@@ -608,6 +676,9 @@ enum IOSUIKitArticleLayoutEngine {
         } else if variant == .visualSideTitle || variant == .visualSideTitleTextOnly {
             textBlockHeight = metadataHeight + IOSUIKitArticleGeometry.textSpacing + sideTitleRowHeight
                 + (previewHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
+        } else if variant == .visualPortrait {
+            textBlockHeight = titleHeight + IOSUIKitArticleGeometry.textSpacing + metadataHeight
+                + (previewHeight > 0 ? IOSUIKitArticleGeometry.portraitSpacing + previewHeight : 0)
         } else {
             textBlockHeight = titleHeight + IOSUIKitArticleGeometry.textSpacing + metadataHeight
                 + IOSUIKitArticleGeometry.textSpacing + dateHeight
@@ -616,11 +687,10 @@ enum IOSUIKitArticleLayoutEngine {
         let contentHeight: CGFloat
         switch variant {
         case .visualPortrait:
-            // Title -> metadata -> date -> inset hero image -> preview.
+            // Title -> feed metadata -> hero/Info Rail -> preview.
             contentHeight = titleHeight
                 + IOSUIKitArticleGeometry.textSpacing + metadataHeight
-                + IOSUIKitArticleGeometry.portraitMetadataDateSpacing + dateHeight
-                + IOSUIKitArticleGeometry.portraitSpacing + imageSize.height
+                + IOSUIKitArticleGeometry.portraitSpacing + portraitVisualBlockHeight
                 + (previewHeight > 0 ? IOSUIKitArticleGeometry.portraitSpacing + previewHeight : 0)
         case .visualLandscape: contentHeight = max(imageSize.height, textBlockHeight)
         default: contentHeight = textBlockHeight
@@ -637,7 +707,7 @@ enum IOSUIKitArticleLayoutEngine {
             logicalImageX = geometry.horizontalInset
         }
         // Side-title starts below metadata. Standard Visual portrait puts the
-        // inset hero image below the complete title/metadata/date information block.
+        // hero directly below title/feed metadata; time information lives in the rail.
         let logicalImageY: CGFloat
         if isSideTitleVariant {
             logicalImageY = geometry.verticalPadding + metadataHeight + IOSUIKitArticleGeometry.textSpacing
@@ -646,8 +716,6 @@ enum IOSUIKitArticleLayoutEngine {
                 + titleHeight
                 + IOSUIKitArticleGeometry.textSpacing
                 + metadataHeight
-                + IOSUIKitArticleGeometry.portraitMetadataDateSpacing
-                + dateHeight
                 + IOSUIKitArticleGeometry.portraitSpacing
         } else {
             logicalImageY = geometry.verticalPadding
@@ -656,7 +724,7 @@ enum IOSUIKitArticleLayoutEngine {
         let logicalTextX = variant == .visualLandscape ? geometry.horizontalInset + imageSize.width + IOSUIKitArticleGeometry.landscapeSpacing : geometry.horizontalInset
         let textOrigin = CGPoint(x: physicalX(logicalX: logicalTextX, width: textWidth, in: input.containerWidth, direction: input.layoutDirection), y: geometry.verticalPadding)
         // Side-title order is metadata then title/date. Standard Visual portrait
-        // is title -> metadata -> date -> image -> preview. All other variants
+        // is title -> metadata -> hero/Info Rail -> preview. All other variants
         // retain their existing ordering.
         let isSideTitle = metadataLeads
         let titleTop = isSideTitle
@@ -680,13 +748,15 @@ enum IOSUIKitArticleLayoutEngine {
         let unreadFrame: CGRect
         let starFrame: CGRect
         let commentsFrame: CGRect?
+        let portraitAccessoryRailFrame: CGRect?
+        let publishedAgeIconFrame: CGRect?
+        let publishedAgeFrame: CGRect?
+        let readingTimeIconFrame: CGRect?
+        let readingTimeFrame: CGRect?
         if variant == .visualPortrait {
-            let railLeading = logicalImageX + imageSize.width + IOSUIKitArticleGeometry.portraitAccessoryRailSpacing
-            let railSlotWidth = max(accessories.unread, accessories.star, accessories.comments)
-            let railCenterX = railLeading + railSlotWidth / 2
             func railX(_ width: CGFloat) -> CGFloat {
                 physicalX(
-                    logicalX: railCenterX - width / 2,
+                    logicalX: portraitRailLeading,
                     width: width,
                     in: input.containerWidth,
                     direction: input.layoutDirection
@@ -696,34 +766,81 @@ enum IOSUIKitArticleLayoutEngine {
             unreadFrame = CGRect(x: railX(accessories.unread), y: unreadY, width: accessories.unread, height: accessories.unread)
             let starY = unreadFrame.maxY + IOSUIKitArticleGeometry.portraitAccessoryVerticalSpacing
             starFrame = CGRect(x: railX(accessories.star), y: starY, width: accessories.star, height: accessories.star)
-            if input.hasComments {
-                let commentsY = starFrame.maxY + IOSUIKitArticleGeometry.portraitAccessoryVerticalSpacing
-                commentsFrame = CGRect(x: railX(accessories.comments), y: commentsY, width: accessories.comments, height: accessories.comments)
+            let commentsSlotY = starFrame.maxY + IOSUIKitArticleGeometry.portraitAccessoryVerticalSpacing
+            commentsFrame = input.hasComments
+                ? CGRect(x: railX(accessories.comments), y: commentsSlotY, width: accessories.comments, height: accessories.comments)
+                : nil
+
+            let ageIconY = commentsSlotY + accessories.comments + IOSUIKitArticleGeometry.portraitInfoStartSpacing
+            publishedAgeIconFrame = CGRect(
+                x: railX(accessories.infoIcon),
+                y: ageIconY,
+                width: accessories.infoIcon,
+                height: accessories.infoIcon
+            )
+            let ageLabelY = ageIconY + accessories.infoIcon + IOSUIKitArticleGeometry.portraitInfoLabelSpacing
+            publishedAgeFrame = CGRect(
+                x: physicalX(
+                    logicalX: portraitRailLeading,
+                    width: portraitRailWidth,
+                    in: input.containerWidth,
+                    direction: input.layoutDirection
+                ),
+                y: ageLabelY,
+                width: portraitRailWidth,
+                height: publishedAgeHeight
+            )
+
+            if let readingTime = input.readingTime, !readingTime.isEmpty {
+                let readingIconY = ageLabelY + publishedAgeHeight + IOSUIKitArticleGeometry.portraitInfoGroupSpacing
+                readingTimeIconFrame = CGRect(
+                    x: railX(accessories.infoIcon),
+                    y: readingIconY,
+                    width: accessories.infoIcon,
+                    height: accessories.infoIcon
+                )
+                readingTimeFrame = CGRect(
+                    x: physicalX(
+                        logicalX: portraitRailLeading,
+                        width: portraitRailWidth,
+                        in: input.containerWidth,
+                        direction: input.layoutDirection
+                    ),
+                    y: readingIconY + accessories.infoIcon + IOSUIKitArticleGeometry.portraitInfoLabelSpacing,
+                    width: portraitRailWidth,
+                    height: readingTimeHeight
+                )
             } else {
-                commentsFrame = nil
+                readingTimeIconFrame = nil
+                readingTimeFrame = nil
             }
+
+            portraitAccessoryRailFrame = CGRect(
+                x: physicalX(
+                    logicalX: portraitRailLeading,
+                    width: portraitRailWidth,
+                    in: input.containerWidth,
+                    direction: input.layoutDirection
+                ),
+                y: logicalImageY,
+                width: portraitRailWidth,
+                height: portraitRailContentHeight
+            )
         } else {
             unreadFrame = CGRect(x: metadataX(metadataLayout.unreadX, width: accessories.unread), y: metadataFrame.midY - accessories.unread / 2, width: accessories.unread, height: accessories.unread)
             commentsFrame = input.hasComments ? CGRect(x: metadataX(metadataLayout.commentsX, width: accessories.comments), y: metadataFrame.midY - accessories.comments / 2, width: accessories.comments, height: accessories.comments) : nil
             starFrame = CGRect(x: metadataX(metadataLayout.starX, width: accessories.star), y: metadataFrame.midY - accessories.star / 2, width: accessories.star, height: accessories.star)
+            portraitAccessoryRailFrame = nil
+            publishedAgeIconFrame = nil
+            publishedAgeFrame = nil
+            readingTimeIconFrame = nil
+            readingTimeFrame = nil
         }
         let dateFrame: CGRect
         if isSideTitle {
             dateFrame = CGRect(x: textOrigin.x, y: titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: titleWidth, height: dateHeight)
         } else if variant == .visualPortrait {
-            let dateLogicalInset = metadataLayout.feedTitleX
-            let dateWidth = max(0, infoWidth - dateLogicalInset)
-            dateFrame = CGRect(
-                x: physicalX(
-                    logicalX: logicalTextX + dateLogicalInset,
-                    width: dateWidth,
-                    in: input.containerWidth,
-                    direction: input.layoutDirection
-                ),
-                y: metadataFrame.maxY + IOSUIKitArticleGeometry.portraitMetadataDateSpacing,
-                width: dateWidth,
-                height: dateHeight
-            )
+            dateFrame = .zero
         } else {
             dateFrame = CGRect(x: textOrigin.x, y: metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: infoWidth, height: dateHeight)
         }
@@ -733,7 +850,7 @@ enum IOSUIKitArticleLayoutEngine {
         let previewTop: CGFloat
         switch variant {
         case .visualPortrait:
-            previewTop = logicalImageY + imageSize.height + IOSUIKitArticleGeometry.portraitSpacing
+            previewTop = logicalImageY + portraitVisualBlockHeight + IOSUIKitArticleGeometry.portraitSpacing
         case .visualSideTitleWide:
             previewTop = dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing
         case .visualSideTitle, .visualSideTitleTextOnly:
@@ -742,7 +859,33 @@ enum IOSUIKitArticleLayoutEngine {
             previewTop = dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing
         }
         let previewFrame = previewHeight == 0 ? nil : CGRect(x: textOrigin.x, y: previewTop, width: previewWidth, height: previewHeight)
-        return .init(variant: variant, cellSize: .init(width: input.containerWidth, height: totalHeight), contentFrame: contentFrame, imageFrame: imageFrame, textFrame: CGRect(x: textOrigin.x, y: textOrigin.y, width: infoWidth, height: textBlockHeight), titleFrame: titleFrame, metadataFrame: metadataFrame, unreadFrame: unreadFrame, feedIconFrame: feedIconFrame, feedTitleFrame: feedTitleFrame, commentsFrame: commentsFrame, starFrame: starFrame, dateFrame: dateFrame, previewFrame: previewFrame, horizontalInset: geometry.horizontalInset, verticalInset: geometry.verticalPadding, titleHeight: titleHeight, metadataHeight: metadataHeight, previewHeight: previewHeight, textBlockHeight: textBlockHeight)
+        return .init(
+            variant: variant,
+            cellSize: .init(width: input.containerWidth, height: totalHeight),
+            contentFrame: contentFrame,
+            imageFrame: imageFrame,
+            textFrame: CGRect(x: textOrigin.x, y: textOrigin.y, width: infoWidth, height: textBlockHeight),
+            titleFrame: titleFrame,
+            metadataFrame: metadataFrame,
+            unreadFrame: unreadFrame,
+            feedIconFrame: feedIconFrame,
+            feedTitleFrame: feedTitleFrame,
+            commentsFrame: commentsFrame,
+            starFrame: starFrame,
+            dateFrame: dateFrame,
+            portraitAccessoryRailFrame: portraitAccessoryRailFrame,
+            publishedAgeIconFrame: publishedAgeIconFrame,
+            publishedAgeFrame: publishedAgeFrame,
+            readingTimeIconFrame: readingTimeIconFrame,
+            readingTimeFrame: readingTimeFrame,
+            previewFrame: previewFrame,
+            horizontalInset: geometry.horizontalInset,
+            verticalInset: geometry.verticalPadding,
+            titleHeight: titleHeight,
+            metadataHeight: metadataHeight,
+            previewHeight: previewHeight,
+            textBlockHeight: textBlockHeight
+        )
     }
 
     private static func pixelAligned(_ length: CGFloat, scale: CGFloat) -> CGFloat {
