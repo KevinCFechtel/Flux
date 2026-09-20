@@ -2374,6 +2374,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             portraitStarImageView.centerXAnchor.constraint(equalTo: portraitAccessoryRail.centerXAnchor),
             portraitCommentsContainer.topAnchor.constraint(equalTo: portraitStarImageView.bottomAnchor, constant: IOSUIKitArticleGeometry.portraitAccessoryVerticalSpacing),
             portraitCommentsContainer.centerXAnchor.constraint(equalTo: portraitAccessoryRail.centerXAnchor),
+            portraitCommentsContainer.bottomAnchor.constraint(lessThanOrEqualTo: portraitAccessoryRail.bottomAnchor),
         ])
         portraitRailUnreadWidth = portraitUnreadIndicator.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.unreadSize)
         portraitRailUnreadHeight = portraitUnreadIndicator.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.unreadSize)
