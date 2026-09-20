@@ -1886,7 +1886,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertNil(pipeline.cachedImage(for: imageViewScaled))
 
         _ = try await pipeline.image(for: imageViewScaled)
-        XCTAssertEqual(await counter.callCount(), 2)
+        let calls = await counter.callCount()
+        XCTAssertEqual(calls, 2)
     }
 
     func testImageViewScaledModeSkipsExactSlotRasterAndPreservesAspectFillPixels() throws {
