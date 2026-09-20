@@ -1614,6 +1614,28 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(coordinator.accept([request]), [request])
     }
 
+    @MainActor
+    func testArticleImagePresentationSchedulerPacesOneReadyImagePerTickAndTracksDelay() {
+        let scheduler = IOSArticleImagePresentationScheduler.shared
+        scheduler.resetMetrics()
+        scheduler.setScrolling(true)
+
+        var presented: [Int] = []
+        scheduler.enqueue(isStillValid: { true }) { presented.append(1) }
+        scheduler.enqueue(isStillValid: { true }) { presented.append(2) }
+
+        XCTAssertEqual(scheduler.metrics().queued, 2)
+        XCTAssertEqual(scheduler.metrics().maximumQueued, 2)
+
+        scheduler.setScrolling(false)
+
+        XCTAssertEqual(presented, [1, 2])
+        let metrics = scheduler.metrics()
+        XCTAssertEqual(metrics.queued, 0)
+        XCTAssertEqual(metrics.presented, 2)
+        XCTAssertGreaterThanOrEqual(metrics.maximumQueued, 2)
+    }
+
     func testArticleImageCacheDiagnosticsSnapshotFormatsVisibleHitRate() {
         let metrics = ArticleImagePipeline.Metrics(
             activeOperations: 1,
@@ -1766,29 +1788,26 @@ final class NewsreaderPresentationTests: XCTestCase {
         let activePrefetches = requests.prefix(3).map { request in
             Task { try await pipeline.prefetch(request) }
         }
-        await gate.waitUntilStarted(count: 1)
+        await gate.waitUntilStarted(count: 3)
         let queuedPrefetch = Task { try await pipeline.prefetch(requests[3]) }
         let visible = Task { try await pipeline.image(for: requests[4]) }
         for _ in 0..<8 { await Task.yield() }
 
         let saturated = await pipeline.metrics()
-        XCTAssertEqual(ArticleImagePipeline.maximumConcurrentOperations, 1)
-        XCTAssertEqual(saturated.activeOperations, 1)
+        XCTAssertEqual(ArticleImagePipeline.maximumConcurrentOperations, 3)
+        XCTAssertEqual(saturated.activeOperations, 3)
         XCTAssertEqual(saturated.queuedVisibleRequests, 1)
-        XCTAssertEqual(saturated.queuedPrefetchRequests, 3)
+        XCTAssertEqual(saturated.queuedPrefetchRequests, 1)
         XCTAssertEqual(saturated.trackedRequests, 5)
 
         await gate.releaseOne()
-        await gate.waitUntilStarted(count: 2)
+        await gate.waitUntilStarted(count: 4)
         let startedURLs = await gate.startedURLs()
         XCTAssertEqual(startedURLs.last, requests[4].url)
 
-        for expectedStartCount in 3...5 {
-            await gate.releaseOne()
-            await gate.waitUntilStarted(count: expectedStartCount)
-        }
-        await gate.releaseOne()
-
+        await gate.releaseAll()
+        await gate.waitUntilStarted(count: 5)
+        await gate.releaseAll()
         for task in activePrefetches { _ = try await task.value }
         _ = try await queuedPrefetch.value
         _ = try await visible.value
