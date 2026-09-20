@@ -2606,7 +2606,6 @@ impl Store {
                         feed_id: row.get(0)?,
                         url: row.get(1)?,
                         raw_html_content: row.get(2)?,
-                        reading_time_minutes: 0,
                         image_url: row.get(3)?,
                     })
                 },
@@ -5494,8 +5493,8 @@ mod tests {
                     is_read: false,
                     is_starred: false,
                     raw_html_content:
-                    reading_time_minutes: 0,
                         "<p>Hello &amp; goodbye</p><img data-original=\"/image.jpg\">".into(),
+                    reading_time_minutes: 0,
                     preview: processed.preview.clone(),
                     image_url: processed.image_url.clone(),
                 }],
