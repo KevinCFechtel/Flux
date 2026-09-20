@@ -2695,8 +2695,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
         //   │  HERO IMAGE   │   ★ star
         //   │      80%      │   💬 comments
         //   │               │
-        //   │               │   ◷ relative age
-        //   └───────────────┘   ▤ reading time
+        //   │               │   ▤ reading time
+        //   └───────────────┘   ◷ relative age
         //   Preview … (full content width)
         //
         // Publication age is frozen for the structural Timeline generation; no
