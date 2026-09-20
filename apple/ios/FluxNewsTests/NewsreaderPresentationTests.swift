@@ -2618,6 +2618,44 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(withoutReadingTime.cellSize.height, metrics.cellSize.height, accuracy: 0.5)
     }
 
+    func testCompactAndVisualCompactUseTrailingReadingTimeWithoutAddingHeight() {
+        for (mode, width, hasImage, expectedVariant) in [
+            (ArticlePresentationMode.compact, CGFloat(390), false, IOSUIKitArticleCellLayoutVariant.compact),
+            (.visualCompact, CGFloat(414), true, .visualSideTitle),
+            (.visualCompact, CGFloat(414), false, .visualSideTitleTextOnly),
+        ] {
+            let withReading = layoutMetrics(
+                mode: mode,
+                width: width,
+                hasImage: hasImage,
+                readingTime: "4 min"
+            )
+            let withoutReading = layoutMetrics(
+                mode: mode,
+                width: width,
+                hasImage: hasImage
+            )
+
+            XCTAssertEqual(withReading.variant, expectedVariant)
+            XCTAssertGreaterThan(withReading.titleFrame.height, 0)
+            XCTAssertNotNil(withReading.landscapeReadingTimeContainerFrame)
+            XCTAssertNotNil(withReading.landscapeReadingTimeIconFrame)
+            XCTAssertNotNil(withReading.landscapeReadingTimeFrame)
+            XCTAssertNil(withoutReading.landscapeReadingTimeContainerFrame)
+            XCTAssertEqual(withReading.cellSize.height, withoutReading.cellSize.height, accuracy: 0.5)
+            XCTAssertEqual(
+                withReading.landscapeReadingTimeContainerFrame?.minY,
+                withReading.dateFrame.minY,
+                accuracy: 0.5
+            )
+            XCTAssertEqual(
+                withReading.landscapeReadingTimeContainerFrame?.height,
+                withReading.dateFrame.height,
+                accuracy: 0.5
+            )
+        }
+    }
+
     func testDeterministicArticleLayoutEngineUsesCurrentWidthTransitionsAndPixelRounding() {
         let narrow = layoutMetrics(mode: .visual, width: 401, hasImage: false, scale: 3)
         let wide = layoutMetrics(mode: .visual, width: 402, hasImage: false, scale: 3)
@@ -2640,7 +2678,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, publishedAge: input.publishedAge, readingTime: input.readingTime, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: .compact, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, layoutDirection: input.layoutDirection)))
     }
 
-    func testLayoutKeyIncludesReadingTimeOnlyWhereItAffectsGeometry() {
+    func testLayoutKeyIncludesReadingTimeForEveryRenderedTemporalVariant() {
         let landscape = layoutInput(mode: .visual, width: 760, hasImage: true, readingTime: "4 min")
         let landscapeWithoutReading = IOSUIKitArticleLayoutInput(
             title: landscape.title,
@@ -2680,7 +2718,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             contentSizeCategory: compact.contentSizeCategory,
             layoutDirection: compact.layoutDirection
         )
-        XCTAssertEqual(
+        XCTAssertNotEqual(
             IOSUIKitArticleLayoutKey(compact),
             IOSUIKitArticleLayoutKey(compactWithoutReading)
         )
@@ -2934,6 +2972,8 @@ final class NewsreaderPresentationTests: XCTestCase {
             (.visual, 402, false, .standard),
             (.visual, 700, true, .standard),
             (.visual, 701, true, .standard),
+            (.visualCompact, 414, true, .standard),
+            (.visualCompact, 414, false, .standard),
         ]
         for (index, testCase) in cases.enumerated() {
             let item = oracleItem(
@@ -2941,7 +2981,7 @@ final class NewsreaderPresentationTests: XCTestCase {
                 preview: previews[index % previews.count],
                 hasImage: testCase.2,
                 hasComments: index.isMultiple(of: 2),
-                readingTimeMinutes: (index == 4 || index == 5) ? 4 : 0
+                readingTimeMinutes: [0, 4, 5, 10, 11].contains(index) ? 4 : 0
             )
             let cell = configuredOracleCell(item: item, mode: testCase.0, previewLines: testCase.3, width: testCase.1)
             let actual = measureUIKitArticleCell(cell, width: testCase.1)
