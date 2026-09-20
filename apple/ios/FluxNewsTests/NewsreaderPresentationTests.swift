@@ -48,6 +48,11 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.inlineMinimumContentWidth, 160)
     }
 
+    func testPersistentSplitModesShareTopToolbarPlacement() {
+        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: .persistentSplit), .topBarTrailing)
+        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: .persistentSplitCollapsed), .topBarTrailing)
+    }
+
     func testArticleListChromeAdaptsPortraitLandscapeAndPersistentNavigation() {
         let portrait = IOSArticleListChromePresentation.mode(
             for: .compact,
