@@ -44,12 +44,18 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(IOSBottomAction.defaultActions.contains(.settings))
     }
 
-    func testArticleListChromeMovesActionsAndDropsCapsuleForPersistentNavigation() {
-        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: .compact), .bottomBar)
-        XCTAssertTrue(IOSArticleListChromePresentation.showsTitleCapsule(for: .compact))
+    func testArticleListChromeAdaptsPortraitLandscapeAndPersistentNavigation() {
+        let portrait = IOSArticleListChromePresentation.mode(for: .compact, verticalSizeClass: .regular)
+        XCTAssertEqual(portrait, .compactPortrait)
+        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: portrait), .bottomBar)
 
-        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: .regular), .topBarTrailing)
-        XCTAssertFalse(IOSArticleListChromePresentation.showsTitleCapsule(for: .regular))
+        let landscape = IOSArticleListChromePresentation.mode(for: .compact, verticalSizeClass: .compact)
+        XCTAssertEqual(landscape, .compactLandscape)
+        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: landscape), .topBarTrailing)
+
+        let persistent = IOSArticleListChromePresentation.mode(for: .regular, verticalSizeClass: .regular)
+        XCTAssertEqual(persistent, .persistentSplit)
+        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: persistent), .topBarTrailing)
     }
 
     func testMoreActionsKeepSettingsAndOnlyOfferNextForSupportedScopes() {
