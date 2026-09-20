@@ -41,6 +41,13 @@ enum AdaptiveShellTransitionPolicy {
     static func splitColumnVisibility(after presentation: AdaptivePresentation) -> NavigationSplitViewVisibility {
         presentation.usesPersistentSplitNavigation ? .all : .detailOnly
     }
+
+    static func constrainedSplitColumnVisibility(
+        requested: NavigationSplitViewVisibility,
+        presentation: AdaptivePresentation
+    ) -> NavigationSplitViewVisibility {
+        presentation.usesPersistentSplitNavigation ? requested : .detailOnly
+    }
 }
 
 enum ReaderDocumentNotice {
