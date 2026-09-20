@@ -40,22 +40,27 @@ struct ArticleImageBackdrop: Hashable, Sendable {
 }
 
 enum ArticleImageRenderingMode: String, Hashable, Sendable {
-    /// Production path: ImageIO decode followed by an exact-slot CGContext
-    /// raster with crop, colour space, backdrop and rounded corners baked in.
-    case displayReady
-    /// Diagnostic A/B path: ImageIO only. UIImageView/Core Animation performs
-    /// the final aspect-fill crop and rounded clipping at presentation time.
+    /// Production path: ImageIO performs display-sized decoding and UIImageView /
+    /// Core Animation owns the final aspect-fill crop and rounded clipping.
     case imageViewScaled
+    /// Legacy diagnostic fallback retained for device A/B validation only.
+    /// Do not select this for production rendering without new device evidence.
+    case displayReady
 }
 
 enum ArticleImageRenderingDiagnostics {
     static let didChangeNotification = Notification.Name("FluxArticleImageRenderingModeDidChange")
-    private static let userDefaultsKey = "developer.articleImageDisplayReadyRasterEnabled"
+    static let productionMode: ArticleImageRenderingMode = .imageViewScaled
+
+    // Versioned so installs that previously left the temporary A/B switch ON
+    // do not silently keep the legacy renderer after imageViewScaled becomes
+    // the production default.
+    private static let userDefaultsKey = "developer.articleImageDisplayReadyRasterEnabled.v2"
 
     static var mode: ArticleImageRenderingMode {
         let defaults = UserDefaults.standard
-        guard defaults.object(forKey: userDefaultsKey) != nil else { return .displayReady }
-        return defaults.bool(forKey: userDefaultsKey) ? .displayReady : .imageViewScaled
+        guard defaults.object(forKey: userDefaultsKey) != nil else { return productionMode }
+        return defaults.bool(forKey: userDefaultsKey) ? .displayReady : productionMode
     }
 
     static var displayReadyRasterEnabled: Bool { mode == .displayReady }
@@ -101,11 +106,14 @@ struct ArticleImageRequest: Hashable, Sendable {
             width: max(1, (targetSize.width * scale).rounded()),
             height: max(1, (targetSize.height * scale).rounded())
         )
-        cornerRadiusPixels = max(0, (cornerRadius * scale).rounded())
+        let usesLegacyDisplayReadyRaster = renderingMode == .displayReady
+        cornerRadiusPixels = usesLegacyDisplayReadyRaster
+            ? max(0, (cornerRadius * scale).rounded())
+            : 0
         self.rasterScale = scale
         self.renderingMode = renderingMode
-        self.usesDisplayP3 = usesDisplayP3
-        self.backdrop = backdrop
+        self.usesDisplayP3 = usesLegacyDisplayReadyRaster && usesDisplayP3
+        self.backdrop = usesLegacyDisplayReadyRaster ? backdrop : nil
         self.url = url
     }
 
