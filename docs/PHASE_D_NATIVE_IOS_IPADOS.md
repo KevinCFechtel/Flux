@@ -338,7 +338,8 @@ stable toolbar geometry across idle, syncing, success, and failure states.
 iPhone portrait keeps Sync, Filter/Sort, and More in the bottom toolbar.
 iPhone landscape moves the same action group to the trailing top toolbar and
 uses a compact leading interactive scope capsule that preserves the configured
-current-scope article count (or the existing transient `Syncing…` substitution).
+current-scope article count in compact numeric form (or the existing transient
+`Syncing…` substitution).
 Persistent iPad split navigation also uses the trailing top toolbar but replaces
 the interactive title capsule with a native inline scope title;
 active manual Sync is indicated by continuous symbol rotation, and successful
