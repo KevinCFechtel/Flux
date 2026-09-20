@@ -564,12 +564,12 @@ enum IOSUIKitArticleLayoutEngine {
         let contentHeight: CGFloat
         switch variant {
         case .visualPortrait:
-            // Title -> metadata -> inset hero image -> date -> preview.
+            // Title -> metadata -> date -> inset hero image -> preview.
             contentHeight = titleHeight
                 + IOSUIKitArticleGeometry.textSpacing + metadataHeight
+                + IOSUIKitArticleGeometry.textSpacing + dateHeight
                 + IOSUIKitArticleGeometry.portraitSpacing + imageSize.height
-                + IOSUIKitArticleGeometry.portraitSpacing + dateHeight
-                + (previewHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
+                + (previewHeight > 0 ? IOSUIKitArticleGeometry.portraitSpacing + previewHeight : 0)
         case .visualLandscape: contentHeight = max(imageSize.height, textBlockHeight)
         default: contentHeight = textBlockHeight
         }
@@ -584,7 +584,7 @@ enum IOSUIKitArticleLayoutEngine {
             logicalImageX = geometry.horizontalInset
         }
         // Side-title starts below metadata. Standard Visual portrait puts the
-        // inset hero image below the headline and the unchanged metadata row.
+        // inset hero image below the complete title/metadata/date information block.
         let logicalImageY: CGFloat
         if isSideTitleVariant {
             logicalImageY = geometry.verticalPadding + metadataHeight + IOSUIKitArticleGeometry.textSpacing
@@ -593,6 +593,8 @@ enum IOSUIKitArticleLayoutEngine {
                 + titleHeight
                 + IOSUIKitArticleGeometry.textSpacing
                 + metadataHeight
+                + IOSUIKitArticleGeometry.textSpacing
+                + dateHeight
                 + IOSUIKitArticleGeometry.portraitSpacing
         } else {
             logicalImageY = geometry.verticalPadding
@@ -601,7 +603,7 @@ enum IOSUIKitArticleLayoutEngine {
         let logicalTextX = variant == .visualLandscape ? geometry.horizontalInset + imageSize.width + IOSUIKitArticleGeometry.landscapeSpacing : geometry.horizontalInset
         let textOrigin = CGPoint(x: physicalX(logicalX: logicalTextX, width: textWidth, in: input.containerWidth, direction: input.layoutDirection), y: geometry.verticalPadding)
         // Side-title order is metadata then title/date. Standard Visual portrait
-        // is title -> metadata -> image -> date -> preview. All other variants
+        // is title -> metadata -> date -> image -> preview. All other variants
         // retain their existing ordering.
         let isSideTitle = metadataLeads
         let titleTop = isSideTitle
@@ -628,7 +630,7 @@ enum IOSUIKitArticleLayoutEngine {
         } else if variant == .visualPortrait {
             dateFrame = CGRect(
                 x: textOrigin.x,
-                y: logicalImageY + imageSize.height + IOSUIKitArticleGeometry.portraitSpacing,
+                y: metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing,
                 width: infoWidth,
                 height: dateHeight
             )
@@ -640,10 +642,14 @@ enum IOSUIKitArticleLayoutEngine {
         // has to clear the image as well as the date.
         let previewTop: CGFloat
         switch variant {
-        case .visualSideTitleWide: previewTop = dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing
+        case .visualPortrait:
+            previewTop = logicalImageY + imageSize.height + IOSUIKitArticleGeometry.portraitSpacing
+        case .visualSideTitleWide:
+            previewTop = dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing
         case .visualSideTitle, .visualSideTitleTextOnly:
             previewTop = titleTop + sideTitleRowHeight + IOSUIKitArticleGeometry.textSpacing
-        default: previewTop = dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing
+        default:
+            previewTop = dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing
         }
         let previewFrame = previewHeight == 0 ? nil : CGRect(x: textOrigin.x, y: previewTop, width: previewWidth, height: previewHeight)
         return .init(variant: variant, cellSize: .init(width: input.containerWidth, height: totalHeight), contentFrame: contentFrame, imageFrame: imageFrame, textFrame: CGRect(x: textOrigin.x, y: textOrigin.y, width: infoWidth, height: textBlockHeight), titleFrame: titleFrame, metadataFrame: metadataFrame, unreadFrame: unreadFrame, feedIconFrame: feedIconFrame, feedTitleFrame: feedTitleFrame, commentsFrame: commentsFrame, starFrame: starFrame, dateFrame: dateFrame, previewFrame: previewFrame, horizontalInset: geometry.horizontalInset, verticalInset: geometry.verticalPadding, titleHeight: titleHeight, metadataHeight: metadataHeight, previewHeight: previewHeight, textBlockHeight: textBlockHeight)
