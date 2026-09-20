@@ -178,7 +178,14 @@ checkpoints. This transition does not itself force a sync.
 
 ### 4.1 iOS/iPadOS UIKit Article Timeline
 
-**Accepted on 2026-09-11; implementation and device acceptance are pending.**
+**Accepted on 2026-09-11; amendment implementation is in progress and remains open to performance-driven structural changes.**
+
+The owned UIKit Timeline is now the productive baseline, but this architecture
+decision does not freeze its current internal renderer, cell, layout,
+image-presentation, preparation, or scheduling structures. Until the Phase-D
+UIKit amendment is explicitly completed, physical-device performance evidence
+may justify fundamental changes inside those boundaries while the selected UIKit
+container/cell direction and frozen product semantics remain authoritative.
 
 The unpublished native iOS/iPadOS client replaces the existing Flutter
 FluxNews app. For its central Article Timeline, long-term scrolling performance,
