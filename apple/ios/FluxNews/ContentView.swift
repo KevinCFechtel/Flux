@@ -741,6 +741,7 @@ private struct ArticleListTitleCapsule: View {
                     .font(.headline)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .layoutPriority(2)
                 if let subtitle {
                     Text("·")
                         .font(.caption)
@@ -751,6 +752,10 @@ private struct ArticleListTitleCapsule: View {
                         .layoutPriority(1)
                 }
             }
+            // A leading navigation-bar item is compressed before the trailing
+            // action group. Reserve enough intrinsic width that the scope title
+            // cannot collapse to zero while still allowing long names to truncate.
+            .frame(minWidth: 120, maxWidth: 260, alignment: .leading)
         }
     }
 }
@@ -921,16 +926,19 @@ private struct ArticleListNavigationChrome<Content: View>: View {
     var body: some View {
         let title = ArticleListTitlePresentation.title(scope: store.scope, catalog: store.catalog)
         let countLabel = ArticleListCounterPresentation.expandedLabel(scope: store.scope, unreadOnly: store.unreadOnly, count: store.selectionTotal)
-        // The same scope count remains available in both phone orientations.
-        // During Sync it keeps the existing transient substitution instead of
-        // adding a second line or changing the toolbar geometry.
-        let subtitle = store.isSyncing ? String(localized: "Syncing…") : countLabel
+        // Portrait keeps the descriptive count label. Landscape preserves the
+        // same count feature but uses the compact numeric form so the leading
+        // title and trailing action group have predictable room.
+        let portraitSubtitle = store.isSyncing ? String(localized: "Syncing…") : countLabel
+        let landscapeSubtitle = store.isSyncing
+            ? String(localized: "Syncing…")
+            : ArticleListCounterPresentation.compactCount(store.selectionTotal)
 
         switch chromeMode {
         case .compactPortrait:
-            portraitCapsuleChrome(title: title, subtitle: subtitle)
+            portraitCapsuleChrome(title: title, subtitle: portraitSubtitle)
         case .compactLandscape:
-            landscapeCapsuleChrome(title: title, subtitle: subtitle)
+            landscapeCapsuleChrome(title: title, subtitle: landscapeSubtitle)
         case .persistentSplit:
             // A persistent sidebar already communicates the selected scope and
             // provides its navigation affordance. Keep only the native inline
