@@ -2536,7 +2536,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         //   │  HERO IMAGE   │   ★ star
         //   │      85%      │   💬 comments
         //   └───────────────┘   ♫ audio (+ optional duration, future projection)
-        //   Preview … (same 85% leading column)
+        //   Preview … (full content width, preserving historical wrapping)
         //
         // The performance-motivated 85% hero is therefore an intentional main
         // content column with an accessory gutter, not a centered undersized card.
@@ -2569,7 +2569,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             portraitAccessoryRail.bottomAnchor.constraint(lessThanOrEqualTo: articleImageView.bottomAnchor),
 
             portraitPreviewTopConstraint,
-            previewLabel.trailingAnchor.constraint(equalTo: articleImageView.trailingAnchor),
+            previewTrailingDefaultConstraint,
             previewBottomDefaultConstraint,
         ]
         landscapeConstraints = [
