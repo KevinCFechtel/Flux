@@ -2542,6 +2542,47 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(age.maxY, image.maxY, accuracy: 0.5)
     }
 
+    func testVisualLandscapePlacesReadingTimeAtTrailingEdgeOfDateRow() {
+        let metrics = layoutMetrics(
+            mode: .visual,
+            width: 760,
+            hasImage: true,
+            readingTime: "4 min"
+        )
+        guard
+            let container = metrics.landscapeReadingTimeContainerFrame,
+            let icon = metrics.landscapeReadingTimeIconFrame,
+            let reading = metrics.landscapeReadingTimeFrame
+        else {
+            return XCTFail("Visual landscape should expose trailing reading-time frames")
+        }
+
+        XCTAssertEqual(metrics.variant, .visualLandscape)
+        XCTAssertEqual(container.minY, metrics.dateFrame.minY, accuracy: 0.5)
+        XCTAssertEqual(container.height, metrics.dateFrame.height, accuracy: 0.5)
+        XCTAssertEqual(
+            container.minX - metrics.dateFrame.maxX,
+            IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(icon.midY, metrics.dateFrame.midY, accuracy: 0.5)
+        XCTAssertEqual(reading.minY, metrics.dateFrame.minY, accuracy: 0.5)
+        XCTAssertEqual(reading.height, metrics.dateFrame.height, accuracy: 0.5)
+        XCTAssertEqual(
+            reading.minX - icon.maxX,
+            IOSUIKitArticleGeometry.landscapeReadingTimeIconTextSpacing,
+            accuracy: 0.5
+        )
+
+        let withoutReadingTime = layoutMetrics(mode: .visual, width: 760, hasImage: true)
+        XCTAssertEqual(withoutReadingTime.variant, .visualLandscape)
+        XCTAssertNil(withoutReadingTime.landscapeReadingTimeContainerFrame)
+        XCTAssertNil(withoutReadingTime.landscapeReadingTimeIconFrame)
+        XCTAssertNil(withoutReadingTime.landscapeReadingTimeFrame)
+        XCTAssertEqual(withoutReadingTime.dateFrame.width, metrics.textFrame.width, accuracy: 0.5)
+        XCTAssertEqual(withoutReadingTime.cellSize.height, metrics.cellSize.height, accuracy: 0.5)
+    }
+
     func testDeterministicArticleLayoutEngineUsesCurrentWidthTransitionsAndPixelRounding() {
         let narrow = layoutMetrics(mode: .visual, width: 401, hasImage: false, scale: 3)
         let wide = layoutMetrics(mode: .visual, width: 402, hasImage: false, scale: 3)
@@ -2562,6 +2603,52 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: "Updated title", feedTitle: input.feedTitle, publishedDate: input.publishedDate, publishedAge: input.publishedAge, readingTime: input.readingTime, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, layoutDirection: input.layoutDirection)))
         XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, publishedAge: input.publishedAge, readingTime: input.readingTime, preview: input.preview, hasImage: input.hasImage, hasComments: false, mode: input.mode, previewLines: input.previewLines, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, layoutDirection: input.layoutDirection)))
         XCTAssertNotEqual(key, IOSUIKitArticleLayoutKey(.init(title: input.title, feedTitle: input.feedTitle, publishedDate: input.publishedDate, publishedAge: input.publishedAge, readingTime: input.readingTime, preview: input.preview, hasImage: input.hasImage, hasComments: input.hasComments, mode: input.mode, previewLines: .compact, containerWidth: input.containerWidth, displayScale: input.displayScale, contentSizeCategory: input.contentSizeCategory, layoutDirection: input.layoutDirection)))
+    }
+
+    func testLayoutKeyIncludesReadingTimeOnlyWhereItAffectsGeometry() {
+        let landscape = layoutInput(mode: .visual, width: 760, hasImage: true, readingTime: "4 min")
+        let landscapeWithoutReading = IOSUIKitArticleLayoutInput(
+            title: landscape.title,
+            feedTitle: landscape.feedTitle,
+            publishedDate: landscape.publishedDate,
+            publishedAge: landscape.publishedAge,
+            readingTime: nil,
+            preview: landscape.preview,
+            hasImage: landscape.hasImage,
+            hasComments: landscape.hasComments,
+            mode: landscape.mode,
+            previewLines: landscape.previewLines,
+            containerWidth: landscape.containerWidth,
+            displayScale: landscape.displayScale,
+            contentSizeCategory: landscape.contentSizeCategory,
+            layoutDirection: landscape.layoutDirection
+        )
+        XCTAssertNotEqual(
+            IOSUIKitArticleLayoutKey(landscape),
+            IOSUIKitArticleLayoutKey(landscapeWithoutReading)
+        )
+
+        let compact = layoutInput(mode: .compact, width: 390, hasImage: false, readingTime: "4 min")
+        let compactWithoutReading = IOSUIKitArticleLayoutInput(
+            title: compact.title,
+            feedTitle: compact.feedTitle,
+            publishedDate: compact.publishedDate,
+            publishedAge: compact.publishedAge,
+            readingTime: nil,
+            preview: compact.preview,
+            hasImage: compact.hasImage,
+            hasComments: compact.hasComments,
+            mode: compact.mode,
+            previewLines: compact.previewLines,
+            containerWidth: compact.containerWidth,
+            displayScale: compact.displayScale,
+            contentSizeCategory: compact.contentSizeCategory,
+            layoutDirection: compact.layoutDirection
+        )
+        XCTAssertEqual(
+            IOSUIKitArticleLayoutKey(compact),
+            IOSUIKitArticleLayoutKey(compactWithoutReading)
+        )
     }
 
     func testTimelineGeometryIdentityUsesTheDeterministicMeasurementWidth() {
@@ -2819,7 +2906,7 @@ final class NewsreaderPresentationTests: XCTestCase {
                 preview: previews[index % previews.count],
                 hasImage: testCase.2,
                 hasComments: index.isMultiple(of: 2),
-                readingTimeMinutes: index == 4 ? 4 : 0
+                readingTimeMinutes: (index == 4 || index == 5) ? 4 : 0
             )
             let cell = configuredOracleCell(item: item, mode: testCase.0, previewLines: testCase.3, width: testCase.1)
             let actual = measureUIKitArticleCell(cell, width: testCase.1)
@@ -2835,6 +2922,19 @@ final class NewsreaderPresentationTests: XCTestCase {
             assertOptionalFrameEqual(diagnostics.commentsFrame, expected.commentsFrame, accuracy: Self.accessoryFrameAccuracy)
             assertFrameEqual(diagnostics.starFrame, expected.starFrame, accuracy: Self.accessoryFrameAccuracy)
             assertFrameEqual(diagnostics.dateFrame, expected.dateFrame)
+            assertOptionalFrameEqual(
+                diagnostics.landscapeReadingTimeContainerFrame,
+                expected.landscapeReadingTimeContainerFrame
+            )
+            assertOptionalFrameEqual(
+                diagnostics.landscapeReadingTimeIconFrame,
+                expected.landscapeReadingTimeIconFrame,
+                accuracy: Self.accessoryFrameAccuracy
+            )
+            assertOptionalFrameEqual(
+                diagnostics.landscapeReadingTimeFrame,
+                expected.landscapeReadingTimeFrame
+            )
             assertOptionalFrameEqual(diagnostics.portraitAccessoryRailFrame, expected.portraitAccessoryRailFrame)
             assertOptionalFrameEqual(diagnostics.publishedAgeIconFrame, expected.publishedAgeIconFrame, accuracy: Self.accessoryFrameAccuracy)
             assertOptionalFrameEqual(diagnostics.publishedAgeFrame, expected.publishedAgeFrame)
@@ -2871,6 +2971,19 @@ final class NewsreaderPresentationTests: XCTestCase {
             assertOptionalFrameEqual(diagnostics.commentsFrame, expected.commentsFrame, accuracy: Self.accessoryFrameAccuracy)
             assertFrameEqual(diagnostics.starFrame, expected.starFrame, accuracy: Self.accessoryFrameAccuracy)
             assertFrameEqual(diagnostics.dateFrame, expected.dateFrame)
+            assertOptionalFrameEqual(
+                diagnostics.landscapeReadingTimeContainerFrame,
+                expected.landscapeReadingTimeContainerFrame
+            )
+            assertOptionalFrameEqual(
+                diagnostics.landscapeReadingTimeIconFrame,
+                expected.landscapeReadingTimeIconFrame,
+                accuracy: Self.accessoryFrameAccuracy
+            )
+            assertOptionalFrameEqual(
+                diagnostics.landscapeReadingTimeFrame,
+                expected.landscapeReadingTimeFrame
+            )
             assertOptionalFrameEqual(diagnostics.portraitAccessoryRailFrame, expected.portraitAccessoryRailFrame)
             assertOptionalFrameEqual(diagnostics.publishedAgeIconFrame, expected.publishedAgeIconFrame, accuracy: Self.accessoryFrameAccuracy)
             assertOptionalFrameEqual(diagnostics.publishedAgeFrame, expected.publishedAgeFrame)
