@@ -53,6 +53,34 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: .persistentSplitCollapsed), .topBarTrailing)
     }
 
+    func testCompactShellRejectsPersistentSidebarVisibility() {
+        XCTAssertEqual(
+            AdaptiveShellTransitionPolicy.constrainedSplitColumnVisibility(
+                requested: .all,
+                presentation: .compact
+            ),
+            .detailOnly
+        )
+        XCTAssertEqual(
+            AdaptiveShellTransitionPolicy.constrainedSplitColumnVisibility(
+                requested: .all,
+                presentation: .regular
+            ),
+            .all
+        )
+    }
+
+    func testVisibleSidebarSuppressesCompactLandscapeCapsule() {
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.mode(
+                for: .compact,
+                verticalSizeClass: .compact,
+                splitColumnVisibility: .all
+            ),
+            .persistentSplit
+        )
+    }
+
     func testArticleListChromeAdaptsPortraitLandscapeAndPersistentNavigation() {
         let portrait = IOSArticleListChromePresentation.mode(
             for: .compact,
