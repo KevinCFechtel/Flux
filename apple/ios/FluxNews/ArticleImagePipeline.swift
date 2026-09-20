@@ -109,7 +109,7 @@ private final class ArticleImageCache: @unchecked Sendable {
         let key: NSString
         var image: CGImage
         var cost: Int
-        var previous: Node?
+        weak var previous: Node?
         var next: Node?
 
         init(key: NSString, image: CGImage, cost: Int) {
