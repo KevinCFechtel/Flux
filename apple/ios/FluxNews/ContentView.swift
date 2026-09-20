@@ -30,6 +30,21 @@ enum IOSBottomAction: Equatable {
     static let defaultActions: [Self] = [.sync, .filterAndSort, .more]
 }
 
+enum IOSArticleListActionPlacement: Equatable {
+    case bottomBar
+    case topBarTrailing
+}
+
+enum IOSArticleListChromePresentation {
+    static func actionPlacement(for presentation: AdaptivePresentation) -> IOSArticleListActionPlacement {
+        presentation.usesPersistentSplitNavigation ? .topBarTrailing : .bottomBar
+    }
+
+    static func showsTitleCapsule(for presentation: AdaptivePresentation) -> Bool {
+        !presentation.usesPersistentSplitNavigation
+    }
+}
+
 enum IOSMoreAction: Equatable {
     case markAllRead
     case markAllReadAndNext
@@ -273,7 +288,8 @@ struct ContentView: View {
     private var articleList: some View {
         ArticleListNavigationChrome(
             store: newsreaderStore,
-            onSelectScope: adaptivePresentation.usesPersistentSplitNavigation ? nil : { navigationPresented = true }
+            onSelectScope: adaptivePresentation.usesPersistentSplitNavigation ? nil : { navigationPresented = true },
+            showsTitleCapsule: IOSArticleListChromePresentation.showsTitleCapsule(for: adaptivePresentation)
         ) {
             ArticleListView(store: newsreaderStore, onArticleTap: openArticle, onArticleAction: handleArticleAction)
         }
@@ -283,7 +299,7 @@ struct ContentView: View {
             // button opens the scope chooser, there is nothing to go back to.
             .navigationBarBackButtonHidden(true)
             .toolbar {
-                ToolbarItemGroup(placement: .bottomBar) {
+                ToolbarItemGroup(placement: articleListActionToolbarPlacement) {
                     Button { Task { await performManualSync() } } label: {
                         Image(systemName: IOSSyncButtonPresentation.symbolName(for: syncPresentation))
                             .frame(width: 24, height: 24)
@@ -335,6 +351,13 @@ struct ContentView: View {
                     .accessibilityIdentifier("articleList.more")
                 }
             }
+    }
+
+    private var articleListActionToolbarPlacement: ToolbarItemPlacement {
+        switch IOSArticleListChromePresentation.actionPlacement(for: adaptivePresentation) {
+        case .bottomBar: .bottomBar
+        case .topBarTrailing: .topBarTrailing
+        }
     }
 
     private func performManualSync() async {
@@ -802,6 +825,7 @@ private struct ArticleListNavigationChrome<Content: View>: View {
     var store: NewsreaderStore
     /// Absent when a persistent sidebar already offers scope selection.
     var onSelectScope: (() -> Void)?
+    var showsTitleCapsule: Bool
     @ViewBuilder let content: () -> Content
 
     private func capsuleSubtitle(_ subtitle: String) -> String? {
@@ -835,7 +859,16 @@ private struct ArticleListNavigationChrome<Content: View>: View {
         // it, so the whole bar would jump.
         let subtitle = store.isSyncing ? String(localized: "Syncing…") : countLabel
 
-        capsuleOnlyChrome(title: title, subtitle: subtitle)
+        if showsTitleCapsule {
+            capsuleOnlyChrome(title: title, subtitle: subtitle)
+        } else {
+            // A persistent sidebar already communicates the selected scope and
+            // provides its navigation affordance. Keep only the native inline
+            // title on iPad and leave the trailing toolbar for article actions.
+            content()
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+        }
     }
 }
 
