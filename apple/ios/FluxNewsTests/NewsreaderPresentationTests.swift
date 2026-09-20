@@ -249,6 +249,11 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleListCounterPresentation.compactCount(1000), "1000")
     }
 
+    func testLandscapeArticleCountUsesCompactNumericPresentation() {
+        XCTAssertEqual(ArticleListCounterPresentation.compactCount(42), "42")
+        XCTAssertEqual(ArticleListCounterPresentation.compactCount(12_345), "12345")
+    }
+
     /// `locale:` only decides how numbers are formatted — the language comes
     /// from the bundle. Passing `Locale(identifier: "en")` to the app bundle
     /// therefore returned whatever language the host was running in.
