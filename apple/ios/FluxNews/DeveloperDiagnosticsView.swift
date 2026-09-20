@@ -22,8 +22,8 @@ struct DeveloperDiagnosticsView: View {
                     }
                     Text("Read-only discovery; no legacy data is imported or modified.").font(.footnote).foregroundStyle(.secondary)
                 }
-                Section("Article Image Rendering A/B") {
-                    Toggle("Display-ready raster", isOn: $displayReadyRasterEnabled)
+                Section("Article Image Rendering") {
+                    Toggle("Use legacy display-ready raster", isOn: $displayReadyRasterEnabled)
                         .onChange(of: displayReadyRasterEnabled) { _, enabled in
                             ArticleImageRenderingDiagnostics.setDisplayReadyRasterEnabled(enabled)
                         }
@@ -35,7 +35,7 @@ struct DeveloperDiagnosticsView: View {
                             : "ImageIO + UIImageView aspect-fill"
                     )
 
-                    Text("Use this only for the Hero-image performance comparison. The off path skips the second exact-slot CGContext raster; UIImageView/Core Animation performs the final crop and rounded clipping instead. The cache key includes the selected mode, so A and B cannot reuse each other's rasters.")
+                    Text("OFF is the production default. ON enables the retained legacy A/B fallback, which adds a second exact-slot CGContext raster before presentation. The cache key includes the selected mode, so the two paths cannot reuse each other's images.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
