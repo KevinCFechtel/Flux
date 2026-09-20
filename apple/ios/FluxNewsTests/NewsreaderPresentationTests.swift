@@ -1614,6 +1614,40 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(coordinator.accept([request]), [request])
     }
 
+    func testArticleImageCacheDiagnosticsSnapshotFormatsVisibleHitRate() {
+        let metrics = ArticleImagePipeline.Metrics(
+            activeOperations: 1,
+            queuedVisibleRequests: 0,
+            queuedPrefetchRequests: 0,
+            trackedRequests: 1,
+            memoryCacheHits: 8,
+            memoryCacheMisses: 2,
+            visibleMemoryCacheHits: 8,
+            visibleMemoryCacheMisses: 2,
+            prefetchMemoryCacheHits: 0,
+            prefetchMemoryCacheMisses: 0,
+            memoryCacheInsertions: 4,
+            memoryCacheEvictions: 1,
+            memoryCacheCostLimit: 128 * 1024 * 1024,
+            inFlightDedupHits: 0,
+            startedOperations: 5,
+            completedOperations: 4,
+            retiredOperations: 1,
+            maximumActiveOperations: 3,
+            visibleStarts: 5,
+            prefetchStarts: 0
+        )
+
+        let snapshot = ArticleImageCacheDiagnosticsSnapshot(metrics: metrics)
+
+        XCTAssertEqual(snapshot.visibleHits, 8)
+        XCTAssertEqual(snapshot.visibleMisses, 2)
+        XCTAssertEqual(snapshot.visibleHitRate, 0.8)
+        XCTAssertEqual(snapshot.visibleHitRateText, "80.0%")
+        XCTAssertEqual(snapshot.evictions, 1)
+        XCTAssertEqual(snapshot.activeOperations, 1)
+    }
+
     func testArticleImagePipelineUsesDecodedCacheAndSeparatesLargerRequests() async throws {
         let data = try imageData(width: 800, height: 400)
         let counter = ImageLoadCounter(data: data)
