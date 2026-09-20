@@ -1855,6 +1855,63 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(completed.trackedRequests, 0)
     }
 
+    func testArticleImageRenderingModesUseDistinctCacheEntries() async throws {
+        let data = try imageData(width: 800, height: 400)
+        let counter = ImageLoadCounter(data: data)
+        let pipeline = ArticleImagePipeline { _ in await counter.load() }
+        let url = URL(string: "https://example.com/image.jpg")!
+        let displayReady = ArticleImageRequest(
+            url: url,
+            targetSize: CGSize(width: 128, height: 128),
+            displayScale: 1,
+            cornerRadius: 12,
+            backdrop: .white,
+            renderingMode: .displayReady
+        )
+        let imageViewScaled = ArticleImageRequest(
+            url: url,
+            targetSize: CGSize(width: 128, height: 128),
+            displayScale: 1,
+            cornerRadius: 12,
+            backdrop: .white,
+            renderingMode: .imageViewScaled
+        )
+
+        XCTAssertNotEqual(displayReady, imageViewScaled)
+        XCTAssertTrue(displayReady.producesOpaqueRaster)
+        XCTAssertFalse(imageViewScaled.producesOpaqueRaster)
+
+        _ = try await pipeline.image(for: displayReady)
+        XCTAssertNotNil(pipeline.cachedImage(for: displayReady))
+        XCTAssertNil(pipeline.cachedImage(for: imageViewScaled))
+
+        _ = try await pipeline.image(for: imageViewScaled)
+        XCTAssertEqual(await counter.callCount(), 2)
+    }
+
+    func testImageViewScaledModeSkipsExactSlotRasterAndPreservesAspectFillPixels() throws {
+        let data = try imageData(width: 800, height: 400)
+        let url = URL(string: "https://example.com/image.jpg")!
+        let displayReady = ArticleImageRequest(
+            url: url,
+            targetSize: CGSize(width: 128, height: 128),
+            displayScale: 1,
+            renderingMode: .displayReady
+        )
+        let imageViewScaled = ArticleImageRequest(
+            url: url,
+            targetSize: CGSize(width: 128, height: 128),
+            displayScale: 1,
+            renderingMode: .imageViewScaled
+        )
+
+        let exact = try ArticleImagePipeline.downsample(data: data, request: displayReady)
+        let rendererDriven = try ArticleImagePipeline.downsample(data: data, request: imageViewScaled)
+
+        XCTAssertEqual(CGSize(width: exact.width, height: exact.height), .init(width: 128, height: 128))
+        XCTAssertEqual(CGSize(width: rendererDriven.width, height: rendererDriven.height), .init(width: 256, height: 128))
+    }
+
     func testArticleImagePipelineDownsamplesAndFailsSafely() async throws {
         let data = try imageData(width: 800, height: 400)
         let url = URL(string: "https://example.com/image.jpg")!
