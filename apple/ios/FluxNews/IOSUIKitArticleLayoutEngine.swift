@@ -80,11 +80,14 @@ struct IOSUIKitArticleLayoutKey: Hashable {
         let resolvedVariant = geometry.variant(hasImage: input.hasImage && input.mode.showsArticleImage)
         variant = resolvedVariant
         // Only retain text that can affect geometry in the resolved variant.
-        // Visual portrait hides the absolute date; every other variant hides the
-        // relative-age/reading-time rail.
+        // Visual portrait hides the absolute date and uses relative age +
+        // reading time in its rail. Visual landscape keeps the absolute date and
+        // uses reading time as a trailing item in that same row.
         publishedDate = resolvedVariant == .visualPortrait ? "" : input.publishedDate
         publishedAge = resolvedVariant == .visualPortrait ? input.publishedAge : ""
-        readingTime = resolvedVariant == .visualPortrait ? input.readingTime : nil
+        readingTime = (resolvedVariant == .visualPortrait || resolvedVariant == .visualLandscape)
+            ? input.readingTime
+            : nil
         preview = input.preview
         hasComments = input.hasComments
         previewLines = input.previewLines
@@ -130,6 +133,9 @@ struct IOSUIKitArticleLayoutMetrics: Equatable {
     let commentsFrame: CGRect?
     let starFrame: CGRect
     let dateFrame: CGRect
+    let landscapeReadingTimeContainerFrame: CGRect?
+    let landscapeReadingTimeIconFrame: CGRect?
+    let landscapeReadingTimeFrame: CGRect?
     let portraitAccessoryRailFrame: CGRect?
     let publishedAgeIconFrame: CGRect?
     let publishedAgeFrame: CGRect?
@@ -457,6 +463,8 @@ struct IOSUIKitArticleGeometry: Equatable {
     static let sideTitleImageAspectRatio: CGFloat = 4.0 / 3
     static let sideTitleSpacing: CGFloat = 12
     static let landscapeSpacing: CGFloat = 14
+    static let landscapeDateReadingTimeSpacing: CGFloat = 10
+    static let landscapeReadingTimeIconTextSpacing: CGFloat = 4
     static let unreadSize: CGFloat = 6
     static let feedIconSize: CGFloat = 22
     static let articleImageCornerRadius: CGFloat = 10
@@ -617,8 +625,21 @@ enum IOSUIKitArticleLayoutEngine {
         let titleFont = font(.headline, category: input.contentSizeCategory, bold: false)
         let titleHeight = coreTextHeight(input.title, font: titleFont, width: titleWidth, maximumLines: nil, displayScale: scale)
         let metadataHeight = max(accessories.feedIcon, font(.subheadline, category: input.contentSizeCategory, bold: true).lineHeight)
-        let dateHeight = fixedLineHeight(input.publishedDate, font: font(.caption1, category: input.contentSizeCategory, bold: false))
+        let dateFont = font(.caption1, category: input.contentSizeCategory, bold: false)
+        let dateHeight = fixedLineHeight(input.publishedDate, font: dateFont)
         let previewHeight = coreTextHeight(input.preview, font: font(.subheadline, category: input.contentSizeCategory, bold: false), width: previewWidth, maximumLines: input.previewLines.rawValue, displayScale: scale)
+
+        let landscapeReadingTimeTextWidth = variant == .visualLandscape
+            ? coreTextWidth(input.readingTime ?? "", font: dateFont, displayScale: scale)
+            : 0
+        let landscapeReadingTimeIconSize = variant == .visualLandscape && input.readingTime != nil
+            ? min(accessories.infoIcon, dateHeight)
+            : 0
+        let landscapeReadingTimeBlockWidth = input.readingTime == nil || variant != .visualLandscape
+            ? 0
+            : landscapeReadingTimeIconSize
+                + IOSUIKitArticleGeometry.landscapeReadingTimeIconTextSpacing
+                + landscapeReadingTimeTextWidth
 
         let portraitRailLeading = geometry.horizontalInset + imageSize.width + IOSUIKitArticleGeometry.portraitAccessoryRailSpacing
         let portraitRailTrailing = geometry.horizontalInset + geometry.availableWidth
@@ -859,12 +880,86 @@ enum IOSUIKitArticleLayoutEngine {
             readingTimeFrame = nil
         }
         let dateFrame: CGRect
+        let landscapeReadingTimeContainerFrame: CGRect?
+        let landscapeReadingTimeIconFrame: CGRect?
+        let landscapeReadingTimeFrame: CGRect?
         if isSideTitle {
             dateFrame = CGRect(x: textOrigin.x, y: titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: titleWidth, height: dateHeight)
+            landscapeReadingTimeContainerFrame = nil
+            landscapeReadingTimeIconFrame = nil
+            landscapeReadingTimeFrame = nil
         } else if variant == .visualPortrait {
             dateFrame = .zero
+            landscapeReadingTimeContainerFrame = nil
+            landscapeReadingTimeIconFrame = nil
+            landscapeReadingTimeFrame = nil
+        } else if variant == .visualLandscape, landscapeReadingTimeBlockWidth > 0 {
+            let rowY = metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing
+            let dateWidth = max(
+                0,
+                infoWidth
+                    - IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing
+                    - landscapeReadingTimeBlockWidth
+            )
+            dateFrame = CGRect(
+                x: physicalX(
+                    logicalX: logicalTextX,
+                    width: dateWidth,
+                    in: input.containerWidth,
+                    direction: input.layoutDirection
+                ),
+                y: rowY,
+                width: dateWidth,
+                height: dateHeight
+            )
+
+            let blockLogicalX = logicalTextX + infoWidth - landscapeReadingTimeBlockWidth
+            let blockX = physicalX(
+                logicalX: blockLogicalX,
+                width: landscapeReadingTimeBlockWidth,
+                in: input.containerWidth,
+                direction: input.layoutDirection
+            )
+            landscapeReadingTimeContainerFrame = CGRect(
+                x: blockX,
+                y: rowY,
+                width: landscapeReadingTimeBlockWidth,
+                height: dateHeight
+            )
+            landscapeReadingTimeIconFrame = CGRect(
+                x: physicalX(
+                    logicalX: blockLogicalX,
+                    width: landscapeReadingTimeIconSize,
+                    in: input.containerWidth,
+                    direction: input.layoutDirection
+                ),
+                y: rowY + (dateHeight - landscapeReadingTimeIconSize) / 2,
+                width: landscapeReadingTimeIconSize,
+                height: landscapeReadingTimeIconSize
+            )
+            landscapeReadingTimeFrame = CGRect(
+                x: physicalX(
+                    logicalX: blockLogicalX
+                        + landscapeReadingTimeIconSize
+                        + IOSUIKitArticleGeometry.landscapeReadingTimeIconTextSpacing,
+                    width: landscapeReadingTimeTextWidth,
+                    in: input.containerWidth,
+                    direction: input.layoutDirection
+                ),
+                y: rowY,
+                width: landscapeReadingTimeTextWidth,
+                height: dateHeight
+            )
         } else {
-            dateFrame = CGRect(x: textOrigin.x, y: metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing, width: infoWidth, height: dateHeight)
+            dateFrame = CGRect(
+                x: textOrigin.x,
+                y: metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing,
+                width: infoWidth,
+                height: dateHeight
+            )
+            landscapeReadingTimeContainerFrame = nil
+            landscapeReadingTimeIconFrame = nil
+            landscapeReadingTimeFrame = nil
         }
         // Wide side-title keeps the preview in the column, so it follows the date
         // directly. Narrow side-title puts it under the whole row, which means it
@@ -895,6 +990,9 @@ enum IOSUIKitArticleLayoutEngine {
             commentsFrame: commentsFrame,
             starFrame: starFrame,
             dateFrame: dateFrame,
+            landscapeReadingTimeContainerFrame: landscapeReadingTimeContainerFrame,
+            landscapeReadingTimeIconFrame: landscapeReadingTimeIconFrame,
+            landscapeReadingTimeFrame: landscapeReadingTimeFrame,
             portraitAccessoryRailFrame: portraitAccessoryRailFrame,
             publishedAgeIconFrame: publishedAgeIconFrame,
             publishedAgeFrame: publishedAgeFrame,
@@ -927,6 +1025,19 @@ enum IOSUIKitArticleLayoutEngine {
 
     private static func fixedLineHeight(_ text: String, font: UIFont) -> CGFloat {
         text.isEmpty ? 0 : font.lineHeight
+    }
+
+    private static func coreTextWidth(_ text: String, font: UIFont, displayScale: CGFloat) -> CGFloat {
+        guard !text.isEmpty else { return 0 }
+        let coreTextFont = font as CTFont
+        let attributedText = NSAttributedString(
+            string: text,
+            attributes: [kCTFontAttributeName as NSAttributedString.Key: coreTextFont]
+        )
+        let line = CTLineCreateWithAttributedString(attributedText)
+        let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        let scale = max(displayScale, 1)
+        return ceil(width * scale) / scale
     }
 
     /// Counts only the lines that can affect visible height. The unbounded title
