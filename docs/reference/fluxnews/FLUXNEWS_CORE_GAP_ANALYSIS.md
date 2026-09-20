@@ -114,6 +114,8 @@ The four durable tables are created at
 | `feeds` | Feed metadata plus local-only presentation overrides. |
 | `attachments` | Enclosure identity, article relationship, URL, MIME type, and media progression. |
 
+> **Current Flux status (2026-09-20):** the Rust Core now consumes Miniflux `reading_time`, persists it as `articles.reading_time_minutes` (schema v18), includes it in `ArticleSummary`, and exports it through UniFFI. The original gap for reading-time metadata is therefore closed; platform clients should consume the projected value rather than estimate it independently.
+
 The migration implementation branches on exact `oldVersion` values with
 `else if`, rather than visibly applying every intervening migration
 (`FluxNews/lib/state_management/flux_news_state.dart:672-1699`). Whether every
