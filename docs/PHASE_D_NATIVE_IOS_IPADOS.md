@@ -344,8 +344,11 @@ Persistent iPad split navigation also uses the trailing top toolbar and keeps
 the detail navigation bar title-free while the sidebar is visible because that
 sidebar already communicates the selected scope. If iPadOS temporarily hides the
 sidebar, the detail view restores an explicit leading interactive scope capsule
-with chevron so navigation does not depend on the edge-swipe gesture; the
-capsule disappears again once the sidebar is visible. Category selection and
+with chevron so navigation does not depend on the edge-swipe gesture. The
+leading toolbar slot remains structurally present in both split states; while
+the sidebar is visible the capsule is hidden, non-interactive, and excluded
+from accessibility instead of being removed, so split-view transitions do not
+rebuild navigation chrome or perturb Timeline geometry. Category selection and
 category expansion are separate sidebar interactions so a selected category can
 still be expanded or collapsed independently;
 active manual Sync is indicated by continuous symbol rotation, and successful
