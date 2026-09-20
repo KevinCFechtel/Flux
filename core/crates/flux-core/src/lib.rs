@@ -487,6 +487,7 @@ impl FluxCore {
         &self,
         feed_id: i64,
         raw_html_content: &str,
+        reading_time_minutes: 0,
         url: &str,
         image_url: Option<&str>,
     ) -> Result<ReaderDocument, CoreError> {
@@ -1619,6 +1620,7 @@ mod tests {
             is_read: read,
             is_starred: starred,
             raw_html_content: format!("<p>{id}</p>"),
+            reading_time_minutes: 0,
             preview: id.to_string(),
             image_url: None,
         }
