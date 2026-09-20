@@ -528,8 +528,12 @@ rounded background without clipping its centred symbol. The timeline collection 
 system background. The existing native cell uses stable registrations for
 compact/text-only, portrait, and landscape constraint variants to avoid
 ordinary reuse switching between those graphs. The article-image pipeline
-prioritizes visible decode work over prefetch and keeps a bounded 128 MiB cache
-for warm/back-scroll reuse without making image memory unbounded. Scrollover's
+prioritizes visible decode work over prefetch, runs at most two loader/downsample
+operations concurrently, and keeps a deterministic cost-bounded 128 MiB LRU of
+display-ready rasters for warm/back-scroll reuse. The LRU retains entries
+strongly until its byte budget requires least-recently-used eviction, instead of
+relying on opportunistic NSCache residency, and releases all retained rasters on
+an iOS memory-pressure warning. Scrollover's
 per-scroll geometry state uses bounded ordered frame slots, scalar previous
 geometry, and a private bounded previous-frame copy. It no longer retains a
 sample dictionary that shares the mutable frame-store buffer, avoiding the
