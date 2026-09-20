@@ -63,7 +63,7 @@ Feed icons, including available normal/dark variants from Core, should be used b
 
 Article-row accessory order is semantic and stable. Measured from the visual outer edge inward in a horizontal group, or from the top downward in a vertical rail, the order is: **Unread → Star → Comments → Audio**. Optional audio duration belongs to the Audio accessory and must not become an independent slot. Platform/layout variants may change the axis but not this semantic ordering.
 
-On native iOS/iPadOS, standard Visual portrait uses the performance-motivated 85% hero as a leading main-content column and uses the remaining trailing gutter for the vertical accessory rail. The preview aligns to the same 85% main-content column. Compact, Visual compact, and Visual landscape keep a horizontal accessory group and preserve the same outer-to-inner order. Audio is added only when the Timeline receives a batched article-level audio projection; list cells must not perform per-row enclosure/media fetches merely to populate the accessory.
+On native iOS/iPadOS, standard Visual portrait uses the performance-motivated 85% hero as a leading main-content column and uses the remaining trailing gutter for the vertical accessory rail. The preview remains full content width so its wrapping and deterministic row-height behavior stay unchanged from the previous layout. Compact, Visual compact, and Visual landscape keep a horizontal accessory group and preserve the same outer-to-inner order. Audio is added only when the Timeline receives a batched article-level audio projection; list cells must not perform per-row enclosure/media fetches merely to populate the accessory.
 
 ## 5. Article routing and Reader
 
