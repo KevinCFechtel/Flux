@@ -88,14 +88,6 @@ struct ArticleImageRequest: Hashable, Sendable {
     }
 }
 
-private final class ArticleImageCacheEntry: NSObject {
-    let image: CGImage
-
-    init(image: CGImage) {
-        self.image = image
-    }
-}
-
 private enum ArticleImageCacheLookupSource {
     case visible
     case prefetch
@@ -108,11 +100,32 @@ private struct ArticleImageCacheMetrics: Sendable {
     let prefetchMisses: Int
     let insertions: Int
     let evictions: Int
+    let residentCost: Int
+    let residentCount: Int
 }
 
-private final class ArticleImageCache: NSObject, NSCacheDelegate, @unchecked Sendable {
-    let storage = NSCache<NSString, ArticleImageCacheEntry>()
+private final class ArticleImageCache: @unchecked Sendable {
+    private final class Node {
+        let key: NSString
+        var image: CGImage
+        var cost: Int
+        var previous: Node?
+        var next: Node?
+
+        init(key: NSString, image: CGImage, cost: Int) {
+            self.key = key
+            self.image = image
+            self.cost = cost
+        }
+    }
+
     private let lock = NSLock()
+    private var entries: [NSString: Node] = [:]
+    private var mostRecent: Node?
+    private var leastRecent: Node?
+    private var totalCost = 0
+    let totalCostLimit: Int
+
     private var visibleHits = 0
     private var visibleMisses = 0
     private var prefetchHits = 0
@@ -120,52 +133,119 @@ private final class ArticleImageCache: NSObject, NSCacheDelegate, @unchecked Sen
     private var insertions = 0
     private var evictions = 0
 
-    override init() {
-        super.init()
-        storage.delegate = self
+    init(totalCostLimit: Int) {
+        self.totalCostLimit = max(1, totalCostLimit)
     }
 
     func image(for key: NSString) -> CGImage? {
-        storage.object(forKey: key)?.image
+        lock.lock()
+        defer { lock.unlock() }
+        guard let node = entries[key] else { return nil }
+        promote(node)
+        return node.image
     }
 
     func lookup(_ key: NSString, source: ArticleImageCacheLookupSource) -> CGImage? {
-        let image = image(for: key)
         lock.lock()
-        switch (source, image == nil) {
+        defer { lock.unlock() }
+
+        let node = entries[key]
+        if let node { promote(node) }
+
+        switch (source, node == nil) {
         case (.visible, false): visibleHits += 1
         case (.visible, true): visibleMisses += 1
         case (.prefetch, false): prefetchHits += 1
         case (.prefetch, true): prefetchMisses += 1
         }
-        lock.unlock()
-        return image
+        return node?.image
     }
 
     func insert(_ image: CGImage, for key: NSString) {
+        let cost = ArticleImagePipeline.memoryCost(of: image)
         lock.lock()
+        defer { lock.unlock() }
+
         insertions += 1
+        if let existing = entries[key] {
+            totalCost -= existing.cost
+            existing.image = image
+            existing.cost = cost
+            totalCost += cost
+            promote(existing)
+        } else {
+            let node = Node(key: key, image: image, cost: cost)
+            entries[key] = node
+            insertAtFront(node)
+            totalCost += cost
+        }
+
+        while totalCost > totalCostLimit, let candidate = leastRecent {
+            remove(candidate)
+            entries.removeValue(forKey: candidate.key)
+            totalCost -= candidate.cost
+            evictions += 1
+        }
+    }
+
+    func removeAll() {
+        lock.lock()
+        entries.removeAll(keepingCapacity: false)
+        mostRecent = nil
+        leastRecent = nil
+        totalCost = 0
         lock.unlock()
-        storage.setObject(ArticleImageCacheEntry(image: image), forKey: key, cost: ArticleImagePipeline.memoryCost(of: image))
     }
 
     func snapshot() -> ArticleImageCacheMetrics {
         lock.lock()
         defer { lock.unlock() }
-        return .init(visibleHits: visibleHits, visibleMisses: visibleMisses, prefetchHits: prefetchHits, prefetchMisses: prefetchMisses, insertions: insertions, evictions: evictions)
+        return .init(
+            visibleHits: visibleHits,
+            visibleMisses: visibleMisses,
+            prefetchHits: prefetchHits,
+            prefetchMisses: prefetchMisses,
+            insertions: insertions,
+            evictions: evictions,
+            residentCost: totalCost,
+            residentCount: entries.count
+        )
     }
 
     func resetMetrics() {
         lock.lock()
-        visibleHits = 0; visibleMisses = 0; prefetchHits = 0; prefetchMisses = 0
-        insertions = 0; evictions = 0
+        visibleHits = 0
+        visibleMisses = 0
+        prefetchHits = 0
+        prefetchMisses = 0
+        insertions = 0
+        evictions = 0
         lock.unlock()
     }
 
-    func cache(_ cache: NSCache<AnyObject, AnyObject>, willEvictObject obj: Any) {
-        lock.lock()
-        evictions += 1
-        lock.unlock()
+    private func promote(_ node: Node) {
+        guard mostRecent !== node else { return }
+        remove(node)
+        insertAtFront(node)
+    }
+
+    private func insertAtFront(_ node: Node) {
+        node.previous = nil
+        node.next = mostRecent
+        mostRecent?.previous = node
+        mostRecent = node
+        if leastRecent == nil { leastRecent = node }
+    }
+
+    private func remove(_ node: Node) {
+        let previous = node.previous
+        let next = node.next
+        previous?.next = next
+        next?.previous = previous
+        if mostRecent === node { mostRecent = next }
+        if leastRecent === node { leastRecent = previous }
+        node.previous = nil
+        node.next = nil
     }
 }
 
@@ -213,7 +293,7 @@ actor ArticleImagePipeline {
     }
 
     static let shared = ArticleImagePipeline()
-    static let maximumConcurrentOperations = 3
+    static let maximumConcurrentOperations = 2
     // A visual card is commonly about 1.5-2.5 MiB decoded at @3x. This retains
     // a useful scrolling runway without allowing unbounded image memory.
     /// Display-ready rasters are retained for warm/back scrolling. 128 MiB keeps
@@ -238,8 +318,7 @@ actor ArticleImagePipeline {
 
     init(loader: Loader? = nil, memoryCacheCostLimit: Int = ArticleImagePipeline.memoryCacheCostLimit) {
         self.loader = loader ?? { url in try await Self.loadData(from: url) }
-        cache = ArticleImageCache()
-        cache.storage.totalCostLimit = max(1, memoryCacheCostLimit)
+        cache = ArticleImageCache(totalCostLimit: memoryCacheCostLimit)
     }
 
     nonisolated func cachedImage(for request: ArticleImageRequest) -> CGImage? {
@@ -288,7 +367,7 @@ actor ArticleImagePipeline {
             visibleMemoryCacheHits: cacheMetrics.visibleHits, visibleMemoryCacheMisses: cacheMetrics.visibleMisses,
             prefetchMemoryCacheHits: cacheMetrics.prefetchHits, prefetchMemoryCacheMisses: cacheMetrics.prefetchMisses,
             memoryCacheInsertions: cacheMetrics.insertions, memoryCacheEvictions: cacheMetrics.evictions,
-            memoryCacheCostLimit: cache.storage.totalCostLimit, inFlightDedupHits: inFlightDedupHits,
+            memoryCacheCostLimit: cache.totalCostLimit, inFlightDedupHits: inFlightDedupHits,
             startedOperations: startedOperations, completedOperations: completedOperations,
             retiredOperations: retiredOperations, maximumActiveOperations: maximumActiveOperations,
             visibleStarts: visibleStarts, prefetchStarts: prefetchStarts
@@ -302,7 +381,7 @@ actor ArticleImagePipeline {
     }
 
     func removeAllCachedImages() {
-        cache.storage.removeAllObjects()
+        cache.removeAll()
     }
 
     private func attach(
