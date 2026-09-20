@@ -147,7 +147,7 @@ final class ReaderWindowController: NSObject, ObservableObject {
         guard let article,
               let starred = ReaderArticleState.starredState(articleID: article.id, visibleArticles: visibleArticles.map { ($0.id, $0.isStarred) }),
               starred != article.isStarred else { return }
-        self.article = ArticleSummary(id: article.id, feedId: article.feedId, categoryId: article.categoryId, feedTitle: article.feedTitle, title: article.title, url: article.url, commentsUrl: article.commentsUrl, publishedAt: article.publishedAt, isRead: article.isRead, isStarred: starred, preview: article.preview, imageUrl: article.imageUrl)
+        self.article = ArticleSummary(id: article.id, feedId: article.feedId, categoryId: article.categoryId, feedTitle: article.feedTitle, title: article.title, url: article.url, commentsUrl: article.commentsUrl, publishedAt: article.publishedAt, isRead: article.isRead, isStarred: starred, readingTimeMinutes: article.readingTimeMinutes, preview: article.preview, imageUrl: article.imageUrl)
         updateStarToolbarItem()
     }
 }
