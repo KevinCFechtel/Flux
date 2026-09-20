@@ -352,17 +352,11 @@ actor ArticleImagePipeline {
     private var visibleStarts = 0
     private var prefetchStarts = 0
 
-    init(
-        loader: Loader? = nil,
-        memoryCacheCostLimit: Int = ArticleImagePipeline.memoryCacheCostLimit,
-        transformer: Transformer? = nil
-    ) {
+    init(loader: Loader? = nil, memoryCacheCostLimit: Int = ArticleImagePipeline.memoryCacheCostLimit) {
         self.loader = loader ?? { url in try await Self.loadData(from: url) }
-        transformExecutor = TransformExecutor(
-            transform: transformer ?? { data, request in
-                try Self.downsample(data: data, request: request)
-            }
-        )
+        transformExecutor = TransformExecutor { data, request in
+            try Self.downsample(data: data, request: request)
+        }
         cache = ArticleImageCache(totalCostLimit: memoryCacheCostLimit)
     }
 
