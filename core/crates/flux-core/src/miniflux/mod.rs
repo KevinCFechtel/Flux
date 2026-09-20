@@ -1379,6 +1379,7 @@ fn entry_to_saved_media_article(entry: EntryDto) -> Result<RemoteSavedMediaArtic
             is_read: entry.status == "read",
             is_starred: entry.starred,
             raw_html_content: entry.content,
+            reading_time_minutes: entry.reading_time,
             preview: processed.preview,
             image_url: processed.image_url,
         },
