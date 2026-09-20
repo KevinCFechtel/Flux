@@ -2892,8 +2892,18 @@ final class IOSUIKitArticleCell: UITableViewCell {
         guard let articleID = representedArticleID else { return }
         representedImageRequest = request
         if let cachedImage = articleImagePipeline.cachedImage(for: request) {
-            // Already available before the cell is displayed: nothing to fade.
-            presentArticleImage(cachedImage, animated: false)
+            // Cache residency removes decode/raster work, but swapping several
+            // distinct large rasters into visible cells in one display frame can
+            // still hitch. Route warm-cache presentation through the same
+            // frame-paced scheduler as cold async completions while scrolling.
+            clearArticleImagePresentation()
+            scheduleArticleImagePresentation(
+                cachedImage,
+                request: request,
+                articleID: articleID,
+                bindingGeneration: bindingGeneration,
+                allowsAnimation: false
+            )
             return
         }
 
@@ -2908,21 +2918,12 @@ final class IOSUIKitArticleCell: UITableViewCell {
                       self.representedArticleID == articleID,
                       self.representedImageRequest == request
                 else { return }
-                let presentationScheduler = IOSArticleImagePresentationScheduler.shared
-                presentationScheduler.enqueue(
-                    isStillValid: { [weak self] in
-                        guard let self else { return false }
-                        return self.imageBindingGeneration == bindingGeneration
-                            && self.representedArticleID == articleID
-                            && self.representedImageRequest == request
-                    },
-                    present: { [weak self] in
-                        guard let self else { return }
-                        self.presentArticleImage(
-                            loadedImage,
-                            animated: self.articleImageArrivalAnimationsEnabled
-                        )
-                    }
+                self.scheduleArticleImagePresentation(
+                    loadedImage,
+                    request: request,
+                    articleID: articleID,
+                    bindingGeneration: bindingGeneration,
+                    allowsAnimation: true
                 )
             } catch {
                 guard !Task.isCancelled,
@@ -2934,6 +2935,30 @@ final class IOSUIKitArticleCell: UITableViewCell {
                 self.clearArticleImagePresentation()
             }
         }
+    }
+
+    private func scheduleArticleImagePresentation(
+        _ image: CGImage,
+        request: ArticleImageRequest,
+        articleID: Int64,
+        bindingGeneration: UInt64,
+        allowsAnimation: Bool
+    ) {
+        IOSArticleImagePresentationScheduler.shared.enqueue(
+            isStillValid: { [weak self] in
+                guard let self else { return false }
+                return self.imageBindingGeneration == bindingGeneration
+                    && self.representedArticleID == articleID
+                    && self.representedImageRequest == request
+            },
+            present: { [weak self] in
+                guard let self else { return }
+                self.presentArticleImage(
+                    image,
+                    animated: allowsAnimation && self.articleImageArrivalAnimationsEnabled
+                )
+            }
+        )
     }
 
     private static let articleImageFadeDuration: CFTimeInterval = 0.2
