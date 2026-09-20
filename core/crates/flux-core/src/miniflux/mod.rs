@@ -963,6 +963,7 @@ impl RemoteSource for MinifluxClient {
                 is_read: entry.status == "read",
                 is_starred: entry.starred,
                 raw_html_content: entry.content,
+                reading_time_minutes: entry.reading_time,
                 preview: processed.preview,
                 image_url: processed.image_url,
             });
@@ -1248,6 +1249,8 @@ struct EntryDto {
     #[serde(default)]
     content: String,
     #[serde(default)]
+    reading_time: u32,
+    #[serde(default)]
     external_id: Option<String>,
     #[serde(default)]
     enclosures: Vec<EnclosureDto>,
@@ -1320,6 +1323,7 @@ fn search_article_summary(entry: EntryDto) -> Result<ArticleSummary, CoreError> 
             .to_rfc3339_opts(SecondsFormat::Secs, true),
         is_read: entry.status == "read",
         is_starred: entry.starred,
+        reading_time_minutes: entry.reading_time,
         preview: processed.preview,
         image_url: processed.image_url,
     })
