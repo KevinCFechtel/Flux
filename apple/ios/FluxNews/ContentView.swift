@@ -680,7 +680,7 @@ struct ContentView: View {
     }
 }
 
-private enum ArticleListTitleCapsuleLayout {
+private enum ArticleListTitleCapsuleLayout: Equatable {
     case stacked
     case inline
 }
