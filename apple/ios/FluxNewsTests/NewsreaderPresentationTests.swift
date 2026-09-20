@@ -45,17 +45,37 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     func testArticleListChromeAdaptsPortraitLandscapeAndPersistentNavigation() {
-        let portrait = IOSArticleListChromePresentation.mode(for: .compact, verticalSizeClass: .regular)
+        let portrait = IOSArticleListChromePresentation.mode(
+            for: .compact,
+            verticalSizeClass: .regular,
+            splitColumnVisibility: .detailOnly
+        )
         XCTAssertEqual(portrait, .compactPortrait)
         XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: portrait), .bottomBar)
 
-        let landscape = IOSArticleListChromePresentation.mode(for: .compact, verticalSizeClass: .compact)
+        let landscape = IOSArticleListChromePresentation.mode(
+            for: .compact,
+            verticalSizeClass: .compact,
+            splitColumnVisibility: .detailOnly
+        )
         XCTAssertEqual(landscape, .compactLandscape)
         XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: landscape), .topBarTrailing)
 
-        let persistent = IOSArticleListChromePresentation.mode(for: .regular, verticalSizeClass: .regular)
+        let persistent = IOSArticleListChromePresentation.mode(
+            for: .regular,
+            verticalSizeClass: .regular,
+            splitColumnVisibility: .all
+        )
         XCTAssertEqual(persistent, .persistentSplit)
         XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: persistent), .topBarTrailing)
+
+        let collapsedPersistent = IOSArticleListChromePresentation.mode(
+            for: .regular,
+            verticalSizeClass: .regular,
+            splitColumnVisibility: .detailOnly
+        )
+        XCTAssertEqual(collapsedPersistent, .persistentSplitCollapsed)
+        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: collapsedPersistent), .topBarTrailing)
     }
 
     func testMoreActionsKeepSettingsAndOnlyOfferNextForSupportedScopes() {
