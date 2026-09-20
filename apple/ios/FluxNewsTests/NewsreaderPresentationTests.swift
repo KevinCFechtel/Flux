@@ -2478,10 +2478,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(age.minX, rail.minX, accuracy: 0.5)
         XCTAssertEqual(readingIcon.minX, rail.minX, accuracy: 0.5)
         XCTAssertEqual(reading.minX, rail.minX, accuracy: 0.5)
-        XCTAssertLessThan(ageIcon.minY, age.minY)
-        XCTAssertLessThan(age.maxY, readingIcon.minY)
         XCTAssertLessThan(readingIcon.minY, reading.minY)
-        XCTAssertEqual(reading.maxY, image.maxY, accuracy: 0.5)
+        XCTAssertLessThan(reading.maxY, ageIcon.minY)
+        XCTAssertLessThan(ageIcon.minY, age.minY)
+        XCTAssertEqual(age.maxY, image.maxY, accuracy: 0.5)
 
         let visualBottom = max(image.maxY, rail.maxY)
         XCTAssertEqual(
