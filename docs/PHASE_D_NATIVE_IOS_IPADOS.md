@@ -545,19 +545,19 @@ invalidation. A synchronous prepared-metrics miss is retained in the same
 generation-safe cache, so it does not cause a second equivalent asynchronous
 measurement. The frame-headroom hardening pass keeps append/removal from
 fanning out into unrelated visible-cell configuration, prefetch cancellation,
-or broad layout invalidation. Feed-icon PNGs and article images are decoded,
-downsampled, corner-composed, and rasterized off-main into sRGB BGRA
-premultiplied-first display-ready pixels. The final raster interpolation is
-`.medium`, appropriate for reduced RSS preview assets. Actual prepared-image
-presentation no longer depends on a rounded clipping layer, while transparent
-corners preserve adaptive backgrounds; the cold article placeholder keeps its
-rounded background without clipping its centred symbol. The timeline collection surface is explicitly opaque over the
-system background. The existing native cell uses stable registrations for
-compact/text-only, portrait, and landscape constraint variants to avoid
-ordinary reuse switching between those graphs. The article-image pipeline
-prioritizes visible decode work over prefetch, runs at most two loader/downsample
-operations concurrently, and keeps a deterministic cost-bounded 128 MiB LRU of
-display-ready rasters for warm/back-scroll reuse. The LRU retains entries
+or broad layout invalidation. Feed-icon PNGs retain their existing prepared-raster path. Article images
+use display-sized ImageIO decoding off-main, while UIImageView/Core Animation owns
+the final aspect-fill crop and rounded clipping. The former exact-slot
+`renderDisplayReady` CGContext pass is retained only as a legacy developer
+diagnostic fallback and is not the production default after the 20 September
+2026 device comparison. The timeline collection surface remains explicitly
+opaque over the system background. The existing native cell uses stable
+registrations for compact/text-only, portrait, and landscape constraint variants
+to avoid ordinary reuse switching between those graphs. The article-image
+pipeline prioritizes visible work over prefetch, allows up to two concurrent
+fetch operations, serializes the CPU-heavy ImageIO transform stage to avoid
+overlapping decode/raster peaks, and keeps a deterministic cost-bounded 128 MiB
+LRU of decoded display-sized images for warm/back-scroll reuse. The LRU retains entries
 strongly until its byte budget requires least-recently-used eviction, instead of
 relying on opportunistic NSCache residency, and releases all retained rasters on
 an iOS memory-pressure warning. Scrollover's
@@ -572,6 +572,21 @@ by the diagnostics build command. Diagnostics builds are instrumented and are
 not assumed bit-identical to the shipped archive. U3.7.5 manual cell layout
 remains deferred pending device evidence; this pass does not claim a new
 physical-device result.
+
+#### Article-image renderer decision — 20 September 2026
+
+A new physical-device A/B comparison was run after the presentation scheduler,
+offscreen-image-prefetch removal, obsolete-work cancellation, and serialized
+image-transform changes. On the iPhone 15, both paths still showed very rare
+residual hitches, but the ImageIO -> UIImageView/Core Animation path was
+subjectively somewhat smoother than the additional exact-slot CGContext
+prerasterization path.
+
+Production therefore defaults to renderer-driven aspect-fill presentation. The
+former exact-slot display-ready raster remains available behind Developer
+Diagnostics as a legacy comparison fallback only. Its diagnostic preference uses
+a versioned key so installs that previously left the temporary switch enabled do
+not silently keep the legacy path after this decision.
 
 #### Article-image performance diagnostics — historical conclusion
 
