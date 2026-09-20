@@ -940,11 +940,11 @@ private struct ArticleListNavigationChrome<Content: View>: View {
         case .compactLandscape:
             landscapeCapsuleChrome(title: title, subtitle: landscapeSubtitle)
         case .persistentSplit:
-            // A persistent sidebar already communicates the selected scope and
-            // provides its navigation affordance. Keep only the native inline
-            // title on iPad and leave the trailing toolbar for article actions.
+            // The persistent sidebar already communicates the selected scope.
+            // Keep the detail navigation bar title-free and reserve its trailing
+            // side for the article actions.
             content()
-                .navigationTitle(title)
+                .navigationTitle("")
                 .navigationBarTitleDisplayMode(.inline)
         }
     }
