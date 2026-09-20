@@ -39,15 +39,17 @@ enum IOSArticleListChromeMode: Equatable {
     case compactPortrait
     case compactLandscape
     case persistentSplit
+    case persistentSplitCollapsed
 }
 
 enum IOSArticleListChromePresentation {
     static func mode(
         for presentation: AdaptivePresentation,
-        verticalSizeClass: UserInterfaceSizeClass?
+        verticalSizeClass: UserInterfaceSizeClass?,
+        splitColumnVisibility: NavigationSplitViewVisibility
     ) -> IOSArticleListChromeMode {
         if presentation.usesPersistentSplitNavigation {
-            return .persistentSplit
+            return splitColumnVisibility == .detailOnly ? .persistentSplitCollapsed : .persistentSplit
         }
         return verticalSizeClass == .compact ? .compactLandscape : .compactPortrait
     }
@@ -174,7 +176,8 @@ struct ContentView: View {
     private var articleListChromeMode: IOSArticleListChromeMode {
         IOSArticleListChromePresentation.mode(
             for: adaptivePresentation,
-            verticalSizeClass: verticalSizeClass
+            verticalSizeClass: verticalSizeClass,
+            splitColumnVisibility: splitColumnVisibility
         )
     }
 
@@ -307,7 +310,7 @@ struct ContentView: View {
     private var articleList: some View {
         ArticleListNavigationChrome(
             store: newsreaderStore,
-            onSelectScope: adaptivePresentation.usesPersistentSplitNavigation ? nil : { navigationPresented = true },
+            onSelectScope: presentArticleListNavigation,
             chromeMode: articleListChromeMode
         ) {
             ArticleListView(store: newsreaderStore, onArticleTap: openArticle, onArticleAction: handleArticleAction)
@@ -376,6 +379,14 @@ struct ContentView: View {
         switch IOSArticleListChromePresentation.actionPlacement(for: articleListChromeMode) {
         case .bottomBar: .bottomBar
         case .topBarTrailing: .topBarTrailing
+        }
+    }
+
+    private func presentArticleListNavigation() {
+        if adaptivePresentation.usesPersistentSplitNavigation {
+            splitColumnVisibility = .all
+        } else {
+            navigationPresented = true
         }
     }
 
@@ -938,6 +949,12 @@ private struct ArticleListNavigationChrome<Content: View>: View {
         case .compactPortrait:
             portraitCapsuleChrome(title: title, subtitle: portraitSubtitle)
         case .compactLandscape:
+            landscapeCapsuleChrome(title: title, subtitle: landscapeSubtitle)
+        case .persistentSplitCollapsed:
+            // When iPadOS temporarily hides the sidebar, restore an explicit
+            // navigation affordance instead of relying on the edge gesture.
+            // The same compact count remains visible because it is a product
+            // feature rather than a phone-only decoration.
             landscapeCapsuleChrome(title: title, subtitle: landscapeSubtitle)
         case .persistentSplit:
             // The persistent sidebar already communicates the selected scope.
