@@ -340,16 +340,20 @@ enum IOSArticleTemporalPresentation {
 
 struct ArticleRowContent: Equatable, Sendable {
     let article: ArticleRowArticle
+    /// Absolute publication date retained for Compact/Visual compact/Landscape.
+    let publishedDate: String
     /// Frozen for this structural Timeline generation. It is recomputed only
     /// when the Timeline is rebuilt, never by a timer while rows are visible.
-    let publishedDate: String
+    let publishedAge: String
     let readingTime: String?
     let imageURL: URL?
     let hasComments: Bool
 
     init(article: ArticleSummary, referenceDate: Date = .now) {
         self.article = ArticleRowArticle(article: article)
-        publishedDate = IOSArticleTemporalPresentation.relativePublishedAge(
+        publishedDate = ISO8601DateFormatter().date(from: article.publishedAt)
+            .map { $0.formatted(date: .abbreviated, time: .shortened) } ?? article.publishedAt
+        publishedAge = IOSArticleTemporalPresentation.relativePublishedAge(
             article.publishedAt,
             relativeTo: referenceDate
         )
