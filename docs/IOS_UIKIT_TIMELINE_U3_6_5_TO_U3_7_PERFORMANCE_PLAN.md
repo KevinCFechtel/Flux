@@ -1,10 +1,25 @@
 # UIKit Timeline Performance Plan — U3.6.5 through U3.7
 
-> **Status: U3.6.5, U3.6.6, U3.6.7, AND U3.7.1 COMPLETE**
+> **Historical implementation plan — current U3 performance work remains open.**
 >
-> Baseline: `main` after U3.6.1–U3.6.4, currently including the merged UIKit renderer, targeted presentation bridge, resolved Scrollover geometry, and bounded image scheduler.
+> This file records the ordered U3.6.5–U3.7 plan that guided the September 2026
+> UIKit Timeline performance work. Several packages below have since been
+> implemented, extended, or superseded by later hardening and physical-device
+> experiments. Treat package descriptions and "next action" text as historical
+> sequencing unless the current Phase-D contract or
+> `IOS_UIKIT_TIMELINE_IMPLEMENTATION.md` explicitly carries the requirement
+> forward.
 >
-> This plan follows the physical-device reviews after U3.6. It keeps the owned `UICollectionView` architecture and deliberately postpones U4 mutation-worker work until the rendering path has been repaired and optimized further.
+> The UIKit Timeline amendment itself is still **IN PROGRESS**. Current physical-
+> device performance investigation may still justify fundamental changes to
+> renderer/layout/cell/image-presentation/preparation/scheduling structures.
+> Therefore this document must not be used to infer that U3 is complete merely
+> because individual packages here are complete.
+>
+> Baseline when this plan was written: `main` after U3.6.1–U3.6.4, including
+> the merged UIKit renderer, targeted presentation bridge, resolved Scrollover
+> geometry, and bounded image scheduler. U4 mutation-worker work remains a
+> separate completion gate.
 
 ## 1. Objective
 
@@ -442,8 +457,15 @@ Acceptance is not "warm scrolling looks fine". The intended product property is 
 - reintroduction of SwiftUI article cells;
 - product changes to Scrollover, Undo, Remove When Read, Search, article card presentation or navigation semantics.
 
-## 13. Immediate next action
+## 13. Historical next action at the time of this plan
 
-Start with **U3.6.5 — Cell Geometry Acceptance Repair** on branch `u3-6-5-timeline-acceptance-repair`.
+The original next action was to start **U3.6.5 — Cell Geometry Acceptance
+Repair** on branch `u3-6-5-timeline-acceptance-repair`. That instruction has
+been completed and is retained only to preserve the historical implementation
+sequence.
 
-Do not start deterministic sizing by layering it on top of a cell whose image intrinsic content can still compete with the explicit slot. First make the current renderer geometrically sound and add the real-cell regression tests that will later become the comparison oracle for U3.7.2.
+For current work, use the authoritative Phase-D contract and
+`IOS_UIKIT_TIMELINE_IMPLEMENTATION.md`. Do not restart U3.6.5 or assume the
+remaining task is acceptance-only. Continue from the current production code and
+current physical-device evidence; U3 remains open to deeper structural
+performance changes where justified.
