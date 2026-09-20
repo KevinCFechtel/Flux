@@ -2299,7 +2299,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         //   Headline
         //   ● icon  Feed name              ★ 💬
         //      ┌───────────────┐
-        //      │  HERO IMAGE   │   centered, 80% of content width
+        //      │  HERO IMAGE   │   centered, 85% of content width
         //      └───────────────┘
         //   Date
         //   Preview …
