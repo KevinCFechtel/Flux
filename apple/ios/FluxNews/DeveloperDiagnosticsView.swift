@@ -4,6 +4,7 @@ struct DeveloperDiagnosticsView: View {
     @ObservedObject var bootstrapper: CoreBootstrapper
     @State private var legacyResult = LegacyStateDiscovery.probe()
     @State private var imageCacheDiagnostics: ArticleImageCacheDiagnosticsSnapshot?
+    @State private var imagePresentationDiagnostics: ArticleImagePresentationDiagnosticsSnapshot?
 
     var body: some View {
         NavigationStack {
@@ -20,6 +21,31 @@ struct DeveloperDiagnosticsView: View {
                     }
                     Text("Read-only discovery; no legacy data is imported or modified.").font(.footnote).foregroundStyle(.secondary)
                 }
+                Section("Article Image Presentation") {
+                    if let imagePresentationDiagnostics {
+                        LabeledContent("Queued ready images", value: "\(imagePresentationDiagnostics.queued)")
+                        LabeledContent("Maximum ready queue", value: "\(imagePresentationDiagnostics.maximumQueued)")
+                        LabeledContent("Presented images", value: "\(imagePresentationDiagnostics.presented)")
+                        LabeledContent("Discarded stale images", value: "\(imagePresentationDiagnostics.discarded)")
+                        LabeledContent("Average ready→presented", value: imagePresentationDiagnostics.averageDelayText)
+                        LabeledContent("Maximum ready→presented", value: imagePresentationDiagnostics.maximumDelayText)
+                    } else {
+                        ProgressView()
+                    }
+
+                    Button("Refresh Image Presentation Metrics") {
+                        refreshImagePresentationDiagnostics()
+                    }
+                    Button("Reset Image Presentation Metrics") {
+                        IOSArticleImagePresentationScheduler.shared.resetMetrics()
+                        refreshImagePresentationDiagnostics()
+                    }
+
+                    Text("During scrolling, at most one newly finished async article image is presented per display frame. Cache hits remain immediate.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Article Image Cache") {
                     if let imageCacheDiagnostics {
                         LabeledContent("Visible hits", value: "\(imageCacheDiagnostics.visibleHits)")
@@ -66,6 +92,7 @@ struct DeveloperDiagnosticsView: View {
             .navigationTitle("Developer Diagnostics")
             .task {
                 await refreshImageCacheDiagnostics()
+                refreshImagePresentationDiagnostics()
             }
         }
     }
@@ -73,6 +100,12 @@ struct DeveloperDiagnosticsView: View {
     private func refreshImageCacheDiagnostics() async {
         imageCacheDiagnostics = ArticleImageCacheDiagnosticsSnapshot(
             metrics: await ArticleImagePipeline.shared.metrics()
+        )
+    }
+
+    private func refreshImagePresentationDiagnostics() {
+        imagePresentationDiagnostics = ArticleImagePresentationDiagnosticsSnapshot(
+            metrics: IOSArticleImagePresentationScheduler.shared.metrics()
         )
     }
 
@@ -111,4 +144,26 @@ struct ArticleImageCacheDiagnosticsSnapshot: Equatable {
         guard let visibleHitRate else { return "n/a" }
         return String(format: "%.1f%%", visibleHitRate * 100)
     }
+}
+
+
+struct ArticleImagePresentationDiagnosticsSnapshot: Equatable {
+    let queued: Int
+    let maximumQueued: Int
+    let presented: Int
+    let discarded: Int
+    let averageDelayMilliseconds: Double
+    let maximumDelayMilliseconds: Double
+
+    init(metrics: IOSArticleImagePresentationScheduler.Metrics) {
+        queued = metrics.queued
+        maximumQueued = metrics.maximumQueued
+        presented = metrics.presented
+        discarded = metrics.discarded
+        averageDelayMilliseconds = metrics.averageDelayMilliseconds
+        maximumDelayMilliseconds = metrics.maximumDelayMilliseconds
+    }
+
+    var averageDelayText: String { String(format: "%.1f ms", averageDelayMilliseconds) }
+    var maximumDelayText: String { String(format: "%.1f ms", maximumDelayMilliseconds) }
 }
