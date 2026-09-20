@@ -399,7 +399,7 @@ struct IOSUIKitArticleGeometry: Equatable {
     // Standard Visual portrait uses an inset hero image below the title. Keeping
     // the allocation here makes the renderer and deterministic height engine
     // share exactly the same geometry contract.
-    static let visualHeroImageAllocation: CGFloat = 0.80
+    static let visualHeroImageAllocation: CGFloat = 0.85
     // "Visual compact": a thumbnail beside the title, with the metadata bar above
     // and — on a narrow container — the preview underneath.
     static let sideTitleImageAllocation: CGFloat = 0.32
