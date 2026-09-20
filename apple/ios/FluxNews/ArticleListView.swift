@@ -2273,6 +2273,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var currentTitle = ""
     private var currentFeedTitle = ""
     private var currentPublishedDate = ""
+    private var currentPublishedAge = ""
+    private var currentReadingTime: String?
     private var currentIsRead = false
     private var currentIsStarred = false
     private var currentHasComments = false
@@ -2852,6 +2854,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
         currentTitle = item.content.article.title
         currentFeedTitle = item.content.article.feedTitle
         currentPublishedDate = item.content.publishedDate
+        currentPublishedAge = item.content.publishedAge
+        currentReadingTime = item.content.readingTime
         titleLabel.text = currentTitle
         feedTitleLabel.text = currentFeedTitle
         dateLabel.text = currentPublishedDate
@@ -3111,6 +3115,11 @@ final class IOSUIKitArticleCell: UITableViewCell {
         let feedTitleFrame: CGRect
         let commentsFrame: CGRect?
         let dateFrame: CGRect
+        let portraitAccessoryRailFrame: CGRect?
+        let publishedAgeIconFrame: CGRect?
+        let publishedAgeFrame: CGRect?
+        let readingTimeIconFrame: CGRect?
+        let readingTimeFrame: CGRect?
         let previewFrame: CGRect?
     }
 
@@ -3130,7 +3139,12 @@ final class IOSUIKitArticleCell: UITableViewCell {
             feedIconFrame: frame(feedIconContainer),
             feedTitleFrame: frame(feedTitleLabel),
             commentsFrame: currentHasComments ? frame(usesPortraitRail ? portraitCommentsContainer : commentsContainer) : nil,
-            dateFrame: frame(dateLabel),
+            dateFrame: usesPortraitRail ? .zero : frame(dateLabel),
+            portraitAccessoryRailFrame: usesPortraitRail ? frame(portraitAccessoryRail) : nil,
+            publishedAgeIconFrame: usesPortraitRail ? frame(portraitPublishedAgeIconView) : nil,
+            publishedAgeFrame: usesPortraitRail ? frame(portraitPublishedAgeLabel) : nil,
+            readingTimeIconFrame: usesPortraitRail && currentReadingTime != nil ? frame(portraitReadingTimeIconView) : nil,
+            readingTimeFrame: usesPortraitRail && currentReadingTime != nil ? frame(portraitReadingTimeLabel) : nil,
             previewFrame: previewLabel.isHidden ? nil : frame(previewLabel)
         )
     }
@@ -3315,7 +3329,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
     }
 
     private func updateAccessibility() {
-        accessibilityLabel = "\(currentTitle), \(currentFeedTitle), \(currentPublishedDate), \(currentIsRead ? String(localized: "Read") : String(localized: "Unread"))\(currentIsStarred ? String(localized: ", starred") : "")"
+        let temporal = currentLayoutVariant == .visualPortrait ? currentPublishedAge : currentPublishedDate
+        let reading = currentReadingTime.map { ", \(String(localized: "Reading time")) \($0)" } ?? ""
+        accessibilityLabel = "\(currentTitle), \(currentFeedTitle), \(temporal)\(reading), \(currentIsRead ? String(localized: "Read") : String(localized: "Unread"))\(currentIsStarred ? String(localized: ", starred") : "")"
         accessibilityValue = currentIsRead
             ? (currentIsStarred ? String(localized: "Read, starred") : String(localized: "Read"))
             : (currentIsStarred ? String(localized: "Unread, starred") : String(localized: "Unread"))
