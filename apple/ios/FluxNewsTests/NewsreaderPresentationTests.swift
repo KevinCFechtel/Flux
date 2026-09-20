@@ -44,6 +44,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(IOSBottomAction.defaultActions.contains(.settings))
     }
 
+    func testLandscapeTitleCapsuleKeepsUsefulMinimumWidthWithoutNarrowMaximumContract() {
+        XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.inlineMinimumContentWidth, 160)
+    }
+
     func testArticleListChromeAdaptsPortraitLandscapeAndPersistentNavigation() {
         let portrait = IOSArticleListChromePresentation.mode(
             for: .compact,
