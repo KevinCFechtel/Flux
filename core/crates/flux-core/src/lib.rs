@@ -3270,6 +3270,7 @@ mod tests {
                 published_at: format!("2026-01-02T03:04:{id:02}Z"),
                 is_read: false,
                 is_starred: false,
+                reading_time_minutes: 0,
                 preview: String::new(),
                 image_url: None,
             };
@@ -3512,6 +3513,7 @@ mod tests {
                 published_at: "2026-01-02T03:04:05Z".into(),
                 is_read: false,
                 is_starred: false,
+                reading_time_minutes: 0,
                 preview: String::new(),
                 image_url: None,
             })
