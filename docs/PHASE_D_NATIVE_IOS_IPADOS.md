@@ -333,8 +333,12 @@ Timeline and removal of the unused SwiftUI article-row renderer — but remain o
 until the performance architecture has settled and the required device/runtime
 matrix is accepted.
 
-The native bottom Sync control keeps the same `arrow.clockwise` symbol and
-stable toolbar geometry across idle, syncing, success, and failure states;
+The native manual Sync control keeps the same `arrow.clockwise` symbol and
+stable toolbar geometry across idle, syncing, success, and failure states.
+Compact presentation keeps Sync, Filter/Sort, and More in the bottom toolbar;
+persistent iPad split navigation moves the same action group to the trailing
+top toolbar and replaces the interactive title capsule with a native inline
+scope title;
 active manual Sync is indicated by continuous symbol rotation, and successful
 manual Sync briefly presents a checkmark before returning to the idle symbol.
 Failure returns directly to the idle symbol. This is native transient
