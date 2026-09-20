@@ -266,6 +266,26 @@ private final class ArticleImageCache: @unchecked Sendable {
 
 actor ArticleImagePipeline {
     typealias Loader = @Sendable (URL) async throws -> Data
+    typealias Transformer = @Sendable (Data, ArticleImageRequest) throws -> CGImage
+
+    /// Fetches remain concurrent, but the CPU-heavy ImageIO + exact-slot
+    /// CGContext transform is intentionally serialized. Large Hero rasters can
+    /// otherwise overlap and create short CPU/memory-bandwidth spikes while the
+    /// main thread is trying to sustain scrolling.
+    private actor TransformExecutor {
+        private let transform: Transformer
+
+        init(transform: @escaping Transformer) {
+            self.transform = transform
+        }
+
+        func render(data: Data, request: ArticleImageRequest) throws -> CGImage {
+            // Cancellation while waiting for this serial executor must prevent
+            // obsolete work from entering ImageIO at all.
+            try Task.checkCancellation()
+            return try transform(data, request)
+        }
+    }
 
     enum Demand: Equatable, Sendable { case visible, prefetch }
 
@@ -319,6 +339,7 @@ actor ArticleImagePipeline {
 
     private nonisolated let cache: ArticleImageCache
     private let loader: Loader
+    private let transformExecutor: TransformExecutor
     private var jobs: [ArticleImageRequest: [UUID: Job]] = [:]
     private var visibleQueue: [QueuedJob] = []
     private var prefetchQueue: [QueuedJob] = []
@@ -331,8 +352,17 @@ actor ArticleImagePipeline {
     private var visibleStarts = 0
     private var prefetchStarts = 0
 
-    init(loader: Loader? = nil, memoryCacheCostLimit: Int = ArticleImagePipeline.memoryCacheCostLimit) {
+    init(
+        loader: Loader? = nil,
+        memoryCacheCostLimit: Int = ArticleImagePipeline.memoryCacheCostLimit,
+        transformer: Transformer? = nil
+    ) {
         self.loader = loader ?? { url in try await Self.loadData(from: url) }
+        transformExecutor = TransformExecutor(
+            transform: transformer ?? { data, request in
+                try Self.downsample(data: data, request: request)
+            }
+        )
         cache = ArticleImageCache(totalCostLimit: memoryCacheCostLimit)
     }
 
@@ -498,6 +528,7 @@ actor ArticleImagePipeline {
                 continue
             }
             let loader = loader
+            let transformExecutor = transformExecutor
             let priority: TaskPriority = job.demand == .visible ? .userInitiated : .utility
             let operation = Task.detached(priority: priority) {
                 let data = try await loader(queued.request.url)
@@ -505,7 +536,9 @@ actor ArticleImagePipeline {
                 // Once the last consumer has retired the job, do not turn bytes
                 // that just arrived into an expensive display raster.
                 try Task.checkCancellation()
-                return try Self.downsample(data: data, request: queued.request)
+                // Two fetches may overlap, but ImageIO thumbnail creation and the
+                // exact-slot CGContext raster never execute concurrently.
+                return try await transformExecutor.render(data: data, request: queued.request)
             }
             job.operation = operation
             job.state = .active
