@@ -574,11 +574,13 @@ enum IOSUIKitArticleLayoutEngine {
         // On a wide container the preview joins the column beside the image
         // rather than running underneath it.
         let previewWidth: CGFloat
-        if variant == .visualPortrait {
-            previewWidth = imageSize.width
-        } else if variant == .visualSideTitleWide {
+        if variant == .visualSideTitleWide {
             previewWidth = titleWidth
         } else {
+            // Visual portrait deliberately keeps the preview at the historical
+            // full content width. The 85/15 split belongs only to hero + rail,
+            // so preview wrapping and deterministic row-height semantics do not
+            // change merely because the hero moved to the leading edge.
             previewWidth = infoWidth
         }
 
@@ -729,8 +731,7 @@ enum IOSUIKitArticleLayoutEngine {
         default:
             previewTop = dateFrame.maxY + IOSUIKitArticleGeometry.textSpacing
         }
-        let previewX = variant == .visualPortrait ? (imageFrame?.minX ?? textOrigin.x) : textOrigin.x
-        let previewFrame = previewHeight == 0 ? nil : CGRect(x: previewX, y: previewTop, width: previewWidth, height: previewHeight)
+        let previewFrame = previewHeight == 0 ? nil : CGRect(x: textOrigin.x, y: previewTop, width: previewWidth, height: previewHeight)
         return .init(variant: variant, cellSize: .init(width: input.containerWidth, height: totalHeight), contentFrame: contentFrame, imageFrame: imageFrame, textFrame: CGRect(x: textOrigin.x, y: textOrigin.y, width: infoWidth, height: textBlockHeight), titleFrame: titleFrame, metadataFrame: metadataFrame, unreadFrame: unreadFrame, feedIconFrame: feedIconFrame, feedTitleFrame: feedTitleFrame, commentsFrame: commentsFrame, starFrame: starFrame, dateFrame: dateFrame, previewFrame: previewFrame, horizontalInset: geometry.horizontalInset, verticalInset: geometry.verticalPadding, titleHeight: titleHeight, metadataHeight: metadataHeight, previewHeight: previewHeight, textBlockHeight: textBlockHeight)
     }
 
