@@ -2936,6 +2936,48 @@ final class NewsreaderPresentationTests: XCTestCase {
     /// the timeline is idle; during active movement pixels still appear
     /// immediately but without the Core Animation transition.
     @MainActor
+    func testWarmCacheArticleImageUsesFramePacingWhileScrollingButRemainsImmediateWhenIdle() async throws {
+        let scheduler = IOSArticleImagePresentationScheduler.shared
+        scheduler.setScrolling(false)
+        scheduler.resetMetrics()
+
+        let data = try imageData(width: 1_200, height: 700)
+        let pipeline = ArticleImagePipeline { _ in data }
+        let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
+        let metrics = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 390)
+        let probeCell = IOSUIKitArticleCell(frame: .zero)
+        let request = ArticleImageRequest(
+            url: try XCTUnwrap(item.content.imageURL),
+            targetSize: metrics.imageSize(hasImage: true),
+            displayScale: 3,
+            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
+            rasterScale: 3,
+            usesDisplayP3: false,
+            backdrop: IOSUIKitArticleCell.articleImageBackdrop(for: probeCell.traitCollection)
+        )
+        _ = try await pipeline.prefetch(request)
+
+        scheduler.setScrolling(true)
+        let scrollingCell = configuredArticleImageTestCell(item: item, pipeline: pipeline)
+
+        XCTAssertNil(scrollingCell.articleImageForTesting)
+        XCTAssertFalse(scrollingCell.articleImagePresentationForTesting.placeholderHidden)
+        XCTAssertEqual(scheduler.metrics().queued, 1)
+
+        scheduler.setScrolling(false)
+
+        XCTAssertNotNil(scrollingCell.articleImageForTesting)
+        XCTAssertTrue(scrollingCell.articleImagePresentationForTesting.placeholderHidden)
+
+        scheduler.resetMetrics()
+        let idleCell = configuredArticleImageTestCell(item: item, pipeline: pipeline)
+
+        XCTAssertNotNil(idleCell.articleImageForTesting)
+        XCTAssertTrue(idleCell.articleImagePresentationForTesting.placeholderHidden)
+        XCTAssertEqual(scheduler.metrics().queued, 0)
+    }
+
+    @MainActor
     func testLateArrivingArticleImagesFadeOnlyWhenEnabled() async throws {
         let data = try imageData(width: 1_200, height: 700)
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
