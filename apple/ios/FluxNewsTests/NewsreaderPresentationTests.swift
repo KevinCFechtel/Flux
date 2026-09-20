@@ -1848,6 +1848,37 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(sharedCalls, 2)
     }
 
+    func testArticleImagePipelineCancellationAfterLoadSkipsObsoleteRasterCache() async throws {
+        let gate = ImageLoadGate(data: try imageData(width: 2_400, height: 1_600))
+        let pipeline = ArticleImagePipeline { _ in try await gate.load() }
+        let request = ArticleImageRequest(
+            url: URL(string: "https://example.com/cancelled.jpg")!,
+            targetSize: CGSize(width: 307, height: 173),
+            displayScale: 3
+        )
+
+        let cancelled = Task { try await pipeline.image(for: request) }
+        await gate.waitUntilStarted()
+        cancelled.cancel()
+        await gate.release()
+
+        do {
+            _ = try await cancelled.value
+            XCTFail("Cancelled consumer must not receive a raster")
+        } catch is CancellationError {}
+
+        XCTAssertNil(pipeline.cachedImage(for: request))
+
+        let active = Task { try await pipeline.image(for: request) }
+        await gate.waitUntilStarted(count: 2)
+        await gate.release()
+        _ = try await active.value
+
+        XCTAssertNotNil(pipeline.cachedImage(for: request))
+        let calls = await gate.callCount()
+        XCTAssertEqual(calls, 2)
+    }
+
     func testArticleImagePipelineCancellingOneConsumerRetainsTheCompletedSharedImage() async throws {
         let gate = ImageLoadGate(data: try imageData(width: 800, height: 400))
         let pipeline = ArticleImagePipeline { _ in try await gate.load() }
