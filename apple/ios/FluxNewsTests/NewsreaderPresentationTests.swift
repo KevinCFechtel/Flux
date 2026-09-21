@@ -353,6 +353,19 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(performance.snapshotApplyCount, 0)
     }
 
+    func testArticleActionHapticPolicyConfirmsRealStarStateChangesOnly() {
+        XCTAssertTrue(IOSArticleActionHapticPolicy.shouldConfirmStar(previous: false, requested: true))
+        XCTAssertTrue(IOSArticleActionHapticPolicy.shouldConfirmStar(previous: true, requested: false))
+        XCTAssertFalse(IOSArticleActionHapticPolicy.shouldConfirmStar(previous: true, requested: true))
+        XCTAssertFalse(IOSArticleActionHapticPolicy.shouldConfirmStar(previous: false, requested: false))
+        XCTAssertFalse(IOSArticleActionHapticPolicy.shouldConfirmStar(previous: nil, requested: true))
+    }
+
+    func testArticleActionHapticPolicyConfirmsOnlySuccessfulThirdPartySave() {
+        XCTAssertTrue(IOSArticleActionHapticPolicy.shouldConfirmSaveToService(.saved))
+        XCTAssertFalse(IOSArticleActionHapticPolicy.shouldConfirmSaveToService(.noIntegrationConfigured))
+    }
+
     func testIPhoneNavigationButtonUsesTheFluxTemplateAsset() {
         XCTAssertEqual(IOSNavigationButtonPresentation.imageName, "FluxNewsTemplate")
         XCTAssertEqual(IOSNavigationButtonPresentation.accessibilityLabel, String(localized: "Choose news scope"))

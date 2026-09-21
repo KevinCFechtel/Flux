@@ -6,6 +6,20 @@ import UIKit
 import OSLog
 #endif
 
+enum IOSArticleActionHapticPolicy {
+    static func shouldConfirmStar(previous: Bool?, requested: Bool) -> Bool {
+        guard let previous else { return false }
+        return previous != requested
+    }
+
+    static func shouldConfirmSaveToService(_ result: SaveToServiceResult) -> Bool {
+        switch result {
+        case .saved: true
+        case .noIntegrationConfigured: false
+        }
+    }
+}
+
 struct IOSFeedIconKey: Hashable {
     let feedID: Int64
     let variant: FeedIconVariant
@@ -505,6 +519,7 @@ struct ArticleRowContent: Equatable, Sendable {
     /// Semantic UI feedback events. The view decides how the system represents
     /// them; persistence code only publishes successful user-visible outcomes.
     private(set) var readCompletionFeedbackRevision: UInt64 = 0
+    private(set) var starCompletionFeedbackRevision: UInt64 = 0
     private(set) var undoCompletionFeedbackRevision: UInt64 = 0
     private var feedIconLoader: (@Sendable (Int64, FeedIconVariant) throws -> Data?)?
     private static let feedIconRetryCooldown: TimeInterval = 30
@@ -975,6 +990,12 @@ struct ArticleRowContent: Equatable, Sendable {
 
     func setStarred(articleIDs: [Int64], starred: Bool) {
         guard let core, !articleIDs.isEmpty else { return }
+        let shouldPublishStarFeedback = articleIDs.contains {
+            IOSArticleActionHapticPolicy.shouldConfirmStar(
+                previous: rowPresentationStates[$0]?.isStarred,
+                requested: starred
+            )
+        }
         let revisions = optimisticallySetStarred(articleIDs, starred: starred)
         let snapshotRevision = snapshotRevision
         Task { [weak self, core] in
@@ -984,6 +1005,9 @@ struct ArticleRowContent: Equatable, Sendable {
             case .success:
                 markMeaningfulInteraction()
                 if snapshotRevision == self.snapshotRevision && !starred && scope == .starred { removeVisibleArticles(articleIDs) }
+                if shouldPublishStarFeedback {
+                    starCompletionFeedbackRevision &+= 1
+                }
                 reloadCounts()
             case let .failure(error):
                 restoreStarredPresentation(articleIDs, revisions: revisions, snapshotRevision: snapshotRevision)

@@ -39,6 +39,8 @@ struct SearchView: View {
         .onAppear {
             searchInterfacePresented = true
         }
+        .sensoryFeedback(.success, trigger: store.readCompletionFeedbackRevision)
+        .sensoryFeedback(.success, trigger: store.starCompletionFeedbackRevision)
     }
 }
 

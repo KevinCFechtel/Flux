@@ -44,6 +44,13 @@ final class IOSSearchStore: ObservableObject {
     @Published private(set) var isSearching = false
     @Published private(set) var isLoadingMore = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var readCompletionFeedbackRevision: UInt64 = 0
+    @Published private(set) var starCompletionFeedbackRevision: UInt64 = 0
+
+    private enum MutationFeedback {
+        case read
+        case starred
+    }
 
     private(set) var core: Flux?
     private var requestState = IOSSearchRequestState()
@@ -136,21 +143,25 @@ final class IOSSearchStore: ObservableObject {
         submit()
     }
 
-    func setRead(_ article: ArticleSummary, read: Bool) {
-        mutate(articleID: article.id, read: read)
+    func setRead(_ article: ArticleSummary, read: Bool, providesFeedback: Bool = true) {
+        mutate(
+            articleID: article.id,
+            read: read,
+            feedback: providesFeedback && read ? .read : nil
+        )
     }
 
     func setStarred(_ article: ArticleSummary, starred: Bool) {
-        mutate(articleID: article.id, starred: starred)
+        mutate(articleID: article.id, starred: starred, feedback: .starred)
     }
 
     func open(_ article: ArticleSummary, completion: @escaping (String) -> Void) {
-        setRead(article, read: true)
+        setRead(article, read: true, providesFeedback: false)
         completion(article.url)
     }
 
     func openReader(_ article: ArticleSummary, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
-        setRead(article, read: true)
+        setRead(article, read: true, providesFeedback: false)
         guard let core else {
             completion(.failure(IOSCoreError.notConfigured))
             return
@@ -183,7 +194,12 @@ final class IOSSearchStore: ObservableObject {
         }
     }
 
-    private func mutate(articleID: Int64, read: Bool? = nil, starred: Bool? = nil) {
+    private func mutate(
+        articleID: Int64,
+        read: Bool? = nil,
+        starred: Bool? = nil,
+        feedback: MutationFeedback? = nil
+    ) {
         guard let core else { return }
         Task { [weak self, core] in
             let result = await AppleCoreExecution.shared.blockingResult {
@@ -195,11 +211,21 @@ final class IOSSearchStore: ObservableObject {
             case let .success(disposition):
                 guard let article = self.results.first(where: { $0.id == articleID }) else { return }
                 let current = self.timelinePresentationBridge.articleState(for: articleID, fallback: article)
+                let readChanged = read.map { $0 != current.isRead } ?? false
+                let starChanged = starred.map { $0 != current.isStarred } ?? false
                 self.timelinePresentationBridge.publishArticle(.init(
                     articleID: articleID,
                     state: .init(isRead: read ?? current.isRead, isStarred: starred ?? current.isStarred, revision: current.revision &+ 1),
                     rearmScrollover: false
                 ))
+                switch feedback {
+                case .read where readChanged:
+                    self.readCompletionFeedbackRevision &+= 1
+                case .starred where starChanged:
+                    self.starCompletionFeedbackRevision &+= 1
+                case .read, .starred, nil:
+                    break
+                }
                 if disposition == .localFirst { self.onLocalFirstMutation() }
             case let .failure(error): self.errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
             }

@@ -179,6 +179,7 @@ struct ContentView: View {
     @State private var markReadWorkflow: IOSMarkReadWorkflow = .read
     @State private var syncPresentation: IOSSyncButtonPresentation.State = .idle
     @State private var syncPresentationGeneration: UInt64 = 0
+    @State private var saveToServiceFeedbackTrigger: UInt64 = 0
 
     /// The capsule already opens the scope chooser, so a second control for the
     /// same action would be pure redundancy.
@@ -257,6 +258,7 @@ struct ContentView: View {
         .alert("Article Action", isPresented: Binding(get: { actionConfirmation != nil }, set: { if !$0 { actionConfirmation = nil } })) {
             Button("OK", role: .cancel) { actionConfirmation = nil }
         } message: { Text(actionConfirmation ?? "") }
+        .sensoryFeedback(.success, trigger: saveToServiceFeedbackTrigger)
         .confirmationDialog(markReadDialogTitle, isPresented: $markReadConfirmationPresented, titleVisibility: .visible) {
             Button(markReadDialogTitle, role: .destructive) { performMarkReadWorkflow() }
         } message: { Text("Marks all unread articles in this scope as read.") }
@@ -569,9 +571,18 @@ struct ContentView: View {
         case .saveToService:
             newsreaderStore.saveToService(article) { result in
                 switch result {
-                 case .success(.saved): actionConfirmation = String(localized: "Saved to third-party service")
-                 case .success(.noIntegrationConfigured): actionConfirmation = String(localized: "No third-party integration is configured in Miniflux")
-                case let .failure(error): actionError = IOSErrorPresentation.message(for: error, context: .articleAction)
+                case let .success(value):
+                    if IOSArticleActionHapticPolicy.shouldConfirmSaveToService(value) {
+                        saveToServiceFeedbackTrigger &+= 1
+                    }
+                    switch value {
+                    case .saved:
+                        actionConfirmation = String(localized: "Saved to third-party service")
+                    case .noIntegrationConfigured:
+                        actionConfirmation = String(localized: "No third-party integration is configured in Miniflux")
+                    }
+                case let .failure(error):
+                    actionError = IOSErrorPresentation.message(for: error, context: .articleAction)
                 }
             }
         }
@@ -596,9 +607,18 @@ struct ContentView: View {
         case .saveToService:
             searchStore.saveToService(article) { result in
                 switch result {
-                 case .success(.saved): actionConfirmation = String(localized: "Saved to third-party service")
-                 case .success(.noIntegrationConfigured): actionConfirmation = String(localized: "No third-party integration is configured in Miniflux")
-                case let .failure(error): actionError = IOSErrorPresentation.message(for: error, context: .articleAction)
+                case let .success(value):
+                    if IOSArticleActionHapticPolicy.shouldConfirmSaveToService(value) {
+                        saveToServiceFeedbackTrigger &+= 1
+                    }
+                    switch value {
+                    case .saved:
+                        actionConfirmation = String(localized: "Saved to third-party service")
+                    case .noIntegrationConfigured:
+                        actionConfirmation = String(localized: "No third-party integration is configured in Miniflux")
+                    }
+                case let .failure(error):
+                    actionError = IOSErrorPresentation.message(for: error, context: .articleAction)
                 }
             }
         }

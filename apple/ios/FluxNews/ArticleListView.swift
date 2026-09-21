@@ -3500,6 +3500,7 @@ struct ArticleListView: View {
         // revision only once after the motion has settled and its successful
         // mutations are drained, so fast scrolling never becomes a haptic stream.
         .sensoryFeedback(.success, trigger: store.readCompletionFeedbackRevision)
+        .sensoryFeedback(.success, trigger: store.starCompletionFeedbackRevision)
         // Undo is intentionally distinct and lighter: it communicates the
         // reversal of the read-state change without reusing the completion pulse.
         .sensoryFeedback(.selection, trigger: store.undoCompletionFeedbackRevision)
