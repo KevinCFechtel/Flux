@@ -708,6 +708,7 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
     let feedIconPresentationBridge: IOSUIKitArticleTimelinePresentationBridge
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
+    let showRelativePublicationTime: Bool
     let iconVariant: FeedIconVariant
     let feedIconRequestRevision: UInt64
     let scrollResetRevision: UInt64
@@ -757,6 +758,7 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
             feedIconPresentationBridge: feedIconPresentationBridge,
             mode: mode,
             previewLines: previewLines,
+            showRelativePublicationTime: showRelativePublicationTime,
             iconVariant: iconVariant,
             feedIconRequestRevision: feedIconRequestRevision,
             scrollResetRevision: scrollResetRevision,
@@ -832,6 +834,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private var structuralRevision: UInt64?
     private var mode: ArticlePresentationMode = .visual
     private var previewLines: ArticlePreviewLines = .standard
+    private var showRelativePublicationTime = false
     private var iconVariant: FeedIconVariant = .normal
     private var feedIconRequestRevision: UInt64?
     private var scrollResetRevision: UInt64?
@@ -1163,6 +1166,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         feedIconPresentationBridge newFeedIconPresentationBridge: IOSUIKitArticleTimelinePresentationBridge,
         mode newMode: ArticlePresentationMode,
         previewLines newPreviewLines: ArticlePreviewLines,
+        showRelativePublicationTime newShowRelativePublicationTime: Bool = false,
         iconVariant newIconVariant: FeedIconVariant,
         feedIconRequestRevision newFeedIconRequestRevision: UInt64,
         scrollResetRevision newScrollResetRevision: UInt64,
@@ -1175,13 +1179,16 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
 #endif
 
         let structuralChanged = structuralRevision != structuralState.revision
-        let layoutInputsChanged = mode != newMode || previewLines != newPreviewLines
+        let layoutInputsChanged = mode != newMode
+            || previewLines != newPreviewLines
+            || showRelativePublicationTime != newShowRelativePublicationTime
         let iconVariantChanged = iconVariant != newIconVariant
         let feedIconRequestChanged = feedIconRequestRevision != nil && feedIconRequestRevision != newFeedIconRequestRevision
         let resetChanged = scrollResetRevision != nil && scrollResetRevision != newScrollResetRevision
 
         mode = newMode
         previewLines = newPreviewLines
+        showRelativePublicationTime = newShowRelativePublicationTime
         iconVariant = newIconVariant
         feedIconRequestRevision = newFeedIconRequestRevision
         scrollResetRevision = newScrollResetRevision
@@ -1319,6 +1326,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             item: item,
             mode: mode,
             previewLines: previewLines,
+            showRelativePublicationTime: showRelativePublicationTime,
             metrics: metrics,
             displayScale: view.traitCollection.displayScale,
             preparedLayoutMetrics: layoutMetrics
@@ -1773,6 +1781,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             item: item,
             mode: mode,
             previewLines: previewLines,
+            showsRelativePublicationTime: showRelativePublicationTime,
             containerWidth: tableView.bounds.width,
             displayScale: view.traitCollection.displayScale,
             contentSizeCategory: view.traitCollection.preferredContentSizeCategory,
@@ -1785,6 +1794,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         return .init(
             mode: mode,
             previewLines: previewLines,
+            showsRelativePublicationTime: showRelativePublicationTime,
             containerWidth: tableView.bounds.width,
             displayScale: view.traitCollection.displayScale,
             contentSizeCategory: view.traitCollection.preferredContentSizeCategory,
@@ -2236,6 +2246,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private let feedIconImageView = UIImageView()
     private let feedIconFallbackLabel = UILabel()
     private let feedTitleLabel = UILabel()
+    private let publicationTimeIconView = UIImageView(image: UIImage(systemName: "clock.arrow.circlepath"))
     private let dateLabel = UILabel()
     private let landscapeReadingTimeContainer = UIView()
     private let landscapeReadingTimeIconView = UIImageView(image: UIImage(systemName: "doc.text"))
@@ -2268,7 +2279,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var commentsToStarSpacingConstraint: NSLayoutConstraint!
     private var metadataFeedTitleDefaultTrailingConstraint: NSLayoutConstraint!
     private var metadataFeedTitlePortraitTrailingConstraint: NSLayoutConstraint!
-    private var defaultDateLeadingConstraint: NSLayoutConstraint!
+    private var publicationTimeIconWidthConstraint: NSLayoutConstraint!
+    private var publicationTimeIconHeightConstraint: NSLayoutConstraint!
+    private var publicationTimeIconTextSpacingConstraint: NSLayoutConstraint!
     private var defaultDateTopConstraint: NSLayoutConstraint!
     private var defaultDateTrailingConstraint: NSLayoutConstraint!
     private var landscapeDateTrailingConstraint: NSLayoutConstraint!
@@ -2339,6 +2352,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var currentTitle = ""
     private var currentFeedTitle = ""
     private var currentPublishedDate = ""
+    private var currentShowsRelativePublicationTime = false
     private var currentReadingTime: String?
     private var currentIsRead = false
     private var currentIsStarred = false
@@ -2436,6 +2450,13 @@ final class IOSUIKitArticleCell: UITableViewCell {
         ])
 
         starImageView.translatesAutoresizingMaskIntoConstraints = false
+        publicationTimeIconView.translatesAutoresizingMaskIntoConstraints = false
+        publicationTimeIconView.tintColor = Self.supportingTextColor
+        publicationTimeIconView.contentMode = .scaleAspectFit
+        publicationTimeIconView.isHidden = true
+        publicationTimeIconWidthConstraint = publicationTimeIconView.widthAnchor.constraint(equalToConstant: 0)
+        publicationTimeIconHeightConstraint = publicationTimeIconView.heightAnchor.constraint(equalToConstant: 0)
+
         dateLabel.font = UIFont.preferredFont(forTextStyle: .caption1)
         dateLabel.adjustsFontForContentSizeCategory = true
         dateLabel.textColor = Self.supportingTextColor
@@ -2522,6 +2543,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             textContainer.addSubview(label)
         }
         textContainer.addSubview(metadataRow)
+        textContainer.addSubview(publicationTimeIconView)
         textContainer.addSubview(landscapeReadingTimeContainer)
         previewTopConstraint = previewLabel.topAnchor.constraint(equalTo: dateLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing)
         // Collapsing by priority keeps the constraint graph untouched. Removing
@@ -2538,28 +2560,36 @@ final class IOSUIKitArticleCell: UITableViewCell {
         previewTrailingDefaultConstraint = previewLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor)
 
         defaultDateTopConstraint = dateLabel.topAnchor.constraint(
-            equalTo: metadataRow.bottomAnchor,
+            equalTo: titleLabel.bottomAnchor,
             constant: IOSUIKitArticleGeometry.textSpacing
         )
         defaultDateTrailingConstraint = dateLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor)
         defaultStackConstraints = [
             previewBottomDefaultConstraint,
             previewTrailingDefaultConstraint,
-            titleLabel.topAnchor.constraint(equalTo: textContainer.topAnchor),
-            titleLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
-            metadataRow.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            metadataRow.topAnchor.constraint(equalTo: textContainer.topAnchor),
             metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            titleLabel.topAnchor.constraint(equalTo: metadataRow.bottomAnchor, constant: IOSUIKitArticleGeometry.textSpacing),
+            titleLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
             defaultDateTopConstraint,
             defaultDateTrailingConstraint,
             previewTopConstraint,
         ]
 
-        var stackedConstraints: [NSLayoutConstraint] = []
+        publicationTimeIconTextSpacingConstraint = dateLabel.leadingAnchor.constraint(
+            equalTo: publicationTimeIconView.trailingAnchor,
+            constant: 0
+        )
+        var stackedConstraints: [NSLayoutConstraint] = [
+            publicationTimeIconView.leadingAnchor.constraint(equalTo: textContainer.leadingAnchor),
+            publicationTimeIconView.centerYAnchor.constraint(equalTo: dateLabel.centerYAnchor),
+            publicationTimeIconWidthConstraint,
+            publicationTimeIconHeightConstraint,
+            publicationTimeIconTextSpacingConstraint,
+        ]
         for child in [titleLabel, metadataRow, previewLabel] as [UIView] {
             stackedConstraints.append(child.leadingAnchor.constraint(equalTo: textContainer.leadingAnchor))
         }
-        defaultDateLeadingConstraint = dateLabel.leadingAnchor.constraint(equalTo: textContainer.leadingAnchor)
-        stackedConstraints.append(defaultDateLeadingConstraint)
         NSLayoutConstraint.activate(stackedConstraints)
 
         articleImageView.translatesAutoresizingMaskIntoConstraints = false
@@ -2871,6 +2901,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         item: IOSUIKitArticleTimelineItem,
         mode: ArticlePresentationMode,
         previewLines: ArticlePreviewLines,
+        showRelativePublicationTime: Bool = false,
         metrics: Metrics,
         displayScale: CGFloat,
         preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics
@@ -2882,7 +2913,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
         self.preparedLayoutMetrics = preparedLayoutMetrics
         currentTitle = item.content.article.title
         currentFeedTitle = item.content.article.feedTitle
-        currentPublishedDate = item.content.publishedDate
+        currentShowsRelativePublicationTime = showRelativePublicationTime
+        currentPublishedDate = showRelativePublicationTime ? item.content.publishedAge : item.content.publishedDate
         currentReadingTime = item.content.readingTime
         titleLabel.text = currentTitle
         feedTitleLabel.text = currentFeedTitle
@@ -2954,6 +2986,14 @@ final class IOSUIKitArticleCell: UITableViewCell {
             commentsHeightConstraint.constant = comments
         }
 
+        if let publicationIcon = layout.publicationTimeIconFrame {
+            publicationTimeIconWidthConstraint.constant = publicationIcon.width
+            publicationTimeIconHeightConstraint.constant = publicationIcon.height
+        } else {
+            publicationTimeIconWidthConstraint.constant = 0
+            publicationTimeIconHeightConstraint.constant = 0
+        }
+
         if let container = layout.landscapeReadingTimeContainerFrame,
            let icon = layout.landscapeReadingTimeIconFrame,
            let text = layout.landscapeReadingTimeFrame {
@@ -2979,6 +3019,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
         )
 
         let usesDateRowReadingTime = currentReadingTime != nil
+        publicationTimeIconView.isHidden = !currentShowsRelativePublicationTime
+        publicationTimeIconTextSpacingConstraint.constant = currentShowsRelativePublicationTime
+            ? IOSUIKitArticleGeometry.landscapeReadingTimeIconTextSpacing
+            : 0
         metadataFeedTitleDefaultTrailingConstraint.isActive = true
         metadataFeedTitlePortraitTrailingConstraint.isActive = false
         landscapeReadingTimeContainer.isHidden = !usesDateRowReadingTime
@@ -3009,7 +3053,6 @@ final class IOSUIKitArticleCell: UITableViewCell {
         }
 
         NSLayoutConstraint.deactivate(activeLayoutConstraints)
-        defaultDateLeadingConstraint.isActive = true
         dateLabel.isHidden = false
 
         switch variant {
@@ -3040,6 +3083,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         // Colour only — never anything that could move a frame.
         let supporting = isRead ? Self.supportingReadTextColor : Self.supportingTextColor
         feedTitleLabel.textColor = supporting
+        publicationTimeIconView.tintColor = supporting
         dateLabel.textColor = supporting
         landscapeReadingTimeIconView.tintColor = supporting
         landscapeReadingTimeLabel.textColor = supporting
@@ -3113,6 +3157,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         let feedTitleFrame: CGRect
         let commentsFrame: CGRect?
         let dateFrame: CGRect
+        let publicationTimeIconFrame: CGRect?
         let landscapeReadingTimeContainerFrame: CGRect?
         let landscapeReadingTimeIconFrame: CGRect?
         let landscapeReadingTimeFrame: CGRect?
@@ -3135,6 +3180,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             feedTitleFrame: frame(feedTitleLabel),
             commentsFrame: currentHasComments ? frame(commentsContainer) : nil,
             dateFrame: frame(dateLabel),
+            publicationTimeIconFrame: currentShowsRelativePublicationTime ? frame(publicationTimeIconView) : nil,
             landscapeReadingTimeContainerFrame: currentReadingTime != nil
                 ? frame(landscapeReadingTimeContainer)
                 : nil,
@@ -3369,6 +3415,7 @@ struct ArticleListView: View {
                     feedIconPresentationBridge: store.timelinePresentationBridge,
                     mode: store.articlePresentationMode,
                     previewLines: store.articlePreviewLines,
+                    showRelativePublicationTime: store.showRelativePublicationTime,
                     iconVariant: iconVariant,
                     feedIconRequestRevision: store.feedIconRequestRevision,
                     scrollResetRevision: store.scrollResetRevision,

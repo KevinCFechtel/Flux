@@ -257,6 +257,7 @@ struct IOSNewsreaderReadLifecycle {
 private struct TimelinePagePreparation {
     let page: ArticlePage
     let contents: [ArticleRowContent]
+    let referenceDate: Date
 }
 
 enum IOSSyncCountRefreshPolicy: Equatable {
@@ -320,6 +321,14 @@ struct ArticleRowArticle: Equatable, Sendable {
 }
 
 enum IOSArticleTemporalPresentation {
+    static func relativePublishedAge(_ publishedAt: String, relativeTo referenceDate: Date) -> String {
+        guard let date = ISO8601DateFormatter().date(from: publishedAt) else { return publishedAt }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        formatter.dateTimeStyle = .numeric
+        return formatter.localizedString(for: date, relativeTo: referenceDate)
+    }
+
     static func readingTime(_ minutes: UInt32) -> String? {
         guard minutes > 0 else { return nil }
         let formatter = DateComponentsFormatter()
@@ -333,14 +342,21 @@ enum IOSArticleTemporalPresentation {
 struct ArticleRowContent: Equatable, Sendable {
     let article: ArticleRowArticle
     let publishedDate: String
+    /// Frozen for the active Timeline generation. Pagination reuses the same
+    /// reference date and no timer advances this string while that generation is active.
+    let publishedAge: String
     let readingTime: String?
     let imageURL: URL?
     let hasComments: Bool
 
-    init(article: ArticleSummary) {
+    init(article: ArticleSummary, referenceDate: Date = .now) {
         self.article = ArticleRowArticle(article: article)
         publishedDate = ISO8601DateFormatter().date(from: article.publishedAt)
             .map { $0.formatted(date: .abbreviated, time: .shortened) } ?? article.publishedAt
+        publishedAge = IOSArticleTemporalPresentation.relativePublishedAge(
+            article.publishedAt,
+            relativeTo: referenceDate
+        )
         readingTime = IOSArticleTemporalPresentation.readingTime(article.readingTimeMinutes)
         imageURL = article.imageUrl.flatMap { $0.isEmpty ? nil : URL(string: $0) }
         hasComments = IOSArticleContextMenuPolicy.commentsURL(article.commentsUrl) != nil
@@ -372,7 +388,13 @@ struct ArticleRowContent: Equatable, Sendable {
     }
 
     func reconcile(with article: ArticleSummary, content preparedContent: ArticleRowContent? = nil) {
-        if content.article != ArticleRowArticle(article: article) { content = preparedContent ?? ArticleRowContent(article: article) }
+        if let preparedContent {
+            // A structural replacement owns a fresh frozen temporal projection
+            // even when the underlying article fields are otherwise unchanged.
+            content = preparedContent
+        } else if content.article != ArticleRowArticle(article: article) {
+            content = ArticleRowContent(article: article)
+        }
         setRead(article.isRead)
         setStarred(article.isStarred)
     }
@@ -397,6 +419,7 @@ struct ArticleRowContent: Equatable, Sendable {
         static let presentationMode = "FluxNews.iOS.articlePresentationMode"
         static let previewLines = "FluxNews.iOS.articlePreviewLines"
         static let showArticleCount = "FluxNews.iOS.showArticleCount"
+        static let showRelativePublicationTime = "FluxNews.iOS.showRelativePublicationTime"
         static let clickOnNews = "FluxNews.clickOnNews"
     }
 
@@ -410,6 +433,7 @@ struct ArticleRowContent: Equatable, Sendable {
     private var nextTimelineCursor: ArticleCursor?
     private var hasMoreTimelinePages = false
     private var nextTimelinePageRequest: IOSNewsreaderTimelinePageRequest?
+    private var timelineReferenceDate = Date.now
     private static let timelinePageSize: UInt32 = 72
     private(set) var catalog = NavigationCatalog(categories: [], feeds: [])
     private(set) var unreadTotal: UInt64 = 0
@@ -438,6 +462,7 @@ struct ArticleRowContent: Equatable, Sendable {
     var articlePresentationMode: ArticlePresentationMode
     var articlePreviewLines: ArticlePreviewLines
     var showArticleCount: Bool
+    var showRelativePublicationTime: Bool
     var clickOnNews: ClickOnNews
     private(set) var scrolloverUndoIDs: [Int64] = []
     // The tracker only needs to re-arm when an existing Undo group is cleared.
@@ -496,6 +521,7 @@ struct ArticleRowContent: Equatable, Sendable {
         articlePresentationMode = defaults.string(forKey: Key.presentationMode).flatMap(ArticlePresentationMode.init(rawValue:)) ?? .visual
         articlePreviewLines = ArticlePreviewLines(rawValue: defaults.object(forKey: Key.previewLines) as? Int ?? 3) ?? .standard
         showArticleCount = defaults.object(forKey: Key.showArticleCount) as? Bool ?? true
+        showRelativePublicationTime = defaults.object(forKey: Key.showRelativePublicationTime) as? Bool ?? false
         clickOnNews = defaults.string(forKey: Key.clickOnNews).flatMap(ClickOnNews.init(rawValue:)) ?? .openLink
     }
 
@@ -572,6 +598,7 @@ struct ArticleRowContent: Equatable, Sendable {
         guard let core else { return }
         let request = readLifecycle.beginArticle()
         let articleQuery = query()
+        let referenceDate = Date.now
         nextTimelinePageRequest = nil
         nextTimelineCursor = nil
         hasMoreTimelinePages = false
@@ -582,7 +609,8 @@ struct ArticleRowContent: Equatable, Sendable {
                 let page = try core.articlePage(query: articleQuery, includeTotal: true)
                 return TimelinePagePreparation(
                     page: page,
-                    contents: page.articles.map { ArticleRowContent(article: $0) }
+                    contents: page.articles.map { ArticleRowContent(article: $0, referenceDate: referenceDate) },
+                    referenceDate: referenceDate
                 )
             }
             guard let self, self.readLifecycle.isCurrentArticle(request), self.readLifecycle.isCurrentSelectionCount(request) else { return }
@@ -711,6 +739,11 @@ struct ArticleRowContent: Equatable, Sendable {
     func setArticlePresentationMode(_ value: ArticlePresentationMode) { articlePresentationMode = value; defaults.set(value.rawValue, forKey: Key.presentationMode); resetPresentationState() }
     func setArticlePreviewLines(_ value: ArticlePreviewLines) { articlePreviewLines = value; defaults.set(value.rawValue, forKey: Key.previewLines); resetPresentationState() }
     func setShowArticleCount(_ value: Bool) { showArticleCount = value; defaults.set(value, forKey: Key.showArticleCount) }
+    func setShowRelativePublicationTime(_ value: Bool) {
+        guard showRelativePublicationTime != value else { return }
+        showRelativePublicationTime = value
+        defaults.set(value, forKey: Key.showRelativePublicationTime)
+    }
     func setClickOnNews(_ value: ClickOnNews) { clickOnNews = value; defaults.set(value.rawValue, forKey: Key.clickOnNews) }
 
     func setRead(_ article: ArticleSummary, read: Bool) { setRead(articleIDs: [article.id], read: read) }
@@ -1238,13 +1271,16 @@ struct ArticleRowContent: Equatable, Sendable {
     }
 
     private func replaceArticles(_ value: [ArticleSummary]) {
+        let referenceDate = Date.now
         replaceFirstTimelinePage(.init(
             page: ArticlePage(articles: value, total: UInt64(value.count), nextCursor: nil),
-            contents: value.map { ArticleRowContent(article: $0) }
+            contents: value.map { ArticleRowContent(article: $0, referenceDate: referenceDate) },
+            referenceDate: referenceDate
         ))
     }
 
     private func replaceFirstTimelinePage(_ value: TimelinePagePreparation) {
+        timelineReferenceDate = value.referenceDate
         let articles = value.page.articles
         loadedArticlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
         let loadedIDs = Set(loadedArticlesByID.keys)
@@ -1275,6 +1311,7 @@ struct ArticleRowContent: Equatable, Sendable {
         guard let core, let cursor = nextTimelineCursor, hasMoreTimelinePages, nextTimelinePageRequest == nil else { return }
         let request = readLifecycle.beginNextArticlePage()
         let currentQuery = query()
+        let referenceDate = timelineReferenceDate
         let pageQuery = ArticleQuery(
             scope: currentQuery.scope,
             readFilter: currentQuery.readFilter,
@@ -1289,7 +1326,8 @@ struct ArticleRowContent: Equatable, Sendable {
                 let page = try core.articlePage(query: pageQuery, includeTotal: false)
                 return TimelinePagePreparation(
                     page: page,
-                    contents: page.articles.map { ArticleRowContent(article: $0) }
+                    contents: page.articles.map { ArticleRowContent(article: $0, referenceDate: referenceDate) },
+                    referenceDate: referenceDate
                 )
             }
             guard let self, self.completeNextTimelinePageRequest(request) else { return }
@@ -1336,7 +1374,7 @@ struct ArticleRowContent: Equatable, Sendable {
         if let state = rowPresentationStates[article.id] { return state }
         let state = ArticleRowPresentationState(
             article: article,
-            content: ArticleRowContent(article: article)
+            content: ArticleRowContent(article: article, referenceDate: timelineReferenceDate)
         )
         rowPresentationStates[article.id] = state
         return state
@@ -1469,8 +1507,9 @@ struct ArticleRowContent: Equatable, Sendable {
             .init(
                 page: .init(articles: value, total: nil, nextCursor: nil),
                 contents: value.map {
-                    ArticleRowContent(article: $0)
-                }
+                    ArticleRowContent(article: $0, referenceDate: timelineReferenceDate)
+                },
+                referenceDate: timelineReferenceDate
             )
         )
     }

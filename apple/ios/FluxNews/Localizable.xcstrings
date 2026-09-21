@@ -1551,6 +1551,22 @@
         }
       }
     },
+    "Show relative publication time": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Veröffentlichungszeit relativ anzeigen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show relative publication time"
+          }
+        }
+      }
+    },
     "Showing %lld of %lld": {
       "extractionState": "stale",
       "localizations": {

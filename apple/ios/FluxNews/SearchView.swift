@@ -76,6 +76,7 @@ private struct SearchResultsContent: View {
                     feedIconPresentationBridge: newsreaderStore.timelinePresentationBridge,
                     mode: newsreaderStore.articlePresentationMode,
                     previewLines: newsreaderStore.articlePreviewLines,
+                    showRelativePublicationTime: newsreaderStore.showRelativePublicationTime,
                     iconVariant: iconVariant,
                     feedIconRequestRevision: newsreaderStore.feedIconRequestRevision,
                     scrollResetRevision: 0,

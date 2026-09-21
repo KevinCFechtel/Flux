@@ -48,6 +48,7 @@ final class IOSSearchStore: ObservableObject {
     private(set) var core: Flux?
     private var requestState = IOSSearchRequestState()
     private var paginationExhausted = false
+    private var searchReferenceDate = Date.now
     private let pageSize = IOSSearchPaginationPolicy.pageSize
     var onLocalFirstMutation: () -> Void = {}
 
@@ -59,6 +60,7 @@ final class IOSSearchStore: ObservableObject {
         guard !value.isEmpty, let core else { return }
         let requestGeneration = requestState.begin()
         let pageSize = pageSize
+        searchReferenceDate = .now
         submittedQuery = value
         replaceResults([])
         total = 0
@@ -212,7 +214,7 @@ final class IOSSearchStore: ObservableObject {
         })
         timelinePresentationBridge.replaceArticleStates(states)
         timelineStructuralState = .init(
-            items: value.map { .init(article: $0, content: ArticleRowContent(article: $0)) },
+            items: value.map { .init(article: $0, content: ArticleRowContent(article: $0, referenceDate: searchReferenceDate)) },
             revision: timelineStructuralState.revision &+ 1
         )
     }

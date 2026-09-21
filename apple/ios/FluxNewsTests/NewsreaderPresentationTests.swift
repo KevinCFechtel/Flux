@@ -384,6 +384,22 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testRelativePublicationTimePreferenceDefaultsOffAndPersists() {
+        let suiteName = "FluxNews.RelativePublicationTimeSettings.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = NewsreaderStore(defaults: defaults)
+        XCTAssertFalse(store.showRelativePublicationTime)
+
+        store.setShowRelativePublicationTime(true)
+        XCTAssertTrue(store.showRelativePublicationTime)
+
+        let reloaded = NewsreaderStore(defaults: defaults)
+        XCTAssertTrue(reloaded.showRelativePublicationTime)
+    }
+
+    @MainActor
     func testArticleCountPreferenceDefaultsPersistsAndOnlyControlsCounterPresentation() {
         let suiteName = "FluxNews.CounterSettings.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -2485,11 +2501,89 @@ final class NewsreaderPresentationTests: XCTestCase {
             preview: "",
             imageUrl: nil
         )
-        let content = ArticleRowContent(article: article)
+        let referenceDate = ISO8601DateFormatter().date(from: article.publishedAt)!.addingTimeInterval(3 * 3_600)
+        let content = ArticleRowContent(article: article, referenceDate: referenceDate)
 
         XCTAssertFalse(content.publishedDate.isEmpty)
+        XCTAssertEqual(
+            content.publishedAge,
+            IOSArticleTemporalPresentation.relativePublishedAge(article.publishedAt, relativeTo: referenceDate)
+        )
         XCTAssertEqual(content.readingTime, IOSArticleTemporalPresentation.readingTime(4))
         XCTAssertNil(IOSArticleTemporalPresentation.readingTime(0))
+    }
+
+    func testArticleTemporalProjectionRefreshesOnlyWithPreparedSnapshotContent() {
+        let article = ArticleSummary(
+            id: 78,
+            feedId: 10,
+            categoryId: 20,
+            feedTitle: "Feed",
+            title: "Article",
+            url: "https://example.com/78",
+            commentsUrl: "",
+            publishedAt: "2026-09-20T06:00:00Z",
+            isRead: false,
+            isStarred: false,
+            readingTimeMinutes: 0,
+            preview: "",
+            imageUrl: nil
+        )
+        let publishedDate = ISO8601DateFormatter().date(from: article.publishedAt)!
+        let firstReference = publishedDate.addingTimeInterval(3 * 3_600)
+        let secondReference = publishedDate.addingTimeInterval(5 * 3_600)
+        let first = ArticleRowContent(article: article, referenceDate: firstReference)
+        let second = ArticleRowContent(article: article, referenceDate: secondReference)
+        let state = ArticleRowPresentationState(article: article, content: first)
+
+        state.reconcile(with: article, content: second)
+
+        XCTAssertEqual(state.content.publishedAge, second.publishedAge)
+        XCTAssertNotEqual(first.publishedAge, second.publishedAge)
+    }
+
+    func testEveryArticleLayoutLeadsWithMetadataThenTitleThenPublicationRow() {
+        let cases: [(ArticlePresentationMode, CGFloat, Bool, IOSUIKitArticleCellLayoutVariant)] = [
+            (.compact, 390, false, .compact),
+            (.visual, 390, false, .visualTextOnly),
+            (.visual, 390, true, .visualPortrait),
+            (.visual, 760, true, .visualLandscape),
+            (.visualCompact, 414, true, .visualSideTitle),
+            (.visualCompact, 834, true, .visualSideTitleWide),
+            (.visualCompact, 414, false, .visualSideTitleTextOnly),
+        ]
+
+        for (mode, width, hasImage, expectedVariant) in cases {
+            let metrics = layoutMetrics(mode: mode, width: width, hasImage: hasImage, readingTime: "4 min")
+            XCTAssertEqual(metrics.variant, expectedVariant)
+            XCTAssertLessThan(metrics.metadataFrame.maxY, metrics.titleFrame.minY)
+            XCTAssertLessThan(metrics.titleFrame.maxY, metrics.dateFrame.minY)
+        }
+    }
+
+    func testRelativePublicationTimeUsesLeadingClockWithoutChangingDateRowHeight() {
+        let absolute = layoutMetrics(mode: .visual, width: 390, hasImage: true, readingTime: "4 min")
+        let relative = layoutMetrics(
+            mode: .visual,
+            width: 390,
+            hasImage: true,
+            readingTime: "4 min",
+            showsRelativePublicationTime: true
+        )
+
+        let icon = try? XCTUnwrap(relative.publicationTimeIconFrame)
+        XCTAssertNotNil(icon)
+        XCTAssertNil(absolute.publicationTimeIconFrame)
+        XCTAssertEqual(relative.dateFrame.height, absolute.dateFrame.height, accuracy: 0.5)
+        XCTAssertEqual(relative.cellSize.height, absolute.cellSize.height, accuracy: 0.5)
+        if let icon {
+            XCTAssertEqual(icon.midY, relative.dateFrame.midY, accuracy: 0.5)
+            XCTAssertEqual(
+                relative.dateFrame.minX - icon.maxX,
+                IOSUIKitArticleGeometry.landscapeReadingTimeIconTextSpacing,
+                accuracy: 0.5
+            )
+        }
     }
 
     func testVisualPortraitUsesFullWidthImageBeforeMetadataTitleAndDateRow() {
@@ -3129,7 +3223,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         width: CGFloat,
         hasImage: Bool,
         scale: CGFloat = 2,
-        readingTime: String? = nil
+        readingTime: String? = nil,
+        showsRelativePublicationTime: Bool = false
     ) -> IOSUIKitArticleLayoutMetrics {
         IOSUIKitArticleLayoutEngine.metrics(
             for: layoutInput(
@@ -3137,7 +3232,8 @@ final class NewsreaderPresentationTests: XCTestCase {
                 width: width,
                 hasImage: hasImage,
                 scale: scale,
-                readingTime: readingTime
+                readingTime: readingTime,
+                showsRelativePublicationTime: showsRelativePublicationTime
             )
         )
     }
@@ -3173,12 +3269,15 @@ final class NewsreaderPresentationTests: XCTestCase {
         width: CGFloat,
         hasImage: Bool,
         scale: CGFloat = 2,
-        readingTime: String? = nil
+        readingTime: String? = nil,
+        showsRelativePublicationTime: Bool = false
     ) -> IOSUIKitArticleLayoutInput {
         .init(
             title: "A deliberately multiline article title that exercises deterministic bounded text measurement",
             feedTitle: "A feed title",
-            publishedDate: "January 1", readingTime: readingTime,
+            publishedDate: showsRelativePublicationTime ? "3 hr. ago" : "January 1",
+            showsRelativePublicationTime: showsRelativePublicationTime,
+            readingTime: readingTime,
             preview: "A preview long enough to occupy multiple lines and preserve the production card text stack.",
             hasImage: hasImage,
             hasComments: true,

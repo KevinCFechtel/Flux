@@ -7,6 +7,7 @@ struct IOSUIKitArticleLayoutInput: Hashable {
     let title: String
     let feedTitle: String
     let publishedDate: String
+    let showsRelativePublicationTime: Bool
     let readingTime: String?
     let preview: String
     let hasImage: Bool
@@ -18,10 +19,11 @@ struct IOSUIKitArticleLayoutInput: Hashable {
     let contentSizeCategory: UIContentSizeCategory
     let layoutDirection: UIUserInterfaceLayoutDirection
 
-    init(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
+    init(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, showsRelativePublicationTime: Bool = false, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
         title = item.content.article.title
         feedTitle = item.content.article.feedTitle
-        publishedDate = item.content.publishedDate
+        publishedDate = showsRelativePublicationTime ? item.content.publishedAge : item.content.publishedDate
+        self.showsRelativePublicationTime = showsRelativePublicationTime
         readingTime = item.content.readingTime
         preview = item.content.article.preview
         hasImage = item.content.imageURL != nil
@@ -34,10 +36,11 @@ struct IOSUIKitArticleLayoutInput: Hashable {
         self.layoutDirection = layoutDirection
     }
 
-    init(title: String, feedTitle: String, publishedDate: String, readingTime: String? = nil, preview: String, hasImage: Bool, hasComments: Bool, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
+    init(title: String, feedTitle: String, publishedDate: String, showsRelativePublicationTime: Bool = false, readingTime: String? = nil, preview: String, hasImage: Bool, hasComments: Bool, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
         self.title = title
         self.feedTitle = feedTitle
         self.publishedDate = publishedDate
+        self.showsRelativePublicationTime = showsRelativePublicationTime
         self.readingTime = readingTime
         self.preview = preview
         self.hasImage = hasImage; self.hasComments = hasComments; self.mode = mode; self.previewLines = previewLines
@@ -50,6 +53,7 @@ struct IOSUIKitArticleLayoutKey: Hashable {
     let title: String
     let feedTitle: String
     let publishedDate: String
+    let showsRelativePublicationTime: Bool
     let readingTime: String?
     let preview: String
     let hasComments: Bool
@@ -78,9 +82,10 @@ struct IOSUIKitArticleLayoutKey: Hashable {
         feedTitle = input.feedTitle
         let resolvedVariant = geometry.variant(hasImage: input.hasImage && input.mode.showsArticleImage)
         variant = resolvedVariant
-        // Every productive variant uses the absolute publication date, with
-        // optional Miniflux reading time projected into the same date row.
+        // The selected frozen publication representation and optional Miniflux
+        // reading time are both part of the deterministic publication row.
         publishedDate = input.publishedDate
+        showsRelativePublicationTime = input.showsRelativePublicationTime
         readingTime = input.readingTime
         preview = input.preview
         hasComments = input.hasComments
@@ -102,14 +107,16 @@ struct IOSUIKitTimelineGeometryIdentity: Hashable {
     let layoutDirection: UIUserInterfaceLayoutDirection
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
+    let showsRelativePublicationTime: Bool
 
-    init(mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
+    init(mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, showsRelativePublicationTime: Bool = false, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
         containerWidthPixels = IOSUIKitArticleLayoutKey.canonicalContainerWidthPixels(containerWidth, displayScale: displayScale)
         displayScaleHundredths = IOSUIKitArticleLayoutKey.canonicalDisplayScaleHundredths(displayScale)
         self.contentSizeCategory = contentSizeCategory.rawValue
         self.layoutDirection = layoutDirection
         self.mode = mode
         self.previewLines = previewLines
+        self.showsRelativePublicationTime = showsRelativePublicationTime
     }
 }
 
@@ -127,6 +134,7 @@ struct IOSUIKitArticleLayoutMetrics: Equatable {
     let commentsFrame: CGRect?
     let starFrame: CGRect
     let dateFrame: CGRect
+    let publicationTimeIconFrame: CGRect?
     let landscapeReadingTimeContainerFrame: CGRect?
     let landscapeReadingTimeIconFrame: CGRect?
     let landscapeReadingTimeFrame: CGRect?
@@ -567,9 +575,8 @@ enum IOSUIKitArticleLayoutEngine {
         // full width — the metadata because the feed name is squeezed first, the
         // preview because it needs the room to read as a paragraph.
         let isSideTitleVariant = variant == .visualSideTitle || variant == .visualSideTitleWide
-        // The image-less side-title variant shares the ordering but not the
-        // narrowed title column.
-        let metadataLeads = isSideTitleVariant || variant == .visualSideTitleTextOnly
+        // Every productive article layout uses one semantic order:
+        // metadata -> title -> publication row -> preview.
         let titleWidth = isSideTitleVariant
             ? max(0, geometry.availableWidth - imageSize.width - IOSUIKitArticleGeometry.sideTitleSpacing)
             : textWidth
@@ -589,6 +596,12 @@ enum IOSUIKitArticleLayoutEngine {
         let metadataHeight = max(accessories.feedIcon, font(.subheadline, category: input.contentSizeCategory, bold: true).lineHeight)
         let dateFont = font(.caption1, category: input.contentSizeCategory, bold: false)
         let dateHeight = fixedLineHeight(input.publishedDate, font: dateFont)
+        let publicationTimeIconSize = input.showsRelativePublicationTime
+            ? min(accessories.infoIcon, dateHeight)
+            : 0
+        let publicationTimeLeadingWidth = input.showsRelativePublicationTime
+            ? publicationTimeIconSize + IOSUIKitArticleGeometry.landscapeReadingTimeIconTextSpacing
+            : 0
         let previewHeight = coreTextHeight(input.preview, font: font(.subheadline, category: input.contentSizeCategory, bold: false), width: previewWidth, maximumLines: input.previewLines.rawValue, displayScale: scale)
 
         let usesDateRowReadingTime = input.readingTime != nil
@@ -618,13 +631,9 @@ enum IOSUIKitArticleLayoutEngine {
         } else if variant == .visualSideTitle || variant == .visualSideTitleTextOnly {
             textBlockHeight = metadataHeight + IOSUIKitArticleGeometry.textSpacing + sideTitleRowHeight
                 + (previewHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
-        } else if variant == .visualPortrait {
+        } else {
             textBlockHeight = metadataHeight
                 + IOSUIKitArticleGeometry.textSpacing + titleHeight
-                + IOSUIKitArticleGeometry.textSpacing + dateHeight
-                + (previewHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
-        } else {
-            textBlockHeight = titleHeight + IOSUIKitArticleGeometry.textSpacing + metadataHeight
                 + IOSUIKitArticleGeometry.textSpacing + dateHeight
                 + (previewHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
         }
@@ -663,24 +672,9 @@ enum IOSUIKitArticleLayoutEngine {
             x: physicalX(logicalX: logicalTextX, width: textWidth, in: input.containerWidth, direction: input.layoutDirection),
             y: textOriginY
         )
-        // Side-title and standard Visual portrait both lead their text stack with
-        // metadata, followed by title/date. Other variants retain their ordering.
-        let isSideTitle = metadataLeads
-        let metadataLeadsPortrait = variant == .visualPortrait
-        let titleTop: CGFloat
-        if isSideTitle || metadataLeadsPortrait {
-            titleTop = textOrigin.y + metadataHeight + IOSUIKitArticleGeometry.textSpacing
-        } else {
-            titleTop = textOrigin.y
-        }
+        let metadataFrame = CGRect(x: textOrigin.x, y: textOrigin.y, width: infoWidth, height: metadataHeight)
+        let titleTop = metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing
         let titleFrame = CGRect(x: textOrigin.x, y: titleTop, width: titleWidth, height: titleHeight)
-        let metadataTop: CGFloat
-        if isSideTitle || metadataLeadsPortrait {
-            metadataTop = textOrigin.y
-        } else {
-            metadataTop = titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing
-        }
-        let metadataFrame = CGRect(x: textOrigin.x, y: metadataTop, width: infoWidth, height: metadataHeight)
         let metadataLayout = geometry.metadataLayout(
             width: infoWidth,
             hasComments: input.hasComments,
@@ -713,33 +707,44 @@ enum IOSUIKitArticleLayoutEngine {
         )
 
         let dateFrame: CGRect
+        let publicationTimeIconFrame: CGRect?
         let landscapeReadingTimeContainerFrame: CGRect?
         let landscapeReadingTimeIconFrame: CGRect?
         let landscapeReadingTimeFrame: CGRect?
 
-        let dateRowY = (isSideTitle || variant == .visualPortrait)
-            ? titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing
-            : metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing
+        let dateRowY = titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing
         let dateRowWidth = isSideTitleVariant ? titleWidth : infoWidth
+        let readingTimeReservedWidth = usesDateRowReadingTime && dateRowReadingTimeBlockWidth > 0
+            ? IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing + dateRowReadingTimeBlockWidth
+            : 0
+        let dateWidth = max(0, dateRowWidth - publicationTimeLeadingWidth - readingTimeReservedWidth)
+        let dateLogicalX = logicalTextX + publicationTimeLeadingWidth
+        dateFrame = CGRect(
+            x: physicalX(
+                logicalX: dateLogicalX,
+                width: dateWidth,
+                in: input.containerWidth,
+                direction: input.layoutDirection
+            ),
+            y: dateRowY,
+            width: dateWidth,
+            height: dateHeight
+        )
+        publicationTimeIconFrame = input.showsRelativePublicationTime
+            ? CGRect(
+                x: physicalX(
+                    logicalX: logicalTextX,
+                    width: publicationTimeIconSize,
+                    in: input.containerWidth,
+                    direction: input.layoutDirection
+                ),
+                y: dateRowY + (dateHeight - publicationTimeIconSize) / 2,
+                width: publicationTimeIconSize,
+                height: publicationTimeIconSize
+            )
+            : nil
 
         if usesDateRowReadingTime, dateRowReadingTimeBlockWidth > 0 {
-                let dateWidth = max(
-                    0,
-                    dateRowWidth
-                        - IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing
-                        - dateRowReadingTimeBlockWidth
-                )
-                dateFrame = CGRect(
-                    x: physicalX(
-                        logicalX: logicalTextX,
-                        width: dateWidth,
-                        in: input.containerWidth,
-                        direction: input.layoutDirection
-                    ),
-                    y: dateRowY,
-                    width: dateWidth,
-                    height: dateHeight
-                )
 
                 let blockLogicalX = logicalTextX + dateRowWidth - dateRowReadingTimeBlockWidth
                 let blockX = physicalX(
@@ -779,12 +784,6 @@ enum IOSUIKitArticleLayoutEngine {
                     height: dateHeight
                 )
         } else {
-            dateFrame = CGRect(
-                x: textOrigin.x,
-                y: dateRowY,
-                width: dateRowWidth,
-                height: dateHeight
-            )
             landscapeReadingTimeContainerFrame = nil
             landscapeReadingTimeIconFrame = nil
             landscapeReadingTimeFrame = nil
@@ -816,6 +815,7 @@ enum IOSUIKitArticleLayoutEngine {
             commentsFrame: commentsFrame,
             starFrame: starFrame,
             dateFrame: dateFrame,
+            publicationTimeIconFrame: publicationTimeIconFrame,
             landscapeReadingTimeContainerFrame: landscapeReadingTimeContainerFrame,
             landscapeReadingTimeIconFrame: landscapeReadingTimeIconFrame,
             landscapeReadingTimeFrame: landscapeReadingTimeFrame,
