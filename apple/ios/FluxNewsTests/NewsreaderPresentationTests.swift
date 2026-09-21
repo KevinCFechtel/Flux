@@ -2485,6 +2485,14 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleAccessoryOrdering.horizontalLeadingToTrailing, [.audio, .comments, .star, .unread])
     }
 
+    func testTemporalUnitSpacingNormalizesOnlyMissingWhitespace() {
+        XCTAssertEqual(IOSArticleTemporalPresentation.spacingLocalizedNumberUnits("4Min."), "4 Min.")
+        XCTAssertEqual(IOSArticleTemporalPresentation.spacingLocalizedNumberUnits("vor 3Std."), "vor 3 Std.")
+        XCTAssertEqual(IOSArticleTemporalPresentation.spacingLocalizedNumberUnits("4 Min."), "4 Min.")
+        XCTAssertEqual(IOSArticleTemporalPresentation.spacingLocalizedNumberUnits("4\u{00A0}Min."), "4\u{00A0}Min.")
+        XCTAssertEqual(IOSArticleTemporalPresentation.spacingLocalizedNumberUnits("vor 3 Std."), "vor 3 Std.")
+    }
+
     func testArticleTemporalPresentationUsesCoreReadingTime() {
         let article = ArticleSummary(
             id: 77,
