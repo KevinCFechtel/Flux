@@ -392,22 +392,49 @@ final class NewsreaderPresentationTests: XCTestCase {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.scope = .all
         store.setSelectionTotalForTesting(4)
-        XCTAssertEqual(ArticleListCounterPresentation.compactCount(store.selectionTotal), "4")
+        XCTAssertEqual(
+            ArticleListCounterPresentation.inlineLandscapeLabel(
+                scope: store.scope,
+                unreadOnly: store.unreadOnly,
+                count: store.selectionTotal
+            ),
+            String(localized: "\(4) article")
+        )
 
         store.setSelectionTotalForTesting(3)
-        XCTAssertEqual(ArticleListCounterPresentation.compactCount(store.selectionTotal), "3")
+        XCTAssertEqual(
+            ArticleListCounterPresentation.inlineLandscapeLabel(
+                scope: store.scope,
+                unreadOnly: store.unreadOnly,
+                count: store.selectionTotal
+            ),
+            String(localized: "\(3) article")
+        )
     }
 
     func testArticleListCounterUsesCurrentScopeAndFilterSemantics() {
         XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: true, count: 117), String(localized: "\(117) unread article"))
         XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: false, count: 842), String(localized: "\(842) article"))
         XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .starred, unreadOnly: true, count: 8), String(localized: "\(8) article"))
-        XCTAssertEqual(ArticleListCounterPresentation.compactCount(1000), "1000")
+        XCTAssertEqual(
+            ArticleListCounterPresentation.inlineLandscapeLabel(scope: .all, unreadOnly: false, count: 1000),
+            String(localized: "\(1000) article")
+        )
     }
 
-    func testLandscapeArticleCountUsesCompactNumericPresentation() {
-        XCTAssertEqual(ArticleListCounterPresentation.compactCount(42), "42")
-        XCTAssertEqual(ArticleListCounterPresentation.compactCount(12_345), "12345")
+    func testLandscapeArticleCountUsesScopeAwareInlinePresentation() {
+        XCTAssertEqual(
+            ArticleListCounterPresentation.inlineLandscapeLabel(scope: .all, unreadOnly: false, count: 42),
+            String(localized: "\(42) article")
+        )
+        XCTAssertEqual(
+            ArticleListCounterPresentation.inlineLandscapeLabel(scope: .all, unreadOnly: true, count: 12_345),
+            String(localized: "\(12345) unread")
+        )
+        XCTAssertEqual(
+            ArticleListCounterPresentation.inlineLandscapeLabel(scope: .starred, unreadOnly: true, count: 8),
+            String(localized: "\(8) article")
+        )
     }
 
     /// `locale:` only decides how numbers are formatted — the language comes
@@ -1470,7 +1497,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
 
         let image = try await pipeline.prefetch(twoX)
-        XCTAssertEqual(CGSize(width: image.cgImage?.width ?? 0, height: image.cgImage?.height ?? 0), twoX.targetPixelSize)
+        XCTAssertEqual(CGSize(width: image.width, height: image.height), twoX.targetPixelSize)
         XCTAssertNotEqual(twoX, threeX)
         XCTAssertNil(pipeline.cachedImage(for: threeX))
         XCTAssertNotNil(pipeline.cachedImage(for: twoX))
@@ -1481,7 +1508,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testCachedExactRasterIsPresentedImmediatelyAtPhysicalDisplayScale() async throws {
+    func testCachedProductionRasterIsPresentedImmediatelyAtPhysicalDisplayScale() async throws {
         let data = try imageData(width: 1_600, height: 800)
         let counter = ImageLoadCounter(data: data)
         let pipeline = ArticleImagePipeline { _ in await counter.load() }
@@ -1494,17 +1521,17 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
         let request = ArticleImageRequest(
             url: try XCTUnwrap(item.content.imageURL), targetSize: metrics.imageSize(hasImage: true), displayScale: 3,
-            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius, rasterScale: 2, backdrop: backdrop
+            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius, rasterScale: 2, backdrop: backdrop,
+            renderingMode: .imageViewScaled
         )
         let cached = try await pipeline.prefetch(request)
         let cell = configuredArticleImageTestCell(item: item, pipeline: pipeline, rasterScale: 2)
 
-        XCTAssertTrue(cell.articleImageForTesting === cached)
+        XCTAssertTrue(cell.articleImageForTesting?.cgImage === cached)
         XCTAssertEqual(cell.articleImageForTesting?.scale, 3)
-        let raster = try XCTUnwrap(cached.cgImage)
-        XCTAssertEqual(raster.width, Int(request.targetPixelSize.width))
-        XCTAssertEqual(raster.height, Int(request.targetPixelSize.height))
-        XCTAssertEqual(ArticleImagePipeline.memoryCost(of: cached), raster.width * raster.height * 4)
+        XCTAssertEqual(cached.width, Int(request.targetPixelSize.width))
+        XCTAssertEqual(cached.height, Int(request.targetPixelSize.height))
+        XCTAssertEqual(ArticleImagePipeline.memoryCost(of: cached), cached.width * cached.height * 4)
         let presentation = cell.articleImagePresentationForTesting
         XCTAssertTrue(presentation.placeholderHidden)
         XCTAssertEqual(presentation.contentMode, .scaleAspectFill)
@@ -1893,7 +1920,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         let image = try await pipeline.image(for: large)
         let largerCalls = await counter.callCount()
         XCTAssertEqual(largerCalls, 2)
-        XCTAssertGreaterThan(image.cgImage?.width ?? 0, small.maxPixelDimension)
+        XCTAssertGreaterThan(image.width, small.maxPixelDimension)
     }
 
     func testArticleImagePipelinePrefetchMakesTheSameCanonicalVisibleRequestAnImmediateMemoryHit() async throws {
