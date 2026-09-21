@@ -517,9 +517,17 @@ struct ArticleRowContent: Equatable, Sendable {
     private var pendingScrolloverReadPresentationIDs = Set<Int64>()
     // A forward-qualified group is published once when its motion reverses or idles.
     private var hasForwardPendingScrolloverPresentation = false
+    private typealias ReadMutationWriter = @MainActor ([Int64], Bool) async -> Result<Void, Error>
+
     private var scrolloverMutationRunning = false
     private var runningScrolloverIDs = Set<Int64>()
+    private var supersededRunningScrolloverIDs = Set<Int64>()
     private var scrolloverMutationTask: Task<Void, Never>?
+    private var scrolloverMutationDeadlineTask: Task<Void, Never>?
+    @ObservationIgnored private var readMutationWriterOverride: ReadMutationWriter?
+    @ObservationIgnored private var scrolloverMutationMaximumWaitOverride: Duration?
+    private var explicitReadMutationTokens: [Int64: UInt64] = [:]
+    private var nextExplicitReadMutationToken: UInt64 = 0
     // Presentation resets rebaseline UI feedback only. Accepted persistence work
     // remains owned by this Core session until a real detach invalidates it.
     private var scrolloverPresentationGeneration: UInt64 = 0
@@ -881,18 +889,44 @@ struct ArticleRowContent: Equatable, Sendable {
         }
     }
 
+    private func makeReadMutationWriter() -> ReadMutationWriter? {
+        if let readMutationWriterOverride { return readMutationWriterOverride }
+        guard let core else { return nil }
+        return { articleIDs, read in
+            await AppleCoreExecution.shared.responsiveResult {
+                try core.setReadStateBulk(articleIds: articleIDs, read: read)
+            }
+        }
+    }
+
+    private func beginExplicitReadMutation(_ articleIDs: [Int64]) -> UInt64 {
+        nextExplicitReadMutationToken &+= 1
+        let token = nextExplicitReadMutationToken
+        for id in articleIDs { explicitReadMutationTokens[id] = token }
+        return token
+    }
+
+    private func finishExplicitReadMutation(_ articleIDs: [Int64], token: UInt64) {
+        for id in articleIDs where explicitReadMutationTokens[id] == token {
+            explicitReadMutationTokens[id] = nil
+        }
+    }
+
     func setRead(articleIDs: [Int64], read: Bool) {
-        guard let core, !articleIDs.isEmpty else { return }
+        guard !articleIDs.isEmpty, let writer = makeReadMutationWriter() else { return }
         let conflictingScrolloverMutation = !runningScrolloverIDs.isDisjoint(with: articleIDs) ? scrolloverMutationTask : nil
+        let explicitToken = beginExplicitReadMutation(articleIDs)
+        let sessionGeneration = scrolloverSessionGeneration
         flushConflictingScrolloverIDs(articleIDs)
         let revisions = optimisticallySetRead(articleIDs, read: read)
         let snapshotRevision = snapshotRevision
-        Task { [weak self, core] in
+        Task { [weak self, writer] in
             if let conflictingScrolloverMutation {
                 await conflictingScrolloverMutation.value
             }
-            let result = await AppleCoreExecution.shared.responsiveResult { try core.setReadStateBulk(articleIds: articleIDs, read: read) }
-            guard let self else { return }
+            let result = await writer(articleIDs, read)
+            guard let self, sessionGeneration == self.scrolloverSessionGeneration else { return }
+            self.finishExplicitReadMutation(articleIDs, token: explicitToken)
             switch result {
             case .success:
                 markMeaningfulInteraction()
@@ -928,18 +962,26 @@ struct ArticleRowContent: Equatable, Sendable {
 
     func flushScrollover(_ batch: IOSScrolloverBatch) {
         guard core != nil else { return }
-        let ids = eligibleScrolloverIDs(batch.articleIDs)
+        let ids = acceptScrolloverIDs(batch.articleIDs)
         guard !ids.isEmpty else { return }
         scrolloverDiagnostic("detected count=\(ids.count)")
+    }
+
+    @discardableResult
+    private func acceptScrolloverIDs(_ candidateIDs: [Int64]) -> [Int64] {
+        let ids = eligibleScrolloverIDs(candidateIDs)
+        guard !ids.isEmpty else { return [] }
         for id in ids {
             pendingScrolloverReadPresentationIDs.insert(id)
             pendingScrolloverIDSet.insert(id)
             pendingScrolloverIDs.append(id)
         }
         hasForwardPendingScrolloverPresentation = true
+        scheduleScrolloverMutationDeadlineIfNeeded()
         if pendingScrolloverIDs.count >= Self.maximumScrolloverMutationBatchSize {
             drainScrolloverMutations()
         }
+        return ids
     }
 
     func receiveScrolloverDirection(_ direction: IOSArticleScrollDirection) {
@@ -961,33 +1003,64 @@ struct ArticleRowContent: Equatable, Sendable {
         drainScrolloverMutations()
     }
 
+    private func scheduleScrolloverMutationDeadlineIfNeeded() {
+        guard !pendingScrolloverIDs.isEmpty,
+              !scrolloverMutationRunning,
+              scrolloverMutationDeadlineTask == nil else { return }
+        let sessionGeneration = scrolloverSessionGeneration
+        let delay = scrolloverMutationMaximumWaitOverride ?? Self.defaultScrolloverMutationMaximumWait
+        scrolloverMutationDeadlineTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled,
+                  let self,
+                  sessionGeneration == self.scrolloverSessionGeneration else { return }
+            self.scrolloverMutationDeadlineTask = nil
+            self.drainScrolloverMutations()
+        }
+    }
+
+    private func cancelScrolloverMutationDeadline() {
+        scrolloverMutationDeadlineTask?.cancel()
+        scrolloverMutationDeadlineTask = nil
+    }
+
     private func drainScrolloverMutations() {
-        guard !scrolloverMutationRunning, let core, !pendingScrolloverIDs.isEmpty else { return }
+        guard !scrolloverMutationRunning,
+              !pendingScrolloverIDs.isEmpty,
+              let writer = makeReadMutationWriter() else { return }
+        cancelScrolloverMutationDeadline()
         let ids = Array(pendingScrolloverIDs.prefix(Self.maximumScrolloverMutationBatchSize))
         pendingScrolloverIDs.removeFirst(ids.count)
         scrolloverMutationRunning = true
         runningScrolloverIDs = Set(ids)
+        supersededRunningScrolloverIDs.subtract(ids)
         let presentationGeneration = scrolloverPresentationGeneration
         let sessionGeneration = scrolloverSessionGeneration
         scrolloverDiagnostic("persistence flush count=\(ids.count)")
-        let task = Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.responsiveResult { try core.setReadStateBulk(articleIds: ids, read: true) }
+        let task = Task { [weak self, writer] in
+            let result = await writer(ids, true)
             guard let self else { return }
-            // A prior Core operation must never complete into, or continue work for, a
-            // newly attached Core session.
+            // A prior Core operation must never complete into, clear state for, or
+            // continue work for a newly attached Core session.
             guard sessionGeneration == self.scrolloverSessionGeneration else { return }
+            let ownedIDs = ids.filter { !self.supersededRunningScrolloverIDs.contains($0) }
             switch result {
             case .success:
-                completeSuccessfulScrolloverMutation(ids, presentationGeneration: presentationGeneration)
+                if !ownedIDs.isEmpty {
+                    completeSuccessfulScrolloverMutation(ownedIDs, presentationGeneration: presentationGeneration)
+                }
                 scrolloverDiagnostic("persistence success count=\(ids.count)")
             case let .failure(error):
-                restoreScrolloverPresentation(ids, presentationGeneration: presentationGeneration)
-                if presentationGeneration == scrolloverPresentationGeneration {
-                    errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
+                if !ownedIDs.isEmpty {
+                    restoreScrolloverPresentation(ownedIDs, presentationGeneration: presentationGeneration)
+                    if presentationGeneration == scrolloverPresentationGeneration {
+                        errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
+                    }
                 }
                 scrolloverDiagnosticError(ids: ids, error: error)
             }
             pendingScrolloverIDSet.subtract(ids)
+            supersededRunningScrolloverIDs.subtract(ids)
             for id in ids { publishedScrolloverPresentationRevisions[id] = nil }
             scrolloverMutationRunning = false
             runningScrolloverIDs = []
@@ -1128,11 +1201,14 @@ struct ArticleRowContent: Equatable, Sendable {
     }
 
     func undoScrollover() {
-        guard let core, !scrolloverUndoIDs.isEmpty else { return }
+        guard !scrolloverUndoIDs.isEmpty, let writer = makeReadMutationWriter() else { return }
         let ids = scrolloverUndoIDs
-        Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.responsiveResult { try core.setReadStateBulk(articleIds: ids, read: false) }
-            guard let self else { return }
+        let explicitToken = beginExplicitReadMutation(ids)
+        let sessionGeneration = scrolloverSessionGeneration
+        Task { [weak self, writer] in
+            let result = await writer(ids, false)
+            guard let self, sessionGeneration == self.scrolloverSessionGeneration else { return }
+            self.finishExplicitReadMutation(ids, token: explicitToken)
             switch result {
             case .success:
                 updateVisibleRead(ids, read: false)
@@ -1216,10 +1292,16 @@ struct ArticleRowContent: Equatable, Sendable {
 
     private func invalidateScrolloverSession() {
         scrolloverSessionGeneration &+= 1
+        cancelScrolloverMutationDeadline()
         pendingScrolloverIDs = []
         pendingScrolloverIDSet = []
         runningScrolloverIDs = []
+        supersededRunningScrolloverIDs = []
+        explicitReadMutationTokens = [:]
         scrolloverMutationRunning = false
+        // An in-flight writer is deliberately not synchronously awaited or rebound.
+        // It owns the Core/writer captured for the old session and its completion is
+        // rejected by the generation guard above.
         scrolloverMutationTask = nil
     }
 
@@ -1276,19 +1358,46 @@ struct ArticleRowContent: Equatable, Sendable {
 
     private func eligibleScrolloverIDs(_ ids: [Int64]) -> [Int64] {
         ids.filter { id in
-            !pendingScrolloverIDSet.contains(id) && rowPresentationStates[id]?.isRead == false
+            !pendingScrolloverIDSet.contains(id)
+                && explicitReadMutationTokens[id] == nil
+                && rowPresentationStates[id]?.isRead == false
         }
     }
 
     private static let maximumScrolloverMutationBatchSize = 64
+    private static let defaultScrolloverMutationMaximumWait: Duration = .milliseconds(500)
 
     private func flushConflictingScrolloverIDs(_ ids: [Int64]) {
         let conflicts = Set(ids)
+        let runningConflicts = conflicts.intersection(runningScrolloverIDs)
         pendingScrolloverIDs.removeAll { conflicts.contains($0) }
-        pendingScrolloverIDSet.subtract(conflicts)
-        for id in conflicts where !runningScrolloverIDs.contains(id) {
-            pendingScrolloverReadPresentationIDs.remove(id)
-            publishedScrolloverPresentationRevisions[id] = nil
+        pendingScrolloverIDSet.subtract(conflicts.subtracting(runningConflicts))
+        pendingScrolloverReadPresentationIDs.subtract(conflicts)
+        supersededRunningScrolloverIDs.formUnion(runningConflicts)
+        for id in conflicts { publishedScrolloverPresentationRevisions[id] = nil }
+
+        pendingSuccessfulScrolloverUndoPresentation = pendingSuccessfulScrolloverUndoPresentation.compactMap { result in
+            let remaining = result.ids.filter { !conflicts.contains($0) }
+            guard !remaining.isEmpty else { return nil }
+            return IOSPendingScrolloverUndoPresentation(
+                ids: remaining,
+                generation: result.generation,
+                completedAt: result.completedAt
+            )
+        }
+        recentSuccessfulScrolloverReads.removeAll { conflicts.contains($0.id) }
+
+        let hadUndoIDs = !scrolloverUndoIDs.isEmpty
+        scrolloverUndoIDs.removeAll { conflicts.contains($0) }
+        if hadUndoIDs && scrolloverUndoIDs.isEmpty {
+            scrolloverUndoTask?.cancel()
+            scrolloverUndoTask = nil
+            scrolloverUndoOpenedAt = nil
+            scrolloverUndoLastSuccessAt = nil
+        }
+
+        if pendingScrolloverIDs.isEmpty {
+            cancelScrolloverMutationDeadline()
         }
     }
 
@@ -1598,12 +1707,7 @@ struct ArticleRowContent: Equatable, Sendable {
     }
     @MainActor
     func acceptScrolloverForTesting(_ ids: [Int64]) -> [Int64] {
-        let eligible = eligibleScrolloverIDs(ids)
-        pendingScrolloverReadPresentationIDs.formUnion(eligible)
-        pendingScrolloverIDSet.formUnion(eligible)
-        pendingScrolloverIDs.append(contentsOf: eligible)
-        if !eligible.isEmpty { hasForwardPendingScrolloverPresentation = true }
-        return eligible
+        acceptScrolloverIDs(ids)
     }
     @MainActor
     func beginScrolloverMutationForTesting() -> [Int64] {
@@ -1663,6 +1767,20 @@ struct ArticleRowContent: Equatable, Sendable {
     func invalidateScrolloverSessionForTesting() { invalidateScrolloverSession() }
     @MainActor
     var scrolloverSessionGenerationForTesting: UInt64 { scrolloverSessionGeneration }
+    @MainActor
+    func setReadMutationWriterForTesting(
+        _ writer: @escaping @MainActor ([Int64], Bool) async -> Result<Void, Error>
+    ) {
+        readMutationWriterOverride = writer
+    }
+    @MainActor
+    func setScrolloverMutationMaximumWaitForTesting(_ value: Duration) {
+        scrolloverMutationMaximumWaitOverride = value
+    }
+    @MainActor
+    var scrolloverMutationRunningForTesting: Bool { scrolloverMutationRunning }
+    @MainActor
+    var runningScrolloverIDsForTesting: [Int64] { runningScrolloverIDs.sorted() }
 
     private func reloadCounts() {
         guard let core else { return }

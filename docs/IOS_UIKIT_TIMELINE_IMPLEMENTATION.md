@@ -1,6 +1,6 @@
 # iOS UIKit Timeline — Decision and Implementation Handoff
 
-> **Decision accepted: 2026-09-11. U1-U2 COMPLETE. U3 IN PROGRESS. U4 PARTIALLY IMPLEMENTED / OPEN. U5 IN PROGRESS / OPEN.**
+> **Decision accepted: 2026-09-11. U1-U2 COMPLETE. U3 IN PROGRESS. U4 IMPLEMENTED / LOCAL VALIDATION PENDING. U5 IN PROGRESS / OPEN.**
 >
 > Build the Article Timeline using the owned UIKit `UITableView` Timeline and
 > native UIKit article cells. This is the selected architecture, not a proposal to benchmark
@@ -244,7 +244,7 @@ do not defer correctness until the final package.
 | U1 — Contract | Record UIKit container/native cells, rationale, boundaries, behavior, and this handoff. | **COMPLETE** — documentation contract established. |
 | U2 — Native Timeline | Implement the owned controller, bridge, native reusable cells, stable ID snapshots, sizing, image consumers, system swipes/context menus/refresh, and existing shell integration. Register sources and preserve Search dependencies. | **COMPLETE as the native Timeline baseline.** The owned UIKit controller/cells and structural/status split are productive. Search now also uses the UIKit Timeline. Completion of U2 does not freeze later performance-sensitive internals. |
 | U3 — Geometry, status and performance-sensitive renderer work | Implement coherent UIKit Scrollover geometry and targeted status presentation; establish stable/bounded layout, image and update behavior and close the required performance/correctness regressions. | **IN PROGRESS.** Productive UIKit Scrollover geometry, targeted status updates, deterministic sizing/prepared metrics, incremental pagination/updates and substantial image/layout hardening exist. Physical-device performance remains unresolved enough that fundamental renderer/layout/cell/image/scheduling changes are still permitted. U3 is therefore not merely waiting for acceptance. |
-| U4 — Session mutation worker | Complete queue lifetime, origin attribution, bounded drains, explicit-action ordering, lifecycle and failure handling using a controllably blocked real writer path in tests. | **PARTIALLY IMPLEMENTED / OPEN.** Current code has bounded 64-ID batches, serial running state, session/presentation generations, conflict handling and lifecycle flush hooks, but the complete contracted worker semantics and productive blocked-writer tests remain completion gates. |
+| U4 — Session mutation worker | Complete queue lifetime, origin attribution, bounded drains, explicit-action ordering, lifecycle and failure handling using a controllably blocked real writer path in tests. | **IMPLEMENTED / LOCAL VALIDATION PENDING.** The session-owned worker now has a 500 ms bounded drain deadline, 64-ID FIFO batches, one writer chain per session, explicit-intent precedence, lifecycle coalescing, session-isolated completion, deterministic failure recovery, and blocked-writer regression coverage through the productive drain path. Do not mark U4 complete until the canonical Xcode test/build validation passes. |
 | U5 — Cleanup and acceptance | Remove superseded Timeline code, verify complete interaction/localization/accessibility behavior, run native checks and focused device traces, record actual remaining limitations. | **IN PROGRESS / OPEN.** Search migration and old SwiftUI article-row cleanup are complete, and diagnostic cleanup has progressed. Final cleanup and device/runtime acceptance remain blocked on settling U3 performance architecture and completing U4. |
 
 The selected architecture already includes U2-U4; no new architecture approval
@@ -359,23 +359,47 @@ compromise the product UI or reopen the Timeline container by default.
 Visual compact remains a normal product presentation mode, not a performance
 workaround that must replace the standard full-width Visual mode.
 
-### 8.2 Complete U4 next
+### 8.2 U4 implemented — canonical local validation pending
 
-U4 is the next substantial implementation package. Finish the session-owned
-Scrollover persistence worker before declaring the Timeline architecture frozen.
+The U4 implementation contract is now represented in code and tests. The
+existing queue remains owned by the `NewsreaderStore` Core/account session and
+still uses 64-ID bounded FIFO batches with pending/in-flight deduplication and
+one logical Scrollover writer chain per session.
 
-In addition to the existing 64-ID bounded batches, FIFO continuation,
-deduplication, presentation/session generations, and explicit-mutation conflict
-handling, accepted Scrollover writes must have a bounded maximum wait before a
-drain attempt. A slow continuous interaction with fewer than 64 pending IDs must
-not depend indefinitely on reaching idle. Lifecycle flush remains an additional
-drain trigger rather than the only guarantee for a small batch.
+A small accepted batch now receives one session-owned bounded drain deadline of
+500 ms. Reaching 64 IDs, entering idle, or a lifecycle flush still requests an
+immediate drain through the same serialized worker. The deadline is cancelled
+when a drain starts or the session is invalidated; it never creates a parallel
+writer.
 
-Validate the real running/serialization path with an injectable, controllably
-blocked writer. Array-only `ForTesting` seams that merely pop queued IDs do not
-complete U4. Tests must cover queued/running batches across presentation reset,
-newer explicit Read/Unread/Undo intent, account/Core-session replacement,
-failure, lifecycle flush, and bounded-wait continuation.
+Each drain captures the read-mutation writer for the current session. Production
+writers capture the current `Flux` instance and continue to execute synchronous
+Core/UniFFI work through `AppleCoreExecution`. A Core/account replacement drops
+queued work, cancels its deadline, and invalidates completion ownership. An
+already-running old writer may finish against only the Core it captured; its
+completion cannot clear, publish into, or continue work for the new session.
+
+Newer explicit Read/Unread intent removes conflicting queued/deferred automatic
+presentation and Undo state, marks a conflicting in-flight automatic intent as
+superseded, and waits for that older Core write before issuing the explicit write.
+Automatic completion/failure effects for superseded IDs are ignored. Explicit
+read-mutation tokens also keep those IDs ineligible for new automatic acceptance
+until the explicit operation finishes. Undo uses the same captured writer path.
+
+Writer failure restores only still-owned automatic presentation, clears the
+running state, and continues any remaining FIFO queue; a later batch can run
+normally. Presentation-only resets keep valid persistence work for the same
+session.
+
+Regression tests now use an injectable, controllably blocked read writer around
+the productive drain operation rather than only array-pop helpers. They cover
+the bounded deadline, 64-ID limit/FIFO continuation, trigger coalescing,
+presentation reset, explicit Read/Unread precedence, blocked successors,
+old-session completion, failure recovery, lifecycle flush, and real-writer Undo.
+
+This environment did not run the canonical Xcode validation. U4 remains
+`IMPLEMENTED / LOCAL VALIDATION PENDING` until `./apple/ios/Build/test.sh` and
+`./apple/ios/Build/build-app.sh` pass locally; U3 remains open regardless.
 
 ### 8.3 Close U3 with targeted observation, not another speculative rewrite
 

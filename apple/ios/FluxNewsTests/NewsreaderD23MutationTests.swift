@@ -1,6 +1,43 @@
 import XCTest
 @testable import FluxNews
 
+private enum ControlledReadMutationError: Error {
+    case expectedFailure
+}
+
+@MainActor
+private final class ControlledReadMutationWriter {
+    struct Call: Equatable {
+        let ids: [Int64]
+        let read: Bool
+    }
+
+    private(set) var calls: [Call] = []
+    private var continuations: [CheckedContinuation<Result<Void, Error>, Never>] = []
+    var onStart: ((Int, Call) -> Void)?
+
+    func write(_ ids: [Int64], read: Bool) async -> Result<Void, Error> {
+        let call = Call(ids: ids, read: read)
+        calls.append(call)
+        onStart?(calls.count, call)
+        return await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func succeedNext() {
+        XCTAssertFalse(continuations.isEmpty)
+        guard !continuations.isEmpty else { return }
+        continuations.removeFirst().resume(returning: .success(()))
+    }
+
+    func failNext() {
+        XCTAssertFalse(continuations.isEmpty)
+        guard !continuations.isEmpty else { return }
+        continuations.removeFirst().resume(returning: .failure(ControlledReadMutationError.expectedFailure))
+    }
+}
+
 final class NewsreaderD23MutationTests: XCTestCase {
     private func article(_ id: Int64, read: Bool = false, starred: Bool = false) -> ArticleSummary {
         ArticleSummary(id: id, feedId: 10, categoryId: 20, feedTitle: "Feed", title: "Article \(id)", url: "https://example.com/\(id)", commentsUrl: "", publishedAt: "2026-01-01T00:00:00Z", isRead: read, isStarred: starred, readingTimeMinutes: 0, preview: "Preview", imageUrl: nil)
@@ -811,6 +848,284 @@ final class NewsreaderD23MutationTests: XCTestCase {
 
         XCTAssertGreaterThan(store.scrolloverSessionGenerationForTesting, session)
         XCTAssertTrue(store.pendingScrolloverIDsForTesting.isEmpty)
+    }
+
+    @MainActor
+    func testScrolloverBoundedWaitStartsRealWriterWithoutIdle() async {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let writer = ControlledReadMutationWriter()
+        let started = expectation(description: "bounded wait writer started")
+        writer.onStart = { count, _ in
+            if count == 1 { started.fulfill() }
+        }
+        store.setReadMutationWriterForTesting { ids, read in
+            await writer.write(ids, read: read)
+        }
+        store.setScrolloverMutationMaximumWaitForTesting(.milliseconds(10))
+        store.setArticlesForTesting([article(1)])
+        store.setScrolloverPresentationPhaseForTesting(.interacting)
+
+        XCTAssertEqual(store.acceptScrolloverForTesting([1]), [1])
+        await fulfillment(of: [started], timeout: 1)
+
+        XCTAssertEqual(writer.calls, [.init(ids: [1], read: true)])
+        XCTAssertTrue(store.scrolloverMutationRunningForTesting)
+        writer.succeedNext()
+    }
+
+    @MainActor
+    func testRealScrolloverWriterKeepsBatchLimitAndBlockedSuccessorFIFO() async {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let writer = ControlledReadMutationWriter()
+        let firstStarted = expectation(description: "first batch started")
+        let secondStarted = expectation(description: "second batch started")
+        writer.onStart = { count, _ in
+            if count == 1 { firstStarted.fulfill() }
+            if count == 2 { secondStarted.fulfill() }
+        }
+        store.setReadMutationWriterForTesting { ids, read in
+            await writer.write(ids, read: read)
+        }
+        let maximum = NewsreaderStore.maximumScrolloverMutationBatchSizeForTesting
+        let ids = Array(1...(maximum + 3)).map(Int64.init)
+        store.setArticlesForTesting(ids.map { article($0) })
+        store.setScrolloverPresentationPhaseForTesting(.interacting)
+
+        XCTAssertEqual(store.acceptScrolloverForTesting(ids), ids)
+        await fulfillment(of: [firstStarted], timeout: 1)
+        XCTAssertEqual(writer.calls[0], .init(ids: Array(ids.prefix(maximum)), read: true))
+        XCTAssertEqual(store.pendingScrolloverIDsForTesting, Array(ids.dropFirst(maximum)))
+        XCTAssertEqual(writer.calls.count, 1)
+
+        writer.succeedNext()
+        await fulfillment(of: [secondStarted], timeout: 1)
+        XCTAssertEqual(writer.calls[1], .init(ids: Array(ids.dropFirst(maximum)), read: true))
+        writer.succeedNext()
+    }
+
+    @MainActor
+    func testScrolloverDrainTriggersCoalesceBehindOneRealWriter() async {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let writer = ControlledReadMutationWriter()
+        let started = expectation(description: "writer started")
+        writer.onStart = { count, _ in
+            if count == 1 { started.fulfill() }
+        }
+        store.setReadMutationWriterForTesting { ids, read in
+            await writer.write(ids, read: read)
+        }
+        store.setScrolloverMutationMaximumWaitForTesting(.milliseconds(10))
+        store.setArticlesForTesting([article(1)])
+        store.setScrolloverPresentationPhaseForTesting(.interacting)
+
+        _ = store.acceptScrolloverForTesting([1])
+        store.flushScrolloverPersistenceForLifecycle()
+        await fulfillment(of: [started], timeout: 1)
+        store.setScrolloverPresentationPhaseForTesting(.idle)
+        store.flushScrolloverPersistenceForLifecycle()
+        try? await Task.sleep(for: .milliseconds(30))
+
+        XCTAssertEqual(writer.calls.count, 1)
+        writer.succeedNext()
+    }
+
+    @MainActor
+    func testPresentationResetPreservesQueuedWorkBehindBlockedRealWriter() async {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let writer = ControlledReadMutationWriter()
+        let firstStarted = expectation(description: "first writer started")
+        let secondStarted = expectation(description: "second writer started")
+        writer.onStart = { count, _ in
+            if count == 1 { firstStarted.fulfill() }
+            if count == 2 { secondStarted.fulfill() }
+        }
+        store.setReadMutationWriterForTesting { ids, read in
+            await writer.write(ids, read: read)
+        }
+        store.setArticlesForTesting([article(1), article(2)])
+        store.setScrolloverPresentationPhaseForTesting(.interacting)
+
+        _ = store.acceptScrolloverForTesting([1])
+        store.flushScrolloverPersistenceForLifecycle()
+        await fulfillment(of: [firstStarted], timeout: 1)
+        _ = store.acceptScrolloverForTesting([2])
+
+        store.rebaselineScrolloverPresentationForTesting()
+
+        XCTAssertEqual(store.pendingScrolloverIDsForTesting, [2])
+        writer.succeedNext()
+        await fulfillment(of: [secondStarted], timeout: 1)
+        XCTAssertEqual(writer.calls[1], .init(ids: [2], read: true))
+        writer.succeedNext()
+    }
+
+    @MainActor
+    func testExplicitUnreadWinsAgainstBlockedAutomaticWriter() async {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let writer = ControlledReadMutationWriter()
+        let automaticStarted = expectation(description: "automatic writer started")
+        let explicitStarted = expectation(description: "explicit writer started")
+        writer.onStart = { count, _ in
+            if count == 1 { automaticStarted.fulfill() }
+            if count == 2 { explicitStarted.fulfill() }
+        }
+        store.setReadMutationWriterForTesting { ids, read in
+            await writer.write(ids, read: read)
+        }
+        store.setArticlesForTesting([article(1)])
+        store.setScrolloverPresentationPhaseForTesting(.interacting)
+
+        _ = store.acceptScrolloverForTesting([1])
+        store.flushScrolloverPersistenceForLifecycle()
+        await fulfillment(of: [automaticStarted], timeout: 1)
+
+        store.setRead(articleIDs: [1], read: false)
+        XCTAssertFalse(store.isArticleReadForTesting(1)!)
+        writer.succeedNext()
+
+        await fulfillment(of: [explicitStarted], timeout: 1)
+        XCTAssertEqual(writer.calls[1], .init(ids: [1], read: false))
+        XCTAssertTrue(store.scrolloverUndoIDsForTesting.isEmpty)
+        XCTAssertFalse(store.isArticleReadForTesting(1)!)
+        writer.succeedNext()
+    }
+
+    @MainActor
+    func testExplicitReadSurvivesFailureOfSupersededAutomaticWriter() async {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let writer = ControlledReadMutationWriter()
+        let automaticStarted = expectation(description: "automatic writer started")
+        let explicitStarted = expectation(description: "explicit writer started")
+        writer.onStart = { count, _ in
+            if count == 1 { automaticStarted.fulfill() }
+            if count == 2 { explicitStarted.fulfill() }
+        }
+        store.setReadMutationWriterForTesting { ids, read in
+            await writer.write(ids, read: read)
+        }
+        store.setArticlesForTesting([article(1)])
+        store.setScrolloverPresentationPhaseForTesting(.interacting)
+
+        _ = store.acceptScrolloverForTesting([1])
+        store.receiveScrolloverDirectionForTesting(.backward)
+        XCTAssertTrue(store.isArticleReadForTesting(1)!)
+        store.flushScrolloverPersistenceForLifecycle()
+        await fulfillment(of: [automaticStarted], timeout: 1)
+
+        store.setRead(articleIDs: [1], read: true)
+        writer.failNext()
+
+        await fulfillment(of: [explicitStarted], timeout: 1)
+        XCTAssertTrue(store.isArticleReadForTesting(1)!)
+        XCTAssertEqual(writer.calls[1], .init(ids: [1], read: true))
+        writer.succeedNext()
+    }
+
+    @MainActor
+    func testOldSessionCompletionCannotClearNewSessionWriter() async {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let oldWriter = ControlledReadMutationWriter()
+        let newWriter = ControlledReadMutationWriter()
+        let oldStarted = expectation(description: "old session writer started")
+        let newStarted = expectation(description: "new session writer started")
+        oldWriter.onStart = { count, _ in
+            if count == 1 { oldStarted.fulfill() }
+        }
+        newWriter.onStart = { count, _ in
+            if count == 1 { newStarted.fulfill() }
+        }
+        store.setReadMutationWriterForTesting { ids, read in
+            await oldWriter.write(ids, read: read)
+        }
+        store.setArticlesForTesting([article(1)])
+        _ = store.acceptScrolloverForTesting([1])
+        store.flushScrolloverPersistenceForLifecycle()
+        await fulfillment(of: [oldStarted], timeout: 1)
+
+        store.invalidateScrolloverSessionForTesting()
+        store.setReadMutationWriterForTesting { ids, read in
+            await newWriter.write(ids, read: read)
+        }
+        store.setArticlesForTesting([article(2)])
+        _ = store.acceptScrolloverForTesting([2])
+        store.flushScrolloverPersistenceForLifecycle()
+        await fulfillment(of: [newStarted], timeout: 1)
+
+        oldWriter.succeedNext()
+        await Task.yield()
+
+        XCTAssertTrue(store.scrolloverMutationRunningForTesting)
+        XCTAssertEqual(store.runningScrolloverIDsForTesting, [2])
+        XCTAssertEqual(newWriter.calls, [.init(ids: [2], read: true)])
+        newWriter.succeedNext()
+    }
+
+    @MainActor
+    func testRealScrolloverWriterRecoversAfterFailure() async {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let writer = ControlledReadMutationWriter()
+        let firstStarted = expectation(description: "failing writer started")
+        let secondStarted = expectation(description: "recovery writer started")
+        writer.onStart = { count, _ in
+            if count == 1 { firstStarted.fulfill() }
+            if count == 2 { secondStarted.fulfill() }
+        }
+        store.setReadMutationWriterForTesting { ids, read in
+            await writer.write(ids, read: read)
+        }
+        store.setArticlesForTesting([article(1), article(2)])
+        store.setScrolloverPresentationPhaseForTesting(.interacting)
+
+        _ = store.acceptScrolloverForTesting([1])
+        store.flushScrolloverPersistenceForLifecycle()
+        await fulfillment(of: [firstStarted], timeout: 1)
+        writer.failNext()
+
+        _ = store.acceptScrolloverForTesting([2])
+        store.flushScrolloverPersistenceForLifecycle()
+        await fulfillment(of: [secondStarted], timeout: 1)
+
+        XCTAssertEqual(writer.calls[1], .init(ids: [2], read: true))
+        XCTAssertTrue(store.scrolloverMutationRunningForTesting)
+        writer.succeedNext()
+    }
+
+    @MainActor
+    func testUndoUsesRealWriterAndWinsAfterSuccessfulAutomaticReads() async {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let writer = ControlledReadMutationWriter()
+        let automaticStarted = expectation(description: "automatic writer started")
+        let undoStarted = expectation(description: "undo writer started")
+        writer.onStart = { count, _ in
+            if count == 1 { automaticStarted.fulfill() }
+            if count == 2 { undoStarted.fulfill() }
+        }
+        store.setReadMutationWriterForTesting { ids, read in
+            await writer.write(ids, read: read)
+        }
+        store.setArticlesForTesting([article(1), article(2), article(3)])
+        store.setScrolloverPresentationPhaseForTesting(.interacting)
+
+        _ = store.acceptScrolloverForTesting([1, 2, 3])
+        store.flushScrolloverPersistenceForLifecycle()
+        await fulfillment(of: [automaticStarted], timeout: 1)
+        writer.succeedNext()
+        for _ in 0..<20 where store.scrolloverMutationRunningForTesting {
+            await Task.yield()
+        }
+        store.setScrolloverPresentationPhaseForTesting(.idle)
+
+        XCTAssertEqual(store.scrolloverUndoIDsForTesting, [1, 2, 3])
+        store.undoScrollover()
+        await fulfillment(of: [undoStarted], timeout: 1)
+        XCTAssertEqual(writer.calls[1], .init(ids: [1, 2, 3], read: false))
+
+        writer.succeedNext()
+        for _ in 0..<20 where store.scrolloverMutationRunningForTesting {
+            await Task.yield()
+        }
+        XCTAssertEqual(readStates(store), [false, false, false])
+        XCTAssertTrue(store.scrolloverUndoIDsForTesting.isEmpty)
     }
 
     func testEventRoutingFiltersIgnoredEventsBeforeMainActorDispatch() {
