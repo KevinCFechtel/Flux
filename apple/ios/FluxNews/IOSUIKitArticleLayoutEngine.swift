@@ -34,7 +34,7 @@ struct IOSUIKitArticleLayoutInput: Hashable {
         self.layoutDirection = layoutDirection
     }
 
-    init(title: String, feedTitle: String, publishedDate: String, publishedAge: String? = nil, readingTime: String? = nil, preview: String, hasImage: Bool, hasComments: Bool, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
+    init(title: String, feedTitle: String, publishedDate: String, readingTime: String? = nil, preview: String, hasImage: Bool, hasComments: Bool, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
         self.title = title
         self.feedTitle = feedTitle
         self.publishedDate = publishedDate
