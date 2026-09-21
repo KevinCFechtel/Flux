@@ -1796,6 +1796,7 @@ struct ArticleRowContent: Equatable, Sendable {
     var scrolloverMutationRunningForTesting: Bool { scrolloverMutationRunning }
     @MainActor
     var runningScrolloverIDsForTesting: [Int64] { runningScrolloverIDs.sorted() }
+#if DEBUG
     @MainActor
     func waitForExplicitReadMutationsForTesting() async {
         guard !explicitReadMutationTokens.isEmpty else { return }
@@ -1803,6 +1804,7 @@ struct ArticleRowContent: Equatable, Sendable {
             explicitReadMutationWaiters.append(continuation)
         }
     }
+#endif
 
     private func reloadCounts() {
         guard let core else { return }
