@@ -432,8 +432,12 @@ bounded comparison on the iPhone 15 where practical:
 
 - iOS 26 with `imageViewScaled`;
 - iOS 26 with `displayReady`;
-- iOS 27 with `imageViewScaled`;
-- iOS 27 with `displayReady`.
+- iOS 27 with `imageViewScaled` — **observed on iPhone 15: smooth through roughly 200 articles**;
+- iOS 27 with `displayReady` — **observed on the same device: no visible scrolling advantage over `imageViewScaled`**.
+
+The iOS 27 half of this comparison is therefore complete and currently favors
+retaining only `imageViewScaled`. The remaining iOS 26 comparison is a bounded
+confirmation only, not a reason to reopen the renderer investigation.
 
 This is a confirmation step, not a new open-ended investigation. If the legacy
 renderer shows no clear product-relevant advantage, remove it, its diagnostic
@@ -448,7 +452,18 @@ while allowing UIKit/Core Animation to own ordinary final image presentation so
 future Apple rendering improvements can benefit Flux without a custom raster
 pipeline.
 
-### 8.5 Accept and document the iOS 26 limitation if the closure check confirms it
+### 8.5 Status-bar edge protection during U3 closure
+
+The Timeline deliberately keeps the native scroll edge effect disabled on iOS 26
+because device testing showed the progressive blur resampling the full list width
+during scrolling. iOS 27 is now tested separately: the custom status-bar scrim is
+hidden there and `UITableView.topEdgeEffect` uses Apple's native `.soft` style,
+with the bottom effect still disabled. This experiment must be judged on the same
+real-device scrolling baseline; if it reintroduces visible frame instability, revert
+to the static scrim rather than accepting a readability fix that harms Timeline
+performance.
+
+### 8.6 Accept and document the iOS 26 limitation if the closure check confirms it
 
 Flux continues to support iOS 17+, so iOS 26 remains a supported OS. However, the
 full-width-image scroll-quality difference observed on iPhone 15 has already
@@ -462,7 +477,7 @@ width, or reopen the renderer/container solely to hide that iOS 26 perceptual
 difference. New work requires new reproducible evidence that identifies an
 actionable app-side cause.
 
-### 8.6 Cleanup after U3/U4, then freeze the Timeline architecture
+### 8.7 Cleanup after U3/U4, then freeze the Timeline architecture
 
 After U3 and U4 are complete, perform a behavior-preserving cleanup rather than
 another performance redesign:

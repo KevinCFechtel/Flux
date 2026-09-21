@@ -187,7 +187,7 @@ Deliberately retained, classified per the three categories above:
 
 | Symbol | Class | Reason |
 |---|---|---|
-| `IOSUIKitTimelineTopScrimView` | Promote | The status bar gradient is now shipping behaviour below iOS 27. Moved out of the diagnostic file into `ArticleListView.swift`. |
+| `IOSUIKitTimelineTopScrimView` | Promote | The static status-bar gradient remains shipping behaviour below iOS 27. iOS 27 instead runs a bounded real-device trial of the native `UITableView.topEdgeEffect` with `.soft` style; iOS 26 keeps native edge effects disabled because the measured progressive blur hurt scrolling. |
 | `IOSUIKitTimelinePerformanceMetrics` | Promote | The oracle tests assert `systemLayoutSizeFittingCalls == 0` and `preferredLayoutAttributesFittingCalls == 0` through it. That is the proof that the cell never self-sizes — the core invariant of the UITableView migration. Removing the counters would delete the proof. |
 | `IOSUIKitTimelinePerformanceDiagnostics` | Retain as tooling | Console readout for the above. Its UI is behind `#if DEBUG \|\| FLUX_PERFORMANCE_DIAGNOSTICS` and cannot be reached in Release; the static controller reference is `weak`. The counter increments themselves do run in Release. |
 | `articleImageRasterScale` on the cell | Retain as tooling | Test seam, documented as such, no production assignment. |

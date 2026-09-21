@@ -366,6 +366,19 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(IOSArticleActionHapticPolicy.shouldConfirmSaveToService(.noIntegrationConfigured))
     }
 
+    @MainActor
+    func testTimelineUsesNativeTopEdgeProtectionOnlyOnIOS27AndLater() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+        controller.loadViewIfNeeded()
+
+        if #available(iOS 27.0, *) {
+            XCTAssertTrue(controller.nativeTopEdgeEffectEnabledForTesting)
+        } else {
+            XCTAssertFalse(controller.nativeTopEdgeEffectEnabledForTesting)
+        }
+    }
+
     func testIPhoneNavigationButtonUsesTheFluxTemplateAsset() {
         XCTAssertEqual(IOSNavigationButtonPresentation.imageName, "FluxNewsTemplate")
         XCTAssertEqual(IOSNavigationButtonPresentation.accessibilityLabel, String(localized: "Choose news scope"))
