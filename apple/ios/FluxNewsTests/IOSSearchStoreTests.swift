@@ -43,6 +43,29 @@ final class IOSSearchStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testSearchPaginationKeepsOneFrozenRelativeTimeReference() {
+        let store = IOSSearchStore()
+        let first = article(id: 101, publishedAt: "2026-09-20T06:00:00Z")
+        let second = article(id: 102, publishedAt: "2026-09-20T07:00:00Z")
+        let referenceDate = ISO8601DateFormatter().date(from: "2026-09-20T12:00:00Z")!
+
+        store.replaceResultsForTesting([first], referenceDate: referenceDate)
+        store.appendResultsForTesting([second])
+
+        let items = store.timelineStructuralState.storage.items
+        XCTAssertEqual(items.map(\.article.id), [101, 102])
+        XCTAssertEqual(store.searchReferenceDateForTesting, referenceDate)
+        XCTAssertEqual(
+            items[0].content.publishedAge,
+            IOSArticleTemporalPresentation.relativePublishedAge(first.publishedAt, relativeTo: referenceDate)
+        )
+        XCTAssertEqual(
+            items[1].content.publishedAge,
+            IOSArticleTemporalPresentation.relativePublishedAge(second.publishedAt, relativeTo: referenceDate)
+        )
+    }
+
+    @MainActor
     func testClearResetsAllTransientSearchState() {
         let store = IOSSearchStore()
         store.query = "  Apple  "
@@ -55,5 +78,22 @@ final class IOSSearchStoreTests: XCTestCase {
         XCTAssertFalse(store.isSearching)
         XCTAssertFalse(store.isLoadingMore)
         XCTAssertNil(store.errorMessage)
+    }
+    private func article(id: Int64, publishedAt: String) -> ArticleSummary {
+        ArticleSummary(
+            id: id,
+            feedId: 10,
+            categoryId: 20,
+            feedTitle: "Feed",
+            title: "Article \(id)",
+            url: "https://example.com/\(id)",
+            commentsUrl: "",
+            publishedAt: publishedAt,
+            isRead: false,
+            isStarred: false,
+            readingTimeMinutes: 0,
+            preview: "",
+            imageUrl: nil
+        )
     }
 }

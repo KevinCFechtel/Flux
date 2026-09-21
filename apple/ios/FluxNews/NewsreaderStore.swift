@@ -1536,6 +1536,8 @@ struct ArticleRowContent: Equatable, Sendable {
         )
     }
     @MainActor
+    var timelineReferenceDateForTesting: Date { timelineReferenceDate }
+    @MainActor
     var timelineStructuralItemCountForTesting: Int { timelineStructuralStorage.items.count }
     @MainActor
     var timelineStructuralChangeForTesting: IOSUIKitArticleTimelineStructuralChange { timelineStructuralState.change }

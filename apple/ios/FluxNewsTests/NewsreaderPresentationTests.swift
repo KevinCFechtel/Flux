@@ -298,6 +298,61 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertGreaterThan(controller.scrolloverLayoutGenerationForTesting, scrolloverGeneration)
     }
 
+    @MainActor
+    func testRelativePublicationTimeToggleRekeysGeometryWithoutStructuralSnapshot() async {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let articles = [timelineArticle(id: 1), timelineArticle(id: 2)]
+        let controller = IOSUIKitArticleTimelineController()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
+        controller.view.layoutIfNeeded()
+        bridge.replaceArticleStates(Dictionary(uniqueKeysWithValues: articles.map {
+            ($0.id, IOSUIKitArticlePresentationState(isRead: $0.isRead, isStarred: $0.isStarred, revision: 0))
+        }))
+        let structuralState = timelineStructuralState(articles, revision: 1)
+
+        controller.update(
+            structuralState: structuralState,
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            showRelativePublicationTime: false,
+            iconVariant: .normal,
+            feedIconRequestRevision: 0,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+        await controller.settleForTesting()
+
+        let structuralReconciliations = controller.structuralReconciliationCount
+        let snapshotApplications = controller.structuralSnapshotApplicationCount
+        let ids = controller.orderedArticleIDsForTesting
+        controller.resetPerformanceMetrics()
+
+        controller.update(
+            structuralState: structuralState,
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            showRelativePublicationTime: true,
+            iconVariant: .normal,
+            feedIconRequestRevision: 0,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+        await controller.settleForTesting()
+
+        let performance = controller.performanceSnapshot()
+        XCTAssertEqual(controller.structuralReconciliationCount, structuralReconciliations)
+        XCTAssertEqual(controller.structuralSnapshotApplicationCount, snapshotApplications)
+        XCTAssertEqual(controller.orderedArticleIDsForTesting, ids)
+        XCTAssertGreaterThan(performance.geometryIdentityChanges, 0)
+        XCTAssertEqual(performance.snapshotApplyCount, 0)
+    }
+
     func testIPhoneNavigationButtonUsesTheFluxTemplateAsset() {
         XCTAssertEqual(IOSNavigationButtonPresentation.imageName, "FluxNewsTemplate")
         XCTAssertEqual(IOSNavigationButtonPresentation.accessibilityLabel, String(localized: "Choose news scope"))
@@ -381,6 +436,20 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: false, count: 2), "2 Artikel")
         XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: true, count: 1), "1 ungelesener Artikel")
         XCTAssertEqual(ArticleListCounterPresentation.expandedLabel(scope: .all, unreadOnly: true, count: 2), "2 ungelesene Artikel")
+    }
+
+    func testRelativePublicationTimeSettingIsLocalizedInEnglishAndGerman() throws {
+        let english = try localizationBundle("en")
+        let german = try localizationBundle("de")
+
+        XCTAssertEqual(
+            String(localized: "Show relative publication time", bundle: english),
+            "Show relative publication time"
+        )
+        XCTAssertEqual(
+            String(localized: "Show relative publication time", bundle: german),
+            "Veröffentlichungszeit relativ anzeigen"
+        )
     }
 
     @MainActor
@@ -2493,6 +2562,25 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleTemporalPresentation.spacingLocalizedNumberUnits("vor 3 Std."), "vor 3 Std.")
     }
 
+    func testTemporalFormatterOutputsNeverJoinNumberDirectlyToUnitLetters() {
+        let publishedAt = "2026-09-20T06:00:00Z"
+        let published = ISO8601DateFormatter().date(from: publishedAt)!
+        let relative = IOSArticleTemporalPresentation.relativePublishedAge(
+            publishedAt,
+            relativeTo: published.addingTimeInterval(3 * 3_600)
+        )
+        let reading = try? XCTUnwrap(IOSArticleTemporalPresentation.readingTime(4))
+
+        func hasJoinedNumberAndUnit(_ value: String) -> Bool {
+            zip(value, value.dropFirst()).contains { pair in
+                pair.0.isNumber && pair.1.isLetter
+            }
+        }
+
+        XCTAssertFalse(hasJoinedNumberAndUnit(relative))
+        if let reading { XCTAssertFalse(hasJoinedNumberAndUnit(reading)) }
+    }
+
     func testArticleTemporalPresentationUsesCoreReadingTime() {
         let article = ArticleSummary(
             id: 77,
@@ -2548,6 +2636,29 @@ final class NewsreaderPresentationTests: XCTestCase {
 
         XCTAssertEqual(state.content.publishedAge, second.publishedAge)
         XCTAssertNotEqual(first.publishedAge, second.publishedAge)
+    }
+
+    @MainActor
+    func testTimelinePaginationKeepsOneFrozenRelativeTimeReference() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let first = timelineArticle(id: 101)
+        let second = timelineArticle(id: 102)
+
+        store.setArticlesForTesting([first])
+        let referenceDate = store.timelineReferenceDateForTesting
+        store.appendArticlesForTesting([second])
+
+        let items = store.timelineStructuralState.storage.items
+        XCTAssertEqual(items.map(\.article.id), [101, 102])
+        XCTAssertEqual(
+            items[0].content.publishedAge,
+            IOSArticleTemporalPresentation.relativePublishedAge(first.publishedAt, relativeTo: referenceDate)
+        )
+        XCTAssertEqual(
+            items[1].content.publishedAge,
+            IOSArticleTemporalPresentation.relativePublishedAge(second.publishedAt, relativeTo: referenceDate)
+        )
+        XCTAssertEqual(store.timelineReferenceDateForTesting, referenceDate)
     }
 
     func testEveryArticleLayoutLeadsWithMetadataThenTitleThenPublicationRow() {
@@ -2623,6 +2734,54 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(readingIcon.midY, metrics.dateFrame.midY, accuracy: 0.5)
         XCTAssertEqual(reading.minY, metrics.dateFrame.minY, accuracy: 0.5)
         XCTAssertEqual(reading.height, metrics.dateFrame.height, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testRelativePublicationTimeUIKitCellMatchesDeterministicGeometryInPortraitAndLandscape() {
+        for width in [390 as CGFloat, 760] {
+            let item = oracleItem(
+                title: "Relative-time UIKit oracle",
+                preview: "Preview text below the publication row.",
+                hasImage: true,
+                hasComments: true,
+                readingTimeMinutes: 4
+            )
+            let cell = configuredOracleCell(
+                item: item,
+                mode: .visual,
+                previewLines: .standard,
+                width: width,
+                showRelativePublicationTime: true
+            )
+            let actualHeight = measureUIKitArticleCell(cell, width: width)
+            let input = IOSUIKitArticleLayoutInput(
+                item: item,
+                mode: .visual,
+                previewLines: .standard,
+                showsRelativePublicationTime: true,
+                containerWidth: width,
+                displayScale: cell.traitCollection.displayScale,
+                contentSizeCategory: .large,
+                layoutDirection: .leftToRight
+            )
+            let expected = IOSUIKitArticleLayoutEngine.metrics(for: input)
+            let diagnostics = cell.layoutDiagnosticsForTesting
+
+            XCTAssertEqual(actualHeight, expected.cellSize.height, accuracy: 0.5)
+            assertFrameEqual(diagnostics.metadataFrame, expected.metadataFrame)
+            assertFrameEqual(diagnostics.titleFrame, expected.titleFrame)
+            assertFrameEqual(diagnostics.dateFrame, expected.dateFrame)
+            assertOptionalFrameEqual(
+                diagnostics.publicationTimeIconFrame,
+                expected.publicationTimeIconFrame,
+                accuracy: Self.accessoryFrameAccuracy
+            )
+            assertOptionalFrameEqual(
+                diagnostics.landscapeReadingTimeContainerFrame,
+                expected.landscapeReadingTimeContainerFrame
+            )
+            assertOptionalFrameEqual(diagnostics.previewFrame, expected.previewFrame)
+        }
     }
 
     @MainActor
@@ -2820,6 +2979,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertNotEqual(baseline, IOSUIKitTimelineGeometryIdentity(mode: .visual, previewLines: .compact, containerWidth: 390, displayScale: 3, contentSizeCategory: .large, layoutDirection: .leftToRight))
         XCTAssertNotEqual(baseline, IOSUIKitTimelineGeometryIdentity(mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 3, contentSizeCategory: .extraLarge, layoutDirection: .leftToRight))
         XCTAssertNotEqual(baseline, IOSUIKitTimelineGeometryIdentity(mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 3, contentSizeCategory: .large, layoutDirection: .rightToLeft))
+        XCTAssertNotEqual(baseline, IOSUIKitTimelineGeometryIdentity(mode: .visual, previewLines: .standard, showsRelativePublicationTime: true, containerWidth: 390, displayScale: 3, contentSizeCategory: .large, layoutDirection: .leftToRight))
     }
 
     @MainActor
@@ -3340,7 +3500,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         previewLines: ArticlePreviewLines,
         width: CGFloat,
         layoutDirection: UIUserInterfaceLayoutDirection = .leftToRight,
-        rasterScale: CGFloat? = nil
+        rasterScale: CGFloat? = nil,
+        showRelativePublicationTime: Bool = false
     ) -> IOSUIKitArticleCell {
         let container = UIView(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
         let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
@@ -3357,6 +3518,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             item: item,
             mode: mode,
             previewLines: previewLines,
+            showsRelativePublicationTime: showRelativePublicationTime,
             containerWidth: width,
             displayScale: displayScale,
             contentSizeCategory: .large,
@@ -3366,6 +3528,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             item: item,
             mode: mode,
             previewLines: previewLines,
+            showRelativePublicationTime: showRelativePublicationTime,
             metrics: .init(
                 mode: mode,
                 containerWidth: width

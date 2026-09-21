@@ -206,6 +206,18 @@ final class IOSSearchStore: ObservableObject {
         }
     }
 
+    // Narrow deterministic seams for temporal/pagination presentation tests.
+    func replaceResultsForTesting(_ value: [ArticleSummary], referenceDate: Date) {
+        searchReferenceDate = referenceDate
+        replaceResults(value)
+    }
+
+    func appendResultsForTesting(_ value: [ArticleSummary]) {
+        replaceResults(IOSSearchPaginationPolicy.deduplicated(results + value))
+    }
+
+    var searchReferenceDateForTesting: Date { searchReferenceDate }
+
     private func replaceResults(_ value: [ArticleSummary]) {
         results = value
         let states = Dictionary(uniqueKeysWithValues: value.map { article in
