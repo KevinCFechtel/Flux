@@ -843,8 +843,19 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private var scrolloverPhase: IOSScrolloverPresentationPhase = .idle
     private var scrolloverLayoutGeneration: UInt64 = 0
     private var resolvedScrolloverFrames = IOSUIKitResolvedScrolloverFrameStore()
+    private struct ScrollAnchor {
+        let articleID: Int64
+        let viewportOffset: CGFloat
+    }
+
     private var geometryIdentity: IOSUIKitTimelineGeometryIdentity?
     private var geometryGeneration: UInt64 = 0
+    /// Geometry changes may temporarily make UIKit recalculate its content
+    /// offset before replacement row heights are ready. Capture the stable
+    /// article identity before that transition so the asynchronous reload can
+    /// restore the user's place rather than anchoring whatever UIKit happens to
+    /// expose afterwards.
+    private var pendingGeometryScrollAnchor: ScrollAnchor?
     private var preparedWindowTask: Task<Void, Never>?
     private var preparedWindowGeneration: UInt64 = 0
     private var scheduledPreparedWindowGeneration: UInt64?
@@ -910,6 +921,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     var contentOffsetForTesting: CGPoint { tableView.contentOffset }
     var scrolloverLayoutGenerationForTesting: UInt64 { scrolloverLayoutGeneration }
     var orderedArticleIDsForTesting: [Int64] { orderedIDs }
+    var scrollAnchorForTesting: (articleID: Int64, viewportOffset: CGFloat)? {
+        currentScrollAnchor().map { ($0.articleID, $0.viewportOffset) }
+    }
+    func captureGeometryScrollAnchorForTesting() {
+        captureGeometryScrollAnchorIfNeeded()
+    }
 #endif
 
     override func viewDidLoad() {
@@ -1016,6 +1033,14 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         updateGeometryIfNeeded()
     }
 
+    override func viewWillTransition(
+        to size: CGSize,
+        with coordinator: UIViewControllerTransitionCoordinator
+    ) {
+        captureGeometryScrollAnchorIfNeeded()
+        super.viewWillTransition(to: size, with: coordinator)
+    }
+
     private func updateStatusBarScrimHeight() {
         let height = view.window?.windowScene?.statusBarManager?.statusBarFrame.height ?? 0
         guard statusBarScrimHeight.constant != height else { return }
@@ -1024,6 +1049,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
 
     private func updateGeometryIfNeeded() {
         guard let newIdentity = currentGeometryIdentity(), newIdentity != geometryIdentity else { return }
+        if geometryIdentity != nil {
+            captureGeometryScrollAnchorIfNeeded()
+        }
         geometryIdentity = newIdentity
         geometryGeneration &+= 1
         performanceMetrics.recordGeometryChange()
@@ -1080,19 +1108,34 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     /// visible article is re-anchored explicitly instead of being left wherever
     /// the new content size happens to put it.
     private func reloadPreservingAnchor() {
-        let anchor = currentScrollAnchor()
+        let anchor = pendingGeometryScrollAnchor ?? currentScrollAnchor()
+        pendingGeometryScrollAnchor = nil
         dataSource.applySnapshotUsingReloadData(dataSource.snapshot(), completion: nil)
-        guard let anchor, let row = orderedIDs.firstIndex(of: anchor.id) else { return }
+        guard let anchor, let row = orderedIDs.firstIndex(of: anchor.articleID) else { return }
         tableView.layoutIfNeeded()
         let rect = tableView.rectForRow(at: IndexPath(row: row, section: 0))
-        tableView.setContentOffset(CGPoint(x: tableView.contentOffset.x, y: rect.minY - anchor.offset), animated: false)
+        tableView.setContentOffset(
+            CGPoint(x: tableView.contentOffset.x, y: rect.minY - anchor.viewportOffset),
+            animated: false
+        )
     }
 
-    private func currentScrollAnchor() -> (id: Int64, offset: CGFloat)? {
-        guard let indexPath = tableView.indexPathsForVisibleRows?.first,
+    private func captureGeometryScrollAnchorIfNeeded() {
+        guard pendingGeometryScrollAnchor == nil else { return }
+        pendingGeometryScrollAnchor = currentScrollAnchor()
+    }
+
+    private func currentScrollAnchor() -> ScrollAnchor? {
+        guard let visibleRows = tableView.indexPathsForVisibleRows,
+              let indexPath = visibleRows.min(by: { lhs, rhs in
+                  tableView.rectForRow(at: lhs).minY < tableView.rectForRow(at: rhs).minY
+              }),
               indexPath.row < orderedIDs.count
         else { return nil }
-        return (orderedIDs[indexPath.row], tableView.rectForRow(at: indexPath).minY - tableView.contentOffset.y)
+        return ScrollAnchor(
+            articleID: orderedIDs[indexPath.row],
+            viewportOffset: tableView.rectForRow(at: indexPath).minY - tableView.contentOffset.y
+        )
     }
 
     /// Rows are never published before their exact heights exist. Applying a
@@ -1288,6 +1331,10 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         if layoutInputsChanged { updateGeometryIfNeeded() }
         if feedIconRequestChanged { requestFeedIconsForVisibleCells() }
         if resetChanged {
+            // Semantic scope/filter/sort resets intentionally own the scroll
+            // position. Never let a pending geometry-only anchor restore the
+            // previous article after that explicit reset.
+            pendingGeometryScrollAnchor = nil
             invalidateScrolloverGeometry()
             let naturalTop = CGPoint(x: 0, y: -tableView.adjustedContentInset.top)
             tableView.setContentOffset(naturalTop, animated: false)

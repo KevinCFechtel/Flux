@@ -2577,6 +2577,66 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(snapshot.snapshotApplyCount, 0)
     }
 
+    @MainActor
+    func testGeometryResizeRestoresAnchorCapturedBeforeUIKitChangesOffset() async {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = IOSUIKitArticleTimelineController()
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
+        controller.view.layoutIfNeeded()
+
+        let articles = (1...80).map { timelineArticle(id: Int64($0)) }
+        bridge.replaceArticleStates(Dictionary(uniqueKeysWithValues: articles.map {
+            ($0.id, .init(isRead: false, isStarred: false, revision: 0))
+        }))
+        controller.update(
+            structuralState: timelineStructuralState(articles, revision: 1),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            feedIconRequestRevision: 0,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+        await controller.settleForTesting()
+        controller.view.layoutIfNeeded()
+
+        let targetRow = 30
+        controller.tableViewForTesting.scrollToRow(
+            at: IndexPath(row: targetRow, section: 0),
+            at: .top,
+            animated: false
+        )
+        controller.tableViewForTesting.layoutIfNeeded()
+        guard let originalAnchor = controller.scrollAnchorForTesting else {
+            return XCTFail("Expected a visible pre-resize anchor")
+        }
+        XCTAssertEqual(originalAnchor.articleID, articles[targetRow].id)
+
+        // viewWillTransition captures this before UIKit starts adapting its
+        // content offset. Simulate UIKit subsequently losing that position
+        // before the asynchronous replacement heights are ready.
+        controller.captureGeometryScrollAnchorForTesting()
+        controller.tableViewForTesting.setContentOffset(
+            CGPoint(x: 0, y: -controller.tableViewForTesting.adjustedContentInset.top),
+            animated: false
+        )
+
+        controller.view.frame.size.width = 760
+        controller.view.layoutIfNeeded()
+        await controller.settleForTesting()
+        controller.view.layoutIfNeeded()
+
+        guard let restoredAnchor = controller.scrollAnchorForTesting else {
+            return XCTFail("Expected the pre-resize anchor to be restored")
+        }
+        XCTAssertEqual(restoredAnchor.articleID, originalAnchor.articleID)
+        XCTAssertEqual(restoredAnchor.viewportOffset, originalAnchor.viewportOffset, accuracy: 1)
+    }
+
     func testDeterministicArticleLayoutEngineSelectsCurrentPresentationVariants() {
         XCTAssertEqual(layoutMetrics(mode: .compact, width: 390, hasImage: true).variant, .compact)
         XCTAssertEqual(layoutMetrics(mode: .visual, width: 390, hasImage: false).variant, .visualTextOnly)
