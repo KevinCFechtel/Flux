@@ -320,14 +320,6 @@ struct ArticleRowArticle: Equatable, Sendable {
 }
 
 enum IOSArticleTemporalPresentation {
-    static func relativePublishedAge(_ publishedAt: String, relativeTo referenceDate: Date) -> String {
-        guard let date = ISO8601DateFormatter().date(from: publishedAt) else { return publishedAt }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        formatter.dateTimeStyle = .numeric
-        return formatter.localizedString(for: date, relativeTo: referenceDate)
-    }
-
     static func readingTime(_ minutes: UInt32) -> String? {
         guard minutes > 0 else { return nil }
         let formatter = DateComponentsFormatter()
@@ -340,23 +332,15 @@ enum IOSArticleTemporalPresentation {
 
 struct ArticleRowContent: Equatable, Sendable {
     let article: ArticleRowArticle
-    /// Absolute publication date retained for Compact/Visual compact/Landscape.
     let publishedDate: String
-    /// Frozen for this structural Timeline generation. It is recomputed only
-    /// when the Timeline is rebuilt, never by a timer while rows are visible.
-    let publishedAge: String
     let readingTime: String?
     let imageURL: URL?
     let hasComments: Bool
 
-    init(article: ArticleSummary, referenceDate: Date = .now) {
+    init(article: ArticleSummary) {
         self.article = ArticleRowArticle(article: article)
         publishedDate = ISO8601DateFormatter().date(from: article.publishedAt)
             .map { $0.formatted(date: .abbreviated, time: .shortened) } ?? article.publishedAt
-        publishedAge = IOSArticleTemporalPresentation.relativePublishedAge(
-            article.publishedAt,
-            relativeTo: referenceDate
-        )
         readingTime = IOSArticleTemporalPresentation.readingTime(article.readingTimeMinutes)
         imageURL = article.imageUrl.flatMap { $0.isEmpty ? nil : URL(string: $0) }
         hasComments = IOSArticleContextMenuPolicy.commentsURL(article.commentsUrl) != nil
@@ -424,9 +408,6 @@ struct ArticleRowContent: Equatable, Sendable {
     @ObservationIgnored private var rowPresentationStates: [Int64: ArticleRowPresentationState] = [:]
     @ObservationIgnored private var loadedArticlesByID: [Int64: ArticleSummary] = [:]
     private var nextTimelineCursor: ArticleCursor?
-    /// Captured when the first page of a structural Timeline generation is
-    /// requested and reused by all subsequently paged rows.
-    private var timelineRelativeDateReference = Date()
     private var hasMoreTimelinePages = false
     private var nextTimelinePageRequest: IOSNewsreaderTimelinePageRequest?
     private static let timelinePageSize: UInt32 = 72
@@ -591,8 +572,6 @@ struct ArticleRowContent: Equatable, Sendable {
         guard let core else { return }
         let request = readLifecycle.beginArticle()
         let articleQuery = query()
-        let relativeDateReference = Date()
-        timelineRelativeDateReference = relativeDateReference
         nextTimelinePageRequest = nil
         nextTimelineCursor = nil
         hasMoreTimelinePages = false
@@ -603,7 +582,7 @@ struct ArticleRowContent: Equatable, Sendable {
                 let page = try core.articlePage(query: articleQuery, includeTotal: true)
                 return TimelinePagePreparation(
                     page: page,
-                    contents: page.articles.map { ArticleRowContent(article: $0, referenceDate: relativeDateReference) }
+                    contents: page.articles.map { ArticleRowContent(article: $0) }
                 )
             }
             guard let self, self.readLifecycle.isCurrentArticle(request), self.readLifecycle.isCurrentSelectionCount(request) else { return }
@@ -1261,7 +1240,7 @@ struct ArticleRowContent: Equatable, Sendable {
     private func replaceArticles(_ value: [ArticleSummary]) {
         replaceFirstTimelinePage(.init(
             page: ArticlePage(articles: value, total: UInt64(value.count), nextCursor: nil),
-            contents: value.map { ArticleRowContent(article: $0, referenceDate: timelineRelativeDateReference) }
+            contents: value.map { ArticleRowContent(article: $0) }
         ))
     }
 
@@ -1305,13 +1284,12 @@ struct ArticleRowContent: Equatable, Sendable {
             cursor: cursor
         )
         nextTimelinePageRequest = request
-        let relativeDateReference = timelineRelativeDateReference
         Task { [weak self, core] in
             let result = await AppleCoreExecution.shared.responsiveResult {
                 let page = try core.articlePage(query: pageQuery, includeTotal: false)
                 return TimelinePagePreparation(
                     page: page,
-                    contents: page.articles.map { ArticleRowContent(article: $0, referenceDate: relativeDateReference) }
+                    contents: page.articles.map { ArticleRowContent(article: $0) }
                 )
             }
             guard let self, self.completeNextTimelinePageRequest(request) else { return }
@@ -1358,7 +1336,7 @@ struct ArticleRowContent: Equatable, Sendable {
         if let state = rowPresentationStates[article.id] { return state }
         let state = ArticleRowPresentationState(
             article: article,
-            content: ArticleRowContent(article: article, referenceDate: timelineRelativeDateReference)
+            content: ArticleRowContent(article: article)
         )
         rowPresentationStates[article.id] = state
         return state
@@ -1491,7 +1469,7 @@ struct ArticleRowContent: Equatable, Sendable {
             .init(
                 page: .init(articles: value, total: nil, nextCursor: nil),
                 contents: value.map {
-                    ArticleRowContent(article: $0, referenceDate: timelineRelativeDateReference)
+                    ArticleRowContent(article: $0)
                 }
             )
         )
