@@ -528,6 +528,9 @@ struct ArticleRowContent: Equatable, Sendable {
     @ObservationIgnored private var scrolloverMutationMaximumWaitOverride: Duration?
     private var explicitReadMutationTokens: [Int64: UInt64] = [:]
     private var nextExplicitReadMutationToken: UInt64 = 0
+#if DEBUG
+    @ObservationIgnored private var explicitReadMutationWaiters: [CheckedContinuation<Void, Never>] = []
+#endif
     // Presentation resets rebaseline UI feedback only. Accepted persistence work
     // remains owned by this Core session until a real detach invalidates it.
     private var scrolloverPresentationGeneration: UInt64 = 0
@@ -894,7 +897,7 @@ struct ArticleRowContent: Equatable, Sendable {
         guard let core else { return nil }
         return { articleIDs, read in
             await AppleCoreExecution.shared.responsiveResult {
-                try core.setReadStateBulk(articleIds: articleIDs, read: read)
+                _ = try core.setReadStateBulk(articleIds: articleIDs, read: read)
             }
         }
     }
@@ -910,6 +913,15 @@ struct ArticleRowContent: Equatable, Sendable {
         for id in articleIDs where explicitReadMutationTokens[id] == token {
             explicitReadMutationTokens[id] = nil
         }
+    }
+
+    private func notifyExplicitReadMutationWaitersIfIdle() {
+#if DEBUG
+        guard explicitReadMutationTokens.isEmpty, !explicitReadMutationWaiters.isEmpty else { return }
+        let waiters = explicitReadMutationWaiters
+        explicitReadMutationWaiters = []
+        for waiter in waiters { waiter.resume() }
+#endif
     }
 
     func setRead(articleIDs: [Int64], read: Bool) {
@@ -938,6 +950,7 @@ struct ArticleRowContent: Equatable, Sendable {
                 restoreReadPresentation(articleIDs, revisions: revisions, snapshotRevision: snapshotRevision)
                 errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
             }
+            notifyExplicitReadMutationWaitersIfIdle()
         }
     }
 
@@ -1215,6 +1228,7 @@ struct ArticleRowContent: Equatable, Sendable {
                 clearScrolloverUndoGroup(); reloadCounts()
             case let .failure(error): errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
             }
+            notifyExplicitReadMutationWaitersIfIdle()
         }
     }
 
@@ -1298,6 +1312,7 @@ struct ArticleRowContent: Equatable, Sendable {
         runningScrolloverIDs = []
         supersededRunningScrolloverIDs = []
         explicitReadMutationTokens = [:]
+        notifyExplicitReadMutationWaitersIfIdle()
         scrolloverMutationRunning = false
         // An in-flight writer is deliberately not synchronously awaited or rebound.
         // It owns the Core/writer captured for the old session and its completion is
@@ -1781,6 +1796,13 @@ struct ArticleRowContent: Equatable, Sendable {
     var scrolloverMutationRunningForTesting: Bool { scrolloverMutationRunning }
     @MainActor
     var runningScrolloverIDsForTesting: [Int64] { runningScrolloverIDs.sorted() }
+    @MainActor
+    func waitForExplicitReadMutationsForTesting() async {
+        guard !explicitReadMutationTokens.isEmpty else { return }
+        await withCheckedContinuation { continuation in
+            explicitReadMutationWaiters.append(continuation)
+        }
+    }
 
     private func reloadCounts() {
         guard let core else { return }

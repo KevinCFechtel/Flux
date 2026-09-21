@@ -1121,9 +1121,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         XCTAssertEqual(writer.calls[1], .init(ids: [1, 2, 3], read: false))
 
         writer.succeedNext()
-        for _ in 0..<20 where store.scrolloverMutationRunningForTesting {
-            await Task.yield()
-        }
+        await store.waitForExplicitReadMutationsForTesting()
         XCTAssertEqual(readStates(store), [false, false, false])
         XCTAssertTrue(store.scrolloverUndoIDsForTesting.isEmpty)
     }
