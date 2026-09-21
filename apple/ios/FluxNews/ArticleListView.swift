@@ -2329,6 +2329,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var publicationTimeIconWidthConstraint: NSLayoutConstraint!
     private var publicationTimeIconHeightConstraint: NSLayoutConstraint!
     private var publicationTimeIconTextSpacingConstraint: NSLayoutConstraint!
+    private var dateWidthConstraint: NSLayoutConstraint!
     private var defaultDateTopConstraint: NSLayoutConstraint!
     private var defaultDateTrailingConstraint: NSLayoutConstraint!
     private var landscapeDateTrailingConstraint: NSLayoutConstraint!
@@ -2509,6 +2510,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
         dateLabel.textColor = Self.supportingTextColor
         dateLabel.numberOfLines = 1
         dateLabel.lineBreakMode = .byTruncatingTail
+        // The deterministic engine owns the exact publication width. This keeps
+        // the optional reading-time group immediately adjacent instead of letting
+        // the date label expand across all remaining horizontal space.
+        dateWidthConstraint = dateLabel.widthAnchor.constraint(equalToConstant: 0)
 
         landscapeReadingTimeContainer.translatesAutoresizingMaskIntoConstraints = false
         landscapeReadingTimeContainer.isHidden = true
@@ -2633,6 +2638,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             publicationTimeIconWidthConstraint,
             publicationTimeIconHeightConstraint,
             publicationTimeIconTextSpacingConstraint,
+            dateWidthConstraint,
         ]
         for child in [titleLabel, metadataRow, previewLabel] as [UIView] {
             stackedConstraints.append(child.leadingAnchor.constraint(equalTo: textContainer.leadingAnchor))
@@ -2679,7 +2685,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             constant: -IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing
         )
         compactReadingContainerTrailingConstraint = landscapeReadingTimeContainer.trailingAnchor.constraint(
-            equalTo: textContainer.trailingAnchor
+            lessThanOrEqualTo: textContainer.trailingAnchor
         )
         let compactStackConstraints = defaultStackConstraints.filter {
             $0 !== defaultDateTrailingConstraint
@@ -2702,7 +2708,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         //   └─────────────────────┘
         //   ● icon  Feed name              ★ 💬
         //   Headline
-        //   Date                         ▤ 4 min
+        //   Date · ▤ 4 min
         //   Preview …
         //
         // Full-width image followed by the normal metadata/title/date stack.
@@ -2711,7 +2717,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             constant: -IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing
         )
         portraitReadingContainerTrailingConstraint = landscapeReadingTimeContainer.trailingAnchor.constraint(
-            equalTo: textContainer.trailingAnchor
+            lessThanOrEqualTo: textContainer.trailingAnchor
         )
         portraitConstraints = [
             articleImageView.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
@@ -2771,7 +2777,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             textContainer.topAnchor.constraint(equalTo: margins.topAnchor),
             textContainer.bottomAnchor.constraint(lessThanOrEqualTo: margins.bottomAnchor),
 
-            landscapeReadingTimeContainer.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            landscapeReadingTimeContainer.trailingAnchor.constraint(lessThanOrEqualTo: textContainer.trailingAnchor),
             landscapeReadingTimeContainer.topAnchor.constraint(equalTo: dateLabel.topAnchor),
             landscapeReadingTimeContainer.bottomAnchor.constraint(equalTo: dateLabel.bottomAnchor),
         ]
@@ -2780,7 +2786,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         //
         //   ● icon  Feed name              ★ 💬     full width
         //   Headline …                    ┌─────┐
-        //   Date              ▤ 4 min    │ IMG │
+        //   Date · ▤ 4 min               │ IMG │
         //                                 └─────┘
         //   Preview …                               full width
         //
@@ -2819,7 +2825,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             constant: -IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing
         )
         sideTitleReadingContainerTrailingConstraint = landscapeReadingTimeContainer.trailingAnchor.constraint(
-            equalTo: articleImageView.leadingAnchor,
+            lessThanOrEqualTo: articleImageView.leadingAnchor,
             constant: -IOSUIKitArticleGeometry.sideTitleSpacing
         )
         sideTitleConstraints = [
@@ -2866,7 +2872,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             constant: -IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing
         )
         sideTitleWideReadingContainerTrailingConstraint = landscapeReadingTimeContainer.trailingAnchor.constraint(
-            equalTo: articleImageView.leadingAnchor,
+            lessThanOrEqualTo: articleImageView.leadingAnchor,
             constant: -IOSUIKitArticleGeometry.sideTitleSpacing
         )
         sideTitleWideConstraints = [
@@ -2909,7 +2915,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             constant: -IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing
         )
         sideTitleTextOnlyReadingContainerTrailingConstraint = landscapeReadingTimeContainer.trailingAnchor.constraint(
-            equalTo: textContainer.trailingAnchor
+            lessThanOrEqualTo: textContainer.trailingAnchor
         )
         sideTitleTextOnlyConstraints = [
             textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
@@ -2965,7 +2971,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
         currentReadingTime = item.content.readingTime
         titleLabel.text = currentTitle
         feedTitleLabel.text = currentFeedTitle
-        dateLabel.text = currentPublishedDate
+        dateLabel.text = item.content.readingTime == nil
+            ? currentPublishedDate
+            : "\(currentPublishedDate) ·"
         landscapeReadingTimeLabel.text = item.content.readingTime
         let hasPreview = !item.content.article.preview.isEmpty
         previewLabel.text = item.content.article.preview
@@ -3040,6 +3048,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             publicationTimeIconWidthConstraint.constant = 0
             publicationTimeIconHeightConstraint.constant = 0
         }
+        dateWidthConstraint.constant = layout.dateFrame.width
 
         if let container = layout.landscapeReadingTimeContainerFrame,
            let icon = layout.landscapeReadingTimeIconFrame,

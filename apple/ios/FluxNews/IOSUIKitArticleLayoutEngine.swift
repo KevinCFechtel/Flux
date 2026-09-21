@@ -449,7 +449,7 @@ struct IOSUIKitArticleGeometry: Equatable {
     static let sideTitleImageAspectRatio: CGFloat = 4.0 / 3
     static let sideTitleSpacing: CGFloat = 12
     static let landscapeSpacing: CGFloat = 14
-    static let landscapeDateReadingTimeSpacing: CGFloat = 10
+    static let landscapeDateReadingTimeSpacing: CGFloat = 4
     static let landscapeReadingTimeIconTextSpacing: CGFloat = 4
     static let unreadSize: CGFloat = 6
     static let feedIconSize: CGFloat = 22
@@ -594,7 +594,15 @@ enum IOSUIKitArticleLayoutEngine {
         let titleHeight = coreTextHeight(input.title, font: titleFont, width: titleWidth, maximumLines: nil, displayScale: scale)
         let metadataHeight = max(accessories.feedIcon, font(.subheadline, category: input.contentSizeCategory, bold: true).lineHeight)
         let dateFont = font(.caption1, category: input.contentSizeCategory, bold: false)
-        let dateHeight = fixedLineHeight(input.publishedDate, font: dateFont)
+        let usesDateRowReadingTime = input.readingTime != nil
+        // Reading time is one inline metadata group with the publication value:
+        // "date · [doc.text] duration". The separator stays attached to the date
+        // so the optional reading-time container can follow it immediately.
+        let publicationText = usesDateRowReadingTime
+            ? "\(input.publishedDate) ·"
+            : input.publishedDate
+        let dateHeight = fixedLineHeight(publicationText, font: dateFont)
+        let publicationDateTextWidth = coreTextWidth(publicationText, font: dateFont, displayScale: scale)
         let publicationTimeIconSize = input.showsRelativePublicationTime
             ? min(accessories.infoIcon, dateHeight)
             : 0
@@ -603,7 +611,6 @@ enum IOSUIKitArticleLayoutEngine {
             : 0
         let previewHeight = coreTextHeight(input.preview, font: font(.subheadline, category: input.contentSizeCategory, bold: false), width: previewWidth, maximumLines: input.previewLines.rawValue, displayScale: scale)
 
-        let usesDateRowReadingTime = input.readingTime != nil
         let dateRowReadingTimeTextWidth = usesDateRowReadingTime
             ? coreTextWidth(input.readingTime ?? "", font: dateFont, displayScale: scale)
             : 0
@@ -716,7 +723,11 @@ enum IOSUIKitArticleLayoutEngine {
         let readingTimeReservedWidth = usesDateRowReadingTime && dateRowReadingTimeBlockWidth > 0
             ? IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing + dateRowReadingTimeBlockWidth
             : 0
-        let dateWidth = max(0, dateRowWidth - publicationTimeLeadingWidth - readingTimeReservedWidth)
+        let availableDateWidth = max(
+            0,
+            dateRowWidth - publicationTimeLeadingWidth - readingTimeReservedWidth
+        )
+        let dateWidth = min(publicationDateTextWidth, availableDateWidth)
         let dateLogicalX = logicalTextX + publicationTimeLeadingWidth
         dateFrame = CGRect(
             x: physicalX(
@@ -745,7 +756,9 @@ enum IOSUIKitArticleLayoutEngine {
 
         if usesDateRowReadingTime, dateRowReadingTimeBlockWidth > 0 {
 
-                let blockLogicalX = logicalTextX + dateRowWidth - dateRowReadingTimeBlockWidth
+                let blockLogicalX = dateLogicalX
+                    + dateWidth
+                    + IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing
                 let blockX = physicalX(
                     logicalX: blockLogicalX,
                     width: dateRowReadingTimeBlockWidth,

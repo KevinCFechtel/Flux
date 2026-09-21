@@ -2918,7 +2918,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         assertOptionalFrameEqual(diagnostics.previewFrame, expected.previewFrame)
     }
 
-    func testVisualLandscapePlacesReadingTimeAtTrailingEdgeOfDateRow() {
+    func testVisualLandscapePlacesReadingTimeInlineAfterDate() {
         let metrics = layoutMetrics(
             mode: .visual,
             width: 760,
@@ -2930,7 +2930,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             let icon = metrics.landscapeReadingTimeIconFrame,
             let reading = metrics.landscapeReadingTimeFrame
         else {
-            return XCTFail("Visual landscape should expose trailing reading-time frames")
+            return XCTFail("Visual landscape should expose inline reading-time frames")
         }
 
         XCTAssertEqual(metrics.variant, .visualLandscape)
@@ -2949,17 +2949,23 @@ final class NewsreaderPresentationTests: XCTestCase {
             IOSUIKitArticleGeometry.landscapeReadingTimeIconTextSpacing,
             accuracy: 0.5
         )
+        XCTAssertLessThan(
+            container.maxX,
+            metrics.textFrame.maxX,
+            "Reading time should stay next to the date rather than being pushed to the trailing edge"
+        )
 
         let withoutReadingTime = layoutMetrics(mode: .visual, width: 760, hasImage: true)
         XCTAssertEqual(withoutReadingTime.variant, .visualLandscape)
         XCTAssertNil(withoutReadingTime.landscapeReadingTimeContainerFrame)
         XCTAssertNil(withoutReadingTime.landscapeReadingTimeIconFrame)
         XCTAssertNil(withoutReadingTime.landscapeReadingTimeFrame)
-        XCTAssertEqual(withoutReadingTime.dateFrame.width, metrics.textFrame.width, accuracy: 0.5)
+        XCTAssertGreaterThan(withoutReadingTime.dateFrame.width, 0)
+        XCTAssertLessThanOrEqual(withoutReadingTime.dateFrame.maxX, withoutReadingTime.textFrame.maxX)
         XCTAssertEqual(withoutReadingTime.cellSize.height, metrics.cellSize.height, accuracy: 0.5)
     }
 
-    func testCompactAndVisualCompactUseTrailingReadingTimeWithoutAddingHeight() {
+    func testCompactAndVisualCompactUseInlineReadingTimeWithoutAddingHeight() {
         for (mode, width, hasImage, expectedVariant) in [
             (ArticlePresentationMode.compact, CGFloat(390), false, IOSUIKitArticleCellLayoutVariant.compact),
             (.visualCompact, CGFloat(414), true, .visualSideTitle),
