@@ -143,9 +143,10 @@ enum IOSReaderDismissalPresentation {
 }
 
 enum IOSArticleNavigationPresentation {
-    // UIKit derives system Large Title state from the Timeline collection view's
-    // scroll edge. Semantic resets therefore preserve view identity and move the
-    // collection view to its natural top position.
+    // Keep the outer navigation container on the native large-title-compatible
+    // path so semantic resets preserve the expected navigation-controller
+    // geometry. The accepted visible article-list title remains the explicit
+    // scope capsule, whose inner chrome overrides the visible display mode.
     static let titleDisplayMode: NavigationBarItem.TitleDisplayMode = .large
 }
 

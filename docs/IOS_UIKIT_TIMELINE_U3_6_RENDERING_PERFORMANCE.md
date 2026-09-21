@@ -1,6 +1,12 @@
 # U3.6 — UIKit Timeline Rendering Performance Repair
 
-> **Status: U3.6.1, U3.6.2, U3.6.3, AND U3.6.4 COMPLETE**
+> **Status: HISTORICAL PERFORMANCE PACKAGE — U3.6.1, U3.6.2, U3.6.3, AND U3.6.4 COMPLETE**
+>
+> Container references in this document describe the implementation at the time
+> this package was executed. The productive Timeline later migrated from the
+> `UICollectionView` baseline to the current `UITableView` architecture.
+> Current container/UI contracts are authoritative in
+> `PHASE_D_NATIVE_IOS_IPADOS.md` and `IOS_UIKIT_TIMELINE_IMPLEMENTATION.md`.
 >
 > Baseline: `main` at `2dbec0d3fc0368b15d04ff679fd79dc5e6bcdfc7`.
 >

@@ -1,8 +1,18 @@
-# Phase D Status — D1 Foundation / D2 Progress
+# Phase D Historical Status — D1 Foundation / Early D2 Progress
 
-Status: **D1 COMPLETE AND FROZEN FOR CONTINUED DEVELOPMENT**
+> **HISTORICAL SNAPSHOT — NOT CURRENT PHASE STATUS**
+>
+> This file preserves the state of Phase D when D1 had completed and D2.1 was the
+> newest implemented Newsreader milestone. Statements below such as "D2 is in
+> progress" and "next step is D2.2" describe that historical point in time and
+> must not be used to determine the current implementation status.
+>
+> Current Phase-D status and binding architecture live in
+> `PHASE_D_NATIVE_IOS_IPADOS.md` and `ARCHITECTURE_DECISIONS.md`.
 
-This document records the implementation status of the early Phase-D work. The authoritative architecture and Phase-D roadmap remain in `ARCHITECTURE_DECISIONS.md` and `PHASE_D_NATIVE_IOS_IPADOS.md`.
+Historical status at this snapshot: **D1 COMPLETE AND FROZEN FOR CONTINUED DEVELOPMENT**
+
+This document records the implementation status of the early Phase-D work.
 
 ## D1 — Foundation / Safe Replacement
 

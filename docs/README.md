@@ -7,7 +7,7 @@ This directory is intentionally small.
 - `ARCHITECTURE_DECISIONS.md` — explicitly agreed target architecture for the shared Rust core and native macOS/iOS/Android clients. This is the primary architecture authority.
 - `MOBILE_PRODUCT_SEMANTICS.md` — shared native-mobile behavior contract for iOS/iPadOS and future Android work. It captures product semantics that must not be rediscovered per platform while deliberately leaving SwiftUI/UIKit/Compose and OS-integration mechanics platform-specific.
 - `PHASE_D_NATIVE_IOS_IPADOS.md` — authoritative Phase-D contract and roadmap for the native iOS/iPadOS replacement, including Apple sharing boundaries, development/production identities, migration safety, mobile UX, system integrations, and D1–D10 sequencing.
-- `PHASE_D_D1_STATUS.md` — implementation status for the completed/frozen D1 foundation and current D2 progress.
+- `PHASE_D_D1_STATUS.md` — historical snapshot of the completed/frozen D1 foundation and early D2.1 progress; it is not a current status authority.
 
 ## Phase status
 

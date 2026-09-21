@@ -310,7 +310,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(IOSNavigationBranding.iconUsesSolidAccentColor)
     }
 
-    func testArticleNavigationUsesSystemLargeTitlePresentation() {
+    func testArticleNavigationKeepsLargeTitleCompatibleContainerModeBehindScopeCapsule() {
         XCTAssertEqual(IOSArticleNavigationPresentation.titleDisplayMode, .large)
     }
 

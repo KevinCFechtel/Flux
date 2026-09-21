@@ -3,7 +3,9 @@
 > **Historical implementation plan — current U3 performance work remains open.**
 >
 > This file records the ordered U3.6.5–U3.7 plan that guided the September 2026
-> UIKit Timeline performance work. Several packages below have since been
+> UIKit Timeline performance work. References to the then-current
+> `UICollectionView` container are historical; the productive Timeline later
+> migrated to the accepted `UITableView` implementation. Several packages below have since been
 > implemented, extended, or superseded by later hardening and physical-device
 > experiments. Treat package descriptions and "next action" text as historical
 > sequencing unless the current Phase-D contract or

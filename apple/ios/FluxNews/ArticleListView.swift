@@ -277,7 +277,7 @@ final class IOSScrolloverGeometryController {
     }
 }
 
-/// One coherent UIKit geometry sample. All values use UICollectionView content coordinates.
+/// One coherent UIKit geometry sample. All values use the Timeline table view's content coordinates.
 struct IOSUIKitScrolloverGeometrySample: Equatable {
     let contentOffsetY: CGFloat
     let effectiveTop: CGFloat
@@ -292,7 +292,7 @@ struct IOSUIKitScrolloverGeometryResult: Equatable {
     let batch: IOSScrolloverBatch
 }
 
-/// Resolved frames captured from real collection-view cells. This is deliberately
+/// Resolved frames captured from real table-view cells. This is deliberately
 /// smaller than the tracker's crossing window: it bridges lifecycle callback order
 /// without becoming a second geometry cache for the complete collection.
 struct IOSUIKitResolvedScrolloverFrameStore {
@@ -1889,11 +1889,11 @@ enum IOSUIKitArticleCellLayoutVariant: Hashable {
     case visualTextOnly
     case visualPortrait
     case visualLandscape
-    /// `Visual compact`: image beside the title, metadata/date/preview full
-    /// width underneath.
+    /// `Visual compact`: metadata spans the row above; title and publication
+    /// row share the content row with the trailing image; preview follows below.
     case visualSideTitle
-    /// The same arrangement on a wide container: the preview joins the column
-    /// beside the image instead of running underneath it.
+    /// The same arrangement on a wide container, except the preview also joins
+    /// the text column beside the image instead of running underneath it.
     case visualSideTitleWide
     /// `Visual compact` for an article without an image: same order, full width.
     case visualSideTitleTextOnly

@@ -12,7 +12,10 @@
 > not be reintroduced without a product decision.
 >
 > On 2026-09-11, the owner approved replacing the Article Timeline with an owned
-> `UICollectionView` and native UIKit cells. Only the previous Timeline renderer,
+> UIKit Timeline and native UIKit cells. The implementation initially used a
+> `UICollectionView` baseline and later evolved to the current `UITableView`
+> implementation during performance work. The current table-based Timeline is
+> the accepted productive UI/UX baseline. Only the previous Timeline renderer,
 > geometry integration, associated mutation scheduling, and the performance-sensitive
 > implementation needed to make that Timeline production-ready are reopened. The
 > remaining completed architecture and product rules stay frozen. The amendment is
@@ -24,7 +27,7 @@
 
 ## 1. Goal and non-goals
 
-Native FluxNews iOS/iPadOS minimum deployment target: 18.0.
+Native FluxNews iOS/iPadOS minimum deployment target: 17.0.
 
 Phase D delivers a first-class native iPhone/iPadOS FluxNews client without
 creating a second domain layer in Swift.
@@ -180,9 +183,9 @@ presentation state.
 ### iOS/iPadOS Article Timeline — UIKit
 
 The target Article Timeline is an owned UIKit view controller containing a
-`UICollectionView`, embedded through a narrow bridge in the SwiftUI app shell.
-Use stable Article IDs and a collection-view list configuration with native
-UIKit article cells. Compact and visual modes, portrait/landscape image slots,
+plain `UITableView`, embedded through a narrow bridge in the SwiftUI app shell.
+Use stable Article IDs, a diffable table data source, deterministic prepared row
+heights, and native reusable UIKit article cells. Compact and visual modes, portrait/landscape image slots,
 preview-line choices, Dynamic Type, VoiceOver, and adaptive compact/regular
 presentation remain supported. Cell structure and content sizing are reused
 when their layout inputs have not changed.
@@ -193,9 +196,9 @@ Search, sheets, and other surfaces may continue using SwiftUI. Use public UIKit
 APIs; do not take over the internal delegate of a SwiftUI control through
 introspection. Retire the old Timeline path after the replacement is integrated.
 
-Available collection-container geometry is the Timeline layout authority; device
+Available table-container geometry is the Timeline layout authority; device
 identity, screen dimensions, and orientation names are not inputs. A canonical
-pixel geometry generation includes the effective collection width and the
+pixel geometry generation includes the effective table width and the
 environment values that affect deterministic item layout. Geometry changes make
 visible cells correct immediately and establish a fresh Scrollover baseline, but
 coalesce only speculative prepared-layout work for the latest generation. Older
@@ -207,8 +210,8 @@ changing visible-first or bounded scheduling behavior.
 Timeline actions use system-native swipe actions: leading Read/Unread and
 trailing Star/Unstar invoke the existing optimistic mutations and allow the
 platform's standard full-swipe behavior. Preserve context menus, pull-to-refresh,
-article routing, native Large Title/scroll-edge behavior, semantic scope resets,
-and persistent split navigation. Actions identify articles by stable ID, never a captured
+article routing, the accepted native scope-capsule navigation chrome, semantic
+scope resets, and persistent split navigation. Actions identify articles by stable ID, never a captured
 index path or a cell reference that may have been reused.
 
 Mark-as-Read-on-Scrollover uses actual UIKit scroll movement and resolved cell
@@ -283,8 +286,9 @@ scroll-frequency work. Ignored Core events must be filtered before creating
 main-thread tasks. Feed icons and article images arrive as prepared images;
 decoding, network access, and synchronous Core queries are not cell/scroll work.
 All detected Scrollover candidates are still marked read, independently of Undo.
-Existing SwiftUI fallback presentation outside this Timeline retains correct
-read/starred equality and updates, including Search results.
+Search results use the same UIKit Article Timeline renderer and presentation
+settings as the normal Article List, with Search-specific pagination and
+Scrollover disabled.
 Normal continuous scrolling and small forward jumps do not present Undo. Undo is
 an exceptional recovery mechanism: it activates only after at least 3 successful
 unread-to-read Scrollover mutations in a rolling one-second window. Visibility
@@ -315,7 +319,7 @@ device profiling is acceptance of the new implementation. The implementation
 sequence and regression matrix are in
 [IOS_UIKIT_TIMELINE_IMPLEMENTATION.md](IOS_UIKIT_TIMELINE_IMPLEMENTATION.md).
 
-#### Current UIKit Timeline amendment status — 20 September 2026
+#### Current UIKit Timeline amendment status — 21 September 2026
 
 The UIKit amendment remains **IN PROGRESS**. U1 and the U2 native Timeline
 baseline are complete. U3 is active rather than acceptance-only: the productive
@@ -508,8 +512,8 @@ remains entirely in D9.
 
 #### D4.2 — Native Settings
 
-Implement a conventional native Settings hierarchy with dedicated Account,
-Articles, Navigation, and Developer Diagnostics destinations. D4.2 exposes only
+Implement a conventional native Settings hierarchy with Settings entries for
+Account, Articles, Navigation, and Developer Diagnostics. D4.2 exposes only
 currently functional native/Core settings and reuses the frozen D4.1 account
 lifecycle. Transient article-list filters such as Unread Only and Newest First
 remain list controls rather than persistent Settings.
@@ -529,10 +533,17 @@ structured UI, while sheets, menus, popovers, and controls retain system
 elevation.
 
 The Newsreader navigation scope title is stable and never embeds the live
-article count. Where supported, iOS uses the native navigation subtitle for the
-optional current-scope count; older supported iOS versions retain the native
-trailing-counter fallback. System Large Title and collapsed navigation behavior
-is authoritative and is not recreated through custom scroll tracking.
+article count into the title string itself. The accepted native chrome is the
+scope capsule implemented by `ArticleListTitleCapsule`: iPhone portrait uses a
+stacked capsule in the principal toolbar position with the optional descriptive
+current-scope count; iPhone landscape uses an inline leading capsule with a
+compact count. Persistent iPad split navigation hides the capsule while the
+sidebar is visible but retains its toolbar slot; when the sidebar collapses, the
+same leading capsule becomes visible and interactive. During Sync the capsule's
+count presentation may temporarily show `Syncing…`. The capsule is the
+authoritative visible title/header presentation and carries the accessibility
+header role; do not reintroduce a separate Large-Title or native-subtitle product
+presentation over it.
 
 Navigation metadata and navigation counts are consumed as one shared Rust Core
 projection. Swift selects unread-only or all-entry navigation semantics but
@@ -566,7 +577,7 @@ use display-sized ImageIO decoding off-main, while UIImageView/Core Animation ow
 the final aspect-fill crop and rounded clipping. The former exact-slot
 `renderDisplayReady` CGContext pass is retained only as a legacy developer
 diagnostic fallback and is not the production default after the 20 September
-2026 device comparison. The timeline collection surface remains explicitly
+2026 device comparison. The Timeline table surface remains explicitly
 opaque over the system background. The existing native cell uses stable
 registrations for compact/text-only, portrait, and landscape constraint variants
 to avoid ordinary reuse switching between those graphs. The article-image
@@ -624,14 +635,12 @@ describe them as a next step. New performance work should start from the current
 production architecture and current physical-device evidence.
 
 On iOS, a semantic scope/filter/sort reset stays within the existing UIKit
-Timeline controller: it resets the collection view to its natural top position
-and rebaselines Scrollover geometry without re-identifying the adaptive detail
-subtree. The system navigation controller derives Large Title state from that
-normal scroll-edge position. Device acceptance must verify a populated Timeline
-after collapsing its Large Title, then after each scope, filter, and sort reset:
-the Timeline returns to its natural start, the Large Title expands naturally,
-there is no Timeline teardown/flicker, and subsequent Scrollover remains
-correct.
+Timeline controller: it resets the table view to its natural top position and
+rebaselines Scrollover geometry without re-identifying the adaptive detail
+subtree. Device acceptance must verify a populated Timeline before and after each
+scope, filter, and sort reset: the Timeline returns to its natural start, the
+scope-capsule chrome remains stable, there is no Timeline teardown/flicker, and
+subsequent Scrollover remains correct.
 Sync activity is communicated by the normal Newsreader UI; an empty scope shows
 `News syncing…` while Sync is active and `No News` after it completes, without
 an additional custom splash screen.
@@ -673,10 +682,14 @@ remain unchanged by design.
 
 The English wording freeze is preserved, the English/German localization pass is
 complete, and the final localization audit found no unintended release-visible
-English-only strings. The original D4 baseline is **COMPLETE / architecture-frozen**;
-the accepted UIKit Timeline amendment reopens only the renderer/integration and
-its relevant D4.4 validation. It does not reopen Settings, wording, localization,
-or unrelated phase architecture.
+English-only strings. The original D4 baseline is **COMPLETE / architecture-frozen**.
+A later accepted Article Timeline presentation amendment narrowly extended the
+Articles presentation settings and English/German localization with the
+absolute/relative publication-time choice. That extension is now part of the
+accepted D4 UI baseline and does not reopen unrelated Settings, wording,
+localization architecture, or other phase architecture. The UIKit Timeline
+amendment otherwise remains limited to renderer/integration and its relevant
+D4.4 validation.
 
 For iOS Scrollover, D4.4 still requires real-device coverage of slow drags,
 fast flicks that skip rows, reverse-then-forward movement, Remove When Read,

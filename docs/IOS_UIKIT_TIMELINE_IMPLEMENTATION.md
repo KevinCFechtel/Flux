@@ -2,8 +2,8 @@
 
 > **Decision accepted: 2026-09-11. U1-U2 COMPLETE. U3 IN PROGRESS. U4 PARTIALLY IMPLEMENTED / OPEN. U5 IN PROGRESS / OPEN.**
 >
-> Build the Article Timeline using an owned `UICollectionView` and native UIKit
-> article cells. This is the selected architecture, not a proposal to benchmark
+> Build the Article Timeline using the owned UIKit `UITableView` Timeline and
+> native UIKit article cells. This is the selected architecture, not a proposal to benchmark
 > against the existing SwiftUI `List`. This file records the amended contracts
 > and the remaining completion sequence. The current UIKit implementation is not
 > architecture-frozen: unresolved physical-device performance work may still
@@ -41,7 +41,7 @@ evidence; its conditional migration advice and optional SwiftUI cell hosting
 are superseded. Required iOS Scrollover semantics are already decided in Phase D.
 
 Only the iOS Article Timeline renderer, geometry integration, and associated
-mutation scheduling are reopened. Core/macOS architecture, UniFFI, iOS 18.0,
+mutation scheduling are reopened. Core/macOS architecture, UniFFI, iOS 17.0,
 existing product capabilities, and the safe Flutter data-upgrade contract remain
 binding. An unpublished native app does not authorize deleting or rewriting
 the existing Flutter production user's data.
@@ -50,8 +50,8 @@ the existing Flutter production user's data.
 
 | Responsibility | Required implementation |
 |---|---|
-| Timeline ownership | One UIKit view controller owning one `UICollectionView`, embedded in the SwiftUI shell through a narrow representable bridge. |
-| Cell rendering | Native UIKit labels, image views, and status/accessibility presentation in reusable cells. Use a list configuration and list cells/custom native content to preserve system swipe actions. |
+| Timeline ownership | One UIKit view controller owning one plain `UITableView`, embedded in the SwiftUI shell through a narrow representable bridge. |
+| Cell rendering | Native UIKit labels, image views, and status/accessibility presentation in reusable table cells. Preserve native table swipe actions, context menus, refresh, and reuse. |
 | Structural data | Stable Article IDs in a diffable data source, with presentation content keyed by ID. Apply structural snapshots only for actual snapshot adoption/reset/membership/order changes. |
 | Read/starred state | One coherent native presentation overlay over the Core snapshot, keyed by ID. Update only relevant status and actions on a matching cell. |
 | Geometry | An owned UIKit coordinator samples resolved cell frames and scroll movement within one layout generation. The detector is non-observable and independent of SwiftUI view updates. |
@@ -216,31 +216,22 @@ not an instruction to reset or overwrite later work.
 
 | Current path | How it relates to the replacement |
 |---|---|
-| `apple/ios/FluxNews/ArticleListView.swift` | Current List, `IOSScrolloverGeometryController`, prefetch metadata/coordinator, article renderer, Undo overlay. Replace Timeline-only rendering/sensing and reuse product/layout knowledge. |
+| `apple/ios/FluxNews/ArticleListView.swift` | Productive `UITableView` Timeline controller, native reusable article cells, deterministic prepared layout, Scrollover geometry, image/prefetch integration, and Undo overlay. This is the current implementation baseline. |
 | `apple/ios/FluxNews/NewsreaderStore.swift` | Stable snapshots, per-row presentation, Core operations, pending writes, generations, Undo/counts. Refactor the existing ownership/scheduling; do not create a second source of truth. |
 | `apple/ios/FluxNews/ContentView.swift` | Timeline entry point, iPhone/iPad shell, native navigation host and reset behavior. Preserve the shell's product behavior when embedding the new controller. |
 | `apple/ios/FluxNews/ArticleImagePipeline.swift` | Existing ImageIO downsampling, memory cache, request deduplication and prefetch. Adapt consumer lifetime/cancellation as required. |
-| `apple/ios/FluxNews/SearchView.swift` | Still calls `ArticlePresentationView` with fallback read/starred state. Keep Search working; move still-used SwiftUI rendering to an appropriate file before deleting Timeline-specific code. |
+| `apple/ios/FluxNews/SearchView.swift` | Uses the same `IOSUIKitArticleTimelineView` renderer as the Article List, with Search-owned pagination/mutation state and Scrollover disabled. Keep presentation settings aligned with the main Timeline. |
 | `apple/shared/FluxApple/` | Existing shared presentation policies and macOS exposure tracker. Reuse actual shared semantics; do not transplant macOS geometry/timing or broadly refactor macOS. |
 | `apple/ios/FluxNewsTests/NewsreaderD23MutationTests.swift` | Current detection and mutation tests. Preserve valid behavior coverage; replace old-sensor tests and fake array-draining helpers with tests of the new productive paths. |
 | `apple/ios/FluxNewsTests/NewsreaderPresentationTests.swift` | Presentation, image/prefetch and related regression coverage; inspect current cases and keep relevant guarantees. |
 | `core/crates/flux-core/src/lib.rs` | Existing `set_read_state_bulk` domain boundary. Use it; do not add a Scrollover-specific Core API or change frozen delivery behavior as part of a renderer rewrite. |
 | `apple/ios/FluxNews.xcodeproj/project.pbxproj` | Register new/moved sources and tests as required by the existing project. |
 
-Keeping a SwiftUI renderer used by the separate Search screen is not keeping
-two Timeline implementations. Remove genuinely unused Timeline types only after
-checking all call sites. Keep English/German localization and existing actions.
-
-> **Closed (19 September 2026).** Search no longer has its own renderer:
-> `SearchView` embeds `IOSUIKitArticleTimelineView` with Scrollover and the
-> refresh control switched off. With that call site gone, the SwiftUI row chain
-> — `ArticlePresentationView`, `ArticleRowStateInteractions`, `ArticleRowSurface`,
-> `ArticleRowContentBody`, `ArticleMetadataRow`, `ArticleMetadataColumn`,
-> `ArticleTitlePresentation`, `ArticleUnreadIndicator`, `ArticleRowContentLayout`
-> and `ArticleImageView` — had no production caller at all and was deleted
-> (~410 lines), along with four tests that only asserted its `Equatable`
-> conformance. `FeedIconView` stays: the navigation sidebar uses it. The table
-> above still describes the planning baseline and is not updated.
+Search uses the same UIKit Timeline renderer as the normal Article List. The old
+SwiftUI article-row chain was removed after its last production caller
+disappeared; `FeedIconView` remains because the navigation sidebar uses it. The
+source map above describes the current implementation rather than the old planning
+baseline.
 
 ## 5. Ordered implementation packages
 
@@ -248,7 +239,7 @@ These packages build one permanent replacement. They are not competing renderer
 experiments. Each implementation package includes its relevant tests/build;
 do not defer correctness until the final package.
 
-| Package | Scope and completion gate | Current status — 20 September 2026 |
+| Package | Scope and completion gate | Current status — 21 September 2026 |
 |---|---|---|
 | U1 — Contract | Record UIKit container/native cells, rationale, boundaries, behavior, and this handoff. | **COMPLETE** — documentation contract established. |
 | U2 — Native Timeline | Implement the owned controller, bridge, native reusable cells, stable ID snapshots, sizing, image consumers, system swipes/context menus/refresh, and existing shell integration. Register sources and preserve Search dependencies. | **COMPLETE as the native Timeline baseline.** The owned UIKit controller/cells and structural/status split are productive. Search now also uses the UIKit Timeline. Completion of U2 does not freeze later performance-sensitive internals. |
@@ -270,13 +261,16 @@ U5 cleanup/device acceptance are all complete.
 
 ### U2 baseline and subsequent evolution
 
-U2 established the owned UIKit collection-view baseline: native cell reuse,
-image consumers/prefetching, ordinary article interactions, stable IDs, and the
-structural-versus-status update boundary. Since that baseline, U3 added the
+U2 established the owned UIKit Timeline baseline: native cell reuse, image
+consumers/prefetching, ordinary article interactions, stable IDs, and the
+structural-versus-status update boundary. The initial container was a
+`UICollectionView`; subsequent performance work migrated the productive
+Timeline to `UITableView` while preserving those product and update semantics.
+Since that baseline, U3 added the
 productive UIKit Scrollover geometry path and substantial deterministic
 layout/performance work. The legacy `IOSScrolloverGeometryController` is only a
 historical/regression-test reference and does not drive the production
-collection view.
+table view.
 
 Do not interpret the current productive U3 implementation as frozen. The purpose
 of the remaining U3 work is to make the selected UIKit Timeline robust on real
@@ -306,8 +300,8 @@ or exact internal types.
 | Old-session completion after a new account/Core attaches. | No old IDs sent to the new Core, no feedback into the new session, and no unexplained loss during normal view recreation. |
 | Async image completion after cell reuse or prefetch cancellation, including another consumer of the same request. | Correct article/request image, no canceled visible consumer, no height jump or unbounded cache/history. |
 | Core events, counts and Undo updates while scrolling. | Ignored events are filtered before main-thread dispatch; no structural article reload from ordinary feedback. |
-| Native swipes/full swipe, menus, refresh, routing, Large Titles, iPad split view, Dynamic Type, VoiceOver, Reduce Motion and localization. | Existing product behavior remains usable and correct across compact/visual layouts. |
-| Article accessory/info geometry. | Unread is always outermost, followed by Star, Comments, then Audio with optional duration. Visual portrait has one production path: a 100% content-width 16:9 image followed by metadata, title, absolute date with optional trailing reading time, and preview. The temporary reduced-width image/info-rail A/B path and its diagnostics switch are removed after the iOS 27 real-device test showed smooth full-width scrolling. Compact, Visual compact, and Visual landscape keep their existing geometry and use the same date-row reading-time rule. Reading time comes through persisted Core/UniFFI article metadata, never a per-cell calculation/query. Visual compact's title remains an explicit non-collapsing row between metadata and the date/image row. Audio stays unrendered until supplied by a batched Timeline projection. |
+| Native swipes/full swipe, menus, refresh, routing, scope-capsule navigation chrome, iPad split view, Dynamic Type, VoiceOver, Reduce Motion and localization. | Existing product behavior remains usable and correct across compact/visual layouts. |
+| Article accessory/info geometry. | Unread is always outermost, followed by Star, Comments, then Audio with optional duration. Visual portrait has one production path: a 100% content-width 16:9 image followed by metadata, title, publication row, and preview. Every productive layout uses metadata → title → publication row → preview. The publication row uses either the localized absolute date/time or the snapshot-frozen localized relative age selected in Articles settings; relative mode shows `clock.arrow.circlepath`. Optional Miniflux reading time remains trailing in the same row as `doc.text` + duration and must not increase row height. The temporary reduced-width image/info-rail A/B path and its diagnostics switch are removed after the iOS 27 real-device test showed smooth full-width scrolling. Audio stays unrendered until supplied by a batched Timeline projection. |
 
 Queue tests must exercise the actual running flag/serialization and asynchronous
 continuation through an injectable, controllably blocked writer. Calling a

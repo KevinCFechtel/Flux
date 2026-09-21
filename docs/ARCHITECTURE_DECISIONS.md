@@ -192,10 +192,13 @@ FluxNews app. For its central Article Timeline, long-term scrolling performance,
 predictable layout, and direct control of updates take priority over preserving
 the current SwiftUI implementation or minimizing the replacement effort.
 
-The selected target is an owned UIKit view controller containing a
-`UICollectionView`, embedded in the SwiftUI shell. Article cells use native
-UIKit views and reusable cell instances. Use a collection-view list
-configuration to retain system swipe actions and customizable cell content.
+The selected target is an owned UIKit view controller containing a plain
+`UITableView`, embedded in the SwiftUI shell. Article cells use native UIKit
+views and reusable cell instances. Use stable article IDs, a diffable table data
+source, deterministic prepared row heights, and native table swipe/context-menu
+APIs. The earlier `UICollectionView` baseline was an implementation stage, not
+a permanent product requirement; the current table-based Timeline is the accepted
+productive architecture.
 The production Timeline must not use SwiftUI `List`, `ScrollView`/`LazyVStack`,
 or SwiftUI-hosted article cells through `UIHostingConfiguration` or per-cell
 `UIHostingController`. SwiftUI remains appropriate for navigation, Settings,

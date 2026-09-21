@@ -485,10 +485,9 @@ struct IOSUIKitArticleGeometry: Equatable {
 
     func variant(hasImage: Bool) -> IOSUIKitArticleCellLayoutVariant {
         guard mode.showsArticleImage else { return .compact }
-        // Without an image the ordinary visual modes lead with the title, but
-        // `Visual compact` must keep the metadata bar on top either way —
-        // otherwise rows with and without an image disagree about what comes
-        // first, and the list reads as two different designs.
+        // Image-less variants keep the same semantic text order as rows with
+        // images: metadata -> title -> publication row -> preview. Visual compact
+        // only selects a different image-bearing geometry when an image exists.
         guard hasImage else { return usesSideTitle ? .visualSideTitleTextOnly : .visualTextOnly }
         // On a wide container the preview has room to sit beside the image.
         if usesSideTitle { return isWideContainer ? .visualSideTitleWide : .visualSideTitle }
