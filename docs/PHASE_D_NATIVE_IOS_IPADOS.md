@@ -546,11 +546,15 @@ The Newsreader navigation scope title is stable and never embeds the live
 article count into the title string itself. The accepted native chrome is the
 scope capsule implemented by `ArticleListTitleCapsule`: iPhone portrait uses a
 stacked capsule in the principal toolbar position with the optional descriptive
-current-scope count; iPhone landscape uses an inline leading capsule with a
-compact count. Persistent iPad split navigation hides the capsule while the
-sidebar is visible but retains its toolbar slot; when the sidebar collapses, the
-same leading capsule becomes visible and interactive. During Sync the capsule's
-count presentation may temporarily show `Syncing…`. The capsule is the
+current-scope count; iPhone landscape uses a compact two-line leading capsule
+with the scope title above the compact count. The landscape capsule reserves the
+alternate second-line width so transitions between the count and `Syncing…` do
+not make the chrome breathe horizontally, while remaining substantially narrower
+than the former one-line title-plus-count presentation. Persistent iPad split
+navigation keeps the inline leading capsule: it is hidden while the sidebar is
+visible but retains its toolbar slot; when the sidebar collapses, that capsule
+becomes visible and interactive. During Sync the capsule's count presentation
+temporarily shows `Syncing…`. The capsule is the
 authoritative visible title/header presentation and carries the accessibility
 header role; do not reintroduce a separate Large-Title or native-subtitle product
 presentation over it.

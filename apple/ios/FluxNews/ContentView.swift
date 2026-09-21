@@ -66,16 +66,18 @@ enum IOSArticleListChromePresentation {
 }
 
 enum IOSArticleListTitleCapsuleMetrics {
-    /// Landscape must keep a useful title even when the trailing action group is
-    /// present. There is deliberately no app-level maximum width: the navigation
-    /// bar owns the real available space and compresses this leading item only
-    /// when the trailing controls actually require it.
+    /// The iPad collapsed-split inline capsule still needs a useful minimum title
+    /// width beside the trailing toolbar actions.
     static let inlineMinimumContentWidth: CGFloat = 280
     /// Count semantics are more important than preserving every character of a
-    /// long scope/feed title. The count therefore resists horizontal compression
-    /// first and the title yields by truncating at its tail.
+    /// long scope/feed title in the remaining inline iPad presentation.
     static let inlineTitlePriority: Double = 1
     static let inlineCountPriority: Double = 2
+
+    /// Compact-height iPhone landscape uses the same two-line information
+    /// hierarchy as portrait, but trims the vertical chrome so the navigation bar
+    /// does not consume unnecessary landscape height.
+    static let compactStackedVerticalPadding: CGFloat = 4
 }
 
 enum IOSMoreAction: Equatable {
@@ -712,12 +714,14 @@ struct ContentView: View {
 
 private enum ArticleListTitleCapsuleLayout: Equatable {
     case stacked
+    case compactStacked
     case inline
 }
 
 private struct ArticleListTitleCapsule: View {
     let title: String
     let subtitle: String?
+    let widthReservationSubtitle: String?
     let layout: ArticleListTitleCapsuleLayout
     var action: (() -> Void)?
     // Read so the derived glyph height is recomputed when the text size changes.
@@ -783,23 +787,37 @@ private struct ArticleListTitleCapsule: View {
         }
         .padding(.leading, action == nil ? 16 : 12)
         .padding(.trailing, action == nil ? 16 : 12)
-        .padding(.vertical, layout == .inline ? 5 : 7)
+        .padding(.vertical, verticalPadding)
         .background { ArticleListTitleCapsuleBackground(layout: layout) }
         .accessibilityElement(children: .combine)
+    }
+
+    private var verticalPadding: CGFloat {
+        switch layout {
+        case .stacked: 7
+        case .compactStacked: IOSArticleListTitleCapsuleMetrics.compactStackedVerticalPadding
+        case .inline: 5
+        }
     }
 
     @ViewBuilder
     private var titleAndSubtitle: some View {
         switch layout {
-        case .stacked:
+        case .stacked, .compactStacked:
             VStack(spacing: 1) {
                 Text(title)
                     .font(.headline)
                     .lineLimit(1)
                 if let subtitle {
-                    Text(subtitle)
-                        .font(.caption)
-                        .lineLimit(1)
+                    ZStack {
+                        Text(subtitle)
+                        if let widthReservationSubtitle {
+                            Text(widthReservationSubtitle)
+                                .hidden()
+                        }
+                    }
+                    .font(.caption)
+                    .lineLimit(1)
                 }
             }
         case .inline:
@@ -847,10 +865,10 @@ private struct ArticleListTitleCapsuleBackground: View {
 
     @ViewBuilder
     var body: some View {
-        if #available(iOS 26.0, *), layout == .inline {
-            // Inline toolbar items already receive the system's toolbar glass on
-            // iOS 26. Drawing our own glass inside it produces the visible
-            // double-capsule/ring seen on wide iPhone landscape.
+        if #available(iOS 26.0, *), layout != .stacked {
+            // Leading toolbar items already receive the system's toolbar glass on
+            // iOS 26+. Drawing our own glass inside it produces a visible
+            // double-capsule/ring in both compact landscape and collapsed split.
             Color.clear
         } else if reduceTransparency {
             Capsule().fill(Color(uiColor: .secondarySystemBackground))
@@ -995,6 +1013,7 @@ private struct ArticleListNavigationChrome<Content: View>: View {
                     ArticleListTitleCapsule(
                         title: title,
                         subtitle: capsuleSubtitle(subtitle),
+                        widthReservationSubtitle: nil,
                         layout: .stacked,
                         action: onSelectScope
                     )
@@ -1003,7 +1022,11 @@ private struct ArticleListNavigationChrome<Content: View>: View {
     }
 
     @ViewBuilder
-    private func landscapeCapsuleChrome(title: String, subtitle: String) -> some View {
+    private func landscapeCapsuleChrome(
+        title: String,
+        subtitle: String,
+        widthReservationSubtitle: String
+    ) -> some View {
         content()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -1012,7 +1035,8 @@ private struct ArticleListNavigationChrome<Content: View>: View {
                     ArticleListTitleCapsule(
                         title: title,
                         subtitle: capsuleSubtitle(subtitle),
-                        layout: .inline,
+                        widthReservationSubtitle: capsuleSubtitle(widthReservationSubtitle),
+                        layout: .compactStacked,
                         action: onSelectScope
                     )
                 }
@@ -1033,6 +1057,7 @@ private struct ArticleListNavigationChrome<Content: View>: View {
                     ArticleListTitleCapsule(
                         title: title,
                         subtitle: capsuleSubtitle(subtitle),
+                        widthReservationSubtitle: nil,
                         layout: .inline,
                         action: onSelectScope
                     )
@@ -1057,19 +1082,26 @@ private struct ArticleListNavigationChrome<Content: View>: View {
         // same count feature but uses the compact numeric form so the leading
         // title and trailing action group have predictable room.
         let portraitSubtitle = store.isSyncing ? String(localized: "Syncing…") : countLabel
-        let landscapeSubtitle = store.isSyncing
-            ? String(localized: "Syncing…")
-            : ArticleListCounterPresentation.inlineLandscapeLabel(
-                scope: store.scope,
-                unreadOnly: store.unreadOnly,
-                count: store.selectionTotal
-            )
+        let landscapeCountLabel = ArticleListCounterPresentation.inlineLandscapeLabel(
+            scope: store.scope,
+            unreadOnly: store.unreadOnly,
+            count: store.selectionTotal
+        )
+        let syncingLabel = String(localized: "Syncing…")
+        let landscapeSubtitle = store.isSyncing ? syncingLabel : landscapeCountLabel
+        // Reserve the alternate second-line state so Count -> Syncing -> Count
+        // does not make the compact landscape capsule breathe horizontally.
+        let landscapeWidthReservationSubtitle = store.isSyncing ? landscapeCountLabel : syncingLabel
 
         switch chromeMode {
         case .compactPortrait:
             portraitCapsuleChrome(title: title, subtitle: portraitSubtitle)
         case .compactLandscape:
-            landscapeCapsuleChrome(title: title, subtitle: landscapeSubtitle)
+            landscapeCapsuleChrome(
+                title: title,
+                subtitle: landscapeSubtitle,
+                widthReservationSubtitle: landscapeWidthReservationSubtitle
+            )
         case .persistentSplit, .persistentSplitCollapsed:
             // Both iPad split states intentionally share the same toolbar tree.
             // The hidden state reserves the leading slot so collapsing/revealing
