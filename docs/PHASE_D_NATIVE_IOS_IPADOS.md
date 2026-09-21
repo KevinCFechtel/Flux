@@ -495,10 +495,11 @@ existing Core API.
 
 ### D4 — Settings & Native Presentation Quality
 
-D4 is subdivided into D4.1-D4.4. D4.1 introduces the independent native
+D4 is subdivided into D4.1-D4.5. D4.1 introduces the independent native
 account/credential startup lifecycle. D4.2 is the full native Settings redesign,
-D4.3 covers presentation quality, and D4.4 performs combined real-device
-D2-D4 validation and polish.
+D4.3 covers presentation quality, D4.4 performs combined real-device D2-D4
+validation and polish, and D4.5 adds user-cancellable foreground/manual Sync as
+an accepted post-baseline extension.
 
 #### D4.1 — Production-Style Startup & Native Account/Credentials
 
@@ -707,14 +708,18 @@ remain unchanged by design.
 
 The English wording freeze is preserved, the English/German localization pass is
 complete, and the final localization audit found no unintended release-visible
-English-only strings. The original D4 baseline is **COMPLETE / architecture-frozen**.
-A later accepted Article Timeline presentation amendment narrowly extended the
-Articles presentation settings and English/German localization with the
-absolute/relative publication-time choice. That extension is now part of the
-accepted D4 UI baseline and does not reopen unrelated Settings, wording,
-localization architecture, or other phase architecture. The UIKit Timeline
-amendment otherwise remains limited to renderer/integration and its relevant
-D4.4 validation.
+English-only strings. The original D4.1-D4.4 baseline is **COMPLETE /
+architecture-frozen**. A later accepted Article Timeline presentation amendment
+narrowly extended the Articles presentation settings and English/German
+localization with the absolute/relative publication-time choice. That extension
+is now part of the accepted D4 UI baseline and does not reopen unrelated
+Settings, wording, localization architecture, or other phase architecture. The
+UIKit Timeline amendment otherwise remains limited to renderer/integration and
+its relevant D4.4 validation.
+
+D4.5 is a separately accepted **planned** extension and is not covered by the
+earlier D4.1-D4.4 completion/freeze statement. Its user-facing wording and
+English/German localization must be added before D4.5 itself is marked complete.
 
 For iOS Scrollover, D4.4 still requires real-device coverage of slow drags,
 fast flicks that skip rows, reverse-then-forward movement, Remove When Read,
@@ -780,6 +785,59 @@ acceptance before it can be marked complete:
 5. Confirm the app remains single-scene in normal iPad/window operation. If an
    iPhone Duo runtime becomes available, run the same compact/regular transition
    cases there without adding device-specific behavior.
+
+#### D4.5 — Cancellable Manual Sync
+
+**Status: PLANNED / ACCEPTED.** This work starts only after the owner has
+explicitly accepted the current UIKit Timeline/presentation device changes,
+including the current rotation-anchor, article metadata/reading-time, haptic,
+status-bar edge-protection, compact-landscape capsule, and iOS 27 renderer
+closure checks. Do not mix Sync-cancellation implementation into the active U3
+performance-validation pass.
+
+Manual foreground Sync must become explicitly cancellable by the user. This is
+a Newsreader interaction and therefore remains in D4 rather than being deferred
+to D5 background scheduling.
+
+The product contract is:
+
+- when idle, the Sync control starts a manual Sync;
+- while manual Sync is running, that control changes into a clear Cancel/Stop
+  action rather than becoming disabled;
+- the scope capsule continues to present `Syncing…` while the Sync is active;
+- cancellation returns the capsule to the current count and does not present the
+  normal successful-Sync confirmation;
+- user cancellation is a normal outcome, not a Sync/network failure, and must
+  not surface an error alert;
+- accessibility label/value/action state must track Start Sync versus Cancel Sync;
+- already committed durable work remains valid; cancellation must not roll back
+  successfully delivered mutations or otherwise corrupt local/Core state;
+- completion from a cancelled or superseded Sync must not publish stale success,
+  counts, snapshot replacement, notifications, or other presentation into a newer
+  Sync generation;
+- background Sync remains separately governed by D5 and is not made
+  user-cancellable merely by implementing this foreground control.
+
+A real cancellation requires a cooperative Rust/Core boundary. Cancelling only
+the Swift task is insufficient because the current Apple execution contract can
+prevent queued Core work from starting but cannot interrupt synchronous Rust
+network I/O once it is running. The Core Sync path therefore needs a
+session/run-scoped cancellation signal checked at safe phase and bounded-work
+boundaries. Network operations that cannot be interrupted mid-call may finish
+their current bounded request, but no further cancellable Sync work should begin
+after cancellation is observed.
+
+Tests must cover cancellation before Core work starts, cancellation during each
+safe Sync phase, a late completion racing a cancelled generation, immediate
+restart after cancellation, failure-versus-cancellation presentation, and
+preservation of already durable mutations/state. Real-device acceptance must
+verify that cancelling and immediately restarting Sync leaves the Timeline,
+scope count, capsule, and Sync control coherent.
+
+This D4.5 item is the next product feature after the current UIKit
+Timeline/presentation change set is accepted on device. It does not block that
+acceptance and must not be started speculatively before the owner confirms the
+current changes.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 
