@@ -330,17 +330,17 @@ or restructuring parts of those implementations. Do not treat the current cell,
 layout, image, or scheduling architecture as frozen merely because its current
 tests pass.
 
-U4 session-owned mutation-worker semantics are implemented, with canonical local
-Xcode validation still pending. The worker is owned by the active Core/account
-session, retains 64-ID FIFO batching and single-writer serialization, adds a
-500 ms bounded drain deadline for small continuous-scroll batches, preserves
-queued work across presentation-only resets, and isolates old session completion
-from replacement sessions. Newer explicit Read/Unread intent supersedes queued
-and in-flight automatic presentation/Undo effects and issues its Core write after
-the older automatic writer; Undo uses the same captured writer path. Failure
-clears running ownership and allows later FIFO work to continue. Productive-path
-tests use a controllably blocked injected writer. Do not mark U4 complete until
-the canonical iOS test/build commands pass.
+U4 session-owned mutation-worker semantics are complete. The worker is owned by
+the active Core/account session, retains 64-ID FIFO batching and single-writer
+serialization, adds a 500 ms bounded drain deadline for small continuous-scroll
+batches, preserves queued work across presentation-only resets, and isolates old
+session completion from replacement sessions. Newer explicit Read/Unread intent
+supersedes queued and in-flight automatic presentation/Undo effects and issues
+its Core write after the older automatic writer; Undo uses the same captured
+writer path. Failure clears running ownership and allows later FIFO work to
+continue. Productive-path tests use a controllably blocked injected writer.
+Canonical validation passed on 2026-09-21 with 343 iOS tests and 0 failures,
+a successful `build-app.sh`, and a clean `git diff --check HEAD^ HEAD`.
 
 U5 cleanup and final acceptance have started in places — including Search
 migration to the UIKit Timeline and removal of the unused SwiftUI article-row
@@ -646,9 +646,8 @@ production architecture and current physical-device evidence.
 
 The agreed Timeline completion sequence is recorded in
 [IOS_UIKIT_TIMELINE_IMPLEMENTATION.md](IOS_UIKIT_TIMELINE_IMPLEMENTATION.md#8-agreed-u3u4-stabilization-and-architecture-freeze-plan).
-In short: validate the implemented U4 worker locally and close U4; then close U3
-with bounded device observation rather than another speculative renderer rewrite;
-perform one final bounded
+In short: U4 is complete; close U3 with bounded device observation rather than
+another speculative renderer rewrite; perform one final bounded
 `imageViewScaled` versus legacy `displayReady` comparison; accept the remaining
 iOS 26 full-width-image behavior as a known OS/rendering-sensitive limitation if
 that check finds no actionable app-side regression; then remove legacy

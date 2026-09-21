@@ -1,6 +1,6 @@
 # iOS UIKit Timeline — Decision and Implementation Handoff
 
-> **Decision accepted: 2026-09-11. U1-U2 COMPLETE. U3 IN PROGRESS. U4 IMPLEMENTED / LOCAL VALIDATION PENDING. U5 IN PROGRESS / OPEN.**
+> **Decision accepted: 2026-09-11. U1-U2 COMPLETE. U3 IN PROGRESS. U4 COMPLETE. U5 IN PROGRESS / OPEN.**
 >
 > Build the Article Timeline using the owned UIKit `UITableView` Timeline and
 > native UIKit article cells. This is the selected architecture, not a proposal to benchmark
@@ -244,7 +244,7 @@ do not defer correctness until the final package.
 | U1 — Contract | Record UIKit container/native cells, rationale, boundaries, behavior, and this handoff. | **COMPLETE** — documentation contract established. |
 | U2 — Native Timeline | Implement the owned controller, bridge, native reusable cells, stable ID snapshots, sizing, image consumers, system swipes/context menus/refresh, and existing shell integration. Register sources and preserve Search dependencies. | **COMPLETE as the native Timeline baseline.** The owned UIKit controller/cells and structural/status split are productive. Search now also uses the UIKit Timeline. Completion of U2 does not freeze later performance-sensitive internals. |
 | U3 — Geometry, status and performance-sensitive renderer work | Implement coherent UIKit Scrollover geometry and targeted status presentation; establish stable/bounded layout, image and update behavior and close the required performance/correctness regressions. | **IN PROGRESS.** Productive UIKit Scrollover geometry, targeted status updates, deterministic sizing/prepared metrics, incremental pagination/updates and substantial image/layout hardening exist. Physical-device performance remains unresolved enough that fundamental renderer/layout/cell/image/scheduling changes are still permitted. U3 is therefore not merely waiting for acceptance. |
-| U4 — Session mutation worker | Complete queue lifetime, origin attribution, bounded drains, explicit-action ordering, lifecycle and failure handling using a controllably blocked real writer path in tests. | **IMPLEMENTED / LOCAL VALIDATION PENDING.** The session-owned worker now has a 500 ms bounded drain deadline, 64-ID FIFO batches, one writer chain per session, explicit-intent precedence, lifecycle coalescing, session-isolated completion, deterministic failure recovery, and blocked-writer regression coverage through the productive drain path. Do not mark U4 complete until the canonical Xcode test/build validation passes. |
+| U4 — Session mutation worker | Complete queue lifetime, origin attribution, bounded drains, explicit-action ordering, lifecycle and failure handling using a controllably blocked real writer path in tests. | **COMPLETE.** The session-owned worker has a 500 ms bounded drain deadline, 64-ID FIFO batches, one writer chain per session, explicit-intent precedence, lifecycle coalescing, session-isolated completion, deterministic failure recovery, and blocked-writer regression coverage through the productive drain path. Canonical validation passed on 2026-09-21: 343 iOS tests with 0 failures, `build-app.sh` succeeded, and `git diff --check HEAD^ HEAD` was clean. |
 | U5 — Cleanup and acceptance | Remove superseded Timeline code, verify complete interaction/localization/accessibility behavior, run native checks and focused device traces, record actual remaining limitations. | **IN PROGRESS / OPEN.** Search migration and old SwiftUI article-row cleanup are complete, and diagnostic cleanup has progressed. Final cleanup and device/runtime acceptance remain blocked on settling U3 performance architecture and completing U4. |
 
 The selected architecture already includes U2-U4; no new architecture approval
@@ -359,7 +359,7 @@ compromise the product UI or reopen the Timeline container by default.
 Visual compact remains a normal product presentation mode, not a performance
 workaround that must replace the standard full-width Visual mode.
 
-### 8.2 U4 implemented — canonical local validation pending
+### 8.2 U4 complete — session mutation worker
 
 The U4 implementation contract is now represented in code and tests. The
 existing queue remains owned by the `NewsreaderStore` Core/account session and
@@ -397,9 +397,10 @@ the bounded deadline, 64-ID limit/FIFO continuation, trigger coalescing,
 presentation reset, explicit Read/Unread precedence, blocked successors,
 old-session completion, failure recovery, lifecycle flush, and real-writer Undo.
 
-This environment did not run the canonical Xcode validation. U4 remains
-`IMPLEMENTED / LOCAL VALIDATION PENDING` until `./apple/ios/Build/test.sh` and
-`./apple/ios/Build/build-app.sh` pass locally; U3 remains open regardless.
+Canonical local validation passed on 2026-09-21. `./apple/ios/Build/test.sh`
+executed 343 tests with 0 failures, `./apple/ios/Build/build-app.sh` succeeded,
+and `git diff --check HEAD^ HEAD` was clean. U4 is therefore complete. U3
+remains open regardless.
 
 ### 8.3 Close U3 with targeted observation, not another speculative rewrite
 
