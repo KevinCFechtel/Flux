@@ -756,6 +756,7 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
             presentationBridge: presentationBridge,
             feedIconPresentationBridge: feedIconPresentationBridge,
             mode: mode,
+            visualPortraitLayoutMode: IOSVisualPortraitLayoutDiagnostics.mode,
             previewLines: previewLines,
             iconVariant: iconVariant,
             feedIconRequestRevision: feedIconRequestRevision,
@@ -936,6 +937,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             IOSUIKitArticleCellLayoutVariant.compact,
             .visualTextOnly,
             .visualPortrait,
+            .visualPortraitClassic,
             .visualLandscape,
             .visualSideTitle,
             .visualSideTitleWide,
@@ -964,6 +966,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             self,
             selector: #selector(articleImageRenderingModeDidChange),
             name: ArticleImageRenderingDiagnostics.didChangeNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(visualPortraitLayoutModeDidChange),
+            name: IOSVisualPortraitLayoutDiagnostics.didChangeNotification,
             object: nil
         )
         view.addSubview(tableView)
@@ -995,7 +1003,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             guard let self,
                   let item = self.renderedItem(for: id)
             else { return nil }
-            let metrics = IOSUIKitArticleCell.Metrics(mode: self.mode, containerWidth: tableView.bounds.width)
+            let metrics = IOSUIKitArticleCell.Metrics(
+                mode: self.mode,
+                containerWidth: tableView.bounds.width,
+                visualPortraitLayoutMode: IOSVisualPortraitLayoutDiagnostics.mode
+            )
             let variant = metrics.layoutVariant(hasImage: self.mode.showsArticleImage && item.content.imageURL != nil)
             guard let cell = tableView.dequeueReusableCell(withIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant), for: indexPath) as? IOSUIKitArticleCell else { return nil }
             self.configure(cell, item: item)
@@ -1295,7 +1307,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     }
 
     private func configure(_ cell: IOSUIKitArticleCell, item: IOSUIKitArticleTimelineItem) {
-        let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: tableView.bounds.width)
+        let metrics = IOSUIKitArticleCell.Metrics(
+            mode: mode,
+            containerWidth: tableView.bounds.width,
+            visualPortraitLayoutMode: IOSVisualPortraitLayoutDiagnostics.mode
+        )
         let layoutInput = preparedLayoutInput(for: item)
         let layoutMetrics: IOSUIKitArticleLayoutMetrics
         if let prepared = preparedLayoutCoordinator.metrics(for: layoutInput, priority: .visible) {
@@ -1697,7 +1713,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         guard mode.showsArticleImage,
               let url = item.content.imageURL
         else { return nil }
-        let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: tableView.bounds.width)
+        let metrics = IOSUIKitArticleCell.Metrics(
+            mode: mode,
+            containerWidth: tableView.bounds.width,
+            visualPortraitLayoutMode: IOSVisualPortraitLayoutDiagnostics.mode
+        )
         let targetSize = metrics.imageSize(hasImage: true)
         guard targetSize.width > 0, targetSize.height > 0 else { return nil }
         return ArticleImageRequest(
@@ -1737,6 +1757,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             name: ArticleImageRenderingDiagnostics.didChangeNotification,
             object: nil
         )
+        NotificationCenter.default.removeObserver(
+            self,
+            name: IOSVisualPortraitLayoutDiagnostics.didChangeNotification,
+            object: nil
+        )
         preparedWindowTask?.cancel()
         for prefetch in prefetchTasks.values { prefetch.task.cancel() }
     }
@@ -1744,6 +1769,14 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     @objc private func articleImageRenderingModeDidChange() {
         cancelAllPrefetch()
         reconfigureVisibleCells(needsLayout: false)
+    }
+
+    @objc private func visualPortraitLayoutModeDidChange() {
+        // The A/B mode changes image size, row height, cell constraint graph and
+        // image cache identity. Force a geometry generation so deterministic
+        // heights and prefetch requests are rebuilt for the selected layout.
+        geometryIdentity = nil
+        updateGeometryIfNeeded()
     }
 
     func detachPresentationBridges() {
@@ -1760,7 +1793,16 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     func performanceSnapshot() -> IOSUIKitTimelinePerformanceSnapshot { performanceMetrics.snapshot(preparation: preparedLayoutCoordinator.snapshot()) }
 
     private func preparedLayoutInput(for item: IOSUIKitArticleTimelineItem) -> IOSUIKitArticleLayoutInput {
-        .init(item: item, mode: mode, previewLines: previewLines, containerWidth: tableView.bounds.width, displayScale: view.traitCollection.displayScale, contentSizeCategory: view.traitCollection.preferredContentSizeCategory, layoutDirection: view.effectiveUserInterfaceLayoutDirection)
+        .init(
+            item: item,
+            mode: mode,
+            visualPortraitLayoutMode: IOSVisualPortraitLayoutDiagnostics.mode,
+            previewLines: previewLines,
+            containerWidth: tableView.bounds.width,
+            displayScale: view.traitCollection.displayScale,
+            contentSizeCategory: view.traitCollection.preferredContentSizeCategory,
+            layoutDirection: view.effectiveUserInterfaceLayoutDirection
+        )
     }
 
     private func currentGeometryIdentity() -> IOSUIKitTimelineGeometryIdentity? {
@@ -1861,6 +1903,8 @@ enum IOSUIKitArticleCellLayoutVariant: Hashable {
     case compact
     case visualTextOnly
     case visualPortrait
+    /// Classic Visual portrait A/B path: full-width hero above metadata/title/date.
+    case visualPortraitClassic
     case visualLandscape
     /// `Visual compact`: image beside the title, metadata/date/preview full
     /// width underneath.
@@ -1876,7 +1920,7 @@ enum IOSUIKitArticleCellLayoutVariant: Hashable {
     var showsImageSlot: Bool {
         switch self {
         case .compact, .visualTextOnly, .visualSideTitleTextOnly: return false
-        case .visualPortrait, .visualLandscape, .visualSideTitle, .visualSideTitleWide: return true
+        case .visualPortrait, .visualPortraitClassic, .visualLandscape, .visualSideTitle, .visualSideTitleWide: return true
         }
     }
 }
@@ -2163,6 +2207,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         case .compact: return "IOSUIKitArticleCell.compact"
         case .visualTextOnly: return "IOSUIKitArticleCell.visualTextOnly"
         case .visualPortrait: return "IOSUIKitArticleCell.visualPortrait"
+        case .visualPortraitClassic: return "IOSUIKitArticleCell.visualPortraitClassic"
         case .visualLandscape: return "IOSUIKitArticleCell.visualLandscape"
         case .visualSideTitle: return "IOSUIKitArticleCell.visualSideTitle"
         case .visualSideTitleWide: return "IOSUIKitArticleCell.visualSideTitleWide"
@@ -2172,25 +2217,44 @@ final class IOSUIKitArticleCell: UITableViewCell {
 
     struct Metrics {
         let mode: ArticlePresentationMode
+        let visualPortraitLayoutMode: IOSVisualPortraitLayoutMode
         let containerWidth: CGFloat
         let horizontalInset: CGFloat
         let outerVerticalPadding: CGFloat
         let availableWidth: CGFloat
         let isLandscapeVisual: Bool
 
-        init(mode: ArticlePresentationMode, containerWidth: CGFloat) {
-            let geometry = IOSUIKitArticleGeometry(mode: mode, containerWidth: containerWidth)
-            self.mode = geometry.mode; self.containerWidth = geometry.containerWidth
+        init(
+            mode: ArticlePresentationMode,
+            containerWidth: CGFloat,
+            visualPortraitLayoutMode: IOSVisualPortraitLayoutMode = .heroRail80
+        ) {
+            let geometry = IOSUIKitArticleGeometry(
+                mode: mode,
+                containerWidth: containerWidth,
+                visualPortraitLayoutMode: visualPortraitLayoutMode
+            )
+            self.mode = geometry.mode
+            self.visualPortraitLayoutMode = visualPortraitLayoutMode
+            self.containerWidth = geometry.containerWidth
             horizontalInset = geometry.horizontalInset; availableWidth = geometry.availableWidth
             isLandscapeVisual = geometry.isLandscapeVisual; outerVerticalPadding = geometry.verticalPadding
         }
 
         func imageSize(hasImage: Bool) -> CGSize {
-            IOSUIKitArticleGeometry(mode: mode, containerWidth: containerWidth).imageSize(hasImage: hasImage)
+            IOSUIKitArticleGeometry(
+                mode: mode,
+                containerWidth: containerWidth,
+                visualPortraitLayoutMode: visualPortraitLayoutMode
+            ).imageSize(hasImage: hasImage)
         }
 
         func layoutVariant(hasImage: Bool) -> IOSUIKitArticleCellLayoutVariant {
-            IOSUIKitArticleGeometry(mode: mode, containerWidth: containerWidth).variant(hasImage: hasImage)
+            IOSUIKitArticleGeometry(
+                mode: mode,
+                containerWidth: containerWidth,
+                visualPortraitLayoutMode: visualPortraitLayoutMode
+            ).variant(hasImage: hasImage)
         }
     }
 
@@ -2229,6 +2293,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
 
     private var textOnlyConstraints: [NSLayoutConstraint] = []
     private var portraitConstraints: [NSLayoutConstraint] = []
+    private var classicPortraitConstraints: [NSLayoutConstraint] = []
     private var landscapeConstraints: [NSLayoutConstraint] = []
     private var activeLayoutConstraints: [NSLayoutConstraint] = []
     private var portraitImageAspectConstraint: NSLayoutConstraint!
@@ -2254,10 +2319,12 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var defaultDateTrailingConstraint: NSLayoutConstraint!
     private var landscapeDateTrailingConstraint: NSLayoutConstraint!
     private var compactDateTrailingConstraint: NSLayoutConstraint!
+    private var classicPortraitDateTrailingConstraint: NSLayoutConstraint!
     private var sideTitleDateTrailingConstraint: NSLayoutConstraint!
     private var sideTitleWideDateTrailingConstraint: NSLayoutConstraint!
     private var sideTitleTextOnlyDateTrailingConstraint: NSLayoutConstraint!
     private var compactReadingContainerTrailingConstraint: NSLayoutConstraint!
+    private var classicPortraitReadingContainerTrailingConstraint: NSLayoutConstraint!
     private var sideTitleReadingContainerTrailingConstraint: NSLayoutConstraint!
     private var sideTitleWideReadingContainerTrailingConstraint: NSLayoutConstraint!
     private var sideTitleTextOnlyReadingContainerTrailingConstraint: NSLayoutConstraint!
@@ -2802,6 +2869,63 @@ final class IOSUIKitArticleCell: UITableViewCell {
             previewTrailingDefaultConstraint,
             previewBottomDefaultConstraint,
         ]
+
+        // Classic Visual portrait A/B path:
+        //
+        //   ┌─────────────────────┐
+        //   │   HERO IMAGE 100%   │
+        //   └─────────────────────┘
+        //   ● icon  Feed name              ★ 💬
+        //   Headline
+        //   Date                         ▤ 4 min
+        //   Preview …
+        //
+        // It intentionally reuses the normal metadata and date/reading-time
+        // presentation rather than the 80/20 rail.
+        classicPortraitDateTrailingConstraint = dateLabel.trailingAnchor.constraint(
+            equalTo: landscapeReadingTimeContainer.leadingAnchor,
+            constant: -IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing
+        )
+        classicPortraitReadingContainerTrailingConstraint = landscapeReadingTimeContainer.trailingAnchor.constraint(
+            equalTo: textContainer.trailingAnchor
+        )
+        classicPortraitConstraints = [
+            articleImageView.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            articleImageView.topAnchor.constraint(equalTo: margins.topAnchor),
+            portraitImageWidthConstraint,
+            portraitImageAspectConstraint,
+
+            textContainer.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            textContainer.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            textContainer.topAnchor.constraint(
+                equalTo: articleImageView.bottomAnchor,
+                constant: IOSUIKitArticleGeometry.portraitSpacing
+            ),
+            textContainer.bottomAnchor.constraint(equalTo: margins.bottomAnchor),
+
+            metadataRow.topAnchor.constraint(equalTo: textContainer.topAnchor),
+            metadataRow.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+
+            titleLabel.topAnchor.constraint(
+                equalTo: metadataRow.bottomAnchor,
+                constant: IOSUIKitArticleGeometry.textSpacing
+            ),
+            titleLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+
+            dateLabel.topAnchor.constraint(
+                equalTo: titleLabel.bottomAnchor,
+                constant: IOSUIKitArticleGeometry.textSpacing
+            ),
+            classicPortraitDateTrailingConstraint,
+            classicPortraitReadingContainerTrailingConstraint,
+            landscapeReadingTimeContainer.topAnchor.constraint(equalTo: dateLabel.topAnchor),
+            landscapeReadingTimeContainer.bottomAnchor.constraint(equalTo: dateLabel.bottomAnchor),
+
+            previewTopConstraint,
+            previewTrailingDefaultConstraint,
+            previewBottomDefaultConstraint,
+        ]
+
         landscapeDateTrailingConstraint = dateLabel.trailingAnchor.constraint(
             equalTo: landscapeReadingTimeContainer.leadingAnchor,
             constant: -IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing
@@ -3163,6 +3287,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
             : 0
         landscapeDateTrailingConstraint.constant = dateReadingSpacing
         compactDateTrailingConstraint.constant = dateReadingSpacing
+        classicPortraitDateTrailingConstraint.constant = dateReadingSpacing
         sideTitleDateTrailingConstraint.constant = dateReadingSpacing
         sideTitleWideDateTrailingConstraint.constant = dateReadingSpacing
         sideTitleTextOnlyDateTrailingConstraint.constant = dateReadingSpacing
@@ -3172,7 +3297,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         portraitCommentsContainer.isHidden = !usesPortraitRail || !currentHasComments
         portraitAccessoryRail.isHidden = !usesPortraitRail
 
-        if variant == .visualPortrait {
+        if variant == .visualPortrait || variant == .visualPortraitClassic {
             portraitImageWidthConstraint.constant = metrics.imageSize(hasImage: true).width
         } else if variant == .visualLandscape || variant == .visualSideTitle || variant == .visualSideTitleWide {
             let imageSize = metrics.imageSize(hasImage: true)
@@ -3200,6 +3325,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
             activeLayoutConstraints = textOnlyConstraints
         case .visualPortrait:
             activeLayoutConstraints = portraitConstraints
+        case .visualPortraitClassic:
+            activeLayoutConstraints = classicPortraitConstraints
         case .visualLandscape:
             activeLayoutConstraints = landscapeConstraints
         case .visualSideTitle:
