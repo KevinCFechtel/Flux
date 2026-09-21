@@ -391,6 +391,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     func testArticleListTitleReflectsUpdatedSelectionCount() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.scope = .all
+        store.unreadOnly = false
         store.setSelectionTotalForTesting(4)
         XCTAssertEqual(
             ArticleListCounterPresentation.inlineLandscapeLabel(
@@ -1402,13 +1403,14 @@ final class NewsreaderPresentationTests: XCTestCase {
             targetSize: targetSize,
             displayScale: 3,
             cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
-            rasterScale: 2
+            rasterScale: 2,
+            renderingMode: .displayReady
         )
 
-        XCTAssertEqual(targetSize, .init(width: 307, height: 172.6875))
+        XCTAssertEqual(targetSize, .init(width: 361, height: 203.0625))
         XCTAssertEqual(request.rasterScale, 2)
-        XCTAssertEqual(request.maxPixelDimension, 640)
-        XCTAssertEqual(request.targetPixelSize, .init(width: 614, height: 345))
+        XCTAssertEqual(request.maxPixelDimension, 768)
+        XCTAssertEqual(request.targetPixelSize, .init(width: 722, height: 406))
 
         let image = try ArticleImagePipeline.downsample(
             data: horizontalBandPNGData(width: 10, height: 30),
@@ -1419,7 +1421,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(image.bitmapInfo.contains(.byteOrder32Little))
         XCTAssertEqual(pixel(at: .zero, in: image).alpha, 0)
         XCTAssertEqual(pixel(at: .init(x: image.width / 2, y: image.height / 2), in: image), .init(blue: 0, green: 255, red: 0, alpha: 255))
-        XCTAssertEqual(ArticleImagePipeline.memoryCost(of: image), 614 * 345 * 4)
+        XCTAssertEqual(ArticleImagePipeline.memoryCost(of: image), 722 * 406 * 4)
     }
 
     func testBackdropRasterDropsTheAlphaChannelAndPaintsTheCornersWithTheBackdrop() throws {
@@ -1509,13 +1511,14 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     @MainActor
     func testCachedProductionRasterIsPresentedImmediatelyAtPhysicalDisplayScale() async throws {
+        ArticleImageRenderingDiagnostics.setDisplayReadyRasterEnabled(false)
         let data = try imageData(width: 1_600, height: 800)
         let counter = ImageLoadCounter(data: data)
         let pipeline = ArticleImagePipeline { _ in await counter.load() }
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
         let metrics = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 390)
-        // The cell bakes its own appearance into the raster's corners, so the
-        // prefetched request only hits its cache if it resolves the same backdrop.
+        // The production renderer keeps the raster independent of appearance;
+        // the cell applies aspect-fill clipping and rounded corners at presentation time.
         let backdrop = IOSUIKitArticleCell.articleImageBackdrop(
             for: IOSUIKitArticleCell(frame: .zero).traitCollection
         )
@@ -1529,14 +1532,14 @@ final class NewsreaderPresentationTests: XCTestCase {
 
         XCTAssertTrue(cell.articleImageForTesting?.cgImage === cached)
         XCTAssertEqual(cell.articleImageForTesting?.scale, 3)
-        XCTAssertEqual(cached.width, Int(request.targetPixelSize.width))
-        XCTAssertEqual(cached.height, Int(request.targetPixelSize.height))
+        XCTAssertGreaterThanOrEqual(cached.width, Int(request.targetPixelSize.width))
+        XCTAssertGreaterThanOrEqual(cached.height, Int(request.targetPixelSize.height))
         XCTAssertEqual(ArticleImagePipeline.memoryCost(of: cached), cached.width * cached.height * 4)
         let presentation = cell.articleImagePresentationForTesting
         XCTAssertTrue(presentation.placeholderHidden)
         XCTAssertEqual(presentation.contentMode, .scaleAspectFill)
         XCTAssertTrue(presentation.clipsToBounds)
-        XCTAssertEqual(presentation.cornerRadius, 0)
+        XCTAssertEqual(presentation.cornerRadius, IOSUIKitArticleGeometry.articleImageCornerRadius)
         let calls = await counter.callCount()
         XCTAssertEqual(calls, 1)
     }
@@ -1560,6 +1563,7 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     @MainActor
     func testTwoXDiagnosticAssignsAsyncImageImmediatelyAndNormalReuseClearsIt() async throws {
+        ArticleImageRenderingDiagnostics.setDisplayReadyRasterEnabled(false)
         let gate = ImageLoadGate(data: try imageData(width: 800, height: 400))
         let pipeline = ArticleImagePipeline { _ in try await gate.load() }
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
@@ -1569,7 +1573,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         await waitForArticleImagePresentation { cell.articleImageForTesting != nil }
 
         XCTAssertNotNil(cell.articleImageForTesting)
-        XCTAssertEqual(cell.articleImagePresentationForTesting.cornerRadius, 0)
+        XCTAssertEqual(
+            cell.articleImagePresentationForTesting.cornerRadius,
+            IOSUIKitArticleGeometry.articleImageCornerRadius
+        )
         cell.prepareForReuse()
         XCTAssertNil(cell.articleImageForTesting)
         XCTAssertFalse(cell.articleImagePresentationForTesting.placeholderHidden)
@@ -1699,6 +1706,7 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     @MainActor
     func testUIKitArticleAndFeedImagePresentationTransitionsRestoreSafeStates() {
+        ArticleImageRenderingDiagnostics.setDisplayReadyRasterEnabled(false)
         let cell = makeUIKitArticleCell(mode: .visual, width: 390)
         let placeholder = cell.articleImagePresentationForTesting
         XCTAssertFalse(placeholder.placeholderHidden)
@@ -1711,7 +1719,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(loaded.placeholderHidden)
         XCTAssertEqual(loaded.contentMode, .scaleAspectFill)
         XCTAssertTrue(loaded.clipsToBounds)
-        XCTAssertEqual(loaded.cornerRadius, 0)
+        XCTAssertEqual(loaded.cornerRadius, IOSUIKitArticleGeometry.articleImageCornerRadius)
 
         cell.prepareForReuse()
         let reused = cell.articleImagePresentationForTesting
@@ -3703,6 +3711,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     /// immediately but without the Core Animation transition.
     @MainActor
     func testWarmCacheArticleImageUsesFramePacingWhileScrollingButRemainsImmediateWhenIdle() async throws {
+        ArticleImageRenderingDiagnostics.setDisplayReadyRasterEnabled(false)
         let scheduler = IOSArticleImagePresentationScheduler.shared
         scheduler.setScrolling(false)
         scheduler.resetMetrics()
@@ -3719,7 +3728,8 @@ final class NewsreaderPresentationTests: XCTestCase {
             cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
             rasterScale: 3,
             usesDisplayP3: false,
-            backdrop: IOSUIKitArticleCell.articleImageBackdrop(for: probeCell.traitCollection)
+            backdrop: IOSUIKitArticleCell.articleImageBackdrop(for: probeCell.traitCollection),
+            renderingMode: .imageViewScaled
         )
         _ = try await pipeline.prefetch(request)
 
