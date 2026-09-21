@@ -1809,6 +1809,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         guard tableView.bounds.width > 0 else { return nil }
         return .init(
             mode: mode,
+            visualPortraitLayoutMode: IOSVisualPortraitLayoutDiagnostics.mode,
             previewLines: previewLines,
             containerWidth: tableView.bounds.width,
             displayScale: view.traitCollection.displayScale,
