@@ -22,7 +22,6 @@ struct IOSUIKitArticleLayoutInput: Hashable {
         title = item.content.article.title
         feedTitle = item.content.article.feedTitle
         publishedDate = item.content.publishedDate
-        publishedAge = item.content.publishedAge
         readingTime = item.content.readingTime
         preview = item.content.article.preview
         hasImage = item.content.imageURL != nil
@@ -39,7 +38,6 @@ struct IOSUIKitArticleLayoutInput: Hashable {
         self.title = title
         self.feedTitle = feedTitle
         self.publishedDate = publishedDate
-        self.publishedAge = publishedAge ?? publishedDate
         self.readingTime = readingTime
         self.preview = preview
         self.hasImage = hasImage; self.hasComments = hasComments; self.mode = mode; self.previewLines = previewLines
@@ -52,7 +50,6 @@ struct IOSUIKitArticleLayoutKey: Hashable {
     let title: String
     let feedTitle: String
     let publishedDate: String
-    let publishedAge: String
     let readingTime: String?
     let preview: String
     let hasComments: Bool
@@ -595,16 +592,16 @@ enum IOSUIKitArticleLayoutEngine {
         let previewHeight = coreTextHeight(input.preview, font: font(.subheadline, category: input.contentSizeCategory, bold: false), width: previewWidth, maximumLines: input.previewLines.rawValue, displayScale: scale)
 
         let usesDateRowReadingTime = input.readingTime != nil
-        let landscapeReadingTimeTextWidth = usesDateRowReadingTime
+        let dateRowReadingTimeTextWidth = usesDateRowReadingTime
             ? coreTextWidth(input.readingTime ?? "", font: dateFont, displayScale: scale)
             : 0
-        let landscapeReadingTimeIconSize = usesDateRowReadingTime
+        let dateRowReadingTimeIconSize = usesDateRowReadingTime
             ? min(accessories.infoIcon, dateHeight)
             : 0
-        let landscapeReadingTimeBlockWidth = usesDateRowReadingTime
-            ? landscapeReadingTimeIconSize
+        let dateRowReadingTimeBlockWidth = usesDateRowReadingTime
+            ? dateRowReadingTimeIconSize
                 + IOSUIKitArticleGeometry.landscapeReadingTimeIconTextSpacing
-                + landscapeReadingTimeTextWidth
+                + dateRowReadingTimeTextWidth
             : 0
 
         let textBlockHeight: CGFloat
@@ -720,18 +717,17 @@ enum IOSUIKitArticleLayoutEngine {
         let landscapeReadingTimeIconFrame: CGRect?
         let landscapeReadingTimeFrame: CGRect?
 
-        {
-            let dateRowY = (isSideTitle || variant == .visualPortrait)
-                ? titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing
-                : metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing
-            let dateRowWidth = isSideTitleVariant ? titleWidth : infoWidth
+        let dateRowY = (isSideTitle || variant == .visualPortrait)
+            ? titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing
+            : metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing
+        let dateRowWidth = isSideTitleVariant ? titleWidth : infoWidth
 
-            if usesDateRowReadingTime, landscapeReadingTimeBlockWidth > 0 {
+        if usesDateRowReadingTime, dateRowReadingTimeBlockWidth > 0 {
                 let dateWidth = max(
                     0,
                     dateRowWidth
                         - IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing
-                        - landscapeReadingTimeBlockWidth
+                        - dateRowReadingTimeBlockWidth
                 )
                 dateFrame = CGRect(
                     x: physicalX(
@@ -745,54 +741,53 @@ enum IOSUIKitArticleLayoutEngine {
                     height: dateHeight
                 )
 
-                let blockLogicalX = logicalTextX + dateRowWidth - landscapeReadingTimeBlockWidth
+                let blockLogicalX = logicalTextX + dateRowWidth - dateRowReadingTimeBlockWidth
                 let blockX = physicalX(
                     logicalX: blockLogicalX,
-                    width: landscapeReadingTimeBlockWidth,
+                    width: dateRowReadingTimeBlockWidth,
                     in: input.containerWidth,
                     direction: input.layoutDirection
                 )
                 landscapeReadingTimeContainerFrame = CGRect(
                     x: blockX,
                     y: dateRowY,
-                    width: landscapeReadingTimeBlockWidth,
+                    width: dateRowReadingTimeBlockWidth,
                     height: dateHeight
                 )
                 landscapeReadingTimeIconFrame = CGRect(
                     x: physicalX(
                         logicalX: blockLogicalX,
-                        width: landscapeReadingTimeIconSize,
+                        width: dateRowReadingTimeIconSize,
                         in: input.containerWidth,
                         direction: input.layoutDirection
                     ),
-                    y: dateRowY + (dateHeight - landscapeReadingTimeIconSize) / 2,
-                    width: landscapeReadingTimeIconSize,
-                    height: landscapeReadingTimeIconSize
+                    y: dateRowY + (dateHeight - dateRowReadingTimeIconSize) / 2,
+                    width: dateRowReadingTimeIconSize,
+                    height: dateRowReadingTimeIconSize
                 )
                 landscapeReadingTimeFrame = CGRect(
                     x: physicalX(
                         logicalX: blockLogicalX
-                            + landscapeReadingTimeIconSize
+                            + dateRowReadingTimeIconSize
                             + IOSUIKitArticleGeometry.landscapeReadingTimeIconTextSpacing,
-                        width: landscapeReadingTimeTextWidth,
+                        width: dateRowReadingTimeTextWidth,
                         in: input.containerWidth,
                         direction: input.layoutDirection
                     ),
                     y: dateRowY,
-                    width: landscapeReadingTimeTextWidth,
+                    width: dateRowReadingTimeTextWidth,
                     height: dateHeight
                 )
-            } else {
-                dateFrame = CGRect(
-                    x: textOrigin.x,
-                    y: dateRowY,
-                    width: dateRowWidth,
-                    height: dateHeight
-                )
-                landscapeReadingTimeContainerFrame = nil
-                landscapeReadingTimeIconFrame = nil
-                landscapeReadingTimeFrame = nil
-            }
+        } else {
+            dateFrame = CGRect(
+                x: textOrigin.x,
+                y: dateRowY,
+                width: dateRowWidth,
+                height: dateHeight
+            )
+            landscapeReadingTimeContainerFrame = nil
+            landscapeReadingTimeIconFrame = nil
+            landscapeReadingTimeFrame = nil
         }
         // Wide side-title keeps the preview in the column, so it follows the date
         // directly. Narrow side-title puts it under the whole row, which means it
