@@ -3496,13 +3496,19 @@ struct ArticleListView: View {
         .overlay(alignment: .bottom) {
             ArticleListBottomOverlay(store: store)
         }
+        // Mark-as-read is a completed action/event. Scrollover publishes this
+        // revision only once after the motion has settled and its successful
+        // mutations are drained, so fast scrolling never becomes a haptic stream.
+        .sensoryFeedback(.success, trigger: store.readCompletionFeedbackRevision)
+        // Undo is intentionally distinct and lighter: it communicates the
+        // reversal of the read-state change without reusing the completion pulse.
+        .sensoryFeedback(.selection, trigger: store.undoCompletionFeedbackRevision)
     }
 
 }
 
 private struct ArticleListBottomOverlay: View {
     var store: NewsreaderStore
-    @State private var sensoryFeedbackTrigger = 0
 
     var body: some View {
         Group {
@@ -3514,18 +3520,6 @@ private struct ArticleListBottomOverlay: View {
                     .padding(.bottom, 12)
             }
         }
-        .onChange(of: store.scrolloverUndoVisible) { previouslyVisible, currentlyVisible in
-            if ScrolloverUndoPresentationPolicy.shouldTriggerFeedback(previouslyVisible: previouslyVisible, currentlyVisible: currentlyVisible) {
-                sensoryFeedbackTrigger += 1
-            }
-        }
-        .sensoryFeedback(.success, trigger: sensoryFeedbackTrigger)
-    }
-}
-
-enum ScrolloverUndoPresentationPolicy {
-    static func shouldTriggerFeedback(previouslyVisible: Bool, currentlyVisible: Bool) -> Bool {
-        !previouslyVisible && currentlyVisible
     }
 }
 

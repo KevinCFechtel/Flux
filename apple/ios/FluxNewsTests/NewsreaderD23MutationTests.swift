@@ -1119,11 +1119,114 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.undoScrollover()
         await fulfillment(of: [undoStarted], timeout: 1)
         XCTAssertEqual(writer.calls[1], .init(ids: [1, 2, 3], read: false))
+        let undoFeedbackBaseline = store.undoCompletionFeedbackRevision
 
         writer.succeedNext()
         await store.waitForExplicitReadMutationsForTesting()
         XCTAssertEqual(readStates(store), [false, false, false])
         XCTAssertTrue(store.scrolloverUndoIDsForTesting.isEmpty)
+        XCTAssertEqual(store.undoCompletionFeedbackRevision, undoFeedbackBaseline + 1)
+    }
+
+    @MainActor
+    func testExplicitMarkReadPublishesFeedbackOnlyAfterSuccessfulRead() async {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let writer = ControlledReadMutationWriter()
+        let started = expectation(description: "explicit read started")
+        writer.onStart = { count, _ in
+            if count == 1 { started.fulfill() }
+        }
+        store.setReadMutationWriterForTesting { ids, read in
+            await writer.write(ids, read: read)
+        }
+        store.setArticlesForTesting([article(1)])
+
+        let baseline = store.readCompletionFeedbackRevision
+        store.setRead(articleIDs: [1], read: true)
+        await fulfillment(of: [started], timeout: 1)
+        XCTAssertEqual(store.readCompletionFeedbackRevision, baseline)
+
+        writer.succeedNext()
+        await store.waitForExplicitReadMutationsForTesting()
+
+        XCTAssertEqual(store.readCompletionFeedbackRevision, baseline + 1)
+    }
+
+    @MainActor
+    func testExplicitUnreadDoesNotPublishReadFeedback() async {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let writer = ControlledReadMutationWriter()
+        let started = expectation(description: "explicit unread started")
+        writer.onStart = { count, _ in
+            if count == 1 { started.fulfill() }
+        }
+        store.setReadMutationWriterForTesting { ids, read in
+            await writer.write(ids, read: read)
+        }
+        store.setArticlesForTesting([article(1, isRead: true)])
+
+        let baseline = store.readCompletionFeedbackRevision
+        store.setRead(articleIDs: [1], read: false)
+        await fulfillment(of: [started], timeout: 1)
+        writer.succeedNext()
+        await store.waitForExplicitReadMutationsForTesting()
+
+        XCTAssertEqual(store.readCompletionFeedbackRevision, baseline)
+    }
+
+    @MainActor
+    func testReadOnOpenDoesNotPublishReadFeedback() async {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let writer = ControlledReadMutationWriter()
+        let started = expectation(description: "read on open started")
+        writer.onStart = { count, _ in
+            if count == 1 { started.fulfill() }
+        }
+        store.setReadMutationWriterForTesting { ids, read in
+            await writer.write(ids, read: read)
+        }
+        let target = article(1)
+        store.setArticlesForTesting([target])
+
+        let baseline = store.readCompletionFeedbackRevision
+        store.open(target) { _ in }
+        await fulfillment(of: [started], timeout: 1)
+        writer.succeedNext()
+        await store.waitForExplicitReadMutationsForTesting()
+
+        XCTAssertEqual(store.readCompletionFeedbackRevision, baseline)
+    }
+
+    @MainActor
+    func testScrolloverPublishesOneReadFeedbackWhenSuccessfulWorkSettlesAtIdle() async {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        let writer = ControlledReadMutationWriter()
+        let started = expectation(description: "scrollover writer started")
+        writer.onStart = { count, _ in
+            if count == 1 { started.fulfill() }
+        }
+        store.setReadMutationWriterForTesting { ids, read in
+            await writer.write(ids, read: read)
+        }
+        store.setArticlesForTesting([article(1), article(2)])
+        store.setScrolloverPresentationPhaseForTesting(.interacting)
+
+        let baseline = store.readCompletionFeedbackRevision
+        _ = store.acceptScrolloverForTesting([1, 2])
+        store.flushScrolloverPersistenceForLifecycle()
+        await fulfillment(of: [started], timeout: 1)
+        writer.succeedNext()
+        for _ in 0..<20 where store.scrolloverMutationRunningForTesting {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(store.readCompletionFeedbackRevision, baseline)
+        store.setScrolloverPresentationPhaseForTesting(.idle)
+        XCTAssertEqual(store.readCompletionFeedbackRevision, baseline + 1)
+
+        // Repeated idle callbacks without new successful reads are silent.
+        store.setScrolloverPresentationPhaseForTesting(.idle)
+        XCTAssertEqual(store.readCompletionFeedbackRevision, baseline + 1)
     }
 
     func testEventRoutingFiltersIgnoredEventsBeforeMainActorDispatch() {

@@ -1270,12 +1270,6 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
 
-    func testScrolloverUndoFeedbackTriggersOnlyForNewlyVisiblePresentation() {
-        XCTAssertFalse(ScrolloverUndoPresentationPolicy.shouldTriggerFeedback(previouslyVisible: false, currentlyVisible: false))
-        XCTAssertTrue(ScrolloverUndoPresentationPolicy.shouldTriggerFeedback(previouslyVisible: false, currentlyVisible: true))
-        XCTAssertFalse(ScrolloverUndoPresentationPolicy.shouldTriggerFeedback(previouslyVisible: true, currentlyVisible: true))
-        XCTAssertFalse(ScrolloverUndoPresentationPolicy.shouldTriggerFeedback(previouslyVisible: true, currentlyVisible: false))
-    }
 
     func testNewsNavigationSelectionMatchesOnlyTheActiveScope() {
         XCTAssertTrue(NewsNavigationSelection.isSelected(.all, activeScope: .all))

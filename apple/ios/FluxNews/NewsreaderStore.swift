@@ -502,6 +502,10 @@ struct ArticleRowContent: Equatable, Sendable {
     // Causes existing timeline controllers to request icons again after a
     // successful navigation refresh invalidates negative results.
     private(set) var feedIconRequestRevision: UInt64 = 0
+    /// Semantic UI feedback events. The view decides how the system represents
+    /// them; persistence code only publishes successful user-visible outcomes.
+    private(set) var readCompletionFeedbackRevision: UInt64 = 0
+    private(set) var undoCompletionFeedbackRevision: UInt64 = 0
     private var feedIconLoader: (@Sendable (Int64, FeedIconVariant) throws -> Data?)?
     private static let feedIconRetryCooldown: TimeInterval = 30
     private var scrolloverUndoTask: Task<Void, Never>?
@@ -779,7 +783,9 @@ struct ArticleRowContent: Equatable, Sendable {
     }
     func setClickOnNews(_ value: ClickOnNews) { clickOnNews = value; defaults.set(value.rawValue, forKey: Key.clickOnNews) }
 
-    func setRead(_ article: ArticleSummary, read: Bool) { setRead(articleIDs: [article.id], read: read) }
+    func setRead(_ article: ArticleSummary, read: Bool, providesFeedback: Bool = true) {
+        setRead(articleIDs: [article.id], read: read, providesFeedback: providesFeedback)
+    }
     func setStarred(_ article: ArticleSummary, starred: Bool) { setStarred(articleIDs: [article.id], starred: starred) }
 
     func markCurrentScopeAsRead(completion: @escaping (Bool) -> Void = { _ in }) {
@@ -797,7 +803,10 @@ struct ArticleRowContent: Equatable, Sendable {
 
     // Read-on-open stays on the existing Core mutation path; only the original URL is returned.
     func open(_ article: ArticleSummary, completion: @escaping (String) -> Void) {
-        setRead(article, read: true)
+        // Opening already has its own strong visual transition. Avoid stacking a
+        // second tactile confirmation merely because read-on-open shares the
+        // same Core mutation.
+        setRead(article, read: true, providesFeedback: false)
         completion(article.url)
     }
 
@@ -924,8 +933,15 @@ struct ArticleRowContent: Equatable, Sendable {
 #endif
     }
 
-    func setRead(articleIDs: [Int64], read: Bool) {
+    func setRead(
+        articleIDs: [Int64],
+        read: Bool,
+        providesFeedback: Bool = true
+    ) {
         guard !articleIDs.isEmpty, let writer = makeReadMutationWriter() else { return }
+        let shouldPublishReadFeedback = providesFeedback
+            && read
+            && articleIDs.contains { rowPresentationStates[$0]?.isRead == false }
         let conflictingScrolloverMutation = !runningScrolloverIDs.isDisjoint(with: articleIDs) ? scrolloverMutationTask : nil
         let explicitToken = beginExplicitReadMutation(articleIDs)
         let sessionGeneration = scrolloverSessionGeneration
@@ -944,6 +960,9 @@ struct ArticleRowContent: Equatable, Sendable {
                 markMeaningfulInteraction()
                 if snapshotRevision == self.snapshotRevision && read && ArticleListPresentationPolicy.removesMarkedReadArticle(removeWhenMarkedRead: removeArticlesWhenMarkedRead, unreadOnly: unreadOnly, scope: scope) {
                     removeVisibleArticles(articleIDs)
+                }
+                if shouldPublishReadFeedback {
+                    readCompletionFeedbackRevision &+= 1
                 }
                 reloadCounts()
             case let .failure(error):
@@ -1135,6 +1154,7 @@ struct ArticleRowContent: Equatable, Sendable {
               pendingScrolloverIDs.isEmpty,
               scrolloverCountsPending else { return }
         scrolloverCountsPending = false
+        readCompletionFeedbackRevision &+= 1
         reloadCounts()
     }
 
@@ -1225,7 +1245,9 @@ struct ArticleRowContent: Equatable, Sendable {
             switch result {
             case .success:
                 updateVisibleRead(ids, read: false)
-                clearScrolloverUndoGroup(); reloadCounts()
+                clearScrolloverUndoGroup()
+                undoCompletionFeedbackRevision &+= 1
+                reloadCounts()
             case let .failure(error): errorMessage = IOSErrorPresentation.message(for: error, context: .articleAction)
             }
             notifyExplicitReadMutationWaitersIfIdle()
