@@ -1,6 +1,29 @@
 import UIKit
 import CoreText
 
+enum IOSVisualPortraitLayoutMode: String, Hashable, Sendable {
+    /// Historical 80/20 layout retained for A/B validation.
+    case heroRail80
+    /// Classic Visual layout: full-width hero followed by metadata/title/date.
+    case classicFullWidth
+}
+
+enum IOSVisualPortraitLayoutDiagnostics {
+    static let didChangeNotification = Notification.Name("FluxVisualPortraitLayoutDidChange")
+    private static let userDefaultsKey = "developer.visualPortraitHeroRail80Enabled.v1"
+
+    static var mode: IOSVisualPortraitLayoutMode {
+        UserDefaults.standard.bool(forKey: userDefaultsKey) ? .heroRail80 : .classicFullWidth
+    }
+
+    static var heroRail80Enabled: Bool { mode == .heroRail80 }
+
+    static func setHeroRail80Enabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: userDefaultsKey)
+        NotificationCenter.default.post(name: didChangeNotification, object: nil)
+    }
+}
+
 /// Immutable geometry input. Mutable presentation pixels and read/starred state
 /// are intentionally absent: they must never affect article-card geometry.
 struct IOSUIKitArticleLayoutInput: Hashable {
@@ -13,13 +36,14 @@ struct IOSUIKitArticleLayoutInput: Hashable {
     let hasImage: Bool
     let hasComments: Bool
     let mode: ArticlePresentationMode
+    let visualPortraitLayoutMode: IOSVisualPortraitLayoutMode
     let previewLines: ArticlePreviewLines
     let containerWidth: CGFloat
     let displayScale: CGFloat
     let contentSizeCategory: UIContentSizeCategory
     let layoutDirection: UIUserInterfaceLayoutDirection
 
-    init(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
+    init(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, visualPortraitLayoutMode: IOSVisualPortraitLayoutMode = .heroRail80, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
         title = item.content.article.title
         feedTitle = item.content.article.feedTitle
         publishedDate = item.content.publishedDate
@@ -29,6 +53,7 @@ struct IOSUIKitArticleLayoutInput: Hashable {
         hasImage = item.content.imageURL != nil
         hasComments = item.content.hasComments
         self.mode = mode
+        self.visualPortraitLayoutMode = visualPortraitLayoutMode
         self.previewLines = previewLines
         self.containerWidth = containerWidth
         self.displayScale = displayScale
@@ -36,14 +61,15 @@ struct IOSUIKitArticleLayoutInput: Hashable {
         self.layoutDirection = layoutDirection
     }
 
-    init(title: String, feedTitle: String, publishedDate: String, publishedAge: String? = nil, readingTime: String? = nil, preview: String, hasImage: Bool, hasComments: Bool, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
+    init(title: String, feedTitle: String, publishedDate: String, publishedAge: String? = nil, readingTime: String? = nil, preview: String, hasImage: Bool, hasComments: Bool, mode: ArticlePresentationMode, visualPortraitLayoutMode: IOSVisualPortraitLayoutMode = .heroRail80, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
         self.title = title
         self.feedTitle = feedTitle
         self.publishedDate = publishedDate
         self.publishedAge = publishedAge ?? publishedDate
         self.readingTime = readingTime
         self.preview = preview
-        self.hasImage = hasImage; self.hasComments = hasComments; self.mode = mode; self.previewLines = previewLines
+        self.hasImage = hasImage; self.hasComments = hasComments; self.mode = mode
+        self.visualPortraitLayoutMode = visualPortraitLayoutMode; self.previewLines = previewLines
         self.containerWidth = containerWidth; self.displayScale = displayScale; self.contentSizeCategory = contentSizeCategory
         self.layoutDirection = layoutDirection
     }
@@ -74,7 +100,11 @@ struct IOSUIKitArticleLayoutKey: Hashable {
 
     init(_ input: IOSUIKitArticleLayoutInput) {
         let scale = max(input.displayScale, 1)
-        let geometry = IOSUIKitArticleGeometry(mode: input.mode, containerWidth: input.containerWidth)
+        let geometry = IOSUIKitArticleGeometry(
+            mode: input.mode,
+            containerWidth: input.containerWidth,
+            visualPortraitLayoutMode: input.visualPortraitLayoutMode
+        )
         title = input.title
         feedTitle = input.feedTitle
         let resolvedVariant = geometry.variant(hasImage: input.hasImage && input.mode.showsArticleImage)
@@ -105,14 +135,16 @@ struct IOSUIKitTimelineGeometryIdentity: Hashable {
     let contentSizeCategory: String
     let layoutDirection: UIUserInterfaceLayoutDirection
     let mode: ArticlePresentationMode
+    let visualPortraitLayoutMode: IOSVisualPortraitLayoutMode
     let previewLines: ArticlePreviewLines
 
-    init(mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
+    init(mode: ArticlePresentationMode, visualPortraitLayoutMode: IOSVisualPortraitLayoutMode = .heroRail80, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
         containerWidthPixels = IOSUIKitArticleLayoutKey.canonicalContainerWidthPixels(containerWidth, displayScale: displayScale)
         displayScaleHundredths = IOSUIKitArticleLayoutKey.canonicalDisplayScaleHundredths(displayScale)
         self.contentSizeCategory = contentSizeCategory.rawValue
         self.layoutDirection = layoutDirection
         self.mode = mode
+        self.visualPortraitLayoutMode = visualPortraitLayoutMode
         self.previewLines = previewLines
     }
 }
@@ -473,6 +505,7 @@ struct IOSUIKitArticleGeometry: Equatable {
     static let metadataTitleSpacing: CGFloat = 6
 
     let mode: ArticlePresentationMode
+    let visualPortraitLayoutMode: IOSVisualPortraitLayoutMode
     let containerWidth: CGFloat
     let horizontalInset: CGFloat
     let availableWidth: CGFloat
@@ -482,8 +515,9 @@ struct IOSUIKitArticleGeometry: Equatable {
     let isWideContainer: Bool
     let verticalPadding: CGFloat
 
-    init(mode: ArticlePresentationMode, containerWidth: CGFloat) {
+    init(mode: ArticlePresentationMode, containerWidth: CGFloat, visualPortraitLayoutMode: IOSVisualPortraitLayoutMode = .heroRail80) {
         self.mode = mode
+        self.visualPortraitLayoutMode = visualPortraitLayoutMode
         self.containerWidth = containerWidth
         horizontalInset = containerWidth > Self.wideInsetThreshold ? Self.wideInset : mode == .compact ? Self.compactInset : Self.visualInset
         availableWidth = max(0, containerWidth - horizontalInset * 2)
@@ -504,7 +538,8 @@ struct IOSUIKitArticleGeometry: Equatable {
         guard hasImage else { return usesSideTitle ? .visualSideTitleTextOnly : .visualTextOnly }
         // On a wide container the preview has room to sit beside the image.
         if usesSideTitle { return isWideContainer ? .visualSideTitleWide : .visualSideTitle }
-        return isLandscapeVisual ? .visualLandscape : .visualPortrait
+        if isLandscapeVisual { return .visualLandscape }
+        return visualPortraitLayoutMode == .heroRail80 ? .visualPortrait : .visualPortraitClassic
     }
 
     func imageSize(hasImage: Bool) -> CGSize {
@@ -518,9 +553,12 @@ struct IOSUIKitArticleGeometry: Equatable {
             let width = ArticlePresentationLayout.landscapeImageWidth(availableWidth: availableWidth)
             return .init(width: width, height: ArticlePresentationLayout.landscapeImageHeight(imageWidth: width))
         }
-        // Standard Visual portrait: leading inset hero image. Keep the 16:9
-        // aspect contract while shortening the long horizontal moving edge.
-        let width = (availableWidth * Self.visualHeroImageAllocation).rounded()
+        // Visual portrait A/B: retain the 80/20 rail layout, or restore the
+        // classic full-width hero. Both keep the same 16:9 image contract.
+        let allocation = visualPortraitLayoutMode == .heroRail80
+            ? Self.visualHeroImageAllocation
+            : 1
+        let width = (availableWidth * allocation).rounded()
         return .init(width: width, height: width * (1 / ArticlePresentationLayout.portraitImageAspectRatio))
     }
 
@@ -585,11 +623,15 @@ struct IOSUIKitArticleGeometry: Equatable {
 enum IOSUIKitArticleLayoutEngine {
     static func metrics(for input: IOSUIKitArticleLayoutInput) -> IOSUIKitArticleLayoutMetrics {
         let scale = max(input.displayScale, 1)
-        let geometry = IOSUIKitArticleGeometry(mode: input.mode, containerWidth: input.containerWidth)
+        let geometry = IOSUIKitArticleGeometry(
+            mode: input.mode,
+            containerWidth: input.containerWidth,
+            visualPortraitLayoutMode: input.visualPortraitLayoutMode
+        )
         let hasImage = input.hasImage && input.mode.showsArticleImage
         let variant = geometry.variant(hasImage: hasImage)
         var imageSize = geometry.imageSize(hasImage: hasImage)
-        if variant == .visualPortrait {
+        if variant == .visualPortrait || variant == .visualPortraitClassic {
             // NSLayoutConstraint resolves the 16:9 frame on the display-pixel grid.
             imageSize.height = pixelAligned(imageSize.height, scale: scale)
         }
@@ -710,6 +752,11 @@ enum IOSUIKitArticleLayoutEngine {
         } else if variant == .visualPortrait {
             textBlockHeight = titleHeight + IOSUIKitArticleGeometry.textSpacing + metadataHeight
                 + (previewHeight > 0 ? IOSUIKitArticleGeometry.portraitSpacing + previewHeight : 0)
+        } else if variant == .visualPortraitClassic {
+            textBlockHeight = metadataHeight
+                + IOSUIKitArticleGeometry.textSpacing + titleHeight
+                + IOSUIKitArticleGeometry.textSpacing + dateHeight
+                + (previewHeight > 0 ? IOSUIKitArticleGeometry.textSpacing + previewHeight : 0)
         } else {
             textBlockHeight = titleHeight + IOSUIKitArticleGeometry.textSpacing + metadataHeight
                 + IOSUIKitArticleGeometry.textSpacing + dateHeight
@@ -723,6 +770,11 @@ enum IOSUIKitArticleLayoutEngine {
                 + IOSUIKitArticleGeometry.textSpacing + metadataHeight
                 + IOSUIKitArticleGeometry.portraitSpacing + portraitVisualBlockHeight
                 + (previewHeight > 0 ? IOSUIKitArticleGeometry.portraitSpacing + previewHeight : 0)
+        case .visualPortraitClassic:
+            // Full-width hero -> metadata -> title -> date/reading time -> preview.
+            contentHeight = imageSize.height
+                + IOSUIKitArticleGeometry.portraitSpacing
+                + textBlockHeight
         case .visualLandscape: contentHeight = max(imageSize.height, textBlockHeight)
         default: contentHeight = textBlockHeight
         }
@@ -748,22 +800,34 @@ enum IOSUIKitArticleLayoutEngine {
                 + IOSUIKitArticleGeometry.textSpacing
                 + metadataHeight
                 + IOSUIKitArticleGeometry.portraitSpacing
+        } else if variant == .visualPortraitClassic {
+            logicalImageY = geometry.verticalPadding
         } else {
             logicalImageY = geometry.verticalPadding
         }
         let imageFrame: CGRect? = imageSize == .zero ? nil : CGRect(x: physicalX(logicalX: logicalImageX, width: imageSize.width, in: input.containerWidth, direction: input.layoutDirection), y: logicalImageY, width: imageSize.width, height: imageSize.height)
         let logicalTextX = variant == .visualLandscape ? geometry.horizontalInset + imageSize.width + IOSUIKitArticleGeometry.landscapeSpacing : geometry.horizontalInset
-        let textOrigin = CGPoint(x: physicalX(logicalX: logicalTextX, width: textWidth, in: input.containerWidth, direction: input.layoutDirection), y: geometry.verticalPadding)
+        let textOriginY = variant == .visualPortraitClassic
+            ? logicalImageY + imageSize.height + IOSUIKitArticleGeometry.portraitSpacing
+            : geometry.verticalPadding
+        let textOrigin = CGPoint(
+            x: physicalX(logicalX: logicalTextX, width: textWidth, in: input.containerWidth, direction: input.layoutDirection),
+            y: textOriginY
+        )
         // Side-title order is metadata then title/date. Standard Visual portrait
         // is title -> metadata -> hero/Info Rail -> preview. All other variants
         // retain their existing ordering.
         let isSideTitle = metadataLeads
-        let titleTop = isSideTitle
-            ? textOrigin.y + metadataHeight + IOSUIKitArticleGeometry.textSpacing
-            : textOrigin.y
+        let metadataLeadsClassicPortrait = variant == .visualPortraitClassic
+        let titleTop: CGFloat
+        if isSideTitle || metadataLeadsClassicPortrait {
+            titleTop = textOrigin.y + metadataHeight + IOSUIKitArticleGeometry.textSpacing
+        } else {
+            titleTop = textOrigin.y
+        }
         let titleFrame = CGRect(x: textOrigin.x, y: titleTop, width: titleWidth, height: titleHeight)
         let metadataTop: CGFloat
-        if isSideTitle {
+        if isSideTitle || metadataLeadsClassicPortrait {
             metadataTop = textOrigin.y
         } else {
             metadataTop = titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing
@@ -889,7 +953,7 @@ enum IOSUIKitArticleLayoutEngine {
             landscapeReadingTimeIconFrame = nil
             landscapeReadingTimeFrame = nil
         } else {
-            let dateRowY = isSideTitle
+            let dateRowY = (isSideTitle || variant == .visualPortraitClassic)
                 ? titleFrame.maxY + IOSUIKitArticleGeometry.textSpacing
                 : metadataFrame.maxY + IOSUIKitArticleGeometry.textSpacing
             let dateRowWidth = isSideTitleVariant ? titleWidth : infoWidth
