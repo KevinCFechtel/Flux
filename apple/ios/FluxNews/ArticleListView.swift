@@ -845,11 +845,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private var preparedWindowTask: Task<Void, Never>?
     private var preparedWindowGeneration: UInt64 = 0
     private var scheduledPreparedWindowGeneration: UInt64?
-    /// Diagnostic parity with the smooth Flutter timeline: keep UIKit's row/layout
-    /// prefetching, but do not speculatively fetch/decode/raster article images
-    /// before their cells become visible. Visible cells still request images
-    /// immediately through ArticleImagePipeline.
-    private static let offscreenArticleImagePrefetchEnabled = false
+    /// Keep image preparation narrowly ahead of the viewport. UIKit may offer
+    /// a wider prefetch window, but the image pipeline receives at most the next
+    /// two image-bearing articles in the inferred scroll direction.
+    private static let maximumOffscreenArticleImagePrefetchCount = 2
+    private var imageArticleIDs = Set<Int64>()
     private var prefetchTasks: [Int64: (request: ArticleImageRequest, task: Task<Void, Never>)] = [:]
     private let refreshControl = UIRefreshControl()
     private let statusBarScrim = IOSUIKitTimelineTopScrimView()
@@ -1208,6 +1208,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
                 for item in appended {
                     itemsByID[item.article.id] = item
                     presentationByID[item.article.id] = newPresentationBridge.articleState(for: item.article.id, fallback: item.article)
+                    if item.content.imageURL != nil { imageArticleIDs.insert(item.article.id) }
                 }
                 scrolloverGeometryTracker.appendSnapshot(appendedIDs)
                 applySnapshotWhenHeightsReady(currentSnapshot())
@@ -1220,6 +1221,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
                     for id in removed {
                         itemsByID[id] = nil
                         presentationByID[id] = nil
+                        imageArticleIDs.remove(id)
                         prefetchTasks.removeValue(forKey: id)?.task.cancel()
                     }
                     scrolloverGeometryTracker.removeSnapshot(removed)
@@ -1233,6 +1235,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
                 let newIDs = items.map(\.article.id)
                 orderedIDs = newIDs
                 itemsByID = Dictionary(uniqueKeysWithValues: items.map { ($0.article.id, $0) })
+                imageArticleIDs = Set(items.compactMap { $0.content.imageURL == nil ? nil : $0.article.id })
                 presentationByID = Dictionary(uniqueKeysWithValues: items.map {
                     ($0.article.id, newPresentationBridge.articleState(for: $0.article.id, fallback: $0.article))
                 })
@@ -1621,13 +1624,63 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         layoutPrefetchInputCountForTesting += layoutInputs.count
 #endif
         preparedLayoutCoordinator.prepare(layoutInputs, priority: .prefetch)
-        guard Self.offscreenArticleImagePrefetchEnabled, mode.showsArticleImage else { return }
+
+        guard mode.showsArticleImage,
+              let direction = articleImagePrefetchDirection(for: indexPaths)
+        else { return }
+
+        let visibleIDs = (tableView.indexPathsForVisibleRows ?? [])
+            .sorted { $0.row < $1.row }
+            .compactMap(dataSource.itemIdentifier(for:))
+        let candidateIDs = IOSArticleImagePrefetchPolicy.candidateIDs(
+            orderedIDs: orderedIDs,
+            visibleIDs: visibleIDs,
+            imageIDs: imageArticleIDs,
+            direction: direction,
+            limit: Self.maximumOffscreenArticleImagePrefetchCount
+        )
+        reconcileArticleImagePrefetch(candidateIDs)
+    }
+
+    func tableView(_ tableView: UITableView, cancelPrefetchingForRowsAt indexPaths: [IndexPath]) {
         for indexPath in indexPaths {
-            guard let id = dataSource.itemIdentifier(for: indexPath),
-                  let item = renderedItem(for: id), let request = imageRequest(for: item)
-            else { continue }
-            if let existing = prefetchTasks[id], existing.request == request { continue }
+            guard let id = dataSource.itemIdentifier(for: indexPath) else { continue }
             prefetchTasks.removeValue(forKey: id)?.task.cancel()
+        }
+    }
+
+    private func articleImagePrefetchDirection(for indexPaths: [IndexPath]) -> IOSArticleScrollDirection? {
+        guard !indexPaths.isEmpty,
+              let firstVisible = tableView.indexPathsForVisibleRows?.map(\.row).min(),
+              let lastVisible = tableView.indexPathsForVisibleRows?.map(\.row).max()
+        else { return nil }
+
+        let rows = indexPaths.map(\.row)
+        if rows.allSatisfy({ $0 > lastVisible }) { return .forward }
+        if rows.allSatisfy({ $0 < firstVisible }) { return .backward }
+
+        let forwardDistance = max(0, (rows.max() ?? lastVisible) - lastVisible)
+        let backwardDistance = max(0, firstVisible - (rows.min() ?? firstVisible))
+        guard forwardDistance != 0 || backwardDistance != 0 else { return nil }
+        return forwardDistance >= backwardDistance ? .forward : .backward
+    }
+
+    private func reconcileArticleImagePrefetch(_ candidateIDs: [Int64]) {
+        let selected: [(id: Int64, request: ArticleImageRequest)] = candidateIDs.compactMap { id in
+            guard let item = renderedItem(for: id), let request = imageRequest(for: item) else { return nil }
+            return (id, request)
+        }
+        let selectedIDs = Set(selected.map(\.id))
+
+        for id in prefetchTasks.keys where !selectedIDs.contains(id) {
+            prefetchTasks.removeValue(forKey: id)?.task.cancel()
+        }
+
+        for candidate in selected {
+            if let existing = prefetchTasks[candidate.id], existing.request == candidate.request { continue }
+            prefetchTasks.removeValue(forKey: candidate.id)?.task.cancel()
+            let request = candidate.request
+            let id = candidate.id
             let task = Task { [weak self] in
                 defer {
                     if self?.prefetchTasks[id]?.request == request {
@@ -1637,13 +1690,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
                 _ = try? await ArticleImagePipeline.shared.prefetch(request)
             }
             prefetchTasks[id] = (request, task)
-        }
-    }
-
-    func tableView(_ tableView: UITableView, cancelPrefetchingForRowsAt indexPaths: [IndexPath]) {
-        for indexPath in indexPaths {
-            guard let id = dataSource.itemIdentifier(for: indexPath) else { continue }
-            prefetchTasks.removeValue(forKey: id)?.task.cancel()
         }
     }
 
