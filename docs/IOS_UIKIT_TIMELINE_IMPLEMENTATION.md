@@ -337,7 +337,132 @@ After each requested package, report the changed files and resulting behavior,
 tests actually executed, unresolved regressions, and the next incomplete
 package. The docs-only U1 commit does not fix the current app's scrolling.
 
-## 8. Apple references
+## 8. Agreed U3/U4 stabilization and architecture-freeze plan
+
+This section records the owner-approved direction after the September 2026
+performance investigation. It is the default completion sequence unless new,
+reproducible device evidence demonstrates a different architectural problem.
+Do not restart broad renderer experiments merely because older diagnostic plans
+contain alternatives that were already tried.
+
+### 8.1 Current productive baseline
+
+Keep the current owned `UITableView` Timeline, native UIKit cells, deterministic
+layout preparation, and the normal 100%-content-width Visual portrait image.
+The iPhone 15 comparison showed that the same full-width presentation that
+remained visibly rough on iOS 26 is substantially smoother after updating the
+same device to iOS 27. This does not prove a specific iOS 26 framework defect,
+but after the completed SwiftUI/UIKit, collection/table, image-size, raster,
+prefetch, scheduling, and layout experiments it is sufficient evidence not to
+compromise the product UI or reopen the Timeline container by default.
+
+Visual compact remains a normal product presentation mode, not a performance
+workaround that must replace the standard full-width Visual mode.
+
+### 8.2 Complete U4 next
+
+U4 is the next substantial implementation package. Finish the session-owned
+Scrollover persistence worker before declaring the Timeline architecture frozen.
+
+In addition to the existing 64-ID bounded batches, FIFO continuation,
+deduplication, presentation/session generations, and explicit-mutation conflict
+handling, accepted Scrollover writes must have a bounded maximum wait before a
+drain attempt. A slow continuous interaction with fewer than 64 pending IDs must
+not depend indefinitely on reaching idle. Lifecycle flush remains an additional
+drain trigger rather than the only guarantee for a small batch.
+
+Validate the real running/serialization path with an injectable, controllably
+blocked writer. Array-only `ForTesting` seams that merely pop queued IDs do not
+complete U4. Tests must cover queued/running batches across presentation reset,
+newer explicit Read/Unread/Undo intent, account/Core-session replacement,
+failure, lifecycle flush, and bounded-wait continuation.
+
+### 8.3 Close U3 with targeted observation, not another speculative rewrite
+
+After U4, perform a short U3 closure pass on representative hardware.
+
+Treat synchronous deterministic-layout fallback counters as performance
+canaries. During ordinary steady-state scrolling, prepared row heights and
+prepared layout metrics should make synchronous Core Text fallback effectively
+zero. Rotation, Dynamic Type, or a new geometry generation may legitimately
+exercise exceptional preparation paths; recurring fallback during normal
+scrolling requires investigation before U3 closes.
+
+Do not replace the current constraint-based cell with manual frame layout merely
+to eliminate theoretical duplication. `IOSUIKitArticleLayoutEngine` remains the
+authoritative geometry calculation and the cell consumes its prepared metrics.
+Keep the UIKit-cell-versus-engine oracle tests as a hard regression boundary.
+After U4, reduce remaining duplicate cell-side calculations incrementally where
+that can be done without changing rendering behavior.
+
+### 8.4 Retire the legacy image renderer after one final bounded comparison
+
+The production image path is the renderer-driven `imageViewScaled` path:
+display-sized ImageIO downsampling, bounded memory/HTTP caching, in-flight
+deduplication, visible-over-prefetch priority, cancellation, then ordinary
+`UIImageView` / Core Animation aspect-fill presentation.
+
+Before removing the legacy exact-slot `displayReady` renderer, perform one final
+bounded comparison on the iPhone 15 where practical:
+
+- iOS 26 with `imageViewScaled`;
+- iOS 26 with `displayReady`;
+- iOS 27 with `imageViewScaled`;
+- iOS 27 with `displayReady`.
+
+This is a confirmation step, not a new open-ended investigation. If the legacy
+renderer shows no clear product-relevant advantage, remove it, its diagnostic
+switch/state, its renderer-specific cache-key dimensions, backdrop/P3/exact-slot
+CGContext preparation, and the misleading `ArticleImageRequest` legacy default.
+Do not keep shipping code as an archive; Git history is sufficient if future OS
+evidence ever justifies revisiting the experiment.
+
+The long-term preferred direction is to keep app-owned work focused on
+target-size decoding, prioritization, caching, deduplication, and cancellation
+while allowing UIKit/Core Animation to own ordinary final image presentation so
+future Apple rendering improvements can benefit Flux without a custom raster
+pipeline.
+
+### 8.5 Accept and document the iOS 26 limitation if the closure check confirms it
+
+Flux continues to support iOS 17+, so iOS 26 remains a supported OS. However, the
+full-width-image scroll-quality difference observed on iPhone 15 has already
+survived extensive app-side investigation and improved materially on the same
+hardware under iOS 27.
+
+If the bounded U3 closure comparison reveals no actionable app-side regression,
+record the remaining iOS 26 behavior as a known OS/rendering-sensitive
+limitation. Do not restore the temporary 80%-image/info-rail design, reduce image
+width, or reopen the renderer/container solely to hide that iOS 26 perceptual
+difference. New work requires new reproducible evidence that identifies an
+actionable app-side cause.
+
+### 8.6 Cleanup after U3/U4, then freeze the Timeline architecture
+
+After U3 and U4 are complete, perform a behavior-preserving cleanup rather than
+another performance redesign:
+
+- split the large Timeline source into focused controller, cell, Scrollover,
+  presentation-bridge, and performance-metrics files;
+- migrate any still-useful regression coverage from the historical
+  `IOSScrolloverGeometryController` to the productive
+  `IOSUIKitScrolloverGeometryTracker`, then remove or test-isolate the historical
+  controller;
+- reduce redundant geometry helpers so prepared
+  `IOSUIKitArticleLayoutMetrics` is consumed directly wherever practical;
+- remove obsolete image diagnostics/legacy renderer code after the comparison
+  above;
+- keep the existing engine-versus-cell geometry oracle, bounded-cache tests,
+  snapshot/status separation tests, and device acceptance checks.
+
+Once the U4 worker contract, U3 closure checks, and this cleanup are complete,
+the current Timeline container/rendering architecture should be treated as
+frozen. Later feature work should extend the accepted product semantics without
+reopening `UITableView`, full-width Visual portrait images, or the fundamental
+image/layout pipeline unless new device evidence demonstrates a concrete
+regression that cannot be addressed inside those boundaries.
+
+## 9. Apple references
 
 - [Make blazing fast lists and collection views](https://developer.apple.com/videos/play/wwdc2021/10252/): stable identities, cell lifecycle, preparation, prefetch, image handling and targeted updates.
 - [Lists in UICollectionView](https://developer.apple.com/videos/play/wwdc2020/10026/): list configurations, native cell content and system swipe integration.

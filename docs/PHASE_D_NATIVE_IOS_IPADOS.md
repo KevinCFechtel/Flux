@@ -634,6 +634,17 @@ Do not re-enable removed performance experiments merely because older commits
 describe them as a next step. New performance work should start from the current
 production architecture and current physical-device evidence.
 
+The agreed Timeline completion sequence is recorded in
+[IOS_UIKIT_TIMELINE_IMPLEMENTATION.md](IOS_UIKIT_TIMELINE_IMPLEMENTATION.md#8-agreed-u3u4-stabilization-and-architecture-freeze-plan).
+In short: complete U4 next; then close U3 with bounded device observation rather
+than another speculative renderer rewrite; perform one final bounded
+`imageViewScaled` versus legacy `displayReady` comparison; accept the remaining
+iOS 26 full-width-image behavior as a known OS/rendering-sensitive limitation if
+that check finds no actionable app-side regression; then remove legacy
+diagnostics/historical renderer code, reduce duplicate layout plumbing, split the
+large Timeline source files, and freeze the accepted `UITableView`/full-width
+Visual architecture.
+
 On iOS, a semantic scope/filter/sort reset stays within the existing UIKit
 Timeline controller: it resets the table view to its natural top position and
 rebaselines Scrollover geometry without re-identifying the adaptive detail
