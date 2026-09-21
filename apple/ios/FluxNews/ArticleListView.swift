@@ -1300,7 +1300,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private func configure(_ cell: IOSUIKitArticleCell, item: IOSUIKitArticleTimelineItem) {
         let metrics = IOSUIKitArticleCell.Metrics(
             mode: mode,
-            containerWidth: tableView.bounds.width,
+            containerWidth: tableView.bounds.width
         )
         let layoutInput = preparedLayoutInput(for: item)
         let layoutMetrics: IOSUIKitArticleLayoutMetrics
@@ -2247,6 +2247,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private let imagePlaceholder = UIImageView(image: UIImage(systemName: "photo"))
 
     private var textOnlyConstraints: [NSLayoutConstraint] = []
+    private var portraitConstraints: [NSLayoutConstraint] = []
     private var landscapeConstraints: [NSLayoutConstraint] = []
     private var activeLayoutConstraints: [NSLayoutConstraint] = []
     private var portraitImageAspectConstraint: NSLayoutConstraint!
