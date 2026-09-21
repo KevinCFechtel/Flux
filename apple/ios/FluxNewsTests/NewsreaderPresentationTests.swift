@@ -3197,7 +3197,9 @@ final class NewsreaderPresentationTests: XCTestCase {
                     lineCount += 1
                 }
                 for scale in [2 as CGFloat, 3] {
-                    let scaleTrait = UITraitCollection(traitsFrom: [trait, UITraitCollection(displayScale: scale)])
+                    let scaleTrait = trait.modifyingTraits { mutableTraits in
+                        mutableTraits.displayScale = scale
+                    }
                     var fitted = CGSize.zero
                     scaleTrait.performAsCurrent {
                         let label = UILabel()

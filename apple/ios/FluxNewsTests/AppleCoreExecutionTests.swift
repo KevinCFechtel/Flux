@@ -20,10 +20,10 @@ final class AppleCoreExecutionTests: XCTestCase {
             Task { try await execution.responsive { gate.enter(); return 1 } }
         }
 
-        try gate.waitForStarts(2)
+        try await gate.waitForStarts(2)
         XCTAssertEqual(gate.startCount, 2)
         gate.release(2)
-        try gate.waitForStarts(2)
+        try await gate.waitForStarts(4)
         XCTAssertEqual(gate.maximumConcurrentOperations, 2)
         gate.release(2)
         for task in tasks { _ = try await task.value }
@@ -36,10 +36,10 @@ final class AppleCoreExecutionTests: XCTestCase {
             Task { try await execution.blocking { gate.enter(); return 1 } }
         }
 
-        try gate.waitForStarts(2)
+        try await gate.waitForStarts(2)
         XCTAssertEqual(gate.startCount, 2)
         gate.release(2)
-        try gate.waitForStarts(2)
+        try await gate.waitForStarts(4)
         XCTAssertEqual(gate.maximumConcurrentOperations, 2)
         gate.release(2)
         for task in tasks { _ = try await task.value }
@@ -48,18 +48,18 @@ final class AppleCoreExecutionTests: XCTestCase {
     func testBlockingWorkDoesNotBlockResponsiveWork() async throws {
         let execution = AppleCoreExecution(responsiveConcurrency: 1, blockingConcurrency: 1)
         let blockingGate = ExecutionGate()
-        let responsiveStarted = DispatchSemaphore(value: 0)
+        let responsiveStarted = LockedFlag()
         let blockingTask = Task { try await execution.blocking { blockingGate.enter(); return 1 } }
 
-        try blockingGate.waitForStarts(1)
+        try await blockingGate.waitForStarts(1)
         let responsiveTask = Task {
             try await execution.responsive {
-                responsiveStarted.signal()
+                responsiveStarted.set()
                 return 2
             }
         }
 
-        XCTAssertEqual(responsiveStarted.wait(timeout: .now() + 2), .success)
+        try await waitUntil(timeout: 2) { responsiveStarted.value }
         blockingGate.release(1)
         let blockingValue = try await blockingTask.value
         let responsiveValue = try await responsiveTask.value
@@ -84,7 +84,7 @@ final class AppleCoreExecutionTests: XCTestCase {
         let execution = AppleCoreExecution(responsiveConcurrency: 1, blockingConcurrency: 1)
         let gate = ExecutionGate()
         let first = Task { try await execution.blocking { gate.enter(); return 1 } }
-        try gate.waitForStarts(1)
+        try await gate.waitForStarts(1)
 
         let ranCancelledOperation = LockedFlag()
         let cancelled = Task {
@@ -123,7 +123,7 @@ final class AppleCoreExecutionTests: XCTestCase {
 
         let gate = ExecutionGate()
         let first = Task { try await execution.blocking { gate.enter(); return 1 } }
-        try gate.waitForStarts(1)
+        try await gate.waitForStarts(1)
         let cancelled = Task { try await execution.blocking { 2 } }
         cancelled.cancel()
         gate.release(1)
@@ -186,10 +186,9 @@ private final class LockedFlag: @unchecked Sendable {
 
 private final class ExecutionGate: @unchecked Sendable {
     private let lock = NSLock()
-    private let started = DispatchSemaphore(value: 0)
-    private let releaseSemaphore = DispatchSemaphore(value: 0)
     private var activeOperations = 0
     private var starts = 0
+    private var releasedOperations = 0
     private var maximumActiveOperations = 0
 
     func enter() {
@@ -198,23 +197,32 @@ private final class ExecutionGate: @unchecked Sendable {
         activeOperations += 1
         maximumActiveOperations = max(maximumActiveOperations, activeOperations)
         lock.unlock()
-        started.signal()
-        releaseSemaphore.wait()
-        lock.lock()
-        activeOperations -= 1
-        lock.unlock()
+
+        while true {
+            lock.lock()
+            if releasedOperations > 0 {
+                releasedOperations -= 1
+                activeOperations -= 1
+                lock.unlock()
+                return
+            }
+            lock.unlock()
+            Thread.sleep(forTimeInterval: 0.001)
+        }
     }
 
-    func waitForStarts(_ count: Int, timeout: TimeInterval = 2) throws {
-        for _ in 0 ..< count {
-            guard started.wait(timeout: .now() + timeout) == .success else {
-                throw GateError.timedOut
-            }
+    func waitForStarts(_ count: Int, timeout: TimeInterval = 2) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(timeout))
+        while startCount < count {
+            guard ContinuousClock.now < deadline else { throw GateError.timedOut }
+            try await Task.sleep(for: .milliseconds(1))
         }
     }
 
     func release(_ count: Int) {
-        for _ in 0 ..< count { releaseSemaphore.signal() }
+        lock.lock()
+        releasedOperations += count
+        lock.unlock()
     }
 
     var startCount: Int {
@@ -227,6 +235,17 @@ private final class ExecutionGate: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return maximumActiveOperations
+    }
+}
+
+private func waitUntil(
+    timeout: TimeInterval,
+    condition: @escaping @Sendable () -> Bool
+) async throws {
+    let deadline = ContinuousClock.now.advanced(by: .seconds(timeout))
+    while !condition() {
+        guard ContinuousClock.now < deadline else { throw GateError.timedOut }
+        try await Task.sleep(for: .milliseconds(1))
     }
 }
 
