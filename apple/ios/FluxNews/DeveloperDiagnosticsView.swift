@@ -6,6 +6,7 @@ struct DeveloperDiagnosticsView: View {
     @State private var imageCacheDiagnostics: ArticleImageCacheDiagnosticsSnapshot?
     @State private var imagePresentationDiagnostics: ArticleImagePresentationDiagnosticsSnapshot?
     @State private var displayReadyRasterEnabled = ArticleImageRenderingDiagnostics.displayReadyRasterEnabled
+    @State private var visualHeroRail80Enabled = IOSVisualPortraitLayoutDiagnostics.heroRail80Enabled
 
     var body: some View {
         NavigationStack {
@@ -22,6 +23,24 @@ struct DeveloperDiagnosticsView: View {
                     }
                     Text("Read-only discovery; no legacy data is imported or modified.").font(.footnote).foregroundStyle(.secondary)
                 }
+                Section("Visual Layout A/B") {
+                    Toggle("Use 80% hero + info rail", isOn: $visualHeroRail80Enabled)
+                        .onChange(of: visualHeroRail80Enabled) { _, enabled in
+                            IOSVisualPortraitLayoutDiagnostics.setHeroRail80Enabled(enabled)
+                        }
+
+                    LabeledContent(
+                        "Current Visual portrait",
+                        value: visualHeroRail80Enabled
+                            ? "80% hero + info rail"
+                            : "100% classic hero"
+                    )
+
+                    Text("OFF is the A/B default: full-width hero first, followed by metadata, headline, and the normal date/reading-time row. ON restores the current 80/20 hero + info-rail layout. Compact, Visual compact, and wide Visual layouts are unchanged.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Article Image Rendering") {
                     Toggle("Use legacy display-ready raster", isOn: $displayReadyRasterEnabled)
                         .onChange(of: displayReadyRasterEnabled) { _, enabled in
