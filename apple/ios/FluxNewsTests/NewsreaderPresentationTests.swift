@@ -594,7 +594,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testUIKitPrefetchKeepsLayoutPreparationButSkipsOffscreenArticleImages() async {
+    func testUIKitPrefetchKeepsLayoutPreparationAndBoundsArticleImagePrefetch() async {
         let bridge = IOSUIKitArticleTimelinePresentationBridge()
         let articles = (1...8).map {
             timelineArticle(id: Int64($0), imageURL: "https://example.com/image-\($0).jpg")
@@ -615,14 +615,15 @@ final class NewsreaderPresentationTests: XCTestCase {
             prefetchRowsAt: [
                 IndexPath(row: 5, section: 0),
                 IndexPath(row: 6, section: 0),
+                IndexPath(row: 7, section: 0),
             ]
         )
 
         XCTAssertEqual(
             controller.layoutPrefetchInputCountForTesting,
-            initialLayoutPrefetchCount + 2
+            initialLayoutPrefetchCount + 3
         )
-        XCTAssertEqual(controller.articleImagePrefetchTaskCountForTesting, 0)
+        XCTAssertLessThanOrEqual(controller.articleImagePrefetchTaskCountForTesting, 2)
     }
 
     @MainActor
