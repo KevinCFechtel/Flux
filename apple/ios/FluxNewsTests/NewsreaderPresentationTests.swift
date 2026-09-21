@@ -2502,6 +2502,93 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertNotEqual(content.publishedAge, later.publishedAge)
     }
 
+    func testClassicVisualPortraitUsesFullWidthHeroBeforeMetadataTitleAndDateRow() {
+        let metrics = layoutMetrics(
+            mode: .visual,
+            width: 390,
+            hasImage: true,
+            readingTime: "4 min",
+            visualPortraitLayoutMode: .classicFullWidth
+        )
+        guard
+            let image = metrics.imageFrame,
+            let readingContainer = metrics.landscapeReadingTimeContainerFrame,
+            let readingIcon = metrics.landscapeReadingTimeIconFrame,
+            let reading = metrics.landscapeReadingTimeFrame,
+            let preview = metrics.previewFrame
+        else {
+            return XCTFail("Classic Visual portrait should expose hero, date-row reading time and preview")
+        }
+
+        XCTAssertEqual(metrics.variant, .visualPortraitClassic)
+        XCTAssertEqual(image.minX, metrics.contentFrame.minX, accuracy: 0.5)
+        XCTAssertEqual(image.width, metrics.contentFrame.width, accuracy: 0.5)
+        XCTAssertNil(metrics.portraitAccessoryRailFrame)
+        XCTAssertNil(metrics.publishedAgeIconFrame)
+        XCTAssertNil(metrics.publishedAgeFrame)
+        XCTAssertNil(metrics.readingTimeIconFrame)
+        XCTAssertNil(metrics.readingTimeFrame)
+
+        XCTAssertLessThan(image.maxY, metrics.metadataFrame.minY)
+        XCTAssertLessThan(metrics.metadataFrame.maxY, metrics.titleFrame.minY)
+        XCTAssertLessThan(metrics.titleFrame.maxY, metrics.dateFrame.minY)
+        XCTAssertLessThan(metrics.dateFrame.maxY, preview.minY)
+
+        XCTAssertEqual(readingContainer.minY, metrics.dateFrame.minY, accuracy: 0.5)
+        XCTAssertEqual(readingContainer.height, metrics.dateFrame.height, accuracy: 0.5)
+        XCTAssertEqual(
+            readingContainer.minX - metrics.dateFrame.maxX,
+            IOSUIKitArticleGeometry.landscapeDateReadingTimeSpacing,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(readingIcon.midY, metrics.dateFrame.midY, accuracy: 0.5)
+        XCTAssertEqual(reading.minY, metrics.dateFrame.minY, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testClassicVisualPortraitUIKitCellMatchesDeterministicGeometry() {
+        let item = oracleItem(
+            title: "A multiline classic Visual headline for the A/B layout",
+            preview: "Preview text below the date row.",
+            hasImage: true,
+            hasComments: true,
+            readingTimeMinutes: 4
+        )
+        let cell = configuredOracleCell(
+            item: item,
+            mode: .visual,
+            previewLines: .standard,
+            width: 390,
+            visualPortraitLayoutMode: .classicFullWidth
+        )
+        let actualHeight = measureUIKitArticleCell(cell, width: 390)
+        let input = IOSUIKitArticleLayoutInput(
+            item: item,
+            mode: .visual,
+            visualPortraitLayoutMode: .classicFullWidth,
+            previewLines: .standard,
+            containerWidth: 390,
+            displayScale: cell.traitCollection.displayScale,
+            contentSizeCategory: .large,
+            layoutDirection: .leftToRight
+        )
+        let expected = IOSUIKitArticleLayoutEngine.metrics(for: input)
+        let diagnostics = cell.layoutDiagnosticsForTesting
+
+        XCTAssertEqual(expected.variant, .visualPortraitClassic)
+        XCTAssertEqual(actualHeight, expected.cellSize.height, accuracy: 0.5)
+        assertFrameEqual(diagnostics.imageFrame, try! XCTUnwrap(expected.imageFrame))
+        assertFrameEqual(diagnostics.metadataFrame, expected.metadataFrame)
+        assertFrameEqual(diagnostics.titleFrame, expected.titleFrame)
+        assertFrameEqual(diagnostics.dateFrame, expected.dateFrame)
+        assertOptionalFrameEqual(
+            diagnostics.landscapeReadingTimeContainerFrame,
+            expected.landscapeReadingTimeContainerFrame
+        )
+        assertOptionalFrameEqual(diagnostics.previewFrame, expected.previewFrame)
+        XCTAssertNil(diagnostics.portraitAccessoryRailFrame)
+    }
+
     func testVisualPortraitUsesHeroInfoRailAndFullWidthPreview() {
         let metrics = layoutMetrics(mode: .visual, width: 390, hasImage: true, readingTime: "4 min")
         guard
@@ -2719,6 +2806,47 @@ final class NewsreaderPresentationTests: XCTestCase {
             IOSUIKitArticleLayoutKey(compact),
             IOSUIKitArticleLayoutKey(compactWithoutReading)
         )
+    }
+
+    func testVisualPortraitABModesUseDistinctLayoutAndTimelineIdentities() {
+        let rail = layoutInput(
+            mode: .visual,
+            width: 390,
+            hasImage: true,
+            readingTime: "4 min",
+            visualPortraitLayoutMode: .heroRail80
+        )
+        let classic = layoutInput(
+            mode: .visual,
+            width: 390,
+            hasImage: true,
+            readingTime: "4 min",
+            visualPortraitLayoutMode: .classicFullWidth
+        )
+
+        XCTAssertNotEqual(IOSUIKitArticleLayoutKey(rail), IOSUIKitArticleLayoutKey(classic))
+        XCTAssertEqual(IOSUIKitArticleLayoutEngine.metrics(for: rail).variant, .visualPortrait)
+        XCTAssertEqual(IOSUIKitArticleLayoutEngine.metrics(for: classic).variant, .visualPortraitClassic)
+
+        let railIdentity = IOSUIKitTimelineGeometryIdentity(
+            mode: .visual,
+            visualPortraitLayoutMode: .heroRail80,
+            previewLines: .standard,
+            containerWidth: 390,
+            displayScale: 3,
+            contentSizeCategory: .large,
+            layoutDirection: .leftToRight
+        )
+        let classicIdentity = IOSUIKitTimelineGeometryIdentity(
+            mode: .visual,
+            visualPortraitLayoutMode: .classicFullWidth,
+            previewLines: .standard,
+            containerWidth: 390,
+            displayScale: 3,
+            contentSizeCategory: .large,
+            layoutDirection: .leftToRight
+        )
+        XCTAssertNotEqual(railIdentity, classicIdentity)
     }
 
     func testTimelineGeometryIdentityUsesTheDeterministicMeasurementWidth() {
@@ -3154,9 +3282,23 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(nearestMatches, 10)
     }
 
-    private func layoutMetrics(mode: ArticlePresentationMode, width: CGFloat, hasImage: Bool, scale: CGFloat = 2, readingTime: String? = nil) -> IOSUIKitArticleLayoutMetrics {
+    private func layoutMetrics(
+        mode: ArticlePresentationMode,
+        width: CGFloat,
+        hasImage: Bool,
+        scale: CGFloat = 2,
+        readingTime: String? = nil,
+        visualPortraitLayoutMode: IOSVisualPortraitLayoutMode = .heroRail80
+    ) -> IOSUIKitArticleLayoutMetrics {
         IOSUIKitArticleLayoutEngine.metrics(
-            for: layoutInput(mode: mode, width: width, hasImage: hasImage, scale: scale, readingTime: readingTime)
+            for: layoutInput(
+                mode: mode,
+                width: width,
+                hasImage: hasImage,
+                scale: scale,
+                readingTime: readingTime,
+                visualPortraitLayoutMode: visualPortraitLayoutMode
+            )
         )
     }
 
@@ -3186,7 +3328,14 @@ final class NewsreaderPresentationTests: XCTestCase {
     /// every text frame stay at 0.5 pt.
     private static let accessoryFrameAccuracy: CGFloat = 1.0
 
-    private func layoutInput(mode: ArticlePresentationMode, width: CGFloat, hasImage: Bool, scale: CGFloat = 2, readingTime: String? = nil) -> IOSUIKitArticleLayoutInput {
+    private func layoutInput(
+        mode: ArticlePresentationMode,
+        width: CGFloat,
+        hasImage: Bool,
+        scale: CGFloat = 2,
+        readingTime: String? = nil,
+        visualPortraitLayoutMode: IOSVisualPortraitLayoutMode = .heroRail80
+    ) -> IOSUIKitArticleLayoutInput {
         .init(
             title: "A deliberately multiline article title that exercises deterministic bounded text measurement",
             feedTitle: "A feed title",
@@ -3197,6 +3346,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             hasImage: hasImage,
             hasComments: true,
             mode: mode,
+            visualPortraitLayoutMode: visualPortraitLayoutMode,
             previewLines: .standard,
             containerWidth: width,
             displayScale: scale,
@@ -3241,7 +3391,15 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    private func configuredOracleCell(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, width: CGFloat, layoutDirection: UIUserInterfaceLayoutDirection = .leftToRight, rasterScale: CGFloat? = nil) -> IOSUIKitArticleCell {
+    private func configuredOracleCell(
+        item: IOSUIKitArticleTimelineItem,
+        mode: ArticlePresentationMode,
+        previewLines: ArticlePreviewLines,
+        width: CGFloat,
+        layoutDirection: UIUserInterfaceLayoutDirection = .leftToRight,
+        rasterScale: CGFloat? = nil,
+        visualPortraitLayoutMode: IOSVisualPortraitLayoutMode = .heroRail80
+    ) -> IOSUIKitArticleCell {
         let container = UIView(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
         let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
         cell.setArticleImagePipelineForTesting(ArticleImagePipeline { _ in throw CancellationError() })
@@ -3253,8 +3411,28 @@ final class NewsreaderPresentationTests: XCTestCase {
         cell.contentView.semanticContentAttribute = semanticAttribute
         container.addSubview(cell)
         let displayScale = cell.traitCollection.displayScale
-        let input = IOSUIKitArticleLayoutInput(item: item, mode: mode, previewLines: previewLines, containerWidth: width, displayScale: displayScale, contentSizeCategory: .large, layoutDirection: layoutDirection)
-        cell.configure(item: item, mode: mode, previewLines: previewLines, metrics: .init(mode: mode, containerWidth: width), displayScale: displayScale, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
+        let input = IOSUIKitArticleLayoutInput(
+            item: item,
+            mode: mode,
+            visualPortraitLayoutMode: visualPortraitLayoutMode,
+            previewLines: previewLines,
+            containerWidth: width,
+            displayScale: displayScale,
+            contentSizeCategory: .large,
+            layoutDirection: layoutDirection
+        )
+        cell.configure(
+            item: item,
+            mode: mode,
+            previewLines: previewLines,
+            metrics: .init(
+                mode: mode,
+                containerWidth: width,
+                visualPortraitLayoutMode: visualPortraitLayoutMode
+            ),
+            displayScale: displayScale,
+            preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input)
+        )
         container.layoutIfNeeded()
         return cell
     }
