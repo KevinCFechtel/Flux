@@ -3696,7 +3696,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
         XCTAssertEqual(controller.tableViewForTesting.numberOfSections, 0)
 
-        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.frame = window.bounds
         controller.view.layoutIfNeeded()
         await controller.settleForTesting()
         controller.tableViewForTesting.layoutIfNeeded()
