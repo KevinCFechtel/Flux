@@ -756,7 +756,6 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
             presentationBridge: presentationBridge,
             feedIconPresentationBridge: feedIconPresentationBridge,
             mode: mode,
-            visualPortraitLayoutMode: IOSVisualPortraitLayoutDiagnostics.mode,
             previewLines: previewLines,
             iconVariant: iconVariant,
             feedIconRequestRevision: feedIconRequestRevision,
