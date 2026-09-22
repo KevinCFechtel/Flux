@@ -225,3 +225,42 @@ makes the same dropped frames stop being visible. Screen-recording comparisons
 of the two layouts differed by 0.04 percentage points — and per the measurement
 caveat at the top of this document, that metric is not a valid KPI in either
 direction.
+
+
+## U5 source-cleanup follow-up — 22 September 2026
+
+The final behavior-preserving U5 source cleanup removes the historical
+SwiftUI/List `IOSScrolloverGeometryController` and its row-region/scroll-geometry
+helper types. Still-relevant crossing, resize/rebaseline, terminal-bottom and
+Undo-rearm regression semantics now target the productive
+`IOSUIKitScrolloverGeometryTracker` directly.
+
+Productive UIKit Scrollover sampling/tracking has been extracted from the large
+Timeline source into `IOSUIKitScrolloverGeometry.swift`. This is a source
+ownership cleanup only; the detector semantics are unchanged.
+
+The redundant `IOSUIKitArticleCell.Metrics` wrapper has also been removed.
+Configured cells now consume the already-prepared
+`IOSUIKitArticleLayoutMetrics` for variant, insets, accessory geometry and image
+slot size. The cheap non-text `IOSUIKitArticleGeometry` remains intentionally
+available to the controller for reuse-identifier selection and image-prefetch
+target sizing without invoking Core Text measurement.
+
+The retained performance metrics/diagnostics and `articleImageRasterScale` test
+seam keep their classifications from the final cleanup audit above. They are not
+legacy renderer switches.
+
+Final U5 acceptance passed on 22 September 2026. The canonical
+`./apple/ios/Build/test.sh` run executed **338 tests with 0 failures**,
+`./apple/ios/Build/build-app.sh` succeeded, `git diff --check main...HEAD`
+was clean, and the focused physical-device smoke test passed. The reduction from
+the earlier 348-test renderer-retirement baseline is intentional: redundant
+tests tied to the removed historical Scrollover controller were deleted while
+the still-relevant semantics were migrated to the productive
+`IOSUIKitScrolloverGeometryTracker`.
+
+With those gates complete, U5 is closed and the current UIKit Timeline
+container/rendering architecture is frozen. Future feature work must extend this
+baseline rather than reopening the container, Scrollover detector, or
+fundamental image/layout pipeline without new reproducible device evidence of a
+concrete regression.

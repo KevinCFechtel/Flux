@@ -1434,7 +1434,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         let data = try imageData(width: 2_400, height: 1_200)
         let counter = ImageLoadCounter(data: data)
         let pipeline = ArticleImagePipeline { _ in await counter.load() }
-        let targetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
+        let targetSize = IOSUIKitArticleGeometry(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
         let twoX = ArticleImageRequest(
             url: URL(string: "https://example.com/image.jpg")!, targetSize: targetSize, displayScale: 3,
             rasterScale: 2
@@ -1463,10 +1463,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         let counter = ImageLoadCounter(data: data)
         let pipeline = ArticleImagePipeline { _ in await counter.load() }
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
-        let metrics = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 390)
+        let geometry = IOSUIKitArticleGeometry(mode: .visual, containerWidth: 390)
         let request = ArticleImageRequest(
             url: try XCTUnwrap(item.content.imageURL),
-            targetSize: metrics.imageSize(hasImage: true),
+            targetSize: geometry.imageSize(hasImage: true),
             displayScale: 3,
             rasterScale: 2
         )
@@ -2075,7 +2075,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     func testDisplayScaleDecodeCoversTargetWithoutExactSlotRaster() throws {
-        let representativeTargetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
+        let representativeTargetSize = IOSUIKitArticleGeometry(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
         let normalRepresentative = ArticleImageRequest(
             url: URL(string: "https://example.com/image.jpg")!,
             targetSize: representativeTargetSize,
@@ -3453,9 +3453,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: 390, height: 1_000))
         cell.setArticleImagePipelineForTesting(pipeline)
         cell.articleImageRasterScale = { _ in rasterScale ?? displayScale }
-        let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: 390)
         let input = IOSUIKitArticleLayoutInput(item: item, mode: mode, previewLines: .standard, containerWidth: 390, displayScale: displayScale, contentSizeCategory: .large, layoutDirection: .leftToRight)
-        cell.configure(item: item, mode: mode, previewLines: .standard, metrics: metrics, displayScale: displayScale, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
+        cell.configure(item: item, mode: mode, previewLines: .standard, displayScale: displayScale, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
         return cell
     }
 
@@ -3511,10 +3510,6 @@ final class NewsreaderPresentationTests: XCTestCase {
             mode: mode,
             previewLines: previewLines,
             showRelativePublicationTime: showRelativePublicationTime,
-            metrics: .init(
-                mode: mode,
-                containerWidth: width
-            ),
             displayScale: displayScale,
             preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input)
         )
@@ -3565,7 +3560,6 @@ final class NewsreaderPresentationTests: XCTestCase {
             item: item,
             mode: mode,
             previewLines: .standard,
-            metrics: .init(mode: mode, containerWidth: width),
             displayScale: displayScale,
             preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input)
         )
@@ -3590,7 +3584,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         func configure(preview: String) {
             let item = oracleItem(title: "Oracle title", preview: preview, hasImage: false, hasComments: false)
             let input = IOSUIKitArticleLayoutInput(item: item, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 3, contentSizeCategory: .large, layoutDirection: .leftToRight)
-            cell.configure(item: item, mode: .visual, previewLines: .standard, metrics: .init(mode: .visual, containerWidth: 390), displayScale: 3, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
+            cell.configure(item: item, mode: .visual, previewLines: .standard, displayScale: 3, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
             cell.setNeedsLayout()
             cell.layoutIfNeeded()
         }
@@ -3667,10 +3661,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         let data = try imageData(width: 1_200, height: 700)
         let pipeline = ArticleImagePipeline { _ in data }
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
-        let metrics = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 390)
+        let geometry = IOSUIKitArticleGeometry(mode: .visual, containerWidth: 390)
         let request = ArticleImageRequest(
             url: try XCTUnwrap(item.content.imageURL),
-            targetSize: metrics.imageSize(hasImage: true),
+            targetSize: geometry.imageSize(hasImage: true),
             displayScale: 3,
             rasterScale: 3
         )
@@ -3841,6 +3835,56 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleOpenRouting.action(clickOnNews: .openLink, openInMiniflux: true), .miniflux)
         XCTAssertEqual(ArticleOpenRouting.action(clickOnNews: .openLink, openInMiniflux: false), .original)
         XCTAssertEqual(ArticleOpenRouting.action(clickOnNews: .openDetailView, openInMiniflux: true), .detail)
+    }
+
+    @MainActor
+    func testUIKitTimelineUsesNativeFullSwipeReadAndStarActions() async throws {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = IOSUIKitArticleTimelineController()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
+        controller.view.layoutIfNeeded()
+        let article = timelineArticle(id: 1)
+        bridge.replaceArticleStates([article.id: .init(isRead: false, isStarred: false, revision: 0)])
+        controller.update(
+            structuralState: timelineStructuralState([article], revision: 1),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            feedIconRequestRevision: 0,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+        await controller.settleForTesting()
+
+        let table = controller.tableViewForTesting
+        let indexPath = IndexPath(row: 0, section: 0)
+        let leading = try XCTUnwrap(controller.tableView(table, leadingSwipeActionsConfigurationForRowAt: indexPath))
+        let trailing = try XCTUnwrap(controller.tableView(table, trailingSwipeActionsConfigurationForRowAt: indexPath))
+
+        XCTAssertTrue(leading.performsFirstActionWithFullSwipe)
+        XCTAssertEqual(leading.actions.count, 1)
+        XCTAssertEqual(leading.actions.first?.title, String(localized: "Mark as Read"))
+        XCTAssertTrue(trailing.performsFirstActionWithFullSwipe)
+        XCTAssertEqual(trailing.actions.count, 1)
+        XCTAssertEqual(trailing.actions.first?.title, String(localized: "Star"))
+    }
+
+    @MainActor
+    func testUIKitArticleCellStatusUpdateRefreshesAccessibilityWithoutGeometryChange() {
+        let cell = makeUIKitArticleCell(mode: .visual, width: 390, hasImage: false)
+        let geometryBefore = cell.layoutDiagnosticsForTesting
+        let layoutRevision = cell.layoutVariantRevision
+
+        cell.updateStatus(isRead: true, isStarred: true)
+
+        XCTAssertEqual(cell.layoutVariantRevision, layoutRevision)
+        XCTAssertEqual(cell.layoutDiagnosticsForTesting, geometryBefore)
+        XCTAssertEqual(cell.accessibilityValue, String(localized: "Read, starred"))
+        XCTAssertTrue(cell.accessibilityLabel?.contains(String(localized: "Read")) == true)
+        XCTAssertTrue(cell.accessibilityLabel?.contains(String(localized: ", starred")) == true)
     }
 
     func testArticleContextMenuExposesDistinctNativeActions() {
