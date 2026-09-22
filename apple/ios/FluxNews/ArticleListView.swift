@@ -984,19 +984,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self, UITraitLayoutDirection.self]) { (self: Self, _) in
             self.updateGeometryIfNeeded()
         }
-        // The raster bakes the appearance's background into its corners, so a
-        // light/dark switch makes every cached raster stale. Geometry is
-        // unaffected, so only the image bindings need to run again.
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
-            self.reconfigureVisibleCells(needsLayout: false)
-        }
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(articleImageRenderingModeDidChange),
-            name: ArticleImageRenderingDiagnostics.didChangeNotification,
-            object: nil
-        )
-        view.addSubview(tableView)
+        view.addSubview(tableView)        view.addSubview(tableView)
         NSLayoutConstraint.activate([
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -1778,14 +1766,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         return ArticleImageRequest(
             url: url,
             targetSize: targetSize,
-            displayScale: view.traitCollection.displayScale,
-            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
-            usesDisplayP3: view.traitCollection.displayGamut == .P3,
-            // Must match the cell's request exactly, or every prefetched raster
-            // is cached under a key no cell ever asks for.
-            backdrop: IOSUIKitArticleCell.articleImageBackdrop(for: view.traitCollection),
-            renderingMode: ArticleImageRenderingDiagnostics.mode
+            displayScale: view.traitCollection.displayScale
         )
+    }
+
+    private func cancelAllPrefetch()        )
     }
 
     private func cancelAllPrefetch() {
@@ -1807,21 +1792,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     }
 
     deinit {
-        NotificationCenter.default.removeObserver(
-            self,
-            name: ArticleImageRenderingDiagnostics.didChangeNotification,
-            object: nil
-        )
         preparedWindowTask?.cancel()
         for prefetch in prefetchTasks.values { prefetch.task.cancel() }
     }
 
-    @objc private func articleImageRenderingModeDidChange() {
-        cancelAllPrefetch()
-        reconfigureVisibleCells(needsLayout: false)
-    }
-
-    func detachPresentationBridges() {
+    func detachPresentationBridges()    func detachPresentationBridges() {
         presentationBridge?.unsubscribeArticles(self)
         feedIconPresentationBridge?.unsubscribeFeedIcons(self)
         presentationBridge = nil
@@ -2365,21 +2340,6 @@ final class IOSUIKitArticleCell: UITableViewCell {
     /// resolved base already carries the high-contrast variant, but multiplying
     /// it down again takes part of that away. Under high contrast the supporting
     /// text therefore runs at full strength.
-    /// The cell's own background, resolved for the current appearance. The image
-    /// sits directly on it, so filling the raster's corner cut-outs with it is
-    /// indistinguishable from leaving them transparent — while letting the
-    /// raster drop its alpha channel.
-    static func articleImageBackdrop(for traits: UITraitCollection) -> ArticleImageBackdrop {
-        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
-        let resolved = UIColor.systemBackground.resolvedColor(with: traits)
-        guard resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
-            // Monochrome or unconvertible: fall back to the extremes the system
-            // background actually uses.
-            return traits.userInterfaceStyle == .dark ? .black : .white
-        }
-        return .init(components: red, green: green, blue: blue)
-    }
-
     private static let supportingTextColor = UIColor { traits in
         let alpha: CGFloat = traits.accessibilityContrast == .high ? 1 : 0.8
         return UIColor.label.resolvedColor(with: traits).withAlphaComponent(alpha)
@@ -2423,12 +2383,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private(set) var preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics?
 
     weak var performanceMetrics: IOSUIKitTimelinePerformanceMetrics?
-    /// Test seam: lets a test request a raster at a scale other than the
-    /// display's, to prove those rasters cannot alias in the cache.
+    /// Narrow decoded-scale test seam; there is no production renderer switch.
     var articleImageRasterScale: (CGFloat) -> CGFloat = { $0 }
-    /// Production derives this from the display's gamut; tests pin it so a
-    /// request built in the test matches the one the cell builds.
-    var articleImageUsesDisplayP3: (() -> Bool)?
     private(set) var representedArticleID: Int64?
     private(set) var layoutVariantRevision: UInt64 = 0
     private(set) var measurementSolveCount = 0
@@ -3291,12 +3247,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
             url: url,
             targetSize: targetSize,
             displayScale: displayScale,
-            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
-            rasterScale: articleImageRasterScale(displayScale),
-            usesDisplayP3: articleImageUsesDisplayP3?() ?? (traitCollection.displayGamut == .P3),
-            backdrop: Self.articleImageBackdrop(for: traitCollection),
-            renderingMode: ArticleImageRenderingDiagnostics.mode
+            rasterScale: articleImageRasterScale(displayScale)
         )
+        guard articleChanged || representedImageRequest != request else { return }        )
         guard articleChanged || representedImageRequest != request else { return }
         performanceMetrics?.recordImageBinding()
         invalidateImageBinding()
@@ -3389,9 +3342,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         // Use the physical display scale for UIImage semantics. Fixed
         // image-view constraints remain authoritative for the slot.
         articleImageView.image = UIImage(cgImage: image, scale: traitCollection.displayScale, orientation: .up)
-        // An alpha-free raster covering the whole slot lets Core Animation
-        // skip blending it — the single largest composited area per cell.
-        articleImageView.isOpaque = representedImageRequest?.producesOpaqueRaster ?? false
+        articleImageView.isOpaque = false
         imagePlaceholder.isHidden = true
         setArticleImagePresentation(loaded: true)
     }
@@ -3408,20 +3359,11 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private func setArticleImagePresentation(loaded: Bool) {
         articleImageView.contentMode = .scaleAspectFill
         articleImageView.clipsToBounds = loaded
-        if loaded {
-            articleImageView.layer.cornerRadius = representedImageRequest?.renderingMode == .imageViewScaled
-                ? IOSUIKitArticleGeometry.articleImageCornerRadius
-                : 0
-        } else {
-            articleImageView.layer.cornerRadius = IOSUIKitArticleGeometry.articleImageCornerRadius
-        }
-        // A view declared opaque must paint every pixel it owns, so the loaded
-        // state cannot keep a clear background.
-        let opaqueRaster = loaded && (representedImageRequest?.producesOpaqueRaster ?? false)
-        articleImageView.backgroundColor = loaded
-            ? (opaqueRaster ? .systemBackground : .clear)
-            : .tertiarySystemFill
+        articleImageView.layer.cornerRadius = IOSUIKitArticleGeometry.articleImageCornerRadius
+        articleImageView.backgroundColor = loaded ? .clear : .tertiarySystemFill
     }
+
+    private func setFeedIconPresentation    }
 
     private func setFeedIconPresentation(loaded: Bool) {
         feedIconImageView.contentMode = loaded ? .scaleToFill : .scaleAspectFit

@@ -1430,99 +1430,6 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(ArticlePresentationMode.compact.showsArticleImage)
     }
 
-    /// The 2x experiment concluded: it was not meaningfully smoother on the
-    /// device, so the shipping path uses the physical display scale again. The
-    /// reduced-raster mechanism stays covered while the scaffolding exists.
-    @MainActor
-
-    func testReducedRasterScaleProducesAnExactSlotBGRARaster() throws {
-        let targetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
-        let request = ArticleImageRequest(
-            url: URL(string: "https://example.com/image.jpg")!,
-            targetSize: targetSize,
-            displayScale: 3,
-            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
-            rasterScale: 2,
-            renderingMode: .displayReady
-        )
-
-        XCTAssertEqual(targetSize, .init(width: 361, height: 203.0625))
-        XCTAssertEqual(request.rasterScale, 2)
-        XCTAssertEqual(request.maxPixelDimension, 768)
-        XCTAssertEqual(request.targetPixelSize, .init(width: 722, height: 406))
-
-        let image = try ArticleImagePipeline.downsample(
-            data: horizontalBandPNGData(width: 10, height: 30),
-            request: request
-        )
-        XCTAssertEqual(CGSize(width: image.width, height: image.height), request.targetPixelSize)
-        XCTAssertEqual(image.alphaInfo, .premultipliedFirst)
-        XCTAssertTrue(image.bitmapInfo.contains(.byteOrder32Little))
-        XCTAssertEqual(pixel(at: .zero, in: image).alpha, 0)
-        XCTAssertEqual(pixel(at: .init(x: image.width / 2, y: image.height / 2), in: image), .init(blue: 0, green: 255, red: 0, alpha: 255))
-        XCTAssertEqual(ArticleImagePipeline.memoryCost(of: image), 722 * 406 * 4)
-    }
-
-    func testBackdropRasterDropsTheAlphaChannelAndPaintsTheCornersWithTheBackdrop() throws {
-        let targetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
-        let request = ArticleImageRequest(
-            url: URL(string: "https://example.com/image.jpg")!,
-            targetSize: targetSize,
-            displayScale: 3,
-            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
-            backdrop: .black
-        )
-        XCTAssertTrue(request.producesOpaqueRaster)
-
-        let image = try ArticleImagePipeline.downsample(
-            data: horizontalBandPNGData(width: 10, height: 30),
-            request: request
-        )
-
-        // No alpha channel at all: this is what lets the presenting layer be
-        // marked opaque, so Core Animation skips blending the largest composited
-        // area in the cell.
-        XCTAssertEqual(image.alphaInfo, .noneSkipFirst)
-        XCTAssertTrue(image.bitmapInfo.contains(.byteOrder32Little))
-        XCTAssertEqual(ArticleImagePipeline.memoryCost(of: image), image.width * image.height * 4)
-
-        // The corner is outside the rounded clip and therefore carries the
-        // backdrop, where the translucent path would leave transparency.
-        let corner = pixel(at: .zero, in: image)
-        XCTAssertEqual(corner.red, 0)
-        XCTAssertEqual(corner.green, 0)
-        XCTAssertEqual(corner.blue, 0)
-
-        // The photo itself is untouched.
-        let centre = pixel(at: .init(x: image.width / 2, y: image.height / 2), in: image)
-        XCTAssertEqual(centre.red, 0)
-        XCTAssertEqual(centre.green, 255)
-        XCTAssertEqual(centre.blue, 0)
-    }
-
-    func testLightAndDarkRastersCannotAliasInTheMemoryCache() async throws {
-        let data = try imageData(width: 2_400, height: 1_200)
-        let counter = ImageLoadCounter(data: data)
-        let pipeline = ArticleImagePipeline { _ in await counter.load() }
-        let targetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
-        func request(_ backdrop: ArticleImageBackdrop?) -> ArticleImageRequest {
-            ArticleImageRequest(
-                url: URL(string: "https://example.com/image.jpg")!, targetSize: targetSize, displayScale: 3,
-                cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius, backdrop: backdrop
-            )
-        }
-
-        _ = try await pipeline.prefetch(request(.white))
-
-        // The appearance is baked into the corners, so serving the light raster
-        // to a dark cell would show white corners on black.
-        XCTAssertNotEqual(request(.white), request(.black))
-        XCTAssertNotNil(pipeline.cachedImage(for: request(.white)))
-        XCTAssertNil(pipeline.cachedImage(for: request(.black)))
-        XCTAssertNil(pipeline.cachedImage(for: request(nil)))
-        XCTAssertFalse(request(nil).producesOpaqueRaster)
-    }
-
     func testDifferentRasterScalesCannotAliasInTheMemoryCache() async throws {
         let data = try imageData(width: 2_400, height: 1_200)
         let counter = ImageLoadCounter(data: data)
@@ -1550,21 +1457,16 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     @MainActor
     func testCachedProductionRasterIsPresentedImmediatelyAtPhysicalDisplayScale() async throws {
-        ArticleImageRenderingDiagnostics.setDisplayReadyRasterEnabled(false)
         let data = try imageData(width: 1_600, height: 800)
         let counter = ImageLoadCounter(data: data)
         let pipeline = ArticleImagePipeline { _ in await counter.load() }
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
         let metrics = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 390)
-        // The production renderer keeps the raster independent of appearance;
-        // the cell applies aspect-fill clipping and rounded corners at presentation time.
-        let backdrop = IOSUIKitArticleCell.articleImageBackdrop(
-            for: IOSUIKitArticleCell(frame: .zero).traitCollection
-        )
         let request = ArticleImageRequest(
-            url: try XCTUnwrap(item.content.imageURL), targetSize: metrics.imageSize(hasImage: true), displayScale: 3,
-            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius, rasterScale: 2, backdrop: backdrop,
-            renderingMode: .imageViewScaled
+            url: try XCTUnwrap(item.content.imageURL),
+            targetSize: metrics.imageSize(hasImage: true),
+            displayScale: 3,
+            rasterScale: 2
         )
         let cached = try await pipeline.prefetch(request)
         let cell = configuredArticleImageTestCell(item: item, pipeline: pipeline, rasterScale: 2)
@@ -1584,7 +1486,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testTwoXDiagnosticKeepsArticleImageAndLayoutPrefetchActive() {
+    func testRasterScaleSeamKeepsArticleImageAndLayoutPrefetchActive() {
         // The diagnostic changes the request's raster scale, not the Standard
         // article-image prefetch policy or its two-image forward window.
         XCTAssertEqual(
@@ -1601,8 +1503,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testTwoXDiagnosticAssignsAsyncImageImmediatelyAndNormalReuseClearsIt() async throws {
-        ArticleImageRenderingDiagnostics.setDisplayReadyRasterEnabled(false)
+    func testRasterScaleSeamAssignsAsyncImageAndNormalReuseClearsIt() async throws {
         let gate = ImageLoadGate(data: try imageData(width: 800, height: 400))
         let pipeline = ArticleImagePipeline { _ in try await gate.load() }
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
@@ -1638,7 +1539,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testTwoXDiagnosticPreservesStandardImageSlotGeometry() {
+    func testRasterScaleSeamPreservesStandardImageSlotGeometry() {
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: true)
         let cell = configuredOracleCell(item: item, mode: .visual, previewLines: .standard, width: 390, rasterScale: 2)
         let input = IOSUIKitArticleLayoutInput(item: item, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: cell.traitCollection.displayScale, contentSizeCategory: .large, layoutDirection: .leftToRight)
@@ -1745,7 +1646,6 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     @MainActor
     func testUIKitArticleAndFeedImagePresentationTransitionsRestoreSafeStates() {
-        ArticleImageRenderingDiagnostics.setDisplayReadyRasterEnabled(false)
         let cell = makeUIKitArticleCell(mode: .visual, width: 390)
         let placeholder = cell.articleImagePresentationForTesting
         XCTAssertFalse(placeholder.placeholderHidden)
@@ -2135,62 +2035,15 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(completed.trackedRequests, 0)
     }
 
-    func testArticleImageRenderingModesUseDistinctCacheEntries() async throws {
+    func testArticleImagePipelineUsesAspectFillDecodeWithoutExactSlotRaster() throws {
         let data = try imageData(width: 800, height: 400)
-        let counter = ImageLoadCounter(data: data)
-        let pipeline = ArticleImagePipeline { _ in await counter.load() }
-        let url = URL(string: "https://example.com/image.jpg")!
-        let displayReady = ArticleImageRequest(
-            url: url,
+        let request = ArticleImageRequest(
+            url: URL(string: "https://example.com/image.jpg")!,
             targetSize: CGSize(width: 128, height: 128),
-            displayScale: 1,
-            cornerRadius: 12,
-            backdrop: .white,
-            renderingMode: .displayReady
+            displayScale: 1
         )
-        let imageViewScaled = ArticleImageRequest(
-            url: url,
-            targetSize: CGSize(width: 128, height: 128),
-            displayScale: 1,
-            cornerRadius: 12,
-            backdrop: .white,
-            renderingMode: .imageViewScaled
-        )
-
-        XCTAssertNotEqual(displayReady, imageViewScaled)
-        XCTAssertTrue(displayReady.producesOpaqueRaster)
-        XCTAssertFalse(imageViewScaled.producesOpaqueRaster)
-
-        _ = try await pipeline.image(for: displayReady)
-        XCTAssertNotNil(pipeline.cachedImage(for: displayReady))
-        XCTAssertNil(pipeline.cachedImage(for: imageViewScaled))
-
-        _ = try await pipeline.image(for: imageViewScaled)
-        let calls = await counter.callCount()
-        XCTAssertEqual(calls, 2)
-    }
-
-    func testImageViewScaledModeSkipsExactSlotRasterAndPreservesAspectFillPixels() throws {
-        let data = try imageData(width: 800, height: 400)
-        let url = URL(string: "https://example.com/image.jpg")!
-        let displayReady = ArticleImageRequest(
-            url: url,
-            targetSize: CGSize(width: 128, height: 128),
-            displayScale: 1,
-            renderingMode: .displayReady
-        )
-        let imageViewScaled = ArticleImageRequest(
-            url: url,
-            targetSize: CGSize(width: 128, height: 128),
-            displayScale: 1,
-            renderingMode: .imageViewScaled
-        )
-
-        let exact = try ArticleImagePipeline.downsample(data: data, request: displayReady)
-        let rendererDriven = try ArticleImagePipeline.downsample(data: data, request: imageViewScaled)
-
-        XCTAssertEqual(CGSize(width: exact.width, height: exact.height), .init(width: 128, height: 128))
-        XCTAssertEqual(CGSize(width: rendererDriven.width, height: rendererDriven.height), .init(width: 256, height: 128))
+        let decoded = try ArticleImagePipeline.downsample(data: data, request: request)
+        XCTAssertEqual(CGSize(width: decoded.width, height: decoded.height), .init(width: 256, height: 128))
     }
 
     func testArticleImagePipelineDownsamplesAndFailsSafely() async throws {
@@ -3611,7 +3464,6 @@ final class NewsreaderPresentationTests: XCTestCase {
         let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: 390, height: 1_000))
         cell.setArticleImagePipelineForTesting(pipeline)
         cell.articleImageRasterScale = { _ in rasterScale ?? displayScale }
-        cell.articleImageUsesDisplayP3 = { false }
         let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: 390)
         let input = IOSUIKitArticleLayoutInput(item: item, mode: mode, previewLines: .standard, containerWidth: 390, displayScale: displayScale, contentSizeCategory: .large, layoutDirection: .leftToRight)
         cell.configure(item: item, mode: mode, previewLines: .standard, metrics: metrics, displayScale: displayScale, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
@@ -3649,7 +3501,6 @@ final class NewsreaderPresentationTests: XCTestCase {
         let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: width, height: 1_000))
         cell.setArticleImagePipelineForTesting(ArticleImagePipeline { _ in throw CancellationError() })
         cell.articleImageRasterScale = { displayScale in rasterScale ?? displayScale }
-        cell.articleImageUsesDisplayP3 = { false }
         let semanticAttribute: UISemanticContentAttribute = layoutDirection == .rightToLeft ? .forceRightToLeft : .forceLeftToRight
         container.semanticContentAttribute = semanticAttribute
         cell.semanticContentAttribute = semanticAttribute
@@ -3746,7 +3597,6 @@ final class NewsreaderPresentationTests: XCTestCase {
     func testReconfiguringBetweenArticlesWithAndWithoutPreviewLeavesTheConstraintGraphUnchanged() {
         let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: 390, height: 1_000))
         cell.setArticleImagePipelineForTesting(ArticleImagePipeline { _ in throw CancellationError() })
-        cell.articleImageUsesDisplayP3 = { false }
 
         func configure(preview: String) {
             let item = oracleItem(title: "Oracle title", preview: preview, hasImage: false, hasComments: false)
@@ -3821,7 +3671,6 @@ final class NewsreaderPresentationTests: XCTestCase {
     /// immediately but without the Core Animation transition.
     @MainActor
     func testWarmCacheArticleImageUsesFramePacingWhileScrollingButRemainsImmediateWhenIdle() async throws {
-        ArticleImageRenderingDiagnostics.setDisplayReadyRasterEnabled(false)
         let scheduler = IOSArticleImagePresentationScheduler.shared
         scheduler.setScrolling(false)
         scheduler.resetMetrics()
@@ -3830,16 +3679,11 @@ final class NewsreaderPresentationTests: XCTestCase {
         let pipeline = ArticleImagePipeline { _ in data }
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
         let metrics = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 390)
-        let probeCell = IOSUIKitArticleCell(frame: .zero)
         let request = ArticleImageRequest(
             url: try XCTUnwrap(item.content.imageURL),
             targetSize: metrics.imageSize(hasImage: true),
             displayScale: 3,
-            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
-            rasterScale: 3,
-            usesDisplayP3: false,
-            backdrop: IOSUIKitArticleCell.articleImageBackdrop(for: probeCell.traitCollection),
-            renderingMode: .imageViewScaled
+            rasterScale: 3
         )
         _ = try await pipeline.prefetch(request)
 

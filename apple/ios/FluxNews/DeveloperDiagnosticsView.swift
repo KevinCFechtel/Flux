@@ -5,7 +5,6 @@ struct DeveloperDiagnosticsView: View {
     @State private var legacyResult = LegacyStateDiscovery.probe()
     @State private var imageCacheDiagnostics: ArticleImageCacheDiagnosticsSnapshot?
     @State private var imagePresentationDiagnostics: ArticleImagePresentationDiagnosticsSnapshot?
-    @State private var displayReadyRasterEnabled = ArticleImageRenderingDiagnostics.displayReadyRasterEnabled
 
     var body: some View {
         NavigationStack {
@@ -22,25 +21,7 @@ struct DeveloperDiagnosticsView: View {
                     }
                     Text("Read-only discovery; no legacy data is imported or modified.").font(.footnote).foregroundStyle(.secondary)
                 }
-                Section("Article Image Rendering") {
-                    Toggle("Use legacy display-ready raster", isOn: $displayReadyRasterEnabled)
-                        .onChange(of: displayReadyRasterEnabled) { _, enabled in
-                            ArticleImageRenderingDiagnostics.setDisplayReadyRasterEnabled(enabled)
-                        }
-
-                    LabeledContent(
-                        "Current path",
-                        value: displayReadyRasterEnabled
-                            ? "ImageIO + CGContext exact-slot raster"
-                            : "ImageIO + UIImageView aspect-fill"
-                    )
-
-                    Text("OFF is the production default. ON enables the retained legacy A/B fallback, which adds a second exact-slot CGContext raster before presentation. The cache key includes the selected mode, so the two paths cannot reuse each other's images.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("Article Image Presentation") {
+                Section("Article Image Presentation") {                Section("Article Image Presentation") {
                     if let imagePresentationDiagnostics {
                         LabeledContent("Queued ready images", value: "\(imagePresentationDiagnostics.queued)")
                         LabeledContent("Maximum ready queue", value: "\(imagePresentationDiagnostics.maximumQueued)")
