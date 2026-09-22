@@ -559,11 +559,12 @@ not make the chrome breathe horizontally, while remaining substantially narrower
 than the former one-line title-plus-count presentation. Persistent iPad split
 navigation keeps the inline leading capsule: it is hidden while the sidebar is
 visible but retains its toolbar slot; when the sidebar collapses, that capsule
-becomes visible and interactive. On iPadOS 17-25, where the trailing toolbar
-actions do not receive the later Liquid Glass treatment, Sync/Filter/More are
-grouped over one native `.regularMaterial` capsule for contrast against scrolling
-article text. iOS 26+ keeps the system toolbar treatment without an additional
-app-owned material layer. During Sync the capsule's count presentation
+becomes visible and interactive. On iOS/iPadOS 17-25, every article-list action group that lives in the top
+navigation bar is grouped over one native `.regularMaterial` capsule for contrast
+against scrolling article text. This covers iPhone landscape as well as iPad
+split/collapsed-split chrome. iPhone portrait remains on the native bottom bar
+without an extra app-owned capsule. iOS 26+ keeps the system Liquid Glass toolbar
+treatment without an additional app-owned material layer. During Sync the capsule's count presentation
 temporarily shows `Syncing…`. The capsule is the
 authoritative visible title/header presentation and carries the accessibility
 header role; do not reintroduce a separate Large-Title or native-subtitle product

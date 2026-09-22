@@ -64,11 +64,11 @@ enum IOSArticleListChromePresentation {
         mode == .compactPortrait ? .bottomBar : .topBarTrailing
     }
 
-    static func usesLegacyIPadActionMaterial(for mode: IOSArticleListChromeMode) -> Bool {
+    static func usesLegacyTopBarActionMaterial(for mode: IOSArticleListChromeMode) -> Bool {
         switch mode {
-        case .persistentSplit, .persistentSplitCollapsed:
+        case .compactLandscape, .persistentSplit, .persistentSplitCollapsed:
             true
-        case .compactPortrait, .compactLandscape:
+        case .compactPortrait:
             false
         }
     }
@@ -388,7 +388,7 @@ struct ContentView: View {
                         ToolbarItemGroup(placement: .topBarTrailing) {
                             articleListActionButtons
                         }
-                    } else if IOSArticleListChromePresentation.usesLegacyIPadActionMaterial(for: articleListChromeMode) {
+                    } else if IOSArticleListChromePresentation.usesLegacyTopBarActionMaterial(for: articleListChromeMode) {
                         ToolbarItem(placement: .topBarTrailing) {
                             HStack(spacing: IOSArticleListActionChromeMetrics.legacySpacing) {
                                 articleListActionButtons

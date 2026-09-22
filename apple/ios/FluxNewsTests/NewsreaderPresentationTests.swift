@@ -44,11 +44,11 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(IOSBottomAction.defaultActions.contains(.settings))
     }
 
-    func testLegacyActionMaterialIsLimitedToIPadSplitChrome() {
-        XCTAssertTrue(IOSArticleListChromePresentation.usesLegacyIPadActionMaterial(for: .persistentSplit))
-        XCTAssertTrue(IOSArticleListChromePresentation.usesLegacyIPadActionMaterial(for: .persistentSplitCollapsed))
-        XCTAssertFalse(IOSArticleListChromePresentation.usesLegacyIPadActionMaterial(for: .compactPortrait))
-        XCTAssertFalse(IOSArticleListChromePresentation.usesLegacyIPadActionMaterial(for: .compactLandscape))
+    func testLegacyActionMaterialBacksEveryTopBarActionGroup() {
+        XCTAssertTrue(IOSArticleListChromePresentation.usesLegacyTopBarActionMaterial(for: .compactLandscape))
+        XCTAssertTrue(IOSArticleListChromePresentation.usesLegacyTopBarActionMaterial(for: .persistentSplit))
+        XCTAssertTrue(IOSArticleListChromePresentation.usesLegacyTopBarActionMaterial(for: .persistentSplitCollapsed))
+        XCTAssertFalse(IOSArticleListChromePresentation.usesLegacyTopBarActionMaterial(for: .compactPortrait))
         XCTAssertEqual(IOSArticleListActionChromeMetrics.legacyHorizontalPadding, 8)
         XCTAssertEqual(IOSArticleListActionChromeMetrics.legacyVerticalPadding, 5)
         XCTAssertEqual(IOSArticleListActionChromeMetrics.legacySpacing, 6)
