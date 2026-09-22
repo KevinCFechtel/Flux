@@ -971,11 +971,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         }
         // iOS 26's progressive edge blur was measured on device to resample the
         // full list width every frame, so keep it disabled there. On iOS 27 we
-        // deliberately re-test only the top edge with Apple's soft native
-        // effect: it protects status-bar legibility without adding any app-side
-        // per-scroll callbacks or custom blur work. The bottom edge remains clean.
+        // deliberately re-test only the top edge with Apple's recommended
+        // automatic native style: iOS 27 owns the visual treatment while Flux
+        // adds no app-side per-scroll callbacks or custom blur work. The bottom
+        // edge remains clean.
         if #available(iOS 27.0, *) {
-            tableView.topEdgeEffect.style = .soft
+            tableView.topEdgeEffect.style = .automatic
             tableView.topEdgeEffect.isHidden = false
             tableView.bottomEdgeEffect.isHidden = true
         } else if #available(iOS 26.0, *) {

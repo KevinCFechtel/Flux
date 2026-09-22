@@ -460,8 +460,10 @@ pipeline.
 The Timeline deliberately keeps the native scroll edge effect disabled on iOS 26
 because device testing showed the progressive blur resampling the full list width
 during scrolling. iOS 27 is now tested separately: the custom status-bar scrim is
-hidden there and `UITableView.topEdgeEffect` uses Apple's native `.soft` style,
-with the bottom effect still disabled. This experiment must be judged on the same
+hidden there and `UITableView.topEdgeEffect` uses Apple's native `.automatic`
+style, with the bottom effect still disabled. This intentionally follows the
+current system default before considering a custom or explicitly soft treatment.
+The experiment must be judged on the same
 real-device scrolling baseline; if it reintroduces visible frame instability, revert
 to the static scrim rather than accepting a readability fix that harms Timeline
 performance.
