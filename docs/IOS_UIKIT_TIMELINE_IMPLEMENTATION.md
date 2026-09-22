@@ -462,14 +462,13 @@ because device testing showed the progressive blur resampling the full list widt
 during scrolling. iOS 27 is now tested separately: the custom status-bar scrim is
 hidden there and `UITableView.topEdgeEffect` uses Apple's native `.soft` style,
 with the bottom effect still disabled. Device scrolling with more than 200 loaded
-articles remained smooth. A temporary follow-up A/B test now detaches
-`UIRefreshControl` entirely on iOS 27 while leaving the edge effect unchanged, to
-determine whether the refresh control is responsible for the unusually long soft
-edge treatment. During this test Pull to Refresh is intentionally unavailable on
-iOS 27; the normal manual Sync toolbar action remains available. This is diagnostic
-only and must not become the shipping Refresh contract by accident. After the
-device comparison, restore normal Pull to Refresh and choose the final edge
-treatment from the measured result.
+articles remained smooth. A follow-up A/B test detached `UIRefreshControl`
+entirely on iOS 27 while leaving the edge effect unchanged; the soft edge remained
+essentially the same length. The refresh control is therefore not treated as the
+cause of the unusually long native soft treatment, and normal Pull to Refresh is
+restored. The remaining decision is visual rather than performance-driven: either
+accept Apple's long native soft edge on iOS 27 or prefer Flux's shorter static
+status-bar scrim for tighter chrome separation.
 
 ### 8.6 Accept and document the iOS 26 limitation if the closure check confirms it
 
