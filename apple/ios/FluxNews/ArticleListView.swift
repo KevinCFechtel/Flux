@@ -3246,7 +3246,6 @@ final class IOSUIKitArticleCell: UITableViewCell {
             displayScale: displayScale,
             rasterScale: articleImageRasterScale(displayScale)
         )
-        guard articleChanged || representedImageRequest != request else { return }        )
         guard articleChanged || representedImageRequest != request else { return }
         performanceMetrics?.recordImageBinding()
         invalidateImageBinding()

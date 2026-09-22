@@ -21,7 +21,7 @@ struct DeveloperDiagnosticsView: View {
                     }
                     Text("Read-only discovery; no legacy data is imported or modified.").font(.footnote).foregroundStyle(.secondary)
                 }
-                Section("Article Image Presentation") {                Section("Article Image Presentation") {
+                Section("Article Image Presentation") {
                     if let imagePresentationDiagnostics {
                         LabeledContent("Queued ready images", value: "\(imagePresentationDiagnostics.queued)")
                         LabeledContent("Maximum ready queue", value: "\(imagePresentationDiagnostics.maximumQueued)")
