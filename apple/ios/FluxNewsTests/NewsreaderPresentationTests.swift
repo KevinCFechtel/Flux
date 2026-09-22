@@ -2071,10 +2071,12 @@ final class NewsreaderPresentationTests: XCTestCase {
         } catch {}
     }
 
-    func testDisplayScaleRasterRemainsAvailableAtTheExactSlot() throws {
+    func testDisplayScaleDecodeCoversTargetWithoutExactSlotRaster() throws {
         let representativeTargetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
         let normalRepresentative = ArticleImageRequest(
-            url: URL(string: "https://example.com/image.jpg")!, targetSize: representativeTargetSize, displayScale: 3,
+            url: URL(string: "https://example.com/image.jpg")!,
+            targetSize: representativeTargetSize,
+            displayScale: 3,
             rasterScale: 3
         )
         XCTAssertEqual(normalRepresentative.rasterScale, 3)
@@ -2084,25 +2086,25 @@ final class NewsreaderPresentationTests: XCTestCase {
         let request = ArticleImageRequest(
             url: URL(string: "https://example.com/image.jpg")!,
             targetSize: .init(width: 20, height: 10),
-            displayScale: 1,
-            cornerRadius: 4
+            displayScale: 1
         )
-        let portrait = try horizontalBandPNGData(width: 10, height: 30)
-        let image = try ArticleImagePipeline.downsample(data: portrait, request: request)
 
-        XCTAssertEqual(image.width, 20)
-        XCTAssertEqual(image.height, 10)
-        XCTAssertEqual(image.alphaInfo, .premultipliedFirst)
-        XCTAssertTrue(image.bitmapInfo.contains(.byteOrder32Little))
-        XCTAssertEqual(pixel(at: .zero, in: image).alpha, 0)
-        XCTAssertEqual(pixel(at: .init(x: image.width / 2, y: image.height / 2), in: image), .init(blue: 0, green: 255, red: 0, alpha: 255))
+        // The sole production renderer preserves source aspect ratio and decodes
+        // enough pixels for UIImageView aspect-fill. It deliberately does not
+        // create an exact-slot CGContext raster or prescribe a bitmap format.
+        let portrait = try imageData(width: 100, height: 300)
+        let portraitImage = try ArticleImagePipeline.downsample(data: portrait, request: request)
+        XCTAssertEqual(portraitImage.width, 20)
+        XCTAssertEqual(portraitImage.height, 60)
+        XCTAssertGreaterThanOrEqual(portraitImage.width, Int(request.targetPixelSize.width))
+        XCTAssertGreaterThanOrEqual(portraitImage.height, Int(request.targetPixelSize.height))
 
-        let square = try horizontalBandPNGData(width: 20, height: 20)
-        let squareImage = try ArticleImagePipeline.downsample(data: square, request: request)
-        XCTAssertEqual(pixel(at: .init(x: squareImage.width / 2, y: squareImage.height / 2), in: squareImage), .init(blue: 0, green: 255, red: 0, alpha: 255))
-
-        let red = try ArticleImagePipeline.downsample(data: solidPNGData(width: 20, height: 10, color: .red), request: request)
-        XCTAssertEqual(pixel(at: .init(x: red.width / 2, y: red.height / 2), in: red), .init(blue: 0, green: 0, red: 255, alpha: 255))
+        let landscape = try imageData(width: 300, height: 100)
+        let landscapeImage = try ArticleImagePipeline.downsample(data: landscape, request: request)
+        XCTAssertEqual(landscapeImage.width, 30)
+        XCTAssertEqual(landscapeImage.height, 10)
+        XCTAssertGreaterThanOrEqual(landscapeImage.width, Int(request.targetPixelSize.width))
+        XCTAssertGreaterThanOrEqual(landscapeImage.height, Int(request.targetPixelSize.height))
     }
 
     func testArticleImagePipelineCanLoadAfterCacheEvictionAndCancelledWaiter() async throws {
@@ -2218,20 +2220,6 @@ final class NewsreaderPresentationTests: XCTestCase {
         try pngData(width: width, height: height) { context in
             context.setFillColor(color.cgColor)
             context.fill(.init(x: 0, y: 0, width: width, height: height))
-        }
-    }
-
-    /// Top/middle/bottom primary-color bands make the production aspect-fill
-    /// centre crop directly observable instead of merely checking dimensions.
-    private func horizontalBandPNGData(width: Int, height: Int) throws -> Data {
-        try pngData(width: width, height: height) { context in
-            let bandHeight = CGFloat(height) / 3
-            context.setFillColor(UIColor.red.cgColor)
-            context.fill(.init(x: 0, y: bandHeight * 2, width: CGFloat(width), height: bandHeight))
-            context.setFillColor(UIColor.green.cgColor)
-            context.fill(.init(x: 0, y: bandHeight, width: CGFloat(width), height: bandHeight))
-            context.setFillColor(UIColor.blue.cgColor)
-            context.fill(.init(x: 0, y: 0, width: CGFloat(width), height: bandHeight))
         }
     }
 
