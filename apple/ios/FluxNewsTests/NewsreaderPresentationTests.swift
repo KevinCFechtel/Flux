@@ -1434,7 +1434,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         let data = try imageData(width: 2_400, height: 1_200)
         let counter = ImageLoadCounter(data: data)
         let pipeline = ArticleImagePipeline { _ in await counter.load() }
-        let targetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
+        let targetSize = IOSUIKitArticleGeometry(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
         let twoX = ArticleImageRequest(
             url: URL(string: "https://example.com/image.jpg")!, targetSize: targetSize, displayScale: 3,
             rasterScale: 2
@@ -1463,10 +1463,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         let counter = ImageLoadCounter(data: data)
         let pipeline = ArticleImagePipeline { _ in await counter.load() }
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
-        let metrics = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 390)
+        let geometry = IOSUIKitArticleGeometry(mode: .visual, containerWidth: 390)
         let request = ArticleImageRequest(
             url: try XCTUnwrap(item.content.imageURL),
-            targetSize: metrics.imageSize(hasImage: true),
+            targetSize: geometry.imageSize(hasImage: true),
             displayScale: 3,
             rasterScale: 2
         )
@@ -2075,7 +2075,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     func testDisplayScaleDecodeCoversTargetWithoutExactSlotRaster() throws {
-        let representativeTargetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
+        let representativeTargetSize = IOSUIKitArticleGeometry(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
         let normalRepresentative = ArticleImageRequest(
             url: URL(string: "https://example.com/image.jpg")!,
             targetSize: representativeTargetSize,
@@ -3453,9 +3453,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         let cell = IOSUIKitArticleCell(frame: CGRect(x: 0, y: 0, width: 390, height: 1_000))
         cell.setArticleImagePipelineForTesting(pipeline)
         cell.articleImageRasterScale = { _ in rasterScale ?? displayScale }
-        let metrics = IOSUIKitArticleCell.Metrics(mode: mode, containerWidth: 390)
         let input = IOSUIKitArticleLayoutInput(item: item, mode: mode, previewLines: .standard, containerWidth: 390, displayScale: displayScale, contentSizeCategory: .large, layoutDirection: .leftToRight)
-        cell.configure(item: item, mode: mode, previewLines: .standard, metrics: metrics, displayScale: displayScale, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
+        cell.configure(item: item, mode: mode, previewLines: .standard, displayScale: displayScale, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
         return cell
     }
 
@@ -3511,10 +3510,6 @@ final class NewsreaderPresentationTests: XCTestCase {
             mode: mode,
             previewLines: previewLines,
             showRelativePublicationTime: showRelativePublicationTime,
-            metrics: .init(
-                mode: mode,
-                containerWidth: width
-            ),
             displayScale: displayScale,
             preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input)
         )
@@ -3565,7 +3560,6 @@ final class NewsreaderPresentationTests: XCTestCase {
             item: item,
             mode: mode,
             previewLines: .standard,
-            metrics: .init(mode: mode, containerWidth: width),
             displayScale: displayScale,
             preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input)
         )
@@ -3590,7 +3584,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         func configure(preview: String) {
             let item = oracleItem(title: "Oracle title", preview: preview, hasImage: false, hasComments: false)
             let input = IOSUIKitArticleLayoutInput(item: item, mode: .visual, previewLines: .standard, containerWidth: 390, displayScale: 3, contentSizeCategory: .large, layoutDirection: .leftToRight)
-            cell.configure(item: item, mode: .visual, previewLines: .standard, metrics: .init(mode: .visual, containerWidth: 390), displayScale: 3, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
+            cell.configure(item: item, mode: .visual, previewLines: .standard, displayScale: 3, preparedLayoutMetrics: IOSUIKitArticleLayoutEngine.metrics(for: input))
             cell.setNeedsLayout()
             cell.layoutIfNeeded()
         }
@@ -3667,10 +3661,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         let data = try imageData(width: 1_200, height: 700)
         let pipeline = ArticleImagePipeline { _ in data }
         let item = oracleItem(title: "Title", preview: "Preview", hasImage: true, hasComments: false)
-        let metrics = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 390)
+        let geometry = IOSUIKitArticleGeometry(mode: .visual, containerWidth: 390)
         let request = ArticleImageRequest(
             url: try XCTUnwrap(item.content.imageURL),
-            targetSize: metrics.imageSize(hasImage: true),
+            targetSize: geometry.imageSize(hasImage: true),
             displayScale: 3,
             rasterScale: 3
         )
