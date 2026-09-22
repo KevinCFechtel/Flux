@@ -245,7 +245,7 @@ do not defer correctness until the final package.
 | U2 — Native Timeline | Implement the owned controller, bridge, native reusable cells, stable ID snapshots, sizing, image consumers, system swipes/context menus/refresh, and existing shell integration. Register sources and preserve Search dependencies. | **COMPLETE as the native Timeline baseline.** The owned UIKit controller/cells and structural/status split are productive. Search now also uses the UIKit Timeline. Completion of U2 does not freeze later performance-sensitive internals. |
 | U3 — Geometry, status and performance-sensitive renderer work | Implement coherent UIKit Scrollover geometry and targeted status presentation; establish stable/bounded layout, image and update behavior and close the required performance/correctness regressions. | **COMPLETE.** Productive UIKit Scrollover geometry, targeted status updates, deterministic sizing/prepared metrics, incremental pagination/updates and bounded image/layout behavior are accepted on device. The iPhone 15 on iOS 27 scrolls the normal full-width Visual presentation smoothly through 200+ articles, the remaining rotation/chrome/status-bar checks are accepted, and the legacy exact-slot article-image renderer has been removed. Post-retirement canonical XCTest validation on 2026-09-22 executed 348 tests with 0 failures. |
 | U4 — Session mutation worker | Complete queue lifetime, origin attribution, bounded drains, explicit-action ordering, lifecycle and failure handling using a controllably blocked real writer path in tests. | **COMPLETE.** The session-owned worker has a 500 ms bounded drain deadline, 64-ID FIFO batches, one writer chain per session, explicit-intent precedence, lifecycle coalescing, session-isolated completion, deterministic failure recovery, and blocked-writer regression coverage through the productive drain path. Canonical validation passed on 2026-09-21: 343 iOS tests with 0 failures, `build-app.sh` succeeded, and `git diff --check HEAD^ HEAD` was clean. |
-| U5 — Cleanup and acceptance | Remove superseded Timeline code, verify complete interaction/localization/accessibility behavior, run native checks and focused device traces, record actual remaining limitations. | **IN PROGRESS / OPEN.** U3 and U4 are complete; Search migration, old SwiftUI article-row removal, diagnostic cleanup, and legacy article-image renderer retirement are complete. Remaining work is behavior-preserving source/geometry cleanup plus final canonical build/diff validation before freezing the Timeline architecture. |
+| U5 — Cleanup and acceptance | Remove superseded Timeline code, verify complete interaction/localization/accessibility behavior, run native checks and focused device traces, record actual remaining limitations. | **CLEANUP IMPLEMENTED / VALIDATION OPEN.** The historical SwiftUI/List Scrollover controller and helper geometry are removed; its still-relevant regression semantics now exercise the productive `IOSUIKitScrolloverGeometryTracker`. Productive Scrollover geometry lives in its own focused source. The cell consumes prepared `IOSUIKitArticleLayoutMetrics` directly instead of a redundant cell-side metrics wrapper. Native full-swipe and cell-accessibility freeze oracles are added. Canonical test/build/diff validation remains the final gate before architecture freeze. |
 
 The selected architecture already includes U2-U4; no new architecture approval
 is required simply because UIKit replaces the old implementation. U3
@@ -267,9 +267,10 @@ structural-versus-status update boundary. The initial container was a
 Timeline to `UITableView` while preserving those product and update semantics.
 Since that baseline, U3 added the
 productive UIKit Scrollover geometry path and substantial deterministic
-layout/performance work. The legacy `IOSScrolloverGeometryController` is only a
-historical/regression-test reference and does not drive the production
-table view.
+layout/performance work. The historical `IOSScrolloverGeometryController` has been removed. Its
+still-relevant regression semantics now run directly against the productive
+`IOSUIKitScrolloverGeometryTracker`, which is the only iOS Scrollover geometry
+detector.
 
 U3 is complete. Its real-device behavior is accepted, including smooth iOS 27
 scrolling through more than 200 articles, stable rotation/chrome behavior, and
@@ -500,23 +501,26 @@ that identifies an actionable app-side cause.
 U3 and U4 are complete. U5 is now limited to behavior-preserving cleanup rather
 than another performance redesign:
 
-- split the large Timeline source into focused controller, cell, Scrollover,
-  presentation-bridge, and performance-metrics files where that materially
-  improves maintainability;
-- migrate any still-useful regression coverage from the historical
-  `IOSScrolloverGeometryController` to the productive
-  `IOSUIKitScrolloverGeometryTracker`, then remove or test-isolate the historical
-  controller;
-- reduce redundant geometry helpers so prepared
-  `IOSUIKitArticleLayoutMetrics` is consumed directly wherever practical;
+- keep productive Scrollover geometry isolated in
+  `IOSUIKitScrolloverGeometry.swift`; broader controller/cell/bridge source
+  splitting is optional and is not a freeze gate;
+- keep all Scrollover regression semantics on the productive
+  `IOSUIKitScrolloverGeometryTracker`; the historical SwiftUI/List controller
+  must not return;
+- keep cell layout driven directly by prepared
+  `IOSUIKitArticleLayoutMetrics`; use the cheap non-text
+  `IOSUIKitArticleGeometry` only where reuse/prefetch needs geometry without
+  Core Text measurement;
 - keep the retired article-image renderer and diagnostic switches removed;
 - preserve the existing engine-versus-cell geometry oracle, bounded-cache tests,
   snapshot/status separation tests, and accepted device behavior;
 - run final `build-app.sh` and `git diff --check` validation for the cleanup
   commit set before declaring the architecture frozen.
 
-Once this U5 cleanup and final validation are complete, the current Timeline
-container/rendering architecture should be treated as frozen. Later feature work
+The behavior-preserving U5 source cleanup is implemented. Once the final
+canonical test/build/diff validation and focused device smoke check are complete,
+the current Timeline container/rendering architecture should be treated as
+frozen. Later feature work
 should extend the accepted product semantics without reopening `UITableView`,
 full-width Visual portrait images, or the fundamental image/layout pipeline
 unless new device evidence demonstrates a concrete regression that cannot be
