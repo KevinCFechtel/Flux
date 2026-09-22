@@ -1,6 +1,6 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: D1-D4 BASELINE COMPLETE / UIKIT TIMELINE AMENDMENT IN PROGRESS / PERFORMANCE AND ARCHITECTURE WORK REMAINS OPEN / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D4 BASELINE COMPLETE / UIKIT TIMELINE U5 CLEANUP IMPLEMENTED / FINAL VALIDATION AND ARCHITECTURE FREEZE PENDING / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
 > replaces the existing Flutter iOS/iPadOS client with a native Swift client:
@@ -15,15 +15,13 @@
 > UIKit Timeline and native UIKit cells. The implementation initially used a
 > `UICollectionView` baseline and later evolved to the current `UITableView`
 > implementation during performance work. The current table-based Timeline is
-> the accepted productive UI/UX baseline. Only the previous Timeline renderer,
-> geometry integration, associated mutation scheduling, and the performance-sensitive
-> implementation needed to make that Timeline production-ready are reopened. The
-> remaining completed architecture and product rules stay frozen. The amendment is
-> actively implemented, but it is deliberately not considered structurally complete:
-> ongoing physical-device performance work may still justify fundamental changes to
-> Timeline layout, cell construction, image presentation, preparation/scheduling, or
-> adjacent UIKit integration while preserving the frozen product semantics.
-> See [implementation handoff](IOS_UIKIT_TIMELINE_IMPLEMENTATION.md).
+> the accepted productive UI/UX baseline. U3 performance/correctness and U4
+> mutation-worker semantics are complete and accepted. The behavior-preserving U5
+> source cleanup is implemented; only its final canonical validation and focused
+> device smoke check remain before the Timeline architecture is frozen. Fundamental
+> container, layout, image-pipeline, or scheduling redesign now requires new
+> reproducible device evidence of a concrete regression rather than speculative
+> performance work. See [implementation handoff](IOS_UIKIT_TIMELINE_IMPLEMENTATION.md).
 
 ## 1. Goal and non-goals
 
