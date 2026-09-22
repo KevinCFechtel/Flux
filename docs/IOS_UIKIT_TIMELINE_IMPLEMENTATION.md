@@ -461,10 +461,15 @@ The Timeline deliberately keeps the native scroll edge effect disabled on iOS 26
 because device testing showed the progressive blur resampling the full list width
 during scrolling. iOS 27 is now tested separately: the custom status-bar scrim is
 hidden there and `UITableView.topEdgeEffect` uses Apple's native `.soft` style,
-with the bottom effect still disabled. This experiment must be judged on the same
-real-device scrolling baseline; if it reintroduces visible frame instability, revert
-to the static scrim rather than accepting a readability fix that harms Timeline
-performance.
+with the bottom effect still disabled. Device scrolling with more than 200 loaded
+articles remained smooth. A temporary follow-up A/B test now detaches
+`UIRefreshControl` entirely on iOS 27 while leaving the edge effect unchanged, to
+determine whether the refresh control is responsible for the unusually long soft
+edge treatment. During this test Pull to Refresh is intentionally unavailable on
+iOS 27; the normal manual Sync toolbar action remains available. This is diagnostic
+only and must not become the shipping Refresh contract by accident. After the
+device comparison, restore normal Pull to Refresh and choose the final edge
+treatment from the measured result.
 
 ### 8.6 Accept and document the iOS 26 limitation if the closure check confirms it
 

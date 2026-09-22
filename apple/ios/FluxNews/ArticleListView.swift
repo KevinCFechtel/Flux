@@ -1251,7 +1251,16 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         scrollResetRevision = newScrollResetRevision
         markReadOnScrolloverEnabled = newMarkReadOnScrolloverEnabled
         showsRefreshControl = newShowsRefreshControl
-        tableView.refreshControl = showsRefreshControl ? refreshControl : nil
+        // Temporary U3 A/B test for iOS 27: detach UIRefreshControl entirely
+        // while keeping the native .soft topEdgeEffect unchanged. This isolates
+        // whether the refresh control is what makes the system edge treatment
+        // extend unusually far below the status/navigation chrome. Manual Sync
+        // remains available through the normal toolbar action.
+        if #available(iOS 27.0, *) {
+            tableView.refreshControl = nil
+        } else {
+            tableView.refreshControl = showsRefreshControl ? refreshControl : nil
+        }
         if presentationBridge !== newPresentationBridge {
             presentationBridge?.unsubscribeArticles(self)
             presentationBridge = newPresentationBridge
