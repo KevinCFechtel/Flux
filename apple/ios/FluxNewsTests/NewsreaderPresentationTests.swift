@@ -3837,6 +3837,56 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(ArticleOpenRouting.action(clickOnNews: .openDetailView, openInMiniflux: true), .detail)
     }
 
+    @MainActor
+    func testUIKitTimelineUsesNativeFullSwipeReadAndStarActions() async throws {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = IOSUIKitArticleTimelineController()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
+        controller.view.layoutIfNeeded()
+        let article = timelineArticle(id: 1)
+        bridge.replaceArticleStates([article.id: .init(isRead: false, isStarred: false, revision: 0)])
+        controller.update(
+            structuralState: timelineStructuralState([article], revision: 1),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            feedIconRequestRevision: 0,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+        await controller.settleForTesting()
+
+        let table = controller.tableViewForTesting
+        let indexPath = IndexPath(row: 0, section: 0)
+        let leading = try XCTUnwrap(controller.tableView(table, leadingSwipeActionsConfigurationForRowAt: indexPath))
+        let trailing = try XCTUnwrap(controller.tableView(table, trailingSwipeActionsConfigurationForRowAt: indexPath))
+
+        XCTAssertTrue(leading.performsFirstActionWithFullSwipe)
+        XCTAssertEqual(leading.actions.count, 1)
+        XCTAssertEqual(leading.actions.first?.title, String(localized: "Mark as Read"))
+        XCTAssertTrue(trailing.performsFirstActionWithFullSwipe)
+        XCTAssertEqual(trailing.actions.count, 1)
+        XCTAssertEqual(trailing.actions.first?.title, String(localized: "Star"))
+    }
+
+    @MainActor
+    func testUIKitArticleCellStatusUpdateRefreshesAccessibilityWithoutGeometryChange() {
+        let cell = makeUIKitArticleCell(mode: .visual, width: 390, hasImage: false)
+        let geometryBefore = cell.layoutDiagnosticsForTesting
+        let layoutRevision = cell.layoutVariantRevision
+
+        cell.updateStatus(isRead: true, isStarred: true)
+
+        XCTAssertEqual(cell.layoutVariantRevision, layoutRevision)
+        XCTAssertEqual(cell.layoutDiagnosticsForTesting, geometryBefore)
+        XCTAssertEqual(cell.accessibilityValue, String(localized: "Read, starred"))
+        XCTAssertTrue(cell.accessibilityLabel?.contains(String(localized: "Read")) == true)
+        XCTAssertTrue(cell.accessibilityLabel?.contains(String(localized: "starred")) == true)
+    }
+
     func testArticleContextMenuExposesDistinctNativeActions() {
         let actions: [IOSArticleContextAction] = [
             .starred, .read, .original, .reader, .miniflux, .comments, .copyLink, .share, .saveToService
