@@ -573,12 +573,20 @@ actor ArticleImagePipeline {
     private nonisolated static func aspectFillThumbnail(data: Data, targetPixelSize: CGSize) throws -> CGImage {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
-              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue,
-              width > 0, height > 0
+              let rawWidth = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+              let rawHeight = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue,
+              rawWidth > 0, rawHeight > 0
         else {
             throw ArticleImageError.invalidImageData
         }
+
+        // ImageIO applies EXIF orientation while creating the thumbnail. Orientations
+        // 5...8 swap the displayed axes, so size the decode against the displayed
+        // geometry rather than the encoded pixel matrix.
+        let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+        let swapsAxes = (5...8).contains(orientation)
+        let width = swapsAxes ? rawHeight : rawWidth
+        let height = swapsAxes ? rawWidth : rawHeight
 
         let targetWidth = max(1, targetPixelSize.width)
         let targetHeight = max(1, targetPixelSize.height)

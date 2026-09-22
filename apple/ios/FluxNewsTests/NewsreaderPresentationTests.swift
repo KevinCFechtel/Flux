@@ -1444,7 +1444,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
 
         let image = try await pipeline.prefetch(twoX)
-        XCTAssertEqual(CGSize(width: image.width, height: image.height), twoX.targetPixelSize)
+        // The decoded image keeps source aspect ratio and only guarantees enough
+        // pixels to cover the requested slot with UIImageView aspect-fill.
+        XCTAssertGreaterThanOrEqual(image.width, Int(twoX.targetPixelSize.width))
+        XCTAssertGreaterThanOrEqual(image.height, Int(twoX.targetPixelSize.height))
         XCTAssertNotEqual(twoX, threeX)
         XCTAssertNil(pipeline.cachedImage(for: threeX))
         XCTAssertNotNil(pipeline.cachedImage(for: twoX))

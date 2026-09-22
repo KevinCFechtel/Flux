@@ -2925,8 +2925,11 @@ final class IOSUIKitArticleCell: UITableViewCell {
     ) {
         let articleChanged = representedArticleID != item.article.id
         representedArticleID = item.article.id
-        // Keep the independently constrained metadata row in the cell's semantic direction.
+        // Keep independently constrained content in the cell's semantic direction.
+        // This is explicit because forced RTL test/preview environments do not
+        // reliably propagate through UITableViewCell.contentView on every OS.
         metadataRow.semanticContentAttribute = semanticContentAttribute
+        textContainer.semanticContentAttribute = semanticContentAttribute
         self.preparedLayoutMetrics = preparedLayoutMetrics
         currentTitle = item.content.article.title
         currentFeedTitle = item.content.article.feedTitle
