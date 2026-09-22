@@ -3884,7 +3884,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(cell.layoutDiagnosticsForTesting, geometryBefore)
         XCTAssertEqual(cell.accessibilityValue, String(localized: "Read, starred"))
         XCTAssertTrue(cell.accessibilityLabel?.contains(String(localized: "Read")) == true)
-        XCTAssertTrue(cell.accessibilityLabel?.contains(String(localized: "starred")) == true)
+        XCTAssertTrue(cell.accessibilityLabel?.contains(String(localized: ", starred")) == true)
     }
 
     func testArticleContextMenuExposesDistinctNativeActions() {
