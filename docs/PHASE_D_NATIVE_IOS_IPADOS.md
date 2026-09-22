@@ -648,8 +648,9 @@ performance investigation are concluded and their source-level diagnostic
 switches were removed on 18 September 2026. In particular, neither presenting a
 roughly @3x decoded thumbnail without exact-slot prerasterization nor reducing the
 exact-slot raster to 2x produced a meaningful physical-device improvement. Those
-results do not prove a lower-level Core Animation/GPU cause and do not close the
-broader performance investigation.
+individual experiments did not identify a root cause; the broader U3
+performance/correctness investigation was subsequently closed by the accepted
+iOS 27 device baseline and final 22 September validation described below.
 
 The detailed experiment record, cleanup audit, retained production invariants,
 and the resulting `Visual compact` product decision live in
@@ -662,14 +663,16 @@ production architecture and current physical-device evidence.
 
 The agreed Timeline completion sequence is recorded in
 [IOS_UIKIT_TIMELINE_IMPLEMENTATION.md](IOS_UIKIT_TIMELINE_IMPLEMENTATION.md#8-agreed-u3u4-stabilization-and-architecture-freeze-plan).
-In short: U4 is complete and U3 device acceptance is complete on iOS 27,
-including smooth scrolling through more than 200 articles. The legacy
-article-image renderer and its diagnostics have now been removed. The remaining
-pre-freeze work is behavior-preserving cleanup and canonical validation: reduce
-duplicate layout plumbing, split large Timeline source files where useful, run
-the normal test/build path, then freeze the accepted `UITableView`/full-width
-Visual architecture. The historical iOS 26 full-width-image behavior remains
-documented rather than preserved as a second renderer.
+In short: **U3 and U4 are complete.** U3 real-device acceptance on iOS 27
+includes smooth scrolling through more than 200 articles with the normal
+full-width Visual geometry, accepted rotation/chrome/status-bar behavior, and
+the single production article-image path. The legacy article-image renderer and
+its diagnostics have been removed. Post-retirement
+`./apple/ios/Build/test.sh` validation on 22 September 2026 executed **348 tests
+with 0 failures**. The remaining pre-freeze Timeline work is U5
+behavior-preserving cleanup plus final build/diff validation; the historical
+iOS 26 full-width-image behavior is an accepted OS/rendering-sensitive
+limitation rather than a reason to retain a second renderer.
 
 On iOS, a semantic scope/filter/sort reset stays within the existing UIKit
 Timeline controller: it resets the table view to its natural top position and
@@ -735,13 +738,13 @@ D4.5 is a separately accepted **planned** extension and is not covered by the
 earlier D4.1-D4.4 completion/freeze statement. Its user-facing wording and
 English/German localization must be added before D4.5 itself is marked complete.
 
-For iOS Scrollover, D4.4 still requires real-device coverage of slow drags,
-fast flicks that skip rows, reverse-then-forward movement, Remove When Read,
-Dynamic Type, rotation/safe-area changes, and the rolling Undo window across
-compact and regular presentation environments. Run these cases on the new UIKit
-Timeline, including long feeds and cell reuse. Record actual correctness and
-device-performance evidence before marking the amendment complete; documentation
-approval is not runtime acceptance.
+The UIKit Timeline amendment's D4.4/U3 real-device acceptance is complete. The
+owner accepted the exercised slow/fast Scrollover behavior, rotation and
+safe-area/chrome handling, current compact/regular presentation, long-feed
+scrolling and reuse behavior, and the current Undo/haptic/status presentation.
+Future changes must preserve those accepted semantics; new device work is
+required only for a new reproducible regression or a materially changed
+presentation path.
 
 ### U3.8.5 — Adaptive Device Matrix & Runtime Acceptance
 
@@ -777,37 +780,30 @@ concurrency remains bounded, and stale image arrivals do not affect geometry.
 The deterministic path performs no production Auto Layout sizing; the current
 evidence does not justify U3.7.5 manual cell layout.
 
-The available simulator inventory does not include an iPhone Duo runtime, and
-there is no UI-test target or configured simulator account for interactive
-Newsreader acceptance. U3.8 remains pending the following manual/physical
-acceptance before it can be marked complete:
+U3.8/U3.8.5 manual runtime acceptance is **COMPLETE as of 22 September 2026**.
+The available simulator matrix remains a useful automated baseline, but the
+closure decision is based on the completed physical-device checks rather than on
+forcing every optional simulator combination. The owner explicitly accepted the
+current UIKit Timeline/presentation behavior, including rotation-anchor
+preservation, compact/regular chrome, article metadata and reading time, haptic
+feedback and Undo, status-bar protection, the compact-landscape capsule, and the
+iOS 27 renderer/performance baseline. No geometry-only Scrollover regression or
+unresolved device-performance issue remains open in U3.
 
-1. On a configured account, exercise compact portrait/landscape and regular
-   iPad portrait/landscape; repeat compact-to-regular transitions, rotation, and
-   iPad Split View or Stage Manager widths while Timeline, Search, and Reader
-   are active.
-2. Reset and print Timeline Performance diagnostics around sustained live resize,
-   resize during deceleration, image loading, and the first 250 ms of repeated
-   idle-to-first-scroll attempts. Record geometry/replacement/supersession,
-   preparation, fallback, invalidation, image, and structural counters.
-3. Verify Scrollover sequences across resize, slow and fast crossings, Undo and
-   explicit Unread; confirm no geometry-only read mutation and that a subsequent
-   genuine scroll resumes qualification.
-4. Verify normal and accessibility Dynamic Type, LTR and RTL, safe-area/sidebar
-   width changes, read/starred/feed-icon updates, refresh, Search Timeline, and
-   Reader handoff without duplicate Core requests or scroll-position reset.
-5. Confirm the app remains single-scene in normal iPad/window operation. If an
-   iPhone Duo runtime becomes available, run the same compact/regular transition
-   cases there without adding device-specific behavior.
+The final post-renderer-retirement `./apple/ios/Build/test.sh` run executed 348
+tests with 0 failures. Optional future simulator/device matrices such as an
+iPhone Duo runtime are additive regression coverage only; their absence does not
+keep U3 open and must not introduce device-specific product behavior.
 
 #### D4.5 — Cancellable Manual Sync
 
-**Status: PLANNED / ACCEPTED.** This work starts only after the owner has
-explicitly accepted the current UIKit Timeline/presentation device changes,
-including the current rotation-anchor, article metadata/reading-time, haptic,
+**Status: READY / ACCEPTED.** The prerequisite owner acceptance of the current
+UIKit Timeline/presentation device changes was satisfied on 22 September 2026,
+including the rotation-anchor, article metadata/reading-time, haptic,
 status-bar edge-protection, compact-landscape capsule, and iOS 27 renderer
-closure checks. Do not mix Sync-cancellation implementation into the active U3
-performance-validation pass.
+closure checks. U3 is closed. D4.5 remains a separately scoped implementation
+and must not be mixed with the still-open U5 behavior-preserving Timeline
+cleanup.
 
 Manual foreground Sync must become explicitly cancellable by the user. This is
 a Newsreader interaction and therefore remains in D4 rather than being deferred

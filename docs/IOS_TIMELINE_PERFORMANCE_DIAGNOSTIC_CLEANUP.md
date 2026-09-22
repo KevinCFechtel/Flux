@@ -202,7 +202,10 @@ through more than 200 articles was smooth, and the extra exact-slot CGContext
 article renderer showed no visible advantage over display-sized ImageIO decode
 plus UIImageView/Core Animation. On 22 September 2026 that legacy article-image
 renderer, its diagnostic switch, and its renderer-specific cache state were
-removed. Historical experiment descriptions above remain intentionally as the
+removed. The post-retirement canonical XCTest run completed
+`./apple/ios/Build/test.sh` with **348 tests and 0 failures**, including the
+single-renderer image/EXIF coverage and deterministic UIKit RTL geometry.
+Historical experiment descriptions above remain intentionally as the
 investigation record and no longer describe shipping code.
 
 Fixed chrome, no longer switchable: scroll edge effect disabled, Scrollover undo

@@ -1,15 +1,15 @@
 # iOS UIKit Timeline — Decision and Implementation Handoff
 
-> **Decision accepted: 2026-09-11. U1-U2 COMPLETE. U3 DEVICE-ACCEPTED / CLEANUP IN PROGRESS. U4 COMPLETE. U5 IN PROGRESS / OPEN.**
+> **Decision accepted: 2026-09-11. U1-U4 COMPLETE. U5 IN PROGRESS / OPEN.**
 >
 > Build the Article Timeline using the owned UIKit `UITableView` Timeline and
 > native UIKit article cells. This is the selected architecture, not a proposal to benchmark
 > against the existing SwiftUI `List`. This file records the amended contracts
-> and the remaining completion sequence. The current UIKit implementation is not
-> architecture-frozen: unresolved physical-device performance work may still
-> justify fundamental changes to Timeline layout, cell construction, image
-> presentation, preparation/scheduling, or adjacent UIKit integration while
-> preserving the frozen product semantics.
+> and the remaining completion sequence. U3 real-device performance/correctness
+> acceptance is complete. The current UIKit implementation is not yet
+> architecture-frozen only because the behavior-preserving U5 cleanup/final
+> acceptance remains open. Fundamental renderer/container changes now require new
+> reproducible device evidence of a concrete regression.
 
 ## 1. Read first: intent and authority
 
@@ -239,25 +239,24 @@ These packages build one permanent replacement. They are not competing renderer
 experiments. Each implementation package includes its relevant tests/build;
 do not defer correctness until the final package.
 
-| Package | Scope and completion gate | Current status — 21 September 2026 |
+| Package | Scope and completion gate | Current status — 22 September 2026 |
 |---|---|---|
 | U1 — Contract | Record UIKit container/native cells, rationale, boundaries, behavior, and this handoff. | **COMPLETE** — documentation contract established. |
 | U2 — Native Timeline | Implement the owned controller, bridge, native reusable cells, stable ID snapshots, sizing, image consumers, system swipes/context menus/refresh, and existing shell integration. Register sources and preserve Search dependencies. | **COMPLETE as the native Timeline baseline.** The owned UIKit controller/cells and structural/status split are productive. Search now also uses the UIKit Timeline. Completion of U2 does not freeze later performance-sensitive internals. |
-| U3 — Geometry, status and performance-sensitive renderer work | Implement coherent UIKit Scrollover geometry and targeted status presentation; establish stable/bounded layout, image and update behavior and close the required performance/correctness regressions. | **IN PROGRESS.** Productive UIKit Scrollover geometry, targeted status updates, deterministic sizing/prepared metrics, incremental pagination/updates and substantial image/layout hardening exist. Physical-device performance remains unresolved enough that fundamental renderer/layout/cell/image/scheduling changes are still permitted. U3 is therefore not merely waiting for acceptance. |
+| U3 — Geometry, status and performance-sensitive renderer work | Implement coherent UIKit Scrollover geometry and targeted status presentation; establish stable/bounded layout, image and update behavior and close the required performance/correctness regressions. | **COMPLETE.** Productive UIKit Scrollover geometry, targeted status updates, deterministic sizing/prepared metrics, incremental pagination/updates and bounded image/layout behavior are accepted on device. The iPhone 15 on iOS 27 scrolls the normal full-width Visual presentation smoothly through 200+ articles, the remaining rotation/chrome/status-bar checks are accepted, and the legacy exact-slot article-image renderer has been removed. Post-retirement canonical XCTest validation on 2026-09-22 executed 348 tests with 0 failures. |
 | U4 — Session mutation worker | Complete queue lifetime, origin attribution, bounded drains, explicit-action ordering, lifecycle and failure handling using a controllably blocked real writer path in tests. | **COMPLETE.** The session-owned worker has a 500 ms bounded drain deadline, 64-ID FIFO batches, one writer chain per session, explicit-intent precedence, lifecycle coalescing, session-isolated completion, deterministic failure recovery, and blocked-writer regression coverage through the productive drain path. Canonical validation passed on 2026-09-21: 343 iOS tests with 0 failures, `build-app.sh` succeeded, and `git diff --check HEAD^ HEAD` was clean. |
-| U5 — Cleanup and acceptance | Remove superseded Timeline code, verify complete interaction/localization/accessibility behavior, run native checks and focused device traces, record actual remaining limitations. | **IN PROGRESS / OPEN.** Search migration and old SwiftUI article-row cleanup are complete, and diagnostic cleanup has progressed. Final cleanup and device/runtime acceptance remain blocked on settling U3 performance architecture and completing U4. |
+| U5 — Cleanup and acceptance | Remove superseded Timeline code, verify complete interaction/localization/accessibility behavior, run native checks and focused device traces, record actual remaining limitations. | **IN PROGRESS / OPEN.** U3 and U4 are complete; Search migration, old SwiftUI article-row removal, diagnostic cleanup, and legacy article-image renderer retirement are complete. Remaining work is behavior-preserving source/geometry cleanup plus final canonical build/diff validation before freezing the Timeline architecture. |
 
 The selected architecture already includes U2-U4; no new architecture approval
-is required simply because UIKit replaces the old implementation. However, this
-does **not** pre-approve every current internal implementation detail. While U3
-remains open, measured performance evidence may justify fundamental changes
-inside the Timeline renderer, layout, cell, image-presentation, preparation, or
-scheduling boundaries without reopening frozen product semantics or unrelated
-Core/macOS architecture. If the user requests one package, implement that package
-and its validation without silently expanding to unrelated phases. Temporary
-work-in-progress on a branch is not a supported production fallback. Do not mark
-the amendment complete until U3 performance/correctness, U4 worker semantics, and
-U5 cleanup/device acceptance are all complete.
+is required simply because UIKit replaces the old implementation. U3
+performance/correctness and U4 worker semantics are complete. The remaining
+Timeline amendment work is U5 cleanup/final acceptance only. Do not reopen the
+container, full-width Visual geometry, or fundamental image pipeline without new
+reproducible device evidence of a concrete regression. If the user requests one
+package, implement that package and its validation without silently expanding to
+unrelated phases. Temporary work-in-progress on a branch is not a supported
+production fallback. Do not mark the amendment architecture-frozen until U5 is
+complete.
 
 ### U2 baseline and subsequent evolution
 
@@ -272,10 +271,11 @@ layout/performance work. The legacy `IOSScrolloverGeometryController` is only a
 historical/regression-test reference and does not drive the production
 table view.
 
-Do not interpret the current productive U3 implementation as frozen yet. Its
-real-device behavior is accepted, including smooth iOS 27 scrolling through more
-than 200 articles, but the behavior-preserving cleanup and canonical validation
-still precede the architecture freeze. New structural performance work now
+U3 is complete. Its real-device behavior is accepted, including smooth iOS 27
+scrolling through more than 200 articles, stable rotation/chrome behavior, and
+the single production article-image path. The implementation is not yet
+architecture-frozen only because behavior-preserving U5 cleanup and final
+canonical validation still precede the freeze. New structural performance work
 requires new reproducible device evidence rather than another speculative
 renderer experiment.
 
@@ -404,26 +404,38 @@ old-session completion, failure recovery, lifecycle flush, and real-writer Undo.
 
 Canonical local validation passed on 2026-09-21. `./apple/ios/Build/test.sh`
 executed 343 tests with 0 failures, `./apple/ios/Build/build-app.sh` succeeded,
-and `git diff --check HEAD^ HEAD` was clean. U4 is therefore complete. U3
-remains open regardless.
+and `git diff --check HEAD^ HEAD` was clean. U4 is therefore complete. The
+subsequent U3 closure is recorded below.
 
-### 8.3 Close U3 with targeted observation, not another speculative rewrite
+### 8.3 U3 closure — COMPLETE
 
-After U4, perform a short U3 closure pass on representative hardware.
+U3 real-device performance/correctness acceptance completed on 22 September
+2026. The accepted baseline is the owned `UITableView` Timeline with native UIKit
+cells, deterministic prepared layout, normal 100%-content-width Visual portrait
+images, targeted status updates, and the single ImageIO -> UIImageView/Core
+Animation article-image path.
 
-Treat synchronous deterministic-layout fallback counters as performance
-canaries. During ordinary steady-state scrolling, prepared row heights and
-prepared layout metrics should make synchronous Core Text fallback effectively
-zero. Rotation, Dynamic Type, or a new geometry generation may legitimately
-exercise exceptional preparation paths; recurring fallback during normal
-scrolling requires investigation before U3 closes.
+On the iPhone 15 running iOS 27, sustained scrolling remained smooth with more
+than 200 loaded articles and the normal full-width image geometry. The owner also
+accepted the remaining presentation/device checks covering rotation-anchor
+preservation, article metadata/reading-time presentation, haptics and Undo,
+status-bar edge protection, compact-landscape scope capsule behavior, and the
+current iPad/iPhone toolbar presentation. No unresolved performance regression
+remains that justifies another renderer/container experiment.
 
-Do not replace the current constraint-based cell with manual frame layout merely
-to eliminate theoretical duplication. `IOSUIKitArticleLayoutEngine` remains the
-authoritative geometry calculation and the cell consumes its prepared metrics.
-Keep the UIKit-cell-versus-engine oracle tests as a hard regression boundary.
-After U4, reduce remaining duplicate cell-side calculations incrementally where
-that can be done without changing rendering behavior.
+The final post-renderer-retirement canonical XCTest run on 22 September 2026
+completed `./apple/ios/Build/test.sh` with **348 tests and 0 failures**. That run
+covers the productive Scrollover/mutation contracts, deterministic UIKit geometry
+including RTL, EXIF-aware article-image decoding, cache/prefetch behavior, and
+the retained engine-versus-cell geometry oracle. This automated result does not
+replace the device evidence above; together they close U3.
+
+Synchronous deterministic-layout fallback counters remain performance canaries.
+Rotation, Dynamic Type, or a new geometry generation may legitimately exercise
+exceptional preparation paths, but recurring fallback during ordinary
+steady-state scrolling would be a new regression. The constraint-based cell and
+`IOSUIKitArticleLayoutEngine` remain the accepted baseline; manual frame layout
+is not justified without new evidence.
 
 ### 8.4 Legacy article-image renderer retirement — COMPLETE
 
@@ -469,44 +481,46 @@ the capsule. Its upper glyph band uses a moderately stronger background blend
 than the earlier version while retaining the same bounded status-bar height and
 transparent lower edge.
 
-### 8.6 Accept and document the iOS 26 limitation if the closure check confirms it
+### 8.6 iOS 26 full-width-image behavior — ACCEPTED LIMITATION
 
-Flux continues to support iOS 17+, so iOS 26 remains a supported OS. However, the
-full-width-image scroll-quality difference observed on iPhone 15 has already
-survived extensive app-side investigation and improved materially on the same
-hardware under iOS 27.
+Flux continues to support iOS 17+, so iOS 26 remains a supported OS. The
+full-width-image scroll-quality difference observed on iPhone 15 survived the
+app-side investigation and improved materially on the same hardware under iOS 27.
+The completed U3 closure found no actionable app-side regression that justifies a
+second renderer or reduced-width product geometry.
 
-If the bounded U3 closure comparison reveals no actionable app-side regression,
-record the remaining iOS 26 behavior as a known OS/rendering-sensitive
-limitation. Do not restore the temporary 80%-image/info-rail design, reduce image
-width, or reopen the renderer/container solely to hide that iOS 26 perceptual
-difference. New work requires new reproducible evidence that identifies an
-actionable app-side cause.
+The remaining iOS 26 behavior is therefore recorded as an
+OS/rendering-sensitive limitation. Do not restore the temporary 80%-image/
+info-rail design, reduce image width, or reopen the renderer/container solely to
+hide that perceptual difference. New work requires new reproducible evidence
+that identifies an actionable app-side cause.
 
-### 8.7 Cleanup after U3/U4, then freeze the Timeline architecture
+### 8.7 U5 behavior-preserving cleanup, then freeze the Timeline architecture
 
-After U3 and U4 are complete, perform a behavior-preserving cleanup rather than
-another performance redesign:
+U3 and U4 are complete. U5 is now limited to behavior-preserving cleanup rather
+than another performance redesign:
 
 - split the large Timeline source into focused controller, cell, Scrollover,
-  presentation-bridge, and performance-metrics files;
+  presentation-bridge, and performance-metrics files where that materially
+  improves maintainability;
 - migrate any still-useful regression coverage from the historical
   `IOSScrolloverGeometryController` to the productive
   `IOSUIKitScrolloverGeometryTracker`, then remove or test-isolate the historical
   controller;
 - reduce redundant geometry helpers so prepared
   `IOSUIKitArticleLayoutMetrics` is consumed directly wherever practical;
-- remove obsolete image diagnostics/legacy renderer code after the comparison
-  above;
-- keep the existing engine-versus-cell geometry oracle, bounded-cache tests,
-  snapshot/status separation tests, and device acceptance checks.
+- keep the retired article-image renderer and diagnostic switches removed;
+- preserve the existing engine-versus-cell geometry oracle, bounded-cache tests,
+  snapshot/status separation tests, and accepted device behavior;
+- run final `build-app.sh` and `git diff --check` validation for the cleanup
+  commit set before declaring the architecture frozen.
 
-Once the U4 worker contract, U3 closure checks, and this cleanup are complete,
-the current Timeline container/rendering architecture should be treated as
-frozen. Later feature work should extend the accepted product semantics without
-reopening `UITableView`, full-width Visual portrait images, or the fundamental
-image/layout pipeline unless new device evidence demonstrates a concrete
-regression that cannot be addressed inside those boundaries.
+Once this U5 cleanup and final validation are complete, the current Timeline
+container/rendering architecture should be treated as frozen. Later feature work
+should extend the accepted product semantics without reopening `UITableView`,
+full-width Visual portrait images, or the fundamental image/layout pipeline
+unless new device evidence demonstrates a concrete regression that cannot be
+addressed inside those boundaries.
 
 ## 9. Apple references
 
