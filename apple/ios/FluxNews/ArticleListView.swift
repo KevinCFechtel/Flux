@@ -928,11 +928,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         captureGeometryScrollAnchorIfNeeded()
     }
     var nativeTopEdgeEffectEnabledForTesting: Bool {
-        if #available(iOS 27.0, *) {
+        if #available(iOS 26.0, *) {
             return !tableView.topEdgeEffect.isHidden
         }
         return false
     }
+    var statusBarScrimVisibleForTesting: Bool { !statusBarScrim.isHidden }
 #endif
 
     override func viewDidLoad() {
@@ -969,16 +970,13 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         ] {
             tableView.register(IOSUIKitArticleCell.self, forCellReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant))
         }
-        // iOS 26's progressive edge blur was measured on device to resample the
-        // full list width every frame, so keep it disabled there. On iOS 27 we
-        // deliberately re-test only the top edge with Apple's soft native
-        // effect: it protects status-bar legibility without adding any app-side
-        // per-scroll callbacks or custom blur work. The bottom edge remains clean.
-        if #available(iOS 27.0, *) {
-            tableView.topEdgeEffect.style = .soft
-            tableView.topEdgeEffect.isHidden = false
-            tableView.bottomEdgeEffect.isHidden = true
-        } else if #available(iOS 26.0, *) {
+        // Keep native scroll-edge backing out of the Timeline chrome. The
+        // navigation capsule and toolbar actions are already Liquid Glass and
+        // intentionally float directly above article content, matching the
+        // bottom action-bar treatment. Status-bar legibility is handled by the
+        // short static scrim below rather than by a full-width edge effect that
+        // extends underneath the capsule.
+        if #available(iOS 26.0, *) {
             tableView.topEdgeEffect.isHidden = true
             tableView.bottomEdgeEffect.isHidden = true
         }
@@ -1019,11 +1017,10 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             statusBarScrim.topAnchor.constraint(equalTo: view.topAnchor),
             statusBarScrimHeight,
         ])
-        // iOS 27 uses the scroll view's native soft top-edge effect instead of
-        // stacking this custom gradient on top of it. Older systems retain the
-        // cheap static scrim because their native edge blur was not acceptable on
-        // the measured iPhone 15 performance baseline.
-        if #available(iOS 27.0, *) { statusBarScrim.isHidden = true }
+        // This intentionally remains visible on iOS 27 too. It protects only
+        // the status-bar band, leaving the Liquid Glass navigation capsule free
+        // of an additional scroll-edge backing just like the bottom action bar.
+        statusBarScrim.isHidden = false
 
         dataSource = UITableViewDiffableDataSource<Section, Int64>(tableView: tableView) { [weak self] tableView, indexPath, id in
             guard let self,

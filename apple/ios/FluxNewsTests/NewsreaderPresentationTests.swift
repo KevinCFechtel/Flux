@@ -378,16 +378,13 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testTimelineUsesNativeTopEdgeProtectionOnlyOnIOS27AndLater() {
+    func testTimelineLeavesGlassChromeUnbackedAndUsesStatusBarScrim() {
         let bridge = IOSUIKitArticleTimelinePresentationBridge()
         let controller = makeTimelineController(bridge: bridge)
         controller.loadViewIfNeeded()
 
-        if #available(iOS 27.0, *) {
-            XCTAssertTrue(controller.nativeTopEdgeEffectEnabledForTesting)
-        } else {
-            XCTAssertFalse(controller.nativeTopEdgeEffectEnabledForTesting)
-        }
+        XCTAssertFalse(controller.nativeTopEdgeEffectEnabledForTesting)
+        XCTAssertTrue(controller.statusBarScrimVisibleForTesting)
     }
 
     func testIPhoneNavigationButtonUsesTheFluxTemplateAsset() {

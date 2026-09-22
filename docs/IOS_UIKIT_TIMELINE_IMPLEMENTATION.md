@@ -457,18 +457,19 @@ pipeline.
 
 ### 8.5 Status-bar edge protection during U3 closure
 
-The Timeline deliberately keeps the native scroll edge effect disabled on iOS 26
-because device testing showed the progressive blur resampling the full list width
-during scrolling. iOS 27 is now tested separately: the custom status-bar scrim is
-hidden there and `UITableView.topEdgeEffect` uses Apple's native `.soft` style,
-with the bottom effect still disabled. Device scrolling with more than 200 loaded
-articles remained smooth. A follow-up A/B test detached `UIRefreshControl`
-entirely on iOS 27 while leaving the edge effect unchanged; the soft edge remained
-essentially the same length. The refresh control is therefore not treated as the
-cause of the unusually long native soft treatment, and normal Pull to Refresh is
-restored. The remaining decision is visual rather than performance-driven: either
-accept Apple's long native soft edge on iOS 27 or prefer Flux's shorter static
-status-bar scrim for tighter chrome separation.
+The native scroll edge effect remains disabled for the Timeline. iOS 26 device
+testing had already shown the progressive blur to hurt scrolling. On iOS 27 the
+native `.soft` effect was smooth even through more than 200 loaded articles, but
+both `.soft` and `.automatic` extended visibly underneath the custom navigation
+capsule. Detaching `UIRefreshControl` did not materially shorten that region, so
+normal Pull to Refresh is restored.
+
+Flux therefore uses the short static status-bar scrim on iOS 27 as well. The
+navigation capsule and toolbar actions are already Liquid Glass and intentionally
+float directly above article content without an additional full-width backing,
+matching the unbacked bottom action-bar treatment. The scrim protects only the
+status-bar band where system glyph legibility needs help; it does not extend under
+the capsule.
 
 ### 8.6 Accept and document the iOS 26 limitation if the closure check confirms it
 
