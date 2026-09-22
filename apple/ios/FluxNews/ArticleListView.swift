@@ -594,11 +594,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             guard let self,
                   let item = self.renderedItem(for: id)
             else { return nil }
-            let metrics = IOSUIKitArticleCell.Metrics(
+            let geometry = IOSUIKitArticleGeometry(
                 mode: self.mode,
-                containerWidth: tableView.bounds.width,
-                )
-            let variant = metrics.layoutVariant(hasImage: self.mode.showsArticleImage && item.content.imageURL != nil)
+                containerWidth: tableView.bounds.width
+            )
+            let variant = geometry.variant(hasImage: self.mode.showsArticleImage && item.content.imageURL != nil)
             guard let cell = tableView.dequeueReusableCell(withIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant), for: indexPath) as? IOSUIKitArticleCell else { return nil }
             self.configure(cell, item: item)
             return cell
@@ -931,10 +931,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     }
 
     private func configure(_ cell: IOSUIKitArticleCell, item: IOSUIKitArticleTimelineItem) {
-        let metrics = IOSUIKitArticleCell.Metrics(
-            mode: mode,
-            containerWidth: tableView.bounds.width
-        )
         let layoutInput = preparedLayoutInput(for: item)
         let layoutMetrics: IOSUIKitArticleLayoutMetrics
         if let prepared = preparedLayoutCoordinator.metrics(for: layoutInput, priority: .visible) {
@@ -953,7 +949,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             mode: mode,
             previewLines: previewLines,
             showRelativePublicationTime: showRelativePublicationTime,
-            metrics: metrics,
             displayScale: view.traitCollection.displayScale,
             preparedLayoutMetrics: layoutMetrics
         )
@@ -1337,11 +1332,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         guard mode.showsArticleImage,
               let url = item.content.imageURL
         else { return nil }
-        let metrics = IOSUIKitArticleCell.Metrics(
+        let geometry = IOSUIKitArticleGeometry(
             mode: mode,
-            containerWidth: tableView.bounds.width,
+            containerWidth: tableView.bounds.width
         )
-        let targetSize = metrics.imageSize(hasImage: true)
+        let targetSize = geometry.imageSize(hasImage: true)
         guard targetSize.width > 0, targetSize.height > 0 else { return nil }
         return ArticleImageRequest(
             url: url,
@@ -1804,43 +1799,6 @@ final class IOSUIKitArticleCell: UITableViewCell {
         case .visualSideTitle: return "IOSUIKitArticleCell.visualSideTitle"
         case .visualSideTitleWide: return "IOSUIKitArticleCell.visualSideTitleWide"
         case .visualSideTitleTextOnly: return "IOSUIKitArticleCell.visualSideTitleTextOnly"
-        }
-    }
-
-    struct Metrics {
-        let mode: ArticlePresentationMode
-        let containerWidth: CGFloat
-        let horizontalInset: CGFloat
-        let outerVerticalPadding: CGFloat
-        let availableWidth: CGFloat
-        let isLandscapeVisual: Bool
-
-        init(
-            mode: ArticlePresentationMode,
-            containerWidth: CGFloat
-        ) {
-            let geometry = IOSUIKitArticleGeometry(
-                mode: mode,
-                containerWidth: containerWidth
-            )
-            self.mode = geometry.mode
-            self.containerWidth = geometry.containerWidth
-            horizontalInset = geometry.horizontalInset; availableWidth = geometry.availableWidth
-            isLandscapeVisual = geometry.isLandscapeVisual; outerVerticalPadding = geometry.verticalPadding
-        }
-
-        func imageSize(hasImage: Bool) -> CGSize {
-            IOSUIKitArticleGeometry(
-                mode: mode,
-                containerWidth: containerWidth
-            ).imageSize(hasImage: hasImage)
-        }
-
-        func layoutVariant(hasImage: Bool) -> IOSUIKitArticleCellLayoutVariant {
-            IOSUIKitArticleGeometry(
-                mode: mode,
-                containerWidth: containerWidth
-            ).variant(hasImage: hasImage)
         }
     }
 
@@ -2499,7 +2457,6 @@ final class IOSUIKitArticleCell: UITableViewCell {
         mode: ArticlePresentationMode,
         previewLines: ArticlePreviewLines,
         showRelativePublicationTime: Bool = false,
-        metrics: Metrics,
         displayScale: CGFloat,
         preparedLayoutMetrics: IOSUIKitArticleLayoutMetrics
     ) {
@@ -2542,8 +2499,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
         commentsWidthConstraint.constant = hasComments ? (preparedLayoutMetrics.commentsFrame?.width ?? IOSUIKitArticleGeometry.commentSlotSize) : 0
         commentsToStarSpacingConstraint.constant = hasComments ? -IOSUIKitArticleGeometry.metadataAccessorySpacing : 0
         let hasImage = mode.showsArticleImage && item.content.imageURL != nil
-        let imageSize = metrics.imageSize(hasImage: hasImage)
-        applyLayout(metrics: metrics, variant: metrics.layoutVariant(hasImage: hasImage))
+        let imageSize = hasImage ? (preparedLayoutMetrics.imageFrame?.size ?? .zero) : .zero
+        applyLayout(preparedLayoutMetrics)
 
         updateFeedIcon(image: item.feedIconImage, title: item.content.article.feedTitle)
         updateStatus(isRead: item.isRead, isStarred: item.isStarred)
@@ -2612,13 +2569,14 @@ final class IOSUIKitArticleCell: UITableViewCell {
         }
     }
 
-    private func applyLayout(metrics: Metrics, variant: IOSUIKitArticleCellLayoutVariant) {
-        if let preparedLayoutMetrics { applyAccessoryMetrics(preparedLayoutMetrics) }
+    private func applyLayout(_ layout: IOSUIKitArticleLayoutMetrics) {
+        applyAccessoryMetrics(layout)
+        let variant = layout.variant
         contentView.directionalLayoutMargins = NSDirectionalEdgeInsets(
-            top: metrics.outerVerticalPadding,
-            leading: metrics.horizontalInset,
-            bottom: metrics.outerVerticalPadding,
-            trailing: metrics.horizontalInset
+            top: layout.verticalInset,
+            leading: layout.horizontalInset,
+            bottom: layout.verticalInset,
+            trailing: layout.horizontalInset
         )
 
         let usesDateRowReadingTime = currentReadingTime != nil
@@ -2642,12 +2600,13 @@ final class IOSUIKitArticleCell: UITableViewCell {
         starImageView.isHidden = false
         commentsContainer.isHidden = !currentHasComments
 
-        if variant == .visualPortrait {
-            portraitImageWidthConstraint.constant = metrics.imageSize(hasImage: true).width
-        } else if variant == .visualLandscape || variant == .visualSideTitle || variant == .visualSideTitleWide {
-            let imageSize = metrics.imageSize(hasImage: true)
-            landscapeImageWidthConstraint.constant = imageSize.width
-            landscapeImageHeightConstraint.constant = imageSize.height
+        if let imageSize = layout.imageFrame?.size {
+            if variant == .visualPortrait {
+                portraitImageWidthConstraint.constant = imageSize.width
+            } else if variant == .visualLandscape || variant == .visualSideTitle || variant == .visualSideTitleWide {
+                landscapeImageWidthConstraint.constant = imageSize.width
+                landscapeImageHeightConstraint.constant = imageSize.height
+            }
         }
 
         guard currentLayoutVariant != variant else {
