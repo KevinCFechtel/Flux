@@ -1,6 +1,6 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: D1-D4 BASELINE COMPLETE / UIKIT TIMELINE U5 CLEANUP IMPLEMENTED / FINAL VALIDATION AND ARCHITECTURE FREEZE PENDING / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D4 BASELINE COMPLETE / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
 > replaces the existing Flutter iOS/iPadOS client with a native Swift client:
@@ -16,12 +16,12 @@
 > `UICollectionView` baseline and later evolved to the current `UITableView`
 > implementation during performance work. The current table-based Timeline is
 > the accepted productive UI/UX baseline. U3 performance/correctness and U4
-> mutation-worker semantics are complete and accepted. The behavior-preserving U5
-> source cleanup is implemented; only its final canonical validation and focused
-> device smoke check remain before the Timeline architecture is frozen. Fundamental
-> container, layout, image-pipeline, or scheduling redesign now requires new
-> reproducible device evidence of a concrete regression rather than speculative
-> performance work. See [implementation handoff](IOS_UIKIT_TIMELINE_IMPLEMENTATION.md).
+> mutation-worker semantics are complete and accepted. U5 behavior-preserving
+> cleanup and final acceptance are also complete. The current UIKit Timeline
+> container/rendering architecture is frozen. Fundamental container, layout,
+> image-pipeline, Scrollover, or scheduling redesign now requires new reproducible
+> device evidence of a concrete regression rather than speculative performance
+> work. See [implementation handoff](IOS_UIKIT_TIMELINE_IMPLEMENTATION.md).
 
 ## 1. Goal and non-goals
 
@@ -330,16 +330,17 @@ Core/account-session writer, 64-ID FIFO batches, a 500 ms bounded drain deadline
 explicit-intent precedence, lifecycle coalescing, session-isolated completion,
 and deterministic failure recovery.
 
-U5 behavior-preserving cleanup is implemented in the current cleanup branch:
-the historical SwiftUI/List Scrollover controller and its helper geometry have
-been removed; still-relevant regression cases now exercise the productive
-`IOSUIKitScrolloverGeometryTracker`; productive Scrollover geometry has been
-extracted to a focused source file; and the UIKit cell consumes prepared
+U5 behavior-preserving cleanup and final acceptance are complete. The
+historical SwiftUI/List Scrollover controller and its helper geometry have been
+removed; still-relevant regression cases exercise the productive
+`IOSUIKitScrolloverGeometryTracker`; productive Scrollover geometry is isolated
+in its focused source file; and the UIKit cell consumes prepared
 `IOSUIKitArticleLayoutMetrics` directly rather than a redundant cell metrics
-wrapper. Focused native full-swipe and article-cell accessibility oracles were
-added. U5 remains open only for the final canonical test/build/diff validation
-and focused device smoke check. Until those pass, the Timeline architecture is
-not yet marked frozen.
+wrapper. Focused native full-swipe and article-cell accessibility oracles are
+present. Final validation on 22 September 2026 executed 338 iOS tests with
+0 failures, `build-app.sh` succeeded, `git diff --check main...HEAD` was clean,
+and the focused physical-device smoke test passed. The UIKit Timeline
+architecture is now frozen.
 
 The native manual Sync control keeps the same `arrow.clockwise` symbol and
 stable toolbar geometry across idle, syncing, success, and failure states.
@@ -662,11 +663,14 @@ includes smooth scrolling through more than 200 articles with the normal
 full-width Visual geometry, accepted rotation/chrome/status-bar behavior, and
 the single production article-image path. The legacy article-image renderer and
 its diagnostics have been removed. Post-retirement
-`./apple/ios/Build/test.sh` validation on 22 September 2026 executed **348 tests
-with 0 failures**. The remaining pre-freeze Timeline work is U5
-behavior-preserving cleanup plus final build/diff validation; the historical
-iOS 26 full-width-image behavior is an accepted OS/rendering-sensitive
-limitation rather than a reason to retain a second renderer.
+`./apple/ios/Build/test.sh` validation after renderer retirement on
+22 September 2026 executed **348 tests with 0 failures**. U5 then removed
+redundant historical Scrollover coverage and completed the freeze suite; its
+final canonical run executed **338 tests with 0 failures**, `build-app.sh`
+succeeded, `git diff --check main...HEAD` was clean, and focused device
+acceptance passed. The historical iOS 26 full-width-image behavior remains an
+accepted OS/rendering-sensitive limitation rather than a reason to retain a
+second renderer.
 
 On iOS, a semantic scope/filter/sort reset stays within the existing UIKit
 Timeline controller: it resets the table view to its natural top position and
