@@ -56,6 +56,11 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.compactStackedVerticalPadding, 0)
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.compactStackedHorizontalPadding, 8)
         XCTAssertLessThan(IOSArticleListTitleCapsuleMetrics.compactStackedSpacing, 8)
+        XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.compactStackedMinimumContentWidth, 190)
+        XCTAssertGreaterThan(
+            IOSArticleListTitleCapsuleMetrics.compactStackedTitlePriority,
+            IOSArticleListTitleCapsuleMetrics.inlineTitlePriority
+        )
     }
 
     func testLandscapeCounterLabelExplainsCountSemantics() {

@@ -80,6 +80,11 @@ enum IOSArticleListTitleCapsuleMetrics {
     static let compactStackedVerticalPadding: CGFloat = 0
     static let compactStackedHorizontalPadding: CGFloat = 8
     static let compactStackedSpacing: CGFloat = 6
+    /// Give ordinary feed/category titles enough room before the toolbar starts
+    /// compressing the leading item. Very long titles still yield to trailing
+    /// actions instead of displacing them.
+    static let compactStackedMinimumContentWidth: CGFloat = 190
+    static let compactStackedTitlePriority: Double = 3
 }
 
 enum IOSMoreAction: Equatable {
@@ -837,11 +842,22 @@ private struct ArticleListTitleCapsule: View {
             }
         case .compactStacked:
             VStack(alignment: .leading, spacing: 0) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(.primary)
+                // Prefer the full one-line scope title when the landscape toolbar
+                // can accommodate it. Only fall back to truncation when the
+                // trailing action group actually needs that space.
+                ViewThatFits(in: .horizontal) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundStyle(.primary)
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .foregroundStyle(.primary)
+                }
+                .layoutPriority(IOSArticleListTitleCapsuleMetrics.compactStackedTitlePriority)
                 if let subtitle {
                     ZStack(alignment: .leading) {
                         Text(subtitle)
@@ -856,7 +872,12 @@ private struct ArticleListTitleCapsule: View {
                     .fixedSize(horizontal: true, vertical: true)
                 }
             }
+            .frame(
+                minWidth: IOSArticleListTitleCapsuleMetrics.compactStackedMinimumContentWidth,
+                alignment: .leading
+            )
             .fixedSize(horizontal: false, vertical: true)
+            .layoutPriority(IOSArticleListTitleCapsuleMetrics.compactStackedTitlePriority)
         case .inline:
             HStack(spacing: 4) {
                 Text(title)

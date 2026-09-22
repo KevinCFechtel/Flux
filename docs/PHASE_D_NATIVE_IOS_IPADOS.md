@@ -550,7 +550,10 @@ stacked capsule in the principal toolbar position with the optional descriptive
 current-scope count; iPhone landscape uses a compact two-line leading capsule
 with the scope title above the compact count. Its compact-height typography and
 zero extra vertical padding fit the landscape navigation bar without allowing
-SwiftUI to vertically compress the text away. The landscape capsule reserves the
+SwiftUI to vertically compress the text away. The leading item reserves a modest
+minimum text width and prefers the complete one-line scope title whenever the
+available toolbar space permits it; only unusually long titles yield and truncate
+before displacing the trailing action group. The landscape capsule reserves the
 alternate second-line width so transitions between the count and `Syncing…` do
 not make the chrome breathe horizontally, while remaining substantially narrower
 than the former one-line title-plus-count presentation. Persistent iPad split
