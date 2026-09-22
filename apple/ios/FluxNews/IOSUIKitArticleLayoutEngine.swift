@@ -689,14 +689,7 @@ enum IOSUIKitArticleLayoutEngine {
         )
         func metadataX(_ logicalX: CGFloat, width: CGFloat) -> CGFloat { input.layoutDirection == .rightToLeft ? metadataFrame.maxX - logicalX - width : metadataFrame.minX + logicalX }
         let feedIconFrame = CGRect(x: metadataX(metadataLayout.feedIconX, width: accessories.feedIcon), y: metadataFrame.midY - accessories.feedIcon / 2, width: accessories.feedIcon, height: accessories.feedIcon)
-        // UIKit mirrors the metadata icon/accessory anchors in RTL, but the
-        // feed-title label itself occupies the physical leading remainder of the
-        // row. Match that resolved Auto Layout frame instead of mirroring the
-        // LTR feedTitleX offset a second time.
-        let feedTitleX = input.layoutDirection == .rightToLeft
-            ? metadataFrame.minX
-            : metadataFrame.minX + metadataLayout.feedTitleX
-        let feedTitleFrame = CGRect(x: feedTitleX, y: metadataFrame.minY, width: metadataLayout.feedTitleWidth, height: metadataHeight)
+        let feedTitleFrame = CGRect(x: metadataX(metadataLayout.feedTitleX, width: metadataLayout.feedTitleWidth), y: metadataFrame.minY, width: metadataLayout.feedTitleWidth, height: metadataHeight)
 
         let unreadFrame = CGRect(
             x: metadataX(metadataLayout.unreadX, width: accessories.unread),
