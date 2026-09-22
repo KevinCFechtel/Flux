@@ -250,5 +250,17 @@ The retained performance metrics/diagnostics and `articleImageRasterScale` test
 seam keep their classifications from the final cleanup audit above. They are not
 legacy renderer switches.
 
-Canonical XCTest/build/diff validation for this U5 cleanup is the remaining
-freeze gate and must be recorded only after those commands actually pass.
+Final U5 acceptance passed on 22 September 2026. The canonical
+`./apple/ios/Build/test.sh` run executed **338 tests with 0 failures**,
+`./apple/ios/Build/build-app.sh` succeeded, `git diff --check main...HEAD`
+was clean, and the focused physical-device smoke test passed. The reduction from
+the earlier 348-test renderer-retirement baseline is intentional: redundant
+tests tied to the removed historical Scrollover controller were deleted while
+the still-relevant semantics were migrated to the productive
+`IOSUIKitScrolloverGeometryTracker`.
+
+With those gates complete, U5 is closed and the current UIKit Timeline
+container/rendering architecture is frozen. Future feature work must extend this
+baseline rather than reopening the container, Scrollover detector, or
+fundamental image/layout pipeline without new reproducible device evidence of a
+concrete regression.
