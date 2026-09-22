@@ -1163,7 +1163,7 @@ final class NewsreaderD23MutationTests: XCTestCase {
         store.setReadMutationWriterForTesting { ids, read in
             await writer.write(ids, read: read)
         }
-        store.setArticlesForTesting([article(1, isRead: true)])
+        store.setArticlesForTesting([article(1, read: true)])
 
         let baseline = store.readCompletionFeedbackRevision
         store.setRead(articleIDs: [1], read: false)
