@@ -597,12 +597,12 @@ invalidation. A synchronous prepared-metrics miss is retained in the same
 generation-safe cache, so it does not cause a second equivalent asynchronous
 measurement. The frame-headroom hardening pass keeps append/removal from
 fanning out into unrelated visible-cell configuration, prefetch cancellation,
-or broad layout invalidation. Feed-icon PNGs retain their existing prepared-raster path. Article images
-use display-sized ImageIO decoding off-main, while UIImageView/Core Animation owns
-the final aspect-fill crop and rounded clipping. The former exact-slot
-`renderDisplayReady` CGContext pass is retained only as a legacy developer
-diagnostic fallback and is not the production default after the 20 September
-2026 device comparison. The Timeline table surface remains explicitly
+or broad layout invalidation. Feed-icon PNGs retain their existing prepared-raster path. Article images use
+display-sized ImageIO decoding off-main, while UIImageView/Core Animation owns
+the final aspect-fill crop and rounded clipping. The former exact-slot article
+CGContext renderer, its Developer Diagnostics switch, backdrop/P3 cache state,
+and renderer-mode plumbing were retired on 22 September 2026 after device
+acceptance showed no product-relevant advantage. The Timeline table surface remains explicitly
 opaque over the system background. The existing native cell uses stable
 registrations for compact/text-only, portrait, and landscape constraint variants
 to avoid ordinary reuse switching between those graphs. The article-image
@@ -634,11 +634,12 @@ residual hitches, but the ImageIO -> UIImageView/Core Animation path was
 subjectively somewhat smoother than the additional exact-slot CGContext
 prerasterization path.
 
-Production therefore defaults to renderer-driven aspect-fill presentation. The
-former exact-slot display-ready raster remains available behind Developer
-Diagnostics as a legacy comparison fallback only. Its diagnostic preference uses
-a versioned key so installs that previously left the temporary switch enabled do
-not silently keep the legacy path after this decision.
+Production therefore has one article-image renderer: display-sized ImageIO
+decode followed by UIImageView/Core Animation aspect-fill and rounded clipping.
+The former exact-slot display-ready path is no longer compiled into the article
+image pipeline, and Developer Diagnostics no longer exposes a renderer switch.
+Git history preserves the experiment if future OS evidence warrants revisiting
+it.
 
 #### Article-image performance diagnostics — historical conclusion
 
@@ -661,14 +662,14 @@ production architecture and current physical-device evidence.
 
 The agreed Timeline completion sequence is recorded in
 [IOS_UIKIT_TIMELINE_IMPLEMENTATION.md](IOS_UIKIT_TIMELINE_IMPLEMENTATION.md#8-agreed-u3u4-stabilization-and-architecture-freeze-plan).
-In short: U4 is complete; close U3 with bounded device observation rather than
-another speculative renderer rewrite; perform one final bounded
-`imageViewScaled` versus legacy `displayReady` comparison; accept the remaining
-iOS 26 full-width-image behavior as a known OS/rendering-sensitive limitation if
-that check finds no actionable app-side regression; then remove legacy
-diagnostics/historical renderer code, reduce duplicate layout plumbing, split the
-large Timeline source files, and freeze the accepted `UITableView`/full-width
-Visual architecture.
+In short: U4 is complete and U3 device acceptance is complete on iOS 27,
+including smooth scrolling through more than 200 articles. The legacy
+article-image renderer and its diagnostics have now been removed. The remaining
+pre-freeze work is behavior-preserving cleanup and canonical validation: reduce
+duplicate layout plumbing, split large Timeline source files where useful, run
+the normal test/build path, then freeze the accepted `UITableView`/full-width
+Visual architecture. The historical iOS 26 full-width-image behavior remains
+documented rather than preserved as a second renderer.
 
 On iOS, a semantic scope/filter/sort reset stays within the existing UIKit
 Timeline controller: it resets the table view to its natural top position and

@@ -190,17 +190,25 @@ Deliberately retained, classified per the three categories above:
 | `IOSUIKitTimelineTopScrimView` | Promote | The static status-bar gradient is the accepted shipping protection on all supported iOS versions, including iOS 27. Native top/bottom edge effects remain disabled for the Timeline so the Liquid Glass capsule/actions float directly over content; the scrim protects only the status-bar band. |
 | `IOSUIKitTimelinePerformanceMetrics` | Promote | The oracle tests assert `systemLayoutSizeFittingCalls == 0` and `preferredLayoutAttributesFittingCalls == 0` through it. That is the proof that the cell never self-sizes — the core invariant of the UITableView migration. Removing the counters would delete the proof. |
 | `IOSUIKitTimelinePerformanceDiagnostics` | Retain as tooling | Console readout for the above. Its UI is behind `#if DEBUG \|\| FLUX_PERFORMANCE_DIAGNOSTICS` and cannot be reached in Release; the static controller reference is `weak`. The counter increments themselves do run in Release. |
-| `articleImageRasterScale` on the cell | Retain as tooling | Test seam, documented as such, no production assignment. |
+| `articleImageRasterScale` on the cell | Retain as tooling | Narrow decoded-scale test seam only; there is no production renderer or raster-scale switch. |
 
 ## Final production decision
 
 The investigation ended with a presentation decision rather than a performance
 fix, and the evidence for that is recorded in the measurement caveat above.
 
+A later iOS 27 acceptance pass closed the remaining renderer question: scrolling
+through more than 200 articles was smooth, and the extra exact-slot CGContext
+article renderer showed no visible advantage over display-sized ImageIO decode
+plus UIImageView/Core Animation. On 22 September 2026 that legacy article-image
+renderer, its diagnostic switch, and its renderer-specific cache state were
+removed. Historical experiment descriptions above remain intentionally as the
+investigation record and no longer describe shipping code.
+
 Fixed chrome, no longer switchable: scroll edge effect disabled, Scrollover undo
 pill in `.regularMaterial`, the title as a Liquid Glass capsule
-(`UIGlassEffect(style: .regular)`, `.regularMaterial` below iOS 26), status bar
-gradient below iOS 27 only.
+(`UIGlassEffect(style: .regular)`, `.regularMaterial` below iOS 26), the bounded status-bar
+gradient on all supported iOS versions.
 
 New presentation mode **Visual compact** (`ArticlePresentationMode.visualCompact`):
 a 4:3 thumbnail beside the title, metadata bar full width above, preview below —

@@ -1,6 +1,6 @@
 # iOS UIKit Timeline — Decision and Implementation Handoff
 
-> **Decision accepted: 2026-09-11. U1-U2 COMPLETE. U3 IN PROGRESS. U4 COMPLETE. U5 IN PROGRESS / OPEN.**
+> **Decision accepted: 2026-09-11. U1-U2 COMPLETE. U3 DEVICE-ACCEPTED / CLEANUP IN PROGRESS. U4 COMPLETE. U5 IN PROGRESS / OPEN.**
 >
 > Build the Article Timeline using the owned UIKit `UITableView` Timeline and
 > native UIKit article cells. This is the selected architecture, not a proposal to benchmark
@@ -272,10 +272,12 @@ layout/performance work. The legacy `IOSScrolloverGeometryController` is only a
 historical/regression-test reference and does not drive the production
 table view.
 
-Do not interpret the current productive U3 implementation as frozen. The purpose
-of the remaining U3 work is to make the selected UIKit Timeline robust on real
-hardware, and evidence from that work may still require structural changes to
-cells, layout, image presentation, preparation, or scheduling.
+Do not interpret the current productive U3 implementation as frozen yet. Its
+real-device behavior is accepted, including smooth iOS 27 scrolling through more
+than 200 articles, but the behavior-preserving cleanup and canonical validation
+still precede the architecture freeze. New structural performance work now
+requires new reproducible device evidence rather than another speculative
+renderer experiment.
 
 ## 6. Required regression cases
 
@@ -423,37 +425,31 @@ Keep the UIKit-cell-versus-engine oracle tests as a hard regression boundary.
 After U4, reduce remaining duplicate cell-side calculations incrementally where
 that can be done without changing rendering behavior.
 
-### 8.4 Retire the legacy image renderer after one final bounded comparison
+### 8.4 Legacy article-image renderer retirement — COMPLETE
 
-The production image path is the renderer-driven `imageViewScaled` path:
-display-sized ImageIO downsampling, bounded memory/HTTP caching, in-flight
-deduplication, visible-over-prefetch priority, cancellation, then ordinary
-`UIImageView` / Core Animation aspect-fill presentation.
+The sole production article-image path is now:
 
-Before removing the legacy exact-slot `displayReady` renderer, perform one final
-bounded comparison on the iPhone 15 where practical:
+`Data -> ImageIO display-sized aspect-fill decode -> bounded cache -> UIImageView/Core Animation aspect-fill + rounded clipping`.
 
-- iOS 26 with `imageViewScaled`;
-- iOS 26 with `displayReady`;
-- iOS 27 with `imageViewScaled` — **observed on iPhone 15: smooth through roughly 200 articles**;
-- iOS 27 with `displayReady` — **observed on the same device: no visible scrolling advantage over `imageViewScaled`**.
+The final iOS 27 device pass on the iPhone 15 remained smooth through more than
+200 articles, and the former exact-slot `displayReady` CGContext path showed no
+visible scrolling advantage. Earlier iOS 26 investigation likewise did not
+establish a product-relevant benefit from the extra raster stage. After device
+acceptance, retaining a second renderer solely for historical comparison no
+longer justified its code and cache complexity.
 
-The iOS 27 half of this comparison is therefore complete and currently favors
-retaining only `imageViewScaled`. The remaining iOS 26 comparison is a bounded
-confirmation only, not a reason to reopen the renderer investigation.
+Removed with the legacy article renderer are the runtime renderer-mode
+distinction, the Developer Diagnostics switch and persisted preference,
+exact-slot rounded-corner/backdrop CGContext preparation, article-image P3/
+backdrop renderer cache dimensions, renderer-change notifications,
+appearance-driven article-image rebinding, and renderer-specific tests. Git
+history remains the archive for the experiment.
 
-This is a confirmation step, not a new open-ended investigation. If the legacy
-renderer shows no clear product-relevant advantage, remove it, its diagnostic
-switch/state, its renderer-specific cache-key dimensions, backdrop/P3/exact-slot
-CGContext preparation, and the misleading `ArticleImageRequest` legacy default.
-Do not keep shipping code as an archive; Git history is sufficient if future OS
-evidence ever justifies revisiting the experiment.
-
-The long-term preferred direction is to keep app-owned work focused on
-target-size decoding, prioritization, caching, deduplication, and cancellation
-while allowing UIKit/Core Animation to own ordinary final image presentation so
-future Apple rendering improvements can benefit Flux without a custom raster
-pipeline.
+The remaining pipeline keeps display-sized ImageIO decoding, the bounded 128 MiB
+LRU, in-flight deduplication, visible-over-prefetch priority, cancellation,
+serialized transform work, the narrow decoded-scale test seam, and the
+presentation scheduler. UIKit/Core Animation owns normal final image
+presentation.
 
 ### 8.5 Status-bar edge protection during U3 closure
 
