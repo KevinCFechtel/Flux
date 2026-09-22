@@ -769,8 +769,8 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
 }
 
 @MainActor
-/// Softens the status bar against scrolling content below iOS 27, which
-/// adapts the bar's own elements to their backdrop.
+/// Protects the status-bar glyph band while leaving the Liquid Glass navigation
+/// chrome itself unbacked over scrolling article content.
 final class IOSUIKitTimelineTopScrimView: UIView {
     override class var layerClass: AnyClass { CAGradientLayer.self }
     private var gradient: CAGradientLayer { layer as! CAGradientLayer }
@@ -784,7 +784,7 @@ final class IOSUIKitTimelineTopScrimView: UIView {
         // Holding almost full strength across the glyph band and then easing out
         // makes the scrim read as shorter *and* softer than a linear one, without
         // taking protection away from where the status bar actually sits.
-        gradient.locations = [0, 0.5, 0.75, 1]
+        gradient.locations = [0, 0.55, 0.75, 1]
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
             self.updateColors()
         }
@@ -795,13 +795,13 @@ final class IOSUIKitTimelineTopScrimView: UIView {
 
     /// Strength at the very top. The remaining stops are fractions of it, so
     /// this one number changes the whole scrim.
-    static let peakAlpha: CGFloat = 0.6
+    static let peakAlpha: CGFloat = 0.68
 
     private func updateColors() {
         let base = UIColor.systemBackground.resolvedColor(with: traitCollection)
         gradient.colors = [
             base.withAlphaComponent(Self.peakAlpha).cgColor,
-            base.withAlphaComponent(Self.peakAlpha * 0.9).cgColor,
+            base.withAlphaComponent(Self.peakAlpha * 0.95).cgColor,
             base.withAlphaComponent(Self.peakAlpha * 0.4).cgColor,
             base.withAlphaComponent(0).cgColor,
         ]

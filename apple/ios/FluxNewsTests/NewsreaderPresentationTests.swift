@@ -385,6 +385,7 @@ final class NewsreaderPresentationTests: XCTestCase {
 
         XCTAssertFalse(controller.nativeTopEdgeEffectEnabledForTesting)
         XCTAssertTrue(controller.statusBarScrimVisibleForTesting)
+        XCTAssertEqual(IOSUIKitTimelineTopScrimView.peakAlpha, 0.68, accuracy: 0.001)
     }
 
     func testIPhoneNavigationButtonUsesTheFluxTemplateAsset() {

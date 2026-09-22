@@ -469,7 +469,9 @@ navigation capsule and toolbar actions are already Liquid Glass and intentionall
 float directly above article content without an additional full-width backing,
 matching the unbacked bottom action-bar treatment. The scrim protects only the
 status-bar band where system glyph legibility needs help; it does not extend under
-the capsule.
+the capsule. Its upper glyph band uses a moderately stronger background blend
+than the earlier version while retaining the same bounded status-bar height and
+transparent lower edge.
 
 ### 8.6 Accept and document the iOS 26 limitation if the closure check confirms it
 
