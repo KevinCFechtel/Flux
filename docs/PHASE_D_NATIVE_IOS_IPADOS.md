@@ -319,33 +319,29 @@ device profiling is acceptance of the new implementation. The implementation
 sequence and regression matrix are in
 [IOS_UIKIT_TIMELINE_IMPLEMENTATION.md](IOS_UIKIT_TIMELINE_IMPLEMENTATION.md).
 
-#### Current UIKit Timeline amendment status — 21 September 2026
+#### Current UIKit Timeline amendment status — 22 September 2026
 
-The UIKit amendment remains **IN PROGRESS**. U1 and the U2 native Timeline
-baseline are complete. U3 is active rather than acceptance-only: the productive
-UIKit geometry/status path, deterministic layout work, incremental structural
-updates, image scheduling/caching, and several performance-hardening passes exist,
-but unresolved physical-device performance findings may still justify replacing
-or restructuring parts of those implementations. Do not treat the current cell,
-layout, image, or scheduling architecture as frozen merely because its current
-tests pass.
+U1-U4 are complete. U3 is real-device accepted on iOS 27 with the normal
+full-width Visual presentation, stable rotation/chrome/status-bar behavior, and
+the single ImageIO -> UIImageView/Core Animation article-image path. The legacy
+exact-slot renderer and its diagnostic switches are removed. The canonical
+post-retirement XCTest run executed 348 tests with 0 failures.
 
-U4 session-owned mutation-worker semantics are complete. The worker is owned by
-the active Core/account session, retains 64-ID FIFO batching and single-writer
-serialization, adds a 500 ms bounded drain deadline for small continuous-scroll
-batches, preserves queued work across presentation-only resets, and isolates old
-session completion from replacement sessions. Newer explicit Read/Unread intent
-supersedes queued and in-flight automatic presentation/Undo effects and issues
-its Core write after the older automatic writer; Undo uses the same captured
-writer path. Failure clears running ownership and allows later FIFO work to
-continue. Productive-path tests use a controllably blocked injected writer.
-Canonical validation passed on 2026-09-21 with 343 iOS tests and 0 failures,
-a successful `build-app.sh`, and a clean `git diff --check HEAD^ HEAD`.
+U4 session-owned mutation-worker semantics remain complete: one active
+Core/account-session writer, 64-ID FIFO batches, a 500 ms bounded drain deadline,
+explicit-intent precedence, lifecycle coalescing, session-isolated completion,
+and deterministic failure recovery.
 
-U5 cleanup and final acceptance have started in places — including Search
-migration to the UIKit Timeline and removal of the unused SwiftUI article-row
-renderer — but remain open until the performance architecture has settled and
-the required device/runtime matrix is accepted.
+U5 behavior-preserving cleanup is implemented in the current cleanup branch:
+the historical SwiftUI/List Scrollover controller and its helper geometry have
+been removed; still-relevant regression cases now exercise the productive
+`IOSUIKitScrolloverGeometryTracker`; productive Scrollover geometry has been
+extracted to a focused source file; and the UIKit cell consumes prepared
+`IOSUIKitArticleLayoutMetrics` directly rather than a redundant cell metrics
+wrapper. Focused native full-swipe and article-cell accessibility oracles were
+added. U5 remains open only for the final canonical test/build/diff validation
+and focused device smoke check. Until those pass, the Timeline architecture is
+not yet marked frozen.
 
 The native manual Sync control keeps the same `arrow.clockwise` symbol and
 stable toolbar geometry across idle, syncing, success, and failure states.
