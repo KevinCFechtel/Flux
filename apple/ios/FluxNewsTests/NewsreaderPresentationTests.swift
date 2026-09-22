@@ -44,6 +44,16 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(IOSBottomAction.defaultActions.contains(.settings))
     }
 
+    func testLegacyActionMaterialIsLimitedToIPadSplitChrome() {
+        XCTAssertTrue(IOSArticleListChromePresentation.usesLegacyIPadActionMaterial(for: .persistentSplit))
+        XCTAssertTrue(IOSArticleListChromePresentation.usesLegacyIPadActionMaterial(for: .persistentSplitCollapsed))
+        XCTAssertFalse(IOSArticleListChromePresentation.usesLegacyIPadActionMaterial(for: .compactPortrait))
+        XCTAssertFalse(IOSArticleListChromePresentation.usesLegacyIPadActionMaterial(for: .compactLandscape))
+        XCTAssertEqual(IOSArticleListActionChromeMetrics.legacyHorizontalPadding, 8)
+        XCTAssertEqual(IOSArticleListActionChromeMetrics.legacyVerticalPadding, 5)
+        XCTAssertEqual(IOSArticleListActionChromeMetrics.legacySpacing, 6)
+    }
+
     func testCollapsedSplitInlineTitleCapsuleKeepsUsefulMinimumWidth() {
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.inlineMinimumContentWidth, 280)
         XCTAssertGreaterThan(

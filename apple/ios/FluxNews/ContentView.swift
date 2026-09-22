@@ -63,6 +63,21 @@ enum IOSArticleListChromePresentation {
     static func actionPlacement(for mode: IOSArticleListChromeMode) -> IOSArticleListActionPlacement {
         mode == .compactPortrait ? .bottomBar : .topBarTrailing
     }
+
+    static func usesLegacyIPadActionMaterial(for mode: IOSArticleListChromeMode) -> Bool {
+        switch mode {
+        case .persistentSplit, .persistentSplitCollapsed:
+            true
+        case .compactPortrait, .compactLandscape:
+            false
+        }
+    }
+}
+
+enum IOSArticleListActionChromeMetrics {
+    static let legacyHorizontalPadding: CGFloat = 8
+    static let legacyVerticalPadding: CGFloat = 5
+    static let legacySpacing: CGFloat = 6
 }
 
 enum IOSArticleListTitleCapsuleMetrics {
@@ -369,8 +384,23 @@ struct ContentView: View {
                         articleListActionButtons
                     }
                 } else {
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        articleListActionButtons
+                    if #available(iOS 26.0, *) {
+                        ToolbarItemGroup(placement: .topBarTrailing) {
+                            articleListActionButtons
+                        }
+                    } else if IOSArticleListChromePresentation.usesLegacyIPadActionMaterial(for: articleListChromeMode) {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            HStack(spacing: IOSArticleListActionChromeMetrics.legacySpacing) {
+                                articleListActionButtons
+                            }
+                            .padding(.horizontal, IOSArticleListActionChromeMetrics.legacyHorizontalPadding)
+                            .padding(.vertical, IOSArticleListActionChromeMetrics.legacyVerticalPadding)
+                            .background(.regularMaterial, in: Capsule())
+                        }
+                    } else {
+                        ToolbarItemGroup(placement: .topBarTrailing) {
+                            articleListActionButtons
+                        }
                     }
                 }
             }
