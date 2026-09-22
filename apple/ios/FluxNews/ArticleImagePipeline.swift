@@ -567,9 +567,9 @@ actor ArticleImagePipeline {
         return try thumbnail(source: source, maxPixelDimension: maxPixelDimension)
     }
 
-    /// ImageIO's max-pixel option constrains the longest source dimension. For
-    /// the renderer-driven A/B path we instead need enough decoded pixels for
-    /// UIImageView's aspect-fill to cover both slot dimensions without upscaling.
+    /// ImageIO's max-pixel option constrains the longest source dimension. The
+    /// sole production path decodes enough pixels for UIImageView aspect-fill to
+    /// cover both slot dimensions without upscaling.
     private nonisolated static func aspectFillThumbnail(data: Data, targetPixelSize: CGSize) throws -> CGImage {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -605,8 +605,6 @@ actor ArticleImagePipeline {
     }
 
 }
-
-private extension ArticleImagePipeline.Demand}
 
 private extension ArticleImagePipeline.Demand {
     var cacheLookupSource: ArticleImageCacheLookupSource {

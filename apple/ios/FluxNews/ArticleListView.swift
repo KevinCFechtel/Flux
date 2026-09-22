@@ -984,7 +984,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self, UITraitLayoutDirection.self]) { (self: Self, _) in
             self.updateGeometryIfNeeded()
         }
-        view.addSubview(tableView)        view.addSubview(tableView)
+        view.addSubview(tableView)
         NSLayoutConstraint.activate([
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -1770,9 +1770,6 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         )
     }
 
-    private func cancelAllPrefetch()        )
-    }
-
     private func cancelAllPrefetch() {
 #if DEBUG
         fullPrefetchCancellationCountForTesting &+= 1
@@ -1796,7 +1793,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         for prefetch in prefetchTasks.values { prefetch.task.cancel() }
     }
 
-    func detachPresentationBridges()    func detachPresentationBridges() {
+    func detachPresentationBridges() {
         presentationBridge?.unsubscribeArticles(self)
         feedIconPresentationBridge?.unsubscribeFeedIcons(self)
         presentationBridge = nil
@@ -3362,8 +3359,6 @@ final class IOSUIKitArticleCell: UITableViewCell {
         articleImageView.layer.cornerRadius = IOSUIKitArticleGeometry.articleImageCornerRadius
         articleImageView.backgroundColor = loaded ? .clear : .tertiarySystemFill
     }
-
-    private func setFeedIconPresentation    }
 
     private func setFeedIconPresentation(loaded: Bool) {
         feedIconImageView.contentMode = loaded ? .scaleToFill : .scaleAspectFit

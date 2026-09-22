@@ -1437,11 +1437,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         let targetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
         let twoX = ArticleImageRequest(
             url: URL(string: "https://example.com/image.jpg")!, targetSize: targetSize, displayScale: 3,
-            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius, rasterScale: 2
+            rasterScale: 2
         )
         let threeX = ArticleImageRequest(
             url: twoX.url, targetSize: targetSize, displayScale: 3,
-            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius
         )
 
         let image = try await pipeline.prefetch(twoX)
@@ -1497,7 +1496,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
         let request = ArticleImageRequest(
             url: URL(string: "https://example.com/image.jpg")!, targetSize: .init(width: 361, height: 203), displayScale: 3,
-            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius, rasterScale: 2
+            rasterScale: 2
         )
         XCTAssertEqual(request.rasterScale, 2)
     }
@@ -2076,7 +2075,6 @@ final class NewsreaderPresentationTests: XCTestCase {
         let representativeTargetSize = IOSUIKitArticleCell.Metrics(mode: .visual, containerWidth: 393).imageSize(hasImage: true)
         let normalRepresentative = ArticleImageRequest(
             url: URL(string: "https://example.com/image.jpg")!, targetSize: representativeTargetSize, displayScale: 3,
-            cornerRadius: IOSUIKitArticleGeometry.articleImageCornerRadius,
             rasterScale: 3
         )
         XCTAssertEqual(normalRepresentative.rasterScale, 3)
