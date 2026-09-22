@@ -321,6 +321,9 @@ existing `DESTINATION` mechanism when necessary. Run `git diff --check`.
 For acceptance, exercise an optimized Release build on representative iPhone
 and iPad hardware with long feeds, compact/visual modes, warm/cold image caches,
 slow crossings, fast flicks, reversals, rotation and background/foreground work.
+Portrait/landscape toolbar changes must not replace the Timeline representable;
+the same visible article and approximate viewport-relative offset must survive
+rotation, and geometry-only rotation must not emit Scrollover reads.
 Use the available device/OS Instruments tools for short traces of actual hitches,
 main-thread work, and memory behavior. Include 60-Hz and 120-Hz hardware when
 available. The relevant goals are bounded scroll work, no repeated

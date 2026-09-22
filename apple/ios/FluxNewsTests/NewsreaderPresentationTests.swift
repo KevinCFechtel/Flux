@@ -52,8 +52,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
-    func testCompactLandscapeTitleCapsuleUsesReducedStackedPadding() {
-        XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.compactStackedVerticalPadding, 4)
+    func testCompactLandscapeTitleCapsuleFitsCompactToolbarHeight() {
+        XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.compactStackedVerticalPadding, 0)
+        XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.compactStackedHorizontalPadding, 8)
+        XCTAssertLessThan(IOSArticleListTitleCapsuleMetrics.compactStackedSpacing, 8)
     }
 
     func testLandscapeCounterLabelExplainsCountSemantics() {

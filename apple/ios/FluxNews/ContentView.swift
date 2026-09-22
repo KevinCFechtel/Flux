@@ -77,7 +77,9 @@ enum IOSArticleListTitleCapsuleMetrics {
     /// Compact-height iPhone landscape uses the same two-line information
     /// hierarchy as portrait, but trims the vertical chrome so the navigation bar
     /// does not consume unnecessary landscape height.
-    static let compactStackedVerticalPadding: CGFloat = 4
+    static let compactStackedVerticalPadding: CGFloat = 0
+    static let compactStackedHorizontalPadding: CGFloat = 8
+    static let compactStackedSpacing: CGFloat = 6
 }
 
 enum IOSMoreAction: Equatable {
@@ -731,9 +733,27 @@ private struct ArticleListTitleCapsule: View {
     /// them out. A fixed point size would drift apart from them under Dynamic
     /// Type, and a flexible frame would let the glyph drive the capsule's height.
     private var glyphHeight: CGFloat {
-        let titleHeight = UIFont.preferredFont(forTextStyle: .headline).lineHeight
-        guard layout == .stacked, subtitle != nil else { return titleHeight }
-        return titleHeight + 1 + UIFont.preferredFont(forTextStyle: .caption1).lineHeight
+        switch layout {
+        case .stacked:
+            let titleHeight = UIFont.preferredFont(forTextStyle: .headline).lineHeight
+            guard subtitle != nil else { return titleHeight }
+            return titleHeight + 1 + UIFont.preferredFont(forTextStyle: .caption1).lineHeight
+        case .compactStacked:
+            return UIFont.preferredFont(forTextStyle: .subheadline).lineHeight
+        case .inline:
+            return UIFont.preferredFont(forTextStyle: .headline).lineHeight
+        }
+    }
+
+    private var horizontalSpacing: CGFloat {
+        layout == .compactStacked ? IOSArticleListTitleCapsuleMetrics.compactStackedSpacing : 8
+    }
+
+    private var horizontalPadding: CGFloat {
+        if layout == .compactStacked {
+            return IOSArticleListTitleCapsuleMetrics.compactStackedHorizontalPadding
+        }
+        return action == nil ? 16 : 12
     }
 
     var body: some View {
@@ -764,7 +784,7 @@ private struct ArticleListTitleCapsule: View {
     }
 
     private var capsule: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: horizontalSpacing) {
             if action != nil {
                 Image(IOSNavigationButtonPresentation.imageName)
                     .renderingMode(.template)
@@ -785,8 +805,7 @@ private struct ArticleListTitleCapsule: View {
                     .opacity(0.55)
             }
         }
-        .padding(.leading, action == nil ? 16 : 12)
-        .padding(.trailing, action == nil ? 16 : 12)
+        .padding(.horizontal, horizontalPadding)
         .padding(.vertical, verticalPadding)
         .background { ArticleListTitleCapsuleBackground(layout: layout) }
         .accessibilityElement(children: .combine)
@@ -803,23 +822,41 @@ private struct ArticleListTitleCapsule: View {
     @ViewBuilder
     private var titleAndSubtitle: some View {
         switch layout {
-        case .stacked, .compactStacked:
+        case .stacked:
             VStack(spacing: 1) {
                 Text(title)
                     .font(.headline)
                     .lineLimit(1)
+                    .foregroundStyle(.primary)
                 if let subtitle {
-                    ZStack {
+                    Text(subtitle)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .foregroundStyle(.primary)
+                }
+            }
+        case .compactStacked:
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(.primary)
+                if let subtitle {
+                    ZStack(alignment: .leading) {
                         Text(subtitle)
+                            .foregroundStyle(.primary)
                         if let widthReservationSubtitle {
                             Text(widthReservationSubtitle)
                                 .hidden()
                         }
                     }
-                    .font(.caption)
+                    .font(.caption2)
                     .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: true)
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
         case .inline:
             HStack(spacing: 4) {
                 Text(title)
@@ -999,88 +1036,13 @@ private struct ArticleListNavigationChrome<Content: View>: View {
         ArticleListCounterPresentation.usesNativeSubtitle(showArticleCount: store.showArticleCount, supportsNativeSubtitle: true) ? subtitle : nil
     }
 
-    /// A large title cannot hand over to the capsule. Toolbar placements are
-    /// additive, so each compact-height mode gives the capsule one explicit
-    /// toolbar slot. Persistent split navigation keeps that leading slot stable
-    /// even while the sidebar is visible; only the capsule's visibility changes.
-    @ViewBuilder
-    private func portraitCapsuleChrome(title: String, subtitle: String) -> some View {
-        content()
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    ArticleListTitleCapsule(
-                        title: title,
-                        subtitle: capsuleSubtitle(subtitle),
-                        widthReservationSubtitle: nil,
-                        layout: .stacked,
-                        action: onSelectScope
-                    )
-                }
-            }
-    }
-
-    @ViewBuilder
-    private func landscapeCapsuleChrome(
-        title: String,
-        subtitle: String,
-        widthReservationSubtitle: String
-    ) -> some View {
-        content()
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    ArticleListTitleCapsule(
-                        title: title,
-                        subtitle: capsuleSubtitle(subtitle),
-                        widthReservationSubtitle: capsuleSubtitle(widthReservationSubtitle),
-                        layout: .compactStacked,
-                        action: onSelectScope
-                    )
-                }
-            }
-    }
-
-    @ViewBuilder
-    private func persistentSplitCapsuleChrome(
-        title: String,
-        subtitle: String,
-        capsuleVisible: Bool
-    ) -> some View {
-        content()
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    ArticleListTitleCapsule(
-                        title: title,
-                        subtitle: capsuleSubtitle(subtitle),
-                        widthReservationSubtitle: nil,
-                        layout: .inline,
-                        action: onSelectScope
-                    )
-                    // Keep the toolbar slot and its measured width alive while
-                    // the sidebar is visible. Inserting/removing the item during
-                    // the split-view animation makes iPadOS re-layout the nav bar
-                    // and can visibly disturb the UIKit timeline underneath.
-                    .opacity(capsuleVisible ? 1 : 0)
-                    .allowsHitTesting(capsuleVisible)
-                    .accessibilityHidden(!capsuleVisible)
-                    .transaction { transaction in
-                        transaction.animation = nil
-                    }
-                }
-            }
-    }
-
     var body: some View {
         let title = ArticleListTitlePresentation.title(scope: store.scope, catalog: store.catalog)
-        let countLabel = ArticleListCounterPresentation.expandedLabel(scope: store.scope, unreadOnly: store.unreadOnly, count: store.selectionTotal)
-        // Portrait keeps the descriptive count label. Landscape preserves the
-        // same count feature but uses the compact numeric form so the leading
-        // title and trailing action group have predictable room.
+        let countLabel = ArticleListCounterPresentation.expandedLabel(
+            scope: store.scope,
+            unreadOnly: store.unreadOnly,
+            count: store.selectionTotal
+        )
         let portraitSubtitle = store.isSyncing ? String(localized: "Syncing…") : countLabel
         let landscapeCountLabel = ArticleListCounterPresentation.inlineLandscapeLabel(
             scope: store.scope,
@@ -1093,25 +1055,56 @@ private struct ArticleListNavigationChrome<Content: View>: View {
         // does not make the compact landscape capsule breathe horizontally.
         let landscapeWidthReservationSubtitle = store.isSyncing ? landscapeCountLabel : syncingLabel
 
-        switch chromeMode {
-        case .compactPortrait:
-            portraitCapsuleChrome(title: title, subtitle: portraitSubtitle)
-        case .compactLandscape:
-            landscapeCapsuleChrome(
-                title: title,
-                subtitle: landscapeSubtitle,
-                widthReservationSubtitle: landscapeWidthReservationSubtitle
-            )
-        case .persistentSplit, .persistentSplitCollapsed:
-            // Both iPad split states intentionally share the same toolbar tree.
-            // The hidden state reserves the leading slot so collapsing/revealing
-            // the sidebar does not structurally rebuild the navigation bar.
-            persistentSplitCapsuleChrome(
-                title: title,
-                subtitle: landscapeSubtitle,
-                capsuleVisible: chromeMode == .persistentSplitCollapsed
-            )
-        }
+        // Keep the Timeline itself outside the chrome-mode switch. Rotation only
+        // replaces toolbar items; it must never replace the UIViewControllerRepresentable
+        // subtree and thereby discard the table's current scroll position.
+        content()
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                switch chromeMode {
+                case .compactPortrait:
+                    ToolbarItem(placement: .principal) {
+                        ArticleListTitleCapsule(
+                            title: title,
+                            subtitle: capsuleSubtitle(portraitSubtitle),
+                            widthReservationSubtitle: nil,
+                            layout: .stacked,
+                            action: onSelectScope
+                        )
+                    }
+                case .compactLandscape:
+                    ToolbarItem(placement: .topBarLeading) {
+                        ArticleListTitleCapsule(
+                            title: title,
+                            subtitle: capsuleSubtitle(landscapeSubtitle),
+                            widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
+                            layout: .compactStacked,
+                            action: onSelectScope
+                        )
+                    }
+                case .persistentSplit, .persistentSplitCollapsed:
+                    ToolbarItem(placement: .topBarLeading) {
+                        ArticleListTitleCapsule(
+                            title: title,
+                            subtitle: capsuleSubtitle(landscapeSubtitle),
+                            widthReservationSubtitle: nil,
+                            layout: .inline,
+                            action: onSelectScope
+                        )
+                        // Keep the toolbar slot and its measured width alive while
+                        // the sidebar is visible. Inserting/removing the item during
+                        // the split-view animation makes iPadOS re-layout the nav bar
+                        // and can visibly disturb the UIKit timeline underneath.
+                        .opacity(chromeMode == .persistentSplitCollapsed ? 1 : 0)
+                        .allowsHitTesting(chromeMode == .persistentSplitCollapsed)
+                        .accessibilityHidden(chromeMode != .persistentSplitCollapsed)
+                        .transaction { transaction in
+                            transaction.animation = nil
+                        }
+                    }
+                }
+            }
     }
 }
 

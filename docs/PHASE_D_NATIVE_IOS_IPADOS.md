@@ -548,7 +548,9 @@ article count into the title string itself. The accepted native chrome is the
 scope capsule implemented by `ArticleListTitleCapsule`: iPhone portrait uses a
 stacked capsule in the principal toolbar position with the optional descriptive
 current-scope count; iPhone landscape uses a compact two-line leading capsule
-with the scope title above the compact count. The landscape capsule reserves the
+with the scope title above the compact count. Its compact-height typography and
+zero extra vertical padding fit the landscape navigation bar without allowing
+SwiftUI to vertically compress the text away. The landscape capsule reserves the
 alternate second-line width so transitions between the count and `Syncing…` do
 not make the chrome breathe horizontally, while remaining substantially narrower
 than the former one-line title-plus-count presentation. Persistent iPad split
@@ -663,7 +665,10 @@ Visual architecture.
 On iOS, a semantic scope/filter/sort reset stays within the existing UIKit
 Timeline controller: it resets the table view to its natural top position and
 rebaselines Scrollover geometry without re-identifying the adaptive detail
-subtree. Device acceptance must verify a populated Timeline before and after each
+subtree. Portrait/landscape chrome changes are presentation-only: the
+`ArticleListView`/UIKit Timeline subtree remains structurally stable while only
+its toolbar items change, so rotation must preserve the current article/viewport
+anchor rather than recreate the Timeline at the top. Device acceptance must verify a populated Timeline before and after each
 scope, filter, and sort reset: the Timeline returns to its natural start, the
 scope-capsule chrome remains stable, there is no Timeline teardown/flicker, and
 subsequent Scrollover remains correct.
