@@ -1017,8 +1017,8 @@ recurrence of the UIKit diffable-data-source crash. D4.5 is therefore closed.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 
-**D5-A — Core-Session Execution Foundation is implemented; automated validation is pending.**
-The native iOS app now has one app-wide `IOSCoreSessionExecutionCoordinator`
+**D5-A — Core-Session Execution Foundation is complete and automated-test validated.**
+The canonical iOS test suite passes after the D5-A integration. The native iOS app now has one app-wide `IOSCoreSessionExecutionCoordinator`
 owned by `CoreBootstrapper`. It admits synchronous Core work only for the
 current Core session, tracks admitted work until the underlying
 `AppleCoreExecution` call has actually returned, blocks new admission during
