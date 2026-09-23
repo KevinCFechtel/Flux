@@ -1212,15 +1212,16 @@ separate host/widget provisioning profiles and the shared
 `group.dev.kevincfechtel.fluxNews.nativeDev` App Group. The archive script now
 supports both NativeDev Release and production-identity Upgrade Test archives
 and verifies the archived host Bundle ID, widget Bundle ID, shared App Group
-entitlements and signatures. Final D5-G acceptance still requires one physical
-device widget/deep-link smoke pass plus a successful Upgrade Test archive. The iOS application now embeds a native
+entitlements and signatures. The production-identity Upgrade Test archive has also been validated
+successfully. Final D5-G acceptance now requires only the physical-device
+widget/deep-link smoke pass after the final widget presentation polish. The iOS application now embeds a native
 `FluxNewsWidgets` extension using the shared snapshot/presentation contract.
 The Headlines widget supports Home Screen `systemMedium`, `systemLarge` and
 iPad `systemExtraLarge`; the small Headlines family is intentionally not
 offered because a single-headline layout does not provide useful value. The
 Status widget supports Home Screen `systemSmall`/`systemMedium` and the Lock
 Screen families `accessoryInline`, `accessoryCircular` and
-`accessoryRectangular`. Widget branding uses the existing FluxNews book mark
+`accessoryRectangular`. Widget branding uses the existing FluxNews book logo
 (`FluxNewsTemplate`) rather than a generic news glyph. The rectangular Lock
 Screen status presents the selected scope and its authoritative count without a
 truncated article teaser. Last-sync presentation continues to use the one global
