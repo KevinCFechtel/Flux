@@ -3,7 +3,6 @@ import WidgetKit
 
 enum WidgetFamilyPolicy {
     static let headlineFamilies: [WidgetFamily] = [
-        .systemSmall,
         .systemMedium,
         .systemLarge,
         .systemExtraLarge,
@@ -31,6 +30,21 @@ enum WidgetFamilyPolicy {
 
     static let lockScreenFamilies: [WidgetFamily] = []
     #endif
+}
+
+enum WidgetSyncTimestamp {
+    static func date(from value: String) -> Date? {
+        if let date = ISO8601DateFormatter().date(from: value) {
+            return date
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.date(from: value)
+    }
 }
 
 enum HeadlinesPresentation {
