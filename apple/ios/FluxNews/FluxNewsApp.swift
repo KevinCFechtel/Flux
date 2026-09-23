@@ -35,10 +35,12 @@ struct FluxNewsApp: App {
                             newsreaderStore.detach()
                         }
                     }
-                    await bootstrapper.start()
+                    await bootstrapper.ensureStarted()
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase != .active {
+                    if phase == .active {
+                        Task { await bootstrapper.ensureStarted() }
+                    } else {
                         newsreaderStore.flushScrolloverPersistenceForLifecycle()
                     }
                 }
