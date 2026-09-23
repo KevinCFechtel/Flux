@@ -2839,7 +2839,6 @@ impl Store {
         Ok(())
     }
 
-
     pub fn full_sync_required(&self) -> Result<bool, CoreError> {
         let value: Option<String> = self
             .connection
@@ -2887,7 +2886,6 @@ impl Store {
             .map_err(sql_error)?;
         Ok(due)
     }
-
 
     pub fn mark_full_sync_required(&self, reason: &str) -> Result<(), CoreError> {
         let connection = self
@@ -2948,8 +2946,11 @@ impl Store {
             tx.execute("DELETE FROM core_settings WHERE key='full_sync_reason'", [])
                 .map_err(sql_error)?;
         } else {
-            tx.execute("DELETE FROM core_settings WHERE key='delta_sync_cursor'", [])
-                .map_err(sql_error)?;
+            tx.execute(
+                "DELETE FROM core_settings WHERE key='delta_sync_cursor'",
+                [],
+            )
+            .map_err(sql_error)?;
             tx.execute(
                 "INSERT INTO core_settings(key,value) VALUES('full_sync_required','1') ON CONFLICT(key) DO UPDATE SET value='1'",
                 [],
