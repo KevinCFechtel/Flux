@@ -566,6 +566,7 @@ struct ArticleRowContent: Equatable, Sendable {
     var scrolloverUndoVisible: Bool { scrolloverUndoIDs.count >= 2 }
 
     private(set) var core: Flux?
+    @ObservationIgnored private var coreSessionExecutionCoordinator = IOSCoreSessionExecutionCoordinator()
     private var eventSubscription: EventSubscription?
     private let defaults: UserDefaults
     private var pending = PendingNewData()
@@ -628,9 +629,15 @@ struct ArticleRowContent: Equatable, Sendable {
     @ObservationIgnored private var manualSyncExecutions: [IOSManualSyncRequest: (cancellation: SyncCancellation, task: Task<Void, Never>)] = [:]
     @ObservationIgnored private var manualSyncQuiescenceRequested = false
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator? = nil
+    ) {
         timelineStructuralState = .init(storage: timelineStructuralStorage, change: .replace, revision: 0)
         self.defaults = defaults
+        if let coreSessionExecutionCoordinator {
+            self.coreSessionExecutionCoordinator = coreSessionExecutionCoordinator
+        }
         startupScope = defaults.string(forKey: Key.startupScope).flatMap(StartupScopePreference.init(rawValue:)) ?? .allNews
         startupCategoryID = defaults.object(forKey: Key.startupCategoryID) as? Int64
         startupFeedID = defaults.object(forKey: Key.startupFeedID) as? Int64
@@ -644,8 +651,15 @@ struct ArticleRowContent: Equatable, Sendable {
         clickOnNews = defaults.string(forKey: Key.clickOnNews).flatMap(ClickOnNews.init(rawValue:)) ?? .openLink
     }
 
-    func attach(to configuredCore: Flux) {
+    func attach(
+        to configuredCore: Flux,
+        coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator? = nil
+    ) {
         detach()
+        if let coreSessionExecutionCoordinator {
+            self.coreSessionExecutionCoordinator = coreSessionExecutionCoordinator
+        }
+        self.coreSessionExecutionCoordinator.ensureActive(configuredCore)
         core = configuredCore
         manualSyncQuiescenceRequested = false
         do {
