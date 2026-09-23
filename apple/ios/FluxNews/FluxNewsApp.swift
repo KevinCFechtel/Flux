@@ -22,6 +22,9 @@ struct FluxNewsApp: App {
             ContentView(bootstrapper: bootstrapper, newsreaderStore: newsreaderStore)
                 .tint(Color("FluxAccent"))
                 .task {
+                    IOSAppRuntime.shared.systemNotificationManager.onFeedSelected = { feedID in
+                        newsreaderStore.select(.feed(feedID))
+                    }
                     bootstrapper.prepareForCoreReplacement = {
                         await newsreaderStore.quiesceManualSyncForCoreReplacement()
                     }
