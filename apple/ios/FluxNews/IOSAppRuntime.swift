@@ -11,13 +11,14 @@ final class IOSAppRuntime {
 
     init(
         scheduler: IOSBackgroundTaskScheduling = IOSSystemBackgroundTaskScheduler.shared,
-        systemNotificationManager: IOSSystemNotificationManager = .shared
+        systemNotificationManager: IOSSystemNotificationManager? = nil
     ) {
         let bootstrapper = CoreBootstrapper()
         let backgroundSyncCoordinator = IOSBackgroundSyncCoordinator(
             bootstrapper: bootstrapper,
             scheduler: scheduler
         )
+        let systemNotificationManager = systemNotificationManager ?? IOSSystemNotificationManager.shared
         self.bootstrapper = bootstrapper
         self.backgroundSyncCoordinator = backgroundSyncCoordinator
         self.systemNotificationManager = systemNotificationManager
