@@ -868,7 +868,7 @@ struct ArticleRowContent: Equatable, Sendable {
         }
 
         while !manualSyncExecutions.isEmpty {
-            let tasks = manualSyncExecutions.values.map(\.task)
+            let tasks = manualSyncExecutions.values.map { $0.task }
             for task in tasks {
                 await task.value
             }
