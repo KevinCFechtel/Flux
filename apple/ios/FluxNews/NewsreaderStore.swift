@@ -888,6 +888,85 @@ struct ArticleRowContent: Equatable, Sendable {
         await task.value
     }
 
+    func syncFromWidget() {
+        guard let core else { return }
+        let cancellation = SyncCancellation()
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [core, cancellation, sessionCoordinator] in
+            _ = await sessionCoordinator.blockingCancellableResult(
+                for: core,
+                onCancel: { cancellation.cancel() },
+                {
+                    try core.syncCancellable(
+                        reason: .widget,
+                        cancellation: cancellation
+                    )
+                }
+            )
+        }
+    }
+
+    func article(
+        withID articleID: Int64,
+        completion: @escaping (ArticleSummary?) -> Void
+    ) {
+        guard let core else {
+            completion(nil)
+            return
+        }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.responsiveResult(
+                for: core,
+                {
+                    let query = ArticleQuery(
+                        scope: .all,
+                        readFilter: .all,
+                        starredFilter: .all,
+                        sort: .newestFirst,
+                        limit: 0,
+                        cursor: nil
+                    )
+                    return try core.queryArticles(query: query)
+                        .first(where: { $0.id == articleID })
+                }
+            ) else {
+                return
+            }
+            guard self?.core === core else { return }
+            switch result {
+            case let .success(article):
+                completion(article)
+            case .failure:
+                completion(nil)
+            }
+        }
+    }
+
+    func openWidgetScope(_ selection: WidgetContentSelection) {
+        switch selection.scope {
+        case .allNews:
+            setUnreadOnly(true)
+            select(.all)
+        case .bookmarks:
+            select(.starred)
+        case .category:
+            guard let id = selection.categoryID,
+                  catalog.categories.contains(where: { $0.id == id }) else {
+                return
+            }
+            setUnreadOnly(true)
+            select(.category(id))
+        case .feed:
+            guard let id = selection.feedID,
+                  catalog.feeds.contains(where: { $0.id == id }) else {
+                return
+            }
+            setUnreadOnly(true)
+            select(.feed(id))
+        }
+    }
+
     func cancelManualSync() {
         guard let request = manualSyncRequest,
               manualSyncLifecycle.requestCancellation(request) else { return }
