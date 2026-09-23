@@ -887,8 +887,8 @@ clean and `cargo test --workspace` green: 216 `flux-core` tests and 6
 The native iOS gate then executed 340 tests with 0 failures and
 `./apple/ios/Build/build-app.sh` completed with `BUILD SUCCEEDED`.
 
-**D4.5-D — session-owned Manual Sync lifecycle in NewsreaderStore is IN
-PROGRESS.** NewsreaderStore now owns one current manual run, its UniFFI
+**D4.5-D — session-owned Manual Sync lifecycle in NewsreaderStore is
+COMPLETE.** NewsreaderStore owns one current manual run, its UniFFI
 `SyncCancellation` handle, and the Swift task that submits it through
 `AppleCoreExecution.blockingCancellableResult`. Manual Sync state is explicit
 (`idle/running/cancelling`); cancellation signals both the Core handle and the
@@ -898,17 +898,22 @@ cancellation suppresses normal success/error presentation, and cancelling a run
 immediately supersedes its presentation generation so a fresh manual Sync may
 start even while the old synchronous Core call is still cooperatively winding
 down. Detach likewise cancels and invalidates the old run without accepting stale
-publication. The Core event listener
-also captures the attached Core session so an already-enqueued old-session
-automatic/background completion cannot publish after detach/reattach.
+publication. The Core event listener captures the attached Core session so an
+already-enqueued old-session automatic/background completion cannot publish after
+detach/reattach.
 
-D4.5-D does not yet provide the account/Core **quiescence barrier** required
-before replacing or deleting a Core that may still have synchronous work
-winding down; that remains D4.5-E. D4.5-D remains open until native tests/build
-validate the generated UniFFI names and the new store lifecycle. D4.5 after D
-still requires the account/Core quiescence barrier, presentation/localization
-work, automated regression coverage, and focused real-device acceptance defined
-above.
+D4.5-D validation on 23 September 2026 executed **345 native iOS tests with
+0 failures**, including the queued/running cooperative cancellation and central
+Core-execution-boundary coverage, and `./apple/ios/Build/build-app.sh`
+completed successfully.
+
+The next implementation package is **D4.5-E — account/Core quiescence
+barrier**. Before account removal, reconfiguration, or Core replacement, the
+active manual run must be cancelled and the old synchronous Core execution must
+actually quiesce before another Core can touch the same storage paths. Scene
+inactivity/backgrounding alone must not trigger this barrier. D4.5 after E still
+requires presentation/localization work, final automated regression coverage,
+and focused real-device cancellation/restart acceptance.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 
