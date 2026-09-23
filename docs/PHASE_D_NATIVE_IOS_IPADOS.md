@@ -1153,6 +1153,37 @@ finishing background/manual Sync. Focused tests cover persisted preference reads
 disable/cancel scheduling behavior, enable/reschedule behavior, and the
 dedicated Resume trigger.
 
+**D5-E — Native Local Notifications is IMPLEMENTED; validation is pending.**
+The existing Core notification-candidate contract remains authoritative; D5-E
+adds no Rust/UniFFI notification-domain logic and no APNs/push infrastructure.
+
+Native iOS now owns local delivery through `UNUserNotificationCenter`.
+Feed Settings expose the existing Core `systemNotificationsEnabled` preference.
+Enabling the preference first resolves native notification authorization; denied
+authorization leaves the Core feed preference disabled and presents a localized
+error. Disabling the preference requires no authorization interaction.
+
+A successful Background Sync hands Core-generated
+`SystemNotificationCandidate` values to `IOSSystemNotificationManager`.
+The BGAppRefresh success fanout is asynchronous and awaited before the OS task is
+completed, so iOS cannot suspend the process merely because Sync finished before
+notification submission. For each candidate the native manager submits one
+immediate local notification and only then acknowledges the candidate through
+the current app-wide Core session. Failed native submission is not acknowledged,
+preserving the existing durable retry semantics.
+
+Notification title/body presentation is shared with macOS through
+`apple/shared/FluxApple/SystemNotificationPresentation.swift`; the former
+macOS-local duplicate has been removed. Foreground notifications use banner/list
+presentation. A notification tap routes to its Core feed ID. Because the first
+native release intentionally owns one scene, an early/cold-launch tap is buffered
+until the app's `NewsreaderStore` presentation handler is attached, then
+consumed exactly once.
+
+Focused native tests cover authorization, denied permission, successful
+delivery-before-ACK, failed-delivery/no-ACK, buffered feed routing, and the
+requirement that BGTask completion waits for post-Sync fanout.
+
 Integrate BGTaskScheduler, local notifications and the native iOS WidgetKit
 presentation using the shared snapshot contract. Background execution shares
 the existing account/Core session, participates in app-wide Core quiescence and
