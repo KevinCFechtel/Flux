@@ -784,21 +784,42 @@ struct ArticleRowContent: Equatable, Sendable {
         let state = feedIconPresentationState(for: feedID, variant: variant)
         guard state.canRequest(at: now) else { return }
         let loader: @Sendable (Int64, FeedIconVariant) throws -> Data?
+        let productionCore: Flux?
         if let feedIconLoader {
             loader = feedIconLoader
+            productionCore = nil
         } else if let core {
             loader = { feedID, variant in try core.feedIcon(feedId: feedID, variant: variant)?.pngData }
+            productionCore = core
         } else {
             return
         }
         let ownership = IOSFeedIconRequestOwnership(key: key, generation: feedIconOwnershipGeneration)
         guard requestedFeedIcons.insert(ownership).inserted else { return }
         state.beginLoading()
-        Task { [weak self] in
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, productionCore, sessionCoordinator] in
             // The synchronous Core fetch remains on the bounded blocking lane.
             // ImageIO raster work is CPU-only and deliberately leaves that lane;
             // it must not run on the MainActor that owns presentation state.
-            let loaded = await AppleCoreExecution.shared.blockingResult { try loader(feedID, variant) }
+            let loaded: Result<Data?, Error>
+            if let productionCore {
+                guard let admitted = await sessionCoordinator.blockingResult(
+                    for: productionCore,
+                    { try loader(feedID, variant) }
+                ) else {
+                    guard let self,
+                          ownership.generation == feedIconOwnershipGeneration else { return }
+                    requestedFeedIcons.remove(ownership)
+                    feedIconPresentationStates[key]?.invalidateLoading()
+                    return
+                }
+                loaded = admitted
+            } else {
+                loaded = await AppleCoreExecution.shared.blockingResult {
+                    try loader(feedID, variant)
+                }
+            }
             let result: Result<IOSPreparedFeedIcon?, Error> = switch loaded {
             case let .success(data?):
                 await Task.detached(priority: .userInitiated) {
