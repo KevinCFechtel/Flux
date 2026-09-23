@@ -1652,7 +1652,7 @@ struct ArticleRowContent: Equatable, Sendable {
     }
 
     fileprivate func handleSyncCompleted(_ metadata: SyncCompleted) {
-        if metadata.reason == .background || metadata.reason == .periodic {
+        if metadata.reason == .background || metadata.reason == .periodic || metadata.reason == .resume {
             pending.accumulate(metadata.newArticlesByFeed.map { (feedID: $0.feedId, count: $0.count) })
             publishPending()
             if metadata.dataChanged && metadata.newArticlesByFeed.isEmpty { hasUnscopedNewDataSignal = true }
