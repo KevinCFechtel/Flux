@@ -136,7 +136,7 @@ final class SpotlightIndexer {
             DispatchQueue.main.async {
                 guard let self else { return }
                 guard !items.isEmpty else { self.finishUpdate(); return }
-                self.index.indexSearchableItems(items) { _ in DispatchQueue.main.async { [weak self] in self?.finishUpdate() } }
+                self.index.indexSearchableItems(items) { _ in DispatchQueue.main.async { [weak self = self] in self?.finishUpdate() } }
             }
         }
     }
