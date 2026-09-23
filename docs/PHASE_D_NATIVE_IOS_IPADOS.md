@@ -390,16 +390,39 @@ Sheet and save to configured Miniflux third-party service.
 
 ## 7. Background sync, notifications and widgets
 
-Regular news background refresh uses `BGAppRefreshTask` to initialize/use Core
-and call `sync(.background)`. `BGProcessingTask` is reserved for work that
-actually requires the longer-processing mechanism; it is not the default news
-refresh mechanism. iOS scheduling remains system-controlled and force-quit
-limitations are accepted platform boundaries.
+Regular news background refresh uses `BGAppRefreshTask` and the existing
+app-owned Core session to call `sync(.background)`. `BGProcessingTask` is
+reserved for work that actually requires the longer-processing mechanism; it is
+not the default news refresh mechanism. iOS scheduling remains system-controlled
+and force-quit limitations are accepted platform boundaries.
 
-After successful background sync the native layer may refresh the widget
-snapshot, request WidgetKit reload, process Core notification candidates and
-reconcile native media transfer work. Core-generated download intent must reach
-the native transfer executor after sync.
+Background Sync is not owned by `NewsreaderStore`. The store retains ownership
+of user-facing Manual-Sync presentation and the D4.5 Manual-Sync session, while
+an app-scoped background execution coordinator owns BGTask lifecycle. Foreground,
+manual and background work must converge on the same current account/Core
+session; D5 must not initialize a second Core instance against the same storage
+paths.
+
+The D4.5 Core-quiescence guarantee becomes account/Core-session-wide once D5
+introduces background Core execution. Account replacement, rebuild and removal
+must prevent new Core work from entering, request cancellation of cancellable
+work where appropriate, and wait for already-started synchronous Core execution
+to finish before replacing or destroying that Core session.
+
+D4.5 user cancellation remains specific to user-initiated Manual Sync.
+Background Sync has no user-facing cancellation control. BGTask expiration may
+reuse the same run-scoped Core `SyncCancellation` / `syncCancellable`
+primitive so synchronous Rust work can stop cooperatively when iOS revokes the
+task's execution time. That OS-owned expiration path does not give Background
+Sync Manual-Sync presentation or user-cancellation semantics.
+
+After a successfully completed background sync the native layer refreshes the
+widget snapshot, requests the targeted WidgetKit reloads, processes Core
+notification candidates and requests native media-transfer reconciliation.
+D5 owns this post-sync transfer-reconciliation trigger/handoff. D6 owns the
+actual iOS native transfer executor and its persistent background-`URLSession`
+lifecycle. Core-generated download intent therefore survives D5 even before the
+D6 executor is present, without introducing a temporary second download stack.
 
 Notifications are local only: Core owns candidate/domain semantics and iOS owns
 permission and delivery through `UNUserNotificationCenter`. Phase D adds no APNs
@@ -475,14 +498,13 @@ stable snapshot/pending-new-data behavior. Extract proven shared Apple code only
 where this creates actual reuse.
 
 The original D2 baseline is complete. The accepted UIKit Timeline amendment in
-section 5 replaces its renderer and Scrollover integration and is actively in
-progress. A native UIKit Timeline baseline, UIKit Scrollover geometry, targeted
-status presentation, deterministic sizing, incremental pagination/update work,
-and substantial performance hardening are already implemented. This does **not**
-close the amendment or freeze its current internal structure: ongoing
-physical-device performance investigation may still change fundamental Timeline
-layout, cell, image-presentation, preparation, or scheduling structures. D2
-product behavior remains preserved by that work.
+section 5 replaced its renderer and Scrollover integration and is also complete.
+U1-U5 are closed, U3 was accepted on real devices, the legacy article-image
+renderer has been removed, and the productive image path is
+ImageIO -> UIImageView/Core Animation. The UIKit Article Timeline is now
+architecture-frozen. Fundamental Timeline, Scrollover, layout or image-pipeline
+changes require a concrete reproducible regression case; ordinary later Phase-D
+work must preserve the frozen Timeline architecture and product behavior.
 
 ### D3 — Article Interaction, Reader & Search
 
@@ -996,15 +1018,25 @@ recurrence of the UIKit diffable-data-source crash. D4.5 is therefore closed.
 ### D5 — Background Sync, Local Notifications & Widgets
 
 Integrate BGTaskScheduler, local notifications and the native iOS WidgetKit
-presentation using the shared snapshot contract. Successful background sync
-also triggers the required native transfer reconciliation.
+presentation using the shared snapshot contract. Background execution shares
+the existing account/Core session, participates in app-wide Core quiescence and
+uses OS-owned cooperative cancellation only for BGTask expiration. It does not
+reuse the D4.5 Manual-Sync presentation lifecycle or expose user cancellation.
+
+Successful background sync updates the App Group widget projection, requests
+targeted WidgetKit reloads, hands Core notification candidates to the native
+notification layer and requests native media-transfer reconciliation. D5 closes
+the transfer-reconciliation trigger/handoff; the actual persistent iOS transfer
+executor remains D6 work.
 
 ### D6 — Native Media & Background Downloads
 
 Bring the existing Listening List/player/download experience to iOS/iPadOS,
 including chapters, artwork, progress, policies, AVAudioSession, background
-audio and true background URLSession downloads. Reuse/refactor Phase-C Apple
-media code only where needed for actual cross-platform use.
+audio and true background URLSession downloads. D6 supplies the iOS native
+transfer executor consumed by the transfer-reconciliation handoff established
+in D5. Reuse/refactor Phase-C Apple media code only where needed for actual
+cross-platform use.
 
 ### D7 — Now Playing & CarPlay
 
