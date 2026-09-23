@@ -2014,6 +2014,56 @@
         }
       }
     },
+    "Background Sync": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hintergrundsynchronisierung"
+          }
+        }
+      }
+    },
+    "Background Sync setting could not be loaded. Please try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Einstellung für die Hintergrundsynchronisierung konnte nicht geladen werden. Bitte versuchen Sie es erneut."
+          }
+        }
+      }
+    },
+    "Background Sync setting could not be saved. Please try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Einstellung für die Hintergrundsynchronisierung konnte nicht gespeichert werden. Bitte versuchen Sie es erneut."
+          }
+        }
+      }
+    },
+    "When enabled, FluxNews may refresh news in the background and when you return to the app. Manual Sync remains available at all times.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wenn aktiviert, kann FluxNews Nachrichten im Hintergrund und bei der Rückkehr zur App aktualisieren. Die manuelle Synchronisierung bleibt jederzeit verfügbar."
+          }
+        }
+      }
+    },
+    "Saving…": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wird gespeichert …"
+          }
+        }
+      }
+    },
     "·": {},
     "•": {},
     "Reading time": {
