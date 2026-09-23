@@ -28,6 +28,7 @@ final class CoreBootstrapper: ObservableObject {
     @Published private(set) var core: Flux?
     @Published private(set) var coreRevision: UInt64 = 0
     let credentialStore: IOSCredentialStoreProtocol
+    let coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator
     var onCoreChanged: ((Flux?) -> Void)?
     var prepareForCoreReplacement: (() async -> Void)?
     var onCoreReplacementAborted: (() -> Void)?
@@ -41,10 +42,12 @@ final class CoreBootstrapper: ObservableObject {
 
     init(
         credentialStore: IOSCredentialStoreProtocol = IOSKeychainCredentialStore(),
+        coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator = IOSCoreSessionExecutionCoordinator(),
         coreFactory: @escaping @Sendable (IOSMinifluxCredentials) throws -> Flux = CoreBootstrapper.defaultCoreFactory,
         accountValidator: @escaping @Sendable (IOSMinifluxCredentials) throws -> AccountValidationAttempt = CoreBootstrapper.defaultAccountValidator
     ) {
         self.credentialStore = credentialStore
+        self.coreSessionExecutionCoordinator = coreSessionExecutionCoordinator
         self.coreFactory = coreFactory
         self.accountValidator = accountValidator
     }
@@ -126,18 +129,26 @@ final class CoreBootstrapper: ObservableObject {
         }
 
         await prepareForCoreReplacement?()
-        guard generation == bootstrapGeneration else { return }
+        await coreSessionExecutionCoordinator.quiesce()
+        guard generation == bootstrapGeneration else {
+            coreSessionExecutionCoordinator.resume(activeCore)
+            return
+        }
 
         do {
             try await AppleCoreExecution.shared.responsive {
                 try activeCore.removeAccountState()
             }
-            guard generation == bootstrapGeneration else { return }
+            guard generation == bootstrapGeneration else {
+                coreSessionExecutionCoordinator.resume(activeCore)
+                return
+            }
             try credentialStore.remove()
             deactivateAfterCoreQuiescence()
             state = .accountRequired
         } catch {
             guard generation == bootstrapGeneration else { return }
+            coreSessionExecutionCoordinator.resume(activeCore)
             onCoreReplacementAborted?()
             validationMessage = String(localized: "The account could not be removed.")
         }
@@ -151,10 +162,15 @@ final class CoreBootstrapper: ObservableObject {
     private func activate(_ account: IOSMinifluxCredentials, persist: Bool, generation: UInt64) async throws -> Bool {
         if persist { try credentialStore.save(account) }
 
-        let replacingExistingCore = core != nil
-        if replacingExistingCore {
+        let previousCore = core
+        let replacingExistingCore = previousCore != nil
+        if let previousCore {
             await prepareForCoreReplacement?()
-            guard generation == bootstrapGeneration else { return false }
+            await coreSessionExecutionCoordinator.quiesce()
+            guard generation == bootstrapGeneration else {
+                coreSessionExecutionCoordinator.resume(previousCore)
+                return false
+            }
         }
 
         let factory = coreFactory
@@ -167,10 +183,17 @@ final class CoreBootstrapper: ObservableObject {
         do {
             configuredCore = try result.get()
         } catch {
-            if replacingExistingCore { onCoreReplacementAborted?() }
+            if let previousCore {
+                coreSessionExecutionCoordinator.resume(previousCore)
+                onCoreReplacementAborted?()
+            }
             throw error
         }
 
+        if replacingExistingCore {
+            coreSessionExecutionCoordinator.deactivate()
+        }
+        coreSessionExecutionCoordinator.activate(configuredCore)
         core = configuredCore
         credentials = account
         coreRevision &+= 1
@@ -181,14 +204,21 @@ final class CoreBootstrapper: ObservableObject {
 
     func deactivate() async {
         let generation = nextBootstrapGeneration()
-        if core != nil {
+        if let activeCore = core {
             await prepareForCoreReplacement?()
-            guard generation == bootstrapGeneration else { return }
+            await coreSessionExecutionCoordinator.quiesce()
+            guard generation == bootstrapGeneration else {
+                coreSessionExecutionCoordinator.resume(activeCore)
+                return
+            }
         }
         deactivateAfterCoreQuiescence()
     }
 
     private func deactivateAfterCoreQuiescence() {
+        if core != nil {
+            coreSessionExecutionCoordinator.deactivate()
+        }
         core = nil
         coreRevision &+= 1
         credentials = nil
