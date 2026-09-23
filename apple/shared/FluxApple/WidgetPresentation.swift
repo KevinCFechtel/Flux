@@ -50,7 +50,6 @@ enum WidgetSyncTimestamp {
 enum HeadlinesPresentation {
     static func capacity(for family: WidgetFamily) -> Int {
         switch family {
-        case .systemSmall: 1
         case .systemMedium: 3
         case .systemLarge: 7
         case .systemExtraLarge: 12
