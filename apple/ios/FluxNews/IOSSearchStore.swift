@@ -53,13 +53,24 @@ final class IOSSearchStore: ObservableObject {
     }
 
     private(set) var core: Flux?
+    private var coreSessionExecutionCoordinator = IOSCoreSessionExecutionCoordinator()
     private var requestState = IOSSearchRequestState()
     private var paginationExhausted = false
     private var searchReferenceDate = Date.now
     private let pageSize = IOSSearchPaginationPolicy.pageSize
     var onLocalFirstMutation: () -> Void = {}
 
-    func attach(to core: Flux) { invalidate(); self.core = core }
+    func attach(
+        to core: Flux,
+        coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator? = nil
+    ) {
+        invalidate()
+        if let coreSessionExecutionCoordinator {
+            self.coreSessionExecutionCoordinator = coreSessionExecutionCoordinator
+        }
+        self.coreSessionExecutionCoordinator.ensureActive(core)
+        self.core = core
+    }
     func detach() { invalidate(); core = nil; clear() }
 
     func submit() {
@@ -77,10 +88,16 @@ final class IOSSearchStore: ObservableObject {
         paginationExhausted = false
         errorMessage = nil
 
-        Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.blockingResult {
-                try core.searchArticles(request: SearchArticlesRequest(query: value, offset: 0, limit: pageSize))
-            }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.blockingResult(
+                for: core,
+                {
+                    try core.searchArticles(
+                        request: SearchArticlesRequest(query: value, offset: 0, limit: pageSize)
+                    )
+                }
+            ) else { return }
             guard let self, self.requestState.isCurrent(requestGeneration) else { return }
             self.isSearching = false
             switch result {
@@ -121,10 +138,20 @@ final class IOSSearchStore: ObservableObject {
         let value = submittedQuery
         isLoadingMore = true
 
-        Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.blockingResult {
-                try core.searchArticles(request: SearchArticlesRequest(query: value, offset: offset, limit: IOSSearchPaginationPolicy.pageSize))
-            }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.blockingResult(
+                for: core,
+                {
+                    try core.searchArticles(
+                        request: SearchArticlesRequest(
+                            query: value,
+                            offset: offset,
+                            limit: IOSSearchPaginationPolicy.pageSize
+                        )
+                    )
+                }
+            ) else { return }
             guard let self, self.requestState.isCurrent(requestGeneration) else { return }
             self.isLoadingMore = false
             switch result {
@@ -167,8 +194,12 @@ final class IOSSearchStore: ObservableObject {
             return
         }
         let requestGeneration = requestState.generation
-        Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.blockingResult { try core.readerDocumentForSearch(articleId: article.id) }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.blockingResult(
+                for: core,
+                { try core.readerDocumentForSearch(articleId: article.id) }
+            ) else { return }
             guard let self, self.requestState.isCurrent(requestGeneration) else { return }
             completion(result)
         }
@@ -187,8 +218,12 @@ final class IOSSearchStore: ObservableObject {
             completion(.failure(IOSCoreError.notConfigured))
             return
         }
-        Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.blockingResult { try core.saveToService(articleId: article.id) }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.blockingResult(
+                for: core,
+                { try core.saveToService(articleId: article.id) }
+            ) else { return }
             guard self != nil else { return }
             completion(result)
         }
@@ -201,11 +236,20 @@ final class IOSSearchStore: ObservableObject {
         feedback: MutationFeedback? = nil
     ) {
         guard let core else { return }
-        Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.blockingResult {
-                if let read { return try core.searchSetReadState(articleId: articleID, read: read) }
-                return try core.searchSetStarredState(articleId: articleID, starred: starred ?? false)
-            }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.blockingResult(
+                for: core,
+                {
+                    if let read {
+                        return try core.searchSetReadState(articleId: articleID, read: read)
+                    }
+                    return try core.searchSetStarredState(
+                        articleId: articleID,
+                        starred: starred ?? false
+                    )
+                }
+            ) else { return }
             guard let self else { return }
             switch result {
             case let .success(disposition):
