@@ -49,10 +49,9 @@ fn sync_plan(store: &Store, reason: SyncReason) -> Result<SyncPlan, CoreError> {
                 None => Ok(SyncPlan::Full),
             }
         }
-        SyncReason::Manual
-        | SyncReason::AppStart
-        | SyncReason::Periodic
-        | SyncReason::Widget => Ok(SyncPlan::Full),
+        SyncReason::Manual | SyncReason::AppStart | SyncReason::Periodic | SyncReason::Widget => {
+            Ok(SyncPlan::Full)
+        }
     }
 }
 
@@ -347,7 +346,6 @@ fn run_full_cancellable(
         system_notification_candidates,
     }))
 }
-
 
 fn run_delta_cancellable(
     remote: &dyn RemoteSource,
