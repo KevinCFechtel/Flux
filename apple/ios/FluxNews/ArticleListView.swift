@@ -513,6 +513,12 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         }
         return false
     }
+    var nativeTopEdgeEffectUsesAutomaticStyleForTesting: Bool {
+        if #available(iOS 26.0, *) {
+            return tableView.topEdgeEffect.style.isEqual(UIScrollEdgeEffect.Style.automatic)
+        }
+        return false
+    }
     var statusBarScrimVisibleForTesting: Bool { !statusBarScrim.isHidden }
 #endif
 
@@ -550,15 +556,18 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         ] {
             tableView.register(IOSUIKitArticleCell.self, forCellReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant))
         }
-        // Keep native scroll-edge backing out of the Timeline chrome. The
-        // navigation capsule and toolbar actions are already Liquid Glass and
-        // intentionally float directly above article content, matching the
-        // bottom action-bar treatment. Status-bar legibility is handled by the
-        // short static scrim below rather than by a full-width edge effect that
-        // extends underneath the capsule.
+        // The scope capsule is no longer a UINavigationBar item, so the native
+        // top edge effect can follow only the actual system bar chrome instead of
+        // extending underneath that custom control. Prefer the system automatic
+        // style on iOS 26+; iOS 27 gives it its own updated appearance.
+        let usesNativeTopEdgeEffect: Bool
         if #available(iOS 26.0, *) {
-            tableView.topEdgeEffect.isHidden = true
+            tableView.topEdgeEffect.style = .automatic
+            tableView.topEdgeEffect.isHidden = false
             tableView.bottomEdgeEffect.isHidden = true
+            usesNativeTopEdgeEffect = true
+        } else {
+            usesNativeTopEdgeEffect = false
         }
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self, UITraitLayoutDirection.self]) { (self: Self, _) in
@@ -585,10 +594,10 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             statusBarScrim.topAnchor.constraint(equalTo: view.topAnchor),
             statusBarScrimHeight,
         ])
-        // This intentionally remains visible on iOS 27 too. It protects only
-        // the status-bar band, leaving the Liquid Glass navigation capsule free
-        // of an additional scroll-edge backing just like the bottom action bar.
-        statusBarScrim.isHidden = false
+        // Older systems have no UIScrollEdgeEffect API, so retain the bounded
+        // status-bar fallback there. On iOS 26+ the native automatic top edge
+        // effect owns this protection and the scrim must not stack with it.
+        statusBarScrim.isHidden = usesNativeTopEdgeEffect
 
         dataSource = UITableViewDiffableDataSource<Section, Int64>(tableView: tableView) { [weak self] tableView, indexPath, id in
             guard let self,

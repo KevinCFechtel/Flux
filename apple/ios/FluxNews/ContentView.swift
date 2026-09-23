@@ -42,6 +42,12 @@ enum IOSArticleListChromeMode: Equatable {
     case persistentSplitCollapsed
 }
 
+enum IOSArticleListTitleCapsulePlacement: Equatable {
+    case floatingTopCenter
+    case floatingTopLeading
+    case hidden
+}
+
 enum IOSArticleListChromePresentation {
     static func mode(
         for presentation: AdaptivePresentation,
@@ -64,6 +70,21 @@ enum IOSArticleListChromePresentation {
         mode == .compactPortrait ? .bottomBar : .topBarTrailing
     }
 
+    static func titleCapsulePlacement(for mode: IOSArticleListChromeMode) -> IOSArticleListTitleCapsulePlacement {
+        switch mode {
+        case .compactPortrait:
+            .floatingTopCenter
+        case .compactLandscape, .persistentSplitCollapsed:
+            .floatingTopLeading
+        case .persistentSplit:
+            .hidden
+        }
+    }
+
+    static func showsTopNavigationBar(for mode: IOSArticleListChromeMode) -> Bool {
+        mode != .compactPortrait
+    }
+
     static func usesLegacyTopBarActionMaterial(for mode: IOSArticleListChromeMode) -> Bool {
         switch mode {
         case .compactLandscape, .persistentSplit, .persistentSplitCollapsed:
@@ -81,6 +102,12 @@ enum IOSArticleListActionChromeMetrics {
 }
 
 enum IOSArticleListTitleCapsuleMetrics {
+    /// The title capsule is deliberately outside UINavigationBar chrome. These
+    /// insets create a small transparent floating row without registering the
+    /// capsule as a scroll-edge element.
+    static let floatingHorizontalInset: CGFloat = 12
+    static let floatingVerticalInset: CGFloat = 4
+
     /// The iPad collapsed-split inline capsule still needs a useful minimum title
     /// width beside the trailing toolbar actions.
     static let inlineMinimumContentWidth: CGFloat = 280
@@ -90,14 +117,14 @@ enum IOSArticleListTitleCapsuleMetrics {
     static let inlineCountPriority: Double = 2
 
     /// Compact-height iPhone landscape uses the same two-line information
-    /// hierarchy as portrait, but trims the vertical chrome so the navigation bar
-    /// does not consume unnecessary landscape height.
+    /// hierarchy as portrait, but trims the capsule itself so the separate
+    /// floating row does not consume unnecessary landscape height.
     static let compactStackedVerticalPadding: CGFloat = 0
     static let compactStackedHorizontalPadding: CGFloat = 8
     static let compactStackedSpacing: CGFloat = 6
-    /// Give ordinary feed/category titles enough room before the toolbar starts
-    /// compressing the leading item. Very long titles still yield to trailing
-    /// actions instead of displacing them.
+    /// Give ordinary feed/category titles enough room in the independent floating
+    /// row. Very long titles may still truncate rather than claiming the full
+    /// detail width.
     static let compactStackedMinimumContentWidth: CGFloat = 190
     static let compactStackedTitlePriority: Double = 3
 }
@@ -384,6 +411,12 @@ struct ContentView: View {
             ArticleListView(store: newsreaderStore, onArticleTap: openArticle, onArticleAction: handleArticleAction)
         }
             .navigationBarTitleDisplayMode(IOSArticleNavigationPresentation.titleDisplayMode)
+            // Portrait has no top actions after the title capsule leaves the
+            // navigation bar, so do not retain an empty system bar above it.
+            .toolbar(
+                IOSArticleListChromePresentation.showsTopNavigationBar(for: articleListChromeMode) ? .visible : .hidden,
+                for: .navigationBar
+            )
             // A collapsed split view pushes the detail and offers a back button.
             // The Timeline is the root of this app's navigation: the branded
             // button opens the scope chooser, there is nothing to go back to.
@@ -896,7 +929,7 @@ private struct ArticleListTitleCapsule: View {
         }
         .padding(.horizontal, horizontalPadding)
         .padding(.vertical, verticalPadding)
-        .background { ArticleListTitleCapsuleBackground(layout: layout) }
+        .background { ArticleListTitleCapsuleBackground() }
         .accessibilityElement(children: .combine)
     }
 
@@ -997,8 +1030,6 @@ private struct ArticleListTitleCapsule: View {
 }
 
 private struct ArticleListTitleCapsuleBackground: View {
-    let layout: ArticleListTitleCapsuleLayout
-
     /// Whether the system is asked to avoid see-through backgrounds. Glass is
     /// exactly that, and the title has to stay legible over scrolling articles,
     /// so this substitutes an opaque fill rather than trusting the effect to
@@ -1007,17 +1038,15 @@ private struct ArticleListTitleCapsuleBackground: View {
 
     @ViewBuilder
     var body: some View {
-        if #available(iOS 26.0, *), layout != .stacked {
-            // Leading toolbar items already receive the system's toolbar glass on
-            // iOS 26+. Drawing our own glass inside it produces a visible
-            // double-capsule/ring in both compact landscape and collapsed split.
-            Color.clear
-        } else if reduceTransparency {
+        if reduceTransparency {
             Capsule().fill(Color(uiColor: .secondarySystemBackground))
         } else if #available(iOS 26.0, *) {
+            // The capsule no longer lives in UINavigationBar, so it owns exactly
+            // one glass layer instead of inheriting toolbar glass from the system.
             ArticleListGlassCapsule()
         } else {
-            // iOS 18 has no glass material; the closest stock equivalent.
+            // iOS 17-25 have no Liquid Glass; regular material is the closest
+            // stock presentation for this independent floating control.
             Capsule().fill(.regularMaterial)
         }
     }
@@ -1179,54 +1208,54 @@ private struct ArticleListNavigationChrome<Content: View>: View {
         // does not make the compact landscape capsule breathe horizontally.
         let landscapeWidthReservationSubtitle = store.isSyncing ? landscapeCountLabel : syncingLabel
 
-        // Keep the Timeline itself outside the chrome-mode switch. Rotation only
-        // replaces toolbar items; it must never replace the UIViewControllerRepresentable
-        // subtree and thereby discard the table's current scroll position.
+        let capsulePlacement = IOSArticleListChromePresentation.titleCapsulePlacement(for: chromeMode)
+
+        // Keep the Timeline itself outside the chrome-mode switch. The scope
+        // capsule is a separate safe-area inset instead of a UINavigationBar
+        // item, so native scroll-edge geometry is derived only from actual
+        // system navigation/toolbar chrome.
         content()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                switch chromeMode {
-                case .compactPortrait:
-                    ToolbarItem(placement: .principal) {
-                        ArticleListTitleCapsule(
-                            title: title,
-                            subtitle: capsuleSubtitle(portraitSubtitle),
-                            widthReservationSubtitle: nil,
-                            layout: .stacked,
-                            action: onSelectScope
-                        )
-                    }
-                case .compactLandscape:
-                    ToolbarItem(placement: .topBarLeading) {
-                        ArticleListTitleCapsule(
-                            title: title,
-                            subtitle: capsuleSubtitle(landscapeSubtitle),
-                            widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
-                            layout: .compactStacked,
-                            action: onSelectScope
-                        )
-                    }
-                case .persistentSplit, .persistentSplitCollapsed:
-                    ToolbarItem(placement: .topBarLeading) {
-                        ArticleListTitleCapsule(
-                            title: title,
-                            subtitle: capsuleSubtitle(landscapeSubtitle),
-                            widthReservationSubtitle: nil,
-                            layout: .inline,
-                            action: onSelectScope
-                        )
-                        // Keep the toolbar slot and its measured width alive while
-                        // the sidebar is visible. Inserting/removing the item during
-                        // the split-view animation makes iPadOS re-layout the nav bar
-                        // and can visibly disturb the UIKit timeline underneath.
-                        .opacity(chromeMode == .persistentSplitCollapsed ? 1 : 0)
-                        .allowsHitTesting(chromeMode == .persistentSplitCollapsed)
-                        .accessibilityHidden(chromeMode != .persistentSplitCollapsed)
-                        .transaction { transaction in
-                            transaction.animation = nil
-                        }
-                    }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                switch (capsulePlacement, chromeMode) {
+                case (.floatingTopCenter, .compactPortrait):
+                    ArticleListTitleCapsule(
+                        title: title,
+                        subtitle: capsuleSubtitle(portraitSubtitle),
+                        widthReservationSubtitle: nil,
+                        layout: .stacked,
+                        action: onSelectScope
+                    )
+                    .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
+                    .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                case (.floatingTopLeading, .compactLandscape):
+                    ArticleListTitleCapsule(
+                        title: title,
+                        subtitle: capsuleSubtitle(landscapeSubtitle),
+                        widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
+                        layout: .compactStacked,
+                        action: onSelectScope
+                    )
+                    .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
+                    .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                case (.floatingTopLeading, .persistentSplitCollapsed):
+                    ArticleListTitleCapsule(
+                        title: title,
+                        subtitle: capsuleSubtitle(landscapeSubtitle),
+                        widthReservationSubtitle: nil,
+                        layout: .inline,
+                        action: onSelectScope
+                    )
+                    .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
+                    .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                case (.hidden, .persistentSplit):
+                    EmptyView()
+                default:
+                    EmptyView()
                 }
             }
     }

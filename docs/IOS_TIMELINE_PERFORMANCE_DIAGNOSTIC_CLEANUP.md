@@ -187,7 +187,7 @@ Deliberately retained, classified per the three categories above:
 
 | Symbol | Class | Reason |
 |---|---|---|
-| `IOSUIKitTimelineTopScrimView` | Promote | The static status-bar gradient is the accepted shipping protection on all supported iOS versions, including iOS 27. Native top/bottom edge effects remain disabled for the Timeline so the Liquid Glass capsule/actions float directly over content; the scrim protects only the status-bar band. |
+| `IOSUIKitTimelineTopScrimView` | Promote | Retained as the iOS/iPadOS 17-25 status-bar fallback. After the 23 September 2026 chrome amendment, iOS/iPadOS 26+ hides it and uses the native `.automatic` top edge effect; the bottom edge effect remains disabled. |
 | `IOSUIKitTimelinePerformanceMetrics` | Promote | The oracle tests assert `systemLayoutSizeFittingCalls == 0` and `preferredLayoutAttributesFittingCalls == 0` through it. That is the proof that the cell never self-sizes — the core invariant of the UITableView migration. Removing the counters would delete the proof. |
 | `IOSUIKitTimelinePerformanceDiagnostics` | Retain as tooling | Console readout for the above. Its UI is behind `#if DEBUG \|\| FLUX_PERFORMANCE_DIAGNOSTICS` and cannot be reached in Release; the static controller reference is `weak`. The counter increments themselves do run in Release. |
 | `articleImageRasterScale` on the cell | Retain as tooling | Narrow decoded-scale test seam only; there is no production renderer or raster-scale switch. |
@@ -208,10 +208,12 @@ single-renderer image/EXIF coverage and deterministic UIKit RTL geometry.
 Historical experiment descriptions above remain intentionally as the
 investigation record and no longer describe shipping code.
 
-Fixed chrome, no longer switchable: scroll edge effect disabled, Scrollover undo
-pill in `.regularMaterial`, the title as a Liquid Glass capsule
-(`UIGlassEffect(style: .regular)`, `.regularMaterial` below iOS 26), the bounded status-bar
-gradient on all supported iOS versions.
+Fixed chrome, no longer switchable: the native top scroll-edge effect is
+`.automatic` on iOS/iPadOS 26+ and the bounded status-bar gradient is retained
+only on 17-25; the bottom edge effect remains disabled. The scope title is a
+detached Liquid Glass capsule in a normal top `safeAreaInset`
+(`UIGlassEffect(style: .regular)`, `.regularMaterial` below iOS 26), and the
+Scrollover undo pill remains in `.regularMaterial`.
 
 New presentation mode **Visual compact** (`ArticlePresentationMode.visualCompact`):
 a 4:3 thumbnail beside the title, metadata bar full width above, preview below —

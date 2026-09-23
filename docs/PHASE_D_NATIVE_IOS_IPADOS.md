@@ -347,21 +347,19 @@ symbol across idle and active Sync while preserving a stable toolbar slot.
 D4.5 supersedes only that control-state presentation with an explicit Cancel
 action while retaining the same toolbar geometry. iPhone portrait keeps Sync,
 Filter/Sort, and More in the bottom toolbar.
-iPhone landscape moves the same action group to the trailing top toolbar and
-uses a compact leading interactive scope capsule that preserves the configured
+iPhone landscape moves the same action group to the trailing top toolbar. The
+interactive scope capsule is no longer a navigation-bar item: it lives in a
+separate top safe-area inset below the system bar and preserves the configured
 current-scope article count in compact numeric form (or the existing transient
-`Syncing…` substitution).
+`Syncing…` substitution). iPhone portrait uses the same detached-inset model and
+hides the otherwise-empty top navigation bar.
 Persistent iPad split navigation also uses the trailing top toolbar and keeps
-the detail navigation bar title-free while the sidebar is visible because that
-sidebar already communicates the selected scope. If iPadOS temporarily hides the
-sidebar, the detail view restores an explicit leading interactive scope capsule
-with chevron so navigation does not depend on the edge-swipe gesture. The
-leading toolbar slot remains structurally present in both split states; while
-the sidebar is visible the capsule is hidden, non-interactive, and excluded
-from accessibility instead of being removed, so split-view transitions do not
-rebuild navigation chrome or perturb Timeline geometry. Category selection and
-category expansion are separate sidebar interactions so a selected category can
-still be expanded or collapsed independently;
+the detail title-free while the sidebar is visible because that sidebar already
+communicates the selected scope. If iPadOS temporarily hides the sidebar, the
+detail view restores the interactive scope capsule with chevron in the independent
+top inset so navigation does not depend on the edge-swipe gesture. Category
+selection and category expansion remain separate sidebar interactions so a
+selected category can still be expanded or collapsed independently;
 active manual Sync is indicated by continuous symbol rotation, and successful
 manual Sync briefly presents a checkmark before returning to the idle symbol.
 Failure returns directly to the idle symbol. This is native transient
@@ -564,28 +562,29 @@ elevation.
 
 The Newsreader navigation scope title is stable and never embeds the live
 article count into the title string itself. The accepted native chrome is the
-scope capsule implemented by `ArticleListTitleCapsule`: iPhone portrait uses a
-stacked capsule in the principal toolbar position with the optional descriptive
-current-scope count; iPhone landscape uses a compact two-line leading capsule
-with the scope title above the compact count. Its compact-height typography and
-zero extra vertical padding fit the landscape navigation bar without allowing
-SwiftUI to vertically compress the text away. The leading item reserves a modest
-minimum text width and prefers the complete one-line scope title whenever the
-available toolbar space permits it; only unusually long titles yield and truncate
-before displacing the trailing action group. The landscape capsule reserves the
-alternate second-line width so transitions between the count and `Syncing…` do
-not make the chrome breathe horizontally, while remaining substantially narrower
-than the former one-line title-plus-count presentation. Persistent iPad split
-navigation keeps the inline leading capsule: it is hidden while the sidebar is
-visible but retains its toolbar slot; when the sidebar collapses, that capsule
-becomes visible and interactive. On iOS/iPadOS 17-25, every article-list action group that lives in the top
-navigation bar is grouped over one native `.regularMaterial` capsule for contrast
-against scrolling article text. This covers iPhone landscape as well as iPad
-split/collapsed-split chrome. iPhone portrait remains on the native bottom bar
-without an extra app-owned capsule. iOS 26+ keeps the system Liquid Glass toolbar
-treatment without an additional app-owned material layer. During Sync the capsule's count presentation
-temporarily shows `Syncing…`. The capsule is the
-authoritative visible title/header presentation and carries the accessibility
+scope capsule implemented by `ArticleListTitleCapsule`, detached from
+`UINavigationBar` and rendered in a normal SwiftUI top `safeAreaInset`.
+iPhone portrait uses a centered stacked capsule with the optional descriptive
+current-scope count and hides the otherwise-empty top navigation bar. iPhone
+landscape uses a compact two-line leading capsule in the independent inset row,
+with the scope title above the compact count, while Sync/Filter/More remain in
+the trailing system toolbar. Its compact-height typography and zero extra
+internal vertical padding avoid wasting landscape height. The capsule reserves
+the alternate second-line width so transitions between the count and `Syncing…`
+do not make the chrome breathe horizontally. Persistent iPad split navigation
+shows no capsule while the sidebar is visible; when that sidebar collapses, the
+inline capsule becomes visible and interactive in the detached inset row.
+
+On iOS/iPadOS 17-25, every article-list action group that lives in the top
+navigation bar is still grouped over one native `.regularMaterial` capsule for
+contrast against scrolling article text. iOS 26+ keeps the system Liquid Glass
+toolbar treatment for those system actions. The detached scope capsule owns its
+own single Liquid Glass layer on 26+ (or `.regularMaterial` before 26) rather
+than inheriting toolbar glass. The native Timeline top-edge effect uses
+`.automatic` on iOS/iPadOS 26+ and no longer includes the detached capsule; the
+older bounded status-bar scrim remains only for iOS/iPadOS 17-25. During Sync the
+capsule's count presentation temporarily shows `Syncing…`. The capsule remains
+the authoritative visible title/header presentation and carries the accessibility
 header role; do not reintroduce a separate Large-Title or native-subtitle product
 presentation over it.
 

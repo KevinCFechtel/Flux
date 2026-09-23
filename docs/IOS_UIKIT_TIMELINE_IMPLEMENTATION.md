@@ -462,23 +462,29 @@ serialized transform work, the narrow decoded-scale test seam, and the
 presentation scheduler. UIKit/Core Animation owns normal final image
 presentation.
 
-### 8.5 Status-bar edge protection during U3 closure
+### 8.5 Status-bar and navigation edge protection
 
-The native scroll edge effect remains disabled for the Timeline. iOS 26 device
-testing had already shown the progressive blur to hurt scrolling. On iOS 27 the
-native `.soft` effect was smooth even through more than 200 loaded articles, but
-both `.soft` and `.automatic` extended visibly underneath the custom navigation
-capsule. Detaching `UIRefreshControl` did not materially shorten that region, so
-normal Pull to Refresh is restored.
+The U3 closure originally kept the native top scroll-edge effect disabled because
+both `.soft` and the then-current `.automatic` presentation extended underneath
+the custom scope capsule while that capsule was a `UINavigationBar` toolbar
+item. Pull to Refresh was not the cause and remains enabled.
 
-Flux therefore uses the short static status-bar scrim on iOS 27 as well. The
-navigation capsule and toolbar actions are already Liquid Glass and intentionally
-float directly above article content without an additional full-width backing,
-matching the unbacked bottom action-bar treatment. The scrim protects only the
-status-bar band where system glyph legibility needs help; it does not extend under
-the capsule. Its upper glyph band uses a moderately stronger background blend
-than the earlier version while retaining the same bounded status-bar height and
-transparent lower edge.
+On 23 September 2026 the presentation chrome was amended without reopening the
+frozen Timeline renderer/container architecture. `ArticleListTitleCapsule` is
+now rendered by the SwiftUI shell in a normal top `safeAreaInset`, not as
+`.principal` or `.topBarLeading` navigation content. iPhone portrait hides the
+otherwise-empty top navigation bar; iPhone landscape and iPad keep only their
+actual system action group in that bar. A visible persistent iPad sidebar keeps
+the detail title-free; when the sidebar collapses, the scope capsule appears in
+the independent inset row.
+
+Because a normal `safeAreaInset` does not extend scroll-edge effects the way
+`safeAreaBar` does, iOS/iPadOS 26+ now re-enables the Timeline's native top edge
+effect with the system `.automatic` style. The bottom edge effect remains
+disabled. The bounded status-bar scrim is retained only as the iOS/iPadOS 17-25
+fallback and is hidden on 26+. The detached scope capsule owns its own
+`UIGlassEffect(style: .regular)` on 26+ (or `.regularMaterial` before 26), so
+there is no inherited toolbar-glass double layer.
 
 ### 8.6 iOS 26 full-width-image behavior — ACCEPTED LIMITATION
 

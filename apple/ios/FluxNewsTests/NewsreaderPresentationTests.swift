@@ -62,7 +62,20 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
-    func testCompactLandscapeTitleCapsuleFitsCompactToolbarHeight() {
+    func testTitleCapsuleIsDetachedFromNavigationBarChrome() {
+        XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .compactPortrait), .floatingTopCenter)
+        XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .compactLandscape), .floatingTopLeading)
+        XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .persistentSplit), .hidden)
+        XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .persistentSplitCollapsed), .floatingTopLeading)
+        XCTAssertFalse(IOSArticleListChromePresentation.showsTopNavigationBar(for: .compactPortrait))
+        XCTAssertTrue(IOSArticleListChromePresentation.showsTopNavigationBar(for: .compactLandscape))
+        XCTAssertTrue(IOSArticleListChromePresentation.showsTopNavigationBar(for: .persistentSplit))
+        XCTAssertTrue(IOSArticleListChromePresentation.showsTopNavigationBar(for: .persistentSplitCollapsed))
+        XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset, 12)
+        XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.floatingVerticalInset, 4)
+    }
+
+    func testCompactLandscapeTitleCapsuleFitsCompactFloatingRow() {
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.compactStackedVerticalPadding, 0)
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.compactStackedHorizontalPadding, 8)
         XCTAssertLessThan(IOSArticleListTitleCapsuleMetrics.compactStackedSpacing, 8)
@@ -388,13 +401,20 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testTimelineLeavesGlassChromeUnbackedAndUsesStatusBarScrim() {
+    func testTimelineUsesAutomaticNativeTopEdgeEffectWhenAvailable() {
         let bridge = IOSUIKitArticleTimelinePresentationBridge()
         let controller = makeTimelineController(bridge: bridge)
         controller.loadViewIfNeeded()
 
-        XCTAssertFalse(controller.nativeTopEdgeEffectEnabledForTesting)
-        XCTAssertTrue(controller.statusBarScrimVisibleForTesting)
+        if #available(iOS 26.0, *) {
+            XCTAssertTrue(controller.nativeTopEdgeEffectEnabledForTesting)
+            XCTAssertTrue(controller.nativeTopEdgeEffectUsesAutomaticStyleForTesting)
+            XCTAssertFalse(controller.statusBarScrimVisibleForTesting)
+        } else {
+            XCTAssertFalse(controller.nativeTopEdgeEffectEnabledForTesting)
+            XCTAssertFalse(controller.nativeTopEdgeEffectUsesAutomaticStyleForTesting)
+            XCTAssertTrue(controller.statusBarScrimVisibleForTesting)
+        }
         XCTAssertEqual(IOSUIKitTimelineTopScrimView.peakAlpha, 0.68, accuracy: 0.001)
     }
 
