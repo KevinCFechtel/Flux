@@ -303,12 +303,21 @@ pub trait RemoteSource: Send + Sync {
     }
     fn fetch_changed_articles_cancellable(
         &self,
-        _changed_after: i64,
-        _cancellation: &SyncCancellation,
+        changed_after: i64,
+        cancellation: &SyncCancellation,
     ) -> Result<Option<RemoteDelta>, CoreError> {
-        Err(CoreError::data(
-            "incremental entry synchronization is unavailable",
-        ))
+        if cancellation.is_cancelled() {
+            return Ok(None);
+        }
+        let snapshot = self.fetch_initial_articles_cancellable(cancellation)?;
+        if cancellation.is_cancelled() {
+            return Ok(None);
+        }
+        Ok(snapshot.map(|snapshot| RemoteDelta {
+            articles: snapshot.articles,
+            enclosures: snapshot.enclosures,
+            cursor: changed_after.saturating_add(1),
+        }))
     }
     /// Returns a server-derived changed_at high-water mark for establishing a
     /// post-Full-Sync delta baseline. Test/embedded sources without changed_at
