@@ -977,7 +977,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     func applyFeedIconPresentation(_ delta: IOSUIKitFeedIconPresentationDelta) {
         guard delta.key.variant == iconVariant else { return }
         feedIconPresentationApplicationCount &+= 1
-        applyFeedIconPresentation(delta, to: tableView.visibleCells.compactMap { $0 as? IOSUIKitArticleCell })
+        applyFeedIconPresentation(delta, to: materializedVisibleArticleCells())
     }
 
     func applyFeedIconPresentation(_ delta: IOSUIKitFeedIconPresentationDelta, to cells: [IOSUIKitArticleCell]) {
@@ -990,7 +990,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
 
     func clearFeedIconPresentation() {
         feedIconPresentationApplicationCount &+= 1
-        clearFeedIconPresentation(to: tableView.visibleCells.compactMap { $0 as? IOSUIKitArticleCell })
+        clearFeedIconPresentation(to: materializedVisibleArticleCells())
     }
 
     func clearFeedIconPresentation(to cells: [IOSUIKitArticleCell]) {
@@ -1000,9 +1000,22 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         }
     }
 
+    /// Returns only cells UIKit has already materialized. Avoid
+    /// `tableView.visibleCells` from update/presentation paths: on iOS 27 that
+    /// accessor may synchronously create cells while a diffable snapshot is
+    /// transitioning. During the intentional short window where `itemsByID`
+    /// already reflects the new structural state but the table still presents
+    /// the old snapshot, forced cell creation can ask the provider for an ID
+    /// that was just removed and UIKit asserts when the provider returns nil.
+    private func materializedVisibleArticleCells() -> [IOSUIKitArticleCell] {
+        (tableView.indexPathsForVisibleRows ?? []).compactMap {
+            tableView.cellForRow(at: $0) as? IOSUIKitArticleCell
+        }
+    }
+
     private func requestFeedIconsForVisibleCells() {
-        for cell in tableView.visibleCells {
-            guard let id = (cell as? IOSUIKitArticleCell)?.representedArticleID,
+        for cell in materializedVisibleArticleCells() {
+            guard let id = cell.representedArticleID,
                   let item = itemsByID[id]
             else { continue }
             onRequestFeedIcon?(item.content.article.feedId, iconVariant, view.traitCollection.displayScale)
@@ -1013,7 +1026,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
 #if DEBUG
         visibleCellReconfigurationPassCountForTesting &+= 1
 #endif
-        for case let cell as IOSUIKitArticleCell in tableView.visibleCells {
+        for cell in materializedVisibleArticleCells() {
             guard let id = cell.representedArticleID, let item = renderedItem(for: id) else { continue }
             configure(cell, item: item)
             if needsLayout { cell.setNeedsLayout() }

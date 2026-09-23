@@ -802,6 +802,56 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testFeedIconRetryDuringStructuralRemovalDoesNotForceDiffableCellMaterialization() async {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let articles = (1...30).map { timelineArticle(id: Int64($0)) }
+        let controller = makeTimelineController(
+            articles: articles,
+            presentationBridge: bridge,
+            feedIconBridge: bridge
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.frame = window.bounds
+        controller.view.layoutIfNeeded()
+        await controller.settleForTesting()
+        controller.tableViewForTesting.layoutIfNeeded()
+
+        XCTAssertFalse(controller.tableViewForTesting.indexPathsForVisibleRows?.isEmpty ?? true)
+
+        let remaining = Array(articles.dropFirst())
+        let storage = IOSUIKitArticleTimelineStructuralStorage()
+        storage.items = remaining.map { .init(article: $0, content: ArticleRowContent(article: $0)) }
+
+        // This combination reproduced the TestFlight abort: the structural
+        // model has already removed ID 1 while the table can still be
+        // presenting the prior diffable snapshot, and the feed-icon revision
+        // requests another pass over the visible rows.
+        controller.update(
+            structuralState: .init(
+                storage: storage,
+                change: .remove([articles[0].id]),
+                revision: 2
+            ),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            feedIconRequestRevision: 1,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false
+        )
+        await controller.settleForTesting()
+        controller.tableViewForTesting.layoutIfNeeded()
+
+        XCTAssertEqual(controller.orderedArticleIDsForTesting, remaining.map(\.id))
+        XCTAssertEqual(controller.tableViewForTesting.numberOfRows(inSection: 0), remaining.count)
+    }
+
+    @MainActor
     func testIncrementalTimelineChangesDoNotPerformFullReplacementCleanup() {
         let bridge = IOSUIKitArticleTimelinePresentationBridge()
         let first = timelineArticle(id: 1)
@@ -4071,6 +4121,22 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(source.contains("invalidateManualSyncSession()"))
         XCTAssertTrue(source.contains("store.ownsCoreEventSession(session)"))
         XCTAssertFalse(source.contains("blockingResult { try core.sync(reason: .manual) }"))
+    }
+
+    func testTimelineFeedIconRetryDoesNotUseMaterializingVisibleCellsAccessor() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let sourceURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("FluxNews/ArticleListView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        let helperStart = try XCTUnwrap(source.range(of: "private func requestFeedIconsForVisibleCells()"))
+        let helperTail = source[helperStart.lowerBound...]
+        let helperEnd = try XCTUnwrap(helperTail.range(of: "\n    private func reconfigureVisibleCells"))
+        let helper = helperTail[..<helperEnd.lowerBound]
+
+        XCTAssertTrue(helper.contains("materializedVisibleArticleCells()"))
+        XCTAssertFalse(helper.contains("tableView.visibleCells"))
     }
 
     func testCancellableManualSyncPresentationUsesCancelRestartAndLocalizedAccessibility() throws {

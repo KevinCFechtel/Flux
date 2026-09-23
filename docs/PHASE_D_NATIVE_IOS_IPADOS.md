@@ -956,11 +956,30 @@ tests with 0 failures**, including
 with `TEST SUCCEEDED`. `./apple/ios/Build/build-app.sh` also completed
 successfully.
 
-D4.5-F, and therefore D4.5 as a whole, remains open only for focused physical
-device acceptance. That acceptance must verify start -> cancel -> immediate
-restart, coherent scope count/`Syncing…` presentation, no cancellation error
-alert, and no stale success checkmark or snapshot/count publication from the
-cancelled generation.
+D4.5-F, and therefore D4.5 as a whole, remains open for focused physical
+device acceptance. The first cancellation acceptance pass on 23 September 2026
+successfully exercised cancellation several times, but a later run combined
+cancellation with a large "mark all as read" structural Timeline change and
+exposed a UIKit diffable-data-source abort on iOS 27. The crash stack terminates
+in `__UIDiffableDataSource tableView:cellForRowAtIndexPath:`, reached from
+`IOSUIKitArticleTimelineController.requestFeedIconsForVisibleCells()`.
+
+The failure is a Timeline presentation ordering bug rather than a Rust/Core
+cancellation failure. During a structural update, `itemsByID` intentionally
+moves to the new model before the diffable table has necessarily finished
+publishing that snapshot. Calling `tableView.visibleCells` in the feed-icon
+retry path can force UIKit to materialize a cell in that short interval; an old
+identifier that has already been removed from `itemsByID` then makes the cell
+provider return nil and UIKit asserts. Update-side feed-icon/reconfiguration
+paths now enumerate only already-materialized cells through
+`indexPathsForVisibleRows` + `cellForRow(at:)`, which does not request new
+cells from the data source. Focused regression coverage combines a visible
+Timeline, structural removal, and a feed-icon request revision.
+
+Physical-device acceptance must be rerun after this fix and still verify start
+-> cancel -> immediate restart, the large mark-all-read case, coherent scope
+count/`Syncing…` presentation, no cancellation error alert, and no stale
+success checkmark or snapshot/count publication from the cancelled generation.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 
