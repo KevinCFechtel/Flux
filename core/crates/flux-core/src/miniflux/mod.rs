@@ -736,22 +736,28 @@ impl MinifluxClient {
     ) -> Result<Option<RemoteDelta>, CoreError> {
         const CURSOR_OVERLAP_SECONDS: i64 = 2;
         let query_after = changed_after.saturating_sub(CURSOR_OVERLAP_SECONDS).max(0);
+        let Some(window_end) = self.delta_watermark_with_cancellation(cancellation)? else {
+            return Ok(None);
+        };
+        let cursor = changed_after.max(window_end);
+        let changed_before = window_end.saturating_add(1);
         let started = Instant::now();
         tracing::info!(
             target: "miniflux",
-            "delta entry fetch started changed_after={} query_after={}",
+            "delta entry fetch started changed_after={} query_after={} window_end={}",
             changed_after,
-            query_after
+            query_after,
+            window_end
         );
         let mut all = Vec::new();
         let mut after_id = 0;
-        let mut cursor = changed_after;
         loop {
             if cancellation.is_cancelled() {
                 return Ok(None);
             }
             let mut query = vec![
                 ("changed_after", query_after.to_string()),
+                ("changed_before", changed_before.to_string()),
                 ("limit", PAGE_SIZE.to_string()),
                 ("order", "id".to_string()),
                 ("direction", "asc".to_string()),
@@ -775,7 +781,10 @@ impl MinifluxClient {
                     ));
                 }
                 previous = entry.id;
-                cursor = cursor.max(entry_changed_at_unix(entry)?);
+                // Validate changed_at while parsing the bounded window. Cursor
+                // advancement itself uses the pre-fetch high-water mark so
+                // concurrent changes after window_end remain for the next run.
+                let _ = entry_changed_at_unix(entry)?;
             }
             after_id = previous;
             all.extend(page.entries);
