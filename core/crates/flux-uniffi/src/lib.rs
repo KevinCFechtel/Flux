@@ -2,8 +2,7 @@
 
 use flux_core::domain;
 use flux_core::{
-    CoreConfig, FluxCore, SyncCancellation as CoreSyncCancellation,
-    SyncOutcome as CoreSyncOutcome,
+    CoreConfig, FluxCore, SyncCancellation as CoreSyncCancellation, SyncOutcome as CoreSyncOutcome,
 };
 use std::sync::Arc;
 
