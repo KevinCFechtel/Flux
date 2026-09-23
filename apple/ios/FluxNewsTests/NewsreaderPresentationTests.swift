@@ -4426,8 +4426,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         }
 
         XCTAssertEqual(
-            Set(WidgetFamilyPolicy.lockScreenFamilies),
-            Set([.accessoryInline, .accessoryCircular, .accessoryRectangular])
+            WidgetFamilyPolicy.lockScreenFamilies,
+            [.accessoryInline, .accessoryCircular, .accessoryRectangular]
         )
         XCTAssertTrue(
             WidgetFamilyPolicy.lockScreenFamilies.allSatisfy {
