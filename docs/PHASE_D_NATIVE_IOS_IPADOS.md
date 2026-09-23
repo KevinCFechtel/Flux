@@ -868,9 +868,11 @@ verify that cancelling and immediately restarting Sync leaves the Timeline,
 scope count, capsule, and Sync control coherent.
 
 D4.5 implementation began only after the UIKit Timeline/presentation change
-set was accepted on device and U5 was closed. D4.5-A and D4.5-B are complete.
-**D4.5-C — UniFFI + AppleCoreExecution is IN PROGRESS.** The UniFFI layer now
-exports a run-scoped `SyncCancellation` object, explicit
+set was accepted on device and U5 was closed. D4.5-A, D4.5-B, and D4.5-C are
+complete.
+
+**D4.5-C — UniFFI + AppleCoreExecution is COMPLETE.** The UniFFI layer exports
+a run-scoped `SyncCancellation` object, explicit
 `SyncOutcome::Completed/Cancelled`, and an additive cancellable Sync entry
 point while preserving the existing `sync(reason)` API. `AppleCoreExecution`
 adds a blocking cancellable lane operation: cancellation before execution still
@@ -878,11 +880,19 @@ prevents queued Core work from starting; cancellation after execution begins
 invokes the supplied cooperative cancellation callback exactly once and does not
 release the OperationQueue worker until the synchronous Core closure actually
 returns. Focused tests cover both queued and running cancellation semantics.
-D4.5-C remains open until Rust formatting/workspace tests and the native iOS
-test/build gates pass.
 
-Completion of D4.5 after C still requires the session-owned iOS manual-Sync
-lifecycle, account/Core quiescence barrier, presentation/localization work,
+D4.5-C validation on 23 September 2026 completed with `cargo fmt --check`
+clean and `cargo test --workspace` green: 216 `flux-core` tests and 6
+`flux-uniffi` tests passed with 0 failures, plus all workspace doc-tests.
+The native iOS gate then executed 340 tests with 0 failures and
+`./apple/ios/Build/build-app.sh` completed with `BUILD SUCCEEDED`.
+
+The next implementation package is **D4.5-D — session-owned Manual Sync
+lifecycle in NewsreaderStore**: own one current manual run and cancellation
+handle per Core/account session, distinguish idle/running/cancelling, suppress
+late or superseded completion, cancel/invalidate on detach, and permit a clean
+immediate restart without stale success/error publication. D4.5 after D still
+requires the account/Core quiescence barrier, presentation/localization work,
 automated regression coverage, and focused real-device acceptance defined
 above.
 
