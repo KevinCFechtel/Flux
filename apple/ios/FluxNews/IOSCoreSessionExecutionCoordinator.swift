@@ -15,7 +15,7 @@ final class IOSCoreSessionExecutionCoordinator {
     }
 
     private struct ActiveExecution {
-        let cancellation: (() -> Void)?
+        let cancellation: (@Sendable () -> Void)?
     }
 
     private(set) var sessionGeneration: UInt64 = 0
@@ -100,7 +100,7 @@ final class IOSCoreSessionExecutionCoordinator {
     /// session is quiescing, detached, or the caller captured a stale Core.
     func beginExecution(
         for core: Flux,
-        cancellation: (() -> Void)? = nil
+        cancellation: (@Sendable () -> Void)? = nil
     ) -> Lease? {
         guard !isQuiescing,
               activeCoreIdentifier == ObjectIdentifier(core) else { return nil }
@@ -113,6 +113,49 @@ final class IOSCoreSessionExecutionCoordinator {
             sessionGeneration: sessionGeneration,
             executionID: executionID
         )
+    }
+
+    /// Runs a responsive/local synchronous Core operation while holding a
+    /// session lease. Nil means admission was rejected because the caller
+    /// captured a stale Core or replacement quiescence has begun.
+    func responsiveResult<Value: Sendable>(
+        for core: Flux,
+        _ operation: @escaping @Sendable () throws -> Value
+    ) async -> Result<Value, Error>? {
+        guard let lease = beginExecution(for: core) else { return nil }
+        let result = await AppleCoreExecution.shared.responsiveResult(operation)
+        finish(lease)
+        return result
+    }
+
+    /// Runs blocking/remote synchronous Core work while holding a session lease.
+    func blockingResult<Value: Sendable>(
+        for core: Flux,
+        _ operation: @escaping @Sendable () throws -> Value
+    ) async -> Result<Value, Error>? {
+        guard let lease = beginExecution(for: core) else { return nil }
+        let result = await AppleCoreExecution.shared.blockingResult(operation)
+        finish(lease)
+        return result
+    }
+
+    /// Cancellable blocking form used by run-scoped Core operations such as
+    /// Manual Sync and, later, BGTask-owned Background Sync. The session keeps
+    /// the lease until the synchronous worker really returns.
+    func blockingCancellableResult<Value: Sendable>(
+        for core: Flux,
+        onCancel: @escaping @Sendable () -> Void,
+        _ operation: @escaping @Sendable () throws -> Value
+    ) async -> Result<Value, Error>? {
+        guard let lease = beginExecution(for: core, cancellation: onCancel) else {
+            return nil
+        }
+        let result = await AppleCoreExecution.shared.blockingCancellableResult(
+            onCancel: onCancel,
+            operation
+        )
+        finish(lease)
+        return result
     }
 
     /// Must be called only after the underlying synchronous Core call has
