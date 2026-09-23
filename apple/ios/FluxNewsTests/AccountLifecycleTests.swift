@@ -508,4 +508,126 @@ final class AccountLifecycleTests: XCTestCase {
         XCTAssertEqual(bootstrapper.coreRevision, 1)
         XCTAssertEqual(bootstrapper.validationMessage, String(localized: "The account could not be activated. Your previous account is still active."))
     }
+    @MainActor
+    func testCoreSessionCoordinatorQuiescenceCancelsAndWaitsForActiveExecution() async throws {
+        let credentials = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let core = try makeCore(for: credentials)
+        let coordinator = IOSCoreSessionExecutionCoordinator()
+        let cancelled = LockedBox(false)
+        coordinator.activate(core)
+
+        let lease = try XCTUnwrap(
+            coordinator.beginExecution(
+                for: core,
+                cancellation: { cancelled.withValue { $0 = true } }
+            )
+        )
+
+        let quiescence = Task { @MainActor in
+            await coordinator.quiesce()
+        }
+        await Task.yield()
+
+        XCTAssertTrue(cancelled.value())
+        XCTAssertTrue(coordinator.isQuiescing)
+        XCTAssertEqual(coordinator.activeExecutionCount, 1)
+        XCTAssertNil(coordinator.beginExecution(for: core))
+
+        coordinator.finish(lease)
+        await quiescence.value
+
+        XCTAssertEqual(coordinator.activeExecutionCount, 0)
+        XCTAssertTrue(coordinator.isQuiescing)
+    }
+
+    @MainActor
+    func testCoreSessionCoordinatorRejectsStaleCoreAfterReplacement() async throws {
+        let oldCredentials = IOSMinifluxCredentials(
+            server: "https://old.example",
+            apiKey: "old",
+            customHeaders: []
+        )
+        let newCredentials = IOSMinifluxCredentials(
+            server: "https://new.example",
+            apiKey: "new",
+            customHeaders: []
+        )
+        let oldCore = try makeCore(for: oldCredentials)
+        let newCore = try makeCore(for: newCredentials)
+        let coordinator = IOSCoreSessionExecutionCoordinator()
+
+        coordinator.activate(oldCore)
+        await coordinator.quiesce()
+        coordinator.deactivate()
+        coordinator.activate(newCore)
+
+        XCTAssertNil(coordinator.beginExecution(for: oldCore))
+        let lease = try XCTUnwrap(coordinator.beginExecution(for: newCore))
+        coordinator.finish(lease)
+    }
+
+    @MainActor
+    func testAccountEditWaitsForAppWideCoreSessionExecutionBeforeReplacement() async throws {
+        let old = IOSMinifluxCredentials(
+            server: "https://old.example",
+            apiKey: "old-key",
+            customHeaders: []
+        )
+        let replacement = IOSMinifluxCredentials(
+            server: "https://new.example",
+            apiKey: "new-key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(old)
+        let oldCore = try makeCore(for: old)
+        let newCore = try makeCore(for: replacement)
+        let factoryInputs = LockedBox<[IOSMinifluxCredentials]>([])
+        let coordinator = IOSCoreSessionExecutionCoordinator()
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreSessionExecutionCoordinator: coordinator,
+            coreFactory: { account in
+                factoryInputs.withValue { $0.append(account) }
+                return account == old ? oldCore : newCore
+            },
+            accountValidator: { _ in
+                AccountValidationAttempt(
+                    result: AccountValidationResult(
+                        installationBase: replacement.server,
+                        version: "2.0"
+                    ),
+                    error: nil,
+                    diagnostic: nil
+                )
+            }
+        )
+        await bootstrapper.start()
+        let lease = try XCTUnwrap(coordinator.beginExecution(for: oldCore))
+
+        let configure = Task { @MainActor in
+            await bootstrapper.configure(
+                server: replacement.server,
+                apiKey: replacement.apiKey,
+                headers: []
+            )
+        }
+        await Task.yield()
+
+        XCTAssertTrue(coordinator.isQuiescing)
+        XCTAssertEqual(factoryInputs.value(), [old])
+        XCTAssertIdentical(bootstrapper.core, oldCore)
+
+        coordinator.finish(lease)
+        await configure.value
+
+        XCTAssertEqual(factoryInputs.value(), [old, replacement])
+        XCTAssertIdentical(bootstrapper.core, newCore)
+        XCTAssertFalse(coordinator.isQuiescing)
+    }
+
 }
