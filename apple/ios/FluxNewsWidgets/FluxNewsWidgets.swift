@@ -362,17 +362,23 @@ private struct IOSFluxNewsStatusView: View {
 
     private var rectangular: some View {
         HStack(alignment: .center, spacing: 8) {
-            FluxNewsWidgetBrandIcon()
-                .frame(width: 22, height: 22)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.headline)
-                    .lineLimit(1)
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(title)
+                .font(.headline)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            Spacer(minLength: 6)
+
+            HStack(alignment: .center, spacing: 5) {
+                FluxNewsWidgetBrandIcon()
+                    .frame(width: 18, height: 18)
+
+                VStack(alignment: .center, spacing: 0) {
                     Text("\(entry.model.count)")
-                        .font(.title3.bold().monospacedDigit())
+                        .font(.headline.bold().monospacedDigit())
                     Text(LocalizedStringKey(entry.model.countLabel))
-                        .font(.caption)
+                        .font(.caption2)
+                        .lineLimit(1)
                 }
             }
         }
@@ -382,6 +388,7 @@ private struct IOSFluxNewsStatusView: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
                 FluxNewsWidgetBrandIcon()
+                    .frame(width: 32, height: 32)
                 Spacer()
             }
             Text(title)
