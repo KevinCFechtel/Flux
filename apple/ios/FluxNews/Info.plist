@@ -18,12 +18,22 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>$(FLUX_BACKGROUND_REFRESH_IDENTIFIER)</string>
+	</array>
+	<key>FluxBackgroundRefreshIdentifier</key>
+	<string>$(FLUX_BACKGROUND_REFRESH_IDENTIFIER)</string>
 	<key>FluxStorageNamespace</key>
 	<string>$(FLUX_STORAGE_NAMESPACE)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
