@@ -894,9 +894,11 @@ PROGRESS.** NewsreaderStore now owns one current manual run, its UniFFI
 (`idle/running/cancelling`); cancellation signals both the Core handle and the
 Swift task so queued work is prevented from starting while running work remains
 cooperatively cancellable. Run/session generations reject late completion,
-cancellation suppresses normal success/error presentation, detach cancels and
-invalidates the old run, and a completed cancelled run can be followed by a
-fresh generation without accepting stale publication. The Core event listener
+cancellation suppresses normal success/error presentation, and cancelling a run
+immediately supersedes its presentation generation so a fresh manual Sync may
+start even while the old synchronous Core call is still cooperatively winding
+down. Detach likewise cancels and invalidates the old run without accepting stale
+publication. The Core event listener
 also captures the attached Core session so an already-enqueued old-session
 automatic/background completion cannot publish after detach/reattach.
 

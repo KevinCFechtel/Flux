@@ -305,6 +305,13 @@ struct IOSManualSyncLifecycle {
         return true
     }
 
+    mutating func supersedeCancelled(_ request: IOSManualSyncRequest) -> Bool {
+        guard isCurrent(request), state == .cancelling else { return false }
+        generation &+= 1
+        state = .idle
+        return true
+    }
+
     mutating func finish(_ request: IOSManualSyncRequest) -> Bool {
         guard isCurrent(request) else { return false }
         state = .idle
@@ -831,6 +838,15 @@ struct ArticleRowContent: Equatable, Sendable {
         manualSyncState = .cancelling
         manualSyncCancellation?.cancel()
         manualSyncTask?.cancel()
+
+        // Presentation ownership ends immediately. The cancelled Core call may
+        // still be winding down on its worker, but its request generation is now
+        // stale and a fresh manual run may start without accepting old results.
+        _ = manualSyncLifecycle.supersedeCancelled(request)
+        manualSyncState = .idle
+        manualSyncRequest = nil
+        manualSyncCancellation = nil
+        manualSyncTask = nil
     }
 
     func select(_ newScope: BrowserScope) {

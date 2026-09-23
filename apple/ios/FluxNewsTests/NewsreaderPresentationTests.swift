@@ -3953,17 +3953,18 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(lifecycle.canPublishCompletion(first!))
     }
 
-    func testManualSyncCancellationSuppressesSuccessPublicationUntilRunFinishes() {
+    func testManualSyncCancellationImmediatelySupersedesPresentationOwnership() {
         var lifecycle = IOSManualSyncLifecycle()
         let request = lifecycle.begin()!
 
         XCTAssertTrue(lifecycle.requestCancellation(request))
         XCTAssertEqual(lifecycle.state, .cancelling)
         XCTAssertFalse(lifecycle.canPublishCompletion(request))
-        XCTAssertFalse(lifecycle.requestCancellation(request))
+        XCTAssertTrue(lifecycle.supersedeCancelled(request))
 
-        XCTAssertTrue(lifecycle.finish(request))
         XCTAssertEqual(lifecycle.state, .idle)
+        XCTAssertFalse(lifecycle.isCurrent(request))
+        XCTAssertFalse(lifecycle.finish(request))
     }
 
     func testManualSyncSessionInvalidationRejectsLateCompletionAndAllowsFreshRun() {
@@ -3981,11 +3982,11 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertNotEqual(stale.generation, current.generation)
     }
 
-    func testManualSyncCanRestartImmediatelyAfterCancelledRunFinishes() {
+    func testManualSyncCanRestartImmediatelyAfterCancellation() {
         var lifecycle = IOSManualSyncLifecycle()
         let first = lifecycle.begin()!
         XCTAssertTrue(lifecycle.requestCancellation(first))
-        XCTAssertTrue(lifecycle.finish(first))
+        XCTAssertTrue(lifecycle.supersedeCancelled(first))
 
         let second = lifecycle.begin()!
         XCTAssertEqual(lifecycle.state, .running)
