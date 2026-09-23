@@ -232,7 +232,7 @@ final class IOSBackgroundSyncCoordinator {
         let runner = resumeSyncRunner
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { resumeTask = nil }
+            defer { self.resumeTask = nil }
 
             guard let core = await bootstrapper.ensureStarted() else { return }
             let cancellation = SyncCancellation()
