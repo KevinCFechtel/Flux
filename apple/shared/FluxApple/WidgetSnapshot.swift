@@ -21,7 +21,9 @@ enum WidgetAction: Equatable {
     case open(WidgetContentSelection)
     case sync
 
-    private static let scheme = "fluxnews"
+    private static var scheme: String {
+        WidgetSnapshotConfiguration.widgetURLScheme()
+    }
     private static let host = "widget"
 
     func url() -> URL {
@@ -143,12 +145,21 @@ enum WidgetSnapshotDiagnostics {
 
 enum WidgetSnapshotConfiguration {
     static let infoKey = "FluxWidgetAppGroupIdentifier"
+    static let urlSchemeInfoKey = "FluxWidgetURLScheme"
     static let productionAppGroupIdentifier = "group.dev.kevincfechtel.fluxNews"
 
     static func appGroupIdentifier(bundle: Bundle = .main) -> String {
         guard let configured = bundle.object(forInfoDictionaryKey: infoKey) as? String,
               !configured.isEmpty else {
             return productionAppGroupIdentifier
+        }
+        return configured
+    }
+
+    static func widgetURLScheme(bundle: Bundle = .main) -> String {
+        guard let configured = bundle.object(forInfoDictionaryKey: urlSchemeInfoKey) as? String,
+              !configured.isEmpty else {
+            return "fluxnews"
         }
         return configured
     }
