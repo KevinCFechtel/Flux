@@ -587,17 +587,32 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleListEmptyState.resolve(isSyncing: store.isSyncing, isLoading: store.isLoading, errorMessage: store.errorMessage, hasArticles: !store.articles.isEmpty), .loading)
     }
 
-    func testSyncButtonPresentationUsesTheSameRotatingSymbolForEverySyncState() {
+    func testSyncButtonPresentationMakesRunningSyncAnExplicitCancelAction() {
         XCTAssertEqual(IOSSyncButtonPresentation.symbolName(for: .idle), "arrow.clockwise")
-        XCTAssertEqual(IOSSyncButtonPresentation.symbolName(for: .syncing), "arrow.clockwise")
+        XCTAssertEqual(IOSSyncButtonPresentation.symbolName(for: .syncing), "xmark")
+        XCTAssertEqual(IOSSyncButtonPresentation.symbolName(for: .cancelling), "arrow.clockwise")
         XCTAssertEqual(IOSSyncButtonPresentation.symbolName(for: .success), "checkmark")
-        XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(for: .idle, reduceMotion: false), 0)
-        XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(for: .syncing, reduceMotion: false), 360)
-        XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(for: .success, reduceMotion: false), 0)
-        XCTAssertEqual(IOSSyncButtonPresentation.rotationDegrees(for: .syncing, reduceMotion: true), 0)
+
+        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityLabel(for: .idle), String(localized: "Sync news"))
+        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityLabel(for: .syncing), String(localized: "Cancel sync"))
+        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityLabel(for: .cancelling), String(localized: "Sync news"))
         XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(for: .idle), String(localized: "Ready"))
         XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(for: .syncing), String(localized: "Syncing"))
+        XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(for: .cancelling), String(localized: "Cancelling"))
         XCTAssertEqual(IOSSyncButtonPresentation.accessibilityValue(for: .success), String(localized: "Sync complete"))
+
+        XCTAssertEqual(
+            IOSSyncButtonPresentation.resolve(manualSyncState: .running, transientState: .success),
+            .syncing
+        )
+        XCTAssertEqual(
+            IOSSyncButtonPresentation.resolve(manualSyncState: .cancelling, transientState: .success),
+            .cancelling
+        )
+        XCTAssertEqual(
+            IOSSyncButtonPresentation.resolve(manualSyncState: .idle, transientState: .success),
+            .success
+        )
     }
 
     func testSyncButtonSuccessTimeoutCannotOverwriteNewerSync() {
@@ -610,9 +625,11 @@ final class NewsreaderPresentationTests: XCTestCase {
     func testEmptyStatePresentationUsesSyncLifecycle() {
         let store = NewsreaderStore(defaults: UserDefaults())
         XCTAssertFalse(store.isSyncing)
-        store.setSyncingForTesting(true)
+        store.setManualSyncStateForTesting(.running)
         XCTAssertTrue(store.isSyncing)
-        store.setSyncingForTesting(false)
+        store.setManualSyncStateForTesting(.cancelling)
+        XCTAssertTrue(store.isSyncing)
+        store.setManualSyncStateForTesting(.idle)
         XCTAssertFalse(store.isSyncing)
     }
 
@@ -4054,6 +4071,48 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(source.contains("invalidateManualSyncSession()"))
         XCTAssertTrue(source.contains("store.ownsCoreEventSession(session)"))
         XCTAssertFalse(source.contains("blockingResult { try core.sync(reason: .manual) }"))
+    }
+
+    func testCancellableManualSyncPresentationUsesCancelRestartAndLocalizedAccessibility() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let iosDirectory = testsDirectory.deletingLastPathComponent()
+        let contentSource = try String(
+            contentsOf: iosDirectory.appendingPathComponent("FluxNews/ContentView.swift"),
+            encoding: .utf8
+        )
+        let storeSource = try String(
+            contentsOf: iosDirectory.appendingPathComponent("FluxNews/NewsreaderStore.swift"),
+            encoding: .utf8
+        )
+        let catalogData = try Data(
+            contentsOf: iosDirectory.appendingPathComponent("FluxNews/Localizable.xcstrings")
+        )
+        let catalog = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: catalogData) as? [String: Any]
+        )
+        let strings = try XCTUnwrap(catalog["strings"] as? [String: Any])
+
+        XCTAssertTrue(contentSource.contains("case .running:"))
+        XCTAssertTrue(contentSource.contains("newsreaderStore.cancelManualSync()"))
+        XCTAssertTrue(contentSource.contains("case .idle, .cancelling:"))
+        XCTAssertTrue(contentSource.contains("accessibilityIdentifier(\"articleList.sync\")"))
+        XCTAssertFalse(contentSource.contains(".disabled(newsreaderStore.isSyncing)"))
+        XCTAssertTrue(storeSource.contains("manualSyncPresentationCancellationRequest = request"))
+        XCTAssertTrue(storeSource.contains("manualSyncState == .cancelling"))
+
+        XCTAssertNotNil(strings["Cancel sync"])
+        XCTAssertNotNil(strings["Cancelling"])
+        let cancelSync = try XCTUnwrap(strings["Cancel sync"] as? [String: Any])
+        let cancelLocalizations = try XCTUnwrap(cancelSync["localizations"] as? [String: Any])
+        let cancelGerman = try XCTUnwrap(cancelLocalizations["de"] as? [String: Any])
+        let cancelUnit = try XCTUnwrap(cancelGerman["stringUnit"] as? [String: Any])
+        XCTAssertEqual(cancelUnit["value"] as? String, "Synchronisierung abbrechen")
+
+        let cancelling = try XCTUnwrap(strings["Cancelling"] as? [String: Any])
+        let cancellingLocalizations = try XCTUnwrap(cancelling["localizations"] as? [String: Any])
+        let cancellingGerman = try XCTUnwrap(cancellingLocalizations["de"] as? [String: Any])
+        let cancellingUnit = try XCTUnwrap(cancellingGerman["stringUnit"] as? [String: Any])
+        XCTAssertEqual(cancellingUnit["value"] as? String, "Synchronisierung wird abgebrochen")
     }
 
     func testCoreReplacementQuiescenceTracksWindingManualSyncsWithoutSceneBackgroundCancellation() throws {

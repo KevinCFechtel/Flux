@@ -624,6 +624,7 @@ struct ArticleRowContent: Equatable, Sendable {
     @ObservationIgnored private var manualSyncRequest: IOSManualSyncRequest?
     @ObservationIgnored private var manualSyncCancellation: SyncCancellation?
     @ObservationIgnored private var manualSyncTask: Task<Void, Never>?
+    @ObservationIgnored private var manualSyncPresentationCancellationRequest: IOSManualSyncRequest?
     @ObservationIgnored private var manualSyncExecutions: [IOSManualSyncRequest: (cancellation: SyncCancellation, task: Task<Void, Never>)] = [:]
     @ObservationIgnored private var manualSyncQuiescenceRequested = false
 
@@ -821,6 +822,7 @@ struct ArticleRowContent: Equatable, Sendable {
         let cancellation = SyncCancellation()
         manualSyncRequest = request
         manualSyncCancellation = cancellation
+        manualSyncPresentationCancellationRequest = nil
         manualSyncState = .running
         errorMessage = nil
 
@@ -849,7 +851,7 @@ struct ArticleRowContent: Equatable, Sendable {
         // still be winding down on its worker, but its request generation is now
         // stale and a fresh manual run may start without accepting old results.
         _ = manualSyncLifecycle.supersedeCancelled(request)
-        manualSyncState = .idle
+        manualSyncPresentationCancellationRequest = request
         manualSyncRequest = nil
         manualSyncCancellation = nil
         manualSyncTask = nil
@@ -1493,6 +1495,12 @@ struct ArticleRowContent: Equatable, Sendable {
         result: Result<SyncOutcome, Error>
     ) {
         manualSyncExecutions[request] = nil
+        if manualSyncPresentationCancellationRequest == request {
+            manualSyncPresentationCancellationRequest = nil
+            if manualSyncRequest == nil && manualSyncState == .cancelling {
+                manualSyncState = .idle
+            }
+        }
         guard manualSyncLifecycle.isCurrent(request) else { return }
 
         let cancellationWonPresentation = manualSyncState == .cancelling
@@ -1528,6 +1536,7 @@ struct ArticleRowContent: Equatable, Sendable {
         manualSyncRequest = nil
         manualSyncCancellation = nil
         manualSyncTask = nil
+        manualSyncPresentationCancellationRequest = nil
     }
 
     private func invalidateManualSyncSession() {
@@ -1545,6 +1554,7 @@ struct ArticleRowContent: Equatable, Sendable {
         manualSyncRequest = nil
         manualSyncCancellation = nil
         manualSyncTask = nil
+        manualSyncPresentationCancellationRequest = nil
     }
 
     fileprivate func ownsCoreEventSession(_ session: UInt64) -> Bool {
@@ -1987,7 +1997,7 @@ struct ArticleRowContent: Equatable, Sendable {
     @MainActor
     func completeSyncForTesting(_ metadata: SyncCompleted) { handleSyncCompleted(metadata) }
     @MainActor
-    func setSyncingForTesting(_ value: Bool) { manualSyncState = value ? .running : .idle }
+    func setManualSyncStateForTesting(_ value: IOSManualSyncState) { manualSyncState = value }
     @MainActor
     var meaningfullyInteractedForTesting: Bool { hasMeaningfullyInteracted }
     @MainActor

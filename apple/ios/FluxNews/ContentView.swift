@@ -408,13 +408,17 @@ struct ContentView: View {
 
     @ViewBuilder
     private var articleListActionButtons: some View {
-        Button { Task { await performManualSync() } } label: {
-            Image(systemName: IOSSyncButtonPresentation.symbolName(for: syncPresentation))
+        let syncButtonPresentation = IOSSyncButtonPresentation.resolve(
+            manualSyncState: newsreaderStore.manualSyncState,
+            transientState: syncPresentation
+        )
+        Button { performManualSyncControlAction() } label: {
+            Image(systemName: IOSSyncButtonPresentation.symbolName(for: syncButtonPresentation))
                 .frame(width: 24, height: 24)
         }
-        .disabled(newsreaderStore.isSyncing)
-        .accessibilityLabel(String(localized: "Sync news"))
-        .accessibilityValue(IOSSyncButtonPresentation.accessibilityValue(for: syncPresentation))
+        .accessibilityLabel(IOSSyncButtonPresentation.accessibilityLabel(for: syncButtonPresentation))
+        .accessibilityValue(IOSSyncButtonPresentation.accessibilityValue(for: syncButtonPresentation))
+        .accessibilityIdentifier("articleList.sync")
 
         Menu {
             Section("Show") {
@@ -467,10 +471,21 @@ struct ContentView: View {
         }
     }
 
+    private func performManualSyncControlAction() {
+        switch newsreaderStore.manualSyncState {
+        case .running:
+            syncPresentationGeneration &+= 1
+            syncPresentation = .idle
+            newsreaderStore.cancelManualSync()
+        case .idle, .cancelling:
+            Task { await performManualSync() }
+        }
+    }
+
     private func performManualSync() async {
         syncPresentationGeneration &+= 1
         let generation = syncPresentationGeneration
-        syncPresentation = .syncing
+        syncPresentation = .idle
 
         await newsreaderStore.syncManually()
 
@@ -1052,21 +1067,40 @@ enum IOSSyncButtonPresentation {
     enum State: Equatable {
         case idle
         case syncing
+        case cancelling
         case success
     }
 
-    static func symbolName(for state: State) -> String {
-        state == .success ? "checkmark" : "arrow.clockwise"
+    static func resolve(
+        manualSyncState: IOSManualSyncState,
+        transientState: State
+    ) -> State {
+        switch manualSyncState {
+        case .idle: transientState
+        case .running: .syncing
+        case .cancelling: .cancelling
+        }
     }
 
-    static func rotationDegrees(for state: State, reduceMotion: Bool) -> Double {
-        state == .syncing && !reduceMotion ? 360 : 0
+    static func symbolName(for state: State) -> String {
+        switch state {
+        case .syncing: "xmark"
+        case .success: "checkmark"
+        case .idle, .cancelling: "arrow.clockwise"
+        }
+    }
+
+    static func accessibilityLabel(for state: State) -> String {
+        state == .syncing
+            ? String(localized: "Cancel sync")
+            : String(localized: "Sync news")
     }
 
     static func accessibilityValue(for state: State) -> String {
         switch state {
         case .idle: String(localized: "Ready")
         case .syncing: String(localized: "Syncing")
+        case .cancelling: String(localized: "Cancelling")
         case .success: String(localized: "Sync complete")
         }
     }

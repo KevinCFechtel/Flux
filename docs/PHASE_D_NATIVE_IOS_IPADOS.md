@@ -928,12 +928,29 @@ D4.5-E validation on 23 September 2026 executed **348 native iOS tests with
 0 failures**, including account-edit and account-removal quiescence ordering,
 and `./apple/ios/Build/build-app.sh` completed successfully.
 
-The remaining D4.5 work is presentation/localization plus final focused
-regression and physical-device cancellation/restart acceptance. The manual Sync
-control must now expose the accepted Start/Cancel interaction, keep
-`Syncing…` while cancellation is pending, suppress success/error presentation
-for normal cancellation, update accessibility state, and complete English/German
-localization without reopening the frozen UIKit Timeline architecture.
+**D4.5-F — presentation, localization, and final acceptance is IN PROGRESS.**
+The manual Sync control now resolves directly from the store-owned manual-Sync
+state: idle starts Sync, running presents an explicit `xmark` Cancel action,
+and cancelling returns the control to the Sync/restart action while the scope
+capsule and empty-state presentation continue to report `Syncing…` until the
+cancelled execution actually returns. Starting again during that cancelling
+window supersedes the old cancellation presentation and starts a fresh
+generation immediately. Normal cancellation advances the presentation
+generation so the cancelled run cannot publish the success checkmark.
+
+Accessibility follows the action rather than the icon: the running state is
+labelled `Cancel sync` with value `Syncing`; cancelling exposes the restart
+action with value `Cancelling`. The new English source strings
+`Cancel sync` and `Cancelling` have German translations
+`Synchronisierung abbrechen` and `Synchronisierung wird abgebrochen`.
+The fixed 24-point toolbar slot and existing capsule geometry are preserved; the
+frozen UIKit Timeline renderer, Scrollover, image, and layout architecture are
+unchanged.
+
+D4.5-F remains open until the native test/build gates pass and focused physical
+device acceptance verifies start -> cancel -> immediate restart, coherent scope
+count/`Syncing…` presentation, no cancellation error alert, and no stale
+success checkmark or snapshot/count publication from the cancelled generation.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 
