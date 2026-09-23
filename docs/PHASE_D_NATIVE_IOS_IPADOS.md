@@ -1215,10 +1215,17 @@ and verifies the archived host Bundle ID, widget Bundle ID, shared App Group
 entitlements and signatures. Final D5-G acceptance still requires one physical
 device widget/deep-link smoke pass plus a successful Upgrade Test archive. The iOS application now embeds a native
 `FluxNewsWidgets` extension using the shared snapshot/presentation contract.
-The Headlines widget supports Home Screen `systemSmall`, `systemMedium`,
-`systemLarge` and iPad `systemExtraLarge`. The Status widget supports Home
-Screen `systemSmall`/`systemMedium` and the Lock Screen families
-`accessoryInline`, `accessoryCircular` and `accessoryRectangular`.
+The Headlines widget supports Home Screen `systemMedium`, `systemLarge` and
+iPad `systemExtraLarge`; the small Headlines family is intentionally not
+offered because a single-headline layout does not provide useful value. The
+Status widget supports Home Screen `systemSmall`/`systemMedium` and the Lock
+Screen families `accessoryInline`, `accessoryCircular` and
+`accessoryRectangular`. Widget branding uses the existing FluxNews book mark
+(`FluxNewsTemplate`) rather than a generic news glyph. The rectangular Lock
+Screen status presents the selected scope and its authoritative count without a
+truncated article teaser. Last-sync presentation continues to use the one global
+Core `last_successful_sync_at` value independent of SyncReason and accepts the
+persisted SQLite UTC timestamp format as well as ISO-8601 snapshots.
 
 All families consume the same configured content scopes
 (All News/Bookmarks/Category/Feed) and the same snapshot counts/articles. Lock
