@@ -4452,6 +4452,21 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertNil(WidgetSyncTimestamp.date(from: "not-a-timestamp"))
     }
 
+    func testStatusWidgetKeepsProminentBrandAndCompactRectangularCountLayout() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let widgetSource = try String(
+            contentsOf: testsDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("FluxNewsWidgets/FluxNewsWidgets.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(widgetSource.contains(".frame(width: 32, height: 32)"))
+        XCTAssertTrue(widgetSource.contains("Spacer(minLength: 6)"))
+        XCTAssertTrue(widgetSource.contains(".font(.headline.bold().monospacedDigit())"))
+        XCTAssertTrue(widgetSource.contains(".font(.caption2)"))
+    }
+
 }
 
 private final class FeedIconLoadGate: @unchecked Sendable {
