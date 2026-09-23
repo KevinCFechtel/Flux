@@ -7,16 +7,46 @@ final class IOSAppRuntime {
 
     let bootstrapper: CoreBootstrapper
     let backgroundSyncCoordinator: IOSBackgroundSyncCoordinator
+    let systemNotificationManager: IOSSystemNotificationManager
 
     init(
-        scheduler: IOSBackgroundTaskScheduling = IOSSystemBackgroundTaskScheduler.shared
+        scheduler: IOSBackgroundTaskScheduling = IOSSystemBackgroundTaskScheduler.shared,
+        systemNotificationManager: IOSSystemNotificationManager = .shared
     ) {
         let bootstrapper = CoreBootstrapper()
-        self.bootstrapper = bootstrapper
-        backgroundSyncCoordinator = IOSBackgroundSyncCoordinator(
+        let backgroundSyncCoordinator = IOSBackgroundSyncCoordinator(
             bootstrapper: bootstrapper,
             scheduler: scheduler
         )
+        self.bootstrapper = bootstrapper
+        self.backgroundSyncCoordinator = backgroundSyncCoordinator
+        self.systemNotificationManager = systemNotificationManager
+
+        backgroundSyncCoordinator.onSuccessfulBackgroundSync = { [weak bootstrapper, weak systemNotificationManager] metadata in
+            guard !metadata.systemNotificationCandidates.isEmpty,
+                  let bootstrapper,
+                  let systemNotificationManager,
+                  let core = bootstrapper.core else {
+                return
+            }
+            Task { @MainActor in
+                await systemNotificationManager.deliver(metadata.systemNotificationCandidates) { candidateID in
+                    guard let result = await bootstrapper.coreSessionExecutionCoordinator
+                        .responsiveResult(
+                            for: core,
+                            {
+                                try core.acknowledgeSystemNotification(candidateId: candidateID)
+                            }
+                        ) else {
+                        return false
+                    }
+                    if case .success = result {
+                        return true
+                    }
+                    return false
+                }
+            }
+        }
     }
 }
 
@@ -36,6 +66,7 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         _ = backgroundRegistration.register()
+        IOSAppRuntime.shared.systemNotificationManager.configure()
         return true
     }
 }
