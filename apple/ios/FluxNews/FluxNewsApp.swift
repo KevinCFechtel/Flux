@@ -46,6 +46,7 @@ struct FluxNewsApp: App {
                         )
                     }
                     await IOSAppRuntime.shared.backgroundSyncCoordinator.refreshScheduling()
+                    IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
@@ -57,6 +58,7 @@ struct FluxNewsApp: App {
                                     coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
                                 )
                             }
+                            IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
                         }
                     } else {
                         newsreaderStore.flushScrolloverPersistenceForLifecycle()
