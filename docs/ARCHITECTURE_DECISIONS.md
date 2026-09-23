@@ -301,13 +301,45 @@ abort early. Isolated entity/data-processing failures should be
 contained where safe.
 
 Background sync is independently configurable from Live/Deferred
-mutation delivery and can be disabled completely. When enabled it is a
-full normal sync, including pending mutations.
+mutation delivery and can be disabled completely. Pending mutations remain part
+of every real Sync opportunity and are delivered/acknowledged before the Core
+chooses the remote reconciliation plan.
 
-On mobile, this same Background Sync preference also governs automatic
+The Core has two reconciliation plans behind the existing `sync(reason)`
+boundary:
+
+- **Full Sync** is the authoritative structural reconciliation. It refreshes the
+  Feed/Category catalog and the complete unread-plus-starred remote snapshot and
+  retains the established absent-entry, feed-removal and category-removal
+  semantics.
+- **Delta Sync** is a lightweight changed-entry reconciliation over Miniflux
+  `changed_after`. It updates only returned Entries belonging to already-known
+  local Feeds. It does not infer anything from Entries absent from the Delta and
+  does not mutate Feed/Category structure.
+
+On mobile, regular `Background` Sync is Delta-only once a valid Delta baseline
+exists. A `BGAppRefreshTask` must not escalate into a Full Sync. If no valid
+Delta baseline exists, Background records that Full reconciliation is required
+and completes without starting the expensive remote Full snapshot. A Delta Entry
+whose Feed is unknown locally is skipped while known-Feed work is retained; the
+Delta cursor still advances and durable `full_sync_required` state requests a
+later Full Sync. This is safe because Full Sync is independent of the Delta
+cursor.
+
+A successful Full Sync establishes the next Delta baseline from a remote
+changed-entry high-water mark captured before the Full snapshot fetch. Delta
+pagination uses a small overlap and a bounded changed-at window so concurrent
+remote changes are re-read by a later Delta rather than skipped.
+
+On mobile, the same Background Sync preference also governs automatic
 foreground/resume refresh. There is no second mobile Sync-on-Start setting.
-Native scheduling is platform-owned and must avoid duplicate work when a recent
-or currently-running background sync already satisfies the freshness need.
+Resume requests are evaluated inside the serialized Core Sync boundary: when
+Background Sync is disabled they are no-ops; otherwise a fresh successful Sync
+suppresses ordinary Resume work. A stale Resume normally uses Delta, but Full
+Sync takes precedence when `full_sync_required` is set, no valid Delta
+baseline exists, or the last Full Sync is at least 24 hours old. The initial
+mobile freshness window is 30 minutes. Native scheduling therefore does not need
+a second race-prone Swift freshness state machine.
 
 Background OS execution and Manual Sync share the same app-owned account/Core
 session but not the same presentation lifecycle. D4.5 Manual Sync remains
@@ -322,10 +354,13 @@ block new work, request cancellation of cancellable runs where appropriate, and
 wait for already-started synchronous Core work to finish before replacing or
 destroying the session.
 
-`last_successful_sync_at` is one global persisted/queryable timestamp
-for the last fully successful sync, independent of `SyncReason`. The
-reason belongs in events/logs rather than separate persisted success
-timestamps.
+`last_successful_sync_at` remains the one global persisted/queryable
+timestamp for the last fully successful Sync, independent of `SyncReason`,
+and is the user-facing freshness signal. Delta execution additionally persists
+its remote cursor, while `last_full_sync_at` and `full_sync_required` are
+Core-owned reconciliation-planning state. They are not separate user-facing
+"last sync" values. The reason belongs in events/logs rather than separate
+per-reason success timestamps.
 
 Sync completion events contain coarse domain metadata rather than
 snapshots or counts. They may include the reason, numbers of new/updated
