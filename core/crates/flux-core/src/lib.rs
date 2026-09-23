@@ -338,6 +338,36 @@ impl FluxCore {
         if cancellation.is_cancelled() {
             return Ok(SyncOutcome::Cancelled);
         }
+
+        if reason == SyncReason::Resume {
+            const RESUME_STALE_AFTER_MINUTES: i64 = 30;
+            let settings = self.store.core_settings()?;
+            if !settings.background_sync_enabled
+                || !self
+                    .store
+                    .successful_sync_due(RESUME_STALE_AFTER_MINUTES)?
+            {
+                tracing::info!(
+                    target: "sync",
+                    "resume sync skipped enabled={} stale={}",
+                    settings.background_sync_enabled,
+                    self.store.successful_sync_due(RESUME_STALE_AFTER_MINUTES)?
+                );
+                let completed = SyncCompleted {
+                    reason,
+                    new_articles: 0,
+                    updated_articles: 0,
+                    mutations_delivered: 0,
+                    data_changed: false,
+                    navigation_changed: false,
+                    new_articles_by_feed: Vec::new(),
+                    system_notification_candidates: Vec::new(),
+                };
+                self.emit(CoreEvent::SyncCompleted(completed.clone()));
+                return Ok(SyncOutcome::Completed(completed));
+            }
+        }
+
         if reason != SyncReason::Manual && self.in_backoff()? {
             tracing::info!(target: "sync", "sync skipped reason={reason:?} because runtime backoff is active");
             let completed = SyncCompleted {
