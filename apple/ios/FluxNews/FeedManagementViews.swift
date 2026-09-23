@@ -191,6 +191,13 @@ struct IOSFeedSettingsView: View {
                         Text("Text Only").tag(DetailRenderingMode.textOnly)
                     }
                     Toggle("Truncate Detail", isOn: Binding(get: { preferences.truncateDetail }, set: updateTruncateDetail))
+                    Toggle(
+                        "System Notifications",
+                        isOn: Binding(
+                            get: { preferences.systemNotificationsEnabled },
+                            set: updateSystemNotifications
+                        )
+                    )
                     Toggle("Open in Miniflux", isOn: Binding(get: { preferences.openInMiniflux }, set: updateOpenInMiniflux))
                 }
                 .disabled(isSaving)
@@ -217,6 +224,34 @@ struct IOSFeedSettingsView: View {
     }
     private func updateDetailRendering(_ mode: DetailRenderingMode) { update { completion in store.setFeedDetailRendering(feedID: target.id, mode: mode, completion: completion) } }
     private func updateTruncateDetail(_ enabled: Bool) { update { completion in store.setFeedTruncateDetail(feedID: target.id, enabled: enabled, completion: completion) } }
+
+    private func updateSystemNotifications(_ enabled: Bool) {
+        let generation = requestLifecycle.begin()
+        isSaving = true
+        error = nil
+        Task { @MainActor in
+            do {
+                if enabled {
+                    try await IOSSystemNotificationManager.shared.ensureAuthorization()
+                }
+                store.setFeedSystemNotificationsEnabled(feedID: target.id, enabled: enabled) { result in
+                    guard requestLifecycle.isCurrent(generation) else { return }
+                    isSaving = false
+                    switch result {
+                    case .success:
+                        load()
+                    case let .failure(error):
+                        self.error = IOSErrorPresentation.message(for: error, context: .feedSettingsSave)
+                    }
+                }
+            } catch {
+                guard requestLifecycle.isCurrent(generation) else { return }
+                isSaving = false
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
     private func updateOpenInMiniflux(_ enabled: Bool) { update { completion in store.setFeedOpenInMiniflux(feedID: target.id, enabled: enabled, completion: completion) } }
     private func update(_ change: (@escaping (Result<Void, Error>) -> Void) -> Void) {
         let generation = requestLifecycle.begin()
