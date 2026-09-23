@@ -946,7 +946,7 @@ struct ArticleRowContent: Equatable, Sendable {
     func openWidgetScope(_ selection: WidgetContentSelection) {
         switch selection.scope {
         case .allNews:
-            setUnreadOnly(true)
+            unreadOnly = true
             select(.all)
         case .bookmarks:
             select(.starred)
@@ -955,14 +955,14 @@ struct ArticleRowContent: Equatable, Sendable {
                   catalog.categories.contains(where: { $0.id == id }) else {
                 return
             }
-            setUnreadOnly(true)
+            unreadOnly = true
             select(.category(id))
         case .feed:
             guard let id = selection.feedID,
                   catalog.feeds.contains(where: { $0.id == id }) else {
                 return
             }
-            setUnreadOnly(true)
+            unreadOnly = true
             select(.feed(id))
         }
     }
