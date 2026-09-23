@@ -3942,6 +3942,57 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(state.isCurrent(second))
     }
 
+    func testManualSyncLifecycleAllowsOnlyOneCurrentRun() {
+        var lifecycle = IOSManualSyncLifecycle()
+        let first = lifecycle.begin()
+
+        XCTAssertNotNil(first)
+        XCTAssertNil(lifecycle.begin())
+        XCTAssertEqual(lifecycle.state, .running)
+        XCTAssertTrue(lifecycle.isCurrent(first!))
+        XCTAssertTrue(lifecycle.canPublishCompletion(first!))
+    }
+
+    func testManualSyncCancellationSuppressesSuccessPublicationUntilRunFinishes() {
+        var lifecycle = IOSManualSyncLifecycle()
+        let request = lifecycle.begin()!
+
+        XCTAssertTrue(lifecycle.requestCancellation(request))
+        XCTAssertEqual(lifecycle.state, .cancelling)
+        XCTAssertFalse(lifecycle.canPublishCompletion(request))
+        XCTAssertFalse(lifecycle.requestCancellation(request))
+
+        XCTAssertTrue(lifecycle.finish(request))
+        XCTAssertEqual(lifecycle.state, .idle)
+    }
+
+    func testManualSyncSessionInvalidationRejectsLateCompletionAndAllowsFreshRun() {
+        var lifecycle = IOSManualSyncLifecycle()
+        let stale = lifecycle.begin()!
+
+        lifecycle.invalidateSession()
+        XCTAssertFalse(lifecycle.isCurrent(stale))
+        XCTAssertFalse(lifecycle.canPublishCompletion(stale))
+        XCTAssertFalse(lifecycle.finish(stale))
+
+        let current = lifecycle.begin()!
+        XCTAssertTrue(lifecycle.isCurrent(current))
+        XCTAssertNotEqual(stale.session, current.session)
+        XCTAssertNotEqual(stale.generation, current.generation)
+    }
+
+    func testManualSyncCanRestartImmediatelyAfterCancelledRunFinishes() {
+        var lifecycle = IOSManualSyncLifecycle()
+        let first = lifecycle.begin()!
+        XCTAssertTrue(lifecycle.requestCancellation(first))
+        XCTAssertTrue(lifecycle.finish(first))
+
+        let second = lifecycle.begin()!
+        XCTAssertEqual(lifecycle.state, .running)
+        XCTAssertTrue(lifecycle.isCurrent(second))
+        XCTAssertNotEqual(first.generation, second.generation)
+    }
+
     func testNewerArticleReadSupersedesOlderReadAndOwnsPublication() {
         var lifecycle = IOSNewsreaderReadLifecycle()
         let first = lifecycle.beginArticle()
@@ -3987,6 +4038,21 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(lifecycle.ownsError(stale))
         XCTAssertTrue(lifecycle.isCurrentNavigation(current))
         XCTAssertTrue(lifecycle.ownsError(current))
+    }
+
+    func testManualSyncUsesCancellableCoreBoundaryAndSessionOwnedState() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let sourceURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("FluxNews/NewsreaderStore.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        XCTAssertTrue(source.contains("blockingCancellableResult("))
+        XCTAssertTrue(source.contains("core.syncCancellable(reason: .manual, cancellation: cancellation)"))
+        XCTAssertTrue(source.contains("func cancelManualSync()"))
+        XCTAssertTrue(source.contains("invalidateManualSyncSession()"))
+        XCTAssertTrue(source.contains("store.ownsCoreEventSession(session)"))
+        XCTAssertFalse(source.contains("blockingResult { try core.sync(reason: .manual) }"))
     }
 
     func testNavigationRefreshUsesOneCoreProjectionInsteadOfCountFanout() throws {

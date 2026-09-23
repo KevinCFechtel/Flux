@@ -274,6 +274,58 @@ private struct TimelinePagePreparation {
     let referenceDate: Date
 }
 
+enum IOSManualSyncState: Equatable {
+    case idle
+    case running
+    case cancelling
+
+    var isActive: Bool { self != .idle }
+}
+
+struct IOSManualSyncRequest: Equatable {
+    let session: UInt64
+    let generation: UInt64
+}
+
+struct IOSManualSyncLifecycle {
+    private(set) var session: UInt64 = 0
+    private(set) var generation: UInt64 = 0
+    private(set) var state: IOSManualSyncState = .idle
+
+    mutating func begin() -> IOSManualSyncRequest? {
+        guard state == .idle else { return nil }
+        generation &+= 1
+        state = .running
+        return .init(session: session, generation: generation)
+    }
+
+    mutating func requestCancellation(_ request: IOSManualSyncRequest) -> Bool {
+        guard isCurrent(request), state == .running else { return false }
+        state = .cancelling
+        return true
+    }
+
+    mutating func finish(_ request: IOSManualSyncRequest) -> Bool {
+        guard isCurrent(request) else { return false }
+        state = .idle
+        return true
+    }
+
+    mutating func invalidateSession() {
+        session &+= 1
+        generation &+= 1
+        state = .idle
+    }
+
+    func isCurrent(_ request: IOSManualSyncRequest) -> Bool {
+        request.session == session && request.generation == generation
+    }
+
+    func canPublishCompletion(_ request: IOSManualSyncRequest) -> Bool {
+        isCurrent(request) && state == .running
+    }
+}
+
 enum IOSSyncCountRefreshPolicy: Equatable {
     case none
     case allCounts
@@ -479,7 +531,8 @@ struct ArticleRowContent: Equatable, Sendable {
     private(set) var feedCounts: [Int64: UInt64] = [:]
     @ObservationIgnored private var feedIconPresentationStates: [IOSFeedIconKey: IOSFeedIconPresentationState] = [:]
     private(set) var isLoading = false
-    private(set) var isSyncing = false
+    private(set) var manualSyncState: IOSManualSyncState = .idle
+    var isSyncing: Bool { manualSyncState.isActive }
     private(set) var errorMessage: String?
     private(set) var pendingNewByFeed: [Int64: Int] = [:]
     private(set) var hasPendingNewData = false
@@ -560,6 +613,10 @@ struct ArticleRowContent: Equatable, Sendable {
     private var hasMeaningfullyInteracted = false
     private var readerRequests = ReaderRequestState()
     private var readLifecycle = IOSNewsreaderReadLifecycle()
+    private var manualSyncLifecycle = IOSManualSyncLifecycle()
+    @ObservationIgnored private var manualSyncRequest: IOSManualSyncRequest?
+    @ObservationIgnored private var manualSyncCancellation: SyncCancellation?
+    @ObservationIgnored private var manualSyncTask: Task<Void, Never>?
 
     init(defaults: UserDefaults = .standard) {
         timelineStructuralState = .init(storage: timelineStructuralStorage, change: .replace, revision: 0)
@@ -581,7 +638,9 @@ struct ArticleRowContent: Equatable, Sendable {
         detach()
         core = configuredCore
         do {
-            eventSubscription = try configuredCore.subscribeEvents(listener: IOSNewsreaderEventListener(store: self))
+            eventSubscription = try configuredCore.subscribeEvents(
+                listener: IOSNewsreaderEventListener(store: self, session: readLifecycle.session)
+            )
         } catch {
             errorMessage = IOSErrorPresentation.message(for: error, context: .contentLoad)
         }
@@ -599,6 +658,7 @@ struct ArticleRowContent: Equatable, Sendable {
     func detach() {
         flushScrolloverPersistenceForLifecycle()
         invalidateScrolloverSession()
+        invalidateManualSyncSession()
         readLifecycle.invalidateSession()
         eventSubscription = nil
         core = nil
@@ -611,7 +671,6 @@ struct ArticleRowContent: Equatable, Sendable {
         feedCounts = [:]
         invalidateFeedIconSession()
         isLoading = false
-        isSyncing = false
         resetPresentationState()
     }
 
@@ -746,18 +805,32 @@ struct ArticleRowContent: Equatable, Sendable {
 #endif
 
     func syncManually() async {
-        guard let core, !isSyncing else { return }
-        isSyncing = true
+        guard let core, let request = manualSyncLifecycle.begin() else { return }
+        let cancellation = SyncCancellation()
+        manualSyncRequest = request
+        manualSyncCancellation = cancellation
+        manualSyncState = .running
         errorMessage = nil
 
-        let result = await AppleCoreExecution.shared.blockingResult { try core.sync(reason: .manual) }
-        switch result {
-        case let .success(metadata):
-            handleSyncCompleted(metadata)
-        case let .failure(error):
-            errorMessage = IOSErrorPresentation.message(for: error, context: .sync)
-            isSyncing = false
+        let task = Task { [weak self, core, cancellation] in
+            let result = await AppleCoreExecution.shared.blockingCancellableResult(
+                onCancel: { cancellation.cancel() }
+            ) {
+                try core.syncCancellable(reason: .manual, cancellation: cancellation)
+            }
+            guard let self else { return }
+            completeManualSync(request, cancellation: cancellation, result: result)
         }
+        manualSyncTask = task
+        await task.value
+    }
+
+    func cancelManualSync() {
+        guard let request = manualSyncRequest,
+              manualSyncLifecycle.requestCancellation(request) else { return }
+        manualSyncState = .cancelling
+        manualSyncCancellation?.cancel()
+        manualSyncTask?.cancel()
     }
 
     func select(_ newScope: BrowserScope) {
@@ -1366,6 +1439,65 @@ struct ArticleRowContent: Equatable, Sendable {
         scrolloverMutationTask = nil
     }
 
+    private func completeManualSync(
+        _ request: IOSManualSyncRequest,
+        cancellation: SyncCancellation,
+        result: Result<SyncOutcome, Error>
+    ) {
+        guard manualSyncLifecycle.isCurrent(request) else { return }
+
+        let cancellationWonPresentation = manualSyncState == .cancelling
+            || cancellation.isCancelled()
+
+        switch result {
+        case let .success(outcome):
+            switch outcome {
+            case let .completed(metadata):
+                guard !cancellationWonPresentation,
+                      manualSyncLifecycle.canPublishCompletion(request) else {
+                    finishManualSync(request)
+                    return
+                }
+                finishManualSync(request)
+                handleSyncCompleted(metadata)
+            case .cancelled:
+                finishManualSync(request)
+            }
+        case let .failure(error):
+            if cancellationWonPresentation || error is CancellationError {
+                finishManualSync(request)
+                return
+            }
+            finishManualSync(request)
+            errorMessage = IOSErrorPresentation.message(for: error, context: .sync)
+        }
+    }
+
+    private func finishManualSync(_ request: IOSManualSyncRequest) {
+        guard manualSyncLifecycle.finish(request) else { return }
+        manualSyncState = .idle
+        manualSyncRequest = nil
+        manualSyncCancellation = nil
+        manualSyncTask = nil
+    }
+
+    private func invalidateManualSyncSession() {
+        if let request = manualSyncRequest {
+            _ = manualSyncLifecycle.requestCancellation(request)
+        }
+        manualSyncCancellation?.cancel()
+        manualSyncTask?.cancel()
+        manualSyncLifecycle.invalidateSession()
+        manualSyncState = .idle
+        manualSyncRequest = nil
+        manualSyncCancellation = nil
+        manualSyncTask = nil
+    }
+
+    fileprivate func ownsCoreEventSession(_ session: UInt64) -> Bool {
+        readLifecycle.session == session
+    }
+
     fileprivate func handleSyncCompleted(_ metadata: SyncCompleted) {
         if metadata.reason == .background || metadata.reason == .periodic {
             pending.accumulate(metadata.newArticlesByFeed.map { (feedID: $0.feedId, count: $0.count) })
@@ -1374,7 +1506,6 @@ struct ArticleRowContent: Equatable, Sendable {
         }
         let action = SnapshotRefreshPolicy.action(manual: metadata.reason == .manual, dataChanged: metadata.dataChanged, hasMeaningfullyInteracted: hasMeaningfullyInteracted)
         if action == .replace { isLoading = true }
-        isSyncing = false
         switch IOSSyncCountRefreshPolicy.resolve(dataChanged: metadata.dataChanged, navigationChanged: metadata.navigationChanged) {
         case .navigationAndAllCounts:
             loadNavigationAndCounts { [weak self] in self?.applySyncSnapshotRefresh(metadata, action: action) }
@@ -1803,7 +1934,7 @@ struct ArticleRowContent: Equatable, Sendable {
     @MainActor
     func completeSyncForTesting(_ metadata: SyncCompleted) { handleSyncCompleted(metadata) }
     @MainActor
-    func setSyncingForTesting(_ value: Bool) { isSyncing = value }
+    func setSyncingForTesting(_ value: Bool) { manualSyncState = value ? .running : .idle }
     @MainActor
     var meaningfullyInteractedForTesting: Bool { hasMeaningfullyInteracted }
     @MainActor
@@ -1894,14 +2025,19 @@ struct ArticleRowContent: Equatable, Sendable {
 
 private final class IOSNewsreaderEventListener: EventListener, @unchecked Sendable {
     weak var store: NewsreaderStore?
+    let session: UInt64
 
-    init(store: NewsreaderStore) { self.store = store }
+    init(store: NewsreaderStore, session: UInt64) {
+        self.store = store
+        self.session = session
+    }
 
     func onEvent(event: CoreEvent) {
         guard case let .syncCompleted(metadata) = event,
               IOSNewsreaderEventRoutingPolicy.shouldDispatchSyncCompleted(reason: metadata.reason) else { return }
+        let session = session
         Task { @MainActor [weak store] in
-            guard let store else { return }
+            guard let store, store.ownsCoreEventSession(session) else { return }
             store.handleSyncCompleted(metadata)
         }
     }

@@ -887,13 +887,25 @@ clean and `cargo test --workspace` green: 216 `flux-core` tests and 6
 The native iOS gate then executed 340 tests with 0 failures and
 `./apple/ios/Build/build-app.sh` completed with `BUILD SUCCEEDED`.
 
-The next implementation package is **D4.5-D — session-owned Manual Sync
-lifecycle in NewsreaderStore**: own one current manual run and cancellation
-handle per Core/account session, distinguish idle/running/cancelling, suppress
-late or superseded completion, cancel/invalidate on detach, and permit a clean
-immediate restart without stale success/error publication. D4.5 after D still
-requires the account/Core quiescence barrier, presentation/localization work,
-automated regression coverage, and focused real-device acceptance defined
+**D4.5-D — session-owned Manual Sync lifecycle in NewsreaderStore is IN
+PROGRESS.** NewsreaderStore now owns one current manual run, its UniFFI
+`SyncCancellation` handle, and the Swift task that submits it through
+`AppleCoreExecution.blockingCancellableResult`. Manual Sync state is explicit
+(`idle/running/cancelling`); cancellation signals both the Core handle and the
+Swift task so queued work is prevented from starting while running work remains
+cooperatively cancellable. Run/session generations reject late completion,
+cancellation suppresses normal success/error presentation, detach cancels and
+invalidates the old run, and a completed cancelled run can be followed by a
+fresh generation without accepting stale publication. The Core event listener
+also captures the attached Core session so an already-enqueued old-session
+automatic/background completion cannot publish after detach/reattach.
+
+D4.5-D does not yet provide the account/Core **quiescence barrier** required
+before replacing or deleting a Core that may still have synchronous work
+winding down; that remains D4.5-E. D4.5-D remains open until native tests/build
+validate the generated UniFFI names and the new store lifecycle. D4.5 after D
+still requires the account/Core quiescence barrier, presentation/localization
+work, automated regression coverage, and focused real-device acceptance defined
 above.
 
 ### D5 — Background Sync, Local Notifications & Widgets
