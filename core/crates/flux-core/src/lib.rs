@@ -343,9 +343,7 @@ impl FluxCore {
             const RESUME_STALE_AFTER_MINUTES: i64 = 30;
             const FULL_SYNC_MAX_AGE_HOURS: i64 = 24;
             let settings = self.store.core_settings()?;
-            let stale = self
-                .store
-                .successful_sync_due(RESUME_STALE_AFTER_MINUTES)?;
+            let stale = self.store.successful_sync_due(RESUME_STALE_AFTER_MINUTES)?;
             let full_required = self.store.full_sync_required()?;
             let full_due = self.store.full_sync_due(FULL_SYNC_MAX_AGE_HOURS)?;
             if !settings.background_sync_enabled || (!stale && !full_required && !full_due) {
@@ -4238,20 +4236,12 @@ mod tests {
         let (core, source) = mutation_core(&temp);
         {
             let mut remote = source.snapshot.lock().unwrap();
-            remote.articles.push(article(
-                4,
-                10,
-                Utc::now().to_rfc3339(),
-                false,
-                false,
-            ));
-            remote.articles.push(article(
-                5,
-                99,
-                Utc::now().to_rfc3339(),
-                false,
-                false,
-            ));
+            remote
+                .articles
+                .push(article(4, 10, Utc::now().to_rfc3339(), false, false));
+            remote
+                .articles
+                .push(article(5, 99, Utc::now().to_rfc3339(), false, false));
         }
 
         let delta = core.sync(SyncReason::Background).unwrap();
@@ -4267,13 +4257,14 @@ mod tests {
             .any(|article| article.id == 4)
         );
         assert!(
-            !core.query_articles(ArticleQuery {
-                limit: 0,
-                ..Default::default()
-            })
-            .unwrap()
-            .iter()
-            .any(|article| article.id == 5)
+            !core
+                .query_articles(ArticleQuery {
+                    limit: 0,
+                    ..Default::default()
+                })
+                .unwrap()
+                .iter()
+                .any(|article| article.id == 5)
         );
         assert!(core.store.full_sync_required().unwrap());
         assert!(core.store.delta_sync_cursor().unwrap().is_some());
@@ -4319,5 +4310,4 @@ mod tests {
         );
         assert!(!core.store.full_sync_required().unwrap());
     }
-
 }
