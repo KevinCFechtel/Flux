@@ -19,6 +19,54 @@ final class AccountLifecycleTests: XCTestCase {
         }
     }
 
+    private final class MutableCredentialStore: IOSCredentialStoreProtocol {
+        var result: Result<IOSMinifluxCredentials?, Error>
+
+        init(result: Result<IOSMinifluxCredentials?, Error>) {
+            self.result = result
+        }
+
+        func load() throws -> IOSMinifluxCredentials? { try result.get() }
+        func save(_ credentials: IOSMinifluxCredentials) throws { result = .success(credentials) }
+        func remove() throws { result = .success(nil) }
+    }
+
+    private final class RecordingKeychainDataStore: IOSKeychainDataStoreProtocol {
+        var storedData: Data?
+        var loadError: Error?
+        private(set) var savedAccessibility: IOSKeychainAccessibility?
+        private(set) var updatedAccessibility: IOSKeychainAccessibility?
+        private(set) var removed = false
+
+        func loadData(service: String, account: String) throws -> Data? {
+            if let loadError { throw loadError }
+            return storedData
+        }
+
+        func saveData(
+            _ data: Data,
+            service: String,
+            account: String,
+            accessibility: IOSKeychainAccessibility
+        ) throws {
+            storedData = data
+            savedAccessibility = accessibility
+        }
+
+        func updateAccessibility(
+            service: String,
+            account: String,
+            accessibility: IOSKeychainAccessibility
+        ) throws {
+            updatedAccessibility = accessibility
+        }
+
+        func remove(service: String, account: String) throws {
+            removed = true
+            storedData = nil
+        }
+    }
+
     @MainActor
     private final class CoreQuiescenceGate {
         private var entered = false
@@ -124,6 +172,38 @@ final class AccountLifecycleTests: XCTestCase {
         XCTAssertFalse(credentials.description.contains("secret-header"))
         try store.remove()
         XCTAssertNil(try store.load())
+    }
+
+    func testKeychainStoreSavesCredentialsForBackgroundAccessAfterFirstUnlock() throws {
+        let keychain = RecordingKeychainDataStore()
+        let store = IOSKeychainCredentialStore(keychain: keychain)
+        let credentials = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "secret",
+            customHeaders: []
+        )
+
+        try store.save(credentials)
+
+        XCTAssertEqual(keychain.savedAccessibility, .backgroundAfterFirstUnlock)
+        XCTAssertEqual(
+            try JSONDecoder().decode(IOSMinifluxCredentials.self, from: XCTUnwrap(keychain.storedData)),
+            credentials
+        )
+    }
+
+    func testKeychainStoreMigratesReadableLegacyCredentialAccessibility() throws {
+        let credentials = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "secret",
+            customHeaders: []
+        )
+        let keychain = RecordingKeychainDataStore()
+        keychain.storedData = try JSONEncoder().encode(credentials)
+        let store = IOSKeychainCredentialStore(keychain: keychain)
+
+        XCTAssertEqual(try store.load(), credentials)
+        XCTAssertEqual(keychain.updatedAccessibility, .backgroundAfterFirstUnlock)
     }
 
     @MainActor
@@ -345,6 +425,76 @@ final class AccountLifecycleTests: XCTestCase {
 
         XCTAssertIdentical(bootstrapper.core, core)
         XCTAssertEqual(bootstrapper.coreRevision, 1)
+    }
+
+    @MainActor
+    func testEnsureStartedConcurrentCallersShareOneInFlightBootstrap() async throws {
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let gate = FirstFactoryGate()
+        let factoryCalls = LockedBox(0)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { credentials in
+                factoryCalls.withValue { $0 += 1 }
+                return gate.make(credentials, first: core, subsequent: core)
+            }
+        )
+
+        let first = Task { await bootstrapper.ensureStarted() }
+        await gate.waitUntilFirstFactoryStarts()
+        let second = Task { await bootstrapper.ensureStarted() }
+        await Task.yield()
+
+        XCTAssertEqual(factoryCalls.value(), 1)
+        XCTAssertNil(bootstrapper.core)
+
+        gate.releaseFirst()
+        let firstCore = await first.value
+        let secondCore = await second.value
+
+        XCTAssertIdentical(firstCore, core)
+        XCTAssertIdentical(secondCore, core)
+        XCTAssertEqual(factoryCalls.value(), 1)
+        XCTAssertEqual(bootstrapper.coreRevision, 1)
+    }
+
+    @MainActor
+    func testEnsureStartedRetriesAfterProtectedCredentialsBecomeAvailable() async throws {
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = MutableCredentialStore(result: .failure(IOSCredentialStoreError.temporarilyUnavailable))
+        let core = try makeCore(for: account)
+        let factoryCalls = LockedBox(0)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in
+                factoryCalls.withValue { $0 += 1 }
+                return core
+            }
+        )
+
+        XCTAssertNil(await bootstrapper.ensureStarted())
+        XCTAssertEqual(bootstrapper.state, .starting)
+        XCTAssertNil(bootstrapper.core)
+        XCTAssertEqual(factoryCalls.value(), 0)
+
+        store.result = .success(account)
+        let readyCore = await bootstrapper.ensureStarted()
+
+        XCTAssertIdentical(readyCore, core)
+        XCTAssertIdentical(bootstrapper.core, core)
+        XCTAssertEqual(factoryCalls.value(), 1)
+        XCTAssertTrue({ if case .ready = bootstrapper.state { return true }; return false }())
     }
 
     @MainActor
