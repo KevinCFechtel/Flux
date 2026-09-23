@@ -1080,6 +1080,46 @@ been initialized by the background runtime before SwiftUI installed its
 enabled scheduling, disabled cancellation, successful completion and OS
 expiration/cooperative cancellation.
 
+**D5-C.1 — Lightweight Delta Sync and Resume Full-Reconcile Policy is
+implemented; automated validation is pending.** Regular iOS Background Sync no
+longer requires the Full unread+starred snapshot once a Full Sync has
+established a Delta baseline. The Rust Core owns the plan decision:
+
+- `.background` is Delta-only. It delivers pending mutations first, then uses
+  Miniflux `changed_after` to fetch changed Entries. It never escalates into a
+  Full Sync inside `BGAppRefreshTask`.
+- `.resume` is requested whenever the app becomes active, but the Core returns
+  a no-op when Background Sync is disabled or the latest successful Sync is
+  younger than 30 minutes and no Full reconciliation is due.
+- Resume performs Full Sync when `full_sync_required` is set, when no valid
+  Delta baseline exists, or when the last Full Sync is at least 24 hours old.
+  Otherwise stale Resume uses Delta.
+- `.manual`, `.appStart`, `.periodic`, and `.widget` retain Full-Sync
+  semantics for now.
+
+A successful Full Sync captures a Miniflux changed-entry high-water mark before
+the Full remote snapshot begins and commits that value as the next Delta
+baseline only after the Full reconciliation succeeds. This ordering allows
+changes racing the Full fetch to be observed again by the next Delta instead of
+being skipped. Delta requests use a small overlap window around the persisted
+cursor so equal/near-boundary `changed_at` values are safely re-read.
+
+Delta Sync does not fetch or reconcile the Feed/Category catalog. A changed
+Entry whose `feed_id` is unknown locally is skipped, while all Entries from
+known Feeds continue to reconcile normally. The successful Delta cursor is
+still advanced and `full_sync_required` is persisted. The later Full Sync is
+independent of the Delta cursor and restores the structural Feed/Category truth.
+Because system-notification preferences exist only for known local Feeds,
+skipped unknown-Feed Entries cannot create notification candidates.
+
+Pending article/media mutations retain their established ordering and safety:
+delivery and durable acknowledgement happen before the Core chooses or executes
+the remote Delta/Full plan. A failed pending delivery still aborts remote fetch;
+successful writes remain durable even if a later Delta step is cancelled.
+Delta reconciliation updates only returned Entries and their enclosures. It
+never applies the Full-Snapshot rule that an Entry absent from the response is
+implicitly read and unstarred.
+
 Integrate BGTaskScheduler, local notifications and the native iOS WidgetKit
 presentation using the shared snapshot contract. Background execution shares
 the existing account/Core session, participates in app-wide Core quiescence and
