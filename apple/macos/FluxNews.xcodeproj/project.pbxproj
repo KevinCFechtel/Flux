@@ -117,7 +117,7 @@
 		B19 /* ReaderRequestState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderRequestState.swift; sourceTree = "<group>"; };
 		B2 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		B20 /* ReaderRequestStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderRequestStateTests.swift; sourceTree = "<group>"; };
-		B21 /* SystemNotificationPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemNotificationPresentation.swift; sourceTree = "<group>"; };
+		B21 /* SystemNotificationPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/SystemNotificationPresentation.swift; sourceTree = SOURCE_ROOT; };
 		B22 /* KeyboardCommandRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardCommandRoutingTests.swift; sourceTree = "<group>"; };
 		B23 /* SystemNotificationPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemNotificationPresentationTests.swift; sourceTree = "<group>"; };
 		B24 /* ReaderPresentationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderPresentationState.swift; sourceTree = "<group>"; };
