@@ -8,6 +8,7 @@ final class IOSAppRuntime {
     let bootstrapper: CoreBootstrapper
     let backgroundSyncCoordinator: IOSBackgroundSyncCoordinator
     let systemNotificationManager: IOSSystemNotificationManager
+    let widgetSnapshotCoordinator: IOSWidgetSnapshotCoordinator
 
     init(
         scheduler: IOSBackgroundTaskScheduling = IOSSystemBackgroundTaskScheduler.shared,
@@ -19,15 +20,22 @@ final class IOSAppRuntime {
             scheduler: scheduler
         )
         let systemNotificationManager = systemNotificationManager ?? IOSSystemNotificationManager.shared
+        let widgetSnapshotCoordinator = IOSWidgetSnapshotCoordinator(bootstrapper: bootstrapper)
         self.bootstrapper = bootstrapper
         self.backgroundSyncCoordinator = backgroundSyncCoordinator
         self.systemNotificationManager = systemNotificationManager
+        self.widgetSnapshotCoordinator = widgetSnapshotCoordinator
 
-        backgroundSyncCoordinator.onSuccessfulBackgroundSync = { [weak bootstrapper, weak systemNotificationManager] metadata in
-            guard !metadata.systemNotificationCandidates.isEmpty,
-                  let bootstrapper,
-                  let systemNotificationManager,
+        backgroundSyncCoordinator.onSuccessfulBackgroundSync = { [weak bootstrapper, weak systemNotificationManager, weak widgetSnapshotCoordinator] metadata in
+            guard let bootstrapper,
                   let core = bootstrapper.core else {
+                return
+            }
+
+            await widgetSnapshotCoordinator?.refreshNow(for: core)
+
+            guard !metadata.systemNotificationCandidates.isEmpty,
+                  let systemNotificationManager else {
                 return
             }
             await systemNotificationManager.deliver(metadata.systemNotificationCandidates) { candidateID in
