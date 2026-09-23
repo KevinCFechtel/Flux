@@ -281,10 +281,14 @@ All ordinary triggers use one operation:
 
 `sync(reason)`
 
-Reasons identify the trigger, e.g. Manual, AppStart, Resume, Background,
-Periodic, Widget. They must not become hidden behavior switches. Native
-platforms decide when timer/stale refreshes occur; these use `Periodic`
-rather than overloading `Background`.
+Reasons identify the trigger, e.g. Manual, AppStart, Resume, Background,
+Periodic, Widget. Native platforms must not implement separate synchronization
+algorithms for those reasons. The Core may map a trigger through an explicit,
+documented `SyncPlan` policy (for example mobile Background to Delta, or a
+repair-due Resume to Full) while retaining one mutation, reconciliation,
+cancellation and event contract. Native platforms decide when timer/stale
+refreshes occur; these use their proper reason rather than overloading another
+trigger.
 
 The normal sync order is:
 
