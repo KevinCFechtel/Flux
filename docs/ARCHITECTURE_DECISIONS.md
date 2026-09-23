@@ -146,7 +146,8 @@ requested separately for article detail.
 A background core change must not unexpectedly rebuild a list the user
 is currently using.
 
-With Sync-on-Start enabled:
+Desktop clients may expose an explicit Sync-on-Start preference. Where such a
+preference exists:
 
 1.  load and display local state immediately;
 2.  run sync in parallel;
@@ -156,12 +157,17 @@ With Sync-on-Start enabled:
 4.  after interaction, keep the snapshot stable and signal new data
     through an event/badge until the UI intentionally refreshes.
 
-Sync-on-Start is optional. When disabled, app start only loads local
-state.
+Mobile clients do **not** expose a separate Sync-on-Start preference. Their
+single user-facing Background Sync preference governs scheduled background work
+and automatic foreground/resume refresh. When Background Sync is disabled,
+mobile app start/resume loads local state without automatic sync; Manual Sync
+remains available. When enabled, foreground/resume may perform a stale-data
+fallback sync while avoiding duplication with a recent or running background
+sync.
 
-Resume follows the same stable-snapshot rule. Data obtained by a
-background sync while the app was suspended is signalled, not pushed
-into the visible list.
+Resume follows the same stable-snapshot rule. Data obtained by a background
+sync while the app was suspended is signalled, not pushed into the visible
+list.
 
 Deep-link/widget/notification launches prioritize the explicit
 target/action. Later resumes return to the normal snapshot rules.
@@ -178,14 +184,15 @@ checkpoints. This transition does not itself force a sync.
 
 ### 4.1 iOS/iPadOS UIKit Article Timeline
 
-**Accepted on 2026-09-11; amendment implementation is in progress and remains open to performance-driven structural changes.**
+**Accepted on 2026-09-11; U1-U5 are complete and the UIKit Timeline architecture is frozen.**
 
-The owned UIKit Timeline is now the productive baseline, but this architecture
-decision does not freeze its current internal renderer, cell, layout,
-image-presentation, preparation, or scheduling structures. Until the Phase-D
-UIKit amendment is explicitly completed, physical-device performance evidence
-may justify fundamental changes inside those boundaries while the selected UIKit
-container/cell direction and frozen product semantics remain authoritative.
+The owned UIKit Timeline is the productive baseline. U3 passed real-device
+acceptance, the legacy article-image renderer has been removed, and the
+productive image path is ImageIO -> UIImageView/Core Animation. Fundamental
+changes to the Timeline renderer, cell/layout structure, Scrollover integration,
+image-presentation pipeline, preparation, or scheduling require a concrete
+reproducible regression case. Later Phase-D feature work must preserve this
+frozen architecture and its product semantics.
 
 The unpublished native iOS/iPadOS client replaces the existing Flutter
 FluxNews app. For its central Article Timeline, long-term scrolling performance,
@@ -296,6 +303,24 @@ contained where safe.
 Background sync is independently configurable from Live/Deferred
 mutation delivery and can be disabled completely. When enabled it is a
 full normal sync, including pending mutations.
+
+On mobile, this same Background Sync preference also governs automatic
+foreground/resume refresh. There is no second mobile Sync-on-Start setting.
+Native scheduling is platform-owned and must avoid duplicate work when a recent
+or currently-running background sync already satisfies the freshness need.
+
+Background OS execution and Manual Sync share the same app-owned account/Core
+session but not the same presentation lifecycle. D4.5 Manual Sync remains
+user-owned and user-cancellable. An OS background task may use the same
+run-scoped cooperative Core cancellation primitive only to stop already-running
+synchronous work when the operating system expires the task; that does not make
+background sync user-cancellable.
+
+Once native background Core execution exists, destructive account/Core
+operations must quiesce the entire current Core session, not only a UI store:
+block new work, request cancellation of cancellable runs where appropriate, and
+wait for already-started synchronous Core work to finish before replacing or
+destroying the session.
 
 `last_successful_sync_at` is one global persisted/queryable timestamp
 for the last fully successful sync, independent of `SyncReason`. The
