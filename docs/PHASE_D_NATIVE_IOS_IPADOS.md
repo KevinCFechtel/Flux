@@ -1184,6 +1184,55 @@ Focused native tests cover authorization, denied permission, successful
 delivery-before-ACK, failed-delivery/no-ACK, buffered feed routing, and the
 requirement that BGTask completion waits for post-Sync fanout.
 
+**D5-F — Apple-shared Widget Contract Extraction is IMPLEMENTED; validation is
+pending.** The existing macOS WidgetKit contract has been moved mechanically
+into `apple/shared/FluxApple`: `WidgetSnapshotV1`, `WidgetSnapshotStore`,
+`WidgetAction`, `WidgetContentModel`, the widget-family presentation policy
+and `WidgetSnapshotWriter`. macOS now references those shared sources instead
+of maintaining private copies.
+
+The durable widget contract remains intentionally separate from UniFFI records,
+Core persistence and account credentials. App/Background execution asks Core for
+the existing compact `WidgetData` projection, serializes the versioned snapshot
+into the configured App Group and asks WidgetKit to reload the two stable widget
+kinds. The extension remains read-only over that snapshot and never opens Core,
+SQLite, Keychain or Miniflux itself.
+
+Widget identity is configuration-driven so the parallel native-development app
+does not collide with the production/Flutter identity. Native Dev uses
+`group.dev.kevincfechtel.fluxNews.nativeDev` and the
+`fluxnews-native-dev` widget URL scheme; Upgrade Test/production retains
+`group.dev.kevincfechtel.fluxNews` and `fluxnews`.
+
+**D5-G — Native iOS WidgetKit, including Lock Screen widgets, is IMPLEMENTED;
+validation is pending.** The iOS application now embeds a native
+`FluxNewsWidgets` extension using the shared snapshot/presentation contract.
+The Headlines widget supports Home Screen `systemSmall`, `systemMedium`,
+`systemLarge` and iPad `systemExtraLarge`. The Status widget supports Home
+Screen `systemSmall`/`systemMedium` and the Lock Screen families
+`accessoryInline`, `accessoryCircular` and `accessoryRectangular`.
+
+All families consume the same configured content scopes
+(All News/Bookmarks/Category/Feed) and the same snapshot counts/articles. Lock
+Screen presentation is deliberately reduced rather than shrinking the Home
+Screen article card: inline shows the FluxNews/count summary, circular presents
+the count in an accessory gauge, and rectangular shows scope/count plus the
+leading article when available.
+
+Native iOS owns snapshot freshness through `IOSWidgetSnapshotCoordinator`.
+The coordinator subscribes to the active Core session and refreshes the App Group
+snapshot after article read/star state events and completed Sync events.
+Successful BGAppRefresh fanout additionally awaits a snapshot refresh before the
+OS task completes. Account/Core detachment invalidates the snapshot and reloads
+WidgetKit.
+
+Widget URLs reuse the shared stable `WidgetAction` contract. iOS registers its
+configuration-specific URL scheme and routes scope actions into
+`NewsreaderStore`, article IDs through Core back into the existing article-open
+policy, and widget Sync through `sync(.widget)` without borrowing the D4.5
+Manual-Sync presentation lifecycle. Focused tests cover snapshot round-trip,
+scope projection, URL action round-trip and the exact three Lock Screen families.
+
 Integrate BGTaskScheduler, local notifications and the native iOS WidgetKit
 presentation using the shared snapshot contract. Background execution shares
 the existing account/Core session, participates in app-wide Core quiescence and
