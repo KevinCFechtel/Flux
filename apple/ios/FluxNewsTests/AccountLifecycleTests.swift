@@ -67,6 +67,44 @@ final class AccountLifecycleTests: XCTestCase {
         }
     }
 
+    private final class FakeBackgroundTaskScheduler: IOSBackgroundTaskScheduling {
+        struct Submission: Equatable {
+            let identifier: String
+            let earliestBeginDate: Date
+        }
+
+        private(set) var registrationCount = 0
+        private(set) var submissions: [Submission] = []
+        private(set) var cancellations: [String] = []
+        private(set) var launchHandler: ((IOSBackgroundTaskContext) -> Void)?
+
+        @discardableResult
+        func registerAppRefresh(
+            identifier: String,
+            launchHandler: @escaping (IOSBackgroundTaskContext) -> Void
+        ) -> Bool {
+            registrationCount += 1
+            self.launchHandler = launchHandler
+            return true
+        }
+
+        func submitAppRefresh(
+            identifier: String,
+            earliestBeginDate: Date
+        ) throws {
+            submissions.append(
+                Submission(
+                    identifier: identifier,
+                    earliestBeginDate: earliestBeginDate
+                )
+            )
+        }
+
+        func cancel(identifier: String) {
+            cancellations.append(identifier)
+        }
+    }
+
     @MainActor
     private final class CoreQuiescenceGate {
         private var entered = false
@@ -787,6 +825,215 @@ final class AccountLifecycleTests: XCTestCase {
         XCTAssertEqual(factoryInputs.value(), [old, replacement])
         XCTAssertIdentical(bootstrapper.core, newCore)
         XCTAssertFalse(coordinator.isQuiescing)
+    }
+
+
+    @MainActor
+    func testBackgroundTaskRegistrationRegistersIdentifierOnlyOnce() {
+        let scheduler = FakeBackgroundTaskScheduler()
+        let registration = IOSBackgroundTaskRegistration(
+            scheduler: scheduler,
+            identifier: "dev.test.backgroundSync",
+            launchHandler: { _ in }
+        )
+
+        XCTAssertTrue(registration.register())
+        XCTAssertTrue(registration.register())
+        XCTAssertEqual(scheduler.registrationCount, 1)
+    }
+
+    @MainActor
+    func testBackgroundSchedulingUsesPreferredEarliestBeginDateWhenEnabled() async throws {
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core }
+        )
+        let scheduler = FakeBackgroundTaskScheduler()
+        let now = Date(timeIntervalSince1970: 1_000)
+        let coordinator = IOSBackgroundSyncCoordinator(
+            bootstrapper: bootstrapper,
+            scheduler: scheduler,
+            identifier: "dev.test.backgroundSync",
+            preferredInterval: 1_800,
+            now: { now },
+            settingsReader: { _ in true }
+        )
+
+        await coordinator.refreshScheduling()
+
+        XCTAssertEqual(
+            scheduler.submissions,
+            [
+                .init(
+                    identifier: "dev.test.backgroundSync",
+                    earliestBeginDate: Date(timeIntervalSince1970: 2_800)
+                )
+            ]
+        )
+        XCTAssertTrue(scheduler.cancellations.isEmpty)
+    }
+
+    @MainActor
+    func testDisabledBackgroundSyncCancelsSuccessorWithoutRunningCoreSync() async throws {
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core }
+        )
+        let scheduler = FakeBackgroundTaskScheduler()
+        let syncCalls = LockedBox(0)
+        let completion = expectation(description: "background task completes")
+        let coordinator = IOSBackgroundSyncCoordinator(
+            bootstrapper: bootstrapper,
+            scheduler: scheduler,
+            identifier: "dev.test.backgroundSync",
+            settingsReader: { _ in false },
+            syncRunner: { _, _ in
+                syncCalls.withValue { $0 += 1 }
+                return .cancelled
+            }
+        )
+
+        coordinator.handle(
+            IOSBackgroundTaskContext(
+                setExpirationHandler: { _ in },
+                complete: { success in
+                    XCTAssertTrue(success)
+                    completion.fulfill()
+                }
+            )
+        )
+
+        await fulfillment(of: [completion], timeout: 5)
+
+        XCTAssertEqual(syncCalls.value(), 0)
+        XCTAssertEqual(scheduler.submissions.count, 1)
+        XCTAssertEqual(scheduler.cancellations, ["dev.test.backgroundSync"])
+    }
+
+    @MainActor
+    func testSuccessfulBackgroundSyncCompletesOnceAndPublishesSuccessHook() async throws {
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core }
+        )
+        let scheduler = FakeBackgroundTaskScheduler()
+        let completion = expectation(description: "background task completes")
+        let published = expectation(description: "success hook publishes")
+        let completionCalls = LockedBox<[Bool]>([])
+        let metadata = SyncCompleted(
+            reason: .background,
+            newArticles: 1,
+            updatedArticles: 0,
+            mutationsDelivered: 0,
+            dataChanged: true,
+            navigationChanged: true,
+            newArticlesByFeed: [],
+            systemNotificationCandidates: []
+        )
+        let coordinator = IOSBackgroundSyncCoordinator(
+            bootstrapper: bootstrapper,
+            scheduler: scheduler,
+            identifier: "dev.test.backgroundSync",
+            settingsReader: { _ in true },
+            syncRunner: { _, _ in .completed(metadata: metadata) }
+        )
+        coordinator.onSuccessfulBackgroundSync = { result in
+            XCTAssertEqual(result.reason, .background)
+            published.fulfill()
+        }
+
+        coordinator.handle(
+            IOSBackgroundTaskContext(
+                setExpirationHandler: { _ in },
+                complete: { success in
+                    completionCalls.withValue { $0.append(success) }
+                    completion.fulfill()
+                }
+            )
+        )
+
+        await fulfillment(of: [published, completion], timeout: 5)
+
+        XCTAssertEqual(completionCalls.value(), [true])
+        XCTAssertEqual(scheduler.submissions.count, 1)
+    }
+
+    @MainActor
+    func testBackgroundTaskExpirationCancelsCoreRunAndCompletesFailureOnce() async throws {
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core }
+        )
+        let scheduler = FakeBackgroundTaskScheduler()
+        let syncStarted = expectation(description: "background sync starts")
+        let cancellationObserved = expectation(description: "Core cancellation observed")
+        let completion = expectation(description: "background task completes")
+        let completionCalls = LockedBox<[Bool]>([])
+        let expiration = LockedBox<(() -> Void)?>(nil)
+        let coordinator = IOSBackgroundSyncCoordinator(
+            bootstrapper: bootstrapper,
+            scheduler: scheduler,
+            identifier: "dev.test.backgroundSync",
+            settingsReader: { _ in true },
+            syncRunner: { _, cancellation in
+                syncStarted.fulfill()
+                while !cancellation.isCancelled() {
+                    Thread.sleep(forTimeInterval: 0.001)
+                }
+                cancellationObserved.fulfill()
+                return .cancelled
+            }
+        )
+
+        coordinator.handle(
+            IOSBackgroundTaskContext(
+                setExpirationHandler: { handler in
+                    expiration.withValue { $0 = handler }
+                },
+                complete: { success in
+                    completionCalls.withValue { $0.append(success) }
+                    completion.fulfill()
+                }
+            )
+        )
+
+        await fulfillment(of: [syncStarted], timeout: 5)
+        expiration.value()?()
+        await fulfillment(of: [cancellationObserved, completion], timeout: 5)
+
+        XCTAssertEqual(completionCalls.value(), [false])
     }
 
 }
