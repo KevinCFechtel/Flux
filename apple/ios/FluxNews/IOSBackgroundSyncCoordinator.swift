@@ -141,6 +141,10 @@ private final class IOSBackgroundTaskCompletionGate: @unchecked Sendable {
     }
 }
 
+enum IOSBackgroundSyncPreferenceError: Error {
+    case coreUnavailable
+}
+
 @MainActor
 final class IOSBackgroundSyncCoordinator {
     private let bootstrapper: CoreBootstrapper
@@ -191,8 +195,8 @@ final class IOSBackgroundSyncCoordinator {
     }
 
     /// Reconciles the one pending BGAppRefresh request with persisted Core
-    /// settings. This schedules work only; foreground/resume Sync freshness is
-    /// intentionally D5-D.
+    /// settings. Foreground/resume freshness is Core-owned and requested
+    /// separately through resumeIfNeeded().
     func refreshScheduling() async {
         guard let core = await bootstrapper.ensureStarted() else {
             if case .accountRequired = bootstrapper.state {
@@ -219,6 +223,47 @@ final class IOSBackgroundSyncCoordinator {
             logger.error(
                 "Could not read Background Sync setting: \(String(reflecting: error), privacy: .private)"
             )
+        }
+    }
+
+    func backgroundSyncPreference() async -> Result<Bool, Error> {
+        guard let core = await bootstrapper.ensureStarted() else {
+            return .failure(IOSBackgroundSyncPreferenceError.coreUnavailable)
+        }
+        guard let result = await bootstrapper.coreSessionExecutionCoordinator
+            .responsiveResult(for: core, { [settingsReader] in
+                try settingsReader(core)
+            }) else {
+            return .failure(IOSBackgroundSyncPreferenceError.coreUnavailable)
+        }
+        return result
+    }
+
+    func setBackgroundSyncPreference(_ enabled: Bool) async -> Result<Void, Error> {
+        guard let core = await bootstrapper.ensureStarted() else {
+            return .failure(IOSBackgroundSyncPreferenceError.coreUnavailable)
+        }
+        guard let result = await bootstrapper.coreSessionExecutionCoordinator
+            .responsiveResult(
+                for: core,
+                {
+                    try core.setBackgroundSyncEnabled(enabled: enabled)
+                }
+            ) else {
+            return .failure(IOSBackgroundSyncPreferenceError.coreUnavailable)
+        }
+
+        switch result {
+        case .success:
+            if enabled {
+                scheduleNext()
+                resumeIfNeeded()
+            } else {
+                scheduler.cancel(identifier: identifier)
+            }
+            return .success(())
+        case let .failure(error):
+            return .failure(error)
         }
     }
 
