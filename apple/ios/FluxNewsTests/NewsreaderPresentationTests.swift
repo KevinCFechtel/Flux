@@ -44,14 +44,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(IOSBottomAction.defaultActions.contains(.settings))
     }
 
-    func testLegacyActionMaterialBacksEveryTopBarActionGroup() {
-        XCTAssertTrue(IOSArticleListChromePresentation.usesLegacyTopBarActionMaterial(for: .compactLandscape))
-        XCTAssertTrue(IOSArticleListChromePresentation.usesLegacyTopBarActionMaterial(for: .persistentSplit))
-        XCTAssertTrue(IOSArticleListChromePresentation.usesLegacyTopBarActionMaterial(for: .persistentSplitCollapsed))
-        XCTAssertFalse(IOSArticleListChromePresentation.usesLegacyTopBarActionMaterial(for: .compactPortrait))
-        XCTAssertEqual(IOSArticleListActionChromeMetrics.legacyHorizontalPadding, 8)
-        XCTAssertEqual(IOSArticleListActionChromeMetrics.legacyVerticalPadding, 5)
-        XCTAssertEqual(IOSArticleListActionChromeMetrics.legacySpacing, 6)
+    func testFloatingActionGroupUsesStableCapsuleMetrics() {
+        XCTAssertEqual(IOSArticleListActionChromeMetrics.floatingHorizontalPadding, 8)
+        XCTAssertEqual(IOSArticleListActionChromeMetrics.floatingVerticalPadding, 5)
+        XCTAssertEqual(IOSArticleListActionChromeMetrics.floatingSpacing, 6)
     }
 
     func testCollapsedSplitInlineTitleCapsuleKeepsUsefulMinimumWidth() {
@@ -67,12 +63,9 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .compactLandscape), .floatingTopLeading)
         XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .persistentSplit), .hidden)
         XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .persistentSplitCollapsed), .floatingTopLeading)
-        XCTAssertFalse(IOSArticleListChromePresentation.showsTopNavigationBar(for: .compactPortrait))
-        XCTAssertTrue(IOSArticleListChromePresentation.showsTopNavigationBar(for: .compactLandscape))
-        XCTAssertTrue(IOSArticleListChromePresentation.showsTopNavigationBar(for: .persistentSplit))
-        XCTAssertTrue(IOSArticleListChromePresentation.showsTopNavigationBar(for: .persistentSplitCollapsed))
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset, 12)
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.floatingVerticalInset, 4)
+        XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.floatingRowSpacing, 10)
     }
 
     func testCompactLandscapeTitleCapsuleFitsCompactFloatingRow() {
@@ -117,9 +110,9 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
-    func testPersistentSplitModesShareTopToolbarPlacement() {
-        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: .persistentSplit), .topBarTrailing)
-        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: .persistentSplitCollapsed), .topBarTrailing)
+    func testPersistentSplitModesShareDetachedTopActionPlacement() {
+        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: .persistentSplit), .floatingTopTrailing)
+        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: .persistentSplitCollapsed), .floatingTopTrailing)
     }
 
     func testCompactShellRejectsPersistentSidebarVisibility() {
@@ -165,7 +158,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             splitColumnVisibility: .detailOnly
         )
         XCTAssertEqual(landscape, .compactLandscape)
-        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: landscape), .topBarTrailing)
+        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: landscape), .floatingTopTrailing)
 
         let persistent = IOSArticleListChromePresentation.mode(
             for: .regular,
@@ -173,7 +166,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             splitColumnVisibility: .all
         )
         XCTAssertEqual(persistent, .persistentSplit)
-        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: persistent), .topBarTrailing)
+        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: persistent), .floatingTopTrailing)
 
         let collapsedPersistent = IOSArticleListChromePresentation.mode(
             for: .regular,
@@ -181,7 +174,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             splitColumnVisibility: .detailOnly
         )
         XCTAssertEqual(collapsedPersistent, .persistentSplitCollapsed)
-        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: collapsedPersistent), .topBarTrailing)
+        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: collapsedPersistent), .floatingTopTrailing)
     }
 
     func testMoreActionsKeepSettingsAndOnlyOfferNextForSupportedScopes() {

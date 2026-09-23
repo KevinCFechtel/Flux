@@ -345,19 +345,18 @@ architecture is now frozen.
 The pre-D4.5 native manual Sync control used the same `arrow.clockwise`
 symbol across idle and active Sync while preserving a stable toolbar slot.
 D4.5 supersedes only that control-state presentation with an explicit Cancel
-action while retaining the same toolbar geometry. iPhone portrait keeps Sync,
+action while retaining the same semantic controls. iPhone portrait keeps Sync,
 Filter/Sort, and More in the bottom toolbar.
-iPhone landscape moves the same action group to the trailing top toolbar. The
-interactive scope capsule is no longer a navigation-bar item: it lives in a
-separate top safe-area inset below the system bar and preserves the configured
+iPhone landscape moves the same action group into one detached floating capsule
+on the trailing side of the normal top safe-area inset. The interactive scope
+capsule lives on the leading side of that inset and preserves the configured
 current-scope article count in compact numeric form (or the existing transient
-`Syncing…` substitution). iPhone portrait uses the same detached-inset model and
-hides the otherwise-empty top navigation bar.
-Persistent iPad split navigation also uses the trailing top toolbar and keeps
-the detail title-free while the sidebar is visible because that sidebar already
-communicates the selected scope. If iPadOS temporarily hides the sidebar, the
-detail view restores the interactive scope capsule with chevron in the independent
-top inset so navigation does not depend on the edge-swipe gesture. Category
+`Syncing…` substitution). The otherwise-empty Article List navigation bar is
+hidden.
+Persistent iPad split navigation uses the same detached floating action capsule.
+While the sidebar is visible the detail remains scope-title-free; if iPadOS
+temporarily hides that sidebar, the interactive scope capsule with chevron joins
+the inset row so navigation does not depend on the edge-swipe gesture. Category
 selection and category expansion remain separate sidebar interactions so a
 selected category can still be expanded or collapsed independently;
 active manual Sync is indicated by continuous symbol rotation, and successful
@@ -565,24 +564,21 @@ article count into the title string itself. The accepted native chrome is the
 scope capsule implemented by `ArticleListTitleCapsule`, detached from
 `UINavigationBar` and rendered in a normal SwiftUI top `safeAreaInset`.
 iPhone portrait uses a centered stacked capsule with the optional descriptive
-current-scope count and hides the otherwise-empty top navigation bar. iPhone
-landscape uses a compact two-line leading capsule in the independent inset row,
-with the scope title above the compact count, while Sync/Filter/More remain in
-the trailing system toolbar. Its compact-height typography and zero extra
-internal vertical padding avoid wasting landscape height. The capsule reserves
-the alternate second-line width so transitions between the count and `Syncing…`
-do not make the chrome breathe horizontally. Persistent iPad split navigation
-shows no capsule while the sidebar is visible; when that sidebar collapses, the
-inline capsule becomes visible and interactive in the detached inset row.
+current-scope count and keeps Sync/Filter/More in the native bottom toolbar.
+iPhone landscape uses a compact two-line leading scope capsule and one detached
+trailing Sync/Filter/More capsule in the same independent inset row. Its
+compact-height typography and zero extra internal vertical padding avoid wasting
+landscape height. The scope capsule reserves the alternate second-line width so
+transitions between the count and `Syncing…` do not make the chrome breathe
+horizontally. Persistent iPad split navigation shows only the detached trailing
+action capsule while the sidebar is visible; when that sidebar collapses, the
+inline scope capsule becomes visible and interactive on the left.
 
-On iOS/iPadOS 17-25, every article-list action group that lives in the top
-navigation bar is still grouped over one native `.regularMaterial` capsule for
-contrast against scrolling article text. iOS 26+ keeps the system Liquid Glass
-toolbar treatment for those system actions. The detached scope capsule owns its
-own single Liquid Glass layer on 26+ (or `.regularMaterial` before 26) rather
-than inheriting toolbar glass. The native Timeline top-edge effect uses
-`.automatic` on iOS/iPadOS 26+ and no longer includes the detached capsule; the
-older bounded status-bar scrim remains only for iOS/iPadOS 17-25. During Sync the
+Both detached capsules use `.regularMaterial` on iOS/iPadOS 17-25 and own a
+single `UIGlassEffect(style: .regular)` layer on iOS/iPadOS 26+. No Article List
+control remains in the top navigation bar. The native Timeline top-edge effect
+nevertheless stays enabled with `.automatic` on iOS/iPadOS 26+; the older
+bounded status-bar scrim remains only for iOS/iPadOS 17-25. During Sync the
 capsule's count presentation temporarily shows `Syncing…`. The capsule remains
 the authoritative visible title/header presentation and carries the accessibility
 header role; do not reintroduce a separate Large-Title or native-subtitle product

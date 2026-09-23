@@ -210,9 +210,10 @@ investigation record and no longer describe shipping code.
 
 Fixed chrome, no longer switchable: the native top scroll-edge effect is
 `.automatic` on iOS/iPadOS 26+ and the bounded status-bar gradient is retained
-only on 17-25; the bottom edge effect remains disabled. The scope title is a
-detached Liquid Glass capsule in a normal top `safeAreaInset`
-(`UIGlassEffect(style: .regular)`, `.regularMaterial` below iOS 26), and the
+only on 17-25; the bottom edge effect remains disabled. The scope title and every
+former top-bar Article List action live in detached capsules inside one normal
+top `safeAreaInset` (`UIGlassEffect(style: .regular)`, `.regularMaterial`
+below iOS 26); no Article List control remains in `UINavigationBar`. The
 Scrollover undo pill remains in `.regularMaterial`.
 
 New presentation mode **Visual compact** (`ArticlePresentationMode.visualCompact`):

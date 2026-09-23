@@ -470,19 +470,23 @@ the custom scope capsule while that capsule was a `UINavigationBar` toolbar
 item. Pull to Refresh was not the cause and remains enabled.
 
 On 23 September 2026 the presentation chrome was amended without reopening the
-frozen Timeline renderer/container architecture. `ArticleListTitleCapsule` is
-now rendered by the SwiftUI shell in a normal top `safeAreaInset`, not as
-`.principal` or `.topBarLeading` navigation content. iPhone portrait hides the
-otherwise-empty top navigation bar; iPhone landscape and iPad keep only their
-actual system action group in that bar. A visible persistent iPad sidebar keeps
-the detail title-free; when the sidebar collapses, the scope capsule appears in
-the independent inset row.
+frozen Timeline renderer/container architecture. `ArticleListTitleCapsule` and
+the former leading/trailing top-bar actions are now rendered by the SwiftUI shell
+in one normal top `safeAreaInset`, not as `.principal`, `.topBarLeading`, or
+`.topBarTrailing` navigation content. iPhone portrait keeps Sync/Filter/More in
+the bottom toolbar and centers only the detached scope capsule above the
+Timeline. iPhone landscape places the capsule left and a single floating
+Sync/Filter/More capsule right in the inset row. A visible persistent iPad sidebar
+shows only that floating action capsule; when the sidebar collapses, the scope
+capsule joins it on the left. The otherwise-empty Article List navigation bar is
+hidden in every mode.
 
 Because a normal `safeAreaInset` does not extend scroll-edge effects the way
-`safeAreaBar` does, iOS/iPadOS 26+ now re-enables the Timeline's native top edge
-effect with the system `.automatic` style. The bottom edge effect remains
-disabled. The bounded status-bar scrim is retained only as the iOS/iPadOS 17-25
-fallback and is hidden on 26+. The detached scope capsule owns its own
+`safeAreaBar` does, iOS/iPadOS 26+ keeps the Timeline's native top edge effect
+enabled with the system `.automatic` style even though no Article List controls
+remain in `UINavigationBar`. The bottom edge effect remains disabled. The
+bounded status-bar scrim is retained only as the iOS/iPadOS 17-25 fallback and is
+hidden on 26+. Detached scope and action capsules own their own single
 `UIGlassEffect(style: .regular)` on 26+ (or `.regularMaterial` before 26), so
 there is no inherited toolbar-glass double layer.
 

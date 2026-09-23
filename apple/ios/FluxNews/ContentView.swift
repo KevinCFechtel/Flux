@@ -32,7 +32,7 @@ enum IOSBottomAction: Equatable {
 
 enum IOSArticleListActionPlacement: Equatable {
     case bottomBar
-    case topBarTrailing
+    case floatingTopTrailing
 }
 
 enum IOSArticleListChromeMode: Equatable {
@@ -67,7 +67,7 @@ enum IOSArticleListChromePresentation {
     }
 
     static func actionPlacement(for mode: IOSArticleListChromeMode) -> IOSArticleListActionPlacement {
-        mode == .compactPortrait ? .bottomBar : .topBarTrailing
+        mode == .compactPortrait ? .bottomBar : .floatingTopTrailing
     }
 
     static func titleCapsulePlacement(for mode: IOSArticleListChromeMode) -> IOSArticleListTitleCapsulePlacement {
@@ -81,24 +81,12 @@ enum IOSArticleListChromePresentation {
         }
     }
 
-    static func showsTopNavigationBar(for mode: IOSArticleListChromeMode) -> Bool {
-        mode != .compactPortrait
-    }
-
-    static func usesLegacyTopBarActionMaterial(for mode: IOSArticleListChromeMode) -> Bool {
-        switch mode {
-        case .compactLandscape, .persistentSplit, .persistentSplitCollapsed:
-            true
-        case .compactPortrait:
-            false
-        }
-    }
 }
 
 enum IOSArticleListActionChromeMetrics {
-    static let legacyHorizontalPadding: CGFloat = 8
-    static let legacyVerticalPadding: CGFloat = 5
-    static let legacySpacing: CGFloat = 6
+    static let floatingHorizontalPadding: CGFloat = 8
+    static let floatingVerticalPadding: CGFloat = 5
+    static let floatingSpacing: CGFloat = 6
 }
 
 enum IOSArticleListTitleCapsuleMetrics {
@@ -107,6 +95,7 @@ enum IOSArticleListTitleCapsuleMetrics {
     /// capsule as a scroll-edge element.
     static let floatingHorizontalInset: CGFloat = 12
     static let floatingVerticalInset: CGFloat = 4
+    static let floatingRowSpacing: CGFloat = 10
 
     /// The iPad collapsed-split inline capsule still needs a useful minimum title
     /// width beside the trailing toolbar actions.
@@ -406,17 +395,20 @@ struct ContentView: View {
         ArticleListNavigationChrome(
             store: newsreaderStore,
             onSelectScope: presentArticleListNavigation,
-            chromeMode: articleListChromeMode
-        ) {
-            ArticleListView(store: newsreaderStore, onArticleTap: openArticle, onArticleAction: handleArticleAction)
-        }
+            chromeMode: articleListChromeMode,
+            topActions: {
+                articleListActionButtons
+            },
+            content: {
+                ArticleListView(store: newsreaderStore, onArticleTap: openArticle, onArticleAction: handleArticleAction)
+            }
+        )
             .navigationBarTitleDisplayMode(IOSArticleNavigationPresentation.titleDisplayMode)
-            // Portrait has no top actions after the title capsule leaves the
-            // navigation bar, so do not retain an empty system bar above it.
-            .toolbar(
-                IOSArticleListChromePresentation.showsTopNavigationBar(for: articleListChromeMode) ? .visible : .hidden,
-                for: .navigationBar
-            )
+            // Scope and former top-bar actions are both detached from
+            // UINavigationBar. Keep the Article List's otherwise-empty system
+            // navigation bar hidden in every chrome mode; the UITableView's own
+            // native topEdgeEffect remains enabled on iOS 26+.
+            .toolbar(.hidden, for: .navigationBar)
             // A collapsed split view pushes the detail and offers a back button.
             // The Timeline is the root of this app's navigation: the branded
             // button opens the scope chooser, there is nothing to go back to.
@@ -425,25 +417,6 @@ struct ContentView: View {
                 if IOSArticleListChromePresentation.actionPlacement(for: articleListChromeMode) == .bottomBar {
                     ToolbarItemGroup(placement: .bottomBar) {
                         articleListActionButtons
-                    }
-                } else {
-                    if #available(iOS 26.0, *) {
-                        ToolbarItemGroup(placement: .topBarTrailing) {
-                            articleListActionButtons
-                        }
-                    } else if IOSArticleListChromePresentation.usesLegacyTopBarActionMaterial(for: articleListChromeMode) {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            HStack(spacing: IOSArticleListActionChromeMetrics.legacySpacing) {
-                                articleListActionButtons
-                            }
-                            .padding(.horizontal, IOSArticleListActionChromeMetrics.legacyHorizontalPadding)
-                            .padding(.vertical, IOSArticleListActionChromeMetrics.legacyVerticalPadding)
-                            .background(.regularMaterial, in: Capsule())
-                        }
-                    } else {
-                        ToolbarItemGroup(placement: .topBarTrailing) {
-                            articleListActionButtons
-                        }
                     }
                 }
             }
@@ -929,7 +902,7 @@ private struct ArticleListTitleCapsule: View {
         }
         .padding(.horizontal, horizontalPadding)
         .padding(.vertical, verticalPadding)
-        .background { ArticleListTitleCapsuleBackground() }
+        .background { ArticleListChromeCapsuleBackground() }
         .accessibilityElement(children: .combine)
     }
 
@@ -1029,7 +1002,7 @@ private struct ArticleListTitleCapsule: View {
     }
 }
 
-private struct ArticleListTitleCapsuleBackground: View {
+private struct ArticleListChromeCapsuleBackground: View {
     /// Whether the system is asked to avoid see-through backgrounds. Glass is
     /// exactly that, and the title has to stay legible over scrolling articles,
     /// so this substitutes an opaque fill rather than trusting the effect to
@@ -1178,11 +1151,27 @@ enum IOSSyncButtonPresentation {
     }
 }
 
-private struct ArticleListNavigationChrome<Content: View>: View {
+private struct ArticleListFloatingActionGroup<Actions: View>: View {
+    @ViewBuilder let actions: () -> Actions
+
+    var body: some View {
+        HStack(spacing: IOSArticleListActionChromeMetrics.floatingSpacing) {
+            actions()
+                .labelStyle(.iconOnly)
+        }
+        .padding(.horizontal, IOSArticleListActionChromeMetrics.floatingHorizontalPadding)
+        .padding(.vertical, IOSArticleListActionChromeMetrics.floatingVerticalPadding)
+        .background { ArticleListChromeCapsuleBackground() }
+        .fixedSize()
+    }
+}
+
+private struct ArticleListNavigationChrome<Content: View, TopActions: View>: View {
     var store: NewsreaderStore
     /// Absent when a persistent sidebar already offers scope selection.
     var onSelectScope: (() -> Void)?
     var chromeMode: IOSArticleListChromeMode
+    @ViewBuilder let topActions: () -> TopActions
     @ViewBuilder let content: () -> Content
 
     private func capsuleSubtitle(_ subtitle: String) -> String? {
@@ -1209,54 +1198,62 @@ private struct ArticleListNavigationChrome<Content: View>: View {
         let landscapeWidthReservationSubtitle = store.isSyncing ? landscapeCountLabel : syncingLabel
 
         let capsulePlacement = IOSArticleListChromePresentation.titleCapsulePlacement(for: chromeMode)
+        let actionPlacement = IOSArticleListChromePresentation.actionPlacement(for: chromeMode)
 
-        // Keep the Timeline itself outside the chrome-mode switch. The scope
-        // capsule is a separate safe-area inset instead of a UINavigationBar
-        // item, so native scroll-edge geometry is derived only from actual
-        // system navigation/toolbar chrome.
+        // Keep the Timeline itself outside the chrome-mode switch. Scope and
+        // former top-bar actions live in one ordinary safe-area inset, not in
+        // UINavigationBar and not in safeAreaBar. The UITableView retains its
+        // native automatic topEdgeEffect independently on iOS 26+.
         content()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .top, spacing: 0) {
-                switch (capsulePlacement, chromeMode) {
-                case (.floatingTopCenter, .compactPortrait):
-                    ArticleListTitleCapsule(
-                        title: title,
-                        subtitle: capsuleSubtitle(portraitSubtitle),
-                        widthReservationSubtitle: nil,
-                        layout: .stacked,
-                        action: onSelectScope
-                    )
-                    .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
-                    .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                case (.floatingTopLeading, .compactLandscape):
-                    ArticleListTitleCapsule(
-                        title: title,
-                        subtitle: capsuleSubtitle(landscapeSubtitle),
-                        widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
-                        layout: .compactStacked,
-                        action: onSelectScope
-                    )
-                    .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
-                    .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                case (.floatingTopLeading, .persistentSplitCollapsed):
-                    ArticleListTitleCapsule(
-                        title: title,
-                        subtitle: capsuleSubtitle(landscapeSubtitle),
-                        widthReservationSubtitle: nil,
-                        layout: .inline,
-                        action: onSelectScope
-                    )
-                    .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
-                    .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                case (.hidden, .persistentSplit):
-                    EmptyView()
-                default:
-                    EmptyView()
+                Group {
+                    switch (capsulePlacement, actionPlacement, chromeMode) {
+                    case (.floatingTopCenter, .bottomBar, .compactPortrait):
+                        ArticleListTitleCapsule(
+                            title: title,
+                            subtitle: capsuleSubtitle(portraitSubtitle),
+                            widthReservationSubtitle: nil,
+                            layout: .stacked,
+                            action: onSelectScope
+                        )
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    case (.floatingTopLeading, .floatingTopTrailing, .compactLandscape):
+                        HStack(spacing: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing) {
+                            ArticleListTitleCapsule(
+                                title: title,
+                                subtitle: capsuleSubtitle(landscapeSubtitle),
+                                widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
+                                layout: .compactStacked,
+                                action: onSelectScope
+                            )
+                            Spacer(minLength: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing)
+                            ArticleListFloatingActionGroup(actions: topActions)
+                        }
+                    case (.hidden, .floatingTopTrailing, .persistentSplit):
+                        HStack {
+                            Spacer(minLength: 0)
+                            ArticleListFloatingActionGroup(actions: topActions)
+                        }
+                    case (.floatingTopLeading, .floatingTopTrailing, .persistentSplitCollapsed):
+                        HStack(spacing: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing) {
+                            ArticleListTitleCapsule(
+                                title: title,
+                                subtitle: capsuleSubtitle(landscapeSubtitle),
+                                widthReservationSubtitle: nil,
+                                layout: .inline,
+                                action: onSelectScope
+                            )
+                            Spacer(minLength: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing)
+                            ArticleListFloatingActionGroup(actions: topActions)
+                        }
+                    default:
+                        EmptyView()
+                    }
                 }
+                .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
+                .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
             }
     }
 }
