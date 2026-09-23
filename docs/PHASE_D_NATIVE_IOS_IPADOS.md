@@ -1124,6 +1124,32 @@ Delta reconciliation updates only returned Entries and their enclosures. It
 never applies the Full-Snapshot rule that an Entry absent from the response is
 implicitly read and unstarred.
 
+**D5-D — Mobile Background-Sync Preference & Resume Integration is IMPLEMENTED;
+validation is pending.** D5-C.1 already established the Core-owned Resume
+freshness and Delta-vs-Full policy, so D5-D does not introduce another Swift
+freshness clock or synchronization algorithm.
+
+Native iOS now exposes one `Background Sync` Settings destination backed directly
+by the persisted Core `backgroundSyncEnabled` value. There is no separate mobile
+Sync-on-Start preference. Reading and writing the preference use the app-wide
+`IOSCoreSessionExecutionCoordinator`, preserving the current Core-session and
+quiescence contract.
+
+Turning Background Sync off persists the Core setting and cancels the pending
+`BGAppRefreshTask` request. It does not reinterpret the setting change as
+D4.5-style user cancellation of already-running automatic work. Turning the
+setting on persists the Core value, submits the next refresh request, and asks
+the existing Core-owned Resume path to evaluate whether immediate catch-up work
+is actually needed. The Core still decides no-op vs Delta vs Full using the
+D5-C.1 policy.
+
+The normal app-active lifecycle continues to request `.resume` through
+`IOSBackgroundSyncCoordinator`; Core serialization and post-gate freshness
+evaluation prevent duplicate automatic work after a recent or concurrently
+finishing background/manual Sync. Focused tests cover persisted preference reads,
+disable/cancel scheduling behavior, enable/reschedule behavior, and the
+dedicated Resume trigger.
+
 Integrate BGTaskScheduler, local notifications and the native iOS WidgetKit
 presentation using the shared snapshot contract. Background execution shares
 the existing account/Core session, participates in app-wide Core quiescence and
