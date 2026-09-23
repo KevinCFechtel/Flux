@@ -2121,7 +2121,7 @@ mod tests {
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            17
+            18
         );
         let bytes = std::fs::read(core.database_path()).unwrap();
         assert!(
@@ -2795,6 +2795,10 @@ mod tests {
             fetch_calls: AtomicUsize::new(0),
         });
         let core = Arc::new(FluxCore::with_remote(config(&temp), source.clone()).unwrap());
+        core.sync(SyncReason::Manual).unwrap();
+        let successful_sync_before_cancel = core.last_successful_sync_at().unwrap();
+        let fetch_calls_before_cancel = source.fetch_calls.load(Ordering::SeqCst);
+
         core.set_delivery_mode(DeliveryMode::Deferred).unwrap();
         core.set_read_state(1, true).unwrap();
         core.set_starred_state(3, true).unwrap();
@@ -2805,9 +2809,15 @@ mod tests {
             SyncOutcome::Cancelled
         );
         assert_eq!(source.mutation_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(source.fetch_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            source.fetch_calls.load(Ordering::SeqCst),
+            fetch_calls_before_cancel
+        );
         assert_eq!(core.store.pending_mutations().unwrap().len(), 1);
-        assert!(core.last_successful_sync_at().unwrap().is_none());
+        assert_eq!(
+            core.last_successful_sync_at().unwrap(),
+            successful_sync_before_cancel
+        );
     }
 
     #[test]
