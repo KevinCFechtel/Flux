@@ -2844,6 +2844,21 @@ impl Store {
             Some(_) => Err(CoreError::persistence("invalid full sync required setting")),
         }
     }
+    pub fn full_sync_due(&self, max_age_hours: i64) -> Result<bool, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let due: bool = connection
+            .query_row(
+                "SELECT NOT EXISTS(SELECT 1 FROM core_settings WHERE key='last_full_sync_at') OR EXISTS(SELECT 1 FROM core_settings WHERE key='last_full_sync_at' AND datetime(value) <= datetime('now', ?1))",
+                [format!("-{max_age_hours} hours")],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)?;
+        Ok(due)
+    }
+
 
     pub fn mark_full_sync_required(&self, reason: &str) -> Result<(), CoreError> {
         let connection = self
