@@ -523,7 +523,8 @@
 		C1 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;\n\t\t\t\tALWAYS_USE_SEPARATE_HEADERMAPS = YES;\n				ARCHS = arm64;
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = FluxAccent;
 				CODE_SIGN_ENTITLEMENTS = FluxNews/FluxNewsNativeDev.entitlements;
@@ -556,7 +557,8 @@
 		C2 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;\n\t\t\t\tALWAYS_USE_SEPARATE_HEADERMAPS = YES;\n				ARCHS = arm64;
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = FluxAccent;
 				CODE_SIGN_ENTITLEMENTS = FluxNews/FluxNewsNativeDev.entitlements;
@@ -586,18 +588,23 @@
 		};
 		C3 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			buildSettings = {\n\t\t\t\tALWAYS_SEARCH_USER_PATHS = NO;\n\t\t\t\tALWAYS_USE_SEPARATE_HEADERMAPS = YES;\n\t\t\t\tSDKROOT = iphoneos;\n\t\t\t};
+			buildSettings = {
+				SDKROOT = iphoneos;
+			};
 			name = Debug;
 		};
 		C4 /* Release */ = {
 			isa = XCBuildConfiguration;
-			buildSettings = {\n\t\t\t\tALWAYS_SEARCH_USER_PATHS = NO;\n\t\t\t\tALWAYS_USE_SEPARATE_HEADERMAPS = YES;\n\t\t\t\tSDKROOT = iphoneos;\n\t\t\t};
+			buildSettings = {
+				SDKROOT = iphoneos;
+			};
 			name = Release;
 		};
 		C5 /* Upgrade Test */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;\n\t\t\t\tALWAYS_USE_SEPARATE_HEADERMAPS = YES;\n				ARCHS = arm64;
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = FluxAccent;
 				CODE_SIGN_ENTITLEMENTS = FluxNews/FluxNewsUpgradeTest.entitlements;
@@ -628,7 +635,8 @@
 		C6 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;\n\t\t\t\tALWAYS_USE_SEPARATE_HEADERMAPS = YES;\n				ARCHS = arm64;
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -647,7 +655,8 @@
 		C7 /* Upgrade Test */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;\n\t\t\t\tALWAYS_USE_SEPARATE_HEADERMAPS = YES;\n				ARCHS = arm64;
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -666,7 +675,8 @@
 		E17F743430471C1C00698DA5 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;\n\t\t\t\tALWAYS_USE_SEPARATE_HEADERMAPS = YES;\n				COPY_PHASE_STRIP = YES;
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				COPY_PHASE_STRIP = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				PRODUCT_NAME = FluxNewsTests;
 			};
@@ -674,7 +684,10 @@
 		};
 		WD /* Debug */ = {
 			isa = XCBuildConfiguration;
-			buildSettings = {\n\t\t\t\tALWAYS_SEARCH_USER_PATHS = NO;\n\t\t\t\tALWAYS_USE_SEPARATE_HEADERMAPS = YES;\n\t\t\t\tAPPLICATION_EXTENSION_API_ONLY = YES;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ALWAYS_USE_SEPARATE_HEADERMAPS = YES;
+				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = FluxNewsWidgets/FluxNewsWidgetsNativeDev.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -695,7 +708,10 @@
 		};
 		WR /* Release */ = {
 			isa = XCBuildConfiguration;
-			buildSettings = {\n\t\t\t\tALWAYS_SEARCH_USER_PATHS = NO;\n\t\t\t\tALWAYS_USE_SEPARATE_HEADERMAPS = YES;\n\t\t\t\tAPPLICATION_EXTENSION_API_ONLY = YES;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ALWAYS_USE_SEPARATE_HEADERMAPS = YES;
+				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = FluxNewsWidgets/FluxNewsWidgetsNativeDev.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -716,7 +732,10 @@
 		};
 		WU /* Upgrade Test */ = {
 			isa = XCBuildConfiguration;
-			buildSettings = {\n\t\t\t\tALWAYS_SEARCH_USER_PATHS = NO;\n\t\t\t\tALWAYS_USE_SEPARATE_HEADERMAPS = YES;\n\t\t\t\tAPPLICATION_EXTENSION_API_ONLY = YES;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ALWAYS_USE_SEPARATE_HEADERMAPS = YES;
+				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = FluxNewsWidgets/FluxNewsWidgetsUpgradeTest.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
