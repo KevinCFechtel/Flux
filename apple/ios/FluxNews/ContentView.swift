@@ -293,6 +293,9 @@ struct ContentView: View {
             if !presented { searchStore.invalidate() }
         }
         .onAppear { normalizeAdaptiveShell(for: adaptivePresentation) }
+        .onOpenURL { url in
+            handleWidgetURL(url)
+        }
         .task(id: bootstrapper.coreRevision) {
             if let core = newsreaderStore.core {
                 searchStore.attach(
@@ -539,6 +542,21 @@ struct ContentView: View {
             wasPresented: navigationPresented
         )
         splitColumnVisibility = AdaptiveShellTransitionPolicy.splitColumnVisibility(after: presentation)
+    }
+
+    private func handleWidgetURL(_ url: URL) {
+        guard let action = WidgetAction(url: url) else { return }
+        switch action {
+        case let .article(articleID):
+            newsreaderStore.article(withID: articleID) { article in
+                guard let article else { return }
+                openArticle(article)
+            }
+        case let .open(selection):
+            newsreaderStore.openWidgetScope(selection)
+        case .sync:
+            newsreaderStore.syncFromWidget()
+        }
     }
 
     private func openArticle(_ article: ArticleSummary) {
