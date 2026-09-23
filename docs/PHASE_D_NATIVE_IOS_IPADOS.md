@@ -1017,6 +1017,19 @@ recurrence of the UIKit diffable-data-source crash. D4.5 is therefore closed.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 
+**D5-A — Core-Session Execution Foundation is implemented; automated validation is pending.**
+The native iOS app now has one app-wide `IOSCoreSessionExecutionCoordinator`
+owned by `CoreBootstrapper`. It admits synchronous Core work only for the
+current Core session, tracks admitted work until the underlying
+`AppleCoreExecution` call has actually returned, blocks new admission during
+quiescence, and can forward cooperative cancellation to cancellable runs.
+`NewsreaderStore` and `IOSSearchStore` share this coordinator with the
+bootstrapper; Manual Sync retains its D4.5 presentation/session lifecycle while
+also holding a Core-session lease. Account replacement/removal/deactivation
+quiesce the app-wide Core session before replacing or destroying it. This is
+foundation only: BGTask scheduling, cold-launch readiness, notification delivery
+and WidgetKit work have not started.
+
 Integrate BGTaskScheduler, local notifications and the native iOS WidgetKit
 presentation using the shared snapshot contract. Background execution shares
 the existing account/Core session, participates in app-wide Core quiescence and
