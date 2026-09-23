@@ -24,6 +24,13 @@ struct SettingsView: View {
                 } label: {
                     Label("Navigation", systemImage: "sidebar.leading")
                 }
+                NavigationLink {
+                    BackgroundSyncSettingsView(
+                        coordinator: IOSAppRuntime.shared.backgroundSyncCoordinator
+                    )
+                } label: {
+                    Label("Background Sync", systemImage: "arrow.triangle.2.circlepath")
+                }
                 Button { onDiagnostics() } label: {
                     Label("Developer Diagnostics", systemImage: "info.circle")
                 }
