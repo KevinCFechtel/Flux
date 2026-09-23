@@ -1081,10 +1081,11 @@ enabled scheduling, disabled cancellation, successful completion and OS
 expiration/cooperative cancellation.
 
 **D5-C.1 — Lightweight Delta Sync and Resume Full-Reconcile Policy is
-implemented and Rust-Core validated; iOS integration validation is pending.**
+implemented and Core/iOS-test validated; final app-build validation is pending.**
 `cargo fmt --check` passes and `cargo test --workspace` passes with
 220 `flux-core` tests and 6 `flux-uniffi` tests after the Delta/Resume
-integration. Regular iOS Background Sync no
+integration. The canonical iOS test gate also passes with 364 tests and
+0 failures. Regular iOS Background Sync no
 longer requires the Full unread+starred snapshot once a Full Sync has
 established a Delta baseline. The Rust Core owns the plan decision:
 
