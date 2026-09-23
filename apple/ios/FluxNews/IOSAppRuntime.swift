@@ -2,6 +2,35 @@ import BackgroundTasks
 import UIKit
 
 @MainActor
+final class IOSMediaTransferReconciliationHandoff {
+    static let shared = IOSMediaTransferReconciliationHandoff()
+
+    typealias Handler = () async -> Void
+
+    private var handler: Handler?
+    private var hasPendingRequest = false
+
+    func install(_ handler: @escaping Handler) async {
+        self.handler = handler
+        guard hasPendingRequest else { return }
+        hasPendingRequest = false
+        await handler()
+    }
+
+    func uninstall() {
+        handler = nil
+    }
+
+    func requestReconciliation() async {
+        guard let handler else {
+            hasPendingRequest = true
+            return
+        }
+        await handler()
+    }
+}
+
+@MainActor
 final class IOSAppRuntime {
     static let shared = IOSAppRuntime()
 
@@ -9,10 +38,12 @@ final class IOSAppRuntime {
     let backgroundSyncCoordinator: IOSBackgroundSyncCoordinator
     let systemNotificationManager: IOSSystemNotificationManager
     let widgetSnapshotCoordinator: IOSWidgetSnapshotCoordinator
+    let mediaTransferReconciliationHandoff: IOSMediaTransferReconciliationHandoff
 
     init(
         scheduler: IOSBackgroundTaskScheduling = IOSSystemBackgroundTaskScheduler.shared,
-        systemNotificationManager: IOSSystemNotificationManager? = nil
+        systemNotificationManager: IOSSystemNotificationManager? = nil,
+        mediaTransferReconciliationHandoff: IOSMediaTransferReconciliationHandoff = .shared
     ) {
         let bootstrapper = CoreBootstrapper()
         let backgroundSyncCoordinator = IOSBackgroundSyncCoordinator(
@@ -25,8 +56,11 @@ final class IOSAppRuntime {
         self.backgroundSyncCoordinator = backgroundSyncCoordinator
         self.systemNotificationManager = systemNotificationManager
         self.widgetSnapshotCoordinator = widgetSnapshotCoordinator
+        self.mediaTransferReconciliationHandoff = mediaTransferReconciliationHandoff
 
-        backgroundSyncCoordinator.onSuccessfulBackgroundSync = { [weak bootstrapper, weak systemNotificationManager, weak widgetSnapshotCoordinator] metadata in
+        backgroundSyncCoordinator.onSuccessfulBackgroundSync = {
+            [weak bootstrapper, weak systemNotificationManager, weak widgetSnapshotCoordinator, weak mediaTransferReconciliationHandoff]
+            metadata in
             guard let bootstrapper,
                   let core = bootstrapper.core else {
                 return
@@ -34,25 +68,26 @@ final class IOSAppRuntime {
 
             await widgetSnapshotCoordinator?.refreshNow(for: core)
 
-            guard !metadata.systemNotificationCandidates.isEmpty,
-                  let systemNotificationManager else {
-                return
-            }
-            await systemNotificationManager.deliver(metadata.systemNotificationCandidates) { candidateID in
-                guard let result = await bootstrapper.coreSessionExecutionCoordinator
-                    .responsiveResult(
-                        for: core,
-                        {
-                            try core.acknowledgeSystemNotification(candidateId: candidateID)
-                        }
-                    ) else {
+            if !metadata.systemNotificationCandidates.isEmpty,
+               let systemNotificationManager {
+                await systemNotificationManager.deliver(metadata.systemNotificationCandidates) { candidateID in
+                    guard let result = await bootstrapper.coreSessionExecutionCoordinator
+                        .responsiveResult(
+                            for: core,
+                            {
+                                try core.acknowledgeSystemNotification(candidateId: candidateID)
+                            }
+                        ) else {
+                        return false
+                    }
+                    if case .success = result {
+                        return true
+                    }
                     return false
                 }
-                if case .success = result {
-                    return true
-                }
-                return false
             }
+
+            await mediaTransferReconciliationHandoff?.requestReconciliation()
         }
     }
 }
