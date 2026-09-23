@@ -232,7 +232,7 @@ private struct IOSFluxNewsHeadlinesView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Image(systemName: "newspaper")
+            FluxNewsWidgetBrandIcon()
             Text(title)
                 .font(.headline)
                 .lineLimit(1)
@@ -352,7 +352,7 @@ private struct IOSFluxNewsStatusView: View {
 
     private var circular: some View {
         Gauge(value: min(Double(entry.model.count), 99), in: 0...99) {
-            Image(systemName: "newspaper")
+            FluxNewsWidgetBrandIcon()
         } currentValueLabel: {
             Text("\(entry.model.count)")
                 .font(.headline.monospacedDigit())
@@ -361,20 +361,19 @@ private struct IOSFluxNewsStatusView: View {
     }
 
     private var rectangular: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Label(title, systemImage: "newspaper")
-                .font(.headline)
-                .lineLimit(1)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text("\(entry.model.count)")
-                    .font(.title3.bold().monospacedDigit())
-                Text(LocalizedStringKey(entry.model.countLabel))
-                    .font(.caption)
-            }
-            if let first = entry.model.articles.first {
-                Text(first.title)
-                    .font(.caption2)
+        HStack(alignment: .center, spacing: 8) {
+            FluxNewsWidgetBrandIcon()
+                .frame(width: 22, height: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline)
                     .lineLimit(1)
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("\(entry.model.count)")
+                        .font(.title3.bold().monospacedDigit())
+                    Text(LocalizedStringKey(entry.model.countLabel))
+                        .font(.caption)
+                }
             }
         }
     }
@@ -382,7 +381,7 @@ private struct IOSFluxNewsStatusView: View {
     private var homeScreen: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Image(systemName: "newspaper")
+                FluxNewsWidgetBrandIcon()
                 Spacer()
             }
             Text(title)
@@ -435,7 +434,7 @@ private struct IOSFluxNewsStatusView: View {
 
     private var lastSuccessfulSync: String {
         guard let value = entry.model.lastSuccessfulSyncAt,
-              let date = ISO8601DateFormatter().date(from: value) else {
+              let date = WidgetSyncTimestamp.date(from: value) else {
             return String(localized: "Never")
         }
         return String(
@@ -444,6 +443,18 @@ private struct IOSFluxNewsStatusView: View {
         )
     }
 }
+
+private struct FluxNewsWidgetBrandIcon: View {
+    var body: some View {
+        Image("FluxNewsTemplate")
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .foregroundStyle(.tint)
+            .accessibilityHidden(true)
+    }
+}
+
 
 private struct IOSWidgetFeedIcon: View {
     let snapshot: WidgetSnapshotV1?
