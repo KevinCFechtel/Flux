@@ -167,7 +167,7 @@ final class IOSBackgroundSyncCoordinator {
     private var activeCancellation: SyncCancellation?
     private var resumeTask: Task<Void, Never>?
 
-    var onSuccessfulBackgroundSync: ((SyncCompleted) -> Void)?
+    var onSuccessfulBackgroundSync: ((SyncCompleted) async -> Void)?
 
     init(
         bootstrapper: CoreBootstrapper,
@@ -405,7 +405,7 @@ final class IOSBackgroundSyncCoordinator {
                 guard !Task.isCancelled, !cancellation.isCancelled() else {
                     return false
                 }
-                onSuccessfulBackgroundSync?(metadata)
+                await onSuccessfulBackgroundSync?(metadata)
                 return true
             case .cancelled:
                 return false
