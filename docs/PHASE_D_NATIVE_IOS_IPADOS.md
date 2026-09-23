@@ -1031,8 +1031,9 @@ quiesce the app-wide Core session before replacing or destroying it. This is
 foundation only: BGTask scheduling, cold-launch readiness, notification delivery
 and WidgetKit work have not started.
 
-**D5-B — Cold-Launch Readiness & Credential Accessibility is implemented;
-automated validation is pending.** `CoreBootstrapper.ensureStarted()` is the
+**D5-B — Cold-Launch Readiness & Credential Accessibility is implemented and
+automated-test validated.** The canonical iOS test suite passes after the D5-B
+integration. `CoreBootstrapper.ensureStarted()` is the
 idempotent readiness entry point for foreground and future headless/background
 callers. Concurrent callers await one in-flight bootstrap, while retry,
 reconfiguration, account removal and deactivation retain generation-based stale
