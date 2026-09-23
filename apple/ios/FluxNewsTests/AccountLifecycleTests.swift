@@ -758,7 +758,15 @@ final class AccountLifecycleTests: XCTestCase {
             }
         )
         await bootstrapper.start()
-        let lease = try XCTUnwrap(coordinator.beginExecution(for: oldCore))
+        let quiescenceRequested = expectation(
+            description: "Core-session replacement requests cancellation of admitted work"
+        )
+        let lease = try XCTUnwrap(
+            coordinator.beginExecution(
+                for: oldCore,
+                cancellation: { quiescenceRequested.fulfill() }
+            )
+        )
 
         let configure = Task { @MainActor in
             await bootstrapper.configure(
@@ -767,10 +775,7 @@ final class AccountLifecycleTests: XCTestCase {
                 headers: []
             )
         }
-        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
-        while !coordinator.isQuiescing, ContinuousClock.now < deadline {
-            await Task.yield()
-        }
+        await fulfillment(of: [quiescenceRequested], timeout: 5)
 
         XCTAssertTrue(coordinator.isQuiescing)
         XCTAssertEqual(factoryInputs.value(), [old])
