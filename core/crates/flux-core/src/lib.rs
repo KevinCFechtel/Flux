@@ -341,17 +341,21 @@ impl FluxCore {
 
         if reason == SyncReason::Resume {
             const RESUME_STALE_AFTER_MINUTES: i64 = 30;
+            const FULL_SYNC_MAX_AGE_HOURS: i64 = 24;
             let settings = self.store.core_settings()?;
-            if !settings.background_sync_enabled
-                || !self
-                    .store
-                    .successful_sync_due(RESUME_STALE_AFTER_MINUTES)?
-            {
+            let stale = self
+                .store
+                .successful_sync_due(RESUME_STALE_AFTER_MINUTES)?;
+            let full_required = self.store.full_sync_required()?;
+            let full_due = self.store.full_sync_due(FULL_SYNC_MAX_AGE_HOURS)?;
+            if !settings.background_sync_enabled || (!stale && !full_required && !full_due) {
                 tracing::info!(
                     target: "sync",
-                    "resume sync skipped enabled={} stale={}",
+                    "resume sync skipped enabled={} stale={} full_required={} full_due={}",
                     settings.background_sync_enabled,
-                    self.store.successful_sync_due(RESUME_STALE_AFTER_MINUTES)?
+                    stale,
+                    full_required,
+                    full_due
                 );
                 let completed = SyncCompleted {
                     reason,
