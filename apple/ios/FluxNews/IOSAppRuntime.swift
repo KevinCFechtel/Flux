@@ -1,6 +1,12 @@
 import BackgroundTasks
 import UIKit
 
+enum IOSRuntimeLaunchEnvironment {
+    static var isUnitTestHost: Bool {
+        NSClassFromString("XCTestCase") != nil
+    }
+}
+
 @MainActor
 final class IOSMediaTransferReconciliationHandoff {
     static let shared = IOSMediaTransferReconciliationHandoff()
@@ -43,7 +49,7 @@ final class IOSAppRuntime {
     init(
         scheduler: IOSBackgroundTaskScheduling = IOSSystemBackgroundTaskScheduler.shared,
         systemNotificationManager: IOSSystemNotificationManager? = nil,
-        mediaTransferReconciliationHandoff: IOSMediaTransferReconciliationHandoff = .shared
+        mediaTransferReconciliationHandoff: IOSMediaTransferReconciliationHandoff? = nil
     ) {
         let bootstrapper = CoreBootstrapper()
         let backgroundSyncCoordinator = IOSBackgroundSyncCoordinator(
@@ -52,6 +58,8 @@ final class IOSAppRuntime {
         )
         let systemNotificationManager = systemNotificationManager ?? IOSSystemNotificationManager.shared
         let widgetSnapshotCoordinator = IOSWidgetSnapshotCoordinator(bootstrapper: bootstrapper)
+        let mediaTransferReconciliationHandoff =
+            mediaTransferReconciliationHandoff ?? IOSMediaTransferReconciliationHandoff.shared
         self.bootstrapper = bootstrapper
         self.backgroundSyncCoordinator = backgroundSyncCoordinator
         self.systemNotificationManager = systemNotificationManager
@@ -107,6 +115,9 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        guard !IOSRuntimeLaunchEnvironment.isUnitTestHost else {
+            return true
+        }
         _ = backgroundRegistration.register()
         IOSAppRuntime.shared.systemNotificationManager.configure()
         return true
