@@ -907,13 +907,27 @@ D4.5-D validation on 23 September 2026 executed **345 native iOS tests with
 Core-execution-boundary coverage, and `./apple/ios/Build/build-app.sh`
 completed successfully.
 
-The next implementation package is **D4.5-E — account/Core quiescence
-barrier**. Before account removal, reconfiguration, or Core replacement, the
-active manual run must be cancelled and the old synchronous Core execution must
-actually quiesce before another Core can touch the same storage paths. Scene
-inactivity/backgrounding alone must not trigger this barrier. D4.5 after E still
-requires presentation/localization work, final automated regression coverage,
-and focused real-device cancellation/restart acceptance.
+**D4.5-E — account/Core quiescence barrier is IN PROGRESS.** NewsreaderStore
+now keeps every manual-Sync execution registered until its synchronous Core call
+has actually returned, including user-cancelled runs that were already
+superseded for presentation so immediate restart remains possible. A Core
+replacement barrier prevents new manual runs, signals every still-winding
+cancellation handle/Swift task, and awaits all registered executions before the
+old Core may be replaced or its account state removed.
+
+CoreBootstrapper invokes that barrier before creating a replacement Core,
+removing account state, or explicitly deactivating an active Core. A failed
+replacement resumes the existing store session; successful replacement releases
+the quiescence gate when the new Core is attached. Generation guards remain
+authoritative when concurrent bootstrap/account operations supersede an older
+transition. The normal scene inactive/background path still only requests the
+existing Scrollover persistence flush and does **not** cancel or quiesce manual
+Sync.
+
+D4.5-E remains open until the native iOS tests/build validate the barrier and
+account-lifecycle ordering. D4.5 after E still requires
+presentation/localization work, final automated regression coverage, and focused
+real-device cancellation/restart acceptance.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 

@@ -282,7 +282,7 @@ enum IOSManualSyncState: Equatable {
     var isActive: Bool { self != .idle }
 }
 
-struct IOSManualSyncRequest: Equatable {
+struct IOSManualSyncRequest: Hashable {
     let session: UInt64
     let generation: UInt64
 }
@@ -624,6 +624,8 @@ struct ArticleRowContent: Equatable, Sendable {
     @ObservationIgnored private var manualSyncRequest: IOSManualSyncRequest?
     @ObservationIgnored private var manualSyncCancellation: SyncCancellation?
     @ObservationIgnored private var manualSyncTask: Task<Void, Never>?
+    @ObservationIgnored private var manualSyncExecutions: [IOSManualSyncRequest: (cancellation: SyncCancellation, task: Task<Void, Never>)] = [:]
+    @ObservationIgnored private var manualSyncQuiescenceRequested = false
 
     init(defaults: UserDefaults = .standard) {
         timelineStructuralState = .init(storage: timelineStructuralStorage, change: .replace, revision: 0)
@@ -644,6 +646,7 @@ struct ArticleRowContent: Equatable, Sendable {
     func attach(to configuredCore: Flux) {
         detach()
         core = configuredCore
+        manualSyncQuiescenceRequested = false
         do {
             eventSubscription = try configuredCore.subscribeEvents(
                 listener: IOSNewsreaderEventListener(store: self, session: readLifecycle.session)
@@ -812,7 +815,9 @@ struct ArticleRowContent: Equatable, Sendable {
 #endif
 
     func syncManually() async {
-        guard let core, let request = manualSyncLifecycle.begin() else { return }
+        guard !manualSyncQuiescenceRequested,
+              let core,
+              let request = manualSyncLifecycle.begin() else { return }
         let cancellation = SyncCancellation()
         manualSyncRequest = request
         manualSyncCancellation = cancellation
@@ -829,6 +834,7 @@ struct ArticleRowContent: Equatable, Sendable {
             completeManualSync(request, cancellation: cancellation, result: result)
         }
         manualSyncTask = task
+        manualSyncExecutions[request] = (cancellation, task)
         await task.value
     }
 
@@ -847,6 +853,32 @@ struct ArticleRowContent: Equatable, Sendable {
         manualSyncRequest = nil
         manualSyncCancellation = nil
         manualSyncTask = nil
+    }
+
+    /// Account/Core replacement is stronger than presentation cancellation:
+    /// prevent a new manual run, cancel every still-winding execution, and wait
+    /// until each synchronous Rust call has actually returned from its worker.
+    func quiesceManualSyncForCoreReplacement() async {
+        manualSyncQuiescenceRequested = true
+        cancelManualSync()
+
+        for execution in manualSyncExecutions.values {
+            execution.cancellation.cancel()
+            execution.task.cancel()
+        }
+
+        while !manualSyncExecutions.isEmpty {
+            let tasks = manualSyncExecutions.values.map(\.task)
+            for task in tasks {
+                await task.value
+            }
+        }
+    }
+
+    /// Used only when account/Core replacement failed and the existing Core
+    /// remains authoritative. Successful replacement releases the gate in attach.
+    func resumeManualSyncAfterAbortedCoreReplacement() {
+        manualSyncQuiescenceRequested = false
     }
 
     func select(_ newScope: BrowserScope) {
@@ -1460,6 +1492,7 @@ struct ArticleRowContent: Equatable, Sendable {
         cancellation: SyncCancellation,
         result: Result<SyncOutcome, Error>
     ) {
+        manualSyncExecutions[request] = nil
         guard manualSyncLifecycle.isCurrent(request) else { return }
 
         let cancellationWonPresentation = manualSyncState == .cancelling
@@ -1503,6 +1536,10 @@ struct ArticleRowContent: Equatable, Sendable {
         }
         manualSyncCancellation?.cancel()
         manualSyncTask?.cancel()
+        for execution in manualSyncExecutions.values {
+            execution.cancellation.cancel()
+            execution.task.cancel()
+        }
         manualSyncLifecycle.invalidateSession()
         manualSyncState = .idle
         manualSyncRequest = nil

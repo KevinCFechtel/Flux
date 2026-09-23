@@ -19,6 +19,35 @@ final class AccountLifecycleTests: XCTestCase {
         }
     }
 
+    @MainActor
+    private final class CoreQuiescenceGate {
+        private var entered = false
+        private var entryWaiters: [CheckedContinuation<Void, Never>] = []
+        private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+        func block() async {
+            entered = true
+            let waiters = entryWaiters
+            entryWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+            await withCheckedContinuation { continuation in
+                releaseContinuation = continuation
+            }
+        }
+
+        func waitUntilEntered() async {
+            guard !entered else { return }
+            await withCheckedContinuation { continuation in
+                entryWaiters.append(continuation)
+            }
+        }
+
+        func release() {
+            releaseContinuation?.resume()
+            releaseContinuation = nil
+        }
+    }
+
     private final class FirstFactoryGate: @unchecked Sendable {
         private let lock = NSLock()
         private let releaseFirstFactory = DispatchSemaphore(value: 0)
@@ -200,6 +229,52 @@ final class AccountLifecycleTests: XCTestCase {
         XCTAssertIdentical(changes[1], newCore)
     }
 
+    @MainActor
+    func testAccountEditWaitsForCoreQuiescenceBeforeCreatingReplacement() async throws {
+        let old = IOSMinifluxCredentials(server: "https://old.example", apiKey: "old-key", customHeaders: [])
+        let replacement = IOSMinifluxCredentials(server: "https://new.example", apiKey: "new-key", customHeaders: [])
+        let store = IOSMemoryCredentialStore()
+        try store.save(old)
+        let oldCore = try makeCore(for: old)
+        let newCore = try makeCore(for: replacement)
+        let factoryInputs = LockedBox<[IOSMinifluxCredentials]>([])
+        let gate = CoreQuiescenceGate()
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { account in
+                factoryInputs.withValue { $0.append(account) }
+                return account == old ? oldCore : newCore
+            },
+            accountValidator: { _ in
+                AccountValidationAttempt(
+                    result: AccountValidationResult(installationBase: replacement.server, version: "2.0"),
+                    error: nil,
+                    diagnostic: nil
+                )
+            }
+        )
+        await bootstrapper.start()
+        bootstrapper.prepareForCoreReplacement = { await gate.block() }
+
+        let configure = Task {
+            await bootstrapper.configure(
+                server: replacement.server,
+                apiKey: replacement.apiKey,
+                headers: []
+            )
+        }
+        await gate.waitUntilEntered()
+
+        XCTAssertEqual(factoryInputs.value(), [old])
+        XCTAssertIdentical(bootstrapper.core, oldCore)
+
+        gate.release()
+        await configure.value
+
+        XCTAssertEqual(factoryInputs.value(), [old, replacement])
+        XCTAssertIdentical(bootstrapper.core, newCore)
+    }
+
     func testValidationMessagesDoNotContainCredentialValues() {
         let message = IOSAccountValidationPresentation.message(for: .unauthorized)
 
@@ -315,7 +390,7 @@ final class AccountLifecycleTests: XCTestCase {
 
         let startup = Task { await bootstrapper.start() }
         await gate.waitUntilFirstFactoryStarts()
-        bootstrapper.deactivate()
+        await bootstrapper.deactivate()
         gate.releaseFirst()
         await startup.value
 
@@ -353,6 +428,31 @@ final class AccountLifecycleTests: XCTestCase {
     }
 
     @MainActor
+    func testRemoveAccountWaitsForCoreQuiescence() async throws {
+        let account = IOSMinifluxCredentials(server: "https://miniflux.example", apiKey: "key", customHeaders: [])
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let gate = CoreQuiescenceGate()
+        let bootstrapper = CoreBootstrapper(credentialStore: store, coreFactory: { _ in core })
+        await bootstrapper.start()
+        bootstrapper.prepareForCoreReplacement = { await gate.block() }
+
+        let removal = Task { await bootstrapper.removeAccount() }
+        await gate.waitUntilEntered()
+
+        XCTAssertIdentical(bootstrapper.core, core)
+        XCTAssertEqual(bootstrapper.credentials, account)
+
+        gate.release()
+        await removal.value
+
+        XCTAssertNil(bootstrapper.core)
+        XCTAssertNil(bootstrapper.credentials)
+        XCTAssertEqual(bootstrapper.state, .accountRequired)
+    }
+
+    @MainActor
     func testStaleConfigureActivationDoesNotReplaceActiveAccount() async throws {
         let old = IOSMinifluxCredentials(server: "https://old.example", apiKey: "old-key", customHeaders: [])
         let replacement = IOSMinifluxCredentials(server: "https://new.example", apiKey: "new-key", customHeaders: [])
@@ -371,7 +471,7 @@ final class AccountLifecycleTests: XCTestCase {
 
         let configure = Task { await bootstrapper.configure(server: replacement.server, apiKey: replacement.apiKey, headers: []) }
         await gate.waitUntilFirstFactoryStarts()
-        bootstrapper.deactivate()
+        await bootstrapper.deactivate()
         gate.releaseFirst()
         await configure.value
 
@@ -393,9 +493,15 @@ final class AccountLifecycleTests: XCTestCase {
         }, accountValidator: { _ in
             AccountValidationAttempt(result: AccountValidationResult(installationBase: replacement.server, version: "2.0"), error: nil, diagnostic: nil)
         })
+        var prepareCount = 0
+        var abortCount = 0
         await bootstrapper.start()
+        bootstrapper.prepareForCoreReplacement = { prepareCount += 1 }
+        bootstrapper.onCoreReplacementAborted = { abortCount += 1 }
         await bootstrapper.configure(server: replacement.server, apiKey: replacement.apiKey, headers: [])
 
+        XCTAssertEqual(prepareCount, 1)
+        XCTAssertEqual(abortCount, 1)
         XCTAssertEqual(try store.load(), previous)
         XCTAssertEqual(bootstrapper.credentials, previous)
         XCTAssertIdentical(bootstrapper.core, previousCore)

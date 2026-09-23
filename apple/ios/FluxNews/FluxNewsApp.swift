@@ -19,6 +19,12 @@ struct FluxNewsApp: App {
             ContentView(bootstrapper: bootstrapper, newsreaderStore: newsreaderStore)
                 .tint(Color("FluxAccent"))
                 .task {
+                    bootstrapper.prepareForCoreReplacement = {
+                        await newsreaderStore.quiesceManualSyncForCoreReplacement()
+                    }
+                    bootstrapper.onCoreReplacementAborted = {
+                        newsreaderStore.resumeManualSyncAfterAbortedCoreReplacement()
+                    }
                     bootstrapper.onCoreChanged = { core in
                         if let core { newsreaderStore.attach(to: core) }
                         else { newsreaderStore.detach() }

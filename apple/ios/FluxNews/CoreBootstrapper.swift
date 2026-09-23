@@ -29,6 +29,8 @@ final class CoreBootstrapper: ObservableObject {
     @Published private(set) var coreRevision: UInt64 = 0
     let credentialStore: IOSCredentialStoreProtocol
     var onCoreChanged: ((Flux?) -> Void)?
+    var prepareForCoreReplacement: (() async -> Void)?
+    var onCoreReplacementAborted: (() -> Void)?
 
     private let coreFactory: @Sendable (IOSMinifluxCredentials) throws -> Flux
     private let accountValidator: @Sendable (IOSMinifluxCredentials) throws -> AccountValidationAttempt
@@ -122,15 +124,23 @@ final class CoreBootstrapper: ObservableObject {
             state = .accountRequired
             return
         }
+
+        await prepareForCoreReplacement?()
+        guard generation == bootstrapGeneration else { return }
+
         do {
             try await AppleCoreExecution.shared.responsive {
                 try activeCore.removeAccountState()
             }
             guard generation == bootstrapGeneration else { return }
             try credentialStore.remove()
-            deactivate()
+            deactivateAfterCoreQuiescence()
             state = .accountRequired
-        } catch { validationMessage = String(localized: "The account could not be removed.") }
+        } catch {
+            guard generation == bootstrapGeneration else { return }
+            onCoreReplacementAborted?()
+            validationMessage = String(localized: "The account could not be removed.")
+        }
     }
 
     var pathsDescription: String {
@@ -140,12 +150,27 @@ final class CoreBootstrapper: ObservableObject {
 
     private func activate(_ account: IOSMinifluxCredentials, persist: Bool, generation: UInt64) async throws -> Bool {
         if persist { try credentialStore.save(account) }
+
+        let replacingExistingCore = core != nil
+        if replacingExistingCore {
+            await prepareForCoreReplacement?()
+            guard generation == bootstrapGeneration else { return false }
+        }
+
         let factory = coreFactory
         let result = await AppleCoreExecution.shared.responsiveResult {
             try factory(account)
         }
         guard generation == bootstrapGeneration else { return false }
-        let configuredCore = try result.get()
+
+        let configuredCore: Flux
+        do {
+            configuredCore = try result.get()
+        } catch {
+            if replacingExistingCore { onCoreReplacementAborted?() }
+            throw error
+        }
+
         core = configuredCore
         credentials = account
         coreRevision &+= 1
@@ -154,8 +179,16 @@ final class CoreBootstrapper: ObservableObject {
         return true
     }
 
-    func deactivate() {
-        _ = nextBootstrapGeneration()
+    func deactivate() async {
+        let generation = nextBootstrapGeneration()
+        if core != nil {
+            await prepareForCoreReplacement?()
+            guard generation == bootstrapGeneration else { return }
+        }
+        deactivateAfterCoreQuiescence()
+    }
+
+    private func deactivateAfterCoreQuiescence() {
         core = nil
         coreRevision &+= 1
         credentials = nil

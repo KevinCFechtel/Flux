@@ -4056,6 +4056,31 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(source.contains("blockingResult { try core.sync(reason: .manual) }"))
     }
 
+    func testCoreReplacementQuiescenceTracksWindingManualSyncsWithoutSceneBackgroundCancellation() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let iosDirectory = testsDirectory.deletingLastPathComponent()
+        let storeSource = try String(
+            contentsOf: iosDirectory.appendingPathComponent("FluxNews/NewsreaderStore.swift"),
+            encoding: .utf8
+        )
+        let appSource = try String(
+            contentsOf: iosDirectory.appendingPathComponent("FluxNews/FluxNewsApp.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(storeSource.contains("manualSyncExecutions[request] = (cancellation, task)"))
+        XCTAssertTrue(storeSource.contains("func quiesceManualSyncForCoreReplacement() async"))
+        XCTAssertTrue(storeSource.contains("while !manualSyncExecutions.isEmpty"))
+        XCTAssertTrue(storeSource.contains("await task.value"))
+        XCTAssertTrue(appSource.contains("bootstrapper.prepareForCoreReplacement"))
+        XCTAssertTrue(appSource.contains("await newsreaderStore.quiesceManualSyncForCoreReplacement()"))
+
+        let sceneLifecycle = appSource.components(separatedBy: ".onChange(of: scenePhase)").last ?? ""
+        XCTAssertTrue(sceneLifecycle.contains("flushScrolloverPersistenceForLifecycle()"))
+        XCTAssertFalse(sceneLifecycle.contains("quiesceManualSyncForCoreReplacement"))
+        XCTAssertFalse(sceneLifecycle.contains("cancelManualSync"))
+    }
+
     func testNavigationRefreshUsesOneCoreProjectionInsteadOfCountFanout() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let sourceURL = testsDirectory
