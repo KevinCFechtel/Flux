@@ -1124,8 +1124,10 @@ Delta reconciliation updates only returned Entries and their enclosures. It
 never applies the Full-Snapshot rule that an Entry absent from the response is
 implicitly read and unstarred.
 
-**D5-D — Mobile Background-Sync Preference & Resume Integration is IMPLEMENTED;
-validation is pending.** D5-C.1 already established the Core-owned Resume
+**D5-D — Mobile Background-Sync Preference & Resume Integration is IMPLEMENTED
+and Core-validated; iOS integration validation is pending.** `cargo fmt --check`
+passes and `cargo test --workspace` passes with 221 `flux-core` tests and
+6 `flux-uniffi` tests after the D5-D preference integration. D5-C.1 already established the Core-owned Resume
 freshness and Delta-vs-Full policy, so D5-D does not introduce another Swift
 freshness clock or synchronization algorithm.
 
