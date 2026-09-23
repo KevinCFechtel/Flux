@@ -49,6 +49,7 @@
 		A50 /* ../shared/FluxApple/WidgetSnapshot.swift in Widget Sources */ = {isa = PBXBuildFile; fileRef = B45 /* ../shared/FluxApple/WidgetSnapshot.swift */; };
 		A51 /* ../shared/FluxApple/WidgetPresentation.swift in Widget Sources */ = {isa = PBXBuildFile; fileRef = B46 /* ../shared/FluxApple/WidgetPresentation.swift */; };
 		A52 /* Localizable.xcstrings in Widget Resources */ = {isa = PBXBuildFile; fileRef = E182A754304B521300F49A9B /* Localizable.xcstrings */; };
+		A53 /* Assets.xcassets in Widget Resources */ = {isa = PBXBuildFile; fileRef = E182A751304B521300F49A9B /* Assets.xcassets */; };
 		A35 /* ../shared/FluxApple/AppleCoreExecution.swift in Sources */ = {isa = PBXBuildFile; fileRef = B35 /* ../shared/FluxApple/AppleCoreExecution.swift */; };
 		A36 /* FluxNewsTests/AppleCoreExecutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36 /* FluxNewsTests/AppleCoreExecutionTests.swift */; };
 		A4 /* flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4 /* flux_uniffi.swift */; };
@@ -399,6 +400,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A52 /* Localizable.xcstrings in Widget Resources */,
+				A53 /* Assets.xcassets in Widget Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
