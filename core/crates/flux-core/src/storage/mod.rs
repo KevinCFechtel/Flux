@@ -2826,6 +2826,20 @@ impl Store {
             .map_err(sql_error)
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_last_full_sync_at_for_testing(&self, value: &str) -> Result<(), CoreError> {
+        self.connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .execute(
+                "INSERT INTO core_settings(key,value) VALUES('last_full_sync_at',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                [value],
+            )
+            .map_err(sql_error)?;
+        Ok(())
+    }
+
+
     pub fn full_sync_required(&self) -> Result<bool, CoreError> {
         let value: Option<String> = self
             .connection
