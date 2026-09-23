@@ -125,11 +125,16 @@ private final class IOSBackgroundTaskCompletionGate: @unchecked Sendable {
     }
 
     func complete(success: Bool) {
-        let shouldComplete = lock.withLock {
-            guard !completed else { return false }
+        lock.lock()
+        let shouldComplete: Bool
+        if completed {
+            shouldComplete = false
+        } else {
             completed = true
-            return true
+            shouldComplete = true
         }
+        lock.unlock()
+
         if shouldComplete {
             completion(success)
         }
