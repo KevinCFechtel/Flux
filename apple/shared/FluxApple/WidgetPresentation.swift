@@ -1,6 +1,29 @@
 import Foundation
 import WidgetKit
 
+enum WidgetFamilyPolicy {
+    static let headlineFamilies: [WidgetFamily] = [
+        .systemSmall,
+        .systemMedium,
+        .systemLarge,
+        .systemExtraLarge,
+    ]
+
+    static let statusFamilies: [WidgetFamily] = [
+        .systemSmall,
+        .systemMedium,
+        .accessoryInline,
+        .accessoryCircular,
+        .accessoryRectangular,
+    ]
+
+    static let lockScreenFamilies: [WidgetFamily] = [
+        .accessoryInline,
+        .accessoryCircular,
+        .accessoryRectangular,
+    ]
+}
+
 enum HeadlinesPresentation {
     static func capacity(for family: WidgetFamily) -> Int {
         switch family {
