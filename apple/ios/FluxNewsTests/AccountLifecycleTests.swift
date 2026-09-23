@@ -1085,4 +1085,90 @@ final class AccountLifecycleTests: XCTestCase {
         XCTAssertTrue(scheduler.submissions.isEmpty)
     }
 
+
+    @MainActor
+    func testBackgroundSyncPreferenceReadsPersistedCoreSetting() async throws {
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        try core.setBackgroundSyncEnabled(enabled: false)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core }
+        )
+        let coordinator = IOSBackgroundSyncCoordinator(
+            bootstrapper: bootstrapper,
+            scheduler: FakeBackgroundTaskScheduler(),
+            identifier: "dev.test.backgroundSync"
+        )
+
+        let result = await coordinator.backgroundSyncPreference()
+
+        switch result {
+        case let .success(enabled):
+            XCTAssertFalse(enabled)
+        case let .failure(error):
+            XCTFail("Unexpected preference read failure: \(error)")
+        }
+    }
+
+    @MainActor
+    func testBackgroundSyncPreferenceWriteUpdatesCoreSchedulingAndResume() async throws {
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core }
+        )
+        let scheduler = FakeBackgroundTaskScheduler()
+        let resumeStarted = expectation(description: "resume requested after enabling")
+        let metadata = SyncCompleted(
+            reason: .resume,
+            newArticles: 0,
+            updatedArticles: 0,
+            mutationsDelivered: 0,
+            dataChanged: false,
+            navigationChanged: false,
+            newArticlesByFeed: [],
+            systemNotificationCandidates: []
+        )
+        let coordinator = IOSBackgroundSyncCoordinator(
+            bootstrapper: bootstrapper,
+            scheduler: scheduler,
+            identifier: "dev.test.backgroundSync",
+            resumeSyncRunner: { _, _ in
+                resumeStarted.fulfill()
+                return .completed(metadata: metadata)
+            }
+        )
+
+        let disabled = await coordinator.setBackgroundSyncPreference(false)
+        if case let .failure(error) = disabled {
+            XCTFail("Unexpected disable failure: \(error)")
+        }
+        XCTAssertFalse(try core.coreSettings().backgroundSyncEnabled)
+        XCTAssertEqual(scheduler.cancellations, ["dev.test.backgroundSync"])
+        XCTAssertTrue(scheduler.submissions.isEmpty)
+
+        let enabled = await coordinator.setBackgroundSyncPreference(true)
+        if case let .failure(error) = enabled {
+            XCTFail("Unexpected enable failure: \(error)")
+        }
+        await fulfillment(of: [resumeStarted], timeout: 5)
+
+        XCTAssertTrue(try core.coreSettings().backgroundSyncEnabled)
+        XCTAssertEqual(scheduler.submissions.count, 1)
+    }
+
 }
