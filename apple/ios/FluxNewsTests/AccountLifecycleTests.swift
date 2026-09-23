@@ -971,6 +971,7 @@ final class AccountLifecycleTests: XCTestCase {
         let completion = expectation(description: "background task completes")
         let published = expectation(description: "success hook publishes")
         let completionCalls = LockedBox<[Bool]>([])
+        let fanoutGate = CoreQuiescenceGate()
         let metadata = SyncCompleted(
             reason: .background,
             newArticles: 1,
@@ -991,6 +992,7 @@ final class AccountLifecycleTests: XCTestCase {
         coordinator.onSuccessfulBackgroundSync = { result in
             XCTAssertEqual(result.reason, .background)
             published.fulfill()
+            await fanoutGate.block()
         }
 
         coordinator.handle(
@@ -1003,7 +1005,12 @@ final class AccountLifecycleTests: XCTestCase {
             )
         )
 
-        await fulfillment(of: [published, completion], timeout: 5)
+        await fulfillment(of: [published], timeout: 5)
+        await fanoutGate.waitUntilEntered()
+        XCTAssertTrue(completionCalls.value().isEmpty)
+
+        fanoutGate.release()
+        await fulfillment(of: [completion], timeout: 5)
 
         XCTAssertEqual(completionCalls.value(), [true])
         XCTAssertEqual(scheduler.submissions.count, 1)
