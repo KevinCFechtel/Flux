@@ -14,6 +14,9 @@ pub mod queries;
 pub mod saved_media_sync;
 pub mod storage;
 pub mod sync;
+mod sync_cancellation;
+
+pub use sync_cancellation::{SyncCancellation, SyncOutcome};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -267,6 +270,23 @@ impl FluxCore {
         result
     }
 
+    /// Runs Sync with a caller-owned, monotonic cancellation signal.
+    ///
+    /// Cancellation is a normal Sync outcome rather than a Core error. This boundary currently
+    /// observes cancellation before Core work begins and again after waiting for the Sync gate;
+    /// phase and bounded-work checkpoints are supplied by the Sync orchestration itself.
+    pub fn sync_cancellable(
+        &self,
+        reason: SyncReason,
+        cancellation: &SyncCancellation,
+    ) -> Result<SyncOutcome, CoreError> {
+        let result = tracing::dispatcher::with_default(&self.diagnostic_dispatcher, || {
+            self.sync_cancellable_inner(reason, cancellation)
+        });
+        self.diagnostics.flush();
+        result
+    }
+
     pub fn miniflux_entry_url(&self, article_id: i64) -> String {
         miniflux_entry_url(&self.installation_base, article_id)
     }
@@ -277,6 +297,26 @@ impl FluxCore {
             .lock()
             .map_err(|_| CoreError::internal("sync gate poisoned"))?;
         self.sync_locked(reason)
+    }
+
+    fn sync_cancellable_inner(
+        &self,
+        reason: SyncReason,
+        cancellation: &SyncCancellation,
+    ) -> Result<SyncOutcome, CoreError> {
+        if cancellation.is_cancelled() {
+            tracing::info!(target: "sync", "sync cancellation observed before start reason={reason:?}");
+            return Ok(SyncOutcome::Cancelled);
+        }
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        if cancellation.is_cancelled() {
+            tracing::info!(target: "sync", "sync cancellation observed after waiting for sync gate reason={reason:?}");
+            return Ok(SyncOutcome::Cancelled);
+        }
+        self.sync_locked(reason).map(SyncOutcome::Completed)
     }
     fn sync_locked(&self, reason: SyncReason) -> Result<SyncCompleted, CoreError> {
         let started = Instant::now();
@@ -2618,6 +2658,38 @@ mod tests {
             vec![6, 5]
         );
     }
+    #[test]
+    fn cancellable_sync_returns_cancelled_before_core_work_starts() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = core(&temp, snapshot());
+        let cancellation = SyncCancellation::new();
+        cancellation.cancel();
+
+        assert_eq!(
+            core.sync_cancellable(SyncReason::Manual, &cancellation)
+                .unwrap(),
+            SyncOutcome::Cancelled
+        );
+        assert_eq!(source.calls.load(Ordering::SeqCst), 0);
+        assert!(core.last_successful_sync_at().unwrap().is_none());
+    }
+
+    #[test]
+    fn cancellable_sync_preserves_completed_metadata_when_not_cancelled() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = core(&temp, snapshot());
+        let cancellation = SyncCancellation::new();
+
+        let outcome = core
+            .sync_cancellable(SyncReason::Manual, &cancellation)
+            .unwrap();
+        let SyncOutcome::Completed(metadata) = outcome else {
+            panic!("non-cancelled Sync must complete normally");
+        };
+        assert_eq!(metadata.reason, SyncReason::Manual);
+        assert_eq!(source.calls.load(Ordering::SeqCst), 1);
+    }
+
     #[test]
     fn concurrent_syncs_are_serialized_while_queries_remain_safe() {
         let temp = TempDir::new().unwrap();

@@ -795,13 +795,19 @@ keep U3 open and must not introduce device-specific product behavior.
 
 #### D4.5 — Cancellable Manual Sync
 
-**Status: READY / ACCEPTED.** The prerequisite owner acceptance of the current
+**Status: IN PROGRESS.** The prerequisite owner acceptance of the current
 UIKit Timeline/presentation device changes was satisfied on 22 September 2026,
-including the rotation-anchor, article metadata/reading-time, haptic,
-status-bar edge-protection, compact-landscape capsule, and iOS 27 renderer
-closure checks. U3 is closed. D4.5 remains a separately scoped implementation
-and must not be mixed with the still-open U5 behavior-preserving Timeline
-cleanup.
+and U5 cleanup/final acceptance is complete. The current UIKit Timeline
+architecture is frozen. D4.5 is a separately scoped Newsreader/Core feature and
+must not reopen the Timeline container, Scrollover detector, or fundamental
+image/layout pipeline.
+
+D4.5-A establishes the additive Core cancellation contract: a run-scoped,
+monotonic `SyncCancellation` signal, a non-error `SyncOutcome::Cancelled`
+terminal outcome, and a separate cancellable Sync entry point. The existing
+`sync(reason)` API retains its established behavior for existing callers.
+Cooperative phase and bounded-work checkpoints remain part of the subsequent
+D4.5 implementation rather than being simulated by Swift task cancellation.
 
 Manual foreground Sync must become explicitly cancellable by the user. This is
 a Newsreader interaction and therefore remains in D4 rather than being deferred
@@ -842,10 +848,12 @@ preservation of already durable mutations/state. Real-device acceptance must
 verify that cancelling and immediately restarting Sync leaves the Timeline,
 scope count, capsule, and Sync control coherent.
 
-This D4.5 item is the next product feature after the current UIKit
-Timeline/presentation change set is accepted on device. It does not block that
-acceptance and must not be started speculatively before the owner confirms the
-current changes.
+D4.5 implementation began only after the UIKit Timeline/presentation change
+set was accepted on device and U5 was closed. Completion still requires the
+cooperative Core checkpoints, UniFFI/Apple execution bridge, session-owned iOS
+manual-Sync lifecycle, account/Core quiescence barrier, presentation/localization
+work, automated regression coverage, and focused real-device acceptance defined
+above.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 
