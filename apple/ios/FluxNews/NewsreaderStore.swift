@@ -845,14 +845,15 @@ struct ArticleRowContent: Equatable, Sendable {
         manualSyncState = .running
         errorMessage = nil
 
-        let task = Task { [weak self, core, cancellation, sessionLease] in
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        let task = Task { [weak self, core, cancellation, sessionLease, sessionCoordinator] in
             let result = await AppleCoreExecution.shared.blockingCancellableResult(
                 onCancel: { cancellation.cancel() }
             ) {
                 try core.syncCancellable(reason: .manual, cancellation: cancellation)
             }
+            sessionCoordinator.finish(sessionLease)
             guard let self else { return }
-            coreSessionExecutionCoordinator.finish(sessionLease)
             completeManualSync(request, cancellation: cancellation, result: result)
         }
         manualSyncTask = task
