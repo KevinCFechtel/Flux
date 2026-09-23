@@ -103,8 +103,8 @@ final class IOSSystemNotificationManager: NSObject, UNUserNotificationCenterDele
         }
     }
 
-    init(center: IOSSystemNotificationCenter = IOSUserNotificationCenterAdapter.shared) {
-        self.center = center
+    init(center: IOSSystemNotificationCenter? = nil) {
+        self.center = center ?? IOSUserNotificationCenterAdapter.shared
         super.init()
     }
 
