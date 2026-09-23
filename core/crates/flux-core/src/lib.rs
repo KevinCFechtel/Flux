@@ -4217,6 +4217,24 @@ mod tests {
     }
 
     #[test]
+    fn disabled_background_sync_suppresses_resume_even_when_full_sync_is_due() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = mutation_core(&temp);
+        core.set_background_sync_enabled(false).unwrap();
+        core.store
+            .set_last_full_sync_at_for_testing("2020-01-01 00:00:00")
+            .unwrap();
+        let fetches_before = source.fetch_calls.load(Ordering::SeqCst);
+
+        let completed = core.sync(SyncReason::Resume).unwrap();
+
+        assert_eq!(completed.reason, SyncReason::Resume);
+        assert!(!completed.data_changed);
+        assert_eq!(completed.mutations_delivered, 0);
+        assert_eq!(source.fetch_calls.load(Ordering::SeqCst), fetches_before);
+    }
+
+    #[test]
     fn fresh_resume_is_noop_when_no_full_reconciliation_is_required() {
         let temp = TempDir::new().unwrap();
         let (core, source) = mutation_core(&temp);
