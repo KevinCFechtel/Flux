@@ -47,6 +47,7 @@ pub struct AccountValidationResult {
 pub enum MinifluxCapability {
     MediaProgressSync,
     SavedMediaSync,
+    EntryDeltaSync,
 }
 
 impl AccountValidationResult {
@@ -64,6 +65,9 @@ impl MinifluxCapability {
         }
         if Self::saved_media_sync_supported(version) {
             capabilities.push(Self::SavedMediaSync);
+        }
+        if Self::entry_delta_sync_supported(version) {
+            capabilities.push(Self::EntryDeltaSync);
         }
         capabilities
     }
@@ -84,6 +88,20 @@ impl MinifluxCapability {
         };
         (major, minor) >= (2, 2)
     }
+    fn entry_delta_sync_supported(version: &str) -> bool {
+        let mut components = version.trim().trim_start_matches('v').split('.');
+        let Some(major) = components.next().and_then(|value| value.parse::<u64>().ok()) else {
+            return false;
+        };
+        let Some(minor) = components.next().and_then(|value| value.parse::<u64>().ok()) else {
+            return false;
+        };
+        let Some(patch) = components.next().and_then(|value| value.parse::<u64>().ok()) else {
+            return false;
+        };
+        (major, minor, patch) >= (2, 0, 49)
+    }
+
     fn saved_media_sync_supported(version: &str) -> bool {
         let mut components = version.trim().trim_start_matches('v').split('.');
         let Some(major) = components
@@ -220,6 +238,16 @@ pub struct RemoteSnapshot {
     pub enclosures: Vec<Enclosure>,
 }
 
+/// Bounded changed-entry projection used by lightweight Background/Resume Sync.
+/// Feed/category catalog changes are deliberately outside this contract.
+#[derive(Clone, Debug)]
+pub struct RemoteDelta {
+    pub articles: Vec<Article>,
+    pub enclosures: Vec<Enclosure>,
+    /// Greatest Miniflux changed_at observed, expressed as Unix seconds.
+    pub cursor: i64,
+}
+
 pub struct RemoteImage {
     pub content_type: Option<String>,
     pub bytes: Vec<u8>,
@@ -290,6 +318,28 @@ pub trait RemoteSource: Send + Sync {
             return Ok(None);
         }
         result.map(Some)
+    }
+    fn fetch_changed_articles_cancellable(
+        &self,
+        _changed_after: i64,
+        _cancellation: &SyncCancellation,
+    ) -> Result<Option<RemoteDelta>, CoreError> {
+        Err(CoreError::data(
+            "incremental entry synchronization is unavailable",
+        ))
+    }
+    /// Returns a server-derived changed_at high-water mark for establishing a
+    /// post-Full-Sync delta baseline. Test/embedded sources without changed_at
+    /// support safely use zero; real Miniflux sources override this.
+    fn delta_watermark_cancellable(
+        &self,
+        cancellation: &SyncCancellation,
+    ) -> Result<Option<i64>, CoreError> {
+        if cancellation.is_cancelled() {
+            Ok(None)
+        } else {
+            Ok(Some(0))
+        }
     }
     fn set_read_state(&self, article_ids: &[i64], read: bool) -> Result<(), CoreError>;
     fn set_starred_state(&self, article_id: i64, starred: bool) -> Result<(), CoreError>;
@@ -686,6 +736,138 @@ impl MinifluxClient {
     fn entries(&self, status: Option<&str>, starred: bool) -> Result<Vec<EntryDto>, CoreError> {
         self.entries_with_cancellation(status, starred, None)?
             .ok_or_else(|| CoreError::internal("uncancellable entry fetch was cancelled"))
+    }
+
+    fn changed_entries_with_cancellation(
+        &self,
+        changed_after: i64,
+        cancellation: &SyncCancellation,
+    ) -> Result<Option<RemoteDelta>, CoreError> {
+        const CURSOR_OVERLAP_SECONDS: i64 = 2;
+        let query_after = changed_after.saturating_sub(CURSOR_OVERLAP_SECONDS).max(0);
+        let started = Instant::now();
+        tracing::info!(
+            target: "miniflux",
+            "delta entry fetch started changed_after={} query_after={}",
+            changed_after,
+            query_after
+        );
+        let mut all = Vec::new();
+        let mut after_id = 0;
+        let mut cursor = changed_after;
+        loop {
+            if cancellation.is_cancelled() {
+                return Ok(None);
+            }
+            let mut query = vec![
+                ("changed_after", query_after.to_string()),
+                ("limit", PAGE_SIZE.to_string()),
+                ("order", "id".to_string()),
+                ("direction", "asc".to_string()),
+            ];
+            if after_id > 0 {
+                query.push(("after_entry_id", after_id.to_string()));
+            }
+            let page_result: Result<EntriesDto, CoreError> = self.get("/v1/entries", &query);
+            if cancellation.is_cancelled() {
+                return Ok(None);
+            }
+            let page = page_result?;
+            if page.entries.is_empty() {
+                break;
+            }
+            let mut previous = after_id;
+            for entry in &page.entries {
+                if entry.id <= previous {
+                    return Err(CoreError::data(
+                        "Miniflux returned unstable delta entry pagination",
+                    ));
+                }
+                previous = entry.id;
+                cursor = cursor.max(entry_changed_at_unix(entry)?);
+            }
+            after_id = previous;
+            all.extend(page.entries);
+        }
+
+        let mut articles = Vec::with_capacity(all.len());
+        let mut enclosures = Vec::new();
+        for entry in all {
+            if cancellation.is_cancelled() {
+                return Ok(None);
+            }
+            let entry_enclosures = map_enclosures(entry.id, entry.enclosures)?;
+            let enclosure_inputs = entry_enclosures
+                .iter()
+                .map(|item| crate::article::EnclosureInput {
+                    url: item.url.clone(),
+                    mime_type: item.mime_type.clone(),
+                })
+                .collect::<Vec<_>>();
+            let published = DateTime::parse_from_rfc3339(&entry.published_at).map_err(|_| {
+                CoreError::data(format!("article {} has invalid publication time", entry.id))
+            })?;
+            let processed = crate::article::process(&entry.content, &entry.url, &enclosure_inputs);
+            enclosures.extend(entry_enclosures);
+            articles.push(Article {
+                id: entry.id,
+                feed_id: entry.feed_id,
+                title: entry.title,
+                url: entry.url,
+                comments_url: entry.comments_url,
+                published_at: published
+                    .to_utc()
+                    .to_rfc3339_opts(SecondsFormat::Secs, true),
+                // Miniflux's removed state is not an unread state. Full Sync
+                // eventually reconciles structural/removal truth.
+                is_read: entry.status != "unread",
+                is_starred: entry.starred,
+                raw_html_content: entry.content,
+                reading_time_minutes: entry.reading_time,
+                preview: processed.preview,
+                image_url: processed.image_url,
+            });
+        }
+        tracing::info!(
+            target: "miniflux",
+            "delta entry fetch completed entries={} cursor={} elapsed_ms={}",
+            articles.len(),
+            cursor,
+            started.elapsed().as_millis()
+        );
+        Ok(Some(RemoteDelta {
+            articles,
+            enclosures,
+            cursor,
+        }))
+    }
+
+    fn delta_watermark_with_cancellation(
+        &self,
+        cancellation: &SyncCancellation,
+    ) -> Result<Option<i64>, CoreError> {
+        if cancellation.is_cancelled() {
+            return Ok(None);
+        }
+        let result: Result<EntriesDto, CoreError> = self.get(
+            "/v1/entries",
+            &[
+                ("limit", "1".to_string()),
+                ("order", "changed_at".to_string()),
+                ("direction", "desc".to_string()),
+            ],
+        );
+        if cancellation.is_cancelled() {
+            return Ok(None);
+        }
+        let page = result?;
+        let cursor = page
+            .entries
+            .first()
+            .map(entry_changed_at_unix)
+            .transpose()?
+            .unwrap_or(0);
+        Ok(Some(cursor))
     }
 
     fn entries_with_cancellation(
@@ -1108,6 +1290,21 @@ impl RemoteSource for MinifluxClient {
         self.fetch_initial_articles_with_cancellation(Some(cancellation))
     }
 
+    fn fetch_changed_articles_cancellable(
+        &self,
+        changed_after: i64,
+        cancellation: &SyncCancellation,
+    ) -> Result<Option<RemoteDelta>, CoreError> {
+        self.changed_entries_with_cancellation(changed_after, cancellation)
+    }
+
+    fn delta_watermark_cancellable(
+        &self,
+        cancellation: &SyncCancellation,
+    ) -> Result<Option<i64>, CoreError> {
+        self.delta_watermark_with_cancellation(cancellation)
+    }
+
     fn set_read_state(&self, article_ids: &[i64], read: bool) -> Result<(), CoreError> {
         let ids = article_ids
             .iter()
@@ -1414,6 +1611,8 @@ struct EntryDto {
     starred: bool,
     published_at: String,
     #[serde(default)]
+    changed_at: String,
+    #[serde(default)]
     content: String,
     #[serde(default)]
     reading_time: u32,
@@ -1452,6 +1651,12 @@ struct FeedDto {
     #[serde(default)]
     disabled: bool,
     category: Option<CategoryRefDto>,
+}
+
+fn entry_changed_at_unix(entry: &EntryDto) -> Result<i64, CoreError> {
+    DateTime::parse_from_rfc3339(&entry.changed_at)
+        .map(|value| value.timestamp())
+        .map_err(|_| CoreError::data(format!("article {} has invalid changed_at", entry.id)))
 }
 
 fn search_article_summary(entry: EntryDto) -> Result<ArticleSummary, CoreError> {
