@@ -42,12 +42,13 @@ final class CoreBootstrapper: ObservableObject {
 
     init(
         credentialStore: IOSCredentialStoreProtocol = IOSKeychainCredentialStore(),
-        coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator = IOSCoreSessionExecutionCoordinator(),
+        coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator? = nil,
         coreFactory: @escaping @Sendable (IOSMinifluxCredentials) throws -> Flux = CoreBootstrapper.defaultCoreFactory,
         accountValidator: @escaping @Sendable (IOSMinifluxCredentials) throws -> AccountValidationAttempt = CoreBootstrapper.defaultAccountValidator
     ) {
         self.credentialStore = credentialStore
-        self.coreSessionExecutionCoordinator = coreSessionExecutionCoordinator
+        self.coreSessionExecutionCoordinator =
+            coreSessionExecutionCoordinator ?? IOSCoreSessionExecutionCoordinator()
         self.coreFactory = coreFactory
         self.accountValidator = accountValidator
     }
