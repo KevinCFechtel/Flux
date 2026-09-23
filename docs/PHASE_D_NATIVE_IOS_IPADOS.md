@@ -1184,8 +1184,9 @@ Focused native tests cover authorization, denied permission, successful
 delivery-before-ACK, failed-delivery/no-ACK, buffered feed routing, and the
 requirement that BGTask completion waits for post-Sync fanout.
 
-**D5-F — Apple-shared Widget Contract Extraction is IMPLEMENTED; validation is
-pending.** The existing macOS WidgetKit contract has been moved mechanically
+**D5-F — Apple-shared Widget Contract Extraction is COMPLETE.** Validation
+covers the canonical native iOS test gate and a warning-free native macOS
+Universal build after the shared WidgetKit extraction. The existing macOS WidgetKit contract has been moved mechanically
 into `apple/shared/FluxApple`: `WidgetSnapshotV1`, `WidgetSnapshotStore`,
 `WidgetAction`, `WidgetContentModel`, the widget-family presentation policy
 and `WidgetSnapshotWriter`. macOS now references those shared sources instead
@@ -1205,7 +1206,14 @@ does not collide with the production/Flutter identity. Native Dev uses
 `group.dev.kevincfechtel.fluxNews` and `fluxnews`.
 
 **D5-G — Native iOS WidgetKit, including Lock Screen widgets, is IMPLEMENTED;
-validation is pending.** The iOS application now embeds a native
+final device acceptance is pending.** The canonical iOS test gate passes after
+the WidgetKit integration. A signed NativeDev device archive also succeeds with
+separate host/widget provisioning profiles and the shared
+`group.dev.kevincfechtel.fluxNews.nativeDev` App Group. The archive script now
+supports both NativeDev Release and production-identity Upgrade Test archives
+and verifies the archived host Bundle ID, widget Bundle ID, shared App Group
+entitlements and signatures. Final D5-G acceptance still requires one physical
+device widget/deep-link smoke pass plus a successful Upgrade Test archive. The iOS application now embeds a native
 `FluxNewsWidgets` extension using the shared snapshot/presentation contract.
 The Headlines widget supports Home Screen `systemSmall`, `systemMedium`,
 `systemLarge` and iPad `systemExtraLarge`. The Status widget supports Home
@@ -1241,9 +1249,18 @@ reuse the D4.5 Manual-Sync presentation lifecycle or expose user cancellation.
 
 Successful background sync updates the App Group widget projection, requests
 targeted WidgetKit reloads, hands Core notification candidates to the native
-notification layer and requests native media-transfer reconciliation. D5 closes
-the transfer-reconciliation trigger/handoff; the actual persistent iOS transfer
-executor remains D6 work.
+notification layer and requests native media-transfer reconciliation. The D5
+transfer-reconciliation trigger/handoff is now implemented through
+`IOSMediaTransferReconciliationHandoff`. A request is buffered when no native
+executor is installed yet and is delivered when D6 attaches that executor;
+multiple pre-install requests coalesce into one reconciliation request. The
+post-Sync fanout requests this handoff independently of whether notification
+candidates exist and still awaits all D5 fanout before BGTask completion. The
+actual persistent iOS transfer executor remains D6 work.
+
+D5 implementation is therefore code-complete, but the phase remains open until
+the D5-G physical-device widget/deep-link smoke pass and the production-identity
+`Upgrade Test` archive both succeed.
 
 ### D6 — Native Media & Background Downloads
 
