@@ -20,6 +20,42 @@ pub struct SyncData {
     pub system_notification_candidates: Vec<SystemNotificationCandidate>,
 }
 
+const FULL_SYNC_MAX_AGE_HOURS: i64 = 24;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SyncPlan {
+    Full,
+    Delta { cursor: i64 },
+    BackgroundNeedsFull,
+}
+
+fn sync_plan(store: &Store, reason: SyncReason) -> Result<SyncPlan, CoreError> {
+    match reason {
+        SyncReason::Background => {
+            if store.full_sync_required()? {
+                return Ok(SyncPlan::BackgroundNeedsFull);
+            }
+            match store.delta_sync_cursor()? {
+                Some(cursor) => Ok(SyncPlan::Delta { cursor }),
+                None => Ok(SyncPlan::BackgroundNeedsFull),
+            }
+        }
+        SyncReason::Resume => {
+            if store.full_sync_required()? || store.full_sync_due(FULL_SYNC_MAX_AGE_HOURS)? {
+                return Ok(SyncPlan::Full);
+            }
+            match store.delta_sync_cursor()? {
+                Some(cursor) => Ok(SyncPlan::Delta { cursor }),
+                None => Ok(SyncPlan::Full),
+            }
+        }
+        SyncReason::Manual
+        | SyncReason::AppStart
+        | SyncReason::Periodic
+        | SyncReason::Widget => Ok(SyncPlan::Full),
+    }
+}
+
 pub fn run(
     remote: &dyn RemoteSource,
     store: &Store,
@@ -49,12 +85,66 @@ pub(crate) fn run_cancellable(
     media_progress_writes: HashMap<i64, u64>,
     cancellation: &SyncCancellation,
 ) -> Result<Cancellable<SyncData>, CoreError> {
+    match sync_plan(store, reason)? {
+        SyncPlan::Full => run_full_cancellable(
+            remote,
+            store,
+            retention,
+            reason,
+            media_progress_writes,
+            cancellation,
+        ),
+        SyncPlan::Delta { cursor } => run_delta_cancellable(
+            remote,
+            store,
+            retention,
+            reason,
+            media_progress_writes,
+            cursor,
+            cancellation,
+        ),
+        SyncPlan::BackgroundNeedsFull => {
+            store.mark_full_sync_required("missing_or_invalid_delta_baseline")?;
+            tracing::info!(
+                target: "sync",
+                "background delta deferred until Full Sync establishes a valid baseline"
+            );
+            Ok(Cancellable::Completed(SyncData::default()))
+        }
+    }
+}
+
+fn run_full_cancellable(
+    remote: &dyn RemoteSource,
+    store: &Store,
+    retention: ReadArticleRetention,
+    reason: SyncReason,
+    media_progress_writes: HashMap<i64, u64>,
+    cancellation: &SyncCancellation,
+) -> Result<Cancellable<SyncData>, CoreError> {
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
+
+    // Capture the server-side high-water mark before the Full snapshot begins.
+    // Changes racing the Full fetch will therefore remain visible to a later Delta.
+    let delta_baseline = match remote.delta_watermark_cancellable(cancellation) {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(
+                target: "sync",
+                "Full Sync could not establish Delta baseline kind={:?}",
+                error.kind
+            );
+            None
+        }
+    };
     if cancellation.is_cancelled() {
         return Ok(Cancellable::Cancelled);
     }
 
     let fetch_started = Instant::now();
-    tracing::info!(target: "sync", "remote fetch started");
+    tracing::info!(target: "sync", "remote fetch started plan=full");
     let Some(mut snapshot) = remote.fetch_initial_articles_cancellable(cancellation)? else {
         return Ok(Cancellable::Cancelled);
     };
@@ -243,7 +333,7 @@ pub(crate) fn run_cancellable(
     if cancellation.is_cancelled() {
         return Ok(Cancellable::Cancelled);
     }
-    store.mark_sync_success()?;
+    store.commit_full_sync_success(delta_baseline)?;
     Ok(Cancellable::Completed(SyncData {
         new_articles: stats.new_articles,
         updated_articles: stats.updated_articles,
@@ -253,6 +343,135 @@ pub(crate) fn run_cancellable(
             || stats.navigation_changed
             || saved_media_changed,
         navigation_changed: stats.navigation_changed,
+        new_articles_by_feed,
+        system_notification_candidates,
+    }))
+}
+
+
+fn run_delta_cancellable(
+    remote: &dyn RemoteSource,
+    store: &Store,
+    retention: ReadArticleRetention,
+    reason: SyncReason,
+    media_progress_writes: HashMap<i64, u64>,
+    cursor: i64,
+    cancellation: &SyncCancellation,
+) -> Result<Cancellable<SyncData>, CoreError> {
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
+
+    let fetch_started = Instant::now();
+    tracing::info!(target: "sync", "remote fetch started plan=delta cursor={cursor}");
+    let Some(mut delta) = remote.fetch_changed_articles_cancellable(cursor, cancellation)? else {
+        return Ok(Cancellable::Cancelled);
+    };
+    tracing::info!(
+        target: "sync",
+        "remote delta fetch completed articles={} cursor={} elapsed_ms={}",
+        delta.articles.len(),
+        delta.cursor,
+        fetch_started.elapsed().as_millis()
+    );
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
+
+    // SavedMedia marker entries are transport metadata, never user-visible articles.
+    let saved_media_sync = store.saved_media_sync_configuration()?;
+    if let Some(feed_id) = saved_media_sync.sync_feed_id {
+        let technical_article_ids = delta
+            .articles
+            .iter()
+            .filter(|article| article.feed_id == feed_id)
+            .map(|article| article.id)
+            .collect::<HashSet<_>>();
+        delta.articles.retain(|article| article.feed_id != feed_id);
+        delta
+            .enclosures
+            .retain(|enclosure| !technical_article_ids.contains(&enclosure.article_id));
+    }
+
+    let reconcile_started = Instant::now();
+    let (stats, unknown_feed_ids) = store.reconcile_delta_articles(
+        &delta.articles,
+        &delta.enclosures,
+        &media_progress_writes,
+    )?;
+    if !unknown_feed_ids.is_empty() {
+        store.mark_full_sync_required("unknown_feed_in_delta")?;
+        tracing::info!(
+            target: "sync",
+            "delta skipped unknown feeds count={} ids={:?}; Full Sync requested",
+            unknown_feed_ids.len(),
+            unknown_feed_ids
+        );
+    }
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
+
+    let saved_media_changed =
+        match crate::saved_media_sync::run_cancellable(remote, store, cancellation)? {
+            Cancellable::Completed(changed) => changed,
+            Cancellable::Cancelled => return Ok(Cancellable::Cancelled),
+        };
+
+    let cutoff = Utc::now() - Duration::days(retention.days());
+    let removed_articles = store.cleanup_expired_read_articles(&cutoff.to_rfc3339())?;
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
+    let removed_media = store.evaluate_media_cleanup(Utc::now())?;
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
+
+    let new_articles_by_feed = stats
+        .new_article_ids_by_feed
+        .iter()
+        .map(|(&feed_id, article_ids)| NewArticlesByFeed {
+            feed_id,
+            count: article_ids.len() as u32,
+        })
+        .collect();
+    let system_notification_candidates =
+        if matches!(reason, SyncReason::Background | SyncReason::Periodic) {
+            let candidates =
+                store.prepare_system_notification_candidates(&stats.new_article_ids_by_feed)?;
+            if cancellation.is_cancelled() {
+                return Ok(Cancellable::Cancelled);
+            }
+            candidates
+        } else {
+            Vec::new()
+        };
+
+    // Cursor commit is intentionally independent from full_sync_required. Unknown
+    // feeds are skipped, the usable Delta work is retained, and the later Full
+    // Sync does not depend on this cursor.
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
+    store.commit_delta_sync_success(delta.cursor)?;
+    tracing::info!(
+        target: "storage",
+        "delta reconciliation completed new={} updated={} unknown_feeds={} elapsed_ms={}",
+        stats.new_articles,
+        stats.updated_articles,
+        unknown_feed_ids.len(),
+        reconcile_started.elapsed().as_millis()
+    );
+
+    Ok(Cancellable::Completed(SyncData {
+        new_articles: stats.new_articles,
+        updated_articles: stats.updated_articles,
+        data_changed: stats.new_articles > 0
+            || stats.updated_articles > 0
+            || removed_articles > 0
+            || saved_media_changed,
+        navigation_changed: false,
         new_articles_by_feed,
         system_notification_candidates,
     }))
