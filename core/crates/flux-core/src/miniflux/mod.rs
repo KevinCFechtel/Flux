@@ -12,6 +12,7 @@ use crate::domain::{
     CreateFeedResult, DiscoverSubscriptionsRequest, DiscoveredSubscription, Enclosure, Feed,
     SaveToServiceResult, SearchArticlesRequest, SearchArticlesResult,
 };
+use crate::sync_cancellation::SyncCancellation;
 use chrono::{DateTime, SecondsFormat};
 use serde::Deserialize;
 
@@ -277,6 +278,19 @@ pub fn miniflux_entry_url(installation_base: &str, article_id: i64) -> String {
 
 pub trait RemoteSource: Send + Sync {
     fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError>;
+    fn fetch_initial_articles_cancellable(
+        &self,
+        cancellation: &SyncCancellation,
+    ) -> Result<Option<RemoteSnapshot>, CoreError> {
+        if cancellation.is_cancelled() {
+            return Ok(None);
+        }
+        let result = self.fetch_initial_articles();
+        if cancellation.is_cancelled() {
+            return Ok(None);
+        }
+        result.map(Some)
+    }
     fn set_read_state(&self, article_ids: &[i64], read: bool) -> Result<(), CoreError>;
     fn set_starred_state(&self, article_id: i64, starred: bool) -> Result<(), CoreError>;
     fn set_media_progression(&self, _enclosure_id: i64, _seconds: u64) -> Result<(), CoreError> {
@@ -334,6 +348,20 @@ pub trait RemoteSource: Send + Sync {
     }
     fn saved_media_markers(&self, _feed_id: i64) -> Result<Vec<RemoteSavedMediaMarker>, CoreError> {
         Err(CoreError::data("SavedMedia marker fetch is unavailable"))
+    }
+    fn saved_media_markers_cancellable(
+        &self,
+        feed_id: i64,
+        cancellation: &SyncCancellation,
+    ) -> Result<Option<Vec<RemoteSavedMediaMarker>>, CoreError> {
+        if cancellation.is_cancelled() {
+            return Ok(None);
+        }
+        let result = self.saved_media_markers(feed_id);
+        if cancellation.is_cancelled() {
+            return Ok(None);
+        }
+        result.map(Some)
     }
     fn import_saved_media_marker(
         &self,
@@ -640,6 +668,16 @@ impl MinifluxClient {
         })
     }
     fn entries(&self, status: Option<&str>, starred: bool) -> Result<Vec<EntryDto>, CoreError> {
+        self.entries_with_cancellation(status, starred, None)?
+            .ok_or_else(|| CoreError::internal("uncancellable entry fetch was cancelled"))
+    }
+
+    fn entries_with_cancellation(
+        &self,
+        status: Option<&str>,
+        starred: bool,
+        cancellation: Option<&SyncCancellation>,
+    ) -> Result<Option<Vec<EntryDto>>, CoreError> {
         let set = if starred {
             "starred"
         } else {
@@ -650,6 +688,9 @@ impl MinifluxClient {
         let mut all = Vec::new();
         let mut after_id = 0;
         loop {
+            if cancellation.is_some_and(SyncCancellation::is_cancelled) {
+                return Ok(None);
+            }
             let mut query = vec![
                 ("limit", PAGE_SIZE.to_string()),
                 ("order", "id".to_string()),
@@ -664,7 +705,11 @@ impl MinifluxClient {
             if after_id > 0 {
                 query.push(("after_entry_id", after_id.to_string()));
             }
-            let page: EntriesDto = self.get("/v1/entries", &query)?;
+            let page_result: Result<EntriesDto, CoreError> = self.get("/v1/entries", &query);
+            if cancellation.is_some_and(SyncCancellation::is_cancelled) {
+                return Ok(None);
+            }
+            let page = page_result?;
             tracing::debug!(target: "miniflux", "entry page completed set={} entries={} total={} accumulated={} after_entry_id={}", set, page.entries.len(), page.total, all.len(), after_id);
             if page.entries.is_empty() {
                 break;
@@ -682,32 +727,66 @@ impl MinifluxClient {
             all.extend(page.entries);
         }
         tracing::info!(target: "miniflux", "entry fetch completed set={} entries={} elapsed_ms={}", set, all.len(), started.elapsed().as_millis());
-        Ok(all)
+        Ok(Some(all))
     }
+
     fn saved_media_markers(&self, feed_id: i64) -> Result<Vec<RemoteSavedMediaMarker>, CoreError> {
+        self.saved_media_markers_with_cancellation(feed_id, None)?
+            .ok_or_else(|| CoreError::internal("uncancellable SavedMedia marker fetch was cancelled"))
+    }
+
+    fn saved_media_markers_with_cancellation(
+        &self,
+        feed_id: i64,
+        cancellation: Option<&SyncCancellation>,
+    ) -> Result<Option<Vec<RemoteSavedMediaMarker>>, CoreError> {
         let mut entries = Vec::new();
         for status in ["unread", "read", "removed"] {
-            entries.extend(self.entries_for_feed_status(feed_id, status)?);
+            if cancellation.is_some_and(SyncCancellation::is_cancelled) {
+                return Ok(None);
+            }
+            let Some(status_entries) =
+                self.entries_for_feed_status_with_cancellation(feed_id, status, cancellation)?
+            else {
+                return Ok(None);
+            };
+            entries.extend(status_entries);
         }
-        Ok(entries
-            .into_iter()
-            .filter_map(|entry| {
-                entry.external_id.map(|external_id| RemoteSavedMediaMarker {
-                    entry_id: entry.id,
-                    external_id,
-                    status: entry.status,
+        Ok(Some(
+            entries
+                .into_iter()
+                .filter_map(|entry| {
+                    entry.external_id.map(|external_id| RemoteSavedMediaMarker {
+                        entry_id: entry.id,
+                        external_id,
+                        status: entry.status,
+                    })
                 })
-            })
-            .collect())
+                .collect(),
+        ))
     }
+
     fn entries_for_feed_status(
         &self,
         feed_id: i64,
         status: &str,
     ) -> Result<Vec<EntryDto>, CoreError> {
+        self.entries_for_feed_status_with_cancellation(feed_id, status, None)?
+            .ok_or_else(|| CoreError::internal("uncancellable SavedMedia entry fetch was cancelled"))
+    }
+
+    fn entries_for_feed_status_with_cancellation(
+        &self,
+        feed_id: i64,
+        status: &str,
+        cancellation: Option<&SyncCancellation>,
+    ) -> Result<Option<Vec<EntryDto>>, CoreError> {
         let mut all = Vec::new();
         let mut after_id = 0;
         loop {
+            if cancellation.is_some_and(SyncCancellation::is_cancelled) {
+                return Ok(None);
+            }
             let mut query = vec![
                 ("feed_id", feed_id.to_string()),
                 ("status", status.to_string()),
@@ -718,7 +797,11 @@ impl MinifluxClient {
             if after_id > 0 {
                 query.push(("after_entry_id", after_id.to_string()));
             }
-            let page: EntriesDto = self.get("/v1/entries", &query)?;
+            let page_result: Result<EntriesDto, CoreError> = self.get("/v1/entries", &query);
+            if cancellation.is_some_and(SyncCancellation::is_cancelled) {
+                return Ok(None);
+            }
+            let page = page_result?;
             if page.entries.is_empty() {
                 break;
             }
@@ -734,8 +817,9 @@ impl MinifluxClient {
             after_id = previous;
             all.extend(page.entries);
         }
-        Ok(all)
+        Ok(Some(all))
     }
+
     fn saved_media_article(&self, article_id: i64) -> Result<RemoteSavedMediaArticle, CoreError> {
         let entry: EntryDto = self.get(&format!("/v1/entries/{article_id}"), &[])?;
         entry_to_saved_media_article(entry)
@@ -791,6 +875,109 @@ impl MinifluxClient {
             content_type,
             bytes,
         })
+    }
+
+    fn fetch_initial_articles_with_cancellation(
+        &self,
+        cancellation: Option<&SyncCancellation>,
+    ) -> Result<Option<RemoteSnapshot>, CoreError> {
+        if cancellation.is_some_and(SyncCancellation::is_cancelled) {
+            return Ok(None);
+        }
+        let categories_result: Result<Vec<CategoryDto>, CoreError> = self.get("/v1/categories", &[]);
+        if cancellation.is_some_and(SyncCancellation::is_cancelled) {
+            return Ok(None);
+        }
+        let categories = categories_result?;
+        let feeds_result: Result<Vec<FeedDto>, CoreError> = self.get("/v1/feeds", &[]);
+        if cancellation.is_some_and(SyncCancellation::is_cancelled) {
+            return Ok(None);
+        }
+        let feeds = feeds_result?;
+        let categories = categories
+            .into_iter()
+            .map(|c| Category {
+                id: c.id,
+                title: c.title,
+            })
+            .collect();
+        let feeds: Vec<Feed> = feeds
+            .into_iter()
+            .map(|f| Feed {
+                id: f.id,
+                category_id: f.category.map(|c| c.id).unwrap_or_default(),
+                title: f.title,
+            })
+            .collect();
+        let feed_ids: HashMap<i64, _> = feeds.iter().map(|f| (f.id, ())).collect();
+        let mut entries = HashMap::new();
+
+        let Some(unread) =
+            self.entries_with_cancellation(Some("unread"), false, cancellation)?
+        else {
+            return Ok(None);
+        };
+        for entry in unread {
+            entries.insert(entry.id, entry);
+        }
+        let Some(starred) = self.entries_with_cancellation(None, true, cancellation)? else {
+            return Ok(None);
+        };
+        for entry in starred {
+            entries.insert(entry.id, entry);
+        }
+
+        let mut articles = Vec::with_capacity(entries.len());
+        let mut enclosures = Vec::new();
+        for entry in entries.into_values() {
+            if cancellation.is_some_and(SyncCancellation::is_cancelled) {
+                return Ok(None);
+            }
+            if !feed_ids.contains_key(&entry.feed_id) {
+                return Err(CoreError::data(format!(
+                    "article {} references unknown feed {}",
+                    entry.id, entry.feed_id
+                )));
+            }
+            let published = DateTime::parse_from_rfc3339(&entry.published_at).map_err(|_| {
+                CoreError::data(format!("article {} has invalid publication time", entry.id))
+            })?;
+            let entry_enclosures = map_enclosures(entry.id, entry.enclosures)?;
+            let enclosure_inputs = entry_enclosures
+                .iter()
+                .map(|item| crate::article::EnclosureInput {
+                    url: item.url.clone(),
+                    mime_type: item.mime_type.clone(),
+                })
+                .collect::<Vec<_>>();
+            let processed = crate::article::process(&entry.content, &entry.url, &enclosure_inputs);
+            enclosures.extend(entry_enclosures);
+            articles.push(Article {
+                id: entry.id,
+                feed_id: entry.feed_id,
+                title: entry.title,
+                url: entry.url,
+                comments_url: entry.comments_url,
+                published_at: published
+                    .to_utc()
+                    .to_rfc3339_opts(SecondsFormat::Secs, true),
+                is_read: entry.status == "read",
+                is_starred: entry.starred,
+                raw_html_content: entry.content,
+                reading_time_minutes: entry.reading_time,
+                preview: processed.preview,
+                image_url: processed.image_url,
+            });
+        }
+        if cancellation.is_some_and(SyncCancellation::is_cancelled) {
+            return Ok(None);
+        }
+        Ok(Some(RemoteSnapshot {
+            categories,
+            feeds,
+            articles,
+            enclosures,
+        }))
     }
 
     pub fn validate_account(
@@ -901,80 +1088,17 @@ impl AccountValidationFailure {
 
 impl RemoteSource for MinifluxClient {
     fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError> {
-        let categories: Vec<CategoryDto> = self.get("/v1/categories", &[])?;
-        let feeds: Vec<FeedDto> = self.get("/v1/feeds", &[])?;
-        let categories = categories
-            .into_iter()
-            .map(|c| Category {
-                id: c.id,
-                title: c.title,
-            })
-            .collect();
-        let feeds: Vec<Feed> = feeds
-            .into_iter()
-            .map(|f| Feed {
-                id: f.id,
-                category_id: f.category.map(|c| c.id).unwrap_or_default(),
-                title: f.title,
-            })
-            .collect();
-        let feed_ids: HashMap<i64, _> = feeds.iter().map(|f| (f.id, ())).collect();
-        let mut entries = HashMap::new();
-        // Normal sync retains the account-wide unread and starred remote sets. Retention only
-        // cleans up articles that were already persisted locally.
-        for entry in self
-            .entries(Some("unread"), false)?
-            .into_iter()
-            .chain(self.entries(None, true)?)
-        {
-            entries.insert(entry.id, entry);
-        }
-        let mut articles = Vec::with_capacity(entries.len());
-        let mut enclosures = Vec::new();
-        for entry in entries.into_values() {
-            if !feed_ids.contains_key(&entry.feed_id) {
-                return Err(CoreError::data(format!(
-                    "article {} references unknown feed {}",
-                    entry.id, entry.feed_id
-                )));
-            }
-            let published = DateTime::parse_from_rfc3339(&entry.published_at).map_err(|_| {
-                CoreError::data(format!("article {} has invalid publication time", entry.id))
-            })?;
-            let entry_enclosures = map_enclosures(entry.id, entry.enclosures)?;
-            let enclosure_inputs = entry_enclosures
-                .iter()
-                .map(|item| crate::article::EnclosureInput {
-                    url: item.url.clone(),
-                    mime_type: item.mime_type.clone(),
-                })
-                .collect::<Vec<_>>();
-            let processed = crate::article::process(&entry.content, &entry.url, &enclosure_inputs);
-            enclosures.extend(entry_enclosures);
-            articles.push(Article {
-                id: entry.id,
-                feed_id: entry.feed_id,
-                title: entry.title,
-                url: entry.url,
-                comments_url: entry.comments_url,
-                published_at: published
-                    .to_utc()
-                    .to_rfc3339_opts(SecondsFormat::Secs, true),
-                is_read: entry.status == "read",
-                is_starred: entry.starred,
-                raw_html_content: entry.content,
-                reading_time_minutes: entry.reading_time,
-                preview: processed.preview,
-                image_url: processed.image_url,
-            });
-        }
-        Ok(RemoteSnapshot {
-            categories,
-            feeds,
-            articles,
-            enclosures,
-        })
+        self.fetch_initial_articles_with_cancellation(None)?
+            .ok_or_else(|| CoreError::internal("uncancellable initial fetch was cancelled"))
     }
+
+    fn fetch_initial_articles_cancellable(
+        &self,
+        cancellation: &SyncCancellation,
+    ) -> Result<Option<RemoteSnapshot>, CoreError> {
+        self.fetch_initial_articles_with_cancellation(Some(cancellation))
+    }
+
     fn set_read_state(&self, article_ids: &[i64], read: bool) -> Result<(), CoreError> {
         let ids = article_ids
             .iter()
@@ -1067,6 +1191,13 @@ impl RemoteSource for MinifluxClient {
     }
     fn saved_media_markers(&self, feed_id: i64) -> Result<Vec<RemoteSavedMediaMarker>, CoreError> {
         MinifluxClient::saved_media_markers(self, feed_id)
+    }
+    fn saved_media_markers_cancellable(
+        &self,
+        feed_id: i64,
+        cancellation: &SyncCancellation,
+    ) -> Result<Option<Vec<RemoteSavedMediaMarker>>, CoreError> {
+        self.saved_media_markers_with_cancellation(feed_id, Some(cancellation))
     }
     fn import_saved_media_marker(
         &self,
@@ -2519,6 +2650,41 @@ mod tests {
 
         assert_eq!(error.kind, crate::domain::CoreErrorKind::ServerTransient);
         assert_eq!(worker.join().unwrap()[0].1, "/v1/discover");
+    }
+
+    #[test]
+    fn cancellable_entry_pagination_does_not_start_another_page_after_cancel() {
+        let cancellation = SyncCancellation::new();
+        let worker_cancellation = cancellation.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            assert!(line.contains("/v1/entries"));
+            loop {
+                line.clear();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            let body = r#"{"total":2,"entries":[{"id":4,"feed_id":9,"title":"First page","url":"https://entry/post","status":"unread","starred":false,"published_at":"2026-01-02T03:04:05Z","content":"<p>preview</p>","enclosures":[]}]}"#;
+            worker_cancellation.cancel();
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+            thread::sleep(std::time::Duration::from_millis(50));
+            listener.set_nonblocking(true).unwrap();
+            assert!(listener.accept().is_err(), "cancellation must prevent the next page request");
+        });
+        let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
+
+        assert!(client
+            .entries_with_cancellation(Some("unread"), false, Some(&cancellation))
+            .unwrap()
+            .is_none());
+        worker.join().unwrap();
     }
 
     #[test]

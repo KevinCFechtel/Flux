@@ -28,6 +28,13 @@ impl SyncCancellation {
     }
 }
 
+/// Internal cooperative result used between Sync phases.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Cancellable<T> {
+    Completed(T),
+    Cancelled,
+}
+
 /// Normal terminal outcomes for a cooperatively cancellable Sync run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SyncOutcome {

@@ -806,8 +806,17 @@ D4.5-A establishes the additive Core cancellation contract: a run-scoped,
 monotonic `SyncCancellation` signal, a non-error `SyncOutcome::Cancelled`
 terminal outcome, and a separate cancellable Sync entry point. The existing
 `sync(reason)` API retains its established behavior for existing callers.
-Cooperative phase and bounded-work checkpoints remain part of the subsequent
-D4.5 implementation rather than being simulated by Swift task cancellation.
+
+D4.5-B threads that signal through the productive Rust Sync orchestration.
+Pending article/media mutations stop only between safe remote-write/local-ack
+units; Miniflux initial and SavedMedia entry pagination checks between HTTP
+pages; protected media fetches stop between bounded requests; reconciliation
+remains one unsplit SQLite transaction with checks immediately before and after;
+SavedMedia replication, retention/media cleanup, notification preparation, and
+the final successful-Sync commit have explicit safe checkpoints. A cancelled
+run emits neither normal Sync completion nor Sync failure. Once
+`mark_sync_success()` begins after the final checkpoint, that run is considered
+committed rather than retroactively cancelled.
 
 Manual foreground Sync must become explicitly cancellable by the user. This is
 a Newsreader interaction and therefore remains in D4 rather than being deferred

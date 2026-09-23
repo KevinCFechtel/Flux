@@ -4,6 +4,7 @@ use crate::domain::{
 };
 use crate::miniflux::RemoteSource;
 use crate::storage::Store;
+use crate::sync_cancellation::{Cancellable, SyncCancellation};
 use chrono::{Duration, Utc};
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -26,10 +27,42 @@ pub fn run(
     reason: SyncReason,
     media_progress_writes: HashMap<i64, u64>,
 ) -> Result<SyncData, CoreError> {
+    let cancellation = SyncCancellation::new();
+    match run_cancellable(
+        remote,
+        store,
+        retention,
+        reason,
+        media_progress_writes,
+        &cancellation,
+    )? {
+        Cancellable::Completed(data) => Ok(data),
+        Cancellable::Cancelled => unreachable!("fresh cancellation signal cannot be cancelled"),
+    }
+}
+
+pub(crate) fn run_cancellable(
+    remote: &dyn RemoteSource,
+    store: &Store,
+    retention: ReadArticleRetention,
+    reason: SyncReason,
+    media_progress_writes: HashMap<i64, u64>,
+    cancellation: &SyncCancellation,
+) -> Result<Cancellable<SyncData>, CoreError> {
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
+
     let fetch_started = Instant::now();
     tracing::info!(target: "sync", "remote fetch started");
-    let mut snapshot = remote.fetch_initial_articles()?;
+    let Some(mut snapshot) = remote.fetch_initial_articles_cancellable(cancellation)? else {
+        return Ok(Cancellable::Cancelled);
+    };
     tracing::info!(target: "sync", "remote fetch completed articles={} elapsed_ms={}", snapshot.articles.len(), fetch_started.elapsed().as_millis());
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
+
     // Marker entries are transport metadata, never user-visible articles or feeds.
     let saved_media_sync = store.saved_media_sync_configuration()?;
     let mut known_articles = snapshot
@@ -45,7 +78,11 @@ pub fn run(
     let mut fetched_protected_articles = HashSet::new();
     let protected_requirements = store.protected_playback_requirements()?;
     let download_requirements = store.protected_download_requirements()?;
+
     for article_id in store.protected_playback_article_ids()? {
+        if cancellation.is_cancelled() {
+            return Ok(Cancellable::Cancelled);
+        }
         let article_needs_enclosures = protected_requirements
             .iter()
             .filter(|(required_article_id, _)| *required_article_id == article_id)
@@ -60,7 +97,7 @@ pub fn run(
             || (!article_missing && article_needs_enclosures))
             && fetched_protected_articles.insert(article_id)
         {
-            fetch_protected_article(
+            match fetch_protected_article_cancellable(
                 remote,
                 store,
                 article_id,
@@ -68,17 +105,25 @@ pub fn run(
                 &mut snapshot,
                 &mut known_articles,
                 &mut known_enclosures,
-            )?;
+                cancellation,
+            )? {
+                Cancellable::Completed(()) => {}
+                Cancellable::Cancelled => return Ok(Cancellable::Cancelled),
+            }
         }
     }
+
     for (article_id, enclosure_id) in &download_requirements {
+        if cancellation.is_cancelled() {
+            return Ok(Cancellable::Cancelled);
+        }
         let article_missing = !known_articles.contains(article_id);
         let enclosure_missing = !known_enclosures.contains(enclosure_id);
         if (article_missing && store.article_has_remote_present_enclosure(*article_id)?)
             || (!article_missing && enclosure_missing)
         {
             if fetched_protected_articles.insert(*article_id) {
-                fetch_protected_article(
+                match fetch_protected_article_cancellable(
                     remote,
                     store,
                     *article_id,
@@ -90,7 +135,11 @@ pub fn run(
                     &mut snapshot,
                     &mut known_articles,
                     &mut known_enclosures,
-                )?;
+                    cancellation,
+                )? {
+                    Cancellable::Completed(()) => {}
+                    Cancellable::Cancelled => return Ok(Cancellable::Cancelled),
+                }
             } else {
                 tracing::debug!(
                     target: "sync",
@@ -100,6 +149,7 @@ pub fn run(
             }
         }
     }
+
     if saved_media_sync.enabled {
         let Some(feed_id) = saved_media_sync.sync_feed_id else {
             return Err(CoreError::data("SavedMedia Sync setup requires repair"));
@@ -118,12 +168,18 @@ pub fn run(
             .enclosures
             .retain(|enclosure| !technical_article_ids.contains(&enclosure.article_id));
     }
+
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
+
     let reconcile_started = Instant::now();
     let discovery_mode = if store.last_successful_sync_at()?.is_some() {
         DiscoveryMode::LiveDiscovery
     } else {
         DiscoveryMode::Restore
     };
+    // Reconciliation is one SQLite transaction. Do not split it with cancellation checks.
     let stats = store.reconcile_with_enclosures_and_progress_mode(
         &snapshot.categories,
         &snapshot.feeds,
@@ -132,14 +188,36 @@ pub fn run(
         &media_progress_writes,
         discovery_mode,
     )?;
-    let saved_media_changed = crate::saved_media_sync::run(remote, store)?;
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
+
+    let saved_media_changed = match crate::saved_media_sync::run_cancellable(
+        remote,
+        store,
+        cancellation,
+    )? {
+        Cancellable::Completed(changed) => changed,
+        Cancellable::Cancelled => return Ok(Cancellable::Cancelled),
+    };
     tracing::info!(target: "storage", "reconciliation completed new={} updated={} elapsed_ms={}", stats.new_articles, stats.updated_articles, reconcile_started.elapsed().as_millis());
+
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
     let cutoff = Utc::now() - Duration::days(retention.days());
     let cleanup_started = Instant::now();
     let removed_articles = store.cleanup_expired_read_articles(&cutoff.to_rfc3339())?;
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
     let removed_media = store.evaluate_media_cleanup(Utc::now())?;
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
     tracing::info!(target: "retention", "retention cleanup completed removed={} elapsed_ms={}", removed_articles, cleanup_started.elapsed().as_millis());
     tracing::info!(target: "retention", "media cleanup evaluated delete_requested={}", removed_media.len());
+
     let new_articles_by_feed = stats
         .new_article_ids_by_feed
         .iter()
@@ -150,12 +228,26 @@ pub fn run(
         .collect();
     let system_notification_candidates =
         if matches!(reason, SyncReason::Background | SyncReason::Periodic) {
-            store.prepare_system_notification_candidates(&stats.new_article_ids_by_feed)?
+            if cancellation.is_cancelled() {
+                return Ok(Cancellable::Cancelled);
+            }
+            let candidates =
+                store.prepare_system_notification_candidates(&stats.new_article_ids_by_feed)?;
+            if cancellation.is_cancelled() {
+                return Ok(Cancellable::Cancelled);
+            }
+            candidates
         } else {
             Vec::new()
         };
+
+    // This is the final cancellation checkpoint. Once the successful-sync timestamp is committed,
+    // the run is considered complete even if the caller requests cancellation immediately after it.
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
     store.mark_sync_success()?;
-    Ok(SyncData {
+    Ok(Cancellable::Completed(SyncData {
         new_articles: stats.new_articles,
         updated_articles: stats.updated_articles,
         data_changed: stats.new_articles > 0
@@ -166,7 +258,7 @@ pub fn run(
         navigation_changed: stats.navigation_changed,
         new_articles_by_feed,
         system_notification_candidates,
-    })
+    }))
 }
 
 fn fetch_protected_article(
@@ -178,13 +270,46 @@ fn fetch_protected_article(
     known_articles: &mut HashSet<i64>,
     known_enclosures: &mut HashSet<i64>,
 ) -> Result<(), CoreError> {
+    let cancellation = SyncCancellation::new();
+    match fetch_protected_article_cancellable(
+        remote,
+        store,
+        article_id,
+        reason,
+        snapshot,
+        known_articles,
+        known_enclosures,
+        &cancellation,
+    )? {
+        Cancellable::Completed(()) => Ok(()),
+        Cancellable::Cancelled => unreachable!("fresh cancellation signal cannot be cancelled"),
+    }
+}
+
+fn fetch_protected_article_cancellable(
+    remote: &dyn RemoteSource,
+    store: &Store,
+    article_id: i64,
+    reason: &str,
+    snapshot: &mut crate::miniflux::RemoteSnapshot,
+    known_articles: &mut HashSet<i64>,
+    known_enclosures: &mut HashSet<i64>,
+    cancellation: &SyncCancellation,
+) -> Result<Cancellable<()>, CoreError> {
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
     tracing::debug!(
         target: "sync",
         "protected fetch planned article_id={} reason={}",
         article_id,
         reason
     );
-    let protected = match remote.fetch_article_by_id(article_id) {
+    let protected_result = remote.fetch_article_by_id(article_id);
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
+    let protected = match protected_result {
         Ok(protected) => protected,
         Err(error) if matches!(error.http_status(), Some(404 | 410)) => {
             store.mark_article_enclosures_remote_absent(article_id)?;
@@ -195,7 +320,7 @@ fn fetch_protected_article(
                 reason,
                 error.http_status().unwrap_or_default()
             );
-            return Ok(());
+            return Ok(Cancellable::Completed(()));
         }
         Err(error) => return Err(error),
     };
@@ -203,7 +328,7 @@ fn fetch_protected_article(
     known_enclosures.extend(protected.enclosures.iter().map(|enclosure| enclosure.id));
     snapshot.articles.push(protected.article);
     snapshot.enclosures.extend(protected.enclosures);
-    Ok(())
+    Ok(Cancellable::Completed(()))
 }
 
 fn protected_fetch_reason(

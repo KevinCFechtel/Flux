@@ -4,6 +4,7 @@ use crate::MediaProgressCapability;
 use crate::domain::{CoreError, CoreEvent, MutationField};
 use crate::miniflux::RemoteSource;
 use crate::storage::Store;
+use crate::sync_cancellation::{Cancellable, SyncCancellation};
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct DeliveryResult {
@@ -18,20 +19,63 @@ pub(crate) fn deliver_pending(
     media_progress_capability: MediaProgressCapability,
     emit: &dyn Fn(CoreEvent),
 ) -> Result<DeliveryResult, CoreError> {
+    let cancellation = SyncCancellation::new();
+    match deliver_pending_cancellable(
+        remote,
+        store,
+        media_progress_capability,
+        emit,
+        &cancellation,
+    )? {
+        Cancellable::Completed(result) => Ok(result),
+        Cancellable::Cancelled => unreachable!("fresh cancellation signal cannot be cancelled"),
+    }
+}
+
+pub(crate) fn deliver_pending_cancellable(
+    remote: &dyn RemoteSource,
+    store: &Store,
+    media_progress_capability: MediaProgressCapability,
+    emit: &dyn Fn(CoreEvent),
+    cancellation: &SyncCancellation,
+) -> Result<Cancellable<DeliveryResult>, CoreError> {
     let mut result = DeliveryResult::default();
     for pending in store.pending_mutations()? {
-        match pending.field {
+        if cancellation.is_cancelled() {
+            return Ok(Cancellable::Cancelled);
+        }
+
+        let remote_result = match pending.field {
             MutationField::Read => remote.set_read_state(&[pending.article_id], pending.desired),
-            MutationField::Starred => remote.set_starred_state(pending.article_id, pending.desired),
-        }?;
+            MutationField::Starred => {
+                remote.set_starred_state(pending.article_id, pending.desired)
+            }
+        };
+        if let Err(error) = remote_result {
+            if cancellation.is_cancelled() {
+                return Ok(Cancellable::Cancelled);
+            }
+            return Err(error);
+        }
+
+        // A successful remote write and its durable acknowledgement are one safe unit. Cancellation
+        // must not strand an already-applied remote mutation as locally pending.
         store.acknowledge(&pending)?;
         result.count += 1;
         emit(CoreEvent::MutationDeliverySucceeded {
             article_id: pending.article_id,
             field: pending.field,
         });
+        if cancellation.is_cancelled() {
+            return Ok(Cancellable::Cancelled);
+        }
     }
+
     for pending in store.pending_media_progress_mutations()? {
+        if cancellation.is_cancelled() {
+            return Ok(Cancellable::Cancelled);
+        }
+
         match media_progress_capability {
             MediaProgressCapability::Unsupported => {
                 // The local checkpoint remains authoritative; only its unsupported remote intent is obsolete.
@@ -39,10 +83,11 @@ pub(crate) fn deliver_pending(
             }
             MediaProgressCapability::Unknown => {}
             MediaProgressCapability::Supported => {
-                match remote
-                    .set_media_progression(pending.enclosure_id, pending.progression_seconds)
-                {
+                let remote_result = remote
+                    .set_media_progression(pending.enclosure_id, pending.progression_seconds);
+                match remote_result {
                     Ok(()) => {
+                        // Preserve the same remote-write/local-ack safe unit as article mutations.
                         store.acknowledge_media_progress(&pending)?;
                         result.count += 1;
                         result
@@ -53,10 +98,24 @@ pub(crate) fn deliver_pending(
                         // A gone enclosure cannot accept progress, but it must not remove local playback.
                         store.discard_media_progress(&pending)?;
                     }
-                    Err(error) => return Err(error),
+                    Err(error) => {
+                        if cancellation.is_cancelled() {
+                            return Ok(Cancellable::Cancelled);
+                        }
+                        return Err(error);
+                    }
                 }
             }
         }
+
+        if cancellation.is_cancelled() {
+            return Ok(Cancellable::Cancelled);
+        }
     }
-    Ok(result)
+
+    if cancellation.is_cancelled() {
+        Ok(Cancellable::Cancelled)
+    } else {
+        Ok(Cancellable::Completed(result))
+    }
 }

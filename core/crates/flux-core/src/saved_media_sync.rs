@@ -9,6 +9,7 @@ use crate::domain::{
 };
 use crate::miniflux::{MinifluxCapability, RemoteSource};
 use crate::storage::{SavedMediaRemoteState, Store};
+use crate::sync_cancellation::{Cancellable, SyncCancellation};
 
 pub const BOOTSTRAP_URL: &str =
     "https://raw.githubusercontent.com/KevinCFechtel/Flux/main/init.xml";
@@ -91,28 +92,64 @@ pub fn setup_manual(remote: &dyn RemoteSource, store: &Store) -> Result<(), Core
 }
 
 pub fn run(remote: &dyn RemoteSource, store: &Store) -> Result<bool, CoreError> {
+    let cancellation = SyncCancellation::new();
+    match run_cancellable(remote, store, &cancellation)? {
+        Cancellable::Completed(changed) => Ok(changed),
+        Cancellable::Cancelled => unreachable!("fresh cancellation signal cannot be cancelled"),
+    }
+}
+
+pub(crate) fn run_cancellable(
+    remote: &dyn RemoteSource,
+    store: &Store,
+    cancellation: &SyncCancellation,
+) -> Result<Cancellable<bool>, CoreError> {
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
     let configuration = store.saved_media_sync_configuration()?;
     if !configuration.enabled {
-        return Ok(false);
+        return Ok(Cancellable::Completed(false));
     }
-    let feed_id = configured_feed(remote, store, &configuration)?;
+
+    let feed_result = configured_feed(remote, store, &configuration);
+    if cancellation.is_cancelled() {
+        return Ok(Cancellable::Cancelled);
+    }
+    let feed_id = feed_result?;
     let mut successfully_written = HashMap::new();
+
     for pending in store.pending_saved_media_replication()? {
+        if cancellation.is_cancelled() {
+            return Ok(Cancellable::Cancelled);
+        }
         let external_id = marker_external_id(pending.article_id, pending.enclosure_id);
-        let mut markers = remote.saved_media_markers(feed_id)?;
+        let Some(mut markers) = remote.saved_media_markers_cancellable(feed_id, cancellation)?
+        else {
+            return Ok(Cancellable::Cancelled);
+        };
         let marker = markers
             .iter()
             .find(|marker| marker.external_id == external_id);
         let marker_id = match marker {
             Some(marker) => marker.entry_id,
             None => {
-                remote.import_saved_media_marker(
+                let import_result = remote.import_saved_media_marker(
                     feed_id,
                     &external_id,
                     pending.article_id,
                     pending.enclosure_id,
-                )?;
-                markers = remote.saved_media_markers(feed_id)?;
+                );
+                if cancellation.is_cancelled() {
+                    return Ok(Cancellable::Cancelled);
+                }
+                import_result?;
+                let Some(refetched) =
+                    remote.saved_media_markers_cancellable(feed_id, cancellation)?
+                else {
+                    return Ok(Cancellable::Cancelled);
+                };
+                markers = refetched;
                 markers
                     .iter()
                     .find(|marker| marker.external_id == external_id)
@@ -122,10 +159,19 @@ pub fn run(remote: &dyn RemoteSource, store: &Store) -> Result<bool, CoreError> 
                     .entry_id
             }
         };
-        remote.set_saved_media_marker_state(
+
+        let write_result = remote.set_saved_media_marker_state(
             marker_id,
             pending.desired == SavedMediaMarkerState::Saved,
-        )?;
+        );
+        if let Err(error) = write_result {
+            if cancellation.is_cancelled() {
+                return Ok(Cancellable::Cancelled);
+            }
+            return Err(error);
+        }
+
+        // Remote marker state and its local acknowledgement form one durable safe unit.
         let state = pending.desired;
         store.acknowledge_saved_media_replication_with_remote_state(
             &SavedMediaRemoteState {
@@ -137,10 +183,19 @@ pub fn run(remote: &dyn RemoteSource, store: &Store) -> Result<bool, CoreError> 
             pending.desired,
         )?;
         successfully_written.insert(pending.enclosure_id, state);
+        if cancellation.is_cancelled() {
+            return Ok(Cancellable::Cancelled);
+        }
     }
 
+    let Some(markers) = remote.saved_media_markers_cancellable(feed_id, cancellation)? else {
+        return Ok(Cancellable::Cancelled);
+    };
     let mut changed = false;
-    for marker in remote.saved_media_markers(feed_id)? {
+    for marker in markers {
+        if cancellation.is_cancelled() {
+            return Ok(Cancellable::Cancelled);
+        }
         let Some((article_id, enclosure_id)) = parse_marker_external_id(&marker.external_id) else {
             if marker.external_id.starts_with("flux:saved-media:") {
                 tracing::warn!(target: "saved_media_sync", "ignoring malformed SavedMedia marker");
@@ -170,12 +225,30 @@ pub fn run(remote: &dyn RemoteSource, store: &Store) -> Result<bool, CoreError> 
             ) {
                 Ok(()) => changed = true,
                 Err(error) if state == SavedMediaMarkerState::Saved => {
-                    // Markers never synthesize content: resolve it from the original Miniflux entry.
-                    match remote.fetch_saved_media_article(article_id).and_then(|resolved| {
-                        let enclosure = resolved.enclosures.into_iter().find(|item| item.id == enclosure_id)
-                            .ok_or_else(|| CoreError::data("SavedMedia marker enclosure is absent from its original Miniflux entry"))?;
-                        store.materialize_saved_media(&resolved.article, &enclosure, &Utc::now().to_rfc3339())
-                    }) {
+                    if cancellation.is_cancelled() {
+                        return Ok(Cancellable::Cancelled);
+                    }
+                    let resolved_result = remote.fetch_saved_media_article(article_id);
+                    if cancellation.is_cancelled() {
+                        return Ok(Cancellable::Cancelled);
+                    }
+                    let resolution = resolved_result.and_then(|resolved| {
+                        let enclosure = resolved
+                            .enclosures
+                            .into_iter()
+                            .find(|item| item.id == enclosure_id)
+                            .ok_or_else(|| {
+                                CoreError::data(
+                                    "SavedMedia marker enclosure is absent from its original Miniflux entry",
+                                )
+                            })?;
+                        store.materialize_saved_media(
+                            &resolved.article,
+                            &enclosure,
+                            &Utc::now().to_rfc3339(),
+                        )
+                    });
+                    match resolution {
                         Ok(()) => changed = true,
                         Err(resolve_error) => {
                             // Do not advance the baseline, so a later normal sync retries resolution.
@@ -187,14 +260,25 @@ pub fn run(remote: &dyn RemoteSource, store: &Store) -> Result<bool, CoreError> 
                 Err(error) => return Err(error),
             }
         }
+        if cancellation.is_cancelled() {
+            return Ok(Cancellable::Cancelled);
+        }
         store.record_saved_media_remote_state(&SavedMediaRemoteState {
             enclosure_id,
             article_id,
             marker_entry_id: marker.entry_id,
             state,
         })?;
+        if cancellation.is_cancelled() {
+            return Ok(Cancellable::Cancelled);
+        }
     }
-    Ok(changed)
+
+    if cancellation.is_cancelled() {
+        Ok(Cancellable::Cancelled)
+    } else {
+        Ok(Cancellable::Completed(changed))
+    }
 }
 
 pub fn marker_external_id(article_id: i64, enclosure_id: i64) -> String {

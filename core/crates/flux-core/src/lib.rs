@@ -17,6 +17,7 @@ pub mod sync;
 mod sync_cancellation;
 
 pub use sync_cancellation::{SyncCancellation, SyncOutcome};
+use sync_cancellation::Cancellable;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -316,11 +317,27 @@ impl FluxCore {
             tracing::info!(target: "sync", "sync cancellation observed after waiting for sync gate reason={reason:?}");
             return Ok(SyncOutcome::Cancelled);
         }
-        self.sync_locked(reason).map(SyncOutcome::Completed)
+        self.sync_locked_cancellable(reason, cancellation)
     }
+
     fn sync_locked(&self, reason: SyncReason) -> Result<SyncCompleted, CoreError> {
+        let cancellation = SyncCancellation::new();
+        match self.sync_locked_cancellable(reason, &cancellation)? {
+            SyncOutcome::Completed(completed) => Ok(completed),
+            SyncOutcome::Cancelled => unreachable!("fresh cancellation signal cannot be cancelled"),
+        }
+    }
+
+    fn sync_locked_cancellable(
+        &self,
+        reason: SyncReason,
+        cancellation: &SyncCancellation,
+    ) -> Result<SyncOutcome, CoreError> {
         let started = Instant::now();
         tracing::info!(target: "sync", "sync started reason={reason:?}");
+        if cancellation.is_cancelled() {
+            return Ok(SyncOutcome::Cancelled);
+        }
         if reason != SyncReason::Manual && self.in_backoff()? {
             tracing::info!(target: "sync", "sync skipped reason={reason:?} because runtime backoff is active");
             let completed = SyncCompleted {
@@ -334,16 +351,23 @@ impl FluxCore {
                 system_notification_candidates: Vec::new(),
             };
             self.emit(CoreEvent::SyncCompleted(completed.clone()));
-            return Ok(completed);
+            return Ok(SyncOutcome::Completed(completed));
         }
+
         // Capability discovery is advisory: an unreachable version endpoint must not block local sync.
         // Best-effort refresh also detects an upgrade from an unsupported server.
         let _ = self.update_miniflux_capabilities();
-        let delivery = match self.deliver_for_sync(reason) {
-            Ok(result) => {
+        if cancellation.is_cancelled() {
+            return Ok(SyncOutcome::Cancelled);
+        }
+
+        let delivery = match self.deliver_for_sync_cancellable(reason, cancellation) {
+            Ok(Cancellable::Completed(result)) => {
                 tracing::info!(target: "mutation", "pending mutation delivery completed delivered={}", result.count);
                 result
             }
+            Ok(Cancellable::Cancelled) => return Ok(SyncOutcome::Cancelled),
+            Err(_) if cancellation.is_cancelled() => return Ok(SyncOutcome::Cancelled),
             Err(error) => {
                 tracing::warn!(target: "sync", "sync stopped during pending delivery kind={:?}", error.kind);
                 self.emit(CoreEvent::SyncFailed(SyncFailure {
@@ -357,16 +381,21 @@ impl FluxCore {
                 return Err(error);
             }
         };
+
+        if cancellation.is_cancelled() {
+            return Ok(SyncOutcome::Cancelled);
+        }
         let retention = self.store.core_settings()?.retention;
         let media_progress_writes = delivery.media_progress.clone();
-        match sync::run(
+        match sync::run_cancellable(
             self.remote.as_ref(),
             self.store.as_ref(),
             retention,
             reason,
             media_progress_writes,
+            cancellation,
         ) {
-            Ok(data) => {
+            Ok(Cancellable::Completed(data)) => {
                 tracing::info!(target: "sync", "sync completed new={} updated={} delivered={} elapsed_ms={}", data.new_articles, data.updated_articles, delivery.count, started.elapsed().as_millis());
                 let completed = SyncCompleted {
                     reason,
@@ -379,7 +408,15 @@ impl FluxCore {
                     system_notification_candidates: data.system_notification_candidates,
                 };
                 self.emit(CoreEvent::SyncCompleted(completed.clone()));
-                Ok(completed)
+                Ok(SyncOutcome::Completed(completed))
+            }
+            Ok(Cancellable::Cancelled) => {
+                tracing::info!(target: "sync", "sync cancelled reason={reason:?} elapsed_ms={}", started.elapsed().as_millis());
+                Ok(SyncOutcome::Cancelled)
+            }
+            Err(_) if cancellation.is_cancelled() => {
+                tracing::info!(target: "sync", "sync cancellation won error race reason={reason:?} elapsed_ms={}", started.elapsed().as_millis());
+                Ok(SyncOutcome::Cancelled)
             }
             Err(error) => {
                 tracing::warn!(target: "sync", "sync failed kind={:?} message={:?} elapsed_ms={}", error.kind, error.message, started.elapsed().as_millis());
@@ -1259,11 +1296,33 @@ impl FluxCore {
         }
     }
     fn deliver_for_sync(&self, reason: SyncReason) -> Result<mutations::DeliveryResult, CoreError> {
-        if reason != SyncReason::Manual && self.in_backoff()? {
-            return Ok(mutations::DeliveryResult::default());
+        let cancellation = SyncCancellation::new();
+        match self.deliver_for_sync_cancellable(reason, &cancellation)? {
+            Cancellable::Completed(result) => Ok(result),
+            Cancellable::Cancelled => unreachable!("fresh cancellation signal cannot be cancelled"),
         }
-        match self.deliver_pending() {
-            Ok(result) => Ok(result),
+    }
+
+    fn deliver_for_sync_cancellable(
+        &self,
+        reason: SyncReason,
+        cancellation: &SyncCancellation,
+    ) -> Result<Cancellable<mutations::DeliveryResult>, CoreError> {
+        if cancellation.is_cancelled() {
+            return Ok(Cancellable::Cancelled);
+        }
+        if reason != SyncReason::Manual && self.in_backoff()? {
+            return Ok(Cancellable::Completed(
+                mutations::DeliveryResult::default(),
+            ));
+        }
+        match self.deliver_pending_cancellable(cancellation) {
+            Ok(Cancellable::Completed(result)) => {
+                self.clear_backoff().ok();
+                Ok(Cancellable::Completed(result))
+            }
+            Ok(Cancellable::Cancelled) => Ok(Cancellable::Cancelled),
+            Err(_) if cancellation.is_cancelled() => Ok(Cancellable::Cancelled),
             Err(error) if retryable(&error) => {
                 self.record_failure(&error)?;
                 Err(error)
@@ -1271,6 +1330,7 @@ impl FluxCore {
             Err(error) => Err(error),
         }
     }
+
     fn deliver_pending(&self) -> Result<mutations::DeliveryResult, CoreError> {
         let media_progress_capability = self.media_progress_capability();
         mutations::deliver_pending(
@@ -1283,6 +1343,21 @@ impl FluxCore {
             self.clear_backoff().ok();
         })
     }
+
+    fn deliver_pending_cancellable(
+        &self,
+        cancellation: &SyncCancellation,
+    ) -> Result<Cancellable<mutations::DeliveryResult>, CoreError> {
+        let media_progress_capability = self.media_progress_capability();
+        mutations::deliver_pending_cancellable(
+            self.remote.as_ref(),
+            self.store.as_ref(),
+            media_progress_capability,
+            &|event| self.emit(event),
+            cancellation,
+        )
+    }
+
     fn in_backoff(&self) -> Result<bool, CoreError> {
         Ok(self
             .runtime
@@ -1419,6 +1494,17 @@ mod tests {
         inner: Mutex<MutationSource>,
         fail_fetch: Mutex<bool>,
     }
+    struct CancellingMutationSource {
+        snapshot: RemoteSnapshot,
+        cancellation: SyncCancellation,
+        mutation_calls: AtomicUsize,
+        fetch_calls: AtomicUsize,
+    }
+    struct CancellingFetchSource {
+        snapshot: RemoteSnapshot,
+        cancellation: SyncCancellation,
+        fetch_calls: AtomicUsize,
+    }
     struct MediaProgressSource {
         snapshot: RemoteSnapshot,
         fetch_calls: AtomicUsize,
@@ -1437,6 +1523,37 @@ mod tests {
     impl CoreDiagnosticListener for DiagnosticCollector {
         fn on_diagnostic(&self, record: diagnostics::DiagnosticRecord) {
             self.records.lock().unwrap().push(record);
+        }
+    }
+    impl RemoteSource for CancellingMutationSource {
+        fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError> {
+            self.fetch_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.snapshot.clone())
+        }
+        fn set_read_state(&self, _: &[i64], _: bool) -> Result<(), CoreError> {
+            if self.mutation_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.cancellation.cancel();
+            }
+            Ok(())
+        }
+        fn set_starred_state(&self, _: i64, _: bool) -> Result<(), CoreError> {
+            if self.mutation_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.cancellation.cancel();
+            }
+            Ok(())
+        }
+    }
+    impl RemoteSource for CancellingFetchSource {
+        fn fetch_initial_articles(&self) -> Result<RemoteSnapshot, CoreError> {
+            self.fetch_calls.fetch_add(1, Ordering::SeqCst);
+            self.cancellation.cancel();
+            Ok(self.snapshot.clone())
+        }
+        fn set_read_state(&self, _: &[i64], _: bool) -> Result<(), CoreError> {
+            Ok(())
+        }
+        fn set_starred_state(&self, _: i64, _: bool) -> Result<(), CoreError> {
+            Ok(())
         }
     }
     impl RemoteSource for MutationSource {
@@ -2671,6 +2788,53 @@ mod tests {
             SyncOutcome::Cancelled
         );
         assert_eq!(source.calls.load(Ordering::SeqCst), 0);
+        assert!(core.last_successful_sync_at().unwrap().is_none());
+    }
+
+    #[test]
+    fn cancellable_sync_finishes_remote_mutation_ack_before_stopping() {
+        let temp = TempDir::new().unwrap();
+        let cancellation = SyncCancellation::new();
+        let source = Arc::new(CancellingMutationSource {
+            snapshot: snapshot(),
+            cancellation: cancellation.clone(),
+            mutation_calls: AtomicUsize::new(0),
+            fetch_calls: AtomicUsize::new(0),
+        });
+        let core = Arc::new(FluxCore::with_remote(config(&temp), source.clone()).unwrap());
+        core.set_delivery_mode(DeliveryMode::Deferred).unwrap();
+        core.set_read_state(1, true).unwrap();
+        core.set_starred_state(3, true).unwrap();
+
+        assert_eq!(
+            core.sync_cancellable(SyncReason::Manual, &cancellation)
+                .unwrap(),
+            SyncOutcome::Cancelled
+        );
+        assert_eq!(source.mutation_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(source.fetch_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(core.store.pending_mutations().unwrap().len(), 1);
+        assert!(core.last_successful_sync_at().unwrap().is_none());
+    }
+
+    #[test]
+    fn cancellable_sync_stops_after_current_remote_fetch_before_reconciliation() {
+        let temp = TempDir::new().unwrap();
+        let cancellation = SyncCancellation::new();
+        let source = Arc::new(CancellingFetchSource {
+            snapshot: snapshot(),
+            cancellation: cancellation.clone(),
+            fetch_calls: AtomicUsize::new(0),
+        });
+        let core = Arc::new(FluxCore::with_remote(config(&temp), source.clone()).unwrap());
+
+        assert_eq!(
+            core.sync_cancellable(SyncReason::Manual, &cancellation)
+                .unwrap(),
+            SyncOutcome::Cancelled
+        );
+        assert_eq!(source.fetch_calls.load(Ordering::SeqCst), 1);
+        assert!(core.query_articles(ArticleQuery::default()).unwrap().is_empty());
         assert!(core.last_successful_sync_at().unwrap().is_none());
     }
 
