@@ -421,7 +421,7 @@ fn run_delta_cancellable(
     if cancellation.is_cancelled() {
         return Ok(Cancellable::Cancelled);
     }
-    let removed_media = store.evaluate_media_cleanup(Utc::now())?;
+    let _removed_media = store.evaluate_media_cleanup(Utc::now())?;
     if cancellation.is_cancelled() {
         return Ok(Cancellable::Cancelled);
     }
