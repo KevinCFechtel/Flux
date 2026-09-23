@@ -1051,8 +1051,9 @@ uses the migratable AfterFirstUnlock variant rather than a
 are not narrowed merely to enable background access. No BGTask registration or
 background Sync execution is part of D5-B.
 
-**D5-C — BGAppRefresh Scheduling & Execution is implemented; automated
-validation is pending.** Native iOS registers one `BGAppRefreshTask` identifier
+**D5-C — BGAppRefresh Scheduling & Execution is COMPLETE.**
+The canonical iOS test suite passes after the D5-C integration and
+`./apple/ios/Build/build-app.sh` completes successfully. Native iOS registers one `BGAppRefreshTask` identifier
 during application launch through a small `UIApplicationDelegate` bridge. The
 production/upgrade identity retains
 `dev.kevincfechtel.fluxNews.backgroundSync`; the parallel native-development
