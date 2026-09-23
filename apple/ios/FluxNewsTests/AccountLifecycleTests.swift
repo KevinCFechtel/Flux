@@ -616,7 +616,10 @@ final class AccountLifecycleTests: XCTestCase {
                 headers: []
             )
         }
-        await Task.yield()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while !coordinator.isQuiescing, ContinuousClock.now < deadline {
+            await Task.yield()
+        }
 
         XCTAssertTrue(coordinator.isQuiescing)
         XCTAssertEqual(factoryInputs.value(), [old])
