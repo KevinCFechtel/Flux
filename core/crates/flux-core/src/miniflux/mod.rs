@@ -682,11 +682,6 @@ impl MinifluxClient {
             category_id: response.id,
         })
     }
-    fn entries(&self, status: Option<&str>, starred: bool) -> Result<Vec<EntryDto>, CoreError> {
-        self.entries_with_cancellation(status, starred, None)?
-            .ok_or_else(|| CoreError::internal("uncancellable entry fetch was cancelled"))
-    }
-
     fn entries_with_cancellation(
         &self,
         status: Option<&str>,
@@ -779,15 +774,6 @@ impl MinifluxClient {
                 })
                 .collect(),
         ))
-    }
-
-    fn entries_for_feed_status(
-        &self,
-        feed_id: i64,
-        status: &str,
-    ) -> Result<Vec<EntryDto>, CoreError> {
-        self.entries_for_feed_status_with_cancellation(feed_id, status, None)?
-            .ok_or_else(|| CoreError::internal("uncancellable SavedMedia entry fetch was cancelled"))
     }
 
     fn entries_for_feed_status_with_cancellation(

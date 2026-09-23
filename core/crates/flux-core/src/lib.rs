@@ -1295,14 +1295,6 @@ impl FluxCore {
             }),
         }
     }
-    fn deliver_for_sync(&self, reason: SyncReason) -> Result<mutations::DeliveryResult, CoreError> {
-        let cancellation = SyncCancellation::new();
-        match self.deliver_for_sync_cancellable(reason, &cancellation)? {
-            Cancellable::Completed(result) => Ok(result),
-            Cancellable::Cancelled => unreachable!("fresh cancellation signal cannot be cancelled"),
-        }
-    }
-
     fn deliver_for_sync_cancellable(
         &self,
         reason: SyncReason,
@@ -1758,6 +1750,7 @@ mod tests {
                 url: "https://example.test/99".into(),
                 comments_url: String::new(),
                 published_at: "2026-01-02T03:04:05Z".into(),
+                reading_time_minutes: 0,
                 is_read: false,
                 is_starred: false,
                 preview: "Remote preview".into(),

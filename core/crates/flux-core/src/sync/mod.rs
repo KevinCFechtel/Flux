@@ -261,31 +261,6 @@ pub(crate) fn run_cancellable(
     }))
 }
 
-fn fetch_protected_article(
-    remote: &dyn RemoteSource,
-    store: &Store,
-    article_id: i64,
-    reason: &str,
-    snapshot: &mut crate::miniflux::RemoteSnapshot,
-    known_articles: &mut HashSet<i64>,
-    known_enclosures: &mut HashSet<i64>,
-) -> Result<(), CoreError> {
-    let cancellation = SyncCancellation::new();
-    match fetch_protected_article_cancellable(
-        remote,
-        store,
-        article_id,
-        reason,
-        snapshot,
-        known_articles,
-        known_enclosures,
-        &cancellation,
-    )? {
-        Cancellable::Completed(()) => Ok(()),
-        Cancellable::Cancelled => unreachable!("fresh cancellation signal cannot be cancelled"),
-    }
-}
-
 fn fetch_protected_article_cancellable(
     remote: &dyn RemoteSource,
     store: &Store,
