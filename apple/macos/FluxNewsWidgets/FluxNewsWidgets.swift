@@ -107,7 +107,7 @@ struct FluxNewsWidgetProvider: AppIntentTimelineProvider {
 
 struct FluxNewsHeadlinesWidget: Widget {
     let kind = FluxNewsWidgetKind.headlines
-    var body: some WidgetConfiguration { AppIntentConfiguration(kind: kind, intent: FluxNewsWidgetConfigurationIntent.self, provider: FluxNewsWidgetProvider()) { HeadlinesView(entry: $0) }.configurationDisplayName("FluxNews Headlines").description("Shows the latest articles from your selected FluxNews view.").supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge]) }
+    var body: some WidgetConfiguration { AppIntentConfiguration(kind: kind, intent: FluxNewsWidgetConfigurationIntent.self, provider: FluxNewsWidgetProvider()) { HeadlinesView(entry: $0) }.configurationDisplayName("FluxNews Headlines").description("Shows the latest articles from your selected FluxNews view.").supportedFamilies(WidgetFamilyPolicy.headlineFamilies) }
 }
 
 struct FluxNewsCompactStatusWidget: Widget {
@@ -179,7 +179,7 @@ struct StatusView: View {
         default: entry.model.title
         }
     }
-    private var lastSuccessfulSync: String { guard let value = entry.model.lastSuccessfulSyncAt, let date = ISO8601DateFormatter().date(from: value) else { return String(localized: "Never") }; return date.formatted(date: .abbreviated, time: .shortened) }
+    private var lastSuccessfulSync: String { guard let value = entry.model.lastSuccessfulSyncAt, let date = WidgetSyncTimestamp.date(from: value) else { return String(localized: "Never") }; return date.formatted(date: .abbreviated, time: .shortened) }
     private var lastSync: String { String(format: String(localized: "Last sync: %@"), lastSuccessfulSync) }
 }
 
