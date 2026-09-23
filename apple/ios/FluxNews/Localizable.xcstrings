@@ -2064,6 +2064,62 @@
         }
       }
     },
+    "%@ · %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "%lld new articles": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld neue Artikel"
+          }
+        }
+      }
+    },
+    "1 new article": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 neuer Artikel"
+          }
+        }
+      }
+    },
+    "System Notifications": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Systemmitteilungen"
+          }
+        }
+      }
+    },
+    "FluxNews notification permission is disabled. Enable notifications in iOS Settings to use System Notifications.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Mitteilungsberechtigung für FluxNews ist deaktiviert. Aktivieren Sie Mitteilungen in den iOS-Einstellungen, um Systemmitteilungen zu verwenden."
+          }
+        }
+      }
+    },
     "·": {},
     "•": {},
     "Reading time": {
