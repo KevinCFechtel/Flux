@@ -143,8 +143,10 @@ final class AppleCoreExecutionTests: XCTestCase {
         XCTAssertFalse(followUpStarted.value)
 
         gate.release(1)
-        XCTAssertEqual(try await running.value, 7)
-        XCTAssertEqual(try await followUp.value, 8)
+        let runningValue = try await running.value
+        let followUpValue = try await followUp.value
+        XCTAssertEqual(runningValue, 7)
+        XCTAssertEqual(followUpValue, 8)
         XCTAssertTrue(operationFinished.value)
         XCTAssertTrue(followUpStarted.value)
     }
@@ -168,7 +170,8 @@ final class AppleCoreExecutionTests: XCTestCase {
         cancelled.cancel()
         gate.release(1)
 
-        XCTAssertEqual(try await first.value, 1)
+        let firstValue = try await first.value
+        XCTAssertEqual(firstValue, 1)
         do {
             _ = try await cancelled.value
             XCTFail("Expected queued work cancellation")
