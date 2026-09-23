@@ -4324,6 +4324,118 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(inline.count, 5)
     }
 
+
+    func testSharedWidgetSnapshotRoundTripsWithoutCorePersistenceTypes() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = WidgetSnapshotStore(root: root)
+        let snapshot = WidgetSnapshotV1(
+            schemaVersion: WidgetSnapshotV1.schemaVersion,
+            state: .ready,
+            generatedAt: "2026-09-23T12:00:00Z",
+            lastSuccessfulSyncAt: "2026-09-23T11:59:00Z",
+            feeds: [
+                .init(
+                    id: 10,
+                    categoryID: 20,
+                    title: "Feed",
+                    normalIconFile: nil,
+                    darkIconFile: nil
+                ),
+            ],
+            categories: [.init(id: 20, title: "Category")],
+            articles: [
+                .init(
+                    id: 1,
+                    feedID: 10,
+                    categoryID: 20,
+                    feedTitle: "Feed",
+                    title: "Unread",
+                    publishedAt: "2026-09-23T11:58:00Z",
+                    isRead: false,
+                    isStarred: false
+                ),
+            ],
+            counts: .init(
+                allUnread: 1,
+                bookmarks: 0,
+                feedUnread: [.init(id: 10, count: 1)],
+                categoryUnread: [.init(id: 20, count: 1)]
+            )
+        )
+
+        try store.write(snapshot)
+
+        XCTAssertEqual(try store.read(), snapshot)
+    }
+
+    func testWidgetContentModelUsesSameSnapshotForHomeAndLockScreenScopes() {
+        let snapshot = WidgetSnapshotV1(
+            schemaVersion: WidgetSnapshotV1.schemaVersion,
+            state: .ready,
+            generatedAt: "2026-09-23T12:00:00Z",
+            lastSuccessfulSyncAt: "2026-09-23T11:59:00Z",
+            feeds: [
+                .init(id: 10, categoryID: 20, title: "Feed", normalIconFile: nil, darkIconFile: nil),
+            ],
+            categories: [.init(id: 20, title: "Category")],
+            articles: [
+                .init(id: 1, feedID: 10, categoryID: 20, feedTitle: "Feed", title: "Unread", publishedAt: "2026-09-23T11:58:00Z", isRead: false, isStarred: false),
+                .init(id: 2, feedID: 10, categoryID: 20, feedTitle: "Feed", title: "Bookmark", publishedAt: "2026-09-23T11:57:00Z", isRead: true, isStarred: true),
+            ],
+            counts: .init(
+                allUnread: 1,
+                bookmarks: 1,
+                feedUnread: [.init(id: 10, count: 1)],
+                categoryUnread: [.init(id: 20, count: 1)]
+            )
+        )
+
+        let all = WidgetContentModel.make(
+            snapshotResult: .success(snapshot),
+            selection: .init(scope: .allNews, categoryID: nil, feedID: nil)
+        )
+        let bookmarks = WidgetContentModel.make(
+            snapshotResult: .success(snapshot),
+            selection: .init(scope: .bookmarks, categoryID: nil, feedID: nil)
+        )
+        let feed = WidgetContentModel.make(
+            snapshotResult: .success(snapshot),
+            selection: .init(scope: .feed, categoryID: nil, feedID: 10)
+        )
+
+        XCTAssertEqual(all.articles.map(\.id), [1])
+        XCTAssertEqual(bookmarks.articles.map(\.id), [2])
+        XCTAssertEqual(feed.count, 1)
+        XCTAssertEqual(feed.title, "Feed")
+    }
+
+    func testWidgetActionsAndLockScreenFamiliesUseTheSharedContract() {
+        let selection = WidgetContentSelection(scope: .feed, categoryID: nil, feedID: 10)
+        let actions: [WidgetAction] = [
+            .article(42),
+            .open(selection),
+            .sync,
+        ]
+
+        for action in actions {
+            let url = action.url()
+            XCTAssertEqual(WidgetAction(url: url), action)
+            XCTAssertEqual(url.scheme, WidgetSnapshotConfiguration.widgetURLScheme())
+        }
+
+        XCTAssertEqual(
+            Set(WidgetFamilyPolicy.lockScreenFamilies),
+            Set([.accessoryInline, .accessoryCircular, .accessoryRectangular])
+        )
+        XCTAssertTrue(
+            WidgetFamilyPolicy.lockScreenFamilies.allSatisfy {
+                WidgetFamilyPolicy.statusFamilies.contains($0)
+            }
+        )
+    }
+
 }
 
 private final class FeedIconLoadGate: @unchecked Sendable {
