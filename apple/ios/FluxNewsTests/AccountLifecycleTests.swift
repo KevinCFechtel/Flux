@@ -1036,4 +1036,53 @@ final class AccountLifecycleTests: XCTestCase {
         XCTAssertEqual(completionCalls.value(), [false])
     }
 
+
+    @MainActor
+    func testResumeTriggerUsesDedicatedResumeSyncRunner() async throws {
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core }
+        )
+        let scheduler = FakeBackgroundTaskScheduler()
+        let resumeStarted = expectation(description: "resume sync starts")
+        let backgroundCalls = LockedBox(0)
+        let metadata = SyncCompleted(
+            reason: .resume,
+            newArticles: 0,
+            updatedArticles: 0,
+            mutationsDelivered: 0,
+            dataChanged: false,
+            navigationChanged: false,
+            newArticlesByFeed: [],
+            systemNotificationCandidates: []
+        )
+        let coordinator = IOSBackgroundSyncCoordinator(
+            bootstrapper: bootstrapper,
+            scheduler: scheduler,
+            identifier: "dev.test.backgroundSync",
+            syncRunner: { _, _ in
+                backgroundCalls.withValue { $0 += 1 }
+                return .cancelled
+            },
+            resumeSyncRunner: { _, _ in
+                resumeStarted.fulfill()
+                return .completed(metadata: metadata)
+            }
+        )
+
+        coordinator.resumeIfNeeded()
+
+        await fulfillment(of: [resumeStarted], timeout: 5)
+        XCTAssertEqual(backgroundCalls.value(), 0)
+        XCTAssertTrue(scheduler.submissions.isEmpty)
+    }
+
 }
