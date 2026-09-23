@@ -153,6 +153,7 @@ final class IOSBackgroundSyncCoordinator {
     private let preferredInterval: TimeInterval
     private let now: () -> Date
     private let settingsReader: @Sendable (Flux) throws -> Bool
+    private let settingsWriter: @Sendable (Flux, Bool) throws -> Void
     private let syncRunner: @Sendable (Flux, SyncCancellation) throws -> SyncOutcome
     private let resumeSyncRunner: @Sendable (Flux, SyncCancellation) throws -> SyncOutcome
     private let logger = Logger(
@@ -177,6 +178,9 @@ final class IOSBackgroundSyncCoordinator {
         settingsReader: @escaping @Sendable (Flux) throws -> Bool = {
             try $0.coreSettings().backgroundSyncEnabled
         },
+        settingsWriter: @escaping @Sendable (Flux, Bool) throws -> Void = {
+            try $0.setBackgroundSyncEnabled(enabled: $1)
+        },
         syncRunner: @escaping @Sendable (Flux, SyncCancellation) throws -> SyncOutcome = {
             try $0.syncCancellable(reason: .background, cancellation: $1)
         },
@@ -190,6 +194,7 @@ final class IOSBackgroundSyncCoordinator {
         self.preferredInterval = preferredInterval
         self.now = now
         self.settingsReader = settingsReader
+        self.settingsWriter = settingsWriter
         self.syncRunner = syncRunner
         self.resumeSyncRunner = resumeSyncRunner
     }
@@ -246,8 +251,8 @@ final class IOSBackgroundSyncCoordinator {
         guard let result = await bootstrapper.coreSessionExecutionCoordinator
             .responsiveResult(
                 for: core,
-                {
-                    try core.setBackgroundSyncEnabled(enabled: enabled)
+                { [settingsWriter] in
+                    try settingsWriter(core, enabled)
                 }
             ) else {
             return .failure(IOSBackgroundSyncPreferenceError.coreUnavailable)
