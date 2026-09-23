@@ -34,6 +34,7 @@
 		A33 /* FluxNewsTests/IOSErrorPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B33 /* FluxNewsTests/IOSErrorPresentationTests.swift */; };
 		A34 /* FluxNews/IOSUIKitArticleLayoutEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B34 /* FluxNews/IOSUIKitArticleLayoutEngine.swift */; };
 		A37 /* FluxNews/IOSUIKitScrolloverGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B37 /* FluxNews/IOSUIKitScrolloverGeometry.swift */; };
+		A38 /* FluxNews/IOSCoreSessionExecutionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B38 /* FluxNews/IOSCoreSessionExecutionCoordinator.swift */; };
 		A35 /* ../shared/FluxApple/AppleCoreExecution.swift in Sources */ = {isa = PBXBuildFile; fileRef = B35 /* ../shared/FluxApple/AppleCoreExecution.swift */; };
 		A36 /* FluxNewsTests/AppleCoreExecutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36 /* FluxNewsTests/AppleCoreExecutionTests.swift */; };
 		A4 /* flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4 /* flux_uniffi.swift */; };
@@ -103,6 +104,7 @@
 		B33 /* FluxNewsTests/IOSErrorPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/IOSErrorPresentationTests.swift; sourceTree = "<group>"; };
 		B34 /* FluxNews/IOSUIKitArticleLayoutEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSUIKitArticleLayoutEngine.swift; sourceTree = "<group>"; };
 		B37 /* FluxNews/IOSUIKitScrolloverGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSUIKitScrolloverGeometry.swift; sourceTree = "<group>"; };
+		B38 /* FluxNews/IOSCoreSessionExecutionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSCoreSessionExecutionCoordinator.swift; sourceTree = "<group>"; };
 		B35 /* ../shared/FluxApple/AppleCoreExecution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/AppleCoreExecution.swift; sourceTree = "<group>"; };
 		B36 /* FluxNewsTests/AppleCoreExecutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/AppleCoreExecutionTests.swift; sourceTree = "<group>"; };
 		B4 /* flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = flux_uniffi.swift; path = ../Build/Products/FluxUniFFI/Sources/flux_uniffi.swift; sourceTree = "<group>"; };
@@ -168,6 +170,7 @@
 				B31 /* FluxNews/ArticleImagePipeline.swift */,
 				B34 /* FluxNews/IOSUIKitArticleLayoutEngine.swift */,
 				B37 /* FluxNews/IOSUIKitScrolloverGeometry.swift */,
+				B38 /* FluxNews/IOSCoreSessionExecutionCoordinator.swift */,
 				B21 /* FluxNews/SearchView.swift */,
 				B22 /* FluxNewsTests/IOSSearchStoreTests.swift */,
 				B26 /* FluxNewsTests/AccountLifecycleTests.swift */,
@@ -354,6 +357,7 @@
 				A31 /* FluxNews/ArticleImagePipeline.swift in Sources */,
 				A34 /* FluxNews/IOSUIKitArticleLayoutEngine.swift in Sources */,
 				A37 /* FluxNews/IOSUIKitScrolloverGeometry.swift in Sources */,
+				A38 /* FluxNews/IOSCoreSessionExecutionCoordinator.swift in Sources */,
 				A35 /* ../shared/FluxApple/AppleCoreExecution.swift in Sources */,
 				A32 /* FluxNews/IOSErrorPresentation.swift in Sources */,
 			);
