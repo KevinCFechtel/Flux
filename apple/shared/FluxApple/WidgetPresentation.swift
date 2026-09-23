@@ -9,6 +9,7 @@ enum WidgetFamilyPolicy {
         .systemExtraLarge,
     ]
 
+    #if os(iOS)
     static let statusFamilies: [WidgetFamily] = [
         .systemSmall,
         .systemMedium,
@@ -22,6 +23,14 @@ enum WidgetFamilyPolicy {
         .accessoryCircular,
         .accessoryRectangular,
     ]
+    #else
+    static let statusFamilies: [WidgetFamily] = [
+        .systemSmall,
+        .systemMedium,
+    ]
+
+    static let lockScreenFamilies: [WidgetFamily] = []
+    #endif
 }
 
 enum HeadlinesPresentation {
