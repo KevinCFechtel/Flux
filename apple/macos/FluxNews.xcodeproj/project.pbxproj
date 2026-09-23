@@ -127,11 +127,11 @@
 		B28 /* BackupPasswordWorkflow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupPasswordWorkflow.swift; sourceTree = "<group>"; };
 		B29 /* BackupPasswordWorkflowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupPasswordWorkflowTests.swift; sourceTree = "<group>"; };
 		B3 /* BrowserStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserStore.swift; sourceTree = "<group>"; };
-		B30 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshot.swift; sourceTree = "<group>"; };
+		B30 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WidgetSnapshot.swift; path = ../../shared/FluxApple/WidgetSnapshot.swift; sourceTree = "<group>"; };
 		B31 /* FluxNews.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FluxNews.entitlements; sourceTree = "<group>"; };
 		B32 /* WidgetSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshotTests.swift; sourceTree = "<group>"; };
-		B33 /* WidgetSnapshotWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshotWriter.swift; sourceTree = "<group>"; };
-		B34 /* WidgetPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPresentation.swift; sourceTree = "<group>"; };
+		B33 /* WidgetSnapshotWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WidgetSnapshotWriter.swift; path = ../../shared/FluxApple/WidgetSnapshotWriter.swift; sourceTree = "<group>"; };
+		B34 /* WidgetPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WidgetPresentation.swift; path = ../../shared/FluxApple/WidgetPresentation.swift; sourceTree = "<group>"; };
 		B35 /* FluxNewsWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsWidgets.swift; sourceTree = "<group>"; };
 		B36 /* FluxNewsWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FluxNewsWidgets.entitlements; sourceTree = "<group>"; };
 		B37 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
