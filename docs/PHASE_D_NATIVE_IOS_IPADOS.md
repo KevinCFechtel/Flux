@@ -807,17 +807,26 @@ monotonic `SyncCancellation` signal, a non-error `SyncOutcome::Cancelled`
 terminal outcome, and a separate cancellable Sync entry point. The existing
 `sync(reason)` API retains its established behavior for existing callers.
 
-D4.5-B threads that signal through the productive Rust Sync orchestration.
-Pending article/media mutations stop only between safe remote-write/local-ack
-units; the Miniflux starred-state read/conditional-write pair observes
-cancellation between its HTTP requests; initial and SavedMedia entry pagination
-checks between HTTP pages; protected media fetches stop between bounded requests; reconciliation
-remains one unsplit SQLite transaction with checks immediately before and after;
-SavedMedia replication, retention/media cleanup, notification preparation, and
-the final successful-Sync commit have explicit safe checkpoints. A cancelled
-run emits neither normal Sync completion nor Sync failure. Once
-`mark_sync_success()` begins after the final checkpoint, that run is considered
-committed rather than retroactively cancelled.
+D4.5-B is **COMPLETE**. It threads the cancellation signal through the
+productive Rust Sync orchestration. Pending article/media mutations stop only
+between safe remote-write/local-ack units; the Miniflux starred-state
+read/conditional-write pair observes cancellation between its HTTP requests;
+initial and SavedMedia entry pagination check between HTTP pages; protected
+media fetches stop between bounded requests; reconciliation remains one unsplit
+SQLite transaction with checks immediately before and after; SavedMedia
+replication, retention/media cleanup, notification preparation, and the final
+successful-Sync commit have explicit safe checkpoints. A cancelled run emits
+neither normal Sync completion nor Sync failure. Once `mark_sync_success()`
+begins after the final checkpoint, that run is considered committed rather than
+retroactively cancelled.
+
+D4.5-B validation on 23 September 2026 completed with `cargo fmt --check`
+clean and `cargo test --workspace` green: 216 `flux-core` tests and 5
+`flux-uniffi` tests passed with 0 failures, plus all workspace doc-tests.
+During that gate, two pre-existing reading-time baseline defects were corrected:
+`materialize_saved_media` now supplies the persisted
+`reading_time_minutes` SQL parameter, and the versioned-database test now
+expects the current schema version 18.
 
 Manual foreground Sync must become explicitly cancellable by the user. This is
 a Newsreader interaction and therefore remains in D4 rather than being deferred
@@ -859,11 +868,15 @@ verify that cancelling and immediately restarting Sync leaves the Timeline,
 scope count, capsule, and Sync control coherent.
 
 D4.5 implementation began only after the UIKit Timeline/presentation change
-set was accepted on device and U5 was closed. Completion still requires the
-cooperative Core checkpoints, UniFFI/Apple execution bridge, session-owned iOS
-manual-Sync lifecycle, account/Core quiescence barrier, presentation/localization
-work, automated regression coverage, and focused real-device acceptance defined
-above.
+set was accepted on device and U5 was closed. D4.5-A and D4.5-B are complete.
+The next implementation package is **D4.5-C — UniFFI + AppleCoreExecution**:
+export the run-scoped cancellation handle and completed/cancelled outcome through
+UniFFI, propagate running Swift-task cancellation into that handle without
+pretending the synchronous worker has already finished, and preserve queued-work
+cancellation plus existing non-cancellable Core callers. Completion of D4.5
+after C still requires the session-owned iOS manual-Sync lifecycle, account/Core
+quiescence barrier, presentation/localization work, automated regression
+coverage, and focused real-device acceptance defined above.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 
