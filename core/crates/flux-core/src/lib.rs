@@ -2930,7 +2930,7 @@ mod tests {
         let core = Arc::new(FluxCore::with_remote(config(&temp), source.clone()).unwrap());
         let first = {
             let core = core.clone();
-            thread::spawn(move || core.sync(SyncReason::Background).unwrap())
+            thread::spawn(move || core.sync(SyncReason::Periodic).unwrap())
         };
         started_rx.recv().unwrap();
         let second = {
@@ -2941,7 +2941,7 @@ mod tests {
         release_tx.send(()).unwrap();
         started_rx.recv().unwrap();
         release_tx.send(()).unwrap();
-        assert_eq!(first.join().unwrap().reason, SyncReason::Background);
+        assert_eq!(first.join().unwrap().reason, SyncReason::Periodic);
         assert_eq!(second.join().unwrap().reason, SyncReason::Manual);
         assert_eq!(source.calls.load(Ordering::SeqCst), 2);
     }
@@ -2960,18 +2960,18 @@ mod tests {
         let core = Arc::new(FluxCore::with_remote(config(&temp), source.clone()).unwrap());
         let first = {
             let core = core.clone();
-            thread::spawn(move || core.sync(SyncReason::Background))
+            thread::spawn(move || core.sync(SyncReason::Periodic))
         };
         started_rx.recv().unwrap();
         let second = {
             let core = core.clone();
-            thread::spawn(move || core.sync(SyncReason::Periodic))
+            thread::spawn(move || core.sync(SyncReason::Manual))
         };
         release_tx.send(()).unwrap();
         assert!(first.join().unwrap().is_err());
         started_rx.recv().unwrap();
         release_tx.send(()).unwrap();
-        assert_eq!(second.join().unwrap().unwrap().reason, SyncReason::Periodic);
+        assert_eq!(second.join().unwrap().unwrap().reason, SyncReason::Manual);
         assert_eq!(source.calls.load(Ordering::SeqCst), 2);
     }
     #[test]
