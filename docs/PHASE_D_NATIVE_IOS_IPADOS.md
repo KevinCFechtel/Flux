@@ -342,9 +342,11 @@ present. Final validation on 22 September 2026 executed 338 iOS tests with
 and the focused physical-device smoke test passed. The UIKit Timeline
 architecture is now frozen.
 
-The native manual Sync control keeps the same `arrow.clockwise` symbol and
-stable toolbar geometry across idle, syncing, success, and failure states.
-iPhone portrait keeps Sync, Filter/Sort, and More in the bottom toolbar.
+The pre-D4.5 native manual Sync control used the same `arrow.clockwise`
+symbol across idle and active Sync while preserving a stable toolbar slot.
+D4.5 supersedes only that control-state presentation with an explicit Cancel
+action while retaining the same toolbar geometry. iPhone portrait keeps Sync,
+Filter/Sort, and More in the bottom toolbar.
 iPhone landscape moves the same action group to the trailing top toolbar and
 uses a compact leading interactive scope capsule that preserves the configured
 current-scope article count in compact numeric form (or the existing transient
@@ -947,10 +949,18 @@ The fixed 24-point toolbar slot and existing capsule geometry are preserved; the
 frozen UIKit Timeline renderer, Scrollover, image, and layout architecture are
 unchanged.
 
-D4.5-F remains open until the native test/build gates pass and focused physical
-device acceptance verifies start -> cancel -> immediate restart, coherent scope
-count/`Syncing…` presentation, no cancellation error alert, and no stale
-success checkmark or snapshot/count publication from the cancelled generation.
+D4.5-F automated validation on 23 September 2026 is **COMPLETE**. The final
+post-presentation `./apple/ios/Build/test.sh` run executed **349 native iOS
+tests with 0 failures**, including
+`testSyncButtonPresentationMakesRunningSyncAnExplicitCancelAction`, and ended
+with `TEST SUCCEEDED`. `./apple/ios/Build/build-app.sh` also completed
+successfully.
+
+D4.5-F, and therefore D4.5 as a whole, remains open only for focused physical
+device acceptance. That acceptance must verify start -> cancel -> immediate
+restart, coherent scope count/`Syncing…` presentation, no cancellation error
+alert, and no stale success checkmark or snapshot/count publication from the
+cancelled generation.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 
