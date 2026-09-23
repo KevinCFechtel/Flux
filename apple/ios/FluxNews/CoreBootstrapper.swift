@@ -64,7 +64,8 @@ final class CoreBootstrapper: ObservableObject {
 
         let generation = nextBootstrapGeneration()
         let task = Task { @MainActor [weak self] in
-            await self?.performStartup(generation: generation)
+            guard let self else { return }
+            await self.performStartup(generation: generation)
         }
         startupTask = task
         startupTaskGeneration = generation
