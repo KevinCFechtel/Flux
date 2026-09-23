@@ -1051,6 +1051,34 @@ uses the migratable AfterFirstUnlock variant rather than a
 are not narrowed merely to enable background access. No BGTask registration or
 background Sync execution is part of D5-B.
 
+**D5-C — BGAppRefresh Scheduling & Execution is implemented; automated
+validation is pending.** Native iOS registers one `BGAppRefreshTask` identifier
+during application launch through a small `UIApplicationDelegate` bridge. The
+production/upgrade identity retains
+`dev.kevincfechtel.fluxNews.backgroundSync`; the parallel native-development
+identity uses `dev.kevincfechtel.fluxNews.nativeDev.backgroundSync`. The app
+declares only the `fetch` background mode for regular news refresh; no
+`BGProcessingTask` or remote-notification mode is introduced.
+
+`IOSAppRuntime` owns the same `CoreBootstrapper` used by SwiftUI and
+`IOSBackgroundSyncCoordinator`, so a headless BGAppRefresh launch cannot
+construct a second Core. The coordinator reads persisted Core
+`backgroundSyncEnabled`, submits the next refresh with a preferred
+30-minute earliest-begin date, runs `syncCancellable(.background)` through the
+D5-A Core-session execution gate, and completes the OS task exactly once.
+BGTask expiration owns a dedicated run-scoped `SyncCancellation` and Swift
+task cancellation; it has no D4.5 Manual-Sync presentation or user-cancellation
+semantics. Disabled Background Sync cancels pending refresh requests and does
+not enter Core Sync. Successful completion exposes a post-sync hook for later
+D5 notification/widget/media-reconciliation fan-out, but D5-C does not implement
+that fan-out itself.
+
+The app foreground attachment path also adopts a Core that may already have
+been initialized by the background runtime before SwiftUI installed its
+`onCoreChanged` callback. Focused tests cover one-time registration,
+enabled scheduling, disabled cancellation, successful completion and OS
+expiration/cooperative cancellation.
+
 Integrate BGTaskScheduler, local notifications and the native iOS WidgetKit
 presentation using the shared snapshot contract. Background execution shares
 the existing account/Core session, participates in app-wide Core quiescence and
