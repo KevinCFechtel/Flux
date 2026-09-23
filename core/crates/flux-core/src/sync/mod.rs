@@ -192,14 +192,11 @@ pub(crate) fn run_cancellable(
         return Ok(Cancellable::Cancelled);
     }
 
-    let saved_media_changed = match crate::saved_media_sync::run_cancellable(
-        remote,
-        store,
-        cancellation,
-    )? {
-        Cancellable::Completed(changed) => changed,
-        Cancellable::Cancelled => return Ok(Cancellable::Cancelled),
-    };
+    let saved_media_changed =
+        match crate::saved_media_sync::run_cancellable(remote, store, cancellation)? {
+            Cancellable::Completed(changed) => changed,
+            Cancellable::Cancelled => return Ok(Cancellable::Cancelled),
+        };
     tracing::info!(target: "storage", "reconciliation completed new={} updated={} elapsed_ms={}", stats.new_articles, stats.updated_articles, reconcile_started.elapsed().as_millis());
 
     if cancellation.is_cancelled() {

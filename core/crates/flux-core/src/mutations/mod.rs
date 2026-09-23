@@ -47,8 +47,7 @@ pub(crate) fn deliver_pending_cancellable(
 
         match pending.field {
             MutationField::Read => {
-                let remote_result =
-                    remote.set_read_state(&[pending.article_id], pending.desired);
+                let remote_result = remote.set_read_state(&[pending.article_id], pending.desired);
                 if let Err(error) = remote_result {
                     if cancellation.is_cancelled() {
                         return Ok(Cancellable::Cancelled);
@@ -92,8 +91,8 @@ pub(crate) fn deliver_pending_cancellable(
             }
             MediaProgressCapability::Unknown => {}
             MediaProgressCapability::Supported => {
-                let remote_result = remote
-                    .set_media_progression(pending.enclosure_id, pending.progression_seconds);
+                let remote_result =
+                    remote.set_media_progression(pending.enclosure_id, pending.progression_seconds);
                 match remote_result {
                     Ok(()) => {
                         // Preserve the same remote-write/local-ack safe unit as article mutations.

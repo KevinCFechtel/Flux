@@ -16,8 +16,8 @@ pub mod storage;
 pub mod sync;
 mod sync_cancellation;
 
-pub use sync_cancellation::{SyncCancellation, SyncOutcome};
 use sync_cancellation::Cancellable;
+pub use sync_cancellation::{SyncCancellation, SyncOutcome};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -1304,9 +1304,7 @@ impl FluxCore {
             return Ok(Cancellable::Cancelled);
         }
         if reason != SyncReason::Manual && self.in_backoff()? {
-            return Ok(Cancellable::Completed(
-                mutations::DeliveryResult::default(),
-            ));
+            return Ok(Cancellable::Completed(mutations::DeliveryResult::default()));
         }
         match self.deliver_pending_cancellable(cancellation) {
             Ok(Cancellable::Completed(result)) => {
@@ -2837,7 +2835,11 @@ mod tests {
             SyncOutcome::Cancelled
         );
         assert_eq!(source.fetch_calls.load(Ordering::SeqCst), 1);
-        assert!(core.query_articles(ArticleQuery::default()).unwrap().is_empty());
+        assert!(
+            core.query_articles(ArticleQuery::default())
+                .unwrap()
+                .is_empty()
+        );
         assert!(core.last_successful_sync_at().unwrap().is_none());
     }
 

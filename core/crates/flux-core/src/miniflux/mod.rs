@@ -748,7 +748,9 @@ impl MinifluxClient {
 
     fn saved_media_markers(&self, feed_id: i64) -> Result<Vec<RemoteSavedMediaMarker>, CoreError> {
         self.saved_media_markers_with_cancellation(feed_id, None)?
-            .ok_or_else(|| CoreError::internal("uncancellable SavedMedia marker fetch was cancelled"))
+            .ok_or_else(|| {
+                CoreError::internal("uncancellable SavedMedia marker fetch was cancelled")
+            })
     }
 
     fn saved_media_markers_with_cancellation(
@@ -891,7 +893,8 @@ impl MinifluxClient {
         if cancellation.is_some_and(SyncCancellation::is_cancelled) {
             return Ok(None);
         }
-        let categories_result: Result<Vec<CategoryDto>, CoreError> = self.get("/v1/categories", &[]);
+        let categories_result: Result<Vec<CategoryDto>, CoreError> =
+            self.get("/v1/categories", &[]);
         if cancellation.is_some_and(SyncCancellation::is_cancelled) {
             return Ok(None);
         }
@@ -919,8 +922,7 @@ impl MinifluxClient {
         let feed_ids: HashMap<i64, _> = feeds.iter().map(|f| (f.id, ())).collect();
         let mut entries = HashMap::new();
 
-        let Some(unread) =
-            self.entries_with_cancellation(Some("unread"), false, cancellation)?
+        let Some(unread) = self.entries_with_cancellation(Some("unread"), false, cancellation)?
         else {
             return Ok(None);
         };
@@ -1145,8 +1147,7 @@ impl RemoteSource for MinifluxClient {
             if cancellation.is_cancelled() {
                 return Ok(false);
             }
-            let update_result =
-                self.put(&format!("/v1/entries/{article_id}/star"), String::new());
+            let update_result = self.put(&format!("/v1/entries/{article_id}/star"), String::new());
             if cancellation.is_cancelled() {
                 return Ok(false);
             }
@@ -2711,14 +2712,19 @@ mod tests {
             write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
             thread::sleep(std::time::Duration::from_millis(50));
             listener.set_nonblocking(true).unwrap();
-            assert!(listener.accept().is_err(), "cancellation must prevent the next page request");
+            assert!(
+                listener.accept().is_err(),
+                "cancellation must prevent the next page request"
+            );
         });
         let client = MinifluxClient::new(&format!("http://{address}"), "test-key").unwrap();
 
-        assert!(client
-            .entries_with_cancellation(Some("unread"), false, Some(&cancellation))
-            .unwrap()
-            .is_none());
+        assert!(
+            client
+                .entries_with_cancellation(Some("unread"), false, Some(&cancellation))
+                .unwrap()
+                .is_none()
+        );
         worker.join().unwrap();
     }
 
