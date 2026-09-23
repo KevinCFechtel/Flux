@@ -1171,4 +1171,40 @@ final class AccountLifecycleTests: XCTestCase {
         XCTAssertEqual(scheduler.submissions.count, 1)
     }
 
+
+    @MainActor
+    func testFailedBackgroundSyncPreferenceWriteDoesNotChangeScheduling() async throws {
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core }
+        )
+        let scheduler = FakeBackgroundTaskScheduler()
+        let coordinator = IOSBackgroundSyncCoordinator(
+            bootstrapper: bootstrapper,
+            scheduler: scheduler,
+            identifier: "dev.test.backgroundSync",
+            settingsWriter: { _, _ in
+                throw NSError(domain: "FluxNewsTests", code: 7)
+            }
+        )
+
+        let original = try core.coreSettings().backgroundSyncEnabled
+        let result = await coordinator.setBackgroundSyncPreference(!original)
+
+        if case .success = result {
+            XCTFail("Expected preference write to fail")
+        }
+        XCTAssertEqual(try core.coreSettings().backgroundSyncEnabled, original)
+        XCTAssertTrue(scheduler.submissions.isEmpty)
+        XCTAssertTrue(scheduler.cancellations.isEmpty)
+    }
+
 }
