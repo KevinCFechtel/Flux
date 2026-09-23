@@ -483,7 +483,8 @@ final class AccountLifecycleTests: XCTestCase {
             }
         )
 
-        XCTAssertNil(await bootstrapper.ensureStarted())
+        let unavailableCore = await bootstrapper.ensureStarted()
+        XCTAssertNil(unavailableCore)
         XCTAssertEqual(bootstrapper.state, .starting)
         XCTAssertNil(bootstrapper.core)
         XCTAssertEqual(factoryCalls.value(), 0)
