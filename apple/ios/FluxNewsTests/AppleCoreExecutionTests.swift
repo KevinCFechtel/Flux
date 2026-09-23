@@ -109,6 +109,76 @@ final class AppleCoreExecutionTests: XCTestCase {
         XCTAssertEqual(followUp, 3)
     }
 
+    func testRunningCooperativeCancellationSignalsAndKeepsWorkerOccupied() async throws {
+        let execution = AppleCoreExecution(responsiveConcurrency: 1, blockingConcurrency: 1)
+        let gate = ExecutionGate()
+        let cancellationSignalled = LockedFlag()
+        let operationFinished = LockedFlag()
+        let followUpStarted = LockedFlag()
+
+        let running = Task {
+            let value = try await execution.blockingCancellable(
+                onCancel: { cancellationSignalled.set() }
+            ) {
+                gate.enter()
+                return 7
+            }
+            operationFinished.set()
+            return value
+        }
+
+        try await gate.waitForStarts(1)
+        running.cancel()
+        try await waitUntil(timeout: 2) { cancellationSignalled.value }
+
+        let followUp = Task {
+            try await execution.blocking {
+                followUpStarted.set()
+                return 8
+            }
+        }
+
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertFalse(operationFinished.value)
+        XCTAssertFalse(followUpStarted.value)
+
+        gate.release(1)
+        XCTAssertEqual(try await running.value, 7)
+        XCTAssertEqual(try await followUp.value, 8)
+        XCTAssertTrue(operationFinished.value)
+        XCTAssertTrue(followUpStarted.value)
+    }
+
+    func testQueuedCooperativeCancellationDoesNotSignalRunningHook() async throws {
+        let execution = AppleCoreExecution(responsiveConcurrency: 1, blockingConcurrency: 1)
+        let gate = ExecutionGate()
+        let first = Task { try await execution.blocking { gate.enter(); return 1 } }
+        try await gate.waitForStarts(1)
+
+        let cancellationSignalled = LockedFlag()
+        let ranCancelledOperation = LockedFlag()
+        let cancelled = Task {
+            try await execution.blockingCancellable(
+                onCancel: { cancellationSignalled.set() }
+            ) {
+                ranCancelledOperation.set()
+                return 2
+            }
+        }
+        cancelled.cancel()
+        gate.release(1)
+
+        XCTAssertEqual(try await first.value, 1)
+        do {
+            _ = try await cancelled.value
+            XCTFail("Expected queued work cancellation")
+        } catch is CancellationError {
+            // Expected: queued work never became a running Core operation.
+        }
+        XCTAssertFalse(cancellationSignalled.value)
+        XCTAssertFalse(ranCancelledOperation.value)
+    }
+
     func testFailuresAndCancellationsLeaveBothLanesUsable() async throws {
         let execution = AppleCoreExecution(responsiveConcurrency: 1, blockingConcurrency: 1)
 

@@ -869,14 +869,22 @@ scope count, capsule, and Sync control coherent.
 
 D4.5 implementation began only after the UIKit Timeline/presentation change
 set was accepted on device and U5 was closed. D4.5-A and D4.5-B are complete.
-The next implementation package is **D4.5-C — UniFFI + AppleCoreExecution**:
-export the run-scoped cancellation handle and completed/cancelled outcome through
-UniFFI, propagate running Swift-task cancellation into that handle without
-pretending the synchronous worker has already finished, and preserve queued-work
-cancellation plus existing non-cancellable Core callers. Completion of D4.5
-after C still requires the session-owned iOS manual-Sync lifecycle, account/Core
-quiescence barrier, presentation/localization work, automated regression
-coverage, and focused real-device acceptance defined above.
+**D4.5-C — UniFFI + AppleCoreExecution is IN PROGRESS.** The UniFFI layer now
+exports a run-scoped `SyncCancellation` object, explicit
+`SyncOutcome::Completed/Cancelled`, and an additive cancellable Sync entry
+point while preserving the existing `sync(reason)` API. `AppleCoreExecution`
+adds a blocking cancellable lane operation: cancellation before execution still
+prevents queued Core work from starting; cancellation after execution begins
+invokes the supplied cooperative cancellation callback exactly once and does not
+release the OperationQueue worker until the synchronous Core closure actually
+returns. Focused tests cover both queued and running cancellation semantics.
+D4.5-C remains open until Rust formatting/workspace tests and the native iOS
+test/build gates pass.
+
+Completion of D4.5 after C still requires the session-owned iOS manual-Sync
+lifecycle, account/Core quiescence barrier, presentation/localization work,
+automated regression coverage, and focused real-device acceptance defined
+above.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 

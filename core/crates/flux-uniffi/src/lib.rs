@@ -1,7 +1,10 @@
 //! Thin UniFFI adapter around the real shared core API.
 
 use flux_core::domain;
-use flux_core::{CoreConfig, FluxCore};
+use flux_core::{
+    CoreConfig, FluxCore, SyncCancellation as CoreSyncCancellation,
+    SyncOutcome as CoreSyncOutcome,
+};
 use std::sync::Arc;
 
 use flux_core::config_backup;
@@ -330,6 +333,11 @@ pub struct SyncCompleted {
     pub navigation_changed: bool,
     pub new_articles_by_feed: Vec<NewArticlesByFeed>,
     pub system_notification_candidates: Vec<SystemNotificationCandidate>,
+}
+#[derive(uniffi::Enum)]
+pub enum SyncOutcome {
+    Completed { metadata: SyncCompleted },
+    Cancelled,
 }
 #[derive(uniffi::Record)]
 pub struct NewArticlesByFeed {
@@ -780,6 +788,29 @@ impl std::fmt::Display for FluxError {
 }
 
 #[derive(uniffi::Object)]
+pub struct SyncCancellation {
+    inner: CoreSyncCancellation,
+}
+
+#[uniffi::export]
+impl SyncCancellation {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            inner: CoreSyncCancellation::new(),
+        })
+    }
+
+    pub fn cancel(&self) {
+        self.inner.cancel();
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.inner.is_cancelled()
+    }
+}
+
+#[derive(uniffi::Object)]
 pub struct Flux {
     core: Arc<FluxCore>,
 }
@@ -890,6 +921,22 @@ impl Flux {
         self.core
             .sync(reason.into())
             .map(Into::into)
+            .map_err(map_error)
+    }
+
+    pub fn sync_cancellable(
+        &self,
+        reason: SyncReason,
+        cancellation: Arc<SyncCancellation>,
+    ) -> Result<SyncOutcome, FluxError> {
+        self.core
+            .sync_cancellable(reason.into(), &cancellation.inner)
+            .map(|outcome| match outcome {
+                CoreSyncOutcome::Completed(metadata) => SyncOutcome::Completed {
+                    metadata: metadata.into(),
+                },
+                CoreSyncOutcome::Cancelled => SyncOutcome::Cancelled,
+            })
             .map_err(map_error)
     }
     pub fn rebuild_local_state(&self) -> Result<SyncCompleted, FluxError> {
@@ -2655,6 +2702,23 @@ fn map_account_validation_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sync_cancellation_handle_is_monotonic_and_outcome_mapping_is_explicit() {
+        let cancellation = SyncCancellation::new();
+        assert!(!cancellation.is_cancelled());
+        cancellation.cancel();
+        assert!(cancellation.is_cancelled());
+
+        let outcome = CoreSyncOutcome::Cancelled;
+        let mapped = match outcome {
+            CoreSyncOutcome::Completed(metadata) => SyncOutcome::Completed {
+                metadata: metadata.into(),
+            },
+            CoreSyncOutcome::Cancelled => SyncOutcome::Cancelled,
+        };
+        assert!(matches!(mapped, SyncOutcome::Cancelled));
+    }
 
     #[test]
     fn media_state_mappings_are_explicit_and_not_stringly_typed() {

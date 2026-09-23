@@ -41,6 +41,21 @@ final class AppleCoreExecution: @unchecked Sendable {
         try await execute(on: blockingQueue, operation: operation)
     }
 
+    /// Runs blocking Core work with a cooperative cancellation signal for work
+    /// that has already started. Queued cancellation still prevents the
+    /// operation from starting. Once started, cancellation invokes onCancel
+    /// but keeps the worker occupied until the synchronous operation returns.
+    func blockingCancellable<Value: Sendable>(
+        onCancel: @escaping @Sendable () -> Void,
+        _ operation: @escaping @Sendable () throws -> Value
+    ) async throws -> Value {
+        try await execute(
+            on: blockingQueue,
+            onRunningCancel: onCancel,
+            operation: operation
+        )
+    }
+
     /// Convenience for presentation code that already owns Result-based error
     /// routing. The original Core error is preserved unchanged.
     func responsiveResult<Value: Sendable>(
@@ -59,8 +74,25 @@ final class AppleCoreExecution: @unchecked Sendable {
         catch { return .failure(error) }
     }
 
+    /// Result-based form of blockingCancellable. Running cancellation signals
+    /// the cooperative Core handle and returns only after the synchronous
+    /// operation itself has finished.
+    func blockingCancellableResult<Value: Sendable>(
+        onCancel: @escaping @Sendable () -> Void,
+        _ operation: @escaping @Sendable () throws -> Value
+    ) async -> Result<Value, Error> {
+        do {
+            return .success(
+                try await blockingCancellable(onCancel: onCancel, operation)
+            )
+        } catch {
+            return .failure(error)
+        }
+    }
+
     private func execute<Value: Sendable>(
         on queue: OperationQueue,
+        onRunningCancel: (@Sendable () -> Void)? = nil,
         operation: @escaping @Sendable () throws -> Value
     ) async throws -> Value {
         let work = AppleCoreExecutionWork<Value>()
@@ -70,9 +102,7 @@ final class AppleCoreExecution: @unchecked Sendable {
                 queue.addOperation { work.run(operation) }
             }
         }, onCancel: {
-            // This only prevents queued work from beginning. Once run() starts,
-            // a synchronous Core/ureq call cannot be cancelled by its Swift waiter.
-            work.cancelIfQueued()
+            work.cancel(onRunningCancel: onRunningCancel)
         })
     }
 
@@ -94,6 +124,7 @@ private final class AppleCoreExecutionWork<Value: Sendable>: @unchecked Sendable
     private var continuation: CheckedContinuation<Value, Error>?
     private var completion: Result<Value, Error>?
     private var started = false
+    private var runningCancellationSignalled = false
 
     /// Returns false when cancellation won the race before continuation setup.
     func install(_ continuation: CheckedContinuation<Value, Error>) -> Bool {
@@ -108,8 +139,26 @@ private final class AppleCoreExecutionWork<Value: Sendable>: @unchecked Sendable
         return true
     }
 
-    func cancelIfQueued() {
-        finishIfQueued(.failure(CancellationError()))
+    func cancel(onRunningCancel: (@Sendable () -> Void)?) {
+        lock.lock()
+        guard completion == nil else {
+            lock.unlock()
+            return
+        }
+        if !started {
+            let result: Result<Value, Error> = .failure(CancellationError())
+            let continuation = finishLocked(result)
+            lock.unlock()
+            continuation?.resume(with: result)
+            return
+        }
+        guard let onRunningCancel, !runningCancellationSignalled else {
+            lock.unlock()
+            return
+        }
+        runningCancellationSignalled = true
+        lock.unlock()
+        onRunningCancel()
     }
 
     func run(_ operation: @escaping @Sendable () throws -> Value) {
@@ -122,17 +171,6 @@ private final class AppleCoreExecutionWork<Value: Sendable>: @unchecked Sendable
         lock.unlock()
 
         finish(Result(catching: operation))
-    }
-
-    private func finishIfQueued(_ result: Result<Value, Error>) {
-        lock.lock()
-        guard !started, completion == nil else {
-            lock.unlock()
-            return
-        }
-        let continuation = finishLocked(result)
-        lock.unlock()
-        continuation?.resume(with: result)
     }
 
     private func finish(_ result: Result<Value, Error>) {
