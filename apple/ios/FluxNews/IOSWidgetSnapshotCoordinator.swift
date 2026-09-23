@@ -55,8 +55,14 @@ final class IOSWidgetSnapshotCoordinator {
     func handle(event: CoreEvent, core: Flux, generation: UInt64) {
         guard generation == self.generation else { return }
         switch event {
-        case .articleReadStateChanged, .articleStarredStateChanged, .syncCompleted:
+        case .articleReadStateChanged, .articleStarredStateChanged:
             refresh(for: core, generation: generation)
+        case let .syncCompleted(metadata) where metadata.reason != .background:
+            refresh(for: core, generation: generation)
+        case .syncCompleted:
+            // Background success owns an awaited snapshot refresh in the
+            // BGAppRefresh fanout so task completion cannot race suspension.
+            break
         default:
             break
         }
