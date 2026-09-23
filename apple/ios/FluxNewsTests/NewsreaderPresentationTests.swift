@@ -4436,6 +4436,22 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testHeadlineWidgetFamiliesExcludeSystemSmall() {
+        XCTAssertEqual(
+            WidgetFamilyPolicy.headlineFamilies,
+            [.systemMedium, .systemLarge, .systemExtraLarge]
+        )
+        XCTAssertFalse(WidgetFamilyPolicy.headlineFamilies.contains(.systemSmall))
+    }
+
+    func testWidgetSyncTimestampAcceptsCoreSQLiteAndISOFormats() throws {
+        let sqlite = try XCTUnwrap(WidgetSyncTimestamp.date(from: "2026-09-23 18:42:15"))
+        let iso = try XCTUnwrap(WidgetSyncTimestamp.date(from: "2026-09-23T18:42:15Z"))
+
+        XCTAssertEqual(sqlite, iso)
+        XCTAssertNil(WidgetSyncTimestamp.date(from: "not-a-timestamp"))
+    }
+
 }
 
 private final class FeedIconLoadGate: @unchecked Sendable {
