@@ -216,24 +216,31 @@ final class AppleCoreExecutionTests: XCTestCase {
         let sources = try [
             "FluxNews/NewsreaderStore.swift",
             "FluxNews/IOSSearchStore.swift",
-            "FluxNews/CoreBootstrapper.swift"
+            "FluxNews/CoreBootstrapper.swift",
+            "FluxNews/IOSCoreSessionExecutionCoordinator.swift"
         ].map { try String(contentsOf: iosDirectory.appendingPathComponent($0), encoding: .utf8) }
 
-        XCTAssertTrue(sources[0].contains("AppleCoreExecution.shared"))
         XCTAssertTrue(sources[0].contains("Task.detached(priority: .userInitiated)")) // CPU-only feed-icon ImageIO preparation.
-        for source in sources.dropFirst() {
-            XCTAssertFalse(source.contains("Task.detached"))
-            XCTAssertTrue(source.contains("AppleCoreExecution.shared"))
-        }
+        XCTAssertFalse(sources[1].contains("Task.detached"))
+        XCTAssertFalse(sources[2].contains("Task.detached"))
+        XCTAssertFalse(sources[3].contains("Task.detached"))
 
-        XCTAssertTrue(sources[0].contains("responsiveResult {\n                try core.navigationProjection"))
+        XCTAssertTrue(sources[0].contains("sessionCoordinator.responsiveResult("))
+        XCTAssertTrue(sources[0].contains("sessionCoordinator.blockingResult("))
+        XCTAssertTrue(sources[0].contains("beginExecution("))
         XCTAssertTrue(sources[0].contains("blockingCancellableResult("))
         XCTAssertTrue(sources[0].contains("core.syncCancellable(reason: .manual, cancellation: cancellation)"))
-        XCTAssertTrue(sources[0].contains("blockingResult { try loader(feedID, variant)"))
-        XCTAssertTrue(sources[0].contains("responsiveResult { try core.setReadStateBulk(articleIds: ids, read: true)"))
-        XCTAssertTrue(sources[1].contains("blockingResult {\n                try core.searchArticles"))
-        XCTAssertTrue(sources[1].contains("blockingResult { try core.readerDocumentForSearch"))
-        XCTAssertTrue(sources[2].contains("blockingResult {\n            try validator(proposed)"))
+
+        XCTAssertTrue(sources[1].contains("sessionCoordinator.blockingResult("))
+        XCTAssertFalse(sources[1].contains("AppleCoreExecution.shared"))
+
+        XCTAssertTrue(sources[2].contains("coreSessionExecutionCoordinator.quiesce()"))
+        XCTAssertTrue(sources[2].contains("AppleCoreExecution.shared.blockingResult"))
+        XCTAssertTrue(sources[2].contains("AppleCoreExecution.shared.responsive"))
+
+        XCTAssertTrue(sources[3].contains("AppleCoreExecution.shared.responsiveResult"))
+        XCTAssertTrue(sources[3].contains("AppleCoreExecution.shared.blockingResult"))
+        XCTAssertTrue(sources[3].contains("AppleCoreExecution.shared.blockingCancellableResult"))
     }
 }
 
