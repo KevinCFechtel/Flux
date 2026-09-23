@@ -834,19 +834,25 @@ struct ArticleRowContent: Equatable, Sendable {
               let core,
               let request = manualSyncLifecycle.begin() else { return }
         let cancellation = SyncCancellation()
+        guard let sessionLease = coreSessionExecutionCoordinator.beginExecution(
+            for: core,
+            cancellation: { cancellation.cancel() }
+        ) else { return }
+
         manualSyncRequest = request
         manualSyncCancellation = cancellation
         manualSyncPresentationCancellationRequest = nil
         manualSyncState = .running
         errorMessage = nil
 
-        let task = Task { [weak self, core, cancellation] in
+        let task = Task { [weak self, core, cancellation, sessionLease] in
             let result = await AppleCoreExecution.shared.blockingCancellableResult(
                 onCancel: { cancellation.cancel() }
             ) {
                 try core.syncCancellable(reason: .manual, cancellation: cancellation)
             }
             guard let self else { return }
+            coreSessionExecutionCoordinator.finish(sessionLease)
             completeManualSync(request, cancellation: cancellation, result: result)
         }
         manualSyncTask = task
