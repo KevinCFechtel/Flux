@@ -22,6 +22,7 @@ struct FluxNewsApp: App {
             ContentView(bootstrapper: bootstrapper, newsreaderStore: newsreaderStore)
                 .tint(Color("FluxAccent"))
                 .task {
+                    guard !IOSRuntimeLaunchEnvironment.isUnitTestHost else { return }
                     IOSAppRuntime.shared.systemNotificationManager.onFeedSelected = { feedID in
                         newsreaderStore.select(.feed(feedID))
                     }
@@ -55,6 +56,7 @@ struct FluxNewsApp: App {
                     IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
                 }
                 .onChange(of: scenePhase) { _, phase in
+                    guard !IOSRuntimeLaunchEnvironment.isUnitTestHost else { return }
                     if phase == .active {
                         Task {
                             if let core = await bootstrapper.ensureStarted(),
