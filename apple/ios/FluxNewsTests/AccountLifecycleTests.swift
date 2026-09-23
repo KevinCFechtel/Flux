@@ -67,6 +67,33 @@ final class AccountLifecycleTests: XCTestCase {
         }
     }
 
+    @MainActor
+    private final class FakeSystemNotificationCenter: IOSSystemNotificationCenter {
+        var status: IOSSystemNotificationAuthorizationStatus = .authorized
+        var authorizationResult = true
+        var authorizationError: Error?
+        var failingIdentifiers: Set<String> = []
+        private(set) var authorizationRequestCount = 0
+        private(set) var requests: [IOSSystemNotificationRequest] = []
+
+        func authorizationStatus() async -> IOSSystemNotificationAuthorizationStatus {
+            status
+        }
+
+        func requestAuthorization() async throws -> Bool {
+            authorizationRequestCount += 1
+            if let authorizationError { throw authorizationError }
+            return authorizationResult
+        }
+
+        func add(_ request: IOSSystemNotificationRequest) async throws {
+            if failingIdentifiers.contains(request.identifier) {
+                throw NSError(domain: "FluxNewsTests.Notification", code: 1)
+            }
+            requests.append(request)
+        }
+    }
+
     private final class FakeBackgroundTaskScheduler: IOSBackgroundTaskScheduling {
         struct Submission: Equatable {
             let identifier: String
@@ -1205,6 +1232,89 @@ final class AccountLifecycleTests: XCTestCase {
         XCTAssertEqual(try core.coreSettings().backgroundSyncEnabled, original)
         XCTAssertTrue(scheduler.submissions.isEmpty)
         XCTAssertTrue(scheduler.cancellations.isEmpty)
+    }
+
+
+    @MainActor
+    func testSystemNotificationAuthorizationRequestsOnlyWhenUndetermined() async throws {
+        let center = FakeSystemNotificationCenter()
+        center.status = .notDetermined
+        let manager = IOSSystemNotificationManager(center: center)
+
+        try await manager.ensureAuthorization()
+
+        XCTAssertEqual(center.authorizationRequestCount, 1)
+
+        center.status = .authorized
+        try await manager.ensureAuthorization()
+        XCTAssertEqual(center.authorizationRequestCount, 1)
+    }
+
+    @MainActor
+    func testSystemNotificationAuthorizationDeniedIsReportedWithoutRequestingAgain() async {
+        let center = FakeSystemNotificationCenter()
+        center.status = .denied
+        let manager = IOSSystemNotificationManager(center: center)
+
+        do {
+            try await manager.ensureAuthorization()
+            XCTFail("Expected denied authorization to fail")
+        } catch {
+            XCTAssertTrue(error is IOSSystemNotificationError)
+        }
+
+        XCTAssertEqual(center.authorizationRequestCount, 0)
+    }
+
+    @MainActor
+    func testSystemNotificationDeliveryAcknowledgesOnlySuccessfullyAddedCandidates() async {
+        let center = FakeSystemNotificationCenter()
+        center.failingIdentifiers = ["flux.system-notification.2"]
+        let manager = IOSSystemNotificationManager(center: center)
+        var acknowledged: [Int64] = []
+        let candidates = [
+            SystemNotificationCandidate(
+                candidateId: 1,
+                feedId: 10,
+                feedTitle: "Feed One",
+                newCount: 2
+            ),
+            SystemNotificationCandidate(
+                candidateId: 2,
+                feedId: 20,
+                feedTitle: "Feed Two",
+                newCount: 1
+            ),
+        ]
+
+        await manager.deliver(candidates) { candidateID in
+            acknowledged.append(candidateID)
+            return true
+        }
+
+        XCTAssertEqual(acknowledged, [1])
+        XCTAssertEqual(center.requests.count, 1)
+        XCTAssertEqual(center.requests.first?.identifier, "flux.system-notification.1")
+        XCTAssertEqual(center.requests.first?.title, "Feed One")
+        XCTAssertEqual(center.requests.first?.candidateID, 1)
+        XCTAssertEqual(center.requests.first?.feedID, 10)
+        XCTAssertFalse(center.requests.first?.body.isEmpty ?? true)
+    }
+
+    @MainActor
+    func testSystemNotificationFeedRouteBuffersUntilPresentationIsAttached() {
+        let center = FakeSystemNotificationCenter()
+        let manager = IOSSystemNotificationManager(center: center)
+        var selectedFeedIDs: [Int64] = []
+
+        manager.route(feedID: 42)
+        XCTAssertTrue(selectedFeedIDs.isEmpty)
+
+        manager.onFeedSelected = { selectedFeedIDs.append($0) }
+
+        XCTAssertEqual(selectedFeedIDs, [42])
+        manager.route(feedID: 43)
+        XCTAssertEqual(selectedFeedIDs, [42, 43])
     }
 
 }
