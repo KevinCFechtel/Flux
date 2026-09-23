@@ -192,12 +192,7 @@ struct FluxNewsHeadlinesWidget: Widget {
         }
         .configurationDisplayName("FluxNews Headlines")
         .description("Shows the latest articles from your selected FluxNews view.")
-        .supportedFamilies([
-            .systemSmall,
-            .systemMedium,
-            .systemLarge,
-            .systemExtraLarge,
-        ])
+        .supportedFamilies(WidgetFamilyPolicy.headlineFamilies)
     }
 }
 
@@ -214,13 +209,7 @@ struct FluxNewsCompactStatusWidget: Widget {
         }
         .configurationDisplayName("FluxNews Status")
         .description("FluxNews count and last successful sync.")
-        .supportedFamilies([
-            .systemSmall,
-            .systemMedium,
-            .accessoryInline,
-            .accessoryCircular,
-            .accessoryRectangular,
-        ])
+        .supportedFamilies(WidgetFamilyPolicy.statusFamilies)
     }
 }
 
@@ -421,7 +410,12 @@ private struct IOSFluxNewsStatusView: View {
     }
 
     private var localizedCountLabel: String {
-        String(localized: String.LocalizationValue(entry.model.countLabel))
+        switch entry.model.countLabel {
+        case "bookmarked":
+            String(localized: "bookmarked")
+        default:
+            String(localized: "unread")
+        }
     }
 
     private var title: String {
