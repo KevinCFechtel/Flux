@@ -204,6 +204,7 @@ struct ContentView: View {
     @State private var syncPresentation: IOSSyncButtonPresentation.State = .idle
     @State private var syncPresentationGeneration: UInt64 = 0
     @State private var saveToServiceFeedbackTrigger: UInt64 = 0
+    @State private var pendingWidgetAction: WidgetAction?
 
     /// The capsule already opens the scope chooser, so a second control for the
     /// same action would be pure redundancy.
@@ -306,6 +307,7 @@ struct ContentView: View {
             } else {
                 searchStore.detach()
             }
+            consumePendingWidgetActionIfReady()
         }
     }
 
@@ -546,6 +548,14 @@ struct ContentView: View {
 
     private func handleWidgetURL(_ url: URL) {
         guard let action = WidgetAction(url: url) else { return }
+        guard newsreaderStore.core != nil else {
+            pendingWidgetAction = action
+            return
+        }
+        performWidgetAction(action)
+    }
+
+    private func performWidgetAction(_ action: WidgetAction) {
         switch action {
         case let .article(articleID):
             newsreaderStore.article(withID: articleID) { article in
@@ -557,6 +567,12 @@ struct ContentView: View {
         case .sync:
             newsreaderStore.syncFromWidget()
         }
+    }
+
+    private func consumePendingWidgetActionIfReady() {
+        guard newsreaderStore.core != nil, let action = pendingWidgetAction else { return }
+        pendingWidgetAction = nil
+        performWidgetAction(action)
     }
 
     private func openArticle(_ article: ArticleSummary) {
