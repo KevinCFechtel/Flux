@@ -35,6 +35,8 @@
 		A34 /* FluxNews/IOSUIKitArticleLayoutEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B34 /* FluxNews/IOSUIKitArticleLayoutEngine.swift */; };
 		A37 /* FluxNews/IOSUIKitScrolloverGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B37 /* FluxNews/IOSUIKitScrolloverGeometry.swift */; };
 		A38 /* FluxNews/IOSCoreSessionExecutionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B38 /* FluxNews/IOSCoreSessionExecutionCoordinator.swift */; };
+		A39 /* FluxNews/IOSBackgroundSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B39 /* FluxNews/IOSBackgroundSyncCoordinator.swift */; };
+		A40 /* FluxNews/IOSAppRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40 /* FluxNews/IOSAppRuntime.swift */; };
 		A35 /* ../shared/FluxApple/AppleCoreExecution.swift in Sources */ = {isa = PBXBuildFile; fileRef = B35 /* ../shared/FluxApple/AppleCoreExecution.swift */; };
 		A36 /* FluxNewsTests/AppleCoreExecutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36 /* FluxNewsTests/AppleCoreExecutionTests.swift */; };
 		A4 /* flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4 /* flux_uniffi.swift */; };
@@ -105,6 +107,8 @@
 		B34 /* FluxNews/IOSUIKitArticleLayoutEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSUIKitArticleLayoutEngine.swift; sourceTree = "<group>"; };
 		B37 /* FluxNews/IOSUIKitScrolloverGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSUIKitScrolloverGeometry.swift; sourceTree = "<group>"; };
 		B38 /* FluxNews/IOSCoreSessionExecutionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSCoreSessionExecutionCoordinator.swift; sourceTree = "<group>"; };
+		B39 /* FluxNews/IOSBackgroundSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSBackgroundSyncCoordinator.swift; sourceTree = "<group>"; };
+		B40 /* FluxNews/IOSAppRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSAppRuntime.swift; sourceTree = "<group>"; };
 		B35 /* ../shared/FluxApple/AppleCoreExecution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/AppleCoreExecution.swift; sourceTree = "<group>"; };
 		B36 /* FluxNewsTests/AppleCoreExecutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/AppleCoreExecutionTests.swift; sourceTree = "<group>"; };
 		B4 /* flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = flux_uniffi.swift; path = ../Build/Products/FluxUniFFI/Sources/flux_uniffi.swift; sourceTree = "<group>"; };
@@ -171,6 +175,8 @@
 				B34 /* FluxNews/IOSUIKitArticleLayoutEngine.swift */,
 				B37 /* FluxNews/IOSUIKitScrolloverGeometry.swift */,
 				B38 /* FluxNews/IOSCoreSessionExecutionCoordinator.swift */,
+				B39 /* FluxNews/IOSBackgroundSyncCoordinator.swift */,
+				B40 /* FluxNews/IOSAppRuntime.swift */,
 				B21 /* FluxNews/SearchView.swift */,
 				B22 /* FluxNewsTests/IOSSearchStoreTests.swift */,
 				B26 /* FluxNewsTests/AccountLifecycleTests.swift */,
@@ -358,6 +364,8 @@
 				A34 /* FluxNews/IOSUIKitArticleLayoutEngine.swift in Sources */,
 				A37 /* FluxNews/IOSUIKitScrolloverGeometry.swift in Sources */,
 				A38 /* FluxNews/IOSCoreSessionExecutionCoordinator.swift in Sources */,
+				A39 /* FluxNews/IOSBackgroundSyncCoordinator.swift in Sources */,
+				A40 /* FluxNews/IOSAppRuntime.swift in Sources */,
 				A35 /* ../shared/FluxApple/AppleCoreExecution.swift in Sources */,
 				A32 /* FluxNews/IOSErrorPresentation.swift in Sources */,
 			);
@@ -400,6 +408,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_TESTABILITY = YES;
+				FLUX_BACKGROUND_REFRESH_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev.backgroundSync;
 				FLUX_DISPLAY_NAME = "FluxNews Dev";
 				FLUX_STORAGE_NAMESPACE = FluxNewsNativeDev;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -429,6 +438,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
+				FLUX_BACKGROUND_REFRESH_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev.backgroundSync;
 				FLUX_DISPLAY_NAME = "FluxNews Dev";
 				FLUX_STORAGE_NAMESPACE = FluxNewsNativeDev;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -472,6 +482,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
+				FLUX_BACKGROUND_REFRESH_IDENTIFIER = dev.kevincfechtel.fluxNews.backgroundSync;
 				FLUX_DISPLAY_NAME = FluxNews;
 				FLUX_STORAGE_NAMESPACE = FluxNewsNativeUpgradeTest;
 				GENERATE_INFOPLIST_FILE = NO;
