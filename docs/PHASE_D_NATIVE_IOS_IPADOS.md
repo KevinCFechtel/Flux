@@ -1,6 +1,6 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: D1-D4 BASELINE COMPLETE / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D4 BASELINE COMPLETE / D4.5 COMPLETE / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
 > replaces the existing Flutter iOS/iPadOS client with a native Swift client:
@@ -734,9 +734,11 @@ Settings, wording, localization architecture, or other phase architecture. The
 UIKit Timeline amendment otherwise remains limited to renderer/integration and
 its relevant D4.4 validation.
 
-D4.5 is a separately accepted **planned** extension and is not covered by the
-earlier D4.1-D4.4 completion/freeze statement. Its user-facing wording and
-English/German localization must be added before D4.5 itself is marked complete.
+D4.5 is a separately accepted **completed** extension and is not covered by the
+earlier D4.1-D4.4 completion/freeze statement. Its cancellable manual-Sync
+contract, user-facing wording, English/German localization, automated regression
+coverage, and focused physical-device acceptance are complete as of
+23 September 2026.
 
 The UIKit Timeline amendment's D4.4/U3 real-device acceptance is complete. The
 owner accepted the exercised slow/fast Scrollover behavior, rotation and
@@ -797,12 +799,12 @@ keep U3 open and must not introduce device-specific product behavior.
 
 #### D4.5 — Cancellable Manual Sync
 
-**Status: IN PROGRESS.** The prerequisite owner acceptance of the current
-UIKit Timeline/presentation device changes was satisfied on 22 September 2026,
-and U5 cleanup/final acceptance is complete. The current UIKit Timeline
-architecture is frozen. D4.5 is a separately scoped Newsreader/Core feature and
-must not reopen the Timeline container, Scrollover detector, or fundamental
-image/layout pipeline.
+**Status: COMPLETE as of 23 September 2026.** The prerequisite owner
+acceptance of the current UIKit Timeline/presentation device changes was
+satisfied on 22 September 2026, and U5 cleanup/final acceptance is complete. The
+current UIKit Timeline architecture remains frozen. D4.5 is a separately scoped
+Newsreader/Core feature and did not reopen the Timeline container, Scrollover
+detector, or fundamental image/layout pipeline.
 
 D4.5-A establishes the additive Core cancellation contract: a run-scoped,
 monotonic `SyncCancellation` signal, a non-error `SyncOutcome::Cancelled`
@@ -930,7 +932,7 @@ D4.5-E validation on 23 September 2026 executed **348 native iOS tests with
 0 failures**, including account-edit and account-removal quiescence ordering,
 and `./apple/ios/Build/build-app.sh` completed successfully.
 
-**D4.5-F — presentation, localization, and final acceptance is IN PROGRESS.**
+**D4.5-F — presentation, localization, and final acceptance is COMPLETE.**
 The manual Sync control now resolves directly from the store-owned manual-Sync
 state: idle starts Sync, running presents an explicit `xmark` Cancel action,
 and cancelling returns the control to the Sync/restart action while the scope
@@ -983,10 +985,13 @@ and
 `testTimelineFeedIconRetryDoesNotUseMaterializingVisibleCellsAccessor`.
 `./apple/ios/Build/build-app.sh` also completed successfully.
 
-Physical-device acceptance must be rerun after this fix and still verify start
--> cancel -> immediate restart, the large mark-all-read case, coherent scope
-count/`Syncing…` presentation, no cancellation error alert, and no stale
-success checkmark or snapshot/count publication from the cancelled generation.
+Final physical-device acceptance passed on 23 September 2026 after the diffable
+fix. The owner re-exercised manual Sync cancellation, including the previously
+crashing large mark-all-read scenario, and accepted the result. The accepted
+behavior covers start -> cancel -> immediate restart, coherent scope
+count/`Syncing…` presentation, no cancellation error alert, no stale success
+checkmark or snapshot/count publication from the cancelled generation, and no
+recurrence of the UIKit diffable-data-source crash. D4.5 is therefore closed.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 
