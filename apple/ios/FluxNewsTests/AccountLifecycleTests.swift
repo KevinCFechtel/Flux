@@ -1324,4 +1324,34 @@ final class AccountLifecycleTests: XCTestCase {
         XCTAssertEqual(selectedFeedIDs, [42, 43])
     }
 
+    @MainActor
+    func testMediaTransferReconciliationHandoffBuffersUntilExecutorInstalls() async {
+        let handoff = IOSMediaTransferReconciliationHandoff()
+        var reconciliations = 0
+
+        await handoff.requestReconciliation()
+        await handoff.requestReconciliation()
+        XCTAssertEqual(reconciliations, 0)
+
+        await handoff.install {
+            reconciliations += 1
+        }
+
+        XCTAssertEqual(reconciliations, 1)
+    }
+
+    @MainActor
+    func testMediaTransferReconciliationHandoffInvokesInstalledExecutorImmediately() async {
+        let handoff = IOSMediaTransferReconciliationHandoff()
+        var reconciliations = 0
+
+        await handoff.install {
+            reconciliations += 1
+        }
+        await handoff.requestReconciliation()
+
+        XCTAssertEqual(reconciliations, 1)
+    }
+
+
 }
