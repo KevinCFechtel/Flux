@@ -44,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             self.transferCoordinator = MediaTransferCoordinator(core: core, isMediaInUse: { [weak self] enclosureID in
                 self?.playbackCoordinator?.isUsing(enclosureID: enclosureID) ?? false
             }, presentationState: self.transferPresentationState)
-            self.transferCoordinator?.onWorkChanged = { [weak store] in
+            self.transferCoordinator?.onWorkChanged = { [weak store = self.store] in
                 store?.refreshArticleAudioActions()
                 store?.refreshListeningListIfVisible()
             }
