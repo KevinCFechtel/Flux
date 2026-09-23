@@ -227,7 +227,8 @@ final class AppleCoreExecutionTests: XCTestCase {
         }
 
         XCTAssertTrue(sources[0].contains("responsiveResult {\n                try core.navigationProjection"))
-        XCTAssertTrue(sources[0].contains("blockingResult { try core.sync"))
+        XCTAssertTrue(sources[0].contains("blockingCancellableResult("))
+        XCTAssertTrue(sources[0].contains("core.syncCancellable(reason: .manual, cancellation: cancellation)"))
         XCTAssertTrue(sources[0].contains("blockingResult { try loader(feedID, variant)"))
         XCTAssertTrue(sources[0].contains("responsiveResult { try core.setReadStateBulk(articleIds: ids, read: true)"))
         XCTAssertTrue(sources[1].contains("blockingResult {\n                try core.searchArticles"))
