@@ -150,6 +150,7 @@ final class IOSBackgroundSyncCoordinator {
     private let now: () -> Date
     private let settingsReader: @Sendable (Flux) throws -> Bool
     private let syncRunner: @Sendable (Flux, SyncCancellation) throws -> SyncOutcome
+    private let resumeSyncRunner: @Sendable (Flux, SyncCancellation) throws -> SyncOutcome
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews",
         category: "background-sync"
@@ -159,6 +160,7 @@ final class IOSBackgroundSyncCoordinator {
     private var activeRunID: UInt64?
     private var activeTask: Task<Void, Never>?
     private var activeCancellation: SyncCancellation?
+    private var resumeTask: Task<Void, Never>?
 
     var onSuccessfulBackgroundSync: ((SyncCompleted) -> Void)?
 
@@ -173,6 +175,9 @@ final class IOSBackgroundSyncCoordinator {
         },
         syncRunner: @escaping @Sendable (Flux, SyncCancellation) throws -> SyncOutcome = {
             try $0.syncCancellable(reason: .background, cancellation: $1)
+        },
+        resumeSyncRunner: @escaping @Sendable (Flux, SyncCancellation) throws -> SyncOutcome = {
+            try $0.syncCancellable(reason: .resume, cancellation: $1)
         }
     ) {
         self.bootstrapper = bootstrapper
@@ -182,6 +187,7 @@ final class IOSBackgroundSyncCoordinator {
         self.now = now
         self.settingsReader = settingsReader
         self.syncRunner = syncRunner
+        self.resumeSyncRunner = resumeSyncRunner
     }
 
     /// Reconciles the one pending BGAppRefresh request with persisted Core
@@ -214,6 +220,41 @@ final class IOSBackgroundSyncCoordinator {
                 "Could not read Background Sync setting: \(String(reflecting: error), privacy: .private)"
             )
         }
+    }
+
+    /// Requests the Core-owned Resume policy. The Core itself decides whether
+    /// Background Sync is enabled, whether the last successful Sync is stale,
+    /// and whether this run is Delta or Full. Concurrent Manual/Background work
+    /// remains serialized by the existing Core Sync gate, where freshness is
+    /// re-evaluated after waiting.
+    func resumeIfNeeded() {
+        guard resumeTask == nil else { return }
+        let runner = resumeSyncRunner
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { resumeTask = nil }
+
+            guard let core = await bootstrapper.ensureStarted() else { return }
+            let cancellation = SyncCancellation()
+            guard let result = await bootstrapper.coreSessionExecutionCoordinator
+                .blockingCancellableResult(
+                    for: core,
+                    onCancel: { cancellation.cancel() },
+                    {
+                        try runner(core, cancellation)
+                    }
+                ) else {
+                return
+            }
+
+            if case let .failure(error) = result,
+               !(error is CancellationError) {
+                logger.error(
+                    "Resume Sync failed: \(String(reflecting: error), privacy: .private)"
+                )
+            }
+        }
+        resumeTask = task
     }
 
     func handle(_ context: IOSBackgroundTaskContext) {
