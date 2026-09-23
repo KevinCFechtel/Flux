@@ -4202,4 +4202,122 @@ mod tests {
         );
         assert!(widget.last_successful_sync_at.is_some());
     }
+
+    #[test]
+    fn background_without_delta_baseline_requests_full_without_remote_fetch() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = core(&temp, snapshot());
+
+        let completed = core.sync(SyncReason::Background).unwrap();
+
+        assert_eq!(completed.reason, SyncReason::Background);
+        assert!(!completed.data_changed);
+        assert_eq!(source.calls.load(Ordering::SeqCst), 0);
+        assert!(core.store.full_sync_required().unwrap());
+        assert!(core.store.delta_sync_cursor().unwrap().is_none());
+        assert!(core.last_successful_sync_at().unwrap().is_none());
+    }
+
+    #[test]
+    fn fresh_resume_is_noop_when_no_full_reconciliation_is_required() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = mutation_core(&temp);
+        let fetches_before = source.fetch_calls.load(Ordering::SeqCst);
+
+        let completed = core.sync(SyncReason::Resume).unwrap();
+
+        assert_eq!(completed.reason, SyncReason::Resume);
+        assert!(!completed.data_changed);
+        assert_eq!(completed.mutations_delivered, 0);
+        assert_eq!(source.fetch_calls.load(Ordering::SeqCst), fetches_before);
+    }
+
+    #[test]
+    fn delta_skips_unknown_feed_commits_known_work_and_resume_repairs_with_full_sync() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = mutation_core(&temp);
+        {
+            let mut remote = source.snapshot.lock().unwrap();
+            remote.articles.push(article(
+                4,
+                10,
+                Utc::now().to_rfc3339(),
+                false,
+                false,
+            ));
+            remote.articles.push(article(
+                5,
+                99,
+                Utc::now().to_rfc3339(),
+                false,
+                false,
+            ));
+        }
+
+        let delta = core.sync(SyncReason::Background).unwrap();
+
+        assert_eq!(delta.new_articles, 1);
+        assert!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .iter()
+            .any(|article| article.id == 4)
+        );
+        assert!(
+            !core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .iter()
+            .any(|article| article.id == 5)
+        );
+        assert!(core.store.full_sync_required().unwrap());
+        assert!(core.store.delta_sync_cursor().unwrap().is_some());
+
+        source.snapshot.lock().unwrap().feeds.push(Feed {
+            id: 99,
+            category_id: 1,
+            title: "New Feed".into(),
+        });
+
+        let repaired = core.sync(SyncReason::Resume).unwrap();
+
+        assert_eq!(repaired.reason, SyncReason::Resume);
+        assert!(
+            core.query_articles(ArticleQuery {
+                limit: 0,
+                ..Default::default()
+            })
+            .unwrap()
+            .iter()
+            .any(|article| article.id == 5)
+        );
+        assert!(!core.store.full_sync_required().unwrap());
+    }
+
+    #[test]
+    fn resume_runs_full_when_last_full_sync_is_older_than_policy_even_after_fresh_delta() {
+        let temp = TempDir::new().unwrap();
+        let (core, source) = mutation_core(&temp);
+        core.store
+            .set_last_full_sync_at_for_testing("2020-01-01 00:00:00")
+            .unwrap();
+
+        core.sync(SyncReason::Background).unwrap();
+        let fetches_after_delta = source.fetch_calls.load(Ordering::SeqCst);
+
+        let resumed = core.sync(SyncReason::Resume).unwrap();
+
+        assert_eq!(resumed.reason, SyncReason::Resume);
+        assert_eq!(
+            source.fetch_calls.load(Ordering::SeqCst),
+            fetches_after_delta + 1
+        );
+        assert!(!core.store.full_sync_required().unwrap());
+    }
+
 }
