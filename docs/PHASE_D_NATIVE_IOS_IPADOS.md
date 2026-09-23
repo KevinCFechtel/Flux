@@ -976,6 +976,13 @@ paths now enumerate only already-materialized cells through
 cells from the data source. Focused regression coverage combines a visible
 Timeline, structural removal, and a feed-icon request revision.
 
+Post-fix automated validation on 23 September 2026 executed **351 native iOS
+tests with 0 failures** and ended with `TEST SUCCEEDED`. The run includes both
+`testFeedIconRetryDuringStructuralRemovalDoesNotForceDiffableCellMaterialization`
+and
+`testTimelineFeedIconRetryDoesNotUseMaterializingVisibleCellsAccessor`.
+`./apple/ios/Build/build-app.sh` also completed successfully.
+
 Physical-device acceptance must be rerun after this fix and still verify start
 -> cancel -> immediate restart, the large mark-all-read case, coherent scope
 count/`Syncing…` presentation, no cancellation error alert, and no stale
