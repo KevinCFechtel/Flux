@@ -26,8 +26,14 @@ struct FluxNewsApp: App {
                         newsreaderStore.resumeManualSyncAfterAbortedCoreReplacement()
                     }
                     bootstrapper.onCoreChanged = { core in
-                        if let core { newsreaderStore.attach(to: core) }
-                        else { newsreaderStore.detach() }
+                        if let core {
+                            newsreaderStore.attach(
+                                to: core,
+                                coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
+                            )
+                        } else {
+                            newsreaderStore.detach()
+                        }
                     }
                     await bootstrapper.start()
                 }
