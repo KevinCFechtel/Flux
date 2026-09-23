@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum IOSSceneOwnershipPolicy {
     // Core/session and mutation coordination are intentionally single-window until
@@ -8,10 +9,12 @@ enum IOSSceneOwnershipPolicy {
 
 final class FluxNewsAppBundleMarker {}
 
+@MainActor
 @main
 struct FluxNewsApp: App {
+    @UIApplicationDelegateAdaptor(IOSAppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var bootstrapper = CoreBootstrapper()
+    @StateObject private var bootstrapper = IOSAppRuntime.shared.bootstrapper
     @State private var newsreaderStore = NewsreaderStore()
 
     var body: some Scene {
@@ -35,11 +38,26 @@ struct FluxNewsApp: App {
                             newsreaderStore.detach()
                         }
                     }
-                    await bootstrapper.ensureStarted()
+                    if let core = await bootstrapper.ensureStarted(),
+                       newsreaderStore.core !== core {
+                        newsreaderStore.attach(
+                            to: core,
+                            coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
+                        )
+                    }
+                    await IOSAppRuntime.shared.backgroundSyncCoordinator.refreshScheduling()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
-                        Task { await bootstrapper.ensureStarted() }
+                        Task {
+                            if let core = await bootstrapper.ensureStarted(),
+                               newsreaderStore.core !== core {
+                                newsreaderStore.attach(
+                                    to: core,
+                                    coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
+                                )
+                            }
+                        }
                     } else {
                         newsreaderStore.flushScrolloverPersistenceForLifecycle()
                     }
