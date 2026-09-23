@@ -1153,7 +1153,7 @@ finishing background/manual Sync. Focused tests cover persisted preference reads
 disable/cancel scheduling behavior, enable/reschedule behavior, and the
 dedicated Resume trigger.
 
-**D5-E — Native Local Notifications is IMPLEMENTED; validation is pending.**
+**D5-E — Native Local Notifications is COMPLETE.** Validation is complete across the native iOS integration and the shared Apple presentation extraction: the canonical iOS `./apple/ios/Build/test.sh` gate passes with 371 tests and 0 failures after the D5-E integration, the new MainActor default-argument warnings have been removed, and `bash apple/macos/Build/build-app.sh` succeeds after moving `SystemNotificationPresentation` into `apple/shared/FluxApple`.
 The existing Core notification-candidate contract remains authoritative; D5-E
 adds no Rust/UniFFI notification-domain logic and no APNs/push infrastructure.
 
