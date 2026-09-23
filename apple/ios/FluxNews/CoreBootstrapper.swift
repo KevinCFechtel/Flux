@@ -37,6 +37,8 @@ final class CoreBootstrapper: ObservableObject {
     private let accountValidator: @Sendable (IOSMinifluxCredentials) throws -> AccountValidationAttempt
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "core")
     private var bootstrapGeneration: UInt64 = 0
+    private var startupTask: Task<Void, Never>?
+    private var startupTaskGeneration: UInt64?
     private nonisolated static let defaultCoreFactory: @Sendable (IOSMinifluxCredentials) throws -> Flux = { try makeCore($0) }
     private nonisolated static let defaultAccountValidator: @Sendable (IOSMinifluxCredentials) throws -> AccountValidationAttempt = { validateAccount($0) }
 
@@ -54,15 +56,53 @@ final class CoreBootstrapper: ObservableObject {
     }
 
     func start() async {
+        if let startupTask {
+            await startupTask.value
+            return
+        }
         guard case .starting = state else { return }
+
         let generation = nextBootstrapGeneration()
+        let task = Task { @MainActor [weak self] in
+            await self?.performStartup(generation: generation)
+        }
+        startupTask = task
+        startupTaskGeneration = generation
+        await task.value
+
+        if startupTaskGeneration == generation {
+            startupTask = nil
+            startupTaskGeneration = nil
+        }
+    }
+
+    /// Idempotent readiness entry point for both normal app startup and later
+    /// headless/background launch paths. Concurrent callers await the same
+    /// in-flight bootstrap instead of constructing a second Core.
+    @discardableResult
+    func ensureStarted() async -> Flux? {
+        if let core { return core }
+        await start()
+        return core
+    }
+
+    private func performStartup(generation: UInt64) async {
         do {
             guard let stored = try credentialStore.load() else {
+                guard generation == bootstrapGeneration else { return }
                 state = .accountRequired
                 return
             }
             credentials = stored
             _ = try await activate(stored, persist: false, generation: generation)
+        } catch IOSCredentialStoreError.temporarilyUnavailable {
+            // Before the first unlock after reboot, Keychain access can be
+            // unavailable to a background launch. Keep startup retryable rather
+            // than presenting a broken-account error. A later app-active or
+            // background readiness request will retry the same bootstrap path.
+            guard generation == bootstrapGeneration else { return }
+            state = .starting
+            logger.info("Core startup deferred until protected credentials become available.")
         } catch {
             guard generation == bootstrapGeneration else { return }
             state = .recoverableError(Self.safeMessage(for: error))
@@ -228,6 +268,12 @@ final class CoreBootstrapper: ObservableObject {
 
     private func nextBootstrapGeneration() -> UInt64 {
         bootstrapGeneration &+= 1
+        // The underlying stale task may still be unwinding on AppleCoreExecution,
+        // but generation guards make its publication inert. Clearing only this
+        // reference allows an explicit retry/reconfiguration to start a new
+        // bootstrap without waiting for stale synchronous work.
+        startupTask = nil
+        startupTaskGeneration = nil
         return bootstrapGeneration
     }
 
