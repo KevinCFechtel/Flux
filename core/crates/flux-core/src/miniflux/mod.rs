@@ -47,7 +47,6 @@ pub struct AccountValidationResult {
 pub enum MinifluxCapability {
     MediaProgressSync,
     SavedMediaSync,
-    EntryDeltaSync,
 }
 
 impl AccountValidationResult {
@@ -65,9 +64,6 @@ impl MinifluxCapability {
         }
         if Self::saved_media_sync_supported(version) {
             capabilities.push(Self::SavedMediaSync);
-        }
-        if Self::entry_delta_sync_supported(version) {
-            capabilities.push(Self::EntryDeltaSync);
         }
         capabilities
     }
@@ -88,20 +84,6 @@ impl MinifluxCapability {
         };
         (major, minor) >= (2, 2)
     }
-    fn entry_delta_sync_supported(version: &str) -> bool {
-        let mut components = version.trim().trim_start_matches('v').split('.');
-        let Some(major) = components.next().and_then(|value| value.parse::<u64>().ok()) else {
-            return false;
-        };
-        let Some(minor) = components.next().and_then(|value| value.parse::<u64>().ok()) else {
-            return false;
-        };
-        let Some(patch) = components.next().and_then(|value| value.parse::<u64>().ok()) else {
-            return false;
-        };
-        (major, minor, patch) >= (2, 0, 49)
-    }
-
     fn saved_media_sync_supported(version: &str) -> bool {
         let mut components = version.trim().trim_start_matches('v').split('.');
         let Some(major) = components
