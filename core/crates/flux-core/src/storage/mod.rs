@@ -2793,6 +2793,303 @@ impl Store {
             .optional()
             .map_err(sql_error)
     }
+
+    pub fn delta_sync_cursor(&self) -> Result<Option<i64>, CoreError> {
+        self.connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .query_row(
+                "SELECT value FROM core_settings WHERE key='delta_sync_cursor'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(sql_error)?
+            .map(|value| {
+                value
+                    .parse::<i64>()
+                    .map_err(|_| CoreError::persistence("invalid delta sync cursor"))
+            })
+            .transpose()
+    }
+
+    pub fn last_full_sync_at(&self) -> Result<Option<String>, CoreError> {
+        self.connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .query_row(
+                "SELECT value FROM core_settings WHERE key='last_full_sync_at'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(sql_error)
+    }
+
+    pub fn full_sync_required(&self) -> Result<bool, CoreError> {
+        let value: Option<String> = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?
+            .query_row(
+                "SELECT value FROM core_settings WHERE key='full_sync_required'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(sql_error)?;
+        match value.as_deref() {
+            None | Some("0") => Ok(false),
+            Some("1") => Ok(true),
+            Some(_) => Err(CoreError::persistence("invalid full sync required setting")),
+        }
+    }
+
+    pub fn mark_full_sync_required(&self, reason: &str) -> Result<(), CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        connection
+            .execute(
+                "INSERT INTO core_settings(key,value) VALUES('full_sync_required','1') ON CONFLICT(key) DO UPDATE SET value='1'",
+                [],
+            )
+            .map_err(sql_error)?;
+        connection
+            .execute(
+                "INSERT INTO core_settings(key,value) VALUES('full_sync_reason',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                [reason],
+            )
+            .map_err(sql_error)?;
+        Ok(())
+    }
+
+    pub fn commit_delta_sync_success(&self, cursor: i64) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute(
+            "INSERT INTO core_settings(key,value) VALUES('delta_sync_cursor',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [cursor.to_string()],
+        )
+        .map_err(sql_error)?;
+        tx.execute(
+            "INSERT INTO core_settings(key,value) VALUES('last_successful_sync_at',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [],
+        )
+        .map_err(sql_error)?;
+        tx.commit().map_err(sql_error)
+    }
+
+    pub fn commit_full_sync_success(&self, delta_cursor: i64) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute(
+            "INSERT INTO core_settings(key,value) VALUES('delta_sync_cursor',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [delta_cursor.to_string()],
+        )
+        .map_err(sql_error)?;
+        tx.execute(
+            "INSERT INTO core_settings(key,value) VALUES('last_successful_sync_at',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [],
+        )
+        .map_err(sql_error)?;
+        tx.execute(
+            "INSERT INTO core_settings(key,value) VALUES('last_full_sync_at',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [],
+        )
+        .map_err(sql_error)?;
+        tx.execute(
+            "INSERT INTO core_settings(key,value) VALUES('full_sync_required','0') ON CONFLICT(key) DO UPDATE SET value='0'",
+            [],
+        )
+        .map_err(sql_error)?;
+        tx.execute("DELETE FROM core_settings WHERE key='full_sync_reason'", [])
+            .map_err(sql_error)?;
+        tx.commit().map_err(sql_error)
+    }
+
+    pub fn reconcile_delta_articles(
+        &self,
+        articles: &[Article],
+        enclosures: &[Enclosure],
+        media_progress_writes: &HashMap<i64, u64>,
+    ) -> Result<(ReconciliationStats, Vec<i64>), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        let mut stats = ReconciliationStats::default();
+        let mut skipped_unknown_feeds = Vec::new();
+        let mut accepted_article_ids = HashSet::new();
+
+        for article in articles {
+            let feed_exists: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM feeds WHERE id=?1)",
+                    [article.feed_id],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            if !feed_exists {
+                skipped_unknown_feeds.push(article.feed_id);
+                continue;
+            }
+
+            accepted_article_ids.insert(article.id);
+            let existing = tx
+                .query_row(
+                    "SELECT feed_id,title,url,comments_url,published_at,remote_is_read,remote_is_starred,raw_html_content,reading_time_minutes,preview,image_url FROM articles WHERE id=?1",
+                    [article.id],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, bool>(5)?,
+                            row.get::<_, bool>(6)?,
+                            row.get::<_, String>(7)?,
+                            row.get::<_, u32>(8)?,
+                            row.get::<_, String>(9)?,
+                            row.get::<_, Option<String>>(10)?,
+                        ))
+                    },
+                )
+                .optional()
+                .map_err(sql_error)?;
+
+            match existing {
+                None => {
+                    stats.new_articles += 1;
+                    stats
+                        .new_article_ids_by_feed
+                        .entry(article.feed_id)
+                        .or_default()
+                        .push(article.id);
+                }
+                Some(existing)
+                    if existing
+                        != (
+                            article.feed_id,
+                            article.title.clone(),
+                            article.url.clone(),
+                            article.comments_url.clone(),
+                            article.published_at.clone(),
+                            article.is_read,
+                            article.is_starred,
+                            article.raw_html_content.clone(),
+                            article.reading_time_minutes,
+                            article.preview.clone(),
+                            article.image_url.clone(),
+                        ) =>
+                {
+                    stats.updated_articles += 1;
+                }
+                Some(_) => {}
+            }
+
+            tx.execute(
+                "INSERT INTO articles (id,feed_id,title,url,comments_url,published_at,is_read,is_starred,remote_is_read,remote_is_starred,raw_html_content,reading_time_minutes,preview,image_url,content_processing_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?7,?8,?9,?10,?11,?12,?13) ON CONFLICT(id) DO UPDATE SET feed_id=excluded.feed_id,title=excluded.title,url=excluded.url,comments_url=excluded.comments_url,published_at=excluded.published_at,remote_is_read=excluded.remote_is_read,remote_is_starred=excluded.remote_is_starred,is_read=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='read') THEN articles.is_read ELSE excluded.is_read END,is_starred=CASE WHEN EXISTS(SELECT 1 FROM pending_mutations p WHERE p.article_id=excluded.id AND p.field='starred') THEN articles.is_starred ELSE excluded.is_starred END,raw_html_content=excluded.raw_html_content,reading_time_minutes=excluded.reading_time_minutes,preview=excluded.preview,image_url=excluded.image_url,content_processing_version=excluded.content_processing_version",
+                params![
+                    article.id,
+                    article.feed_id,
+                    article.title,
+                    article.url,
+                    article.comments_url,
+                    article.published_at,
+                    article.is_read,
+                    article.is_starred,
+                    article.raw_html_content,
+                    article.reading_time_minutes,
+                    article.preview,
+                    article.image_url,
+                    crate::article::PROCESSING_VERSION
+                ],
+            )
+            .map_err(sql_error)?;
+        }
+
+        let accepted_enclosures = enclosures
+            .iter()
+            .filter(|enclosure| accepted_article_ids.contains(&enclosure.article_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let accepted_articles = articles
+            .iter()
+            .filter(|article| accepted_article_ids.contains(&article.id))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let new_live_enclosures = accepted_enclosures
+            .iter()
+            .filter(|enclosure| {
+                !tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM enclosures WHERE id=?1)",
+                    [enclosure.id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(true)
+            })
+            .map(|enclosure| enclosure.id)
+            .collect::<Vec<_>>();
+
+        reconcile_remote_enclosures(
+            &tx,
+            &accepted_articles,
+            &accepted_enclosures,
+            media_progress_writes,
+        )?;
+
+        let mut auto_download_articles = HashSet::new();
+        for enclosure_id in new_live_enclosures {
+            let article_id: i64 = tx
+                .query_row(
+                    "SELECT article_id FROM enclosures WHERE id=?1",
+                    [enclosure_id],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            let enabled: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM articles a JOIN feed_preferences p ON p.feed_id=a.feed_id WHERE a.id=?1 AND p.auto_download_audio=1)",
+                    [article_id],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            if enabled && is_audio_enclosure(&tx, enclosure_id)? {
+                auto_download_articles.insert(article_id);
+            }
+        }
+        for article_id in auto_download_articles {
+            ensure_listening_membership(&tx, article_id, &Utc::now().to_rfc3339())?;
+            for enclosure_id in audio_enclosure_ids_for_article(&tx, article_id)? {
+                let suppressed: bool = tx
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM auto_download_suppressions WHERE enclosure_id=?1)",
+                        [enclosure_id],
+                        |row| row.get(0),
+                    )
+                    .map_err(sql_error)?;
+                if !suppressed {
+                    request_download_in_transaction(&tx, enclosure_id, DownloadOrigin::Automatic)?;
+                }
+            }
+        }
+
+        skipped_unknown_feeds.sort_unstable();
+        skipped_unknown_feeds.dedup();
+        tx.commit().map_err(sql_error)?;
+        Ok((stats, skipped_unknown_feeds))
+    }
     pub fn navigation_catalog(&self) -> Result<NavigationCatalog, CoreError> {
         let connection = self
             .connection
@@ -3358,7 +3655,7 @@ fn clear_synchronized_state(
         // Technical feed IDs and remote baselines are scoped to the previous account.
         tx.execute_batch("DELETE FROM pending_saved_media_replication; DELETE FROM saved_media_remote_state; UPDATE saved_media_sync_config SET enabled=0,sync_feed_id=NULL,requires_repair=0 WHERE id=1;").map_err(sql_error)?;
     }
-    tx.execute_batch("DELETE FROM feeds; DELETE FROM categories; DELETE FROM core_settings WHERE key='last_successful_sync_at';").map_err(sql_error)
+    tx.execute_batch("DELETE FROM feeds; DELETE FROM categories; DELETE FROM core_settings WHERE key IN ('last_successful_sync_at','last_full_sync_at','delta_sync_cursor','full_sync_required','full_sync_reason');").map_err(sql_error)
 }
 fn upsert_remote_enclosures(
     tx: &Transaction<'_>,
