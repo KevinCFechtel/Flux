@@ -714,10 +714,12 @@ struct ArticleRowContent: Equatable, Sendable {
         guard let core else { return }
         let request = readLifecycle.beginNavigation()
         let countMode: NavigationCountMode = unreadOnly ? .unread : .all
-        Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.responsiveResult {
-                try core.navigationProjection(countMode: countMode)
-            }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.responsiveResult(
+                for: core,
+                { try core.navigationProjection(countMode: countMode) }
+            ) else { return }
             guard let self, self.readLifecycle.isCurrentNavigation(request) else { return }
             switch result {
             case let .success(value):
@@ -740,15 +742,19 @@ struct ArticleRowContent: Equatable, Sendable {
         hasMoreTimelinePages = false
         isLoading = true
         errorMessage = nil
-        Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.responsiveResult {
-                let page = try core.articlePage(query: articleQuery, includeTotal: true)
-                return TimelinePagePreparation(
-                    page: page,
-                    contents: page.articles.map { ArticleRowContent(article: $0, referenceDate: referenceDate) },
-                    referenceDate: referenceDate
-                )
-            }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.responsiveResult(
+                for: core,
+                {
+                    let page = try core.articlePage(query: articleQuery, includeTotal: true)
+                    return TimelinePagePreparation(
+                        page: page,
+                        contents: page.articles.map { ArticleRowContent(article: $0, referenceDate: referenceDate) },
+                        referenceDate: referenceDate
+                    )
+                }
+            ) else { return }
             guard let self, self.readLifecycle.isCurrentArticle(request), self.readLifecycle.isCurrentSelectionCount(request) else { return }
             switch result {
             case let .success(value):
@@ -980,8 +986,12 @@ struct ArticleRowContent: Equatable, Sendable {
             completion(.failure(IOSCoreError.notConfigured))
             return
         }
-        Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.responsiveResult { try core.readerDocument(articleId: articleID) }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.responsiveResult(
+                for: core,
+                { try core.readerDocument(articleId: articleID) }
+            ) else { return }
             guard let self, self.readerRequests.isCurrent(request) else { return }
             completion(result)
         }
@@ -1000,8 +1010,12 @@ struct ArticleRowContent: Equatable, Sendable {
             completion(.failure(IOSCoreError.notConfigured))
             return
         }
-        Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.blockingResult { try core.saveToService(articleId: article.id) }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.blockingResult(
+                for: core,
+                { try core.saveToService(articleId: article.id) }
+            ) else { return }
             guard self != nil else { return }
             completion(result)
         }
@@ -1009,13 +1023,24 @@ struct ArticleRowContent: Equatable, Sendable {
 
     func discoverSubscriptions(_ request: DiscoverSubscriptionsRequest, completion: @escaping (Result<[DiscoveredSubscription], Error>) -> Void) {
         guard let core else { completion(.failure(unconfiguredError)); return }
-        Task { let result = await AppleCoreExecution.shared.blockingResult { try core.discoverSubscriptions(request: request) }; completion(result) }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.blockingResult(
+                for: core,
+                { try core.discoverSubscriptions(request: request) }
+            ) else { return }
+            completion(result)
+        }
     }
 
     func createFeed(_ request: CreateFeedRequest, completion: @escaping (Result<CreateFeedResult, Error>) -> Void) {
         guard let core else { completion(.failure(unconfiguredError)); return }
-        Task { [weak self] in
-            let result = await AppleCoreExecution.shared.blockingResult { try core.createFeed(request: request) }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.blockingResult(
+                for: core,
+                { try core.createFeed(request: request) }
+            ) else { return }
             if case .success = result { self?.loadNavigationAndCounts() }
             completion(result)
         }
@@ -1023,8 +1048,12 @@ struct ArticleRowContent: Equatable, Sendable {
 
     func createCategory(_ title: String, completion: @escaping (Result<CreateCategoryResult, Error>) -> Void) {
         guard let core else { completion(.failure(unconfiguredError)); return }
-        Task { [weak self] in
-            let result = await AppleCoreExecution.shared.blockingResult { try core.createCategory(title: title) }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.blockingResult(
+                for: core,
+                { try core.createCategory(title: title) }
+            ) else { return }
             if case .success = result { self?.loadNavigationAndCounts() }
             completion(result)
         }
@@ -1032,8 +1061,12 @@ struct ArticleRowContent: Equatable, Sendable {
 
     func loadFeedPreferences(feedID: Int64, completion: @escaping (Result<FeedPreferences, Error>) -> Void) {
         guard let core else { completion(.failure(unconfiguredError)); return }
-        Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.responsiveResult { try core.feedPreferences(feedId: feedID) }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.responsiveResult(
+                for: core,
+                { try core.feedPreferences(feedId: feedID) }
+            ) else { return }
             guard self?.core === core else { return }
             completion(result)
         }
@@ -1053,8 +1086,12 @@ struct ArticleRowContent: Equatable, Sendable {
 
     private func updateFeedPreferences(feedID: Int64, change: @escaping @Sendable (Flux) throws -> Void, completion: @escaping (Result<Void, Error>) -> Void) {
         guard let core else { completion(.failure(unconfiguredError)); return }
-        Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.responsiveResult { try change(core) }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.responsiveResult(
+                for: core,
+                { try change(core) }
+            ) else { return }
             guard self?.core === core else { return }
             completion(result)
         }
@@ -1063,10 +1100,17 @@ struct ArticleRowContent: Equatable, Sendable {
     private func makeReadMutationWriter() -> ReadMutationWriter? {
         if let readMutationWriterOverride { return readMutationWriterOverride }
         guard let core else { return nil }
+        let sessionCoordinator = coreSessionExecutionCoordinator
         return { articleIDs, read in
-            await AppleCoreExecution.shared.responsiveResult {
-                _ = try core.setReadStateBulk(articleIds: articleIDs, read: read)
+            guard let result = await sessionCoordinator.responsiveResult(
+                for: core,
+                {
+                    _ = try core.setReadStateBulk(articleIds: articleIDs, read: read)
+                }
+            ) else {
+                return .failure(CancellationError())
             }
+            return result
         }
     }
 
@@ -1142,8 +1186,12 @@ struct ArticleRowContent: Equatable, Sendable {
         }
         let revisions = optimisticallySetStarred(articleIDs, starred: starred)
         let snapshotRevision = snapshotRevision
-        Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.responsiveResult { try core.setStarredStateBulk(articleIds: articleIDs, starred: starred) }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.responsiveResult(
+                for: core,
+                { try core.setStarredStateBulk(articleIds: articleIDs, starred: starred) }
+            ) else { return }
             guard let self else { return }
             switch result {
             case .success:
@@ -1728,15 +1776,19 @@ struct ArticleRowContent: Equatable, Sendable {
             cursor: cursor
         )
         nextTimelinePageRequest = request
-        Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.responsiveResult {
-                let page = try core.articlePage(query: pageQuery, includeTotal: false)
-                return TimelinePagePreparation(
-                    page: page,
-                    contents: page.articles.map { ArticleRowContent(article: $0, referenceDate: referenceDate) },
-                    referenceDate: referenceDate
-                )
-            }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.responsiveResult(
+                for: core,
+                {
+                    let page = try core.articlePage(query: pageQuery, includeTotal: false)
+                    return TimelinePagePreparation(
+                        page: page,
+                        contents: page.articles.map { ArticleRowContent(article: $0, referenceDate: referenceDate) },
+                        referenceDate: referenceDate
+                    )
+                }
+            ) else { return }
             guard let self, self.completeNextTimelinePageRequest(request) else { return }
             switch result {
             case let .success(value):
@@ -1868,13 +1920,20 @@ struct ArticleRowContent: Equatable, Sendable {
         guard let core else { completion(false); return }
         let scope = scope
         let query = ArticleQuery(scope: query(scope: scope).scope, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil)
-        Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.responsiveResult { try core.queryArticles(query: query).map(\.id) }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.responsiveResult(
+                for: core,
+                { try core.queryArticles(query: query).map(\.id) }
+            ) else { return }
             guard let self else { return }
             switch result {
             case let .success(ids):
                 guard !ids.isEmpty else { completion(true); return }
-                let mutation = await AppleCoreExecution.shared.responsiveResult { try core.setReadStateBulk(articleIds: ids, read: true) }
+                guard let mutation = await sessionCoordinator.responsiveResult(
+                    for: core,
+                    { try core.setReadStateBulk(articleIds: ids, read: true) }
+                ) else { return }
                 switch mutation {
                 case .success:
                     self.markMeaningfulInteraction()
@@ -2073,12 +2132,16 @@ struct ArticleRowContent: Equatable, Sendable {
         let request = readLifecycle.beginSelectionCount()
         let selectionQuery = query()
         let countMode: NavigationCountMode = unreadOnly ? .unread : .all
-        Task { [weak self, core] in
-            let result = await AppleCoreExecution.shared.responsiveResult {
-                let selection = try core.countArticles(query: selectionQuery)
-                let navigation = try core.navigationProjection(countMode: countMode)
-                return (selection, navigation)
-            }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.responsiveResult(
+                for: core,
+                {
+                    let selection = try core.countArticles(query: selectionQuery)
+                    let navigation = try core.navigationProjection(countMode: countMode)
+                    return (selection, navigation)
+                }
+            ) else { return }
             guard let self else { return }
             switch result {
             case let .success(counts):
