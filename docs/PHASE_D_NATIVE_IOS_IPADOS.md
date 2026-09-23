@@ -1017,8 +1017,9 @@ recurrence of the UIKit diffable-data-source crash. D4.5 is therefore closed.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 
-**D5-A — Core-Session Execution Foundation is complete and automated-test validated.**
-The canonical iOS test suite passes after the D5-A integration. The native iOS app now has one app-wide `IOSCoreSessionExecutionCoordinator`
+**D5-A — Core-Session Execution Foundation is COMPLETE.**
+The canonical iOS test suite passes after the D5-A integration and
+`./apple/ios/Build/build-app.sh` completes successfully. The native iOS app now has one app-wide `IOSCoreSessionExecutionCoordinator`
 owned by `CoreBootstrapper`. It admits synchronous Core work only for the
 current Core session, tracks admitted work until the underlying
 `AppleCoreExecution` call has actually returned, blocks new admission during
@@ -1029,6 +1030,25 @@ also holding a Core-session lease. Account replacement/removal/deactivation
 quiesce the app-wide Core session before replacing or destroying it. This is
 foundation only: BGTask scheduling, cold-launch readiness, notification delivery
 and WidgetKit work have not started.
+
+**D5-B — Cold-Launch Readiness & Credential Accessibility is implemented;
+automated validation is pending.** `CoreBootstrapper.ensureStarted()` is the
+idempotent readiness entry point for foreground and future headless/background
+callers. Concurrent callers await one in-flight bootstrap, while retry,
+reconfiguration, account removal and deactivation retain generation-based stale
+completion suppression. A background launch that occurs before protected
+credentials are available leaves startup retryable rather than converting the
+account into a permanent configuration failure; returning to the active app
+reuses the same readiness path.
+
+Native iOS Miniflux credentials now use
+`kSecAttrAccessibleAfterFirstUnlock`. Newly saved items receive that
+accessibility class, and readable credentials created by earlier native builds
+are migrated on load from their previous accessibility class. This deliberately
+uses the migratable AfterFirstUnlock variant rather than a
+`ThisDeviceOnly` class so existing encrypted backup/device-migration semantics
+are not narrowed merely to enable background access. No BGTask registration or
+background Sync execution is part of D5-B.
 
 Integrate BGTaskScheduler, local notifications and the native iOS WidgetKit
 presentation using the shared snapshot contract. Background execution shares
