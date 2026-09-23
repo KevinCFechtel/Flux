@@ -273,9 +273,9 @@ impl FluxCore {
 
     /// Runs Sync with a caller-owned, monotonic cancellation signal.
     ///
-    /// Cancellation is a normal Sync outcome rather than a Core error. This boundary currently
-    /// observes cancellation before Core work begins and again after waiting for the Sync gate;
-    /// phase and bounded-work checkpoints are supplied by the Sync orchestration itself.
+    /// Cancellation is a normal Sync outcome rather than a Core error. The signal is observed
+    /// before Core work begins, after waiting for the Sync gate, and at safe phase or bounded-work
+    /// boundaries throughout mutation delivery, remote fetch, reconciliation and cleanup.
     pub fn sync_cancellable(
         &self,
         reason: SyncReason,

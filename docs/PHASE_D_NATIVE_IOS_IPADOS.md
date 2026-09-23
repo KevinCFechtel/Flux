@@ -809,8 +809,9 @@ terminal outcome, and a separate cancellable Sync entry point. The existing
 
 D4.5-B threads that signal through the productive Rust Sync orchestration.
 Pending article/media mutations stop only between safe remote-write/local-ack
-units; Miniflux initial and SavedMedia entry pagination checks between HTTP
-pages; protected media fetches stop between bounded requests; reconciliation
+units; the Miniflux starred-state read/conditional-write pair observes
+cancellation between its HTTP requests; initial and SavedMedia entry pagination
+checks between HTTP pages; protected media fetches stop between bounded requests; reconciliation
 remains one unsplit SQLite transaction with checks immediately before and after;
 SavedMedia replication, retention/media cleanup, notification preparation, and
 the final successful-Sync commit have explicit safe checkpoints. A cancelled

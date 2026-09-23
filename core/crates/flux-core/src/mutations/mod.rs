@@ -45,17 +45,26 @@ pub(crate) fn deliver_pending_cancellable(
             return Ok(Cancellable::Cancelled);
         }
 
-        let remote_result = match pending.field {
-            MutationField::Read => remote.set_read_state(&[pending.article_id], pending.desired),
+        match pending.field {
+            MutationField::Read => {
+                let remote_result =
+                    remote.set_read_state(&[pending.article_id], pending.desired);
+                if let Err(error) = remote_result {
+                    if cancellation.is_cancelled() {
+                        return Ok(Cancellable::Cancelled);
+                    }
+                    return Err(error);
+                }
+            }
             MutationField::Starred => {
-                remote.set_starred_state(pending.article_id, pending.desired)
+                if !remote.set_starred_state_cancellable(
+                    pending.article_id,
+                    pending.desired,
+                    cancellation,
+                )? {
+                    return Ok(Cancellable::Cancelled);
+                }
             }
-        };
-        if let Err(error) = remote_result {
-            if cancellation.is_cancelled() {
-                return Ok(Cancellable::Cancelled);
-            }
-            return Err(error);
         }
 
         // A successful remote write and its durable acknowledgement are one safe unit. Cancellation

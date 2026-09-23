@@ -293,6 +293,21 @@ pub trait RemoteSource: Send + Sync {
     }
     fn set_read_state(&self, article_ids: &[i64], read: bool) -> Result<(), CoreError>;
     fn set_starred_state(&self, article_id: i64, starred: bool) -> Result<(), CoreError>;
+    fn set_starred_state_cancellable(
+        &self,
+        article_id: i64,
+        starred: bool,
+        cancellation: &SyncCancellation,
+    ) -> Result<bool, CoreError> {
+        if cancellation.is_cancelled() {
+            return Ok(false);
+        }
+        let result = self.set_starred_state(article_id, starred);
+        if cancellation.is_cancelled() {
+            return Ok(false);
+        }
+        result.map(|()| true)
+    }
     fn set_media_progression(&self, _enclosure_id: i64, _seconds: u64) -> Result<(), CoreError> {
         Err(CoreError::data("media progression updates are unavailable"))
     }
@@ -1112,12 +1127,40 @@ impl RemoteSource for MinifluxClient {
         )
     }
     fn set_starred_state(&self, article_id: i64, starred: bool) -> Result<(), CoreError> {
-        let entry: EntryDto = self.get(&format!("/v1/entries/{article_id}"), &[])?;
-        if entry.starred != starred {
-            self.put(&format!("/v1/entries/{article_id}/star"), String::new())
-        } else {
+        let cancellation = SyncCancellation::new();
+        if self.set_starred_state_cancellable(article_id, starred, &cancellation)? {
             Ok(())
+        } else {
+            unreachable!("fresh cancellation signal cannot be cancelled")
         }
+    }
+    fn set_starred_state_cancellable(
+        &self,
+        article_id: i64,
+        starred: bool,
+        cancellation: &SyncCancellation,
+    ) -> Result<bool, CoreError> {
+        if cancellation.is_cancelled() {
+            return Ok(false);
+        }
+        let entry_result: Result<EntryDto, CoreError> =
+            self.get(&format!("/v1/entries/{article_id}"), &[]);
+        if cancellation.is_cancelled() {
+            return Ok(false);
+        }
+        let entry = entry_result?;
+        if entry.starred != starred {
+            if cancellation.is_cancelled() {
+                return Ok(false);
+            }
+            let update_result =
+                self.put(&format!("/v1/entries/{article_id}/star"), String::new());
+            if cancellation.is_cancelled() {
+                return Ok(false);
+            }
+            update_result?;
+        }
+        Ok(true)
     }
     fn set_media_progression(&self, enclosure_id: i64, seconds: u64) -> Result<(), CoreError> {
         self.put(
