@@ -295,9 +295,14 @@ struct ContentView: View {
         .onAppear { normalizeAdaptiveShell(for: adaptivePresentation) }
         .task(id: bootstrapper.coreRevision) {
             if let core = newsreaderStore.core {
-                searchStore.attach(to: core)
+                searchStore.attach(
+                    to: core,
+                    coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
+                )
                 searchStore.onLocalFirstMutation = { newsreaderStore.loadNavigationAndCounts() }
-            } else { searchStore.detach() }
+            } else {
+                searchStore.detach()
+            }
         }
     }
 
