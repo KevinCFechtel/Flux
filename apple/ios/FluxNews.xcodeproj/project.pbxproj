@@ -110,7 +110,7 @@
 		B38 /* FluxNews/IOSCoreSessionExecutionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSCoreSessionExecutionCoordinator.swift; sourceTree = "<group>"; };
 		B39 /* FluxNews/IOSBackgroundSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSBackgroundSyncCoordinator.swift; sourceTree = "<group>"; };
 		B40 /* FluxNews/IOSAppRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSAppRuntime.swift; sourceTree = "<group>"; };
-		B41 /* FluxNews/BackgroundSyncSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/BackgroundSyncSettingsView.swift; sourceTree = "<group>"; };
+		B41 /* FluxNews/BackgroundSyncSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncSettingsView.swift; sourceTree = "<group>"; };
 		B35 /* ../shared/FluxApple/AppleCoreExecution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/AppleCoreExecution.swift; sourceTree = "<group>"; };
 		B36 /* FluxNewsTests/AppleCoreExecutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/AppleCoreExecutionTests.swift; sourceTree = "<group>"; };
 		B4 /* flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = flux_uniffi.swift; path = ../Build/Products/FluxUniFFI/Sources/flux_uniffi.swift; sourceTree = "<group>"; };
