@@ -29,22 +29,20 @@ final class IOSAppRuntime {
                   let core = bootstrapper.core else {
                 return
             }
-            Task { @MainActor in
-                await systemNotificationManager.deliver(metadata.systemNotificationCandidates) { candidateID in
-                    guard let result = await bootstrapper.coreSessionExecutionCoordinator
-                        .responsiveResult(
-                            for: core,
-                            {
-                                try core.acknowledgeSystemNotification(candidateId: candidateID)
-                            }
-                        ) else {
-                        return false
-                    }
-                    if case .success = result {
-                        return true
-                    }
+            await systemNotificationManager.deliver(metadata.systemNotificationCandidates) { candidateID in
+                guard let result = await bootstrapper.coreSessionExecutionCoordinator
+                    .responsiveResult(
+                        for: core,
+                        {
+                            try core.acknowledgeSystemNotification(candidateId: candidateID)
+                        }
+                    ) else {
                     return false
                 }
+                if case .success = result {
+                    return true
+                }
+                return false
             }
         }
     }
