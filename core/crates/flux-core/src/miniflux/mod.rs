@@ -1683,7 +1683,7 @@ mod tests {
         let summary = search_article_summary(entry).unwrap();
         assert_eq!(summary.reading_time_minutes, 6);
     }
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{SocketAddr, TcpListener};
     use std::thread;
 
@@ -1700,15 +1700,22 @@ mod tests {
             reader.read_line(&mut request).unwrap();
             let target = request.split_whitespace().nth(1).unwrap().to_string();
             let mut authenticated = false;
+            let mut content_length = 0usize;
             loop {
                 request.clear();
                 reader.read_line(&mut request).unwrap();
                 if request == "\r\n" {
                     break;
                 }
-                authenticated |= request
-                    .to_ascii_lowercase()
-                    .starts_with("x-auth-token: test-key");
+                let lower = request.to_ascii_lowercase();
+                authenticated |= lower.starts_with("x-auth-token: test-key");
+                if let Some(value) = lower.strip_prefix("content-length:") {
+                    content_length = value.trim().parse().unwrap();
+                }
+            }
+            if content_length > 0 {
+                let mut request_body = vec![0; content_length];
+                reader.read_exact(&mut request_body).unwrap();
             }
             write!(stream, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
             (target, authenticated)
