@@ -907,13 +907,13 @@ D4.5-D validation on 23 September 2026 executed **345 native iOS tests with
 Core-execution-boundary coverage, and `./apple/ios/Build/build-app.sh`
 completed successfully.
 
-**D4.5-E — account/Core quiescence barrier is IN PROGRESS.** NewsreaderStore
-now keeps every manual-Sync execution registered until its synchronous Core call
-has actually returned, including user-cancelled runs that were already
-superseded for presentation so immediate restart remains possible. A Core
-replacement barrier prevents new manual runs, signals every still-winding
-cancellation handle/Swift task, and awaits all registered executions before the
-old Core may be replaced or its account state removed.
+**D4.5-E — account/Core quiescence barrier is COMPLETE.** NewsreaderStore
+keeps every manual-Sync execution registered until its synchronous Core call has
+actually returned, including user-cancelled runs that were already superseded
+for presentation so immediate restart remains possible. A Core replacement
+barrier prevents new manual runs, signals every still-winding cancellation
+handle/Swift task, and awaits all registered executions before the old Core may
+be replaced or its account state removed.
 
 CoreBootstrapper invokes that barrier before creating a replacement Core,
 removing account state, or explicitly deactivating an active Core. A failed
@@ -924,10 +924,16 @@ transition. The normal scene inactive/background path still only requests the
 existing Scrollover persistence flush and does **not** cancel or quiesce manual
 Sync.
 
-D4.5-E remains open until the native iOS tests/build validate the barrier and
-account-lifecycle ordering. D4.5 after E still requires
-presentation/localization work, final automated regression coverage, and focused
-real-device cancellation/restart acceptance.
+D4.5-E validation on 23 September 2026 executed **348 native iOS tests with
+0 failures**, including account-edit and account-removal quiescence ordering,
+and `./apple/ios/Build/build-app.sh` completed successfully.
+
+The remaining D4.5 work is presentation/localization plus final focused
+regression and physical-device cancellation/restart acceptance. The manual Sync
+control must now expose the accepted Start/Cancel interaction, keep
+`Syncing…` while cancellation is pending, suppress success/error presentation
+for normal cancellation, update accessibility state, and complete English/German
+localization without reopening the frozen UIKit Timeline architecture.
 
 ### D5 — Background Sync, Local Notifications & Widgets
 
