@@ -33,16 +33,19 @@ struct FluxNewsApp: App {
                     }
                     bootstrapper.onCoreChanged = { core in
                         if let core {
+                            IOSAppRuntime.shared.widgetSnapshotCoordinator.attach(to: core)
                             newsreaderStore.attach(
                                 to: core,
                                 coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
                             )
                         } else {
+                            IOSAppRuntime.shared.widgetSnapshotCoordinator.detach()
                             newsreaderStore.detach()
                         }
                     }
                     if let core = await bootstrapper.ensureStarted(),
                        newsreaderStore.core !== core {
+                        IOSAppRuntime.shared.widgetSnapshotCoordinator.attach(to: core)
                         newsreaderStore.attach(
                             to: core,
                             coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
@@ -56,6 +59,7 @@ struct FluxNewsApp: App {
                         Task {
                             if let core = await bootstrapper.ensureStarted(),
                                newsreaderStore.core !== core {
+                                IOSAppRuntime.shared.widgetSnapshotCoordinator.attach(to: core)
                                 newsreaderStore.attach(
                                     to: core,
                                     coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
