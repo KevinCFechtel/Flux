@@ -2120,6 +2120,206 @@
         }
       }
     },
+    "Bookmarks": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Markiert"
+          }
+        }
+      }
+    },
+    "Content": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inhalt"
+          }
+        }
+      }
+    },
+    "FluxNews Widget": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FluxNews-Widget"
+          }
+        }
+      }
+    },
+    "Choose the FluxNews content this widget shows.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wählen Sie die FluxNews-Inhalte aus, die dieses Widget anzeigt."
+          }
+        }
+      }
+    },
+    "FluxNews Headlines": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FluxNews-Schlagzeilen"
+          }
+        }
+      }
+    },
+    "FluxNews Status": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FluxNews-Status"
+          }
+        }
+      }
+    },
+    "Shows the latest articles from your selected FluxNews view.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zeigt die neuesten Artikel aus der ausgewählten FluxNews-Ansicht."
+          }
+        }
+      }
+    },
+    "FluxNews count and last successful sync.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FluxNews-Anzahl und letzte erfolgreiche Synchronisierung."
+          }
+        }
+      }
+    },
+    "unread": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ungelesen"
+          }
+        }
+      }
+    },
+    "bookmarked": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "markiert"
+          }
+        }
+      }
+    },
+    "No bookmarks": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Markierungen"
+          }
+        }
+      }
+    },
+    "No unread news": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine ungelesenen Nachrichten"
+          }
+        }
+      }
+    },
+    "Open FluxNews to configure": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FluxNews zum Konfigurieren öffnen"
+          }
+        }
+      }
+    },
+    "Waiting for first successful sync": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Warte auf die erste erfolgreiche Synchronisierung"
+          }
+        }
+      }
+    },
+    "No widget data available": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Widget-Daten verfügbar"
+          }
+        }
+      }
+    },
+    "Never": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie"
+          }
+        }
+      }
+    },
+    "Last sync: %@": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Letzte Synchronisierung: %@"
+          }
+        }
+      }
+    },
+    "Selected category unavailable": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ausgewählte Kategorie nicht verfügbar"
+          }
+        }
+      }
+    },
+    "Selected feed unavailable": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ausgewählter Feed nicht verfügbar"
+          }
+        }
+      }
+    },
+    "Open %@ in FluxNews": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ in FluxNews öffnen"
+          }
+        }
+      }
+    },
     "·": {},
     "•": {},
     "Reading time": {
