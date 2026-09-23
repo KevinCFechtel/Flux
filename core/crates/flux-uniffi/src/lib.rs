@@ -2717,6 +2717,7 @@ mod tests {
                 url: "https://example.test/article".into(),
                 comments_url: String::new(),
                 published_at: "2026-01-01T00:00:00Z".into(),
+                reading_time_minutes: 0,
                 is_read: false,
                 is_starred: true,
                 preview: String::new(),
