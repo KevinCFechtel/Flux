@@ -1105,6 +1105,14 @@ struct ArticleRowContent: Equatable, Sendable {
         updateFeedPreferences(feedID: feedID, change: { try $0.setFeedOpenInMiniflux(feedId: feedID, enabled: enabled) }, completion: completion)
     }
 
+    func setFeedSystemNotificationsEnabled(feedID: Int64, enabled: Bool, completion: @escaping (Result<Void, Error>) -> Void) {
+        updateFeedPreferences(
+            feedID: feedID,
+            change: { try $0.setFeedSystemNotificationsEnabled(feedId: feedID, enabled: enabled) },
+            completion: completion
+        )
+    }
+
     private func updateFeedPreferences(feedID: Int64, change: @escaping @Sendable (Flux) throws -> Void, completion: @escaping (Result<Void, Error>) -> Void) {
         guard let core else { completion(.failure(unconfiguredError)); return }
         let sessionCoordinator = coreSessionExecutionCoordinator
