@@ -2899,17 +2899,39 @@ impl Store {
         tx.commit().map_err(sql_error)
     }
 
-    pub fn commit_full_sync_success(&self, delta_cursor: i64) -> Result<(), CoreError> {
+    pub fn commit_full_sync_success(&self, delta_cursor: Option<i64>) -> Result<(), CoreError> {
         let mut connection = self
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let tx = connection.transaction().map_err(sql_error)?;
-        tx.execute(
-            "INSERT INTO core_settings(key,value) VALUES('delta_sync_cursor',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            [delta_cursor.to_string()],
-        )
-        .map_err(sql_error)?;
+        if let Some(delta_cursor) = delta_cursor {
+            tx.execute(
+                "INSERT INTO core_settings(key,value) VALUES('delta_sync_cursor',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                [delta_cursor.to_string()],
+            )
+            .map_err(sql_error)?;
+            tx.execute(
+                "INSERT INTO core_settings(key,value) VALUES('full_sync_required','0') ON CONFLICT(key) DO UPDATE SET value='0'",
+                [],
+            )
+            .map_err(sql_error)?;
+            tx.execute("DELETE FROM core_settings WHERE key='full_sync_reason'", [])
+                .map_err(sql_error)?;
+        } else {
+            tx.execute("DELETE FROM core_settings WHERE key='delta_sync_cursor'", [])
+                .map_err(sql_error)?;
+            tx.execute(
+                "INSERT INTO core_settings(key,value) VALUES('full_sync_required','1') ON CONFLICT(key) DO UPDATE SET value='1'",
+                [],
+            )
+            .map_err(sql_error)?;
+            tx.execute(
+                "INSERT INTO core_settings(key,value) VALUES('full_sync_reason','missing_delta_baseline') ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                [],
+            )
+            .map_err(sql_error)?;
+        }
         tx.execute(
             "INSERT INTO core_settings(key,value) VALUES('last_successful_sync_at',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             [],
@@ -2920,13 +2942,6 @@ impl Store {
             [],
         )
         .map_err(sql_error)?;
-        tx.execute(
-            "INSERT INTO core_settings(key,value) VALUES('full_sync_required','0') ON CONFLICT(key) DO UPDATE SET value='0'",
-            [],
-        )
-        .map_err(sql_error)?;
-        tx.execute("DELETE FROM core_settings WHERE key='full_sync_reason'", [])
-            .map_err(sql_error)?;
         tx.commit().map_err(sql_error)
     }
 
