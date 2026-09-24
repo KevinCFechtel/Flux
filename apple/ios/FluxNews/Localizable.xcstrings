@@ -2457,6 +2457,46 @@
           }
         }
       }
+    },
+    "Sync article changes immediately": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Artikeländerungen sofort synchronisieren"
+          }
+        }
+      }
+    },
+    "When enabled, read/unread and star changes are saved locally first and then sent to Miniflux immediately. If delivery fails, FluxNews keeps the change pending for a later retry.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wenn aktiviert, werden Änderungen an Gelesen/Ungelesen und Markierungen zuerst lokal gespeichert und anschließend sofort an Miniflux gesendet. Schlägt die Übertragung fehl, hält FluxNews die Änderung für einen späteren Versuch ausstehend."
+          }
+        }
+      }
+    },
+    "Immediate article sync setting could not be saved. Please try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Einstellung für die sofortige Artikelsynchronisierung konnte nicht gespeichert werden. Bitte versuche es erneut."
+          }
+        }
+      }
+    },
+    "Immediate article sync setting could not be loaded. Please try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Einstellung für die sofortige Artikelsynchronisierung konnte nicht geladen werden. Bitte versuche es erneut."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
