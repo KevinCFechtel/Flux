@@ -75,11 +75,19 @@ struct FluxNewsWidgetEntry: TimelineEntry {
 }
 
 struct FluxNewsWidgetProvider: AppIntentTimelineProvider {
+    private static let fallbackRefreshInterval: TimeInterval = 30 * 60
+
     func placeholder(in context: Context) -> FluxNewsWidgetEntry {
         .init(date: .now, model: .init(state: .ready, title: "All News", count: 12, countLabel: "unread", articles: [], lastSuccessfulSyncAt: nil), snapshot: nil, selection: .init(scope: .allNews, categoryID: nil, feedID: nil))
     }
     func snapshot(for configuration: FluxNewsWidgetConfigurationIntent, in context: Context) async -> FluxNewsWidgetEntry { entry(configuration) }
-    func timeline(for configuration: FluxNewsWidgetConfigurationIntent, in context: Context) async -> Timeline<FluxNewsWidgetEntry> { .init(entries: [entry(configuration)], policy: .never) }
+    func timeline(for configuration: FluxNewsWidgetConfigurationIntent, in context: Context) async -> Timeline<FluxNewsWidgetEntry> {
+        let currentEntry = entry(configuration)
+        return .init(
+            entries: [currentEntry],
+            policy: .after(currentEntry.date.addingTimeInterval(Self.fallbackRefreshInterval))
+        )
+    }
     private func entry(_ configuration: FluxNewsWidgetConfigurationIntent) -> FluxNewsWidgetEntry {
         let result: Result<WidgetSnapshotV1?, Error> = Result {
             let store = try WidgetSnapshotStore(diagnostics: WidgetSnapshotDiagnostics.logger)
