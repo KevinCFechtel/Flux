@@ -403,6 +403,90 @@ final class AccountLifecycleTests: XCTestCase {
     }
 
     @MainActor
+    func testReadArticleRetentionPreferenceReadsAndWritesCoreSetting() async throws {
+        let suiteName = "FluxNews.RetentionSetting.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            true,
+            forKey: "FluxNews.iOS.mutationDeliveryDefaultApplied.v1"
+        )
+
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core },
+            defaults: defaults
+        )
+        await bootstrapper.start()
+
+        let initial = await bootstrapper.readArticleRetentionPreference()
+        switch initial {
+        case let .success(value):
+            XCTAssertEqual(value, .days90)
+        case let .failure(error):
+            XCTFail("Unexpected retention read failure: \(error)")
+        }
+
+        let update = await bootstrapper
+            .setReadArticleRetentionPreference(.days365)
+        if case let .failure(error) = update {
+            XCTFail("Unexpected retention write failure: \(error)")
+        }
+
+        XCTAssertEqual(try core.coreSettings().retention, .days365)
+    }
+
+    @MainActor
+    func testDetailCharacterLimitPreferenceReadsAndWritesCoreSetting() async throws {
+        let suiteName = "FluxNews.DetailLimitSetting.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            true,
+            forKey: "FluxNews.iOS.mutationDeliveryDefaultApplied.v1"
+        )
+
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core },
+            defaults: defaults
+        )
+        await bootstrapper.start()
+
+        let initial = await bootstrapper.detailCharacterLimitPreference()
+        switch initial {
+        case let .success(value):
+            XCTAssertEqual(value, 10_000)
+        case let .failure(error):
+            XCTFail("Unexpected detail-limit read failure: \(error)")
+        }
+
+        let update = await bootstrapper
+            .setDetailCharacterLimitPreference(20_000)
+        if case let .failure(error) = update {
+            XCTFail("Unexpected detail-limit write failure: \(error)")
+        }
+
+        XCTAssertEqual(try core.coreSettings().detailCharacterLimit, 20_000)
+    }
+
+    @MainActor
     func testStoredCredentialsActivateWithHeaders() async throws {
         let credentials = IOSMinifluxCredentials(
             server: "https://miniflux.example",
