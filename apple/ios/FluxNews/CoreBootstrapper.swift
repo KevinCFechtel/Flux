@@ -4,6 +4,13 @@ import OSLog
 
 @MainActor
 final class CoreBootstrapper: ObservableObject {
+    enum LocalStateRebuildState: Equatable {
+        case idle
+        case rebuilding
+        case succeeded
+        case failed
+    }
+
     enum State: Equatable {
         case starting
         case accountRequired
@@ -25,6 +32,7 @@ final class CoreBootstrapper: ObservableObject {
     @Published private(set) var validationMessage: String?
     @Published private(set) var validationDiagnostic: AccountValidationDiagnostic?
     @Published private(set) var isConfiguring = false
+    @Published private(set) var localStateRebuildState: LocalStateRebuildState = .idle
     @Published private(set) var core: Flux?
     @Published private(set) var coreRevision: UInt64 = 0
     let credentialStore: IOSCredentialStoreProtocol
@@ -32,27 +40,33 @@ final class CoreBootstrapper: ObservableObject {
     var onCoreChanged: ((Flux?) -> Void)?
     var prepareForCoreReplacement: (() async -> Void)?
     var onCoreReplacementAborted: (() -> Void)?
+    var prepareForLocalStateRebuild: (() -> Void)?
+    var onLocalStateRebuildFinished: ((Flux) -> Void)?
 
     private let coreFactory: @Sendable (IOSMinifluxCredentials) throws -> Flux
     private let accountValidator: @Sendable (IOSMinifluxCredentials) throws -> AccountValidationAttempt
+    private let localStateRebuilder: @Sendable (Flux) throws -> SyncCompleted
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "core")
     private var bootstrapGeneration: UInt64 = 0
     private var startupTask: Task<Void, Never>?
     private var startupTaskGeneration: UInt64?
     private nonisolated static let defaultCoreFactory: @Sendable (IOSMinifluxCredentials) throws -> Flux = { try makeCore($0) }
     private nonisolated static let defaultAccountValidator: @Sendable (IOSMinifluxCredentials) throws -> AccountValidationAttempt = { validateAccount($0) }
+    private nonisolated static let defaultLocalStateRebuilder: @Sendable (Flux) throws -> SyncCompleted = { try $0.rebuildLocalState() }
 
     init(
         credentialStore: IOSCredentialStoreProtocol = IOSKeychainCredentialStore(),
         coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator? = nil,
         coreFactory: @escaping @Sendable (IOSMinifluxCredentials) throws -> Flux = CoreBootstrapper.defaultCoreFactory,
-        accountValidator: @escaping @Sendable (IOSMinifluxCredentials) throws -> AccountValidationAttempt = CoreBootstrapper.defaultAccountValidator
+        accountValidator: @escaping @Sendable (IOSMinifluxCredentials) throws -> AccountValidationAttempt = CoreBootstrapper.defaultAccountValidator,
+        localStateRebuilder: @escaping @Sendable (Flux) throws -> SyncCompleted = CoreBootstrapper.defaultLocalStateRebuilder
     ) {
         self.credentialStore = credentialStore
         self.coreSessionExecutionCoordinator =
             coreSessionExecutionCoordinator ?? IOSCoreSessionExecutionCoordinator()
         self.coreFactory = coreFactory
         self.accountValidator = accountValidator
+        self.localStateRebuilder = localStateRebuilder
     }
 
     func start() async {
@@ -118,7 +132,8 @@ final class CoreBootstrapper: ObservableObject {
     }
 
     func configure(server: String, apiKey: String, headers: [IOSCustomHTTPHeader]) async {
-        guard !isConfiguring else { return }
+        guard !isConfiguring, localStateRebuildState != .rebuilding else { return }
+        localStateRebuildState = .idle
         let generation = nextBootstrapGeneration()
         isConfiguring = true
         defer { isConfiguring = false }
@@ -161,7 +176,67 @@ final class CoreBootstrapper: ObservableObject {
         }
     }
 
+    func rebuildLocalState() async {
+        guard localStateRebuildState != .rebuilding else { return }
+        guard let activeCore = core else {
+            localStateRebuildState = .failed
+            return
+        }
+
+        let generation = nextBootstrapGeneration()
+        localStateRebuildState = .rebuilding
+        validationMessage = nil
+
+        // Manual Sync owns presentation work outside the app-wide Core gate.
+        // Quiesce that lifecycle first, then close admission for every other
+        // foreground/background Core caller before invalidating projections.
+        await prepareForCoreReplacement?()
+        await coreSessionExecutionCoordinator.quiesce()
+        guard generation == bootstrapGeneration else {
+            localStateRebuildState = .idle
+            return
+        }
+
+        prepareForLocalStateRebuild?()
+
+        let rebuilder = localStateRebuilder
+        guard let result = await coreSessionExecutionCoordinator.exclusiveBlockingResult(
+            for: activeCore,
+            { try rebuilder(activeCore) }
+        ) else {
+            guard generation == bootstrapGeneration else {
+                localStateRebuildState = .idle
+                return
+            }
+            coreSessionExecutionCoordinator.resume(activeCore)
+            onLocalStateRebuildFinished?(activeCore)
+            localStateRebuildState = .failed
+            return
+        }
+
+        guard generation == bootstrapGeneration else {
+            // A newer account/session lifecycle operation now owns the quiesced
+            // Core. Do not reopen admission or reattach stale presentation.
+            localStateRebuildState = .idle
+            return
+        }
+
+        coreSessionExecutionCoordinator.resume(activeCore)
+        onLocalStateRebuildFinished?(activeCore)
+
+        switch result {
+        case .success:
+            localStateRebuildState = .succeeded
+        case let .failure(error):
+            localStateRebuildState = .failed
+            logger.error(
+                "Local state rebuild failed after destructive reset: \(String(reflecting: error), privacy: .private)"
+            )
+        }
+    }
+
     func removeAccount() async {
+        guard localStateRebuildState != .rebuilding else { return }
         let generation = nextBootstrapGeneration()
         guard let activeCore = core else {
             try? credentialStore.remove()
@@ -187,6 +262,7 @@ final class CoreBootstrapper: ObservableObject {
             }
             try credentialStore.remove()
             deactivateAfterCoreQuiescence()
+            localStateRebuildState = .idle
             state = .accountRequired
         } catch {
             guard generation == bootstrapGeneration else { return }
@@ -238,6 +314,7 @@ final class CoreBootstrapper: ObservableObject {
         coreSessionExecutionCoordinator.activate(configuredCore)
         core = configuredCore
         credentials = account
+        localStateRebuildState = .idle
         coreRevision &+= 1
         state = .ready(String(localized: "Initialized"))
         onCoreChanged?(configuredCore)
