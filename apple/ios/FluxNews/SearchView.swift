@@ -83,6 +83,7 @@ private struct SearchResultsContent: View {
                     feedIconRequestRevision: newsreaderStore.feedIconRequestRevision,
                     scrollResetRevision: 0,
                     markReadOnScrolloverEnabled: false,
+                    swipeConfiguration: newsreaderStore.articleSwipeConfiguration,
                     showsRefreshControl: false,
                     naturalTopContentInset: 0,
                     onArticleTap: onArticleTap,
