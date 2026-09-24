@@ -4306,6 +4306,25 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(project.contains("FLUX_PERFORMANCE_DIAGNOSTICS"))
     }
 
+    func testDuoVerticalToolbarCapabilityGateCoversFutureSDKsWithoutEnablingIOS270() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let project = try String(
+            contentsOf: iosRoot.appendingPathComponent("FluxNews.xcodeproj/project.pbxproj"),
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(project.contains("FLUX_IOS_27_1_SDK"))
+        XCTAssertFalse(project.contains("OTHER_SWIFT_FLAGS[sdk=iphoneos27.0"))
+        XCTAssertTrue(project.contains("OTHER_SWIFT_FLAGS[sdk=iphoneos27.3*]"))
+        XCTAssertTrue(project.contains("OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.9*]"))
+        XCTAssertTrue(project.contains("OTHER_SWIFT_FLAGS[sdk=iphoneos28*]"))
+        XCTAssertTrue(project.contains("OTHER_SWIFT_FLAGS[sdk=iphoneos29*]"))
+        XCTAssertTrue(project.contains("OTHER_SWIFT_FLAGS[sdk=iphoneos3*]"))
+        XCTAssertTrue(project.contains("-DFLUX_HAS_VERTICAL_TOOLBAR_API"))
+    }
+
     func testDetachAndReattachInvalidateAllPriorReadRequests() {
         var lifecycle = IOSNewsreaderReadLifecycle()
         let article = lifecycle.beginArticle()

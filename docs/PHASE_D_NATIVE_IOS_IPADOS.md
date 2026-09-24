@@ -356,9 +356,11 @@ Persistent split navigation normally keeps the detached floating action capsule.
 On systems where SwiftUI reports a non-`nil` `toolbarVerticalEdge`, the
 Sync/Filter/More actions instead return to native top-toolbar items so a vertical
 system bar such as iPhone Duo can place them on the appropriate side edge. This
-path is compiled only with an iOS 27.1+ SDK; builds made with the iOS 27.0 SDK
-retain the established horizontal split chrome and do not gain a beta-SDK build
-dependency. A visible sidebar keeps the detail scope-title-free; if that sidebar is hidden, the
+path is compiled behind the `FLUX_HAS_VERTICAL_TOOLBAR_API` capability. The
+project enables that capability for SDK 27.1 through 27.9 and later major SDK
+families, while deliberately excluding SDK 27.0. This keeps the adaptation
+forward-compatible across later 27.x SDKs without making 27.0 builds depend on
+an unavailable symbol. A visible sidebar keeps the detail scope-title-free; if that sidebar is hidden, the
 wider interactive scope capsule remains horizontal in the independent inset row
 so navigation does not depend on the edge-swipe gesture. Category
 selection and category expansion remain separate sidebar interactions so a

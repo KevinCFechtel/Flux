@@ -228,7 +228,7 @@ enum IOSArticleNavigationPresentation {
     static let titleDisplayMode: NavigationBarItem.TitleDisplayMode = .large
 }
 
-#if FLUX_IOS_27_1_SDK
+#if FLUX_HAS_VERTICAL_TOOLBAR_API
 @available(iOS 27.1, *)
 private struct IOSArticleListVerticalToolbarEnvironment<Content: View>: View {
     @Environment(\.toolbarVerticalEdge) private var toolbarVerticalEdge
@@ -447,7 +447,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private var articleList: some View {
-#if FLUX_IOS_27_1_SDK
+#if FLUX_HAS_VERTICAL_TOOLBAR_API
         if #available(iOS 27.1, *) {
             IOSArticleListVerticalToolbarEnvironment { systemPrefersVerticalToolbar in
                 articleList(systemPrefersVerticalToolbar: systemPrefersVerticalToolbar)

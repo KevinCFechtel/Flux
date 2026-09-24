@@ -492,12 +492,14 @@ deliberately different:
   `.automatic` remains enabled on iOS/iPadOS 26+.
 
 The `toolbarVerticalEdge` symbol itself requires the iOS 27.1 SDK. To avoid
-making ordinary Flux development depend on the Xcode 27.1 beta, the bridge is
-compiled only when the app target receives `FLUX_IOS_27_1_SDK`. The Xcode
-project supplies that flag for iOS/iPhone Simulator 27.1 and 27.2 SDK builds.
-Xcode 27.0 builds therefore keep the established horizontal persistent-split
-chrome and continue to compile normally; a 27.1+ SDK build enables the Duo
-vertical-bar adaptation at runtime on iOS 27.1+.
+making ordinary Flux development depend on that SDK while also avoiding a
+minor-version maintenance trap, the bridge is compiled behind the capability
+flag `FLUX_HAS_VERTICAL_TOOLBAR_API`. The Xcode project enables that capability
+for iOS/iPhone Simulator SDK 27.1 through 27.9 and for later major SDK families.
+SDK 27.0 is deliberately excluded. Thus a 27.0 build keeps the established
+horizontal persistent-split chrome, while 27.1+ SDK builds continue to gain the
+Duo vertical-bar adaptation without adding a new flag for every future 27.x
+release.
 
 The bottom edge effect remains disabled everywhere. On iOS/iPadOS 17-25 the
 bounded status-bar scrim remains the fallback where it has nonzero height. In
