@@ -10,9 +10,7 @@ enum FluxNewsWidgetKind {
 
 enum WidgetTimelineReloader {
     static func reloadAll() {
-        for kind in FluxNewsWidgetKind.all {
-            WidgetCenter.shared.reloadTimelines(ofKind: kind)
-        }
+        WidgetCenter.shared.reloadAllTimelines()
     }
 }
 
