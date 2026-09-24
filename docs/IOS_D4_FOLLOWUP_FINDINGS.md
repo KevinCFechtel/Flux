@@ -12,7 +12,7 @@ regression evidence.
 Flutter remains a behavioral reference, not a parity checklist. The decisions
 below are explicit product decisions for the native iOS/iPadOS client.
 
-## 1. Rebuild Local State — REQUIRED D4.1 completion
+## 1. Rebuild Local State — IMPLEMENTED / VALIDATION PENDING
 
 D4.1 already requires **Rebuild Local State** and **Remove Account** as distinct
 operations. Remove Account exists in native iOS; Rebuild Local State is still
@@ -36,6 +36,21 @@ Implementation contract:
   account/session work cannot race the destructive rebuild.
 - Do not reinterpret Rebuild Local State as Remove Account or as a general
   Factory Reset.
+
+Implementation status:
+
+- Native iOS Account Settings now exposes the confirmed Rebuild Local State action.
+- `CoreBootstrapper` coordinates the operation without replacing the active
+  Core or credentials.
+- The app-wide Core-session gate enters quiescence first and holds the
+  destructive `rebuildLocalState()` call as an exclusive blocking operation.
+- Widget and Newsreader projections are invalidated before the rebuild and
+  reattached to the same Core afterward, on both success and synchronization
+  failure.
+- Focused AccountLifecycle tests cover credential/Core preservation, app-wide
+  quiescence, and failure recovery.
+- Canonical iOS test/build validation is still required before this item is
+  marked complete.
 
 ## 2. Native iOS mutation delivery mode — LIVE BY DEFAULT, USER-CONFIGURABLE
 
