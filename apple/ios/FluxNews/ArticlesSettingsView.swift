@@ -26,6 +26,19 @@ struct ArticlesSettingsView: View {
             Toggle("Remove articles when read", isOn: Binding(get: { store.removeArticlesWhenMarkedRead }, set: store.setRemoveArticlesWhenMarkedRead))
             Toggle("Mark read on scrollover", isOn: Binding(get: { store.markReadOnScrolloverEnabled }, set: store.setMarkReadOnScrolloverEnabled))
 
+            Section("Swipe Actions") {
+                swipeSideSettings(
+                    title: String(localized: "Leading Side"),
+                    side: .leading
+                )
+                swipeSideSettings(
+                    title: String(localized: "Trailing Side"),
+                    side: .trailing
+                )
+            } footer: {
+                Text("Each side supports up to two actions. The Full Swipe action is the outer action and runs when you deliberately swipe through the row.")
+            }
+
             Section {
                 Toggle(
                     "Sync article changes immediately",
@@ -88,5 +101,69 @@ struct ArticlesSettingsView: View {
                 )
             }
         }
+    }
+
+    @ViewBuilder
+    private func swipeSideSettings(
+        title: String,
+        side: IOSArticleSwipeSide
+    ) -> some View {
+        let configuration = store.articleSwipeConfiguration
+        let fullSwipe = configuration.fullSwipeAction(for: side)
+        let additional = configuration.additionalAction(for: side)
+
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+
+            Picker(
+                "Full Swipe",
+                selection: Binding<IOSArticleSwipeAction?>(
+                    get: {
+                        store.articleSwipeConfiguration.fullSwipeAction(for: side)
+                    },
+                    set: { store.setArticleSwipeAction($0, side: side, slot: .fullSwipe) }
+                )
+            ) {
+                Text("None").tag(IOSArticleSwipeAction?.none)
+                ForEach(IOSArticleSwipeAction.allCases, id: \.self) { action in
+                    Text(action.title).tag(Optional(action))
+                }
+            }
+
+            Picker(
+                "Additional Action",
+                selection: Binding<IOSArticleSwipeAction?>(
+                    get: {
+                        store.articleSwipeConfiguration.additionalAction(for: side)
+                    },
+                    set: { store.setArticleSwipeAction($0, side: side, slot: .additional) }
+                )
+            ) {
+                Text("None").tag(IOSArticleSwipeAction?.none)
+                ForEach(IOSArticleSwipeAction.allCases, id: \.self) { action in
+                    Text(action.title).tag(Optional(action))
+                }
+            }
+            .disabled(fullSwipe == nil)
+
+            if let fullSwipe {
+                Text(
+                    additional == nil
+                        ? String(
+                            format: String(localized: "Full Swipe: %@"),
+                            fullSwipe.title
+                        )
+                        : String(
+                            format: String(localized: "Inner: %@ · Full Swipe: %@"),
+                            additional?.title ?? "",
+                            fullSwipe.title
+                        )
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
