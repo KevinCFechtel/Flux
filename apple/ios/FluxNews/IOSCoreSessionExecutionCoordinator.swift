@@ -158,6 +158,35 @@ final class IOSCoreSessionExecutionCoordinator {
         return result
     }
 
+    /// Runs one exclusive blocking Core operation after the session has
+    /// already quiesced. Admission stays closed for the entire operation, and
+    /// a concurrent quiescence request waits until this operation has returned.
+    ///
+    /// This is reserved for destructive session-maintenance work such as
+    /// rebuilding synchronized local state. Normal Core work must use the
+    /// regular responsive/blocking admission methods above.
+    func exclusiveBlockingResult<Value: Sendable>(
+        for core: Flux,
+        _ operation: @escaping @Sendable () throws -> Value
+    ) async -> Result<Value, Error>? {
+        guard isQuiescing,
+              activeCoreIdentifier == ObjectIdentifier(core),
+              activeExecutions.isEmpty else { return nil }
+
+        nextExecutionID &+= 1
+        let executionID = nextExecutionID
+        activeExecutions[executionID] = ActiveExecution(cancellation: nil)
+        activeExecutionCount = activeExecutions.count
+        let lease = Lease(
+            sessionGeneration: sessionGeneration,
+            executionID: executionID
+        )
+
+        let result = await AppleCoreExecution.shared.blockingResult(operation)
+        finish(lease)
+        return result
+    }
+
     /// Must be called only after the underlying synchronous Core call has
     /// returned, not merely when its presentation owner becomes stale.
     func finish(_ lease: Lease) {
