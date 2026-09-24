@@ -4059,6 +4059,172 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(trailing.actions.first?.title, String(localized: "Star"))
     }
 
+    func testSwipeConfigurationStoresInnerToOuterAndCapsAtTwoActions() {
+        let configuration = IOSArticleSwipeConfiguration(
+            leading: [.share, .openOriginal, .readUnread],
+            trailing: [.starUnstar, .saveToService]
+        )
+
+        XCTAssertEqual(configuration.leading, [.openOriginal, .readUnread])
+        XCTAssertEqual(configuration.trailing, [.starUnstar, .saveToService])
+        XCTAssertEqual(
+            configuration.fullSwipeAction(for: .leading),
+            .readUnread
+        )
+        XCTAssertEqual(
+            configuration.additionalAction(for: .leading),
+            .openOriginal
+        )
+    }
+
+    func testSwipeConfigurationPreventsDuplicateActionsOnOneSide() {
+        let configuration = IOSArticleSwipeConfiguration(
+            leading: [.readUnread, .readUnread],
+            trailing: []
+        )
+
+        XCTAssertEqual(configuration.leading, [.readUnread])
+        XCTAssertEqual(
+            configuration.fullSwipeAction(for: .leading),
+            .readUnread
+        )
+        XCTAssertNil(configuration.additionalAction(for: .leading))
+    }
+
+    @MainActor
+    func testSwipeSettingsPersistAndRestoreTwoActionsPerSide() {
+        let suiteName = "FluxNews.SwipeSettings.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = NewsreaderStore(defaults: defaults)
+        XCTAssertEqual(
+            store.articleSwipeConfiguration,
+            .defaultConfiguration
+        )
+
+        store.setArticleSwipeAction(
+            .openOriginal,
+            side: .leading,
+            slot: .additional
+        )
+        store.setArticleSwipeAction(
+            .share,
+            side: .trailing,
+            slot: .additional
+        )
+
+        let restored = NewsreaderStore(defaults: defaults)
+        XCTAssertEqual(
+            restored.articleSwipeConfiguration.leading,
+            [.openOriginal, .readUnread]
+        )
+        XCTAssertEqual(
+            restored.articleSwipeConfiguration.trailing,
+            [.share, .starUnstar]
+        )
+    }
+
+    @MainActor
+    func testUIKitTimelineMapsOuterConfiguredActionToNativeFullSwipe() async throws {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = IOSUIKitArticleTimelineController()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
+        controller.view.layoutIfNeeded()
+        let article = timelineArticle(id: 1)
+        bridge.replaceArticleStates([
+            article.id: .init(
+                isRead: false,
+                isStarred: false,
+                revision: 0
+            )
+        ])
+
+        controller.update(
+            structuralState: timelineStructuralState([article], revision: 1),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            feedIconRequestRevision: 0,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            swipeConfiguration: .init(
+                leading: [.openOriginal, .readUnread],
+                trailing: []
+            ),
+            showsRefreshControl: false
+        )
+        await controller.settleForTesting()
+
+        let table = controller.tableViewForTesting
+        let leading = try XCTUnwrap(
+            controller.tableView(
+                table,
+                leadingSwipeActionsConfigurationForRowAt: IndexPath(
+                    row: 0,
+                    section: 0
+                )
+            )
+        )
+
+        XCTAssertTrue(leading.performsFirstActionWithFullSwipe)
+        XCTAssertEqual(leading.actions.count, 2)
+        XCTAssertEqual(
+            leading.actions.first?.title,
+            String(localized: "Mark as Read")
+        )
+        XCTAssertEqual(
+            leading.actions.last?.title,
+            String(localized: "Open Original")
+        )
+    }
+
+    @MainActor
+    func testUIKitTimelineOmitsConditionalCommentSwipeWhenUnavailable() async throws {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = IOSUIKitArticleTimelineController()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
+        controller.view.layoutIfNeeded()
+        let article = timelineArticle(id: 1)
+        bridge.replaceArticleStates([
+            article.id: .init(
+                isRead: false,
+                isStarred: false,
+                revision: 0
+            )
+        ])
+
+        controller.update(
+            structuralState: timelineStructuralState([article], revision: 1),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            feedIconRequestRevision: 0,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            swipeConfiguration: .init(
+                leading: [.comments],
+                trailing: []
+            ),
+            showsRefreshControl: false
+        )
+        await controller.settleForTesting()
+
+        let configuration = controller.tableView(
+            controller.tableViewForTesting,
+            leadingSwipeActionsConfigurationForRowAt: IndexPath(
+                row: 0,
+                section: 0
+            )
+        )
+
+        XCTAssertNil(configuration)
+    }
+
     @MainActor
     func testUIKitArticleCellStatusUpdateRefreshesAccessibilityWithoutGeometryChange() {
         let cell = makeUIKitArticleCell(mode: .visual, width: 390, hasImage: false)
