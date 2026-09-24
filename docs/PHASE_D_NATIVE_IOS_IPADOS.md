@@ -1,6 +1,6 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: D1-D4 BASELINE COMPLETE / D4.5 COMPLETE / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D4 BASELINE COMPLETE / D4 FOLLOW-UP OPEN / D4.5 COMPLETE / D5 COMPLETE & ARCHITECTURE-FROZEN / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
 > replaces the existing Flutter iOS/iPadOS client with a native Swift client:
@@ -205,9 +205,7 @@ user scrolling and must not mark an article read. Image prefetch retains its
 existing canonical target-size bucket across a resize when possible, without
 changing visible-first or bounded scheduling behavior.
 
-Timeline actions use system-native swipe actions: leading Read/Unread and
-trailing Star/Unstar invoke the existing optimistic mutations and allow the
-platform's standard full-swipe behavior. Preserve context menus, pull-to-refresh,
+Timeline actions use system-native swipe actions under the shared mobile interaction contract: each side supports zero, one, or two configured semantic actions in inner-to-outer order, and the outer action is the deliberate full-swipe action. The established defaults remain Read/Unread and Star/Unstar. These actions invoke the existing optimistic mutations and identify articles by stable ID. Preserve context menus, pull-to-refresh,
 article routing, the accepted native scope-capsule navigation chrome, semantic
 scope resets, and persistent split navigation. Actions identify articles by stable ID, never a captured
 index path or a cell reference that may have been reused.
@@ -1221,8 +1219,7 @@ does not collide with the production/Flutter identity. Native Dev uses
 `fluxnews-native-dev` widget URL scheme; Upgrade Test/production retains
 `group.dev.kevincfechtel.fluxNews` and `fluxnews`.
 
-**D5-G — Native iOS WidgetKit, including Lock Screen widgets, is IMPLEMENTED;
-final device acceptance is pending.** The canonical iOS test gate passes after
+**D5-G — Native iOS WidgetKit, including Lock Screen widgets, is COMPLETE / REAL-DEVICE ACCEPTED.** The canonical iOS test gate passes after
 the WidgetKit integration. A signed NativeDev device archive also succeeds with
 separate host/widget provisioning profiles and the shared
 `group.dev.kevincfechtel.fluxNews.nativeDev` App Group. The archive script now
@@ -1282,9 +1279,21 @@ post-Sync fanout requests this handoff independently of whether notification
 candidates exist and still awaits all D5 fanout before BGTask completion. The
 actual persistent iOS transfer executor remains D6 work.
 
-D5 implementation is therefore code-complete, but the phase remains open until
-the D5-G physical-device widget/deep-link smoke pass and the production-identity
-`Upgrade Test` archive both succeed.
+D5 is COMPLETE / architecture-frozen. Final physical-device widget/deep-link smoke validation and the production-identity Upgrade Test archive succeeded; the authoritative closure record is `docs/IOS_D5_FINAL_ACCEPTANCE.md`.
+
+### Phase-D late settings portability & diagnostics completion
+
+Two product capabilities remain part of Phase D but are intentionally scheduled
+after the Settings surface has largely stabilized and before D10 replacement
+validation:
+
+- native iOS configuration backup/restore using the existing versioned
+  Core/UniFFI backup format;
+- native iOS diagnostics export with bounded privacy-safe Core/native logs,
+  persistent Debug Logging control, and explicit clear/export actions.
+
+The accepted details and the immediate D4 follow-up work are recorded in
+[IOS_D4_FOLLOWUP_FINDINGS.md](IOS_D4_FOLLOWUP_FINDINGS.md).
 
 ### D6 — Native Media & Background Downloads
 
