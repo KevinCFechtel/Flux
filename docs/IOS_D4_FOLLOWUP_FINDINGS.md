@@ -102,7 +102,7 @@ Implementation status:
 - Canonical iOS test/build validation is still required before this item is
   marked complete.
 
-## 3. UIKit Timeline swipe actions — IMPLEMENT THE DOCUMENTED MOBILE CONTRACT
+## 3. UIKit Timeline swipe actions — IMPLEMENTED / VALIDATION PENDING
 
 The fixed one-action-per-side implementation is incomplete relative to the
 authoritative mobile interaction contract.
@@ -121,6 +121,31 @@ Implement the existing documented contract from `MOBILE_PRODUCT_SEMANTICS.md`:
 Expose the configuration through native iOS Settings. This is interaction and
 presentation configuration only and does not reopen the frozen Timeline
 architecture.
+
+Implementation status:
+
+- Native iOS persists one semantic swipe configuration with zero, one, or two
+  actions per side.
+- Settings expose a **Full Swipe** slot and an optional **Additional Action**
+  slot for leading and trailing sides.
+- Stored order remains semantic inner-to-outer; the UIKit adapter reverses that
+  order only at the native API boundary so the configured outer action is
+  UIKit's first/full-swipe action.
+- The established defaults remain leading Read/Unread and trailing Star/Unstar.
+- Currently selectable actions are Read/Unread, Star/Unstar, Open Original,
+  Open in Miniflux, Open Comments, Share, and Save to Third-Party Service.
+- Open Comments is omitted for an individual row when that article has no valid
+  comments URL.
+- Search results consume the same persisted swipe configuration as the normal
+  Article Timeline.
+- The legacy **Download Audio** swipe action is intentionally not exposed yet:
+  native iOS does not have the D6 media/download handler at this phase. D6 may
+  add that semantic action to the existing configuration without changing the
+  swipe architecture. No placeholder/no-op action is permitted.
+- Focused tests cover 0-2 action normalization, duplicate suppression,
+  persistence, outer/full-swipe mapping, and conditional action omission.
+- Canonical iOS test/build validation is still required before this item is
+  marked complete.
 
 ## 4. Missing Core-backed article/settings controls — IMPLEMENT
 
