@@ -52,7 +52,7 @@ Implementation status:
 - Canonical iOS test/build validation is still required before this item is
   marked complete.
 
-## 2. Native iOS mutation delivery mode — LIVE BY DEFAULT, USER-CONFIGURABLE
+## 2. Native iOS mutation delivery mode — IMPLEMENTED / VALIDATION PENDING
 
 The Rust Core already supports `DeliveryMode::Live` and
 `DeliveryMode::Deferred`. Native iOS Read/Unread and Star/Unstar mutations,
@@ -82,6 +82,25 @@ Product decision:
 
 This is a D4/U4 contract completion/configuration item, not a new sync
 architecture.
+
+Implementation status:
+
+- Native iOS applies `DeliveryMode::Live` once as an iOS product default on the
+  first native activation.
+- A persisted iOS migration marker ensures later launches never overwrite an
+  explicit user choice.
+- Articles Settings exposes **Sync article changes immediately**.
+- Enabled writes the existing Core `Live` mode; disabled writes `Deferred`.
+- Reads and writes go through the existing app-wide Core-session execution gate.
+- No Rust Core default was changed and no separate Swift delivery-mode state was
+  introduced.
+- The existing Core mutation path remains authoritative, so failed immediate
+  delivery stays pending and no extra Full/Delta Sync is introduced.
+- Focused tests cover first-start Live defaulting, preservation of explicit
+  Deferred choice on later startup, and direct Core-backed preference reads and
+  writes.
+- Canonical iOS test/build validation is still required before this item is
+  marked complete.
 
 ## 3. UIKit Timeline swipe actions — IMPLEMENT THE DOCUMENTED MOBILE CONTRACT
 
