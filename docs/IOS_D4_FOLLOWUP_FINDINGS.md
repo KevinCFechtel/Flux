@@ -147,7 +147,7 @@ Implementation status:
 - Canonical iOS test/build validation is still required before this item is
   marked complete.
 
-## 4. Missing Core-backed article/settings controls — IMPLEMENT
+## 4. Missing Core-backed article/settings controls — IMPLEMENTED / VALIDATION PENDING
 
 Native iOS Settings must also expose the already-supported Core settings:
 
@@ -158,6 +158,21 @@ Native iOS Settings must also expose the already-supported Core settings:
 
 These are Settings-surface completions over existing Core capabilities; do not
 duplicate the values in a second Swift domain model.
+
+Implementation status:
+
+- Native iOS Articles Settings now exposes Read Article Retention with the
+  existing Core values 30 / 60 / 90 / 180 / 365 days.
+- Native iOS Articles Settings now exposes the Reader detail/truncation limit
+  with the existing Core values 5,000 / 10,000 / 20,000 characters.
+- Both preferences are read directly from `coreSettings()` and written through
+  the existing Core setters behind the app-wide Core-session execution gate.
+- No duplicate Swift persistence/domain setting was introduced.
+- The Core defaults remain authoritative when the user has not changed either
+  value.
+- Focused tests cover reading and writing both settings against the real Core.
+- Canonical iOS test/build validation is still required before this item is
+  marked complete.
 
 ## 5. Configuration backup/restore — PHASE D, DEFERRED UNTIL SETTINGS STABILIZE
 
