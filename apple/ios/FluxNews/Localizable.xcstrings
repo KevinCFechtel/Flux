@@ -2497,6 +2497,116 @@
           }
         }
       }
+    },
+    "Swipe Actions": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wischaktionen"
+          }
+        }
+      }
+    },
+    "Leading Side": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Führende Seite"
+          }
+        }
+      }
+    },
+    "Trailing Side": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nachlaufende Seite"
+          }
+        }
+      }
+    },
+    "Full Swipe": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vollständiges Wischen"
+          }
+        }
+      }
+    },
+    "Additional Action": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zusätzliche Aktion"
+          }
+        }
+      }
+    },
+    "None": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine"
+          }
+        }
+      }
+    },
+    "Each side supports up to two actions. The Full Swipe action is the outer action and runs when you deliberately swipe through the row.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jede Seite unterstützt bis zu zwei Aktionen. Die Aktion für vollständiges Wischen liegt außen und wird ausgeführt, wenn du bewusst über die gesamte Zeile wischst."
+          }
+        }
+      }
+    },
+    "Read / Unread": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gelesen / Ungelesen"
+          }
+        }
+      }
+    },
+    "Star / Unstar": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Markieren / Markierung entfernen"
+          }
+        }
+      }
+    },
+    "Full Swipe: %@": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vollständiges Wischen: %@"
+          }
+        }
+      }
+    },
+    "Inner: %@ · Full Swipe: %@": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Innen: %@ · Vollständiges Wischen: %@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
