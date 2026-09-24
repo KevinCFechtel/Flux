@@ -2607,6 +2607,166 @@
           }
         }
       }
+    },
+    "Storage & Reader": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Speicher & Reader"
+          }
+        }
+      }
+    },
+    "Keep read articles": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gelesene Artikel behalten"
+          }
+        }
+      }
+    },
+    "30 days": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "30 Tage"
+          }
+        }
+      }
+    },
+    "60 days": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "60 Tage"
+          }
+        }
+      }
+    },
+    "90 days": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "90 Tage"
+          }
+        }
+      }
+    },
+    "180 days": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "180 Tage"
+          }
+        }
+      }
+    },
+    "365 days": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "365 Tage"
+          }
+        }
+      }
+    },
+    "Reader detail limit": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reader-Textlimit"
+          }
+        }
+      }
+    },
+    "5,000 characters": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "5.000 Zeichen"
+          }
+        }
+      }
+    },
+    "10,000 characters": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "10.000 Zeichen"
+          }
+        }
+      }
+    },
+    "20,000 characters": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "20.000 Zeichen"
+          }
+        }
+      }
+    },
+    "Read article retention controls how long synchronized read items remain in local history. The Reader detail limit controls how much article text the Core keeps when a feed uses truncated Reader content.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Aufbewahrungsdauer legt fest, wie lange synchronisierte gelesene Artikel im lokalen Verlauf bleiben. Das Reader-Textlimit bestimmt, wie viel Artikeltext der Core behält, wenn ein Feed gekürzte Reader-Inhalte verwendet."
+          }
+        }
+      }
+    },
+    "Read article retention setting could not be saved. Please try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Aufbewahrungsdauer für gelesene Artikel konnte nicht gespeichert werden. Bitte versuche es erneut."
+          }
+        }
+      }
+    },
+    "Reader detail limit setting could not be saved. Please try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Reader-Textlimit konnte nicht gespeichert werden. Bitte versuche es erneut."
+          }
+        }
+      }
+    },
+    "Read article retention setting could not be loaded. Please try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Aufbewahrungsdauer für gelesene Artikel konnte nicht geladen werden. Bitte versuche es erneut."
+          }
+        }
+      }
+    },
+    "Reader detail limit setting could not be loaded. Please try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Reader-Textlimit konnte nicht geladen werden. Bitte versuche es erneut."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
