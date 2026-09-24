@@ -339,6 +339,8 @@ private struct IOSFluxNewsStatusView: View {
                 circular
             case .accessoryRectangular:
                 rectangular
+            case .systemSmall:
+                smallHomeScreen
             default:
                 homeScreen
             }
@@ -361,26 +363,49 @@ private struct IOSFluxNewsStatusView: View {
     }
 
     private var rectangular: some View {
-        HStack(alignment: .center, spacing: 8) {
+        VStack(alignment: .leading, spacing: 3) {
             Text(title)
-                .font(.headline)
+                .font(.caption.weight(.semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-
-            Spacer(minLength: 6)
 
             HStack(alignment: .center, spacing: 5) {
                 FluxNewsWidgetBrandIcon()
                     .frame(width: 18, height: 18)
-
-                VStack(alignment: .center, spacing: 0) {
-                    Text("\(entry.model.count)")
-                        .font(.headline.bold().monospacedDigit())
-                    Text(LocalizedStringKey(entry.model.countLabel))
-                        .font(.caption2)
-                        .lineLimit(1)
-                }
+                Text("\(entry.model.count)")
+                    .font(.headline.bold().monospacedDigit())
+                Text(LocalizedStringKey(entry.model.countLabel))
+                    .font(.caption2)
+                    .lineLimit(1)
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var smallHomeScreen: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                FluxNewsWidgetBrandIcon()
+                    .frame(width: 30, height: 30)
+                Spacer()
+            }
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+            Text("\(entry.model.count)")
+                .font(.system(size: 27, weight: .bold, design: .rounded))
+                .monospacedDigit()
+            Text(LocalizedStringKey(entry.model.countLabel))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(lastSuccessfulSyncDate)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .containerBackground(for: .widget) {
+            Color.clear
         }
     }
 
@@ -437,6 +462,14 @@ private struct IOSFluxNewsStatusView: View {
         default:
             entry.model.title
         }
+    }
+
+    private var lastSuccessfulSyncDate: String {
+        guard let value = entry.model.lastSuccessfulSyncAt,
+              let date = WidgetSyncTimestamp.date(from: value) else {
+            return String(localized: "Never")
+        }
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 
     private var lastSuccessfulSync: String {
