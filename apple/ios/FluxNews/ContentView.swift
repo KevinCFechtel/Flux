@@ -134,6 +134,17 @@ enum IOSArticleListTitleCapsuleMetrics {
     static let floatingHorizontalInset: CGFloat = 12
     static let floatingVerticalInset: CGFloat = 4
     static let floatingRowSpacing: CGFloat = 10
+    static let stackedVerticalPadding: CGFloat = 7
+
+    static func portraitNaturalTopContentInset(showSubtitle: Bool) -> CGFloat {
+        let titleHeight = UIFont.preferredFont(forTextStyle: .headline).lineHeight
+        let contentHeight = showSubtitle
+            ? titleHeight + 1 + UIFont.preferredFont(forTextStyle: .caption1).lineHeight
+            : titleHeight
+        return contentHeight
+            + (stackedVerticalPadding * 2)
+            + (floatingVerticalInset * 2)
+    }
 
     /// The iPad collapsed-split inline capsule still needs a useful minimum title
     /// width beside the trailing toolbar actions.
@@ -478,9 +489,10 @@ struct ContentView: View {
             topActions: {
                 articleListActionButtons
             },
-            content: {
+            content: { naturalTopContentInset in
                 ArticleListView(
                     store: newsreaderStore,
+                    naturalTopContentInset: naturalTopContentInset,
                     usesNativeTopEdgeEffect: usesNativeTopEdgeEffect,
                     onArticleTap: openArticle,
                     onArticleAction: handleArticleAction
@@ -1006,14 +1018,18 @@ private struct ArticleListTitleCapsule: View {
         .padding(.horizontal, horizontalPadding)
         .padding(.vertical, verticalPadding)
         .background {
-            ArticleListChromeCapsuleBackground(usesSystemToolbarGlass: usesSystemToolbarGlass)
+            ArticleListChromeCapsuleBackground(
+                usesSystemToolbarGlass: usesSystemToolbarGlass,
+                isInteractive: action != nil
+            )
         }
+        .contentShape(Capsule())
         .accessibilityElement(children: .combine)
     }
 
     private var verticalPadding: CGFloat {
         switch layout {
-        case .stacked: 7
+        case .stacked: IOSArticleListTitleCapsuleMetrics.stackedVerticalPadding
         case .compactStacked: IOSArticleListTitleCapsuleMetrics.compactStackedVerticalPadding
         case .inline: 5
         }
@@ -1109,6 +1125,7 @@ private struct ArticleListTitleCapsule: View {
 
 private struct ArticleListChromeCapsuleBackground: View {
     var usesSystemToolbarGlass = false
+    var isInteractive = false
 
     /// Whether the system is asked to avoid see-through backgrounds. Glass is
     /// exactly that, and the title has to stay legible over scrolling articles,
@@ -1123,7 +1140,7 @@ private struct ArticleListChromeCapsuleBackground: View {
         } else if reduceTransparency {
             Capsule().fill(Color(uiColor: .secondarySystemBackground))
         } else if #available(iOS 26.0, *) {
-            ArticleListGlassCapsule()
+            ArticleListGlassCapsule(isInteractive: isInteractive)
         } else {
             Capsule().fill(.regularMaterial)
         }
@@ -1132,10 +1149,11 @@ private struct ArticleListChromeCapsuleBackground: View {
 
 @available(iOS 26.0, *)
 private struct ArticleListGlassCapsule: UIViewRepresentable {
+    let isInteractive: Bool
 
     func makeUIView(context: Context) -> UIVisualEffectView {
         let effect = UIGlassEffect(style: .regular)
-        effect.isInteractive = false
+        effect.isInteractive = isInteractive
         let view = UIVisualEffectView(effect: effect)
         // Resolves the capsule shape without a mask layer.
         view.cornerConfiguration = .capsule()
@@ -1144,7 +1162,7 @@ private struct ArticleListGlassCapsule: UIViewRepresentable {
 
     func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
         let effect = UIGlassEffect(style: .regular)
-        effect.isInteractive = false
+        effect.isInteractive = isInteractive
         uiView.effect = effect
     }
 
@@ -1271,6 +1289,14 @@ private struct ArticleListFloatingActionGroup<Actions: View>: View {
     }
 }
 
+private struct ArticleListDetachedTopChromeHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 private struct ArticleListNavigationChrome<Content: View, TopActions: View>: View {
     var store: NewsreaderStore
     /// Absent when a persistent sidebar already offers scope selection.
@@ -1278,7 +1304,8 @@ private struct ArticleListNavigationChrome<Content: View, TopActions: View>: Vie
     var chromeMode: IOSArticleListChromeMode
     var actionPlacement: IOSArticleListActionPlacement
     @ViewBuilder let topActions: () -> TopActions
-    @ViewBuilder let content: () -> Content
+    @ViewBuilder let content: (CGFloat) -> Content
+    @State private var detachedTopChromeHeight: CGFloat = 0
 
     private func capsuleSubtitle(_ subtitle: String) -> String? {
         ArticleListCounterPresentation.usesNativeSubtitle(showArticleCount: store.showArticleCount, supportsNativeSubtitle: true) ? subtitle : nil
@@ -1304,11 +1331,20 @@ private struct ArticleListNavigationChrome<Content: View, TopActions: View>: Vie
         let landscapeWidthReservationSubtitle = store.isSyncing ? landscapeCountLabel : syncingLabel
 
         let capsulePlacement = IOSArticleListChromePresentation.titleCapsulePlacement(for: chromeMode)
+        let naturalTopContentInset: CGFloat = if chromeMode == .compactPortrait {
+            detachedTopChromeHeight > 0
+                ? detachedTopChromeHeight
+                : IOSArticleListTitleCapsuleMetrics.portraitNaturalTopContentInset(
+                    showSubtitle: store.showArticleCount
+                )
+        } else {
+            0
+        }
 
         // Keep the Timeline itself outside the chrome-mode switch. Compact
         // portrait and persistent split modes retain detached safe-area chrome;
         // compact iPhone landscape deliberately returns to UINavigationBar.
-        content()
+        content(naturalTopContentInset)
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .top, spacing: 0) {
@@ -1324,6 +1360,14 @@ private struct ArticleListNavigationChrome<Content: View, TopActions: View>: Vie
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
                     .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: ArticleListDetachedTopChromeHeightPreferenceKey.self,
+                                value: proxy.size.height
+                            )
+                        }
+                    }
                 case (.hidden, .floatingTopTrailing, .persistentSplit):
                     HStack {
                         Spacer(minLength: 0)
@@ -1359,6 +1403,10 @@ private struct ArticleListNavigationChrome<Content: View, TopActions: View>: Vie
                 default:
                     EmptyView()
                 }
+            }
+            .onPreferenceChange(ArticleListDetachedTopChromeHeightPreferenceKey.self) { height in
+                guard abs(detachedTopChromeHeight - height) > 0.5 else { return }
+                detachedTopChromeHeight = height
             }
             .toolbar {
                 if capsulePlacement == .navigationTopLeading {

@@ -294,6 +294,7 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
     let scrollResetRevision: UInt64
     let markReadOnScrolloverEnabled: Bool
     let showsRefreshControl: Bool
+    let naturalTopContentInset: CGFloat
     var usesNativeTopEdgeEffect = true
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
@@ -345,6 +346,7 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
             scrollResetRevision: scrollResetRevision,
             markReadOnScrolloverEnabled: markReadOnScrolloverEnabled,
             showsRefreshControl: showsRefreshControl,
+            naturalTopContentInset: naturalTopContentInset,
             usesNativeTopEdgeEffect: usesNativeTopEdgeEffect
         )
     }
@@ -422,6 +424,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private var scrollResetRevision: UInt64?
     private var markReadOnScrolloverEnabled = false
     private var showsRefreshControl = true
+    private var naturalTopContentInset: CGFloat = 0
     private var usesNativeTopEdgeEffect = true
     private var scrolloverPhase: IOSScrolloverPresentationPhase = .idle
     private var scrolloverLayoutGeneration: UInt64 = 0
@@ -523,6 +526,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         return false
     }
     var statusBarScrimVisibleForTesting: Bool { !statusBarScrim.isHidden }
+    var naturalTopContentInsetForTesting: CGFloat { tableView.contentInset.top }
 #endif
 
     override func viewDidLoad() {
@@ -806,6 +810,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         scrollResetRevision newScrollResetRevision: UInt64,
         markReadOnScrolloverEnabled newMarkReadOnScrolloverEnabled: Bool,
         showsRefreshControl newShowsRefreshControl: Bool,
+        naturalTopContentInset newNaturalTopContentInset: CGFloat = 0,
         usesNativeTopEdgeEffect newUsesNativeTopEdgeEffect: Bool = true
     ) {
         loadViewIfNeeded()
@@ -820,6 +825,10 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         let iconVariantChanged = iconVariant != newIconVariant
         let feedIconRequestChanged = feedIconRequestRevision != nil && feedIconRequestRevision != newFeedIconRequestRevision
         let resetChanged = scrollResetRevision != nil && scrollResetRevision != newScrollResetRevision
+        let clampedNaturalTopContentInset = max(0, newNaturalTopContentInset)
+        let naturalTopInsetChanged = abs(naturalTopContentInset - clampedNaturalTopContentInset) > 0.5
+        let wasAtNaturalTop = structuralRevision == nil
+            || abs(tableView.contentOffset.y + tableView.adjustedContentInset.top) <= 0.5
         let topEdgePolicyChanged = usesNativeTopEdgeEffect != newUsesNativeTopEdgeEffect
 
         mode = newMode
@@ -830,8 +839,22 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         scrollResetRevision = newScrollResetRevision
         markReadOnScrolloverEnabled = newMarkReadOnScrolloverEnabled
         showsRefreshControl = newShowsRefreshControl
+        naturalTopContentInset = clampedNaturalTopContentInset
         usesNativeTopEdgeEffect = newUsesNativeTopEdgeEffect
         tableView.refreshControl = showsRefreshControl ? refreshControl : nil
+        if naturalTopInsetChanged {
+            // The detached portrait capsule should clear the first article only at
+            // the natural beginning of the list. contentInset scrolls away with
+            // the content, unlike a permanent safe-area reservation.
+            invalidateScrolloverGeometry()
+            tableView.contentInset.top = naturalTopContentInset
+            if wasAtNaturalTop {
+                tableView.setContentOffset(
+                    CGPoint(x: tableView.contentOffset.x, y: -tableView.adjustedContentInset.top),
+                    animated: false
+                )
+            }
+        }
         if topEdgePolicyChanged {
             applyTopEdgeEffectPolicy()
         }
@@ -2961,6 +2984,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
 struct ArticleListView: View {
     @Environment(\.colorScheme) private var colorScheme
     var store: NewsreaderStore
+    var naturalTopContentInset: CGFloat = 0
     var usesNativeTopEdgeEffect = true
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
@@ -2998,6 +3022,7 @@ struct ArticleListView: View {
                     scrollResetRevision: store.scrollResetRevision,
                     markReadOnScrolloverEnabled: store.markReadOnScrolloverEnabled,
                     showsRefreshControl: true,
+                    naturalTopContentInset: naturalTopContentInset,
                     usesNativeTopEdgeEffect: usesNativeTopEdgeEffect,
                     onArticleTap: onArticleTap,
                     onArticleAction: onArticleAction,

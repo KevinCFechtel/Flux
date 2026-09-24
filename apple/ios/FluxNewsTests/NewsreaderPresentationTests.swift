@@ -50,6 +50,15 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleListActionChromeMetrics.floatingSpacing, 6)
     }
 
+    func testPortraitTitleCapsuleNaturalTopInsetMatchesItsChromeHeight() {
+        let singleLine = IOSArticleListTitleCapsuleMetrics.portraitNaturalTopContentInset(showSubtitle: false)
+        let twoLine = IOSArticleListTitleCapsuleMetrics.portraitNaturalTopContentInset(showSubtitle: true)
+
+        XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.stackedVerticalPadding, 7)
+        XCTAssertGreaterThan(twoLine, singleLine)
+        XCTAssertGreaterThan(singleLine, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset * 2)
+    }
+
     func testCollapsedSplitInlineTitleCapsuleKeepsUsefulMinimumWidth() {
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.inlineMinimumContentWidth, 280)
         XCTAssertGreaterThan(
@@ -376,6 +385,51 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(controller.lastScrollResetOffsetForTesting, .init(x: 0, y: 0))
         XCTAssertEqual(controller.contentOffsetForTesting, .init(x: 0, y: 0))
         XCTAssertGreaterThan(controller.scrolloverLayoutGenerationForTesting, scrolloverGeneration)
+    }
+
+    @MainActor
+    func testNaturalTopContentInsetScrollsWithContentAndParticipatesInSemanticReset() {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = makeTimelineController(bridge: bridge)
+        let structuralReconciliations = controller.structuralReconciliationCount
+        let snapshotApplications = controller.structuralSnapshotApplicationCount
+
+        controller.update(
+            structuralState: timelineStructuralState([timelineArticle(id: 1), timelineArticle(id: 2)], revision: 1),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            feedIconRequestRevision: 0,
+            scrollResetRevision: 0,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false,
+            naturalTopContentInset: 64
+        )
+
+        XCTAssertEqual(controller.naturalTopContentInsetForTesting, 64, accuracy: 0.001)
+        XCTAssertEqual(controller.contentOffsetForTesting.y, -64, accuracy: 0.001)
+        XCTAssertEqual(controller.structuralReconciliationCount, structuralReconciliations)
+        XCTAssertEqual(controller.structuralSnapshotApplicationCount, snapshotApplications)
+
+        controller.update(
+            structuralState: timelineStructuralState([timelineArticle(id: 1), timelineArticle(id: 2)], revision: 1),
+            presentationBridge: bridge,
+            feedIconPresentationBridge: bridge,
+            mode: .visual,
+            previewLines: .standard,
+            iconVariant: .normal,
+            feedIconRequestRevision: 0,
+            scrollResetRevision: 1,
+            markReadOnScrolloverEnabled: false,
+            showsRefreshControl: false,
+            naturalTopContentInset: 64
+        )
+
+        XCTAssertEqual(controller.scrollResetApplicationCountForTesting, 1)
+        XCTAssertEqual(controller.lastScrollResetOffsetForTesting?.y ?? .nan, -64, accuracy: 0.001)
+        XCTAssertEqual(controller.contentOffsetForTesting.y, -64, accuracy: 0.001)
     }
 
     @MainActor

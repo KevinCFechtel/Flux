@@ -84,6 +84,7 @@ private struct SearchResultsContent: View {
                     scrollResetRevision: 0,
                     markReadOnScrolloverEnabled: false,
                     showsRefreshControl: false,
+                    naturalTopContentInset: 0,
                     onArticleTap: onArticleTap,
                     onArticleAction: onArticleAction,
                     onSetRead: onSetRead,
