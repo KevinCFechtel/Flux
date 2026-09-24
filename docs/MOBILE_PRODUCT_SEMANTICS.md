@@ -119,6 +119,14 @@ Interaction semantics:
 
 Current default actions are Read/Unread and Star/Unstar on their established sides. Future configuration must preserve the semantic action model rather than storing platform widget details.
 
+For native iOS Phase D, the currently implemented configurable semantic set is
+Read/Unread, Star/Unstar, Open Original, Open in Miniflux, Open Comments, Share,
+and Save to Third-Party Service. Conditional actions are omitted for rows where
+their precondition is unavailable. Audio Download remains a D6 media action and
+must not appear as a placeholder before the native media/download handler
+exists; D6 can add it to this semantic set without changing the 0-2-per-side
+contract.
+
 ## 8. Scope-level Mark as Read
 
 `Mark All as Read` is a mutation action and is not part of Filter/Sort presentation controls.
