@@ -475,8 +475,15 @@ the successful compact-portrait result while making compact iPhone landscape
 deliberately different:
 
 - compact portrait keeps the centered detached scope capsule in a normal top
-  `safeAreaInset`, Sync/Filter/More in the native bottom toolbar, and the native
-  `.automatic` Timeline top-edge effect on iOS 26+;
+  `safeAreaInset`, with the full capsule acting as the scope-selection `Button`;
+  its custom iOS 26+ glass is interactive. The measured detached-row height is
+  also supplied to the Timeline as a natural-top `contentInset`, so only the
+  list's initial position clears the capsule while normal scrolling can continue
+  underneath it. Existing semantic resets, including scope changes and
+  manual-Sync replacement, already target `-adjustedContentInset.top` and
+  therefore land on the same cleared start. Sync/Filter/More remain in the
+  native bottom toolbar, and the native `.automatic` Timeline top-edge effect
+  remains enabled on iOS 26+;
 - compact landscape returns the scope capsule to `.topBarLeading` and
   Sync/Filter/More to `.topBarTrailing`. Its Timeline top-edge effect is
   disabled because the compact landscape presentation has no visible status-bar

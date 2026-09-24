@@ -571,8 +571,16 @@ scope capsule implemented by `ArticleListTitleCapsule`, detached from
 `UINavigationBar` and rendered in a normal SwiftUI top `safeAreaInset`.
 iPhone portrait uses a centered stacked detached capsule with the optional
 descriptive current-scope count and keeps Sync/Filter/More in the native bottom
-toolbar. Its native Timeline top-edge effect remains `.automatic` on
-iOS/iPadOS 26+.
+toolbar. The entire scope capsule remains one semantic `Button`; on iOS 26+
+its owned `UIGlassEffect` is interactive, while Reduce Transparency retains the
+opaque fallback. The Timeline receives the measured detached-chrome height as an
+additional natural-top `contentInset`: the first article therefore starts below
+the capsule at the beginning of the list, but that clearance scrolls away with
+the content so later articles can still pass beneath the floating glass.
+Semantic scope/filter/sort resets and manual-Sync snapshot replacement already
+reset to `-adjustedContentInset.top`, so they reuse the same natural start
+without a separate scroll-state path. Its native Timeline top-edge effect remains
+`.automatic` on iOS/iPadOS 26+.
 
 Compact iPhone landscape intentionally uses native top navigation chrome instead:
 the compact two-line scope capsule is `.topBarLeading` and Sync/Filter/More are
