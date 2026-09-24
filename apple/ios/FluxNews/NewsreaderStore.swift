@@ -516,6 +516,10 @@ struct ArticleRowContent: Equatable, Sendable {
         static let showArticleCount = "FluxNews.iOS.showArticleCount"
         static let showRelativePublicationTime = "FluxNews.iOS.showRelativePublicationTime"
         static let clickOnNews = "FluxNews.clickOnNews"
+        static let leadingSwipeFull = "FluxNews.iOS.leadingSwipeFull"
+        static let leadingSwipeAdditional = "FluxNews.iOS.leadingSwipeAdditional"
+        static let trailingSwipeFull = "FluxNews.iOS.trailingSwipeFull"
+        static let trailingSwipeAdditional = "FluxNews.iOS.trailingSwipeAdditional"
     }
 
     var articles: [ArticleSummary] { timelineStructuralStorage.items.map(\.article) }
@@ -560,6 +564,7 @@ struct ArticleRowContent: Equatable, Sendable {
     var showArticleCount: Bool
     var showRelativePublicationTime: Bool
     var clickOnNews: ClickOnNews
+    var articleSwipeConfiguration: IOSArticleSwipeConfiguration
     private(set) var scrolloverUndoIDs: [Int64] = []
     // The tracker only needs to re-arm when an existing Undo group is cleared.
     private(set) var scrolloverRearmRevision: UInt64 = 0
@@ -649,6 +654,7 @@ struct ArticleRowContent: Equatable, Sendable {
         showArticleCount = defaults.object(forKey: Key.showArticleCount) as? Bool ?? true
         showRelativePublicationTime = defaults.object(forKey: Key.showRelativePublicationTime) as? Bool ?? false
         clickOnNews = defaults.string(forKey: Key.clickOnNews).flatMap(ClickOnNews.init(rawValue:)) ?? .openLink
+        articleSwipeConfiguration = Self.loadArticleSwipeConfiguration(defaults: defaults)
     }
 
     func attach(
@@ -1047,6 +1053,90 @@ struct ArticleRowContent: Equatable, Sendable {
         defaults.set(value, forKey: Key.showRelativePublicationTime)
     }
     func setClickOnNews(_ value: ClickOnNews) { clickOnNews = value; defaults.set(value.rawValue, forKey: Key.clickOnNews) }
+
+    func setArticleSwipeAction(
+        _ action: IOSArticleSwipeAction?,
+        side: IOSArticleSwipeSide,
+        slot: IOSArticleSwipeSlot
+    ) {
+        articleSwipeConfiguration = articleSwipeConfiguration.setting(
+            action,
+            side: side,
+            slot: slot
+        )
+        persistArticleSwipeConfiguration()
+    }
+
+    private static func loadArticleSwipeConfiguration(
+        defaults: UserDefaults
+    ) -> IOSArticleSwipeConfiguration {
+        let leadingFull = defaults.string(forKey: Key.leadingSwipeFull)
+            .flatMap(IOSArticleSwipeAction.init(rawValue:))
+        let leadingAdditional = defaults.string(forKey: Key.leadingSwipeAdditional)
+            .flatMap(IOSArticleSwipeAction.init(rawValue:))
+        let trailingFull = defaults.string(forKey: Key.trailingSwipeFull)
+            .flatMap(IOSArticleSwipeAction.init(rawValue:))
+        let trailingAdditional = defaults.string(forKey: Key.trailingSwipeAdditional)
+            .flatMap(IOSArticleSwipeAction.init(rawValue:))
+
+        let hasStoredConfiguration = [
+            Key.leadingSwipeFull,
+            Key.leadingSwipeAdditional,
+            Key.trailingSwipeFull,
+            Key.trailingSwipeAdditional,
+        ].contains { defaults.object(forKey: $0) != nil }
+
+        guard hasStoredConfiguration else {
+            return .defaultConfiguration
+        }
+
+        func side(
+            full: IOSArticleSwipeAction?,
+            additional: IOSArticleSwipeAction?
+        ) -> [IOSArticleSwipeAction] {
+            guard let full else { return [] }
+            if let additional, additional != full {
+                return [additional, full]
+            }
+            return [full]
+        }
+
+        return .init(
+            leading: side(full: leadingFull, additional: leadingAdditional),
+            trailing: side(full: trailingFull, additional: trailingAdditional)
+        )
+    }
+
+    private func persistArticleSwipeConfiguration() {
+        func persist(
+            _ side: IOSArticleSwipeSide,
+            fullKey: String,
+            additionalKey: String
+        ) {
+            if let full = articleSwipeConfiguration.fullSwipeAction(for: side) {
+                defaults.set(full.rawValue, forKey: fullKey)
+            } else {
+                defaults.set("", forKey: fullKey)
+            }
+
+            if let additional = articleSwipeConfiguration.additionalAction(for: side) {
+                defaults.set(additional.rawValue, forKey: additionalKey)
+            } else {
+                defaults.set("", forKey: additionalKey)
+            }
+        }
+
+        persist(
+            .leading,
+            fullKey: Key.leadingSwipeFull,
+            additionalKey: Key.leadingSwipeAdditional
+        )
+        persist(
+            .trailing,
+            fullKey: Key.trailingSwipeFull,
+            additionalKey: Key.trailingSwipeAdditional
+        )
+    }
 
     func setRead(_ article: ArticleSummary, read: Bool, providesFeedback: Bool = true) {
         setRead(articleIDs: [article.id], read: read, providesFeedback: providesFeedback)
