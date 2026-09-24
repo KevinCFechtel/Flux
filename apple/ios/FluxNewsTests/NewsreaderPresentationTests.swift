@@ -4547,9 +4547,10 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
 
         XCTAssertTrue(widgetSource.contains(".frame(width: 32, height: 32)"))
-        XCTAssertTrue(widgetSource.contains("Spacer(minLength: 6)"))
-        XCTAssertTrue(widgetSource.contains(".font(.headline.bold().monospacedDigit())"))
-        XCTAssertTrue(widgetSource.contains(".font(.caption2)"))
+        XCTAssertTrue(source.contains(".frame(width: 18, height: 18)"))
+        XCTAssertTrue(source.contains(".font(.system(size: 13"))
+        XCTAssertTrue(source.contains(".font(.system(size: 17"))
+        XCTAssertTrue(source.contains(".font(.system(size: 12"))
     }
 
 }
