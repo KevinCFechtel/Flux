@@ -671,8 +671,7 @@ URL/category/options; the core performs Miniflux communication. Feed
 discovery is delegated entirely to Miniflux. General feed/category
 edit/delete remains in the Miniflux web UI for now.
 
-Curated feeds remain a static repository-maintained list and may be
-extended through repository change requests/PRs.
+Curated/suggested feed onboarding from the legacy Flutter client is retired product behavior. Flux clients do not maintain or ship a repository-curated feed list; feed creation/discovery stays with the existing Miniflux/native feed-management flow.
 
 Miniflux Save/third-party integration is a core-wrapped Miniflux API
 operation, not a duplicated service implementation.
