@@ -112,6 +112,141 @@ enum IOSArticleContextAction: Equatable {
     case saveToService
 }
 
+enum IOSArticleSwipeSide: Hashable {
+    case leading
+    case trailing
+}
+
+enum IOSArticleSwipeSlot: Hashable {
+    case fullSwipe
+    case additional
+}
+
+enum IOSArticleSwipeAction: String, CaseIterable, Hashable {
+    case readUnread
+    case starUnstar
+    case openOriginal
+    case openMiniflux
+    case comments
+    case share
+    case saveToService
+
+    var title: String {
+        switch self {
+        case .readUnread: String(localized: "Read / Unread")
+        case .starUnstar: String(localized: "Star / Unstar")
+        case .openOriginal: String(localized: "Open Original")
+        case .openMiniflux: String(localized: "Open in Miniflux")
+        case .comments: String(localized: "Open Comments")
+        case .share: String(localized: "Share")
+        case .saveToService: String(localized: "Save to Third-Party Service")
+        }
+    }
+
+    var contextAction: IOSArticleContextAction? {
+        switch self {
+        case .readUnread, .starUnstar:
+            nil
+        case .openOriginal:
+            .original
+        case .openMiniflux:
+            .miniflux
+        case .comments:
+            .comments
+        case .share:
+            .share
+        case .saveToService:
+            .saveToService
+        }
+    }
+}
+
+struct IOSArticleSwipeConfiguration: Equatable {
+    /// Stored in visual inner-to-outer order. The last element is therefore
+    /// the deliberate Full Swipe action.
+    let leading: [IOSArticleSwipeAction]
+    let trailing: [IOSArticleSwipeAction]
+
+    static let defaultConfiguration = IOSArticleSwipeConfiguration(
+        leading: [.readUnread],
+        trailing: [.starUnstar]
+    )
+
+    init(
+        leading: [IOSArticleSwipeAction],
+        trailing: [IOSArticleSwipeAction]
+    ) {
+        self.leading = Self.normalized(leading)
+        self.trailing = Self.normalized(trailing)
+    }
+
+    func actions(for side: IOSArticleSwipeSide) -> [IOSArticleSwipeAction] {
+        switch side {
+        case .leading: leading
+        case .trailing: trailing
+        }
+    }
+
+    func fullSwipeAction(for side: IOSArticleSwipeSide) -> IOSArticleSwipeAction? {
+        actions(for: side).last
+    }
+
+    func additionalAction(for side: IOSArticleSwipeSide) -> IOSArticleSwipeAction? {
+        let actions = actions(for: side)
+        return actions.count == 2 ? actions.first : nil
+    }
+
+    func setting(
+        _ action: IOSArticleSwipeAction?,
+        side: IOSArticleSwipeSide,
+        slot: IOSArticleSwipeSlot
+    ) -> IOSArticleSwipeConfiguration {
+        let current = actions(for: side)
+        let fullSwipe = current.last
+        let additional = current.count == 2 ? current.first : nil
+        let updated: [IOSArticleSwipeAction]
+
+        switch slot {
+        case .fullSwipe:
+            guard let action else {
+                updated = []
+                break
+            }
+            if let additional, additional != action {
+                updated = [additional, action]
+            } else {
+                updated = [action]
+            }
+
+        case .additional:
+            guard let fullSwipe else {
+                updated = []
+                break
+            }
+            if let action, action != fullSwipe {
+                updated = [action, fullSwipe]
+            } else {
+                updated = [fullSwipe]
+            }
+        }
+
+        switch side {
+        case .leading:
+            return .init(leading: updated, trailing: trailing)
+        case .trailing:
+            return .init(leading: leading, trailing: updated)
+        }
+    }
+
+    private static func normalized(
+        _ actions: [IOSArticleSwipeAction]
+    ) -> [IOSArticleSwipeAction] {
+        var seen = Set<IOSArticleSwipeAction>()
+        let unique = actions.filter { seen.insert($0).inserted }
+        return Array(unique.suffix(2))
+    }
+}
+
 enum IOSArticleContextMenuPolicy {
     static func commentsURL(_ value: String) -> URL? {
         ArticleOpenRoutingPolicy.validWebURL(value)
@@ -293,6 +428,7 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
     let feedIconRequestRevision: UInt64
     let scrollResetRevision: UInt64
     let markReadOnScrolloverEnabled: Bool
+    var swipeConfiguration: IOSArticleSwipeConfiguration = .defaultConfiguration
     let showsRefreshControl: Bool
     let naturalTopContentInset: CGFloat
     var usesNativeTopEdgeEffect = true
@@ -345,6 +481,7 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
             feedIconRequestRevision: feedIconRequestRevision,
             scrollResetRevision: scrollResetRevision,
             markReadOnScrolloverEnabled: markReadOnScrolloverEnabled,
+            swipeConfiguration: swipeConfiguration,
             showsRefreshControl: showsRefreshControl,
             naturalTopContentInset: naturalTopContentInset,
             usesNativeTopEdgeEffect: usesNativeTopEdgeEffect
@@ -423,6 +560,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private var feedIconRequestRevision: UInt64?
     private var scrollResetRevision: UInt64?
     private var markReadOnScrolloverEnabled = false
+    private var swipeConfiguration = IOSArticleSwipeConfiguration.defaultConfiguration
     private var showsRefreshControl = true
     private var naturalTopContentInset: CGFloat = 0
     private var usesNativeTopEdgeEffect = true
@@ -809,6 +947,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         feedIconRequestRevision newFeedIconRequestRevision: UInt64,
         scrollResetRevision newScrollResetRevision: UInt64,
         markReadOnScrolloverEnabled newMarkReadOnScrolloverEnabled: Bool,
+        swipeConfiguration newSwipeConfiguration: IOSArticleSwipeConfiguration = .defaultConfiguration,
         showsRefreshControl newShowsRefreshControl: Bool,
         naturalTopContentInset newNaturalTopContentInset: CGFloat = 0,
         usesNativeTopEdgeEffect newUsesNativeTopEdgeEffect: Bool = true
@@ -838,6 +977,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         feedIconRequestRevision = newFeedIconRequestRevision
         scrollResetRevision = newScrollResetRevision
         markReadOnScrolloverEnabled = newMarkReadOnScrolloverEnabled
+        swipeConfiguration = newSwipeConfiguration
         showsRefreshControl = newShowsRefreshControl
         naturalTopContentInset = clampedNaturalTopContentInset
         usesNativeTopEdgeEffect = newUsesNativeTopEdgeEffect
@@ -1206,31 +1346,140 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     }
 
     func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
-        let newValue = !item.isRead
-        let action = UIContextualAction(style: .normal, title: newValue ? String(localized: "Mark as Read") : String(localized: "Mark as Unread")) { [weak self] _, _, completion in
-            self?.setRead(id: id, value: newValue)
-            completion(true)
-        }
-        action.image = UIImage(systemName: newValue ? "envelope.open" : "envelope")
-        action.backgroundColor = .tintColor
-        let configuration = UISwipeActionsConfiguration(actions: [action])
+        swipeActionsConfiguration(for: .leading, indexPath: indexPath)
+    }
+
+    func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        swipeActionsConfiguration(for: .trailing, indexPath: indexPath)
+    }
+
+    private func swipeActionsConfiguration(
+        for side: IOSArticleSwipeSide,
+        indexPath: IndexPath
+    ) -> UISwipeActionsConfiguration? {
+        guard let id = dataSource.itemIdentifier(for: indexPath),
+              let item = renderedItem(for: id)
+        else { return nil }
+
+        // Product settings are inner-to-outer. UIKit assigns Full Swipe to its
+        // first action, so feed UIKit outer-to-inner and keep the semantic
+        // storage independent of UIKit's control ordering.
+        let actions = swipeConfiguration
+            .actions(for: side)
+            .reversed()
+            .compactMap { makeSwipeAction($0, articleID: id, item: item) }
+
+        guard !actions.isEmpty else { return nil }
+        let configuration = UISwipeActionsConfiguration(actions: actions)
         configuration.performsFirstActionWithFullSwipe = true
         return configuration
     }
 
-    func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        guard let id = dataSource.itemIdentifier(for: indexPath), let item = renderedItem(for: id) else { return nil }
-        let newValue = !item.isStarred
-        let action = UIContextualAction(style: .normal, title: newValue ? String(localized: "Star") : String(localized: "Unstar")) { [weak self] _, _, completion in
-            self?.setStarred(id: id, value: newValue)
+    private func makeSwipeAction(
+        _ semanticAction: IOSArticleSwipeAction,
+        articleID: Int64,
+        item: IOSUIKitArticleTimelineItem
+    ) -> UIContextualAction? {
+        switch semanticAction {
+        case .readUnread:
+            let newValue = !item.isRead
+            let action = UIContextualAction(
+                style: .normal,
+                title: newValue
+                    ? String(localized: "Mark as Read")
+                    : String(localized: "Mark as Unread")
+            ) { [weak self] _, _, completion in
+                self?.setRead(id: articleID, value: newValue)
+                completion(true)
+            }
+            action.image = UIImage(
+                systemName: newValue ? "envelope.open" : "envelope"
+            )
+            action.backgroundColor = .tintColor
+            return action
+
+        case .starUnstar:
+            let newValue = !item.isStarred
+            let action = UIContextualAction(
+                style: .normal,
+                title: newValue
+                    ? String(localized: "Star")
+                    : String(localized: "Unstar")
+            ) { [weak self] _, _, completion in
+                self?.setStarred(id: articleID, value: newValue)
+                completion(true)
+            }
+            action.image = UIImage(
+                systemName: newValue ? "star" : "star.slash"
+            )
+            action.backgroundColor = .systemOrange
+            return action
+
+        case .comments:
+            guard item.content.hasComments else { return nil }
+            return makeContextSwipeAction(
+                article: item.article,
+                contextAction: .comments,
+                title: String(localized: "Open Comments"),
+                systemImage: "bubble.left",
+                backgroundColor: .systemTeal
+            )
+
+        case .openOriginal:
+            return makeContextSwipeAction(
+                article: item.article,
+                contextAction: .original,
+                title: String(localized: "Open Original"),
+                systemImage: "safari",
+                backgroundColor: .systemBlue
+            )
+
+        case .openMiniflux:
+            return makeContextSwipeAction(
+                article: item.article,
+                contextAction: .miniflux,
+                title: String(localized: "Open in Miniflux"),
+                systemImage: "arrow.up.forward.app",
+                backgroundColor: .systemIndigo
+            )
+
+        case .share:
+            return makeContextSwipeAction(
+                article: item.article,
+                contextAction: .share,
+                title: String(localized: "Share"),
+                systemImage: "square.and.arrow.up",
+                backgroundColor: .systemBlue
+            )
+
+        case .saveToService:
+            return makeContextSwipeAction(
+                article: item.article,
+                contextAction: .saveToService,
+                title: String(localized: "Save to Third-Party Service"),
+                systemImage: "tray.and.arrow.down",
+                backgroundColor: .systemPurple
+            )
+        }
+    }
+
+    private func makeContextSwipeAction(
+        article: ArticleSummary,
+        contextAction: IOSArticleContextAction,
+        title: String,
+        systemImage: String,
+        backgroundColor: UIColor
+    ) -> UIContextualAction {
+        let action = UIContextualAction(
+            style: .normal,
+            title: title
+        ) { [weak self] _, _, completion in
+            self?.onArticleAction?(article, contextAction)
             completion(true)
         }
-        action.image = UIImage(systemName: newValue ? "star" : "star.slash")
-        action.backgroundColor = .systemOrange
-        let configuration = UISwipeActionsConfiguration(actions: [action])
-        configuration.performsFirstActionWithFullSwipe = true
-        return configuration
+        action.image = UIImage(systemName: systemImage)
+        action.backgroundColor = backgroundColor
+        return action
     }
 
     func tableView(_ tableView: UITableView, contextMenuConfigurationForRowAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
@@ -3021,6 +3270,7 @@ struct ArticleListView: View {
                     feedIconRequestRevision: store.feedIconRequestRevision,
                     scrollResetRevision: store.scrollResetRevision,
                     markReadOnScrolloverEnabled: store.markReadOnScrolloverEnabled,
+                    swipeConfiguration: store.articleSwipeConfiguration,
                     showsRefreshControl: true,
                     naturalTopContentInset: naturalTopContentInset,
                     usesNativeTopEdgeEffect: usesNativeTopEdgeEffect,
