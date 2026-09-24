@@ -4207,22 +4207,29 @@ final class NewsreaderPresentationTests: XCTestCase {
             scrollResetRevision: 0,
             markReadOnScrolloverEnabled: false,
             swipeConfiguration: .init(
-                leading: [.comments],
+                leading: [.share, .comments],
                 trailing: []
             ),
             showsRefreshControl: false
         )
         await controller.settleForTesting()
 
-        let configuration = controller.tableView(
-            controller.tableViewForTesting,
-            leadingSwipeActionsConfigurationForRowAt: IndexPath(
-                row: 0,
-                section: 0
+        let configuration = try XCTUnwrap(
+            controller.tableView(
+                controller.tableViewForTesting,
+                leadingSwipeActionsConfigurationForRowAt: IndexPath(
+                    row: 0,
+                    section: 0
+                )
             )
         )
 
-        XCTAssertNil(configuration)
+        XCTAssertEqual(configuration.actions.count, 1)
+        XCTAssertEqual(
+            configuration.actions.first?.title,
+            String(localized: "Share")
+        )
+        XCTAssertFalse(configuration.performsFirstActionWithFullSwipe)
     }
 
     @MainActor
