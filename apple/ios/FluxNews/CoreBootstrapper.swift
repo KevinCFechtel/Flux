@@ -4,6 +4,16 @@ import OSLog
 
 @MainActor
 final class CoreBootstrapper: ObservableObject {
+    private enum DefaultsKey {
+        static let mutationDeliveryDefaultApplied =
+            "FluxNews.iOS.mutationDeliveryDefaultApplied.v1"
+    }
+
+    enum SettingsAccessError: Error {
+        case coreUnavailable
+        case sessionUnavailable
+    }
+
     enum LocalStateRebuildState: Equatable {
         case idle
         case rebuilding
@@ -46,6 +56,7 @@ final class CoreBootstrapper: ObservableObject {
     private let coreFactory: @Sendable (IOSMinifluxCredentials) throws -> Flux
     private let accountValidator: @Sendable (IOSMinifluxCredentials) throws -> AccountValidationAttempt
     private let localStateRebuilder: @Sendable (Flux) throws -> SyncCompleted
+    private let defaults: UserDefaults
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "core")
     private var bootstrapGeneration: UInt64 = 0
     private var startupTask: Task<Void, Never>?
@@ -59,7 +70,8 @@ final class CoreBootstrapper: ObservableObject {
         coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator? = nil,
         coreFactory: @escaping @Sendable (IOSMinifluxCredentials) throws -> Flux = CoreBootstrapper.defaultCoreFactory,
         accountValidator: @escaping @Sendable (IOSMinifluxCredentials) throws -> AccountValidationAttempt = CoreBootstrapper.defaultAccountValidator,
-        localStateRebuilder: @escaping @Sendable (Flux) throws -> SyncCompleted = CoreBootstrapper.defaultLocalStateRebuilder
+        localStateRebuilder: @escaping @Sendable (Flux) throws -> SyncCompleted = CoreBootstrapper.defaultLocalStateRebuilder,
+        defaults: UserDefaults = .standard
     ) {
         self.credentialStore = credentialStore
         self.coreSessionExecutionCoordinator =
@@ -67,6 +79,7 @@ final class CoreBootstrapper: ObservableObject {
         self.coreFactory = coreFactory
         self.accountValidator = accountValidator
         self.localStateRebuilder = localStateRebuilder
+        self.defaults = defaults
     }
 
     func start() async {
@@ -129,6 +142,32 @@ final class CoreBootstrapper: ObservableObject {
         _ = nextBootstrapGeneration()
         state = .starting
         await start()
+    }
+
+    func mutationDeliveryPreference() async -> Result<Bool, Error> {
+        guard let activeCore = core else {
+            return .failure(SettingsAccessError.coreUnavailable)
+        }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            { try activeCore.coreSettings().deliveryMode == .live }
+        ) else {
+            return .failure(SettingsAccessError.sessionUnavailable)
+        }
+        return result
+    }
+
+    func setMutationDeliveryPreference(_ live: Bool) async -> Result<Void, Error> {
+        guard let activeCore = core else {
+            return .failure(SettingsAccessError.coreUnavailable)
+        }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            { try activeCore.setDeliveryMode(mode: live ? .live : .deferred) }
+        ) else {
+            return .failure(SettingsAccessError.sessionUnavailable)
+        }
+        return result
     }
 
     func configure(server: String, apiKey: String, headers: [IOSCustomHTTPHeader]) async {
@@ -306,6 +345,23 @@ final class CoreBootstrapper: ObservableObject {
                 onCoreReplacementAborted?()
             }
             throw error
+        }
+
+        if !defaults.bool(forKey: DefaultsKey.mutationDeliveryDefaultApplied) {
+            let defaultResult = await AppleCoreExecution.shared.responsiveResult {
+                try configuredCore.setDeliveryMode(mode: .live)
+            }
+            guard generation == bootstrapGeneration else { return false }
+            do {
+                try defaultResult.get()
+                defaults.set(true, forKey: DefaultsKey.mutationDeliveryDefaultApplied)
+            } catch {
+                if let previousCore {
+                    coreSessionExecutionCoordinator.resume(previousCore)
+                    onCoreReplacementAborted?()
+                }
+                throw error
+            }
         }
 
         if replacingExistingCore {
