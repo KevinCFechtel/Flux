@@ -1364,14 +1364,28 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         // Product settings are inner-to-outer. UIKit assigns Full Swipe to its
         // first action, so feed UIKit outer-to-inner and keep the semantic
         // storage independent of UIKit's control ordering.
-        let actions = swipeConfiguration
-            .actions(for: side)
+        let semanticActions = swipeConfiguration.actions(for: side)
+        let configuredFullSwipe = semanticActions.last
+        let renderedActions = semanticActions
             .reversed()
-            .compactMap { makeSwipeAction($0, articleID: id, item: item) }
+            .compactMap { semanticAction -> (IOSArticleSwipeAction, UIContextualAction)? in
+                guard let action = makeSwipeAction(
+                    semanticAction,
+                    articleID: id,
+                    item: item
+                ) else { return nil }
+                return (semanticAction, action)
+            }
 
-        guard !actions.isEmpty else { return nil }
-        let configuration = UISwipeActionsConfiguration(actions: actions)
-        configuration.performsFirstActionWithFullSwipe = true
+        guard !renderedActions.isEmpty else { return nil }
+        let configuration = UISwipeActionsConfiguration(
+            actions: renderedActions.map(\.1)
+        )
+        // A conditional outer action (for example Comments) may be unavailable
+        // for this row. Never promote the inner action into Full Swipe merely
+        // because UIKit sees it first after filtering.
+        configuration.performsFirstActionWithFullSwipe =
+            renderedActions.first?.0 == configuredFullSwipe
         return configuration
     }
 
