@@ -32,6 +32,17 @@ struct FluxNewsApp: App {
                     bootstrapper.onCoreReplacementAborted = {
                         newsreaderStore.resumeManualSyncAfterAbortedCoreReplacement()
                     }
+                    bootstrapper.prepareForLocalStateRebuild = {
+                        IOSAppRuntime.shared.widgetSnapshotCoordinator.detach()
+                        newsreaderStore.detach()
+                    }
+                    bootstrapper.onLocalStateRebuildFinished = { core in
+                        IOSAppRuntime.shared.widgetSnapshotCoordinator.attach(to: core)
+                        newsreaderStore.attach(
+                            to: core,
+                            coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
+                        )
+                    }
                     bootstrapper.onCoreChanged = { core in
                         if let core {
                             IOSAppRuntime.shared.widgetSnapshotCoordinator.attach(to: core)
