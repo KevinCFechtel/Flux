@@ -15,7 +15,7 @@ struct SettingsView: View {
                     Label("Account", systemImage: "person.crop.circle")
                 }
                 NavigationLink {
-                    ArticlesSettingsView(store: store)
+                    ArticlesSettingsView(store: store, bootstrapper: bootstrapper)
                 } label: {
                     Label("Articles", systemImage: "doc.text")
                 }
