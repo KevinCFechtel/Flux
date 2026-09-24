@@ -296,6 +296,113 @@ final class AccountLifecycleTests: XCTestCase {
     }
 
     @MainActor
+    func testFirstNativeStartupAppliesLiveMutationDeliveryDefaultOnce() async throws {
+        let suiteName = "FluxNews.LiveDeliveryDefault.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        XCTAssertEqual(try core.coreSettings().deliveryMode, .deferred)
+
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core },
+            defaults: defaults
+        )
+        await bootstrapper.start()
+
+        XCTAssertEqual(try core.coreSettings().deliveryMode, .live)
+        XCTAssertTrue(
+            defaults.bool(
+                forKey: "FluxNews.iOS.mutationDeliveryDefaultApplied.v1"
+            )
+        )
+    }
+
+    @MainActor
+    func testExplicitDeferredMutationDeliverySurvivesLaterStartup() async throws {
+        let suiteName = "FluxNews.LiveDeliveryPersisted.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            true,
+            forKey: "FluxNews.iOS.mutationDeliveryDefaultApplied.v1"
+        )
+
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        try core.setDeliveryMode(mode: .deferred)
+
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core },
+            defaults: defaults
+        )
+        await bootstrapper.start()
+
+        XCTAssertEqual(try core.coreSettings().deliveryMode, .deferred)
+    }
+
+    @MainActor
+    func testMutationDeliveryPreferenceReadsAndWritesCoreSetting() async throws {
+        let suiteName = "FluxNews.LiveDeliverySetting.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            true,
+            forKey: "FluxNews.iOS.mutationDeliveryDefaultApplied.v1"
+        )
+
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core },
+            defaults: defaults
+        )
+        await bootstrapper.start()
+
+        let initial = await bootstrapper.mutationDeliveryPreference()
+        switch initial {
+        case let .success(enabled):
+            XCTAssertFalse(enabled)
+        case let .failure(error):
+            XCTFail("Unexpected delivery-mode read failure: \(error)")
+        }
+
+        let enabled = await bootstrapper.setMutationDeliveryPreference(true)
+        if case let .failure(error) = enabled {
+            XCTFail("Unexpected delivery-mode write failure: \(error)")
+        }
+        XCTAssertEqual(try core.coreSettings().deliveryMode, .live)
+
+        let disabled = await bootstrapper.setMutationDeliveryPreference(false)
+        if case let .failure(error) = disabled {
+            XCTFail("Unexpected delivery-mode write failure: \(error)")
+        }
+        XCTAssertEqual(try core.coreSettings().deliveryMode, .deferred)
+    }
+
+    @MainActor
     func testStoredCredentialsActivateWithHeaders() async throws {
         let credentials = IOSMinifluxCredentials(
             server: "https://miniflux.example",
