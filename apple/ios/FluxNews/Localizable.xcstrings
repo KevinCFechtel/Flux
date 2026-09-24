@@ -2377,6 +2377,86 @@
           }
         }
       }
+    },
+    "Rebuild Local State": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lokalen Zustand neu aufbauen"
+          }
+        }
+      }
+    },
+    "Rebuilding Local State…": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lokaler Zustand wird neu aufgebaut…"
+          }
+        }
+      }
+    },
+    "Local state rebuilt.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lokaler Zustand wurde neu aufgebaut."
+          }
+        }
+      }
+    },
+    "Local state was cleared, but synchronization could not be completed.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der lokale Zustand wurde gelöscht, aber die Synchronisierung konnte nicht abgeschlossen werden."
+          }
+        }
+      }
+    },
+    "Rebuild discards synchronized local data and downloads it again from Miniflux while keeping this account and your settings. Remove Account also removes account-bound data and credentials.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neu aufbauen verwirft synchronisierte lokale Daten und lädt sie erneut von Miniflux, während dieser Account und deine Einstellungen erhalten bleiben. Account entfernen löscht zusätzlich accountgebundene Daten und Zugangsdaten."
+          }
+        }
+      }
+    },
+    "Rebuild Local State?": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lokalen Zustand neu aufbauen?"
+          }
+        }
+      }
+    },
+    "Rebuild": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neu aufbauen"
+          }
+        }
+      }
+    },
+    "Synchronized local content and pending changes will be discarded and rebuilt from Miniflux. Your account and settings are preserved. If synchronization fails, the previous local data cannot be restored.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synchronisierte lokale Inhalte und ausstehende Änderungen werden verworfen und von Miniflux neu aufgebaut. Dein Account und deine Einstellungen bleiben erhalten. Falls die Synchronisierung fehlschlägt, können die vorherigen lokalen Daten nicht wiederhergestellt werden."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
