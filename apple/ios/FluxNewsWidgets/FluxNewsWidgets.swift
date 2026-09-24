@@ -189,17 +189,17 @@ private struct IOSFluxNewsStatusView: View {
     private var rectangular: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(title)
-                .font(.caption.weight(.semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             HStack(alignment: .center, spacing: 5) {
                 FluxNewsWidgetBrandIcon()
                     .frame(width: 18, height: 18)
                 Text("\(entry.model.count)")
-                    .font(.headline.bold().monospacedDigit())
+                    .font(.system(size: 17, weight: .bold, design: .default).monospacedDigit())
             }
             Text(LocalizedStringKey(entry.model.countLabel))
-                .font(.caption2)
+                .font(.system(size: 12))
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
