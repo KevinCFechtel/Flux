@@ -491,6 +491,14 @@ deliberately different:
   action placement does not alter the regular-mode Timeline top-edge policy:
   `.automatic` remains enabled on iOS/iPadOS 26+.
 
+The `toolbarVerticalEdge` symbol itself requires the iOS 27.1 SDK. To avoid
+making ordinary Flux development depend on the Xcode 27.1 beta, the bridge is
+compiled only when the app target receives `FLUX_IOS_27_1_SDK`. The Xcode
+project supplies that flag for iOS/iPhone Simulator 27.1 and 27.2 SDK builds.
+Xcode 27.0 builds therefore keep the established horizontal persistent-split
+chrome and continue to compile normally; a 27.1+ SDK build enables the Duo
+vertical-bar adaptation at runtime on iOS 27.1+.
+
 The bottom edge effect remains disabled everywhere. On iOS/iPadOS 17-25 the
 bounded status-bar scrim remains the fallback where it has nonzero height. In
 compact landscape its measured status-bar height is zero, so disabling the native
