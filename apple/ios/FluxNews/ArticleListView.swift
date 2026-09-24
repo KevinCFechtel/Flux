@@ -294,6 +294,7 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
     let scrollResetRevision: UInt64
     let markReadOnScrolloverEnabled: Bool
     let showsRefreshControl: Bool
+    var usesNativeTopEdgeEffect = true
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
     let onSetRead: (ArticleSummary, Bool) -> Void
@@ -343,7 +344,8 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
             feedIconRequestRevision: feedIconRequestRevision,
             scrollResetRevision: scrollResetRevision,
             markReadOnScrolloverEnabled: markReadOnScrolloverEnabled,
-            showsRefreshControl: showsRefreshControl
+            showsRefreshControl: showsRefreshControl,
+            usesNativeTopEdgeEffect: usesNativeTopEdgeEffect
         )
     }
 }
@@ -420,6 +422,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private var scrollResetRevision: UInt64?
     private var markReadOnScrolloverEnabled = false
     private var showsRefreshControl = true
+    private var usesNativeTopEdgeEffect = true
     private var scrolloverPhase: IOSScrolloverPresentationPhase = .idle
     private var scrolloverLayoutGeneration: UInt64 = 0
     private var resolvedScrolloverFrames = IOSUIKitResolvedScrolloverFrameStore()
@@ -556,18 +559,10 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         ] {
             tableView.register(IOSUIKitArticleCell.self, forCellReuseIdentifier: IOSUIKitArticleCell.reuseIdentifier(for: variant))
         }
-        // The scope capsule is no longer a UINavigationBar item, so the native
-        // top edge effect can follow only the actual system bar chrome instead of
-        // extending underneath that custom control. Prefer the system automatic
-        // style on iOS 26+; iOS 27 gives it its own updated appearance.
-        let usesNativeTopEdgeEffect: Bool
+        // Top-edge visibility is presentation-driven and may change on
+        // rotation. The bottom edge effect remains disabled everywhere.
         if #available(iOS 26.0, *) {
-            tableView.topEdgeEffect.style = .automatic
-            tableView.topEdgeEffect.isHidden = false
             tableView.bottomEdgeEffect.isHidden = true
-            usesNativeTopEdgeEffect = true
-        } else {
-            usesNativeTopEdgeEffect = false
         }
         refreshControl.addTarget(self, action: #selector(refreshTriggered), for: .valueChanged)
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self, UITraitLayoutDirection.self]) { (self: Self, _) in
@@ -594,10 +589,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             statusBarScrim.topAnchor.constraint(equalTo: view.topAnchor),
             statusBarScrimHeight,
         ])
-        // Older systems have no UIScrollEdgeEffect API, so retain the bounded
-        // status-bar fallback there. On iOS 26+ the native automatic top edge
-        // effect owns this protection and the scrim must not stack with it.
-        statusBarScrim.isHidden = usesNativeTopEdgeEffect
+        applyTopEdgeEffectPolicy()
 
         dataSource = UITableViewDiffableDataSource<Section, Int64>(tableView: tableView) { [weak self] tableView, indexPath, id in
             guard let self,
@@ -627,6 +619,17 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     ) {
         captureGeometryScrollAnchorIfNeeded()
         super.viewWillTransition(to: size, with: coordinator)
+    }
+
+    private func applyTopEdgeEffectPolicy() {
+        if #available(iOS 26.0, *) {
+            tableView.topEdgeEffect.style = .automatic
+            tableView.topEdgeEffect.isHidden = !usesNativeTopEdgeEffect
+            tableView.bottomEdgeEffect.isHidden = true
+            statusBarScrim.isHidden = usesNativeTopEdgeEffect
+        } else {
+            statusBarScrim.isHidden = false
+        }
     }
 
     private func updateStatusBarScrimHeight() {
@@ -802,7 +805,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         feedIconRequestRevision newFeedIconRequestRevision: UInt64,
         scrollResetRevision newScrollResetRevision: UInt64,
         markReadOnScrolloverEnabled newMarkReadOnScrolloverEnabled: Bool,
-        showsRefreshControl newShowsRefreshControl: Bool
+        showsRefreshControl newShowsRefreshControl: Bool,
+        usesNativeTopEdgeEffect newUsesNativeTopEdgeEffect: Bool = true
     ) {
         loadViewIfNeeded()
 #if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
@@ -816,6 +820,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         let iconVariantChanged = iconVariant != newIconVariant
         let feedIconRequestChanged = feedIconRequestRevision != nil && feedIconRequestRevision != newFeedIconRequestRevision
         let resetChanged = scrollResetRevision != nil && scrollResetRevision != newScrollResetRevision
+        let topEdgePolicyChanged = usesNativeTopEdgeEffect != newUsesNativeTopEdgeEffect
 
         mode = newMode
         previewLines = newPreviewLines
@@ -825,7 +830,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         scrollResetRevision = newScrollResetRevision
         markReadOnScrolloverEnabled = newMarkReadOnScrolloverEnabled
         showsRefreshControl = newShowsRefreshControl
+        usesNativeTopEdgeEffect = newUsesNativeTopEdgeEffect
         tableView.refreshControl = showsRefreshControl ? refreshControl : nil
+        if topEdgePolicyChanged {
+            applyTopEdgeEffectPolicy()
+        }
         if presentationBridge !== newPresentationBridge {
             presentationBridge?.unsubscribeArticles(self)
             presentationBridge = newPresentationBridge
@@ -2952,6 +2961,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
 struct ArticleListView: View {
     @Environment(\.colorScheme) private var colorScheme
     var store: NewsreaderStore
+    var usesNativeTopEdgeEffect = true
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
 
@@ -2988,6 +2998,7 @@ struct ArticleListView: View {
                     scrollResetRevision: store.scrollResetRevision,
                     markReadOnScrolloverEnabled: store.markReadOnScrolloverEnabled,
                     showsRefreshControl: true,
+                    usesNativeTopEdgeEffect: usesNativeTopEdgeEffect,
                     onArticleTap: onArticleTap,
                     onArticleAction: onArticleAction,
                     onSetRead: { article, read in store.setRead(article, read: read) },

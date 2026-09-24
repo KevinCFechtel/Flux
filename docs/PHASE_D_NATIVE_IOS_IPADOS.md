@@ -347,13 +347,12 @@ symbol across idle and active Sync while preserving a stable toolbar slot.
 D4.5 supersedes only that control-state presentation with an explicit Cancel
 action while retaining the same semantic controls. iPhone portrait keeps Sync,
 Filter/Sort, and More in the bottom toolbar.
-iPhone landscape moves the same action group into one detached floating capsule
-on the trailing side of the normal top safe-area inset. The interactive scope
-capsule lives on the leading side of that inset and preserves the configured
-current-scope article count in compact numeric form (or the existing transient
-`Syncing…` substitution). The otherwise-empty Article List navigation bar is
-hidden.
-Persistent iPad split navigation uses the same detached floating action capsule.
+iPhone landscape returns the same action group to the native trailing top toolbar
+and the interactive scope capsule to the native leading toolbar. It preserves
+the configured current-scope article count in compact numeric form (or the
+existing transient `Syncing…` substitution). The Timeline top-edge effect is
+disabled specifically for this compact-landscape mode.
+Persistent iPad split navigation keeps the detached floating action capsule.
 While the sidebar is visible the detail remains scope-title-free; if iPadOS
 temporarily hides that sidebar, the interactive scope capsule with chevron joins
 the inset row so navigation does not depend on the edge-swipe gesture. Category
@@ -563,22 +562,25 @@ The Newsreader navigation scope title is stable and never embeds the live
 article count into the title string itself. The accepted native chrome is the
 scope capsule implemented by `ArticleListTitleCapsule`, detached from
 `UINavigationBar` and rendered in a normal SwiftUI top `safeAreaInset`.
-iPhone portrait uses a centered stacked capsule with the optional descriptive
-current-scope count and keeps Sync/Filter/More in the native bottom toolbar.
-iPhone landscape uses a compact two-line leading scope capsule and one detached
-trailing Sync/Filter/More capsule in the same independent inset row. Its
-compact-height typography and zero extra internal vertical padding avoid wasting
-landscape height. The scope capsule reserves the alternate second-line width so
-transitions between the count and `Syncing…` do not make the chrome breathe
-horizontally. Persistent iPad split navigation shows only the detached trailing
-action capsule while the sidebar is visible; when that sidebar collapses, the
-inline scope capsule becomes visible and interactive on the left.
+iPhone portrait uses a centered stacked detached capsule with the optional
+descriptive current-scope count and keeps Sync/Filter/More in the native bottom
+toolbar. Its native Timeline top-edge effect remains `.automatic` on
+iOS/iPadOS 26+.
 
-Both detached capsules use `.regularMaterial` on iOS/iPadOS 17-25 and own a
-single `UIGlassEffect(style: .regular)` layer on iOS/iPadOS 26+. No Article List
-control remains in the top navigation bar. The native Timeline top-edge effect
-nevertheless stays enabled with `.automatic` on iOS/iPadOS 26+; the older
-bounded status-bar scrim remains only for iOS/iPadOS 17-25. During Sync the
+Compact iPhone landscape intentionally uses native top navigation chrome instead:
+the compact two-line scope capsule is `.topBarLeading` and Sync/Filter/More are
+`.topBarTrailing`. The capsule reserves the alternate second-line width so
+transitions between the count and `Syncing…` do not make the chrome breathe
+horizontally. The Timeline top-edge effect is disabled in this mode because the
+compact-landscape presentation has no visible status-bar glyph band to protect.
+
+Persistent iPad split navigation retains detached floating action chrome. It
+shows only the trailing action capsule while the sidebar is visible; when the
+sidebar collapses, the inline scope capsule becomes visible and interactive on
+the left. These regular modes keep the native `.automatic` top-edge effect on
+iOS/iPadOS 26+. Detached capsules use `.regularMaterial` on 17-25 and own one
+`UIGlassEffect(style: .regular)` layer on 26+. The compact-landscape toolbar
+instead relies on system Liquid Glass on 26+ to avoid a double layer. During Sync the
 capsule's count presentation temporarily shows `Syncing…`. The capsule remains
 the authoritative visible title/header presentation and carries the accessibility
 header role; do not reintroduce a separate Large-Title or native-subtitle product

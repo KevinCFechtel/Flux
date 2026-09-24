@@ -32,6 +32,7 @@ enum IOSBottomAction: Equatable {
 
 enum IOSArticleListActionPlacement: Equatable {
     case bottomBar
+    case topBarTrailing
     case floatingTopTrailing
 }
 
@@ -44,6 +45,7 @@ enum IOSArticleListChromeMode: Equatable {
 
 enum IOSArticleListTitleCapsulePlacement: Equatable {
     case floatingTopCenter
+    case navigationTopLeading
     case floatingTopLeading
     case hidden
 }
@@ -67,20 +69,36 @@ enum IOSArticleListChromePresentation {
     }
 
     static func actionPlacement(for mode: IOSArticleListChromeMode) -> IOSArticleListActionPlacement {
-        mode == .compactPortrait ? .bottomBar : .floatingTopTrailing
+        switch mode {
+        case .compactPortrait:
+            .bottomBar
+        case .compactLandscape:
+            .topBarTrailing
+        case .persistentSplit, .persistentSplitCollapsed:
+            .floatingTopTrailing
+        }
     }
 
     static func titleCapsulePlacement(for mode: IOSArticleListChromeMode) -> IOSArticleListTitleCapsulePlacement {
         switch mode {
         case .compactPortrait:
             .floatingTopCenter
-        case .compactLandscape, .persistentSplitCollapsed:
+        case .compactLandscape:
+            .navigationTopLeading
+        case .persistentSplitCollapsed:
             .floatingTopLeading
         case .persistentSplit:
             .hidden
         }
     }
 
+    static func showsTopNavigationBar(for mode: IOSArticleListChromeMode) -> Bool {
+        mode == .compactLandscape
+    }
+
+    static func usesNativeTopEdgeEffect(for mode: IOSArticleListChromeMode) -> Bool {
+        mode != .compactLandscape
+    }
 }
 
 enum IOSArticleListActionChromeMetrics {
@@ -392,7 +410,9 @@ struct ContentView: View {
     }
 
     private var articleList: some View {
-        ArticleListNavigationChrome(
+        let actionPlacement = IOSArticleListChromePresentation.actionPlacement(for: articleListChromeMode)
+
+        return ArticleListNavigationChrome(
             store: newsreaderStore,
             onSelectScope: presentArticleListNavigation,
             chromeMode: articleListChromeMode,
@@ -400,23 +420,43 @@ struct ContentView: View {
                 articleListActionButtons
             },
             content: {
-                ArticleListView(store: newsreaderStore, onArticleTap: openArticle, onArticleAction: handleArticleAction)
+                ArticleListView(
+                    store: newsreaderStore,
+                    usesNativeTopEdgeEffect: IOSArticleListChromePresentation.usesNativeTopEdgeEffect(for: articleListChromeMode),
+                    onArticleTap: openArticle,
+                    onArticleAction: handleArticleAction
+                )
             }
         )
             .navigationBarTitleDisplayMode(IOSArticleNavigationPresentation.titleDisplayMode)
-            // Scope and former top-bar actions are both detached from
-            // UINavigationBar. Keep the Article List's otherwise-empty system
-            // navigation bar hidden in every chrome mode; the UITableView's own
-            // native topEdgeEffect remains enabled on iOS 26+.
-            .toolbar(.hidden, for: .navigationBar)
+            .toolbar(
+                IOSArticleListChromePresentation.showsTopNavigationBar(for: articleListChromeMode) ? .visible : .hidden,
+                for: .navigationBar
+            )
             // A collapsed split view pushes the detail and offers a back button.
             // The Timeline is the root of this app's navigation: the branded
             // button opens the scope chooser, there is nothing to go back to.
             .navigationBarBackButtonHidden(true)
             .toolbar {
-                if IOSArticleListChromePresentation.actionPlacement(for: articleListChromeMode) == .bottomBar {
+                if actionPlacement == .bottomBar {
                     ToolbarItemGroup(placement: .bottomBar) {
                         articleListActionButtons
+                    }
+                }
+                if actionPlacement == .topBarTrailing {
+                    if #available(iOS 26.0, *) {
+                        ToolbarItemGroup(placement: .topBarTrailing) {
+                            articleListActionButtons
+                        }
+                    } else {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            HStack(spacing: IOSArticleListActionChromeMetrics.floatingSpacing) {
+                                articleListActionButtons
+                            }
+                            .padding(.horizontal, IOSArticleListActionChromeMetrics.floatingHorizontalPadding)
+                            .padding(.vertical, IOSArticleListActionChromeMetrics.floatingVerticalPadding)
+                            .background(.regularMaterial, in: Capsule())
+                        }
                     }
                 }
             }
@@ -821,6 +861,7 @@ private struct ArticleListTitleCapsule: View {
     let widthReservationSubtitle: String?
     let layout: ArticleListTitleCapsuleLayout
     var action: (() -> Void)?
+    var usesSystemToolbarGlass = false
     // Read so the derived glyph height is recomputed when the text size changes.
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -902,7 +943,9 @@ private struct ArticleListTitleCapsule: View {
         }
         .padding(.horizontal, horizontalPadding)
         .padding(.vertical, verticalPadding)
-        .background { ArticleListChromeCapsuleBackground() }
+        .background {
+            ArticleListChromeCapsuleBackground(usesSystemToolbarGlass: usesSystemToolbarGlass)
+        }
         .accessibilityElement(children: .combine)
     }
 
@@ -1003,6 +1046,8 @@ private struct ArticleListTitleCapsule: View {
 }
 
 private struct ArticleListChromeCapsuleBackground: View {
+    var usesSystemToolbarGlass = false
+
     /// Whether the system is asked to avoid see-through backgrounds. Glass is
     /// exactly that, and the title has to stay legible over scrolling articles,
     /// so this substitutes an opaque fill rather than trusting the effect to
@@ -1011,15 +1056,13 @@ private struct ArticleListChromeCapsuleBackground: View {
 
     @ViewBuilder
     var body: some View {
-        if reduceTransparency {
+        if #available(iOS 26.0, *), usesSystemToolbarGlass {
+            Color.clear
+        } else if reduceTransparency {
             Capsule().fill(Color(uiColor: .secondarySystemBackground))
         } else if #available(iOS 26.0, *) {
-            // The capsule no longer lives in UINavigationBar, so it owns exactly
-            // one glass layer instead of inheriting toolbar glass from the system.
             ArticleListGlassCapsule()
         } else {
-            // iOS 17-25 have no Liquid Glass; regular material is the closest
-            // stock presentation for this independent floating control.
             Capsule().fill(.regularMaterial)
         }
     }
@@ -1200,10 +1243,9 @@ private struct ArticleListNavigationChrome<Content: View, TopActions: View>: Vie
         let capsulePlacement = IOSArticleListChromePresentation.titleCapsulePlacement(for: chromeMode)
         let actionPlacement = IOSArticleListChromePresentation.actionPlacement(for: chromeMode)
 
-        // Keep the Timeline itself outside the chrome-mode switch. Scope and
-        // former top-bar actions live in one ordinary safe-area inset, not in
-        // UINavigationBar and not in safeAreaBar. The UITableView retains its
-        // native automatic topEdgeEffect independently on iOS 26+.
+        // Keep the Timeline itself outside the chrome-mode switch. Compact
+        // portrait and persistent split modes retain detached safe-area chrome;
+        // compact iPhone landscape deliberately returns to UINavigationBar.
         content()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -1219,18 +1261,6 @@ private struct ArticleListNavigationChrome<Content: View, TopActions: View>: Vie
                             action: onSelectScope
                         )
                         .frame(maxWidth: .infinity, alignment: .center)
-                    case (.floatingTopLeading, .floatingTopTrailing, .compactLandscape):
-                        HStack(spacing: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing) {
-                            ArticleListTitleCapsule(
-                                title: title,
-                                subtitle: capsuleSubtitle(landscapeSubtitle),
-                                widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
-                                layout: .compactStacked,
-                                action: onSelectScope
-                            )
-                            Spacer(minLength: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing)
-                            ArticleListFloatingActionGroup(actions: topActions)
-                        }
                     case (.hidden, .floatingTopTrailing, .persistentSplit):
                         HStack {
                             Spacer(minLength: 0)
@@ -1254,6 +1284,20 @@ private struct ArticleListNavigationChrome<Content: View, TopActions: View>: Vie
                 }
                 .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
                 .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
+            }
+            .toolbar {
+                if capsulePlacement == .navigationTopLeading {
+                    ToolbarItem(placement: .topBarLeading) {
+                        ArticleListTitleCapsule(
+                            title: title,
+                            subtitle: capsuleSubtitle(landscapeSubtitle),
+                            widthReservationSubtitle: capsuleSubtitle(landscapeWidthReservationSubtitle),
+                            layout: .compactStacked,
+                            action: onSelectScope,
+                            usesSystemToolbarGlass: true
+                        )
+                    }
+                }
             }
     }
 }

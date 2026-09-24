@@ -58,11 +58,19 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
-    func testTitleCapsuleIsDetachedFromNavigationBarChrome() {
+    func testArticleListTitleChromeSeparatesPortraitLandscapeAndSplitModes() {
         XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .compactPortrait), .floatingTopCenter)
-        XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .compactLandscape), .floatingTopLeading)
+        XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .compactLandscape), .navigationTopLeading)
         XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .persistentSplit), .hidden)
         XCTAssertEqual(IOSArticleListChromePresentation.titleCapsulePlacement(for: .persistentSplitCollapsed), .floatingTopLeading)
+        XCTAssertFalse(IOSArticleListChromePresentation.showsTopNavigationBar(for: .compactPortrait))
+        XCTAssertTrue(IOSArticleListChromePresentation.showsTopNavigationBar(for: .compactLandscape))
+        XCTAssertFalse(IOSArticleListChromePresentation.showsTopNavigationBar(for: .persistentSplit))
+        XCTAssertFalse(IOSArticleListChromePresentation.showsTopNavigationBar(for: .persistentSplitCollapsed))
+        XCTAssertTrue(IOSArticleListChromePresentation.usesNativeTopEdgeEffect(for: .compactPortrait))
+        XCTAssertFalse(IOSArticleListChromePresentation.usesNativeTopEdgeEffect(for: .compactLandscape))
+        XCTAssertTrue(IOSArticleListChromePresentation.usesNativeTopEdgeEffect(for: .persistentSplit))
+        XCTAssertTrue(IOSArticleListChromePresentation.usesNativeTopEdgeEffect(for: .persistentSplitCollapsed))
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset, 12)
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.floatingVerticalInset, 4)
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.floatingRowSpacing, 10)
@@ -158,7 +166,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             splitColumnVisibility: .detailOnly
         )
         XCTAssertEqual(landscape, .compactLandscape)
-        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: landscape), .floatingTopTrailing)
+        XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: landscape), .topBarTrailing)
 
         let persistent = IOSArticleListChromePresentation.mode(
             for: .regular,

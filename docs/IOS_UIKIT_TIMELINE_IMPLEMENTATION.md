@@ -470,25 +470,28 @@ the custom scope capsule while that capsule was a `UINavigationBar` toolbar
 item. Pull to Refresh was not the cause and remains enabled.
 
 On 23 September 2026 the presentation chrome was amended without reopening the
-frozen Timeline renderer/container architecture. `ArticleListTitleCapsule` and
-the former leading/trailing top-bar actions are now rendered by the SwiftUI shell
-in one normal top `safeAreaInset`, not as `.principal`, `.topBarLeading`, or
-`.topBarTrailing` navigation content. iPhone portrait keeps Sync/Filter/More in
-the bottom toolbar and centers only the detached scope capsule above the
-Timeline. iPhone landscape places the capsule left and a single floating
-Sync/Filter/More capsule right in the inset row. A visible persistent iPad sidebar
-shows only that floating action capsule; when the sidebar collapses, the scope
-capsule joins it on the left. The otherwise-empty Article List navigation bar is
-hidden in every mode.
+frozen Timeline renderer/container architecture. A 24 September follow-up keeps
+the successful compact-portrait result while making compact iPhone landscape
+deliberately different:
 
-Because a normal `safeAreaInset` does not extend scroll-edge effects the way
-`safeAreaBar` does, iOS/iPadOS 26+ keeps the Timeline's native top edge effect
-enabled with the system `.automatic` style even though no Article List controls
-remain in `UINavigationBar`. The bottom edge effect remains disabled. The
-bounded status-bar scrim is retained only as the iOS/iPadOS 17-25 fallback and is
-hidden on 26+. Detached scope and action capsules own their own single
-`UIGlassEffect(style: .regular)` on 26+ (or `.regularMaterial` before 26), so
-there is no inherited toolbar-glass double layer.
+- compact portrait keeps the centered detached scope capsule in a normal top
+  `safeAreaInset`, Sync/Filter/More in the native bottom toolbar, and the native
+  `.automatic` Timeline top-edge effect on iOS 26+;
+- compact landscape returns the scope capsule to `.topBarLeading` and
+  Sync/Filter/More to `.topBarTrailing`. Its Timeline top-edge effect is
+  disabled because the compact landscape presentation has no visible status-bar
+  glyph band to protect;
+- persistent iPad split modes keep the detached floating action chrome from the
+  earlier amendment. A visible sidebar suppresses the scope capsule; collapsed
+  split restores it on the leading side of the independent inset row. Their
+  native `.automatic` top-edge effect remains enabled on iOS/iPadOS 26+.
+
+The bottom edge effect remains disabled everywhere. On iOS/iPadOS 17-25 the
+bounded status-bar scrim remains the fallback where it has nonzero height. In
+compact landscape its measured status-bar height is zero, so disabling the native
+top-edge effect introduces no replacement backing. The compact-landscape scope
+capsule relies on system toolbar Liquid Glass on iOS 26+ and uses regular
+material below 26, avoiding a double glass layer.
 
 ### 8.6 iOS 26 full-width-image behavior — ACCEPTED LIMITATION
 

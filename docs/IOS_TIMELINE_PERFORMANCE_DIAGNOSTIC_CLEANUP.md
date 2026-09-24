@@ -187,7 +187,7 @@ Deliberately retained, classified per the three categories above:
 
 | Symbol | Class | Reason |
 |---|---|---|
-| `IOSUIKitTimelineTopScrimView` | Promote | Retained as the iOS/iPadOS 17-25 status-bar fallback. After the 23 September 2026 chrome amendment, iOS/iPadOS 26+ hides it and uses the native `.automatic` top edge effect; the bottom edge effect remains disabled. |
+| `IOSUIKitTimelineTopScrimView` | Promote | Retained as the iOS/iPadOS 17-25 status-bar fallback. iOS/iPadOS 26+ normally uses the native `.automatic` top edge effect; compact iPhone landscape disables that effect and the status-bar scrim has zero height because the system status bar is absent there. The bottom edge effect remains disabled. |
 | `IOSUIKitTimelinePerformanceMetrics` | Promote | The oracle tests assert `systemLayoutSizeFittingCalls == 0` and `preferredLayoutAttributesFittingCalls == 0` through it. That is the proof that the cell never self-sizes — the core invariant of the UITableView migration. Removing the counters would delete the proof. |
 | `IOSUIKitTimelinePerformanceDiagnostics` | Retain as tooling | Console readout for the above. Its UI is behind `#if DEBUG \|\| FLUX_PERFORMANCE_DIAGNOSTICS` and cannot be reached in Release; the static controller reference is `weak`. The counter increments themselves do run in Release. |
 | `articleImageRasterScale` on the cell | Retain as tooling | Narrow decoded-scale test seam only; there is no production renderer or raster-scale switch. |
@@ -208,13 +208,14 @@ single-renderer image/EXIF coverage and deterministic UIKit RTL geometry.
 Historical experiment descriptions above remain intentionally as the
 investigation record and no longer describe shipping code.
 
-Fixed chrome, no longer switchable: the native top scroll-edge effect is
-`.automatic` on iOS/iPadOS 26+ and the bounded status-bar gradient is retained
-only on 17-25; the bottom edge effect remains disabled. The scope title and every
-former top-bar Article List action live in detached capsules inside one normal
-top `safeAreaInset` (`UIGlassEffect(style: .regular)`, `.regularMaterial`
-below iOS 26); no Article List control remains in `UINavigationBar`. The
-Scrollover undo pill remains in `.regularMaterial`.
+Fixed chrome, no longer switchable: compact portrait and regular split modes
+use the native `.automatic` top scroll-edge effect on iOS/iPadOS 26+, while
+compact iPhone landscape disables it and returns scope plus Sync/Filter/More to
+native top navigation toolbar items. The bounded status-bar gradient remains the
+17-25 fallback and measures to zero in compact landscape; the bottom edge effect
+remains disabled. Compact portrait and regular split modes retain their detached
+scope/action capsules where applicable. The Scrollover undo pill remains in
+`.regularMaterial`.
 
 New presentation mode **Visual compact** (`ArticlePresentationMode.visualCompact`):
 a 4:3 thumbnail beside the title, metadata bar full width above, preview below —
