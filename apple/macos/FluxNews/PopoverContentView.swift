@@ -1714,7 +1714,7 @@ private struct ReadingSettingsView: View {
                 Text("Open Link").tag(ClickOnNews.openLink)
                 Text("Open Detail View").tag(ClickOnNews.openDetailView)
             }
-            Picker("Detail Character Limit", selection: detailCharacterLimit) {
+            Picker("Reader Detail Limit", selection: detailCharacterLimit) {
                 Text("5,000 characters").tag(UInt32(5_000))
                 Text("10,000 characters").tag(UInt32(10_000))
                 Text("20,000 characters").tag(UInt32(20_000))
