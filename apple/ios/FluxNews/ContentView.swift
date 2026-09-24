@@ -68,14 +68,17 @@ enum IOSArticleListChromePresentation {
         return verticalSizeClass == .compact ? .compactLandscape : .compactPortrait
     }
 
-    static func actionPlacement(for mode: IOSArticleListChromeMode) -> IOSArticleListActionPlacement {
+    static func actionPlacement(
+        for mode: IOSArticleListChromeMode,
+        systemPrefersVerticalToolbar: Bool = false
+    ) -> IOSArticleListActionPlacement {
         switch mode {
         case .compactPortrait:
             .bottomBar
         case .compactLandscape:
             .topBarTrailing
         case .persistentSplit, .persistentSplitCollapsed:
-            .floatingTopTrailing
+            systemPrefersVerticalToolbar ? .topBarTrailing : .floatingTopTrailing
         }
     }
 
@@ -92,12 +95,26 @@ enum IOSArticleListChromePresentation {
         }
     }
 
-    static func showsTopNavigationBar(for mode: IOSArticleListChromeMode) -> Bool {
-        mode == .compactLandscape
+    static func showsTopNavigationBar(
+        for mode: IOSArticleListChromeMode,
+        systemPrefersVerticalToolbar: Bool = false
+    ) -> Bool {
+        if mode == .compactLandscape { return true }
+        return systemPrefersVerticalToolbar && {
+            switch mode {
+            case .persistentSplit, .persistentSplitCollapsed:
+                true
+            case .compactPortrait, .compactLandscape:
+                false
+            }
+        }()
     }
 
-    static func usesNativeTopEdgeEffect(for mode: IOSArticleListChromeMode) -> Bool {
-        mode != .compactLandscape
+    static func usesNativeTopEdgeEffect(
+        for mode: IOSArticleListChromeMode,
+        systemPrefersVerticalToolbar: Bool = false
+    ) -> Bool {
+        !systemPrefersVerticalToolbar && mode != .compactLandscape
     }
 }
 
@@ -206,6 +223,20 @@ enum IOSArticleNavigationPresentation {
     // geometry. The accepted visible article-list title remains the explicit
     // scope capsule, whose inner chrome overrides the visible display mode.
     static let titleDisplayMode: NavigationBarItem.TitleDisplayMode = .large
+}
+
+@available(iOS 27.1, *)
+private struct IOSArticleListVerticalToolbarEnvironment<Content: View>: View {
+    @Environment(\.toolbarVerticalEdge) private var toolbarVerticalEdge
+    private let content: (Bool) -> Content
+
+    init(@ViewBuilder content: @escaping (Bool) -> Content) {
+        self.content = content
+    }
+
+    var body: some View {
+        content(toolbarVerticalEdge != nil)
+    }
 }
 
 struct ContentView: View {
@@ -409,20 +440,39 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
     private var articleList: some View {
-        let actionPlacement = IOSArticleListChromePresentation.actionPlacement(for: articleListChromeMode)
+        if #available(iOS 27.1, *) {
+            IOSArticleListVerticalToolbarEnvironment { systemPrefersVerticalToolbar in
+                articleList(systemPrefersVerticalToolbar: systemPrefersVerticalToolbar)
+            }
+        } else {
+            articleList(systemPrefersVerticalToolbar: false)
+        }
+    }
+
+    private func articleList(systemPrefersVerticalToolbar: Bool) -> some View {
+        let actionPlacement = IOSArticleListChromePresentation.actionPlacement(
+            for: articleListChromeMode,
+            systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
+        )
+        let usesNativeTopEdgeEffect = IOSArticleListChromePresentation.usesNativeTopEdgeEffect(
+            for: articleListChromeMode,
+            systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
+        )
 
         return ArticleListNavigationChrome(
             store: newsreaderStore,
             onSelectScope: presentArticleListNavigation,
             chromeMode: articleListChromeMode,
+            actionPlacement: actionPlacement,
             topActions: {
                 articleListActionButtons
             },
             content: {
                 ArticleListView(
                     store: newsreaderStore,
-                    usesNativeTopEdgeEffect: IOSArticleListChromePresentation.usesNativeTopEdgeEffect(for: articleListChromeMode),
+                    usesNativeTopEdgeEffect: usesNativeTopEdgeEffect,
                     onArticleTap: openArticle,
                     onArticleAction: handleArticleAction
                 )
@@ -430,7 +480,10 @@ struct ContentView: View {
         )
             .navigationBarTitleDisplayMode(IOSArticleNavigationPresentation.titleDisplayMode)
             .toolbar(
-                IOSArticleListChromePresentation.showsTopNavigationBar(for: articleListChromeMode) ? .visible : .hidden,
+                IOSArticleListChromePresentation.showsTopNavigationBar(
+                    for: articleListChromeMode,
+                    systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
+                ) ? .visible : .hidden,
                 for: .navigationBar
             )
             // A collapsed split view pushes the detail and offers a back button.
@@ -1214,6 +1267,7 @@ private struct ArticleListNavigationChrome<Content: View, TopActions: View>: Vie
     /// Absent when a persistent sidebar already offers scope selection.
     var onSelectScope: (() -> Void)?
     var chromeMode: IOSArticleListChromeMode
+    var actionPlacement: IOSArticleListActionPlacement
     @ViewBuilder let topActions: () -> TopActions
     @ViewBuilder let content: () -> Content
 
@@ -1241,7 +1295,6 @@ private struct ArticleListNavigationChrome<Content: View, TopActions: View>: Vie
         let landscapeWidthReservationSubtitle = store.isSyncing ? landscapeCountLabel : syncingLabel
 
         let capsulePlacement = IOSArticleListChromePresentation.titleCapsulePlacement(for: chromeMode)
-        let actionPlacement = IOSArticleListChromePresentation.actionPlacement(for: chromeMode)
 
         // Keep the Timeline itself outside the chrome-mode switch. Compact
         // portrait and persistent split modes retain detached safe-area chrome;
@@ -1250,40 +1303,53 @@ private struct ArticleListNavigationChrome<Content: View, TopActions: View>: Vie
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .top, spacing: 0) {
-                Group {
-                    switch (capsulePlacement, actionPlacement, chromeMode) {
-                    case (.floatingTopCenter, .bottomBar, .compactPortrait):
+                switch (capsulePlacement, actionPlacement, chromeMode) {
+                case (.floatingTopCenter, .bottomBar, .compactPortrait):
+                    ArticleListTitleCapsule(
+                        title: title,
+                        subtitle: capsuleSubtitle(portraitSubtitle),
+                        widthReservationSubtitle: nil,
+                        layout: .stacked,
+                        action: onSelectScope
+                    )
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
+                    .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
+                case (.hidden, .floatingTopTrailing, .persistentSplit):
+                    HStack {
+                        Spacer(minLength: 0)
+                        ArticleListFloatingActionGroup(actions: topActions)
+                    }
+                    .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
+                    .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
+                case (.floatingTopLeading, .floatingTopTrailing, .persistentSplitCollapsed):
+                    HStack(spacing: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing) {
                         ArticleListTitleCapsule(
                             title: title,
-                            subtitle: capsuleSubtitle(portraitSubtitle),
+                            subtitle: capsuleSubtitle(landscapeSubtitle),
                             widthReservationSubtitle: nil,
-                            layout: .stacked,
+                            layout: .inline,
                             action: onSelectScope
                         )
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    case (.hidden, .floatingTopTrailing, .persistentSplit):
-                        HStack {
-                            Spacer(minLength: 0)
-                            ArticleListFloatingActionGroup(actions: topActions)
-                        }
-                    case (.floatingTopLeading, .floatingTopTrailing, .persistentSplitCollapsed):
-                        HStack(spacing: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing) {
-                            ArticleListTitleCapsule(
-                                title: title,
-                                subtitle: capsuleSubtitle(landscapeSubtitle),
-                                widthReservationSubtitle: nil,
-                                layout: .inline,
-                                action: onSelectScope
-                            )
-                            Spacer(minLength: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing)
-                            ArticleListFloatingActionGroup(actions: topActions)
-                        }
-                    default:
-                        EmptyView()
+                        Spacer(minLength: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing)
+                        ArticleListFloatingActionGroup(actions: topActions)
                     }
+                    .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
+                    .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
+                case (.floatingTopLeading, .topBarTrailing, .persistentSplitCollapsed):
+                    ArticleListTitleCapsule(
+                        title: title,
+                        subtitle: capsuleSubtitle(landscapeSubtitle),
+                        widthReservationSubtitle: nil,
+                        layout: .inline,
+                        action: onSelectScope
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
+                    .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
+                default:
+                    EmptyView()
                 }
-                .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
-                .padding(.vertical, IOSArticleListTitleCapsuleMetrics.floatingVerticalInset)
             }
             .toolbar {
                 if capsulePlacement == .navigationTopLeading {

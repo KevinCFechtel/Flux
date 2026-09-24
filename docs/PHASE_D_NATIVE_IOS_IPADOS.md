@@ -352,10 +352,13 @@ and the interactive scope capsule to the native leading toolbar. It preserves
 the configured current-scope article count in compact numeric form (or the
 existing transient `Syncing…` substitution). The Timeline top-edge effect is
 disabled specifically for this compact-landscape mode.
-Persistent iPad split navigation keeps the detached floating action capsule.
-While the sidebar is visible the detail remains scope-title-free; if iPadOS
-temporarily hides that sidebar, the interactive scope capsule with chevron joins
-the inset row so navigation does not depend on the edge-swipe gesture. Category
+Persistent split navigation normally keeps the detached floating action capsule.
+On systems where SwiftUI reports a non-`nil` `toolbarVerticalEdge`, the
+Sync/Filter/More actions instead return to native top-toolbar items so a vertical
+system bar such as iPhone Duo can place them on the appropriate side edge. A
+visible sidebar keeps the detail scope-title-free; if that sidebar is hidden, the
+wider interactive scope capsule remains horizontal in the independent inset row
+so navigation does not depend on the edge-swipe gesture. Category
 selection and category expansion remain separate sidebar interactions so a
 selected category can still be expanded or collapsed independently;
 active manual Sync is indicated by continuous symbol rotation, and successful
@@ -574,10 +577,14 @@ transitions between the count and `Syncing…` do not make the chrome breathe
 horizontally. The Timeline top-edge effect is disabled in this mode because the
 compact-landscape presentation has no visible status-bar glyph band to protect.
 
-Persistent iPad split navigation retains detached floating action chrome. It
-shows only the trailing action capsule while the sidebar is visible; when the
-sidebar collapses, the inline scope capsule becomes visible and interactive on
-the left. These regular modes keep the native `.automatic` top-edge effect on
+Persistent split navigation retains detached floating action chrome while the
+system keeps bars horizontal. When SwiftUI's `toolbarVerticalEdge` reports a
+vertical system-bar context, Sync/Filter/More become native trailing toolbar
+items and therefore participate in the system's vertical bar instead. A visible
+sidebar still suppresses the scope capsule; when the sidebar is hidden, the wider
+inline scope capsule stays horizontal in the detached inset row. The explicit
+Timeline top-edge effect is disabled while that vertical system bar is preferred,
+and remains `.automatic` in the ordinary horizontal regular modes on
 iOS/iPadOS 26+. Detached capsules use `.regularMaterial` on 17-25 and own one
 `UIGlassEffect(style: .regular)` layer on 26+. The compact-landscape toolbar
 instead relies on system Liquid Glass on 26+ to avoid a double layer. During Sync the

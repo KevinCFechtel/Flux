@@ -208,13 +208,16 @@ single-renderer image/EXIF coverage and deterministic UIKit RTL geometry.
 Historical experiment descriptions above remain intentionally as the
 investigation record and no longer describe shipping code.
 
-Fixed chrome, no longer switchable: compact portrait and regular split modes
-use the native `.automatic` top scroll-edge effect on iOS/iPadOS 26+, while
-compact iPhone landscape disables it and returns scope plus Sync/Filter/More to
-native top navigation toolbar items. The bounded status-bar gradient remains the
-17-25 fallback and measures to zero in compact landscape; the bottom edge effect
-remains disabled. Compact portrait and regular split modes retain their detached
-scope/action capsules where applicable. The Scrollover undo pill remains in
+Fixed chrome, no longer switchable: ordinary compact portrait and horizontal
+regular split modes use the native `.automatic` top scroll-edge effect on
+iOS/iPadOS 26+, while compact iPhone landscape disables it and returns scope plus
+Sync/Filter/More to native top navigation toolbar items. A non-`nil`
+`toolbarVerticalEdge` also disables Flux's explicit top-edge effect; persistent
+split Sync/Filter/More then become native top-toolbar items so the system may
+place them vertically. The bounded status-bar gradient remains the 17-25 fallback
+and measures to zero where the status bar is absent; the bottom edge effect
+remains disabled. Detached scope/action capsules remain the horizontal-mode
+presentation where applicable. The Scrollover undo pill remains in
 `.regularMaterial`.
 
 New presentation mode **Visual compact** (`ArticlePresentationMode.visualCompact`):

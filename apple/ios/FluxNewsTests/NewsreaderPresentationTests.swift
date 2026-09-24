@@ -71,6 +71,12 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(IOSArticleListChromePresentation.usesNativeTopEdgeEffect(for: .compactLandscape))
         XCTAssertTrue(IOSArticleListChromePresentation.usesNativeTopEdgeEffect(for: .persistentSplit))
         XCTAssertTrue(IOSArticleListChromePresentation.usesNativeTopEdgeEffect(for: .persistentSplitCollapsed))
+        XCTAssertFalse(
+            IOSArticleListChromePresentation.usesNativeTopEdgeEffect(
+                for: .compactPortrait,
+                systemPrefersVerticalToolbar: true
+            )
+        )
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset, 12)
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.floatingVerticalInset, 4)
         XCTAssertEqual(IOSArticleListTitleCapsuleMetrics.floatingRowSpacing, 10)
@@ -118,9 +124,48 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
-    func testPersistentSplitModesShareDetachedTopActionPlacement() {
+    func testPersistentSplitModesAdaptActionsToSystemVerticalToolbar() {
         XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: .persistentSplit), .floatingTopTrailing)
         XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: .persistentSplitCollapsed), .floatingTopTrailing)
+
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.actionPlacement(
+                for: .persistentSplit,
+                systemPrefersVerticalToolbar: true
+            ),
+            .topBarTrailing
+        )
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.actionPlacement(
+                for: .persistentSplitCollapsed,
+                systemPrefersVerticalToolbar: true
+            ),
+            .topBarTrailing
+        )
+        XCTAssertTrue(
+            IOSArticleListChromePresentation.showsTopNavigationBar(
+                for: .persistentSplit,
+                systemPrefersVerticalToolbar: true
+            )
+        )
+        XCTAssertTrue(
+            IOSArticleListChromePresentation.showsTopNavigationBar(
+                for: .persistentSplitCollapsed,
+                systemPrefersVerticalToolbar: true
+            )
+        )
+        XCTAssertFalse(
+            IOSArticleListChromePresentation.usesNativeTopEdgeEffect(
+                for: .persistentSplit,
+                systemPrefersVerticalToolbar: true
+            )
+        )
+        XCTAssertFalse(
+            IOSArticleListChromePresentation.usesNativeTopEdgeEffect(
+                for: .persistentSplitCollapsed,
+                systemPrefersVerticalToolbar: true
+            )
+        )
     }
 
     func testCompactShellRejectsPersistentSidebarVisibility() {
