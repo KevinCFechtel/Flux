@@ -487,9 +487,9 @@ deliberately different:
   switches Sync/Filter/More back to native `.topBarTrailing` toolbar items so
   iPhone Duo can place those symbol actions on its vertical control bar. A
   collapsed split keeps the wider scope capsule horizontal in the independent
-  inset row; a visible sidebar still suppresses that capsule. While a system
-  vertical bar is preferred, Flux also disables its explicit Timeline top-edge
-  effect, matching the platform's vertical-bar treatment.
+  inset row; a visible sidebar still suppresses that capsule. This adaptive
+  action placement does not alter the regular-mode Timeline top-edge policy:
+  `.automatic` remains enabled on iOS/iPadOS 26+.
 
 The bottom edge effect remains disabled everywhere. On iOS/iPadOS 17-25 the
 bounded status-bar scrim remains the fallback where it has nonzero height. In

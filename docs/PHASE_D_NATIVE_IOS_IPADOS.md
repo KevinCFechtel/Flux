@@ -582,10 +582,10 @@ system keeps bars horizontal. When SwiftUI's `toolbarVerticalEdge` reports a
 vertical system-bar context, Sync/Filter/More become native trailing toolbar
 items and therefore participate in the system's vertical bar instead. A visible
 sidebar still suppresses the scope capsule; when the sidebar is hidden, the wider
-inline scope capsule stays horizontal in the detached inset row. The explicit
-Timeline top-edge effect is disabled while that vertical system bar is preferred,
-and remains `.automatic` in the ordinary horizontal regular modes on
-iOS/iPadOS 26+. Detached capsules use `.regularMaterial` on 17-25 and own one
+inline scope capsule stays horizontal in the detached inset row. The action-axis
+change does not alter the regular-mode Timeline edge policy: `.automatic`
+remains enabled on iOS/iPadOS 26+. Detached capsules use `.regularMaterial` on
+17-25 and own one
 `UIGlassEffect(style: .regular)` layer on 26+. The compact-landscape toolbar
 instead relies on system Liquid Glass on 26+ to avoid a double layer. During Sync the
 capsule's count presentation temporarily shows `Syncing…`. The capsule remains

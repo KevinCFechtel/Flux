@@ -212,9 +212,10 @@ Fixed chrome, no longer switchable: ordinary compact portrait and horizontal
 regular split modes use the native `.automatic` top scroll-edge effect on
 iOS/iPadOS 26+, while compact iPhone landscape disables it and returns scope plus
 Sync/Filter/More to native top navigation toolbar items. A non-`nil`
-`toolbarVerticalEdge` also disables Flux's explicit top-edge effect; persistent
-split Sync/Filter/More then become native top-toolbar items so the system may
-place them vertically. The bounded status-bar gradient remains the 17-25 fallback
+`toolbarVerticalEdge` changes persistent-split Sync/Filter/More from detached
+floating controls to native top-toolbar items so the system may place them
+vertically; it does not change the regular-mode `.automatic` Timeline top-edge
+policy. The bounded status-bar gradient remains the 17-25 fallback
 and measures to zero where the status bar is absent; the bottom edge effect
 remains disabled. Detached scope/action capsules remain the horizontal-mode
 presentation where applicable. The Scrollover undo pill remains in

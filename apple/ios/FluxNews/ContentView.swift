@@ -114,7 +114,10 @@ enum IOSArticleListChromePresentation {
         for mode: IOSArticleListChromeMode,
         systemPrefersVerticalToolbar: Bool = false
     ) -> Bool {
-        !systemPrefersVerticalToolbar && mode != .compactLandscape
+        // Vertical-bar preference changes where actions live, not the Timeline's
+        // established top-edge policy. Only compact iPhone landscape disables it.
+        _ = systemPrefersVerticalToolbar
+        return mode != .compactLandscape
     }
 }
 

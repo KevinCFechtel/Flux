@@ -71,7 +71,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(IOSArticleListChromePresentation.usesNativeTopEdgeEffect(for: .compactLandscape))
         XCTAssertTrue(IOSArticleListChromePresentation.usesNativeTopEdgeEffect(for: .persistentSplit))
         XCTAssertTrue(IOSArticleListChromePresentation.usesNativeTopEdgeEffect(for: .persistentSplitCollapsed))
-        XCTAssertFalse(
+        XCTAssertTrue(
             IOSArticleListChromePresentation.usesNativeTopEdgeEffect(
                 for: .compactPortrait,
                 systemPrefersVerticalToolbar: true
@@ -154,13 +154,13 @@ final class NewsreaderPresentationTests: XCTestCase {
                 systemPrefersVerticalToolbar: true
             )
         )
-        XCTAssertFalse(
+        XCTAssertTrue(
             IOSArticleListChromePresentation.usesNativeTopEdgeEffect(
                 for: .persistentSplit,
                 systemPrefersVerticalToolbar: true
             )
         )
-        XCTAssertFalse(
+        XCTAssertTrue(
             IOSArticleListChromePresentation.usesNativeTopEdgeEffect(
                 for: .persistentSplitCollapsed,
                 systemPrefersVerticalToolbar: true
