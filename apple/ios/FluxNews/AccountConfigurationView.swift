@@ -7,6 +7,7 @@ struct AccountConfigurationView: View {
     @State private var apiKey: String
     @State private var headers: [IOSCustomHTTPHeader]
     @State private var removalConfirmation = false
+    @State private var rebuildConfirmation = false
     let embedded: Bool
 
     init(bootstrapper: CoreBootstrapper, allowsRemoval: Bool, embedded: Bool = false) {
@@ -74,14 +75,53 @@ struct AccountConfigurationView: View {
             }
             if allowsRemoval {
                 Section {
+                    Button {
+                        rebuildConfirmation = true
+                    } label: {
+                        if bootstrapper.localStateRebuildState == .rebuilding {
+                            HStack {
+                                ProgressView()
+                                Text("Rebuilding Local State…")
+                            }
+                        } else {
+                            Text("Rebuild Local State")
+                        }
+                    }
+                    .disabled(
+                        bootstrapper.localStateRebuildState == .rebuilding
+                            || bootstrapper.isConfiguring
+                    )
+
+                    switch bootstrapper.localStateRebuildState {
+                    case .succeeded:
+                        Label("Local state rebuilt.", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    case .failed:
+                        Label(
+                            "Local state was cleared, but synchronization could not be completed.",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .foregroundStyle(.orange)
+                    case .idle, .rebuilding:
+                        EmptyView()
+                    }
+
                     Button("Remove Account", role: .destructive) { removalConfirmation = true }
+                        .disabled(bootstrapper.localStateRebuildState == .rebuilding)
                 } footer: {
-                    Text("Removes this account and its local account data, but keeps global app and display preferences.")
+                    Text("Rebuild discards synchronized local data and downloads it again from Miniflux while keeping this account and your settings. Remove Account also removes account-bound data and credentials.")
                 }
             }
         }
         .navigationTitle(allowsRemoval ? "Account" : "Set Up FluxNews")
         .navigationBarTitleDisplayMode(allowsRemoval ? .inline : .large)
+        .confirmationDialog("Rebuild Local State?", isPresented: $rebuildConfirmation) {
+            Button("Rebuild", role: .destructive) {
+                Task { await bootstrapper.rebuildLocalState() }
+            }
+        } message: {
+            Text("Synchronized local content and pending changes will be discarded and rebuilt from Miniflux. Your account and settings are preserved. If synchronization fails, the previous local data cannot be restored.")
+        }
         .confirmationDialog("Remove this account?", isPresented: $removalConfirmation) {
             Button("Remove Account", role: .destructive) { Task { await bootstrapper.removeAccount() } }
         } message: {
