@@ -644,6 +644,155 @@ final class AccountLifecycleTests: XCTestCase {
     }
 
     @MainActor
+    func testRebuildLocalStatePreservesAccountAndCoreSession() async throws {
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: [IOSCustomHTTPHeader(name: "X-Tenant", value: "tenant")]
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let rebuildCalls = LockedBox(0)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core },
+            localStateRebuilder: { receivedCore in
+                XCTAssertIdentical(receivedCore, core)
+                rebuildCalls.withValue { $0 += 1 }
+                return SyncCompleted(
+                    reason: .manual,
+                    newArticles: 0,
+                    updatedArticles: 0,
+                    mutationsDelivered: 0,
+                    dataChanged: true,
+                    navigationChanged: true,
+                    newArticlesByFeed: [],
+                    systemNotificationCandidates: []
+                )
+            }
+        )
+        await bootstrapper.start()
+
+        var prepared = 0
+        var finishedWith: Flux?
+        bootstrapper.prepareForLocalStateRebuild = { prepared += 1 }
+        bootstrapper.onLocalStateRebuildFinished = { finishedWith = $0 }
+
+        await bootstrapper.rebuildLocalState()
+
+        XCTAssertEqual(rebuildCalls.value(), 1)
+        XCTAssertEqual(prepared, 1)
+        XCTAssertIdentical(finishedWith, core)
+        XCTAssertIdentical(bootstrapper.core, core)
+        XCTAssertEqual(bootstrapper.credentials, account)
+        XCTAssertEqual(try store.load(), account)
+        XCTAssertEqual(bootstrapper.localStateRebuildState, .succeeded)
+        XCTAssertFalse(bootstrapper.coreSessionExecutionCoordinator.isQuiescing)
+    }
+
+    @MainActor
+    func testRebuildLocalStateWaitsForAppWideCoreQuiescence() async throws {
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let coordinator = IOSCoreSessionExecutionCoordinator()
+        let rebuildStarted = expectation(description: "rebuild starts after quiescence")
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreSessionExecutionCoordinator: coordinator,
+            coreFactory: { _ in core },
+            localStateRebuilder: { _ in
+                rebuildStarted.fulfill()
+                return SyncCompleted(
+                    reason: .manual,
+                    newArticles: 0,
+                    updatedArticles: 0,
+                    mutationsDelivered: 0,
+                    dataChanged: false,
+                    navigationChanged: false,
+                    newArticlesByFeed: [],
+                    systemNotificationCandidates: []
+                )
+            }
+        )
+        await bootstrapper.start()
+
+        let cancellationRequested = expectation(
+            description: "rebuild requests cancellation of admitted Core work"
+        )
+        let lease = try XCTUnwrap(
+            coordinator.beginExecution(
+                for: core,
+                cancellation: { cancellationRequested.fulfill() }
+            )
+        )
+
+        let rebuild = Task { @MainActor in
+            await bootstrapper.rebuildLocalState()
+        }
+        await fulfillment(of: [cancellationRequested], timeout: 5)
+
+        XCTAssertTrue(coordinator.isQuiescing)
+        XCTAssertEqual(coordinator.activeExecutionCount, 1)
+        XCTAssertEqual(bootstrapper.localStateRebuildState, .rebuilding)
+
+        coordinator.finish(lease)
+        await fulfillment(of: [rebuildStarted], timeout: 5)
+        await rebuild.value
+
+        XCTAssertFalse(coordinator.isQuiescing)
+        XCTAssertEqual(coordinator.activeExecutionCount, 0)
+        XCTAssertEqual(bootstrapper.localStateRebuildState, .succeeded)
+    }
+
+    @MainActor
+    func testFailedRebuildLocalStateResumesSameCoreAndPreservesCredentials() async throws {
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core },
+            localStateRebuilder: { _ in
+                throw NSError(
+                    domain: "FluxNewsTests.Rebuild",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "sync failed"]
+                )
+            }
+        )
+        await bootstrapper.start()
+
+        var finishedWith: Flux?
+        bootstrapper.onLocalStateRebuildFinished = { finishedWith = $0 }
+
+        await bootstrapper.rebuildLocalState()
+
+        XCTAssertEqual(bootstrapper.localStateRebuildState, .failed)
+        XCTAssertIdentical(bootstrapper.core, core)
+        XCTAssertIdentical(finishedWith, core)
+        XCTAssertEqual(bootstrapper.credentials, account)
+        XCTAssertEqual(try store.load(), account)
+        XCTAssertFalse(bootstrapper.coreSessionExecutionCoordinator.isQuiescing)
+
+        let lease = try XCTUnwrap(
+            bootstrapper.coreSessionExecutionCoordinator.beginExecution(for: core)
+        )
+        bootstrapper.coreSessionExecutionCoordinator.finish(lease)
+    }
+
+    @MainActor
     func testRemoveAccountWaitsForCoreQuiescence() async throws {
         let account = IOSMinifluxCredentials(server: "https://miniflux.example", apiKey: "key", customHeaders: [])
         let store = IOSMemoryCredentialStore()
