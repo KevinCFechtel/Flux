@@ -170,6 +170,62 @@ final class CoreBootstrapper: ObservableObject {
         return result
     }
 
+    func readArticleRetentionPreference() async -> Result<ReadArticleRetention, Error> {
+        guard let activeCore = core else {
+            return .failure(SettingsAccessError.coreUnavailable)
+        }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            { try activeCore.coreSettings().retention }
+        ) else {
+            return .failure(SettingsAccessError.sessionUnavailable)
+        }
+        return result
+    }
+
+    func setReadArticleRetentionPreference(
+        _ retention: ReadArticleRetention
+    ) async -> Result<Void, Error> {
+        guard let activeCore = core else {
+            return .failure(SettingsAccessError.coreUnavailable)
+        }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            { try activeCore.setRetention(retention: retention) }
+        ) else {
+            return .failure(SettingsAccessError.sessionUnavailable)
+        }
+        return result
+    }
+
+    func detailCharacterLimitPreference() async -> Result<UInt32, Error> {
+        guard let activeCore = core else {
+            return .failure(SettingsAccessError.coreUnavailable)
+        }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            { try activeCore.coreSettings().detailCharacterLimit }
+        ) else {
+            return .failure(SettingsAccessError.sessionUnavailable)
+        }
+        return result
+    }
+
+    func setDetailCharacterLimitPreference(
+        _ limit: UInt32
+    ) async -> Result<Void, Error> {
+        guard let activeCore = core else {
+            return .failure(SettingsAccessError.coreUnavailable)
+        }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            { try activeCore.setDetailCharacterLimit(limit: limit) }
+        ) else {
+            return .failure(SettingsAccessError.sessionUnavailable)
+        }
+        return result
+    }
+
     func configure(server: String, apiKey: String, headers: [IOSCustomHTTPHeader]) async {
         guard !isConfiguring, localStateRebuildState != .rebuilding else { return }
         localStateRebuildState = .idle
