@@ -633,16 +633,6 @@
         }
       }
     },
-    "Detail Character Limit": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Zeichenlimit für Detailansicht"
-          }
-        }
-      }
-    },
     "Detail Preview": {
       "localizations": {
         "de": {
@@ -2111,155 +2101,315 @@
     },
     "Adding...": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Wird hinzugefügt..." } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wird hinzugefügt..."
+          }
+        }
       }
     },
     "Continue": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Fortfahren" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortfahren"
+          }
+        }
       }
     },
     "Control-Option-F": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Ctrl-Wahl-F" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ctrl-Wahl-F"
+          }
+        }
       }
     },
     "Discovering...": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Wird gesucht..." } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wird gesucht..."
+          }
+        }
       }
     },
     "Encrypt Configuration Backup": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Konfigurationssicherung verschlüsseln" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Konfigurationssicherung verschlüsseln"
+          }
+        }
       }
     },
     "Export": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Exportieren" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exportieren"
+          }
+        }
       }
     },
     "Import": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Importieren" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Importieren"
+          }
+        }
       }
     },
     "Import Configuration Backup": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Konfigurationssicherung importieren" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Konfigurationssicherung importieren"
+          }
+        }
       }
     },
     "Option-Command-F": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Wahl-Befehl-F" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wahl-Befehl-F"
+          }
+        }
       }
     },
     "Processing…": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Wird verarbeitet…" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wird verarbeitet…"
+          }
+        }
       }
     },
     "Save": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Speichern" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Speichern"
+          }
+        }
       }
     },
     "Some content was simplified": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Einige Inhalte wurden vereinfacht" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einige Inhalte wurden vereinfacht"
+          }
+        }
       }
     },
     "Some content was simplified and truncated": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Einige Inhalte wurden vereinfacht und gekürzt" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einige Inhalte wurden vereinfacht und gekürzt"
+          }
+        }
       }
     },
     "Some content was truncated": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Einige Inhalte wurden gekürzt" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einige Inhalte wurden gekürzt"
+          }
+        }
       }
     },
     "Validating…": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Wird überprüft…" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wird überprüft…"
+          }
+        }
       }
     },
     "Hide header value": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Headerwert ausblenden" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Headerwert ausblenden"
+          }
+        }
       }
     },
     "Hide navigation": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Navigation ausblenden" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Navigation ausblenden"
+          }
+        }
       }
     },
     "Mark as Read": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Als gelesen markieren" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Als gelesen markieren"
+          }
+        }
       }
     },
     "No bookmarks": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Keine Markierungen" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Markierungen"
+          }
+        }
       }
     },
     "No unread news": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Keine ungelesenen Nachrichten" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine ungelesenen Nachrichten"
+          }
+        }
       }
     },
     "Show header value": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Headerwert anzeigen" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Headerwert anzeigen"
+          }
+        }
       }
     },
     "Show navigation": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Navigation einblenden" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Navigation einblenden"
+          }
+        }
       }
     },
     "Media / Listening List": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Medien / Hörliste" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Medien / Hörliste"
+          }
+        }
       }
     },
     "Automatically download items added to Listening List": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Zur Hörliste hinzugefügte Elemente automatisch herunterladen" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zur Hörliste hinzugefügte Elemente automatisch herunterladen"
+          }
+        }
       }
     },
     "Downloads audio automatically when an item is added to Listening List.": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Lädt Audio automatisch herunter, wenn ein Element zur Hörliste hinzugefügt wird." } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lädt Audio automatisch herunter, wenn ein Element zur Hörliste hinzugefügt wird."
+          }
+        }
       }
     },
     "Delete download after playback": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Download nach der Wiedergabe löschen" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download nach der Wiedergabe löschen"
+          }
+        }
       }
     },
     "Removes the local download after playback is completed. The item remains in Listening List.": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Löscht den lokalen Download nach Abschluss der Wiedergabe. Das Element bleibt in der Hörliste." } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Löscht den lokalen Download nach Abschluss der Wiedergabe. Das Element bleibt in der Hörliste."
+          }
+        }
       }
     },
     "Remove completed items from Listening List": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Abgeschlossene Elemente aus der Hörliste entfernen" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abgeschlossene Elemente aus der Hörliste entfernen"
+          }
+        }
       }
     },
     "Removes the item from Listening List after all of its audio has been completed.": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Entfernt das Element aus der Hörliste, nachdem alle Audios abgeschlossen wurden." } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Entfernt das Element aus der Hörliste, nachdem alle Audios abgeschlossen wurden."
+          }
+        }
       }
     },
     "Automatically download audio from this feed": {
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Audio aus diesem Feed automatisch herunterladen" } }
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio aus diesem Feed automatisch herunterladen"
+          }
+        }
       }
     },
-    "·": {}
+    "·": {},
+    "Reader Detail Limit": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reader-Textlimit"
+          }
+        }
+      }
+    }
   },
   "version": "1.0"
 }
