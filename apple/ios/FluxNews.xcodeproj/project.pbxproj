@@ -11,7 +11,6 @@
 		A10 /* FluxNews/ArticleListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B12 /* FluxNews/ArticleListView.swift */; };
 		A11 /* FluxNews/NewsNavigationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B13 /* FluxNews/NewsNavigationView.swift */; };
 		A12 /* FluxNews/DeveloperDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B14 /* FluxNews/DeveloperDiagnosticsView.swift */; };
-		A54 /* FluxNews/IOSAppDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B48 /* FluxNews/IOSAppDiagnostics.swift */; };
 		A13 /* FluxNewsTests/NewsreaderPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15 /* FluxNewsTests/NewsreaderPresentationTests.swift */; };
 		A14 /* FluxNewsTests/NewsreaderD23MutationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B16 /* FluxNewsTests/NewsreaderD23MutationTests.swift */; };
 		A15 /* FluxNews/ReaderRequestState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B17 /* FluxNews/ReaderRequestState.swift */; };
@@ -34,13 +33,35 @@
 		A32 /* FluxNews/IOSErrorPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B32 /* FluxNews/IOSErrorPresentation.swift */; };
 		A33 /* FluxNewsTests/IOSErrorPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B33 /* FluxNewsTests/IOSErrorPresentationTests.swift */; };
 		A34 /* FluxNews/IOSUIKitArticleLayoutEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B34 /* FluxNews/IOSUIKitArticleLayoutEngine.swift */; };
+		A35 /* ../shared/FluxApple/AppleCoreExecution.swift in Sources */ = {isa = PBXBuildFile; fileRef = B35 /* ../shared/FluxApple/AppleCoreExecution.swift */; };
+		A36 /* FluxNewsTests/AppleCoreExecutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36 /* FluxNewsTests/AppleCoreExecutionTests.swift */; };
 		A37 /* FluxNews/IOSUIKitScrolloverGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B37 /* FluxNews/IOSUIKitScrolloverGeometry.swift */; };
 		A38 /* FluxNews/IOSCoreSessionExecutionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B38 /* FluxNews/IOSCoreSessionExecutionCoordinator.swift */; };
 		A39 /* FluxNews/IOSBackgroundSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B39 /* FluxNews/IOSBackgroundSyncCoordinator.swift */; };
+		A4 /* flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4 /* flux_uniffi.swift */; };
 		A40 /* FluxNews/IOSAppRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40 /* FluxNews/IOSAppRuntime.swift */; };
+		A41 /* BackgroundSyncSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B41 /* BackgroundSyncSettingsView.swift */; };
+		A42 /* IOSSystemNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B42 /* IOSSystemNotificationManager.swift */; };
+		A43 /* ../shared/FluxApple/SystemNotificationPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B43 /* ../shared/FluxApple/SystemNotificationPresentation.swift */; };
+		A44 /* IOSWidgetSnapshotCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B44 /* IOSWidgetSnapshotCoordinator.swift */; };
+		A45 /* ../shared/FluxApple/WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B45 /* ../shared/FluxApple/WidgetSnapshot.swift */; };
+		A46 /* ../shared/FluxApple/WidgetPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46 /* ../shared/FluxApple/WidgetPresentation.swift */; };
+		A47 /* ../shared/FluxApple/WidgetSnapshotWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B47 /* ../shared/FluxApple/WidgetSnapshotWriter.swift */; };
+		A48 /* FluxNewsWidgets.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = BW0 /* FluxNewsWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A49 /* FluxNewsWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = BW1 /* FluxNewsWidgets.swift */; };
+		A5 /* LegacyStateDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5 /* LegacyStateDiscovery.swift */; };
+		A50 /* ../shared/FluxApple/WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B45 /* ../shared/FluxApple/WidgetSnapshot.swift */; };
+		A51 /* ../shared/FluxApple/WidgetPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46 /* ../shared/FluxApple/WidgetPresentation.swift */; };
+		A52 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = E182A754304B521300F49A9B /* Localizable.xcstrings */; };
+		A53 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E182A751304B521300F49A9B /* Assets.xcassets */; };
+		A54 /* IOSAppDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B48 /* IOSAppDiagnostics.swift */; };
+		A6 /* FluxNewsTests/LegacyStateDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8 /* FluxNewsTests/LegacyStateDiscoveryTests.swift */; };
+		A7 /* ../shared/FluxApple/BrowserPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9 /* ../shared/FluxApple/BrowserPresentation.swift */; };
+		A8 /* ../shared/FluxApple/ScrolloverPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10 /* ../shared/FluxApple/ScrolloverPresentation.swift */; };
+		A9 /* FluxNews/NewsreaderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11 /* FluxNews/NewsreaderStore.swift */; };
 		D6A1 /* ../shared/FluxApple/MediaPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B1 /* ../shared/FluxApple/MediaPresentation.swift */; };
-		D6A3 /* ../shared/FluxApple/MediaTransferFileLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B3 /* ../shared/FluxApple/MediaTransferFileLayout.swift */; };
 		D6A2 /* FluxNews/IOSMediaPresentationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B2 /* FluxNews/IOSMediaPresentationState.swift */; };
+		D6A3 /* ../shared/FluxApple/MediaTransferFileLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B3 /* ../shared/FluxApple/MediaTransferFileLayout.swift */; };
 		D6A4 /* FluxNews/IOSMediaTransferCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B4 /* FluxNews/IOSMediaTransferCoordinator.swift */; };
 		D6A5 /* FluxNews/IOSMediaPlaybackCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B5 /* FluxNews/IOSMediaPlaybackCoordinator.swift */; };
 		D6A6 /* FluxNews/IOSListeningListStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B6 /* FluxNews/IOSListeningListStore.swift */; };
@@ -48,27 +69,6 @@
 		D6A8 /* FluxNews/IOSMediaPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B8 /* FluxNews/IOSMediaPlayerView.swift */; };
 		D6A9 /* FluxNews/IOSMediaSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B9 /* FluxNews/IOSMediaSettingsView.swift */; };
 		D6T1 /* FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6T2 /* FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift */; };
-		A41 /* FluxNews/BackgroundSyncSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B41 /* FluxNews/BackgroundSyncSettingsView.swift */; };
-		A42 /* FluxNews/IOSSystemNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B42 /* FluxNews/IOSSystemNotificationManager.swift */; };
-		A43 /* ../shared/FluxApple/SystemNotificationPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B43 /* ../shared/FluxApple/SystemNotificationPresentation.swift */; };
-		A44 /* FluxNews/IOSWidgetSnapshotCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B44 /* FluxNews/IOSWidgetSnapshotCoordinator.swift */; };
-		A45 /* ../shared/FluxApple/WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B45 /* ../shared/FluxApple/WidgetSnapshot.swift */; };
-		A46 /* ../shared/FluxApple/WidgetPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46 /* ../shared/FluxApple/WidgetPresentation.swift */; };
-		A47 /* ../shared/FluxApple/WidgetSnapshotWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B47 /* ../shared/FluxApple/WidgetSnapshotWriter.swift */; };
-		A48 /* FluxNewsWidgets.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = BW0 /* FluxNewsWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		A49 /* FluxNewsWidgets/FluxNewsWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = BW1 /* FluxNewsWidgets/FluxNewsWidgets.swift */; };
-		A50 /* ../shared/FluxApple/WidgetSnapshot.swift in Widget Sources */ = {isa = PBXBuildFile; fileRef = B45 /* ../shared/FluxApple/WidgetSnapshot.swift */; };
-		A51 /* ../shared/FluxApple/WidgetPresentation.swift in Widget Sources */ = {isa = PBXBuildFile; fileRef = B46 /* ../shared/FluxApple/WidgetPresentation.swift */; };
-		A52 /* Localizable.xcstrings in Widget Resources */ = {isa = PBXBuildFile; fileRef = E182A754304B521300F49A9B /* Localizable.xcstrings */; };
-		A53 /* Assets.xcassets in Widget Resources */ = {isa = PBXBuildFile; fileRef = E182A751304B521300F49A9B /* Assets.xcassets */; };
-		A35 /* ../shared/FluxApple/AppleCoreExecution.swift in Sources */ = {isa = PBXBuildFile; fileRef = B35 /* ../shared/FluxApple/AppleCoreExecution.swift */; };
-		A36 /* FluxNewsTests/AppleCoreExecutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36 /* FluxNewsTests/AppleCoreExecutionTests.swift */; };
-		A4 /* flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4 /* flux_uniffi.swift */; };
-		A5 /* LegacyStateDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5 /* LegacyStateDiscovery.swift */; };
-		A6 /* FluxNewsTests/LegacyStateDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8 /* FluxNewsTests/LegacyStateDiscoveryTests.swift */; };
-		A7 /* ../shared/FluxApple/BrowserPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9 /* ../shared/FluxApple/BrowserPresentation.swift */; };
-		A8 /* ../shared/FluxApple/ScrolloverPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10 /* ../shared/FluxApple/ScrolloverPresentation.swift */; };
-		A9 /* FluxNews/NewsreaderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B11 /* FluxNews/NewsreaderStore.swift */; };
 		E17F743830471E2D00698DA5 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = E17F743730471E2D00698DA5 /* AppIcon.icon */; };
 		E17F744030471E2D00698DA5 /* FluxUniFFI.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */; };
 		E17F744130471E2D00698DA5 /* FluxUniFFI.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -125,7 +125,6 @@
 		B12 /* FluxNews/ArticleListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/ArticleListView.swift; sourceTree = "<group>"; };
 		B13 /* FluxNews/NewsNavigationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/NewsNavigationView.swift; sourceTree = "<group>"; };
 		B14 /* FluxNews/DeveloperDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/DeveloperDiagnosticsView.swift; sourceTree = "<group>"; };
-		B48 /* FluxNews/IOSAppDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSAppDiagnostics.swift; sourceTree = "<group>"; };
 		B15 /* FluxNewsTests/NewsreaderPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/NewsreaderPresentationTests.swift; sourceTree = "<group>"; };
 		B16 /* FluxNewsTests/NewsreaderD23MutationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/NewsreaderD23MutationTests.swift; sourceTree = "<group>"; };
 		B17 /* FluxNews/ReaderRequestState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/ReaderRequestState.swift; sourceTree = "<group>"; };
@@ -148,13 +147,35 @@
 		B32 /* FluxNews/IOSErrorPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSErrorPresentation.swift; sourceTree = "<group>"; };
 		B33 /* FluxNewsTests/IOSErrorPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/IOSErrorPresentationTests.swift; sourceTree = "<group>"; };
 		B34 /* FluxNews/IOSUIKitArticleLayoutEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSUIKitArticleLayoutEngine.swift; sourceTree = "<group>"; };
+		B35 /* ../shared/FluxApple/AppleCoreExecution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/AppleCoreExecution.swift; sourceTree = "<group>"; };
+		B36 /* FluxNewsTests/AppleCoreExecutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/AppleCoreExecutionTests.swift; sourceTree = "<group>"; };
 		B37 /* FluxNews/IOSUIKitScrolloverGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSUIKitScrolloverGeometry.swift; sourceTree = "<group>"; };
 		B38 /* FluxNews/IOSCoreSessionExecutionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSCoreSessionExecutionCoordinator.swift; sourceTree = "<group>"; };
 		B39 /* FluxNews/IOSBackgroundSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSBackgroundSyncCoordinator.swift; sourceTree = "<group>"; };
+		B4 /* flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = flux_uniffi.swift; path = ../Build/Products/FluxUniFFI/Sources/flux_uniffi.swift; sourceTree = "<group>"; };
 		B40 /* FluxNews/IOSAppRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSAppRuntime.swift; sourceTree = "<group>"; };
+		B41 /* BackgroundSyncSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncSettingsView.swift; sourceTree = "<group>"; };
+		B42 /* IOSSystemNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSystemNotificationManager.swift; sourceTree = "<group>"; };
+		B43 /* ../shared/FluxApple/SystemNotificationPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/SystemNotificationPresentation.swift; sourceTree = SOURCE_ROOT; };
+		B44 /* IOSWidgetSnapshotCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSWidgetSnapshotCoordinator.swift; sourceTree = "<group>"; };
+		B45 /* ../shared/FluxApple/WidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/WidgetSnapshot.swift; sourceTree = SOURCE_ROOT; };
+		B46 /* ../shared/FluxApple/WidgetPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/WidgetPresentation.swift; sourceTree = SOURCE_ROOT; };
+		B47 /* ../shared/FluxApple/WidgetSnapshotWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/WidgetSnapshotWriter.swift; sourceTree = SOURCE_ROOT; };
+		B48 /* IOSAppDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSAppDiagnostics.swift; sourceTree = "<group>"; };
+		B5 /* LegacyStateDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyStateDiscovery.swift; sourceTree = "<group>"; };
+		B6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B7 /* FluxNewsUpgradeTest.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FluxNewsUpgradeTest.entitlements; sourceTree = "<group>"; };
+		B8 /* FluxNewsTests/LegacyStateDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/LegacyStateDiscoveryTests.swift; sourceTree = "<group>"; };
+		B9 /* ../shared/FluxApple/BrowserPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/BrowserPresentation.swift; sourceTree = "<group>"; };
+		BW0 /* FluxNewsWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FluxNewsWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		BW1 /* FluxNewsWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsWidgets.swift; sourceTree = "<group>"; };
+		BW2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		BW3 /* FluxNewsWidgetsNativeDev.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FluxNewsWidgetsNativeDev.entitlements; sourceTree = "<group>"; };
+		BW4 /* FluxNewsWidgetsUpgradeTest.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FluxNewsWidgetsUpgradeTest.entitlements; sourceTree = "<group>"; };
+		BW5 /* FluxNewsNativeDev.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FluxNewsNativeDev.entitlements; sourceTree = "<group>"; };
 		D6B1 /* ../shared/FluxApple/MediaPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/MediaPresentation.swift; sourceTree = SOURCE_ROOT; };
-		D6B3 /* ../shared/FluxApple/MediaTransferFileLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/MediaTransferFileLayout.swift; sourceTree = SOURCE_ROOT; };
 		D6B2 /* FluxNews/IOSMediaPresentationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSMediaPresentationState.swift; sourceTree = SOURCE_ROOT; };
+		D6B3 /* ../shared/FluxApple/MediaTransferFileLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/MediaTransferFileLayout.swift; sourceTree = SOURCE_ROOT; };
 		D6B4 /* FluxNews/IOSMediaTransferCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSMediaTransferCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		D6B5 /* FluxNews/IOSMediaPlaybackCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSMediaPlaybackCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		D6B6 /* FluxNews/IOSListeningListStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSListeningListStore.swift; sourceTree = SOURCE_ROOT; };
@@ -162,27 +183,6 @@
 		D6B8 /* FluxNews/IOSMediaPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSMediaPlayerView.swift; sourceTree = SOURCE_ROOT; };
 		D6B9 /* FluxNews/IOSMediaSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSMediaSettingsView.swift; sourceTree = SOURCE_ROOT; };
 		D6T2 /* FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift; sourceTree = SOURCE_ROOT; };
-		B41 /* FluxNews/BackgroundSyncSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncSettingsView.swift; sourceTree = "<group>"; };
-		B42 /* FluxNews/IOSSystemNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSystemNotificationManager.swift; sourceTree = "<group>"; };
-		B43 /* ../shared/FluxApple/SystemNotificationPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/SystemNotificationPresentation.swift; sourceTree = SOURCE_ROOT; };
-		B44 /* FluxNews/IOSWidgetSnapshotCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSWidgetSnapshotCoordinator.swift; sourceTree = "<group>"; };
-		B45 /* ../shared/FluxApple/WidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/WidgetSnapshot.swift; sourceTree = SOURCE_ROOT; };
-		B46 /* ../shared/FluxApple/WidgetPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/WidgetPresentation.swift; sourceTree = SOURCE_ROOT; };
-		B47 /* ../shared/FluxApple/WidgetSnapshotWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/WidgetSnapshotWriter.swift; sourceTree = SOURCE_ROOT; };
-		BW0 /* FluxNewsWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FluxNewsWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		BW1 /* FluxNewsWidgets/FluxNewsWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsWidgets.swift; sourceTree = "<group>"; };
-		BW2 /* FluxNewsWidgets/Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		BW3 /* FluxNewsWidgets/FluxNewsWidgetsNativeDev.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FluxNewsWidgetsNativeDev.entitlements; sourceTree = "<group>"; };
-		BW4 /* FluxNewsWidgets/FluxNewsWidgetsUpgradeTest.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FluxNewsWidgetsUpgradeTest.entitlements; sourceTree = "<group>"; };
-		BW5 /* FluxNews/FluxNewsNativeDev.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FluxNewsNativeDev.entitlements; sourceTree = "<group>"; };
-		B35 /* ../shared/FluxApple/AppleCoreExecution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/AppleCoreExecution.swift; sourceTree = "<group>"; };
-		B36 /* FluxNewsTests/AppleCoreExecutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/AppleCoreExecutionTests.swift; sourceTree = "<group>"; };
-		B4 /* flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = flux_uniffi.swift; path = ../Build/Products/FluxUniFFI/Sources/flux_uniffi.swift; sourceTree = "<group>"; };
-		B5 /* LegacyStateDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyStateDiscovery.swift; sourceTree = "<group>"; };
-		B6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		B7 /* FluxNewsUpgradeTest.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FluxNewsUpgradeTest.entitlements; sourceTree = "<group>"; };
-		B8 /* FluxNewsTests/LegacyStateDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/LegacyStateDiscoveryTests.swift; sourceTree = "<group>"; };
-		B9 /* ../shared/FluxApple/BrowserPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/BrowserPresentation.swift; sourceTree = "<group>"; };
 		E17F743330471C1900698DA5 /* FluxNewsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FluxNewsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E17F743730471E2D00698DA5 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = FluxUniFFI.xcframework; path = ../Build/Products/FluxUniFFI/FluxUniFFI.xcframework; sourceTree = "<group>"; };
@@ -221,6 +221,7 @@
 			isa = PBXGroup;
 			children = (
 				B8 /* FluxNewsTests/LegacyStateDiscoveryTests.swift */,
+				B43 /* ../shared/FluxApple/SystemNotificationPresentation.swift */,
 			);
 			name = "Recovered References";
 			sourceTree = "<group>";
@@ -293,11 +294,11 @@
 				B28 /* ArticlesSettingsView.swift */,
 				B29 /* NavigationSettingsView.swift */,
 				B30 /* FeedManagementViews.swift */,
-				B41 /* FluxNews/BackgroundSyncSettingsView.swift */,
-				B42 /* FluxNews/IOSSystemNotificationManager.swift */,
-				B44 /* FluxNews/IOSWidgetSnapshotCoordinator.swift */,
-				B48 /* FluxNews/IOSAppDiagnostics.swift */,
-				BW5 /* FluxNews/FluxNewsNativeDev.entitlements */,
+				B41 /* BackgroundSyncSettingsView.swift */,
+				B42 /* IOSSystemNotificationManager.swift */,
+				B44 /* IOSWidgetSnapshotCoordinator.swift */,
+				B48 /* IOSAppDiagnostics.swift */,
+				BW5 /* FluxNewsNativeDev.entitlements */,
 			);
 			path = FluxNews;
 			sourceTree = "<group>";
@@ -311,17 +312,6 @@
 			path = FluxNews;
 			sourceTree = "<group>";
 		};
-		GW /* FluxNewsWidgets */ = {
-			isa = PBXGroup;
-			children = (
-				BW1 /* FluxNewsWidgets/FluxNewsWidgets.swift */,
-				BW2 /* FluxNewsWidgets/Info.plist */,
-				BW3 /* FluxNewsWidgets/FluxNewsWidgetsNativeDev.entitlements */,
-				BW4 /* FluxNewsWidgets/FluxNewsWidgetsUpgradeTest.entitlements */,
-			);
-			path = FluxNewsWidgets;
-			sourceTree = "<group>";
-		};
 		G4 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -330,6 +320,17 @@
 				BW0 /* FluxNewsWidgets.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		GW /* FluxNewsWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				BW1 /* FluxNewsWidgets.swift */,
+				BW2 /* Info.plist */,
+				BW3 /* FluxNewsWidgetsNativeDev.entitlements */,
+				BW4 /* FluxNewsWidgetsUpgradeTest.entitlements */,
+			);
+			path = FluxNewsWidgets;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -356,23 +357,6 @@
 			productReference = P1 /* FluxNews.app */;
 			productType = "com.apple.product-type.application";
 		};
-		TW /* FluxNewsWidgets */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = LW /* Build configuration list for PBXNativeTarget "FluxNewsWidgets" */;
-			buildPhases = (
-				SW /* Sources */,
-				FW /* Frameworks */,
-				RW /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = FluxNewsWidgets;
-			productName = FluxNewsWidgets;
-			productReference = BW0 /* FluxNewsWidgets.appex */;
-			productType = "com.apple.product-type.app-extension";
-		};
 		T2 /* FluxNewsTests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = L3 /* Build configuration list for PBXNativeTarget "FluxNewsTests" */;
@@ -389,6 +373,23 @@
 			productName = FluxNewsTests;
 			productReference = E17F743330471C1900698DA5 /* FluxNewsTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		TW /* FluxNewsWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = LW /* Build configuration list for PBXNativeTarget "FluxNewsWidgets" */;
+			buildPhases = (
+				SW /* Sources */,
+				FW /* Frameworks */,
+				RW /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = FluxNewsWidgets;
+			productName = FluxNewsWidgets;
+			productReference = BW0 /* FluxNewsWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -428,15 +429,6 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		RW /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A52 /* Localizable.xcstrings in Widget Resources */,
-				A53 /* Assets.xcassets in Widget Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		E17F743930471E2D00698DA5 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -444,6 +436,15 @@
 				E182A752304B521300F49A9B /* Assets.xcassets in Resources */,
 				E17F743830471E2D00698DA5 /* AppIcon.icon in Resources */,
 				E182A753304B521300F49A9B /* Localizable.xcstrings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		RW /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A52 /* Localizable.xcstrings in Resources */,
+				A53 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -470,16 +471,6 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		SW /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A49 /* FluxNewsWidgets/FluxNewsWidgets.swift in Sources */,
-				A50 /* ../shared/FluxApple/WidgetSnapshot.swift in Widget Sources */,
-				A51 /* ../shared/FluxApple/WidgetPresentation.swift in Widget Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		S1 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -497,7 +488,7 @@
 				A10 /* FluxNews/ArticleListView.swift in Sources */,
 				A11 /* FluxNews/NewsNavigationView.swift in Sources */,
 				A12 /* FluxNews/DeveloperDiagnosticsView.swift in Sources */,
-				A54 /* FluxNews/IOSAppDiagnostics.swift in Sources */,
+				A54 /* IOSAppDiagnostics.swift in Sources */,
 				A18 /* FluxNews/IOSSearchStore.swift in Sources */,
 				A19 /* FluxNews/SearchView.swift in Sources */,
 				A21 /* IOSCredentialStore.swift in Sources */,
@@ -522,10 +513,10 @@
 				D6A7 /* FluxNews/IOSListeningListView.swift in Sources */,
 				D6A8 /* FluxNews/IOSMediaPlayerView.swift in Sources */,
 				D6A9 /* FluxNews/IOSMediaSettingsView.swift in Sources */,
-				A41 /* FluxNews/BackgroundSyncSettingsView.swift in Sources */,
-				A42 /* FluxNews/IOSSystemNotificationManager.swift in Sources */,
+				A41 /* BackgroundSyncSettingsView.swift in Sources */,
+				A42 /* IOSSystemNotificationManager.swift in Sources */,
 				A43 /* ../shared/FluxApple/SystemNotificationPresentation.swift in Sources */,
-				A44 /* FluxNews/IOSWidgetSnapshotCoordinator.swift in Sources */,
+				A44 /* IOSWidgetSnapshotCoordinator.swift in Sources */,
 				A45 /* ../shared/FluxApple/WidgetSnapshot.swift in Sources */,
 				A46 /* ../shared/FluxApple/WidgetPresentation.swift in Sources */,
 				A47 /* ../shared/FluxApple/WidgetSnapshotWriter.swift in Sources */,
@@ -547,6 +538,16 @@
 				A33 /* FluxNewsTests/IOSErrorPresentationTests.swift in Sources */,
 				A36 /* FluxNewsTests/AppleCoreExecutionTests.swift in Sources */,
 				D6T1 /* FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		SW /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A49 /* FluxNewsWidgets.swift in Sources */,
+				A50 /* ../shared/FluxApple/WidgetSnapshot.swift in Sources */,
+				A51 /* ../shared/FluxApple/WidgetPresentation.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -576,13 +577,13 @@
 				CODE_SIGN_ENTITLEMENTS = FluxNews/FluxNewsNativeDev.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 8X9VDP43J9;
 				ENABLE_TESTABILITY = YES;
 				FLUX_BACKGROUND_REFRESH_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev.backgroundSync;
 				FLUX_DISPLAY_NAME = "FluxNews Dev";
-				FLUX_WIDGET_APP_GROUP_IDENTIFIER = group.dev.kevincfechtel.fluxNews.nativeDev;
-				FLUX_WIDGET_URL_SCHEME = fluxnews-native-dev;
 				FLUX_STORAGE_NAMESPACE = FluxNewsNativeDev;
+				FLUX_WIDGET_APP_GROUP_IDENTIFIER = group.dev.kevincfechtel.fluxNews.nativeDev;
+				FLUX_WIDGET_URL_SCHEME = "fluxnews-native-dev";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FluxNews/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -590,33 +591,33 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.1*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.2*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.4*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.5*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.6*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.7*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.8*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.9*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos28*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos29*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.1*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.2*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.4*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.5*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.6*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.7*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.8*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.9*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator28*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator29*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
 				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev;
 				PRODUCT_NAME = FluxNews;
 				SDKROOT = iphoneos;
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.1*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.1*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.2*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.2*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.4*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.4*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.5*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.5*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.6*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.6*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.7*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.7*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.8*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.8*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.9*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.9*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos28*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator28*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos29*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator29*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64/FluxUniFFI.framework/Headers";
 				SWIFT_VERSION = 5.0;
@@ -634,12 +635,12 @@
 				CODE_SIGN_ENTITLEMENTS = FluxNews/FluxNewsNativeDev.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 8X9VDP43J9;
 				FLUX_BACKGROUND_REFRESH_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev.backgroundSync;
 				FLUX_DISPLAY_NAME = "FluxNews Dev";
-				FLUX_WIDGET_APP_GROUP_IDENTIFIER = group.dev.kevincfechtel.fluxNews.nativeDev;
-				FLUX_WIDGET_URL_SCHEME = fluxnews-native-dev;
 				FLUX_STORAGE_NAMESPACE = FluxNewsNativeDev;
+				FLUX_WIDGET_APP_GROUP_IDENTIFIER = group.dev.kevincfechtel.fluxNews.nativeDev;
+				FLUX_WIDGET_URL_SCHEME = "fluxnews-native-dev";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FluxNews/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -647,33 +648,33 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.1*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.2*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.4*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.5*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.6*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.7*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.8*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.9*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos28*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos29*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.1*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.2*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.4*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.5*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.6*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.7*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.8*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.9*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator28*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator29*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
 				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews.nativeDev;
 				PRODUCT_NAME = FluxNews;
 				SDKROOT = iphoneos;
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.1*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.1*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.2*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.2*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.4*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.4*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.5*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.5*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.6*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.6*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.7*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.7*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.8*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.8*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.9*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.9*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos28*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator28*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos29*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator29*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64/FluxUniFFI.framework/Headers";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -704,12 +705,12 @@
 				CODE_SIGN_ENTITLEMENTS = FluxNews/FluxNewsUpgradeTest.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 8X9VDP43J9;
 				FLUX_BACKGROUND_REFRESH_IDENTIFIER = dev.kevincfechtel.fluxNews.backgroundSync;
 				FLUX_DISPLAY_NAME = FluxNews;
+				FLUX_STORAGE_NAMESPACE = FluxNewsNativeUpgradeTest;
 				FLUX_WIDGET_APP_GROUP_IDENTIFIER = group.dev.kevincfechtel.fluxNews;
 				FLUX_WIDGET_URL_SCHEME = fluxnews;
-				FLUX_STORAGE_NAMESPACE = FluxNewsNativeUpgradeTest;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FluxNews/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -717,33 +718,33 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.1*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.2*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.4*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.5*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.6*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.7*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.8*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.9*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos28*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos29*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphoneos3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.1*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.2*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.4*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.5*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.6*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.7*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.8*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.9*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator28*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator29*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
+				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
 				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.fluxNews;
 				PRODUCT_NAME = FluxNews;
 				SDKROOT = iphoneos;
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.1*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.1*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.2*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.2*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.4*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.4*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.5*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.5*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.6*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.6*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.7*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.7*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.8*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.8*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos27.9*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator27.9*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos28*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator28*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos29*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator29*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphoneos3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
-				"OTHER_SWIFT_FLAGS[sdk=iphonesimulator3*]" = "$(inherited) -DFLUX_HAS_VERTICAL_TOOLBAR_API";
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/../Build/Products/FluxUniFFI/FluxUniFFI.xcframework/ios-arm64/FluxUniFFI.framework/Headers";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -811,7 +812,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				FLUX_WIDGET_APP_GROUP_IDENTIFIER = group.dev.kevincfechtel.fluxNews.nativeDev;
-				FLUX_WIDGET_URL_SCHEME = fluxnews-native-dev;
+				FLUX_WIDGET_URL_SCHEME = "fluxnews-native-dev";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FluxNewsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -835,7 +836,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				FLUX_WIDGET_APP_GROUP_IDENTIFIER = group.dev.kevincfechtel.fluxNews.nativeDev;
-				FLUX_WIDGET_URL_SCHEME = fluxnews-native-dev;
+				FLUX_WIDGET_URL_SCHEME = "fluxnews-native-dev";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = FluxNewsWidgets/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
