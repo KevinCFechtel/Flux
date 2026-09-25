@@ -134,9 +134,8 @@ final class IOSMediaRuntime {
         guard core != nil else { return }
         lifecycleGeneration &+= 1
         coreAccessState = .suspendedForLocalStateRebuild
-        Task { @MainActor [weak self] in
-            await self?.playbackCoordinator.suspendForCoreLifecycle()
-        }
+        // Playback Core access was already checkpointed and detached by the
+        // awaited prepareForCoreReplacement hook before app-wide quiescence.
         transferCoordinator.suspendForCoreLifecycle(generation: lifecycleGeneration)
     }
 
