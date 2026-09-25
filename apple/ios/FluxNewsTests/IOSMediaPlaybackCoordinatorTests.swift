@@ -2,6 +2,14 @@ import AVFoundation
 import XCTest
 @testable import FluxNews
 
+final class IOSMediaAudioSessionConfigurationTests: XCTestCase {
+    func testPlaybackCategoryUsesSystemDefaultRoutingOptions() {
+        XCTAssertEqual(IOSMediaAudioSessionConfiguration.category, .playback)
+        XCTAssertEqual(IOSMediaAudioSessionConfiguration.mode, .spokenAudio)
+        XCTAssertEqual(IOSMediaAudioSessionConfiguration.options, [])
+    }
+}
+
 @MainActor
 private final class FakeIOSPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
     var preparation: PlaybackPreparation
