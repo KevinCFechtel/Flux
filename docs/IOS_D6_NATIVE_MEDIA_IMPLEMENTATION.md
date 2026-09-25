@@ -689,11 +689,33 @@ Now Playing/remote commands remain absent and therefore stay in D7.
 
 ### D6-D — Listening List native presentation
 
-**Implementation status:** **ACTIVE.** D6-B and D6-C runtime/execution are
-closed and testvalidated. D6-D now owns the first user-facing iOS media
-presentation over those app-scoped runtimes. The Listening List remains a
-separate read model and must not route through the frozen UIKit Article
-Timeline or its ArticleQuery fallback.
+**Implementation status:** **ACTIVE / first presentation slice implemented,
+validation pending.** D6-B and D6-C runtime/execution are closed and
+testvalidated. D6-D now owns the first user-facing iOS media presentation over
+those app-scoped runtimes. The Listening List remains a separate read model and
+does not route through the frozen UIKit Article Timeline or its ArticleQuery
+fallback.
+
+The first D6-D slice now provides:
+
+- app-scoped-session-aware `IOSListeningListStore` using
+  `listeningListFeeds()` + `listeningList(feedId:sort:)` through the existing
+  `IOSCoreSessionExecutionCoordinator`;
+- Recently Added / Publication Date sorting;
+- optional feed filtering with Core validation of stale feed selections;
+- a native empty/loading/error/list presentation;
+- News-centered rows with feed/date metadata, enclosure count, playback
+  progress and download summary;
+- live row progress sourced from the existing app-wide playback presentation
+  state rather than a second player model;
+- restored Listening List navigation entry;
+- `NewsreaderStore.select(.listeningList)` explicitly stops using the
+  ArticleQuery/Timeline fallback and clears the frozen timeline surface;
+- compact iPhone and regular iPad both route the detail surface to the same
+  native Listening List read model.
+
+Player controls, enclosure actions, Show Notes and final adaptive Player
+presentation remain the next D6-D slice.
 
 - real Listening List store/read model;
 - restore navigation entry;
