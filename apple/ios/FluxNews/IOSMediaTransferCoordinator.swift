@@ -25,11 +25,17 @@ private struct IOSMediaTransferTaskIdentity: Codable, Equatable {
     let version: Int
     let executionToken: String
     let enclosureID: Int64
+    let localReference: String
 
-    init(executionToken: String, enclosureID: Int64) {
+    init(
+        executionToken: String,
+        enclosureID: Int64,
+        localReference: String
+    ) {
         version = Self.version
         self.executionToken = executionToken
         self.enclosureID = enclosureID
+        self.localReference = localReference
     }
 
     var taskDescription: String? {
@@ -367,7 +373,8 @@ final class IOSMediaTransferCoordinator: NSObject {
             let task = session.downloadTask(with: request)
             task.taskDescription = IOSMediaTransferTaskIdentity(
                 executionToken: executionToken,
-                enclosureID: work.enclosureId
+                enclosureID: work.enclosureId,
+                localReference: reference
             ).taskDescription
             presentationState.set(
                 MediaTransferRuntime(
@@ -400,58 +407,6 @@ final class IOSMediaTransferCoordinator: NSObject {
             }
         }
 
-        cleanupOrphanFiles(
-            requested: requested,
-            deletions: deletions,
-            executionToken: executionToken,
-            mediaRoot: mediaRoot
-        )
-    }
-
-    private func cleanupOrphanFiles(
-        requested: [MediaTransferWork],
-        deletions: [MediaTransferWork],
-        executionToken: String,
-        mediaRoot: URL
-    ) {
-        let namespaceRoot = mediaRoot
-            .appendingPathComponent("downloads", isDirectory: true)
-            .appendingPathComponent(executionToken, isDirectory: true)
-        guard let files = try? fileManager.contentsOfDirectory(
-            at: namespaceRoot,
-            includingPropertiesForKeys: nil
-        ) else {
-            return
-        }
-
-        var validPaths = Set<String>()
-        for work in requested {
-            let reference = MediaTransferFileLayout.reference(
-                executionNamespace: executionToken,
-                enclosureID: work.enclosureId,
-                url: work.url,
-                mimeType: work.mimeType
-            )
-            if let destination = try? MediaTransferFileLayout.destination(
-                reference: reference,
-                under: mediaRoot
-            ) {
-                validPaths.insert(destination.path)
-            }
-        }
-        for work in deletions {
-            if let reference = work.localFile,
-               let destination = try? MediaTransferFileLayout.destination(
-                    reference: reference,
-                    under: mediaRoot
-               ) {
-                validPaths.insert(destination.path)
-            }
-        }
-
-        for file in files where !validPaths.contains(file.path) {
-            try? fileManager.removeItem(at: file)
-        }
     }
 
     private func allBackgroundTasks() async -> [URLSessionTask] {
@@ -575,70 +530,84 @@ extension IOSMediaTransferCoordinator: URLSessionDownloadDelegate {
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
-        guard let identity = IOSMediaTransferTaskIdentity.decode(downloadTask.taskDescription),
-              let response = downloadTask.response as? HTTPURLResponse,
-              (200..<300).contains(response.statusCode) else {
+        guard let identity = IOSMediaTransferTaskIdentity.decode(downloadTask.taskDescription) else {
             return
         }
 
-        Task { @MainActor [weak self] in
-            guard let self,
-                  identity.executionToken == executionToken,
-                  let core,
-                  let mediaRoot = IOSMediaTransferPathConfiguration.mediaRootURL,
-                  let workResult = await coreSessionExecutionCoordinator.responsiveResult(
-                    for: core,
-                    {
-                        try core.downloadsRequiringTransfer()
-                            .first { $0.enclosureId == identity.enclosureID }
-                    }
-                  ),
-                  case let .success(work?) = workResult else {
-                return
+        guard let response = downloadTask.response as? HTTPURLResponse,
+              (200..<300).contains(response.statusCode) else {
+            Task { @MainActor [weak self] in
+                guard let self,
+                      identity.executionToken == executionToken,
+                      let core else {
+                    return
+                }
+                await reportFailure(
+                    enclosureID: identity.enclosureID,
+                    kind: .network,
+                    core: core
+                )
             }
+            return
+        }
 
-            let reference = MediaTransferFileLayout.reference(
-                executionNamespace: identity.executionToken,
-                enclosureID: work.enclosureId,
-                url: work.url,
-                mimeType: work.mimeType
-            )
-            guard let destination = try? MediaTransferFileLayout.destination(
-                reference: reference,
+        guard let mediaRoot = IOSMediaTransferPathConfiguration.mediaRootURL,
+              let destination = try? MediaTransferFileLayout.destination(
+                reference: identity.localReference,
                 under: mediaRoot
-            ) else {
+              ) else {
+            Task { @MainActor [weak self] in
+                guard let self,
+                      identity.executionToken == executionToken,
+                      let core else {
+                    return
+                }
                 await reportFailure(
                     enclosureID: identity.enclosureID,
                     kind: .storage,
                     core: core
                 )
-                return
             }
+            return
+        }
 
-            do {
-                try fileManager.createDirectory(
-                    at: destination.deletingLastPathComponent(),
-                    withIntermediateDirectories: true
-                )
-                if fileManager.fileExists(atPath: destination.path) {
-                    try fileManager.removeItem(at: destination)
-                }
-                // This move must finish before the delegate callback returns in
-                // production. The body is isolated here for Core lookup; the
-                // subsequent refactor below moves only the filesystem operation
-                // synchronously into the delegate thread once work metadata is
-                // carried by the task identity.
-                try fileManager.moveItem(at: location, to: destination)
-                guard let size = fileSize(at: destination) else {
-                    throw MediaTransferError.storage
+        // URLSession's temporary location is guaranteed only for this delegate
+        // callback. Persist it synchronously before returning; Core acknowledgement
+        // happens afterward on the app-wide session gate.
+        do {
+            let fileManager = FileManager.default
+            try fileManager.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            if fileManager.fileExists(atPath: destination.path) {
+                try fileManager.removeItem(at: destination)
+            }
+            try fileManager.moveItem(at: location, to: destination)
+            let number = try fileManager
+                .attributesOfItem(atPath: destination.path)[.size] as? NSNumber
+            let size = UInt64(max(0, number?.int64Value ?? 0))
+
+            Task { @MainActor [weak self] in
+                guard let self,
+                      identity.executionToken == executionToken,
+                      let core else {
+                    return
                 }
                 await reportCompletion(
                     enclosureID: identity.enclosureID,
-                    reference: reference,
+                    reference: identity.localReference,
                     size: size,
                     core: core
                 )
-            } catch {
+            }
+        } catch {
+            Task { @MainActor [weak self] in
+                guard let self,
+                      identity.executionToken == executionToken,
+                      let core else {
+                    return
+                }
                 await reportFailure(
                     enclosureID: identity.enclosureID,
                     kind: .storage,
