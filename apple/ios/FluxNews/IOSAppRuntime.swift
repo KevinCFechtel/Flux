@@ -87,7 +87,7 @@ final class IOSMediaRuntime {
         self.mediaTransferReconciliationHandoff = mediaTransferReconciliationHandoff
 
         transferCoordinator.setMediaInUseProvider { [weak self] enclosureID in
-            self?.playbackCoordinator.isUsing(enclosureID: enclosureID) ?? false
+            self?.playbackCoordinator.blocksMediaDeletion(enclosureID: enclosureID) ?? false
         }
         playbackCoordinator.onPlaybackUseChanged = { [weak self] in
             Task { @MainActor [weak self] in
