@@ -1992,6 +1992,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private func preparedLayoutInput(for item: IOSUIKitArticleTimelineItem) -> IOSUIKitArticleLayoutInput {
         .init(
             item: item,
+            hasAudio: IOSArticleAudioPresentation.hasAudio(
+                audioActionStates[item.article.id]
+            ),
             mode: mode,
             previewLines: previewLines,
             showsRelativePublicationTime: showRelativePublicationTime,
