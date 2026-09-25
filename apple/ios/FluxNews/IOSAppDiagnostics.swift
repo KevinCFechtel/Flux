@@ -255,6 +255,7 @@ final class IOSAppDiagnostics: @unchecked Sendable {
 
         if currentBytes + data.count > maxFileBytes {
             rewriteLocked()
+            return
         }
 
         do {
