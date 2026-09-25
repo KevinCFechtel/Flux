@@ -768,9 +768,10 @@ The second D6-D slice now additionally provides:
 The final D6-D implementation slice now additionally provides:
 
 - Player artwork from the existing `MediaArtworkSource` contract;
-- extracted local audio artwork can be resolved from existing Core
-  `MediaMetadata.embedded_artwork_reference` while merely previewing a
-  Listening List item, without preparing/replacing active playback;
+- preview artwork is resolved through the existing canonical Core
+  `MediaArtworkSource` selection while merely previewing a Listening List
+  item, preserving the normal Image Enclosure -> embedded local artwork ->
+  Article Image fallback order without preparing/replacing active playback;
 - player Sleep Timer presentation over the existing app-scoped
   `IOSMediaSleepTimer`, including 30–180 minute intervals and live remaining
   time;
@@ -798,7 +799,12 @@ The final D6-D implementation slice now additionally provides:
 No persistent mini-player, MediaPlayer API, Now Playing, remote commands or
 ActivityKit work was introduced; those remain D7/D8 as contracted.
 
-The final canonical iOS validation passed; D6-D is closed.
+The original D6-D canonical iOS validation passed. A 25 September 2026
+post-closure audit found and corrected a preview-artwork fallback gap, incomplete
+German D6 localization, and a fixed-simulator assumption in the canonical iOS
+test script. These follow-up changes require the canonical iOS and Rust
+validation gates to be rerun before the current head is recorded as
+testvalidated; the D6-D architecture remains closed.
 
 - real Listening List store/read model;
 - restore navigation entry;
