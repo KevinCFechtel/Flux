@@ -689,11 +689,11 @@ Now Playing/remote commands remain absent and therefore stay in D7.
 
 ### D6-D — Listening List native presentation
 
-**Implementation status:** **ACTIVE / second presentation slice implemented,
-validation pending.** D6-B and D6-C runtime/execution are closed and
-testvalidated. The first D6-D Listening List read-model/navigation slice passed
-the canonical iOS test gate. D6-D now owns the user-facing iOS media
-presentation over those app-scoped runtimes. The Listening List remains a separate read model and
+**Implementation status:** **IMPLEMENTATION COMPLETE / final validation
+pending.** D6-B and D6-C runtime/execution are closed and testvalidated. The
+first two D6-D Listening List/Player slices passed the canonical iOS test gate
+(and the shared Reader change also passed the macOS build). D6-D now owns the
+user-facing iOS media presentation over those app-scoped runtimes. The Listening List remains a separate read model and
 does not route through the frozen UIKit Article Timeline or its ArticleQuery
 fallback.
 
@@ -736,8 +736,25 @@ The second D6-D slice now additionally provides:
 - focused presentation coverage for active-enclosure/runtime-progress selection
   and download summaries.
 
-Artwork rendering and final real-device adaptive polish remain before D6-D can
-be closed.
+The final D6-D implementation slice now additionally provides:
+
+- Player artwork from the existing `MediaArtworkSource` contract;
+- local artwork bytes through `core.mediaArtwork(reference:)` on the existing
+  iOS Core-session execution gate;
+- remote HTTP(S) artwork fallback using the same Phase-C source semantics;
+- UIImage validation at the presentation boundary, with a neutral waveform
+  placeholder for missing/invalid artwork;
+- a small size-class-driven Player layout policy: compact portrait is stacked,
+  while regular iPad and compact-height landscape use a side-by-side
+  artwork/controls layout;
+- `ViewThatFits` fallback for the secondary Player action controls;
+- focused tests for local artwork resolution and adaptive layout-policy
+  selection.
+
+No persistent mini-player, MediaPlayer API, Now Playing, remote commands or
+ActivityKit work was introduced; those remain D7/D8 as contracted.
+
+D6-D can be closed after the final canonical iOS validation of this slice.
 
 - real Listening List store/read model;
 - restore navigation entry;
