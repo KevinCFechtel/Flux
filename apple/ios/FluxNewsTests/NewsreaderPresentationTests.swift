@@ -4537,7 +4537,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(IOSArticleSwipeAction.allCases.contains(.downloadAudio))
         XCTAssertEqual(
             IOSArticleSwipeAction.downloadAudio.title,
-            "Download Audio"
+            String(localized: "Download Audio")
         )
         XCTAssertNil(IOSArticleSwipeAction.downloadAudio.contextAction)
 
