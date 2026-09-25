@@ -385,7 +385,23 @@ final class IOSMediaAudioSessionCoordinator: IOSMediaAudioSessionManaging {
 }
 
 @MainActor
-final class IOSMediaPlaybackCoreAccess {
+protocol IOSMediaPlaybackCoreAccessing: AnyObject {
+    func attach(to core: Flux)
+    func detach()
+    func preparePlayback(enclosureID: Int64) async throws -> PlaybackPreparation
+    func chapters(enclosureID: Int64) async throws -> [MediaChapter]
+    func checkpoint(
+        enclosureID: Int64,
+        positionMs: UInt64,
+        durationMs: UInt64?
+    ) async
+    func completed(enclosureID: Int64, durationMs: UInt64?) async throws
+    func restart(enclosureID: Int64) async throws
+    func observeDuration(enclosureID: Int64, durationMs: UInt64) async
+}
+
+@MainActor
+final class IOSMediaPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
     private let coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator
     private var core: Flux?
 
@@ -581,7 +597,7 @@ final class IOSMediaSleepTimer {
 
 @MainActor
 final class IOSMediaPlaybackCoordinator {
-    private let coreAccess: IOSMediaPlaybackCoreAccess
+    private let coreAccess: IOSMediaPlaybackCoreAccessing
     private let engine: IOSNativePlaybackEngine
     private let audioSession: IOSMediaAudioSessionManaging
     private let presentationState: IOSMediaPlaybackPresentationState
@@ -604,7 +620,7 @@ final class IOSMediaPlaybackCoordinator {
     var onPlaybackUseChanged: (() -> Void)?
 
     init(
-        coreAccess: IOSMediaPlaybackCoreAccess,
+        coreAccess: IOSMediaPlaybackCoreAccessing,
         presentationState: IOSMediaPlaybackPresentationState,
         engine: IOSNativePlaybackEngine? = nil,
         audioSession: IOSMediaAudioSessionManaging? = nil,
