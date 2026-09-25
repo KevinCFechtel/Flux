@@ -1649,6 +1649,15 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSAddFeedDiscoveryOutcome.from([item, item]), .choose)
     }
 
+    func testTechnicalChapterTitlesUseGeneratedPresentationNames() {
+        XCTAssertTrue(MediaChapterPresentation.usesGeneratedTitle("cp 1"))
+        XCTAssertTrue(MediaChapterPresentation.usesGeneratedTitle("CP2"))
+        XCTAssertTrue(MediaChapterPresentation.usesGeneratedTitle("chapter 3"))
+        XCTAssertTrue(MediaChapterPresentation.usesGeneratedTitle(""))
+        XCTAssertFalse(MediaChapterPresentation.usesGeneratedTitle("Introduction"))
+        XCTAssertFalse(MediaChapterPresentation.usesGeneratedTitle("Chapter One"))
+    }
+
     func testArticleAudioIndicatorRequiresAudioEnclosure() {
         let audio = Enclosure(
             id: 1,
