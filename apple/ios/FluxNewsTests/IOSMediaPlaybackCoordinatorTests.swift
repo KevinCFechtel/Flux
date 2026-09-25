@@ -154,11 +154,11 @@ private final class FakeIOSAudioSession: IOSMediaAudioSessionManaging {
     private(set) var activateCount = 0
     private(set) var deactivateCount = 0
 
-    func activate() throws {
+    func activate() async throws {
         activateCount += 1
     }
 
-    func deactivateIfIdle() throws {
+    func deactivateIfIdle() {
         deactivateCount += 1
     }
 
