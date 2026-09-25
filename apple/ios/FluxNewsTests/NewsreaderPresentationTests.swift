@@ -1649,6 +1649,49 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSAddFeedDiscoveryOutcome.from([item, item]), .choose)
     }
 
+    func testArticleAudioIndicatorRequiresAudioEnclosure() {
+        let audio = Enclosure(
+            id: 1,
+            articleId: 10,
+            url: "https://example.test/audio.mp3",
+            mimeType: "audio/mpeg",
+            sizeBytes: nil,
+            remoteMediaProgressionSeconds: 0,
+            mediaKind: .audio
+        )
+        let other = Enclosure(
+            id: 2,
+            articleId: 10,
+            url: "https://example.test/file.bin",
+            mimeType: "application/octet-stream",
+            sizeBytes: nil,
+            remoteMediaProgressionSeconds: 0,
+            mediaKind: .other
+        )
+
+        XCTAssertTrue(
+            IOSArticleAudioPresentation.hasAudio(
+                IOSArticleAudioActionState(
+                    articleID: 10,
+                    enclosures: [audio],
+                    isInListeningList: false,
+                    downloads: [:]
+                )
+            )
+        )
+        XCTAssertFalse(
+            IOSArticleAudioPresentation.hasAudio(
+                IOSArticleAudioActionState(
+                    articleID: 10,
+                    enclosures: [other],
+                    isInListeningList: false,
+                    downloads: [:]
+                )
+            )
+        )
+        XCTAssertFalse(IOSArticleAudioPresentation.hasAudio(nil))
+    }
+
     func testArticlePresentationModesAreStableAndVisualIsFirst() {
         XCTAssertEqual(ArticlePresentationMode.allCases, [.visual, .visualCompact, .compact])
         // The raw values persist in UserDefaults and sync through the core, so
