@@ -100,7 +100,7 @@ final class IOSMediaTransferExecutionIdentityStore {
     }
 }
 
-private enum IOSMediaTransferPathConfiguration {
+enum IOSMediaTransferPathConfiguration {
     static var mediaRootURL: URL? {
         guard let applicationSupport = FileManager.default.urls(
             for: .applicationSupportDirectory,
