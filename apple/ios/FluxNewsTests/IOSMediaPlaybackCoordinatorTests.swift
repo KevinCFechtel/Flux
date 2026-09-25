@@ -594,6 +594,42 @@ final class IOSMediaPlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(core.checkpoints.last?.1, 24_000)
     }
 
+    func testPreviewChaptersUsesCoreWithoutPreparingOrReplacingPlayback() async throws {
+        let core = FakeIOSPlaybackCoreAccess(status: .inProgress)
+        core.chaptersValue = [
+            MediaChapter(
+                enclosureId: 8,
+                title: "Intro",
+                startMs: 0,
+                endMs: 60_000,
+                source: .articleContent
+            ),
+            MediaChapter(
+                enclosureId: 8,
+                title: "Topic",
+                startMs: 60_000,
+                endMs: nil,
+                source: .articleContent
+            ),
+        ]
+        let engine = FakeIOSPlaybackEngine()
+        let audio = FakeIOSAudioSession()
+        let coordinator = makeCoordinator(
+            core: core,
+            engine: engine,
+            audio: audio
+        )
+
+        try await coordinator.play(enclosureID: 7)
+        let loadedURL = engine.loadedURL
+        let chapters = await coordinator.previewChapters(enclosureID: 8)
+
+        XCTAssertEqual(chapters.map(\.title), ["Intro", "Topic"])
+        XCTAssertEqual(engine.loadedURL, loadedURL)
+        XCTAssertTrue(engine.isPlaying)
+        XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
+    }
+
     func testPreviewArtworkSourceUsesCanonicalCoreSourceWithoutPreparing() async {
         let core = FakeIOSPlaybackCoreAccess()
         let engine = FakeIOSPlaybackEngine()
