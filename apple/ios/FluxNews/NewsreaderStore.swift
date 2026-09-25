@@ -499,6 +499,17 @@ struct ArticleRowContent: Equatable, Sendable {
     }
 }
 
+struct IOSArticleAudioActionState: Equatable {
+    let articleID: Int64
+    let enclosures: [Enclosure]
+    let isInListeningList: Bool
+    let downloads: [Int64: MediaDownload]
+
+    var audioEnclosures: [Enclosure] {
+        enclosures.filter { $0.mediaKind == .audio }
+    }
+}
+
 @MainActor
 @Observable final class NewsreaderStore {
 #if DEBUG || FLUX_PERFORMANCE_DIAGNOSTICS
@@ -540,6 +551,7 @@ struct ArticleRowContent: Equatable, Sendable {
     private(set) var selectionTotal: UInt64 = 0
     private(set) var categoryCounts: [Int64: UInt64] = [:]
     private(set) var feedCounts: [Int64: UInt64] = [:]
+    private(set) var articleAudioActionStates: [Int64: IOSArticleAudioActionState] = [:]
     @ObservationIgnored private var feedIconPresentationStates: [IOSFeedIconKey: IOSFeedIconPresentationState] = [:]
     private(set) var isLoading = false
     private(set) var manualSyncState: IOSManualSyncState = .idle
@@ -600,6 +612,7 @@ struct ArticleRowContent: Equatable, Sendable {
     // A request belongs to the active Core session and navigation/feed state.
     // Completion may mutate presentation only while this generation still owns it.
     private var feedIconOwnershipGeneration: UInt64 = 0
+    private var articleAudioActionGeneration: UInt64 = 0
     // Causes existing timeline controllers to request icons again after a
     // successful navigation refresh invalidates negative results.
     private(set) var feedIconRequestRevision: UInt64 = 0
@@ -721,6 +734,8 @@ struct ArticleRowContent: Equatable, Sendable {
         selectionTotal = 0
         categoryCounts = [:]
         feedCounts = [:]
+        articleAudioActionGeneration &+= 1
+        articleAudioActionStates = [:]
         invalidateFeedIconSession()
         isLoading = false
         resetPresentationState()
@@ -796,6 +811,186 @@ struct ArticleRowContent: Equatable, Sendable {
             isLoading = false
             if case .success = result { completion?() }
         }
+    }
+
+    func refreshArticleAudioActionState(articleID: Int64) {
+        loadArticleAudioActionStates(for: [articleID], replacing: false)
+    }
+
+    func setArticleListeningListMembership(
+        articleID: Int64,
+        isInListeningList: Bool
+    ) async -> Result<Void, Error> {
+        await mutateArticleMedia(
+            articleID: articleID,
+            operation: { core in
+                if isInListeningList {
+                    try core.addToListeningList(articleId: articleID)
+                } else {
+                    try core.removeFromListeningList(articleId: articleID)
+                }
+            },
+            reconcileTransfers: true
+        )
+    }
+
+    func requestArticleDownload(
+        articleID: Int64,
+        enclosureID: Int64
+    ) async -> Result<Void, Error> {
+        await mutateArticleMedia(
+            articleID: articleID,
+            operation: { core in
+                try core.requestDownload(
+                    enclosureId: enclosureID,
+                    origin: .manual
+                )
+            },
+            reconcileTransfers: true
+        )
+    }
+
+    func cancelArticleDownload(
+        articleID: Int64,
+        enclosureID: Int64
+    ) async -> Result<Void, Error> {
+        await mutateArticleMedia(
+            articleID: articleID,
+            operation: { core in
+                try core.cancelDownload(enclosureId: enclosureID)
+            },
+            reconcileTransfers: true
+        )
+    }
+
+    func retryArticleDownload(
+        articleID: Int64,
+        enclosureID: Int64
+    ) async -> Result<Void, Error> {
+        await mutateArticleMedia(
+            articleID: articleID,
+            operation: { core in
+                try core.retryDownload(enclosureId: enclosureID)
+            },
+            reconcileTransfers: true
+        )
+    }
+
+    func deleteArticleDownload(
+        articleID: Int64,
+        enclosureID: Int64
+    ) async -> Result<Void, Error> {
+        await mutateArticleMedia(
+            articleID: articleID,
+            operation: { core in
+                try core.requestDownloadDeletion(enclosureId: enclosureID)
+            },
+            reconcileTransfers: true
+        )
+    }
+
+    private func loadArticleAudioActionStates(
+        for articleIDs: [Int64],
+        replacing: Bool
+    ) {
+        guard let core else { return }
+        let ids = Array(Set(articleIDs))
+        guard !ids.isEmpty else {
+            if replacing {
+                articleAudioActionGeneration &+= 1
+                articleAudioActionStates = [:]
+            }
+            return
+        }
+
+        articleAudioActionGeneration &+= 1
+        let generation = articleAudioActionGeneration
+        let coordinator = coreSessionExecutionCoordinator
+
+        Task { [weak self, core, coordinator] in
+            guard let result = await coordinator.responsiveResult(
+                for: core,
+                { try core.articleAudioActionStates(articleIds: ids) }
+            ) else { return }
+            guard let self,
+                  self.articleAudioActionGeneration == generation else {
+                return
+            }
+
+            switch result {
+            case let .success(values):
+                let projected = Dictionary(
+                    uniqueKeysWithValues: values.map { value in
+                        (
+                            value.articleId,
+                            IOSArticleAudioActionState(
+                                articleID: value.articleId,
+                                enclosures: value.enclosures,
+                                isInListeningList: value.isInListeningList,
+                                downloads: Dictionary(
+                                    uniqueKeysWithValues: value.downloads.map {
+                                        ($0.enclosureId, $0)
+                                    }
+                                )
+                            )
+                        )
+                    }
+                )
+                if replacing {
+                    self.articleAudioActionStates = projected
+                } else {
+                    for (id, state) in projected {
+                        self.articleAudioActionStates[id] = state
+                    }
+                }
+            case .failure:
+                if replacing {
+                    self.articleAudioActionStates = [:]
+                }
+            }
+        }
+    }
+
+    private func mutateArticleMedia(
+        articleID: Int64,
+        operation: @escaping @Sendable (Flux) throws -> Void,
+        reconcileTransfers: Bool
+    ) async -> Result<Void, Error> {
+        guard let core else {
+            return .failure(
+                NSError(
+                    domain: "FluxNews",
+                    code: 1,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "Flux is not configured"
+                    ]
+                )
+            )
+        }
+        let coordinator = coreSessionExecutionCoordinator
+        guard let result = await coordinator.responsiveResult(
+            for: core,
+            { try operation(core) }
+        ) else {
+            return .failure(
+                NSError(
+                    domain: "FluxNews",
+                    code: 2,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "Core session is unavailable"
+                    ]
+                )
+            )
+        }
+
+        if case .success = result {
+            refreshArticleAudioActionState(articleID: articleID)
+            if reconcileTransfers {
+                await IOSAppRuntime.shared.mediaTransferReconciliationHandoff
+                    .requestReconciliation()
+            }
+        }
+        return result
     }
 
     func feedIconPresentationState(for feedID: Int64, variant: FeedIconVariant) -> IOSFeedIconPresentationState {
@@ -1989,6 +2184,10 @@ struct ArticleRowContent: Equatable, Sendable {
                 rowPresentationStates[article.id].map { .init(article: article, content: $0.content) }
         }
         timelineStructuralState = .init(storage: timelineStructuralStorage, change: .replace, revision: timelineStructuralState.revision &+ 1)
+        loadArticleAudioActionStates(
+            for: articles.map(\.id),
+            replacing: true
+        )
         nextTimelineCursor = value.page.nextCursor
         hasMoreTimelinePages = value.page.nextCursor != nil
         nextTimelinePageRequest = nil
@@ -2057,6 +2256,12 @@ struct ArticleRowContent: Equatable, Sendable {
         timelinePresentationBridge.appendArticleStates(states)
         timelineStructuralStorage.items.append(contentsOf: appended)
         timelineStructuralState = .init(storage: timelineStructuralStorage, change: .append(appended), revision: timelineStructuralState.revision &+ 1)
+        if !appended.isEmpty {
+            loadArticleAudioActionStates(
+                for: appended.map { $0.article.id },
+                replacing: false
+            )
+        }
         nextTimelineCursor = value.page.nextCursor
         hasMoreTimelinePages = value.page.nextCursor != nil
     }
