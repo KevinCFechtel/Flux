@@ -185,38 +185,40 @@ while D6-D8 and the remaining settings work still add product configuration.
 The eventual implementation must use the existing versioned Core backup format
 rather than inventing an iOS-only backup schema.
 
-## 6. Diagnostics, debug logging, and export — REQUIRED LATE PHASE-D CAPABILITY
+## 6. Diagnostics, debug logging, and export — COMPLETE
 
-Native iOS must provide a support-oriented diagnostics export and an explicit
-**Debug Logging** switch.
+Native iOS now provides the support-oriented diagnostics path required for
+physical-device and TestFlight-style investigation without an attached Xcode
+debug session.
 
-Existing foundations:
+Implemented contract:
 
-- Rust Core diagnostics already emit `Trace`, `Debug`, `Info`, `Warn`,
-  and `Error` records.
-- Native iOS already uses Apple's unified `Logger` in several runtime
-  components.
+- `IOSAppDiagnostics` owns a bounded app support log capped at 5,000 records
+  and a rotating on-disk JSONL file under the native Application Support
+  namespace; this is support infrastructure only and is not Core/domain state.
+- `IOSAppLogger` mirrors retained records to Apple's unified logging while
+  Info/Warning/Error remain enabled during normal operation.
+- **Debug Logging** is OFF by default, persisted in UserDefaults when explicitly
+  enabled, and gates Debug/Trace retention.
+- Native Core startup now uses `Flux.initializeWithDiagnostics` with
+  `IOSCoreDiagnosticListener`, so Rust Core Trace/Debug/Info/Warn/Error records
+  feed the same support log.
+- Playback, media transfers, Background Sync, system notifications, widget
+  snapshot coordination, Core bootstrap and app-launch diagnostics use the
+  app-owned logger.
+- Developer Diagnostics exposes the Debug Logging switch, stored-record count,
+  **Prepare Diagnostics Export**, Share Sheet **Export Diagnostics**, and
+  **Clear Diagnostics**.
+- Export combines retained native/Core records with app version/build, OS
+  version and device class and remains useful across a reproducing relaunch.
+- API keys and custom-header values are registered as in-memory sensitive values
+  before Core initialization and are redacted before persistence/export;
+  common authorization/token/password patterns are also scrubbed.
+- Focused tests cover bounded retention, Debug opt-in/persistence across
+  relaunch, credential redaction, and export metadata/content.
 
-Target contract:
-
-- Normal operation records bounded, privacy-safe support diagnostics at
-  Info/Warn/Error severity.
-- **Debug Logging** is OFF by default and persisted when explicitly enabled.
-  Enabling it adds Debug/Trace-level diagnostic detail for Core and native iOS
-  integration paths.
-- Provide **Export Diagnostics** from Developer Diagnostics/Support UI.
-- Export combines native and Core diagnostic records with useful support
-  metadata such as app/build version and OS version.
-- The support export must remain bounded and useful across a reproducing
-  relaunch; do not rely solely on reading the current process's unified log.
-- A bounded/rotating app-owned support log may be used as the export source
-  while continuing to mirror appropriate events to Apple's unified logging.
-- API keys, credential material, custom-header values, authorization data, and
-  other secrets must never be written to or exported in logs.
-- Provide a Clear Diagnostics action.
-
-This capability may be implemented later in Phase D, but must exist before D10
-replacement validation so real-device/support failures can be exported.
+The app-owned log remains deliberately bounded and diagnostic-only; it does not
+create a second persistence or domain authority.
 
 ## 7. Curated feed onboarding — RETIRED
 
