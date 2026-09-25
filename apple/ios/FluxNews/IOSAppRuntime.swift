@@ -59,10 +59,21 @@ final class IOSMediaRuntime {
     let playbackPresentationState = IOSMediaPlaybackPresentationState()
     let transferPresentationState = IOSMediaTransferPresentationState()
 
+    private unowned let bootstrapper: CoreBootstrapper
+
+    lazy var transferCoordinator = IOSMediaTransferCoordinator(
+        bootstrapper: bootstrapper,
+        coreSessionExecutionCoordinator: coreSessionExecutionCoordinator,
+        presentationState: transferPresentationState,
+        handoff: mediaTransferReconciliationHandoff
+    )
+
     init(
+        bootstrapper: CoreBootstrapper,
         coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator,
         mediaTransferReconciliationHandoff: IOSMediaTransferReconciliationHandoff
     ) {
+        self.bootstrapper = bootstrapper
         self.coreSessionExecutionCoordinator = coreSessionExecutionCoordinator
         self.mediaTransferReconciliationHandoff = mediaTransferReconciliationHandoff
     }
@@ -73,6 +84,7 @@ final class IOSMediaRuntime {
         }
         self.core = core
         coreAccessState = .attached
+        transferCoordinator.attach(to: core, generation: lifecycleGeneration)
     }
 
     /// Runs before the app-wide Core execution gate closes. Future playback
@@ -82,14 +94,16 @@ final class IOSMediaRuntime {
         guard core != nil else { return }
         lifecycleGeneration &+= 1
         coreAccessState = .suspendedForCoreReplacement
-        mediaTransferReconciliationHandoff.uninstall()
-        transferPresentationState.reset()
+        transferCoordinator.suspendForCoreLifecycle(generation: lifecycleGeneration)
     }
 
     func resumeAfterAbortedCoreReplacement() {
         guard core != nil else { return }
         lifecycleGeneration &+= 1
         coreAccessState = .attached
+        if let core {
+            transferCoordinator.attach(to: core, generation: lifecycleGeneration)
+        }
     }
 
     /// Called only after the app-wide Core execution coordinator has quiesced.
@@ -99,8 +113,7 @@ final class IOSMediaRuntime {
         guard core != nil else { return }
         lifecycleGeneration &+= 1
         coreAccessState = .suspendedForLocalStateRebuild
-        mediaTransferReconciliationHandoff.uninstall()
-        transferPresentationState.reset()
+        transferCoordinator.suspendForCoreLifecycle(generation: lifecycleGeneration)
     }
 
     func localStateRebuildFinished(with core: Flux) {
@@ -112,9 +125,8 @@ final class IOSMediaRuntime {
         lifecycleGeneration &+= 1
         core = nil
         coreAccessState = .detached
-        mediaTransferReconciliationHandoff.uninstall()
+        transferCoordinator.detach(generation: lifecycleGeneration)
         playbackPresentationState.reset()
-        transferPresentationState.reset()
     }
 }
 
@@ -145,6 +157,7 @@ final class IOSAppRuntime {
         let mediaTransferReconciliationHandoff =
             mediaTransferReconciliationHandoff ?? IOSMediaTransferReconciliationHandoff.shared
         let mediaRuntime = IOSMediaRuntime(
+            bootstrapper: bootstrapper,
             coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator,
             mediaTransferReconciliationHandoff: mediaTransferReconciliationHandoff
         )
@@ -232,5 +245,17 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate {
         _ = backgroundRegistration.register()
         IOSAppRuntime.shared.systemNotificationManager.configure()
         return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        handleEventsForBackgroundURLSession identifier: String,
+        completionHandler: @escaping () -> Void
+    ) {
+        _ = IOSAppRuntime.shared.mediaRuntime.transferCoordinator
+            .handleBackgroundEvents(
+                identifier: identifier,
+                completionHandler: completionHandler
+            )
     }
 }
