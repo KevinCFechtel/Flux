@@ -121,6 +121,16 @@ enum IOSArticleListChromePresentation {
     }
 }
 
+enum IOSListeningListNavigationPresentation {
+    static func showsScopeChooser(
+        for presentation: AdaptivePresentation,
+        splitColumnVisibility: NavigationSplitViewVisibility
+    ) -> Bool {
+        !presentation.usesPersistentSplitNavigation
+            || splitColumnVisibility == .detailOnly
+    }
+}
+
 enum IOSArticleListActionChromeMetrics {
     static let floatingHorizontalPadding: CGFloat = 8
     static let floatingVerticalPadding: CGFloat = 5
@@ -645,8 +655,10 @@ struct ContentView: View {
                 playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
                 playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
                 showsScopeChooser:
-                    !adaptivePresentation.usesPersistentSplitNavigation
-                        || splitColumnVisibility == .detailOnly,
+                    IOSListeningListNavigationPresentation.showsScopeChooser(
+                        for: adaptivePresentation,
+                        splitColumnVisibility: splitColumnVisibility
+                    ),
                 onPresentScopeChooser: presentArticleListNavigation,
                 onStartPlayback: startListeningListPlayback
             )
