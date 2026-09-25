@@ -3171,6 +3171,406 @@
           }
         }
       }
+    },
+    "Player": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Player"
+          }
+        }
+      }
+    },
+    "Restart": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neu starten"
+          }
+        }
+      }
+    },
+    "Play": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abspielen"
+          }
+        }
+      }
+    },
+    "Pause": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pausieren"
+          }
+        }
+      }
+    },
+    "Back 15 seconds": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "15 Sekunden zurück"
+          }
+        }
+      }
+    },
+    "Forward 30 seconds": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "30 Sekunden vor"
+          }
+        }
+      }
+    },
+    "Loading article…": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Artikel wird geladen …"
+          }
+        }
+      }
+    },
+    "Media artwork": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Medien-Cover"
+          }
+        }
+      }
+    },
+    "Audio": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio"
+          }
+        }
+      }
+    },
+    "Unknown Feed": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unbekannter Feed"
+          }
+        }
+      }
+    },
+    "Buffering…": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wird gepuffert …"
+          }
+        }
+      }
+    },
+    "Loading…": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wird geladen …"
+          }
+        }
+      }
+    },
+    "Choose audio": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio auswählen"
+          }
+        }
+      }
+    },
+    "%lld min": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Min."
+          }
+        }
+      }
+    },
+    "%lld%% downloaded": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld %% heruntergeladen"
+          }
+        }
+      }
+    },
+    "Listening List is Empty": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hörliste ist leer"
+          }
+        }
+      }
+    },
+    "Add audio news to your Listening List to find them here.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Füge Nachrichten mit Audio zur Hörliste hinzu, um sie hier zu finden."
+          }
+        }
+      }
+    },
+    "Untitled News": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nachricht ohne Titel"
+          }
+        }
+      }
+    },
+    "Listening List actions": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktionen der Hörliste"
+          }
+        }
+      }
+    },
+    "All Feeds": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alle Feeds"
+          }
+        }
+      }
+    },
+    "Recently Added": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kürzlich hinzugefügt"
+          }
+        }
+      }
+    },
+    "Publication Date": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Veröffentlichungsdatum"
+          }
+        }
+      }
+    },
+    "Filter Listening List by feed": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hörliste nach Feed filtern"
+          }
+        }
+      }
+    },
+    "Sort Listening List": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hörliste sortieren"
+          }
+        }
+      }
+    },
+    "Downloading": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wird heruntergeladen"
+          }
+        }
+      }
+    },
+    "Preparing Download": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download wird vorbereitet"
+          }
+        }
+      }
+    },
+    "Audio %lld": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio %lld"
+          }
+        }
+      }
+    },
+    "Download Network": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download-Netzwerk"
+          }
+        }
+      }
+    },
+    "Any Network": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jedes Netzwerk"
+          }
+        }
+      }
+    },
+    "Unmetered Networks Only": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nur nicht getaktete Netzwerke"
+          }
+        }
+      }
+    },
+    "Keep Downloads": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Downloads behalten"
+          }
+        }
+      }
+    },
+    "Forever": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dauerhaft"
+          }
+        }
+      }
+    },
+    "7 days": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "7 Tage"
+          }
+        }
+      }
+    },
+    "Automatically download Listening List audio": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio aus der Hörliste automatisch herunterladen"
+          }
+        }
+      }
+    },
+    "Delete download after playback completes": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download nach Abschluss der Wiedergabe löschen"
+          }
+        }
+      }
+    },
+    "Remove completed items from Listening List": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abgeschlossene Einträge aus der Hörliste entfernen"
+          }
+        }
+      }
+    },
+    "Media": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Medien"
+          }
+        }
+      }
+    },
+    "Media settings could not be loaded. Please try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Medieneinstellungen konnten nicht geladen werden. Bitte versuche es erneut."
+          }
+        }
+      }
+    },
+    "Media setting could not be saved. Please try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Medieneinstellung konnte nicht gespeichert werden. Bitte versuche es erneut."
+          }
+        }
+      }
+    },
+    "Automatic and manual downloads use the same network policy. Retention cleanup applies to downloaded media that is no longer protected by active playback or other Core media state.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatische und manuelle Downloads verwenden dieselbe Netzwerkregel. Die Aufbewahrungsbereinigung gilt für heruntergeladene Medien, die nicht mehr durch aktive Wiedergabe oder einen anderen Medienzustand im Core geschützt sind."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
