@@ -624,7 +624,7 @@ struct ContentView: View {
             showNotesErrorMessage: listeningListStore.showNotesErrorMessage,
             onSelectEnclosure: { enclosureID in
                 if let articleID = listeningListPlayerArticleID {
-                    startListeningListPlayback(
+                    playListeningListEnclosure(
                         articleID: articleID,
                         enclosureID: enclosureID
                     )
@@ -641,11 +641,38 @@ struct ContentView: View {
         )
     }
 
-    private func startListeningListPlayback(
+    private func openListeningListPlayer(articleID: Int64) {
+        listeningListPlayerArticleID = articleID
+        guard let item = listeningListStore.items.first(
+            where: { $0.articleId == articleID }
+        ) else {
+            return
+        }
+        let preferred = IOSListeningListPresentation.selectedEnclosure(item)
+            ?? item.audioEnclosures.first
+        guard let enclosureID = preferred?.enclosure.id else { return }
+
+        Task {
+            do {
+                _ = try await IOSAppRuntime.shared.mediaRuntime
+                    .playbackCoordinator.prepare(enclosureID: enclosureID)
+                listeningListStore.reload()
+            } catch {
+                let coordinator = IOSAppRuntime.shared.mediaRuntime
+                    .playbackCoordinator
+                IOSAppRuntime.shared.mediaRuntime.playbackPresentationState
+                    .setErrorMessage(
+                        coordinator.lastStartFailureDescription
+                            ?? error.localizedDescription
+                    )
+            }
+        }
+    }
+
+    private func playListeningListEnclosure(
         articleID: Int64,
         enclosureID: Int64
     ) {
-        listeningListPlayerArticleID = articleID
         Task {
             do {
                 try await IOSAppRuntime.shared.mediaRuntime
@@ -746,6 +773,7 @@ struct ContentView: View {
             IOSListeningListView(
                 store: listeningListStore,
                 playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+                transferState: IOSAppRuntime.shared.mediaRuntime.transferPresentationState,
                 playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
                 showsScopeChooser:
                     IOSListeningListNavigationPresentation.showsScopeChooser(
@@ -753,7 +781,8 @@ struct ContentView: View {
                         splitColumnVisibility: splitColumnVisibility
                     ),
                 onPresentScopeChooser: presentArticleListNavigation,
-                onStartPlayback: startListeningListPlayback
+                onOpenPlayer: openListeningListPlayer,
+                onPlay: playListeningListEnclosure
             )
         } else {
             articleList
