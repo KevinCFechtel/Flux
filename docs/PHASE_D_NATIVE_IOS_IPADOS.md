@@ -1,6 +1,6 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: D1-D4 COMPLETE / D4 FOLLOW-UP COMPLETE / D4.5 COMPLETE / D5 COMPLETE & ARCHITECTURE-FROZEN / D6 IMPLEMENTATION STABLE & TESTVALIDATED — UX OBSERVATION WINDOW ACTIVE / D7 READY TO START / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D4 COMPLETE / D4 FOLLOW-UP COMPLETE / D4.5 COMPLETE / D5 COMPLETE & ARCHITECTURE-FROZEN / D6 IMPLEMENTATION STABLE & TESTVALIDATED — UX OBSERVATION WINDOW ACTIVE / D7-0 CONTRACT AUDIT COMPLETE — D7-A READY / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
 > replaces the existing Flutter iOS/iPadOS client with a native Swift client:
@@ -180,6 +180,18 @@ enable additional scenes until that boundary exists; a second scene must not
 create another Core against the same storage paths or share another scene's
 presentation state.
 
+### D7 CarPlay scene amendment — 25 September 2026
+
+D7 does not enable a second independent phone/application scene. CarPlay adds a
+dedicated `CPTemplateApplicationScene` presentation role whose delegate attaches
+to the existing process-scoped `IOSAppRuntime.shared` / `IOSMediaRuntime`. It
+must not create another Core, `IOSMediaRuntime`, AVPlayer, AVAudioSession owner,
+or durable playback state. Disconnecting the CarPlay scene destroys CarPlay
+presentation state only; the app-scoped media runtime remains authoritative.
+
+The detailed D7 ownership, API, entitlement, implementation, test and real-device
+acceptance contract is [IOS_D7_NOW_PLAYING_REMOTE_COMMANDS_CARPLAY.md](IOS_D7_NOW_PLAYING_REMOTE_COMMANDS_CARPLAY.md).
+
 ### iOS/iPadOS Article Timeline — UIKit
 
 The target Article Timeline is an owned UIKit view controller containing a
@@ -339,357 +351,8 @@ in its focused source file; and the UIKit cell consumes prepared
 wrapper. Focused native full-swipe and article-cell accessibility oracles are
 present. Final validation on 22 September 2026 executed 338 iOS tests with
 0 failures, `build-app.sh` succeeded, `git diff --check main...HEAD` was clean,
-and the focused physical-device smoke test passed. The UIKit Timeline
+and U5 was accepted as a behavior-preserving cleanup. The UIKit Timeline
 architecture is now frozen.
-
-The pre-D4.5 native manual Sync control used the same `arrow.clockwise`
-symbol across idle and active Sync while preserving a stable toolbar slot.
-D4.5 supersedes only that control-state presentation with an explicit Cancel
-action while retaining the same semantic controls. iPhone portrait keeps Sync,
-Filter/Sort, and More in the bottom toolbar.
-iPhone landscape returns the same action group to the native trailing top toolbar
-and the interactive scope capsule to the native leading toolbar. It preserves
-the configured current-scope article count in compact numeric form (or the
-existing transient `Syncing…` substitution). The Timeline top-edge effect is
-disabled specifically for this compact-landscape mode.
-Persistent split navigation normally keeps the detached floating action capsule.
-On systems where SwiftUI reports a non-`nil` `toolbarVerticalEdge`, the
-Sync/Filter/More actions instead return to native top-toolbar items so a vertical
-system bar such as iPhone Duo can place them on the appropriate side edge. This
-path is compiled behind the `FLUX_HAS_VERTICAL_TOOLBAR_API` capability. The
-project enables that capability for SDK 27.1 through 27.9 and later major SDK
-families, while deliberately excluding SDK 27.0. This keeps the adaptation
-forward-compatible across later 27.x SDKs without making 27.0 builds depend on
-an unavailable symbol. A visible sidebar keeps the detail scope-title-free; if that sidebar is hidden, the
-wider interactive scope capsule remains horizontal in the independent inset row
-so navigation does not depend on the edge-swipe gesture. Category
-selection and category expansion remain separate sidebar interactions so a
-selected category can still be expanded or collapsed independently;
-active manual Sync is indicated by continuous symbol rotation, and successful
-manual Sync briefly presents a checkmark before returning to the idle symbol.
-Failure returns directly to the idle symbol. This is native transient
-presentation state and does not alter Core Sync semantics; Reduce Motion keeps
-the symbol stationary.
-
-Appearance follows the system Light/Dark mode. Primary content surfaces use the
-system content background, which is true black in Dark Mode. There is no manual
-Light/Dark override, True Black setting, persisted theme preference, or separate
-theme framework.
-
-## 6. Search, Reader and article actions
-
-Search remains the existing Miniflux online search through
-`core.searchArticles`. iOS/iPadOS provides a dedicated native Search screen with
-explicit submit, remote results and pagination. Phase D does not replace this
-with local scope filtering or local full-text search.
-
-Reader semantics come from `ReaderDocument`. Shared Reader presentation/routing
-semantics may live in FluxApple, while actual SwiftUI presentation remains
-platform-specific.
-
-Existing article actions are preserved where supported by current Core/native
-semantics: open original, open in Miniflux, comments, copy link, native Share
-Sheet and save to configured Miniflux third-party service.
-
-## 7. Background sync, notifications and widgets
-
-Regular news background refresh uses `BGAppRefreshTask` and the existing
-app-owned Core session to call `sync(.background)`. `BGProcessingTask` is
-reserved for work that actually requires the longer-processing mechanism; it is
-not the default news refresh mechanism. iOS scheduling remains system-controlled
-and force-quit limitations are accepted platform boundaries.
-
-Background Sync is not owned by `NewsreaderStore`. The store retains ownership
-of user-facing Manual-Sync presentation and the D4.5 Manual-Sync session, while
-an app-scoped background execution coordinator owns BGTask lifecycle. Foreground,
-manual and background work must converge on the same current account/Core
-session; D5 must not initialize a second Core instance against the same storage
-paths.
-
-The D4.5 Core-quiescence guarantee becomes account/Core-session-wide once D5
-introduces background Core execution. Account replacement, rebuild and removal
-must prevent new Core work from entering, request cancellation of cancellable
-work where appropriate, and wait for already-started synchronous Core execution
-to finish before replacing or destroying that Core session.
-
-D4.5 user cancellation remains specific to user-initiated Manual Sync.
-Background Sync has no user-facing cancellation control. BGTask expiration may
-reuse the same run-scoped Core `SyncCancellation` / `syncCancellable`
-primitive so synchronous Rust work can stop cooperatively when iOS revokes the
-task's execution time. That OS-owned expiration path does not give Background
-Sync Manual-Sync presentation or user-cancellation semantics.
-
-After a successfully completed background sync the native layer refreshes the
-widget snapshot, requests the targeted WidgetKit reloads, processes Core
-notification candidates and requests native media-transfer reconciliation.
-D5 owns this post-sync transfer-reconciliation trigger/handoff. D6 owns the
-actual iOS native transfer executor and its persistent background-`URLSession`
-lifecycle. Core-generated download intent therefore survives D5 even before the
-D6 executor is present, without introducing a temporary second download stack.
-
-Notifications are local only: Core owns candidate/domain semantics and iOS owns
-permission and delivery through `UNUserNotificationCenter`. Phase D adds no APNs
-relay or server-side push infrastructure.
-
-Widgets preserve existing FluxNews functionality using native WidgetKit. The
-base architecture is:
-
-```text
-Core -> App/Background Task -> App Group snapshot -> Widget extension
-```
-
-The widget extension does not run an independent full Core/SQLite lifecycle.
-No new interactive mark-read or mini-reader widget functionality is required in
-Phase D.
-
-## 8. Media, downloads and Apple system integration
-
-Phase D reuses the Phase-B/C media domain and the existing native Apple playback
-architecture. Rust remains authoritative for durable media/listening/download
-state. Native Apple code owns the running AVPlayer, runtime transfer execution,
-AVAudioSession and OS integrations.
-
-iOS uses a true background `URLSession` transfer executor so eligible downloads
-can continue under iOS background/process rules. Shared transfer reconciliation
-and Core callbacks should be reused where semantics are common; the iOS
-background-session lifecycle is iOS-specific.
-
-AVAudioSession integration must cover background audio, interruptions, route
-changes, Bluetooth/AirPlay and appropriate resume behavior.
-
-`MPNowPlayingInfoCenter` and `MPRemoteCommandCenter` use the same playback state
-as the in-app player. CarPlay is another native presentation over this same
-playback stack, not a second player or legacy download cache. Required CarPlay
-scope includes browsing playable/listening items, selecting an episode,
-play/pause, skip forward/back and current playback state.
-
-**CarPlay is release-blocking for the native replacement.**
-
-Live Activities/Dynamic Island are tied to active podcast/audio playback. A
-native ActivityKit coordinator consumes the same runtime playback state and
-presents title, feed/podcast, artwork, play/pause state, position and duration.
-Progress should not require explicit per-second ActivityKit updates. No
-ActivityKit push/APNs infrastructure is introduced.
-
-**Live Activities/Dynamic Island are release-blocking for the native
-replacement.**
-
-## 9. Phase roadmap
-
-### D1 — Apple Foundation & Replacement Feasibility
-
-- mechanically establish `apple/macos`, `apple/shared/FluxApple` and `apple/ios`;
-- keep macOS building and behaving as before;
-- package UniFFI/Rust Core for macOS plus iOS device and simulator, preferably
-  through a clean XCFramework-style Apple distribution;
-- create the minimal common iPhone/iPad app shell and initialize Core;
-- establish Core/cache/media paths and Keychain integration boundaries;
-- configure separate native-development and production-upgrade identities;
-- prove access to the production identity, App Group, Keychain and required
-  legacy Flutter storage without mutating it.
-
-D1 is complete when native Flux runs on a real iPhone and iPad/simulator against
-Rust Core, the development app can coexist with Flutter, the future production
-upgrade path is technically proven, and macOS remains green.
-
-### D2 — Native Newsreader Foundation
-
-Implement compact article-first navigation, regular two-column navigation,
-Article List, Row/Card presentation, preview-line choices, Startup Scope, Hide Empty,
-Remove When Read, pull-to-refresh, native swipe actions, Scrollover/Undo and
-stable snapshot/pending-new-data behavior. Extract proven shared Apple code only
-where this creates actual reuse.
-
-The original D2 baseline is complete. The accepted UIKit Timeline amendment in
-section 5 replaced its renderer and Scrollover integration and is also complete.
-U1-U5 are closed, U3 was accepted on real devices, the legacy article-image
-renderer has been removed, and the productive image path is
-ImageIO -> UIImageView/Core Animation. The UIKit Article Timeline is now
-architecture-frozen. Fundamental Timeline, Scrollover, layout or image-pipeline
-changes require a concrete reproducible regression case; ordinary later Phase-D
-work must preserve the frozen Timeline architecture and product behavior.
-
-### D3 — Article Interaction, Reader & Search
-
-Implement existing open routing, in-app browser, temporary Reader presentation,
-article actions/share and the dedicated paginated remote Search screen using the
-existing Core API.
-
-#### D1-D3 legacy FluxNews gap review — COMPLETE
-
-A post-D5 review compared the completed native D1-D3 scope with the former
-Flutter FluxNews client. No additional **open, unassigned** D1-D3 gaps remain.
-
-- **D1** is infrastructure/replacement feasibility rather than UI parity.
-  Access to legacy production identity/storage is proven here; actual import of
-  compatible Flutter state remains intentionally owned by **D9**.
-- **D2** covers the accepted native Newsreader contract: adaptive navigation,
-  Visual/Visual Compact/Compact presentation, preview lines, Startup Scope, Hide
-  Empty, Remove When Read, pull-to-refresh, Scrollover/Undo, stable snapshots and
-  the documented configurable swipe-action contract.
-- Legacy Flutter AppBar/FAB/Glass/layout switches and configurable
-  tap/long-press behavior are not missing D2 work. They are intentionally
-  replaced by the native adaptive presentation and native context-menu model.
-  Swipe configuration is the explicit native exception now covered by the
-  mobile semantic contract.
-- **D3** covers remote Miniflux Search with pagination, ReaderDocument-based
-  temporary Reader presentation, article routing and the supported article
-  actions (Original, Miniflux, Comments, Copy Link, Share and third-party save).
-- Legacy inline article expansion / Split tap modes are intentionally replaced
-  by the native Open Link / temporary Reader product model.
-- The legacy **Download Audio** article/swipe action is not a D3 gap; it belongs
-  to **D6**, where the native iOS media/download executor and handler become
-  available.
-
-Therefore D1-D3 are considered complete against the current native product
-contract. This does not mean byte-for-byte Flutter behavior parity: explicitly
-retired behavior remains retired, D6 owns media actions, and D9 owns legacy
-state migration.
-
-### D4 — Settings & Native Presentation Quality
-
-D4 is subdivided into D4.1-D4.5. D4.1 introduces the independent native
-account/credential startup lifecycle. D4.2 is the full native Settings redesign,
-D4.3 covers presentation quality, D4.4 performs combined real-device D2-D4
-validation and polish, and D4.5 adds user-cancellable foreground/manual Sync as
-an accepted post-baseline extension.
-
-#### D4.1 — Production-Style Startup & Native Account/Credentials
-
-- start without developer environment credentials;
-- store the native account, API key, and custom HTTP headers in the native
-  Keychain namespace;
-- validate and reconfigure accounts through the existing Core/UniFFI contract;
-- keep account-required and recoverable-startup-error states separate from
-  Developer Diagnostics;
-- support Rebuild Local State and Remove Account with distinct semantics.
-
-Remove Account removes native credentials, account-bound Core state, feed
-preferences, and account media while preserving global application/display
-preferences. Rebuild Local State preserves the account and preferences while
-rebuilding reconstructable synchronized state. There is no general FluxNews
-Factory Reset product action.
-
-Flutter credentials, settings, SQLite state, downloads, and playback are not
-read, imported, rewritten, or deleted by D4.1. Flutter-to-native migration
-remains entirely in D9.
-
-#### D4.2 — Native Settings
-
-Implement a conventional native Settings hierarchy with Settings entries for
-Account, Articles, Navigation, and Developer Diagnostics. D4.2 exposes only
-currently functional native/Core settings and reuses the frozen D4.1 account
-lifecycle. Transient article-list filters such as Unread Only and Newest First
-remain list controls rather than persistent Settings.
-
-D4.2 does not add Appearance or True Black settings, future media/notification/
-background/widget settings, or a factory reset action. Those concerns remain in
-D4.3 or their later feature phases.
-
-#### D4.3 — Native Presentation Quality
-
-Complete native presentation quality work across system-controlled appearance,
-flat content surfaces, Dynamic Type, VoiceOver, context-menu presentation,
-semantic sensory feedback, and iPad input behavior. FluxNews has no Appearance
-screen or True Black setting. Dark Mode content surfaces are true black by
-design; Light Mode may retain subtle native background differentiation for
-structured UI, while sheets, menus, popovers, and controls retain system
-elevation.
-
-The Newsreader navigation scope title is stable and never embeds the live
-article count into the title string itself. The accepted native chrome is the
-scope capsule implemented by `ArticleListTitleCapsule`, detached from
-`UINavigationBar` and rendered in a normal SwiftUI top `safeAreaInset`.
-iPhone portrait uses a centered stacked detached capsule with the optional
-descriptive current-scope count and keeps Sync/Filter/More in the native bottom
-toolbar. The entire scope capsule remains one semantic `Button`; on iOS 26+
-its owned `UIGlassEffect` is interactive, while Reduce Transparency retains the
-opaque fallback. The Timeline receives the measured detached-chrome height as an
-additional natural-top `contentInset`: the first article therefore starts below
-the capsule at the beginning of the list, but that clearance scrolls away with
-the content so later articles can still pass beneath the floating glass.
-Semantic scope/filter/sort resets and manual-Sync snapshot replacement already
-reset to `-adjustedContentInset.top`, so they reuse the same natural start
-without a separate scroll-state path. Its native Timeline top-edge effect remains
-`.automatic` on iOS/iPadOS 26+.
-
-Compact iPhone landscape intentionally uses native top navigation chrome instead:
-the compact two-line scope capsule is `.topBarLeading` and Sync/Filter/More are
-`.topBarTrailing`. The capsule reserves the alternate second-line width so
-transitions between the count and `Syncing…` do not make the chrome breathe
-horizontally. The Timeline top-edge effect is disabled in this mode because the
-compact-landscape presentation has no visible status-bar glyph band to protect.
-
-Persistent split navigation retains detached floating action chrome while the
-system keeps bars horizontal. When SwiftUI's `toolbarVerticalEdge` reports a
-vertical system-bar context, Sync/Filter/More become native trailing toolbar
-items and therefore participate in the system's vertical bar instead. A visible
-sidebar still suppresses the scope capsule; when the sidebar is hidden, the wider
-inline scope capsule stays horizontal in the detached inset row. The action-axis
-change does not alter the regular-mode Timeline edge policy: `.automatic`
-remains enabled on iOS/iPadOS 26+. Detached capsules use `.regularMaterial` on
-17-25 and own one
-`UIGlassEffect(style: .regular)` layer on 26+. The compact-landscape toolbar
-instead relies on system Liquid Glass on 26+ to avoid a double layer. During Sync the
-capsule's count presentation temporarily shows `Syncing…`. The capsule remains
-the authoritative visible title/header presentation and carries the accessibility
-header role; do not reintroduce a separate Large-Title or native-subtitle product
-presentation over it.
-
-Navigation metadata and navigation counts are consumed as one shared Rust Core
-projection. Swift selects unread-only or all-entry navigation semantics but
-does not derive or incrementally cache category/feed counts; the selected
-Timeline/query `selectionTotal` remains separate. Scrollover keeps its existing
-idle-refresh policy and may defer consuming a fresh projection until idle, but
-never derives optimistic navigation counts.
-
-The local UIKit Timeline uses bounded Core keyset pages, ordered by
-`(published_at, article_id)`, rather than reading an unbounded selected
-dataset. A first page obtains the authoritative selection total and replaces the
-Timeline; later pages omit that repeated aggregate and append prepared immutable
-row content. Targeted structural removals preserve unaffected presentation state
-and pagination state. Loaded pages remain retained for the current semantic
-query. This is separate from targeted read/starred/Scrollover presentation
-updates and from Search's remote pagination. Hard Timeline windowing is deferred
-unless future profiling justifies it.
-
-Incremental structural changes are deliberately narrower than a semantic
-replacement: page append adds only new Diffable identifiers and prepares only
-new immutable layout inputs; targeted removal deletes only affected identifiers
-and cancels only their article-image requests. Existing visible cells, valid
-prefetch, and prepared layout metrics are retained. Full replacement or a real
-geometry change remains responsible for broader cancellation and layout
-invalidation. A synchronous prepared-metrics miss is retained in the same
-generation-safe cache, so it does not cause a second equivalent asynchronous
-measurement. The frame-headroom hardening pass keeps append/removal from
-fanning out into unrelated visible-cell configuration, prefetch cancellation,
-or broad layout invalidation. Feed-icon PNGs retain their existing prepared-raster path. Article images use
-display-sized ImageIO decoding off-main, while UIImageView/Core Animation owns
-the final aspect-fill crop and rounded clipping. The former exact-slot article
-CGContext renderer, its Developer Diagnostics switch, backdrop/P3 cache state,
-and renderer-mode plumbing were retired on 22 September 2026 after device
-acceptance showed no product-relevant advantage. The Timeline table surface remains explicitly
-opaque over the system background. The existing native cell uses stable
-registrations for compact/text-only, portrait, and landscape constraint variants
-to avoid ordinary reuse switching between those graphs. The article-image
-pipeline prioritizes visible work over prefetch, allows up to two concurrent
-fetch operations, serializes the CPU-heavy ImageIO transform stage to avoid
-overlapping decode/raster peaks, and keeps a deterministic cost-bounded 128 MiB
-LRU of decoded display-sized images for warm/back-scroll reuse. The LRU retains entries
-strongly until its byte budget requires least-recently-used eviction, instead of
-relying on opportunistic NSCache residency, and releases all retained rasters on
-an iOS memory-pressure warning. Scrollover's
-per-scroll geometry state uses bounded ordered frame slots, scalar previous
-geometry, and a private bounded previous-frame copy. It no longer retains a
-sample dictionary that shares the mutable frame-store buffer, avoiding the
-per-scroll copy-on-write of resolved frames; stale-ID storage is allocated only
-when pruning is actually needed. Archive Release builds enable
-whole-module Swift compilation through the archive script only; normal simulator
-execution remains Debug and performance diagnostics remain dynamically injected
-by the diagnostics build command. Diagnostics builds are instrumented and are
-not assumed bit-identical to the shipped archive. U3.7.5 manual cell layout
-remains deferred pending device evidence; this pass does not claim a new
-physical-device result.
 
 #### Article-image renderer decision — 20 September 2026
 
@@ -698,208 +361,53 @@ offscreen-image-prefetch removal, obsolete-work cancellation, and serialized
 image-transform changes. On the iPhone 15, both paths still showed very rare
 residual hitches, but the ImageIO -> UIImageView/Core Animation path was
 subjectively somewhat smoother than the additional exact-slot CGContext
-prerasterization path.
+renderer. The exact-slot renderer was therefore retired after U3 acceptance.
 
-Production therefore has one article-image renderer: display-sized ImageIO
-decode followed by UIImageView/Core Animation aspect-fill and rounded clipping.
-The former exact-slot display-ready path is no longer compiled into the article
-image pipeline, and Developer Diagnostics no longer exposes a renderer switch.
-Git history preserves the experiment if future OS evidence warrants revisiting
-it.
+## 6. Native media and platform integration
 
-#### Article-image performance diagnostics — historical conclusion
+Phase D media uses the shared Rust media domain and the existing app-scoped
+native playback/transfer runtime. Swift owns native execution; Rust/Core owns
+durable media state and policy.
 
-The temporary article-image experiments described during the September 2026
-performance investigation are concluded and their source-level diagnostic
-switches were removed on 18 September 2026. In particular, neither presenting a
-roughly @3x decoded thumbnail without exact-slot prerasterization nor reducing the
-exact-slot raster to 2x produced a meaningful physical-device improvement. Those
-individual experiments did not identify a root cause; the broader U3
-performance/correctness investigation was subsequently closed by the accepted
-iOS 27 device baseline and final 22 September validation described below.
+D6 establishes one app-wide `IOSMediaRuntime` below `IOSAppRuntime`. It owns the
+single `IOSMediaPlaybackCoordinator`, the single `IOSMediaPlaybackPresentationState`,
+the native AVPlayer engine, AVAudioSession lifecycle and background transfer
+coordinator. Downloaded and remote media use this same playback stack.
 
-The detailed experiment record, cleanup audit, retained production invariants,
-and the resulting `Visual compact` product decision live in
-[IOS_TIMELINE_PERFORMANCE_DIAGNOSTIC_CLEANUP.md](IOS_TIMELINE_PERFORMANCE_DIAGNOSTIC_CLEANUP.md).
+`IOSMediaPlaybackPresentationState` is the stable live projection for platform
+integrations. It contains the loaded enclosure, feed/media title, artwork source,
+chapters, status, position, duration, playback source, loading/buffering/error
+state and playback rate. D7/D8 integrations consume this projection rather than
+SwiftUI player geometry or controls.
 
-Article-row accessories use one stable semantic order: **Unread → Star → Comments → Audio**, measured outermost-to-innermost for horizontal groups. Optional listening duration belongs to the Audio accessory. The iOS 27 real-device comparison showed that the normal full-width Visual portrait image scrolls smoothly, so the temporary reduced-width image/info-rail experiment and its Developer Diagnostics switch have been removed rather than retained as product architecture. Standard Visual portrait now has one production geometry: **100% content-width 16:9 image → metadata → title → publication row + optional trailing reading time → preview**. Every productive article layout uses the same semantic text order **metadata → title → publication row → preview**, including Compact, image-less Visual, Visual landscape, and all Visual compact variants. The Articles setting may render the publication row either as the absolute localized date/time or as the localized abbreviated relative publication age. Relative age reuses the system `RelativeDateTimeFormatter` with numeric abbreviated units, begins with `clock.arrow.circlepath`, and is frozen against one result-generation reference date: later keyset Timeline pages and later pages of the same Search request reuse their respective reference date, and visible rows never advance from a timer. A structural Timeline replacement establishes a fresh reference date and refreshes the prepared temporal row content even when the underlying article fields are otherwise unchanged. Miniflux `reading_time` remains a persisted Core article field (schema v18) projected through `ArticleSummary`/UniFFI; the iOS Timeline never calculates reading duration itself. All article variants project Miniflux reading time, when available, inline immediately after the publication value, separated by a centered dot and rendered as `doc.text` + duration in that same publication row; both the optional leading relative-time icon and inline reading-time block are horizontal-only additions and must not increase deterministic text-row height. The current Timeline projection already supplies unread/star/comments; Audio must join through a batched article-level Timeline/media projection before its slot becomes productive. Do not introduce visible-cell enclosure lookups or other per-row Core calls to populate Audio or duration.
-Do not re-enable removed performance experiments merely because older commits
-describe them as a next step. New performance work should start from the current
-production architecture and current physical-device evidence.
+AVAudioSession integration covers background audio, interruptions, route
+changes, Bluetooth/AirPlay and appropriate resume behavior. Core checkpoints,
+completion/restart and Miniflux `media_progression` reconciliation remain D6
+semantics and are not reimplemented by D7.
 
-The agreed Timeline completion sequence is recorded in
-[IOS_UIKIT_TIMELINE_IMPLEMENTATION.md](IOS_UIKIT_TIMELINE_IMPLEMENTATION.md#8-agreed-u3u4-stabilization-and-architecture-freeze-plan).
-In short: **U3 and U4 are complete.** U3 real-device acceptance on iOS 27
-includes smooth scrolling through more than 200 articles with the normal
-full-width Visual geometry, accepted rotation/chrome/status-bar behavior, and
-the single production article-image path. The legacy article-image renderer and
-its diagnostics have been removed. Post-retirement
-`./apple/ios/Build/test.sh` validation after renderer retirement on
-22 September 2026 executed **348 tests with 0 failures**. U5 then removed
-redundant historical Scrollover coverage and completed the freeze suite; its
-final canonical run executed **338 tests with 0 failures**, `build-app.sh`
-succeeded, `git diff --check main...HEAD` was clean, and focused device
-acceptance passed. The historical iOS 26 full-width-image behavior remains an
-accepted OS/rendering-sensitive limitation rather than a reason to retain a
-second renderer.
+`MPNowPlayingInfoCenter` and `MPRemoteCommandCenter` use the same playback state
+as the in-app player. CarPlay is another native presentation over this same
+playback stack, not a second player or legacy download cache. Required CarPlay
+scope includes browsing playable/listening items, selecting an episode,
+starting playback, play/pause, skip and current playback presentation.
 
-On iOS, a semantic scope/filter/sort reset stays within the existing UIKit
-Timeline controller: it resets the table view to its natural top position and
-rebaselines Scrollover geometry without re-identifying the adaptive detail
-subtree. Portrait/landscape chrome changes are presentation-only: the
-`ArticleListView`/UIKit Timeline subtree remains structurally stable while only
-its toolbar items change, so rotation must preserve the current article/viewport
-anchor rather than recreate the Timeline at the top. Device acceptance must verify a populated Timeline before and after each
-scope, filter, and sort reset: the Timeline returns to its natural start, the
-scope-capsule chrome remains stable, there is no Timeline teardown/flicker, and
-subsequent Scrollover remains correct.
-Sync activity is communicated by the normal Newsreader UI; an empty scope shows
-`News syncing…` while Sync is active and `No News` after it completes, without
-an additional custom splash screen.
-`No News` is a confirmed-empty state, never an intermediate Sync or local
-snapshot-loading transition. Existing article content remains visible during
-snapshot refreshes without a generic loading overlay. The stable, count-free
-navigation scope title is unchanged; the separately presented current-scope
-count can be disabled through the native iOS article presentation settings.
+D7-0 is complete. The implementation sequence is D7-A shared Apple Now Playing
+projection/policy, D7-B iOS Now Playing adapter, D7-C remote commands, D7-D
+system playback/real-device acceptance, D7-E CarPlay scene/browsing, D7-F
+CarPlay playback integration, and D7-G final integration/physical CarPlay
+acceptance. The detailed contract is
+[IOS_D7_NOW_PLAYING_REMOTE_COMMANDS_CARPLAY.md](IOS_D7_NOW_PLAYING_REMOTE_COMMANDS_CARPLAY.md).
 
-#### D4.4 — Real-Device Validation & Polish
+D7 must not expose Stop, next/previous episode, autoplay, or queue semantics
+without an explicit product/domain contract. Stop remains an in-app D6 lifecycle
+operation; remote Play/Pause/Toggle/skip/seek operate through the existing
+playback coordinator. CarPlay browsing is Core-backed Listening List content,
+not a filesystem/download-cache scan.
 
-Perform combined real-device D2-D4 validation and polish across representative
-compact and regular presentation environments, including runtime resize,
-rotation, and multitasking transitions where supported.
+D8 ActivityKit/Dynamic Island remains outside D7, but may consume the same stable
+playback projection later.
 
-Before D4.4 completion, establish consistent native user-facing error
-presentation for Sync/network, account/credential, and user-action failures.
-Raw Rust/UniFFI/internal errors must not be exposed directly to users.
-Loading, empty, syncing, and error states remain semantically distinct.
-
-The D4.4 error-presentation work is complete: native iOS error contexts now map
-technical failures to stable safe English messages, while typed account-validation
-messages remain preserved. Technical causes are restricted to diagnostics, and
-optional feed-icon and article-image failures remain silent. The D4.4 English
-user-facing wording freeze is complete.
-
-Localization is the final D4.4 presentation step after user-facing wording and
-error messages are stable. The native iOS/iPadOS app provides complete English
-and German localization through the native iOS String Catalog at
-`apple/ios/FluxNews/Localizable.xcstrings`. Shared terminology aligns with the
-native macOS application, including Feed, Category, API-Schlüssel, and the
-article/read/starred vocabulary. Release-visible errors, Settings,
-Newsreader/navigation, Reader, Search, and accessibility presentation are
-localized. User-facing dynamic counts use native localized substitutions and
-plural forms rather than concatenated fragments. Developer Diagnostics remains
-reachable in the release UI and its presentation labels and explanation are
-localized; paths, URLs, raw status values, revisions, and technical diagnostics
-remain unchanged by design.
-
-The English wording freeze is preserved, the English/German localization pass is
-complete, and the final localization audit found no unintended release-visible
-English-only strings. The original D4.1-D4.4 baseline is **COMPLETE /
-architecture-frozen**. A later accepted Article Timeline presentation amendment
-narrowly extended the Articles presentation settings and English/German
-localization with the absolute/relative publication-time choice. That extension
-is now part of the accepted D4 UI baseline and does not reopen unrelated
-Settings, wording, localization architecture, or other phase architecture. The
-UIKit Timeline amendment otherwise remains limited to renderer/integration and
-its relevant D4.4 validation.
-
-D4.5 is a separately accepted **completed** extension and is not covered by the
-earlier D4.1-D4.4 completion/freeze statement. Its cancellable manual-Sync
-contract, user-facing wording, English/German localization, automated regression
-coverage, and focused physical-device acceptance are complete as of
-23 September 2026.
-
-The UIKit Timeline amendment's D4.4/U3 real-device acceptance is complete. The
-owner accepted the exercised slow/fast Scrollover behavior, rotation and
-safe-area/chrome handling, current compact/regular presentation, long-feed
-scrolling and reuse behavior, and the current Undo/haptic/status presentation.
-Future changes must preserve those accepted semantics; new device work is
-required only for a new reproducible regression or a materially changed
-presentation path.
-
-### U3.8.5 — Adaptive Device Matrix & Runtime Acceptance
-
-The automated U3.8.5 acceptance baseline runs on the available compact iPhone
-simulator and covers semantic compact/regular transitions, deterministic widths,
-display scales, Dynamic Type including accessibility XXXL, and LTR/RTL. It
-verifies persistent adaptive shell state, no structural Timeline snapshot for
-presentation/geometry-only changes, canonical geometry and deterministic
-UIKit-cell height agreement, Search request generation preservation, Reader
-request preservation, Scrollover rebaselining, image request canonicalization,
-bounded image work, and the single-scene hosted app manifest. The available
-regular iPad simulator was booted and its test run began, but did not complete
-within the six-minute acceptance timeout; it is not counted as completed iPad
-acceptance.
-
-Timeline diagnostics now report geometry identity changes, geometry layout
-invalidations, prepared-window replacements, and superseded prepared-window
-generations alongside the existing preparation, deterministic fallback, image,
-structural-snapshot, and cell-work counters. A controller-level same-runloop
-resize regression executes three canonical width changes and records one
-prepared-window replacement with at least two superseded generations and no
-structural reconciliation or snapshot application. This proves `Task.yield()`
-coalesces a burst before speculative window replacement; it is not a substitute
-for a sustained live-resize trace. No coalescing strategy change is justified
-without a runtime trace showing expensive measurement churn rather than cheap
-generation replacement.
-
-Automated Scrollover coverage confirms that structural/geometry rebaselining,
-layout-generation changes, Dynamic Type/RTL layout keys, and stale completion
-paths cannot synthesize crossings or publish stale presentation. Image tests
-confirm compatible canonical requests are retained, visible work is prioritized,
-concurrency remains bounded, and stale image arrivals do not affect geometry.
-The deterministic path performs no production Auto Layout sizing; the current
-evidence does not justify U3.7.5 manual cell layout.
-
-U3.8/U3.8.5 manual runtime acceptance is **COMPLETE as of 22 September 2026**.
-The available simulator matrix remains a useful automated baseline, but the
-closure decision is based on the completed physical-device checks rather than on
-forcing every optional simulator combination. The owner explicitly accepted the
-current UIKit Timeline/presentation behavior, including rotation-anchor
-preservation, compact/regular chrome, article metadata and reading time, haptic
-feedback and Undo, status-bar protection, the compact-landscape capsule, and the
-iOS 27 renderer/performance baseline. No geometry-only Scrollover regression or
-unresolved device-performance issue remains open in U3.
-
-The final post-renderer-retirement `./apple/ios/Build/test.sh` run executed 348
-tests with 0 failures. Optional future simulator/device matrices such as an
-iPhone Duo runtime are additive regression coverage only; their absence does not
-keep U3 open and must not introduce device-specific product behavior.
-
-#### D4.5 — Cancellable Manual Sync
-
-**Status: COMPLETE as of 23 September 2026.** The prerequisite owner
-acceptance of the current UIKit Timeline/presentation device changes was
-satisfied on 22 September 2026, and U5 cleanup/final acceptance is complete. The
-current UIKit Timeline architecture remains frozen. D4.5 is a separately scoped
-Newsreader/Core feature and did not reopen the Timeline container, Scrollover
-detector, or fundamental image/layout pipeline.
-
-D4.5-A establishes the additive Core cancellation contract: a run-scoped,
-monotonic `SyncCancellation` signal, a non-error `SyncOutcome::Cancelled`
-terminal outcome, and a separate cancellable Sync entry point. The existing
-`sync(reason)` API retains its established behavior for existing callers.
-
-D4.5-B is **COMPLETE**. It threads the cancellation signal through the
-productive Rust Sync orchestration. Pending article/media mutations stop only
-between safe remote-write/local-ack units; the Miniflux starred-state
-read/conditional-write pair observes cancellation between its HTTP requests;
-initial and SavedMedia entry pagination check between HTTP pages; protected
-media fetches stop between bounded requests; reconciliation remains one unsplit
-SQLite transaction with checks immediately before and after; SavedMedia
-replication, retention/media cleanup, notification preparation, and the final
-successful-Sync commit have explicit safe checkpoints. A cancelled run emits
-neither normal Sync completion nor Sync failure. Once `mark_sync_success()`
-begins after the final checkpoint, that run is considered committed rather than
-retroactively cancelled.
-
-D4.5-B validation on 23 September 2026 completed with `cargo fmt --check`
-clean and `cargo test --workspace` green: 216 `flux-core` tests and 5
-`flux-uniffi` tests passed with 0 failures, plus all workspace doc-tests.
-During that gate, two pre-existing reading-time baseline defects were corrected:
-`materialize_saved_media` now supplies the persisted
-`reading_time_minutes` SQL parameter, and the versioned-database test now
-expects the current schema version 18.
+## 7. D4/D4.5 manual sync contract
 
 Manual foreground Sync must become explicitly cancellable by the user. This is
 a Newsreader interaction and therefore remains in D4 rather than being deferred
@@ -957,467 +465,91 @@ returns. Focused tests cover both queued and running cancellation semantics.
 D4.5-C validation on 23 September 2026 completed with `cargo fmt --check`
 clean and `cargo test --workspace` green: 216 `flux-core` tests and 6
 `flux-uniffi` tests passed with 0 failures, plus all workspace doc-tests.
-The native iOS gate then executed 340 tests with 0 failures and
-`./apple/ios/Build/build-app.sh` completed with `BUILD SUCCEEDED`.
+The native iOS gate then executed 340 tests with 0 failures and the native app
+build succeeded.
 
-**D4.5-D — session-owned Manual Sync lifecycle in NewsreaderStore is
-COMPLETE.** NewsreaderStore owns one current manual run, its UniFFI
-`SyncCancellation` handle, and the Swift task that submits it through
-`AppleCoreExecution.blockingCancellableResult`. Manual Sync state is explicit
-(`idle/running/cancelling`); cancellation signals both the Core handle and the
-Swift task so queued work is prevented from starting while running work remains
-cooperatively cancellable. Run/session generations reject late completion,
-cancellation suppresses normal success/error presentation, and cancelling a run
-immediately supersedes its presentation generation so a fresh manual Sync may
-start even while the old synchronous Core call is still cooperatively winding
-down. Detach likewise cancels and invalidates the old run without accepting stale
-publication. The Core event listener captures the attached Core session so an
-already-enqueued old-session automatic/background completion cannot publish after
-detach/reattach.
+## 8. D5 background execution
 
-D4.5-D validation on 23 September 2026 executed **345 native iOS tests with
-0 failures**, including the queued/running cooperative cancellation and central
-Core-execution-boundary coverage, and `./apple/ios/Build/build-app.sh`
-completed successfully.
+D5 is complete and architecture-frozen. Native iOS owns BGTaskScheduler,
+WidgetKit and UNUserNotificationCenter execution over Core projections and
+candidates. Background Sync never creates a second Core/session or media runtime.
 
-**D4.5-E — account/Core quiescence barrier is COMPLETE.** NewsreaderStore
-keeps every manual-Sync execution registered until its synchronous Core call has
-actually returned, including user-cancelled runs that were already superseded
-for presentation so immediate restart remains possible. A Core replacement
-barrier prevents new manual runs, signals every still-winding cancellation
-handle/Swift task, and awaits all registered executions before the old Core may
-be replaced or its account state removed.
+The D5 `IOSMediaTransferReconciliationHandoff` remains the authoritative bridge
+from successful background Sync into the D6 transfer runtime. D6 installs the
+native transfer executor and backs `BrowserScope.listeningList` with the Core
+Listening List read model.
 
-CoreBootstrapper invokes that barrier before creating a replacement Core,
-removing account state, or explicitly deactivating an active Core. A failed
-replacement resumes the existing store session; successful replacement releases
-the quiescence gate when the new Core is attached. Generation guards remain
-authoritative when concurrent bootstrap/account operations supersede an older
-transition. The normal scene inactive/background path still only requests the
-existing Scrollover persistence flush and does **not** cancel or quiesce manual
-Sync.
+D5 widget and notification contracts remain unchanged by D7.
 
-D4.5-E validation on 23 September 2026 executed **348 native iOS tests with
-0 failures**, including account-edit and account-removal quiescence ordering,
-and `./apple/ios/Build/build-app.sh` completed successfully.
+## 9. D6 native media status
 
-**D4.5-F — presentation, localization, and final acceptance is COMPLETE.**
-The manual Sync control now resolves directly from the store-owned manual-Sync
-state: idle starts Sync, running presents an explicit `xmark` Cancel action,
-and cancelling returns the control to the Sync/restart action while the scope
-capsule and empty-state presentation continue to report `Syncing…` until the
-cancelled execution actually returns. Starting again during that cancelling
-window supersedes the old cancellation presentation and starts a fresh
-generation immediately. Normal cancellation advances the presentation
-generation so the cancelled run cannot publish the success checkmark.
+D6 is implementation-stable and testvalidated. Its remaining observation window
+is UX/presentation-focused and does not block D7. Playback/runtime ownership is
+stable enough to be consumed by D7.
 
-Accessibility follows the action rather than the icon: the running state is
-labelled `Cancel sync` with value `Syncing`; cancelling exposes the restart
-action with value `Cancelling`. The new English source strings
-`Cancel sync` and `Cancelling` have German translations
-`Synchronisierung abbrechen` and `Synchronisierung wird abgebrochen`.
-The fixed 24-point toolbar slot and existing capsule geometry are preserved; the
-frozen UIKit Timeline renderer, Scrollover, image, and layout architecture are
-unchanged.
+D6 presentation polish may continue in `IOSMediaPlayerView`, Listening List,
+chapter/show-notes/download presentation and related SwiftUI surfaces. D7 must
+not depend on those views' geometry, action placement, buffering-ring design, or
+presentation hierarchy.
 
-D4.5-F automated validation on 23 September 2026 is **COMPLETE**. The final
-post-presentation `./apple/ios/Build/test.sh` run executed **349 native iOS
-tests with 0 failures**, including
-`testSyncButtonPresentationMakesRunningSyncAnExplicitCancelAction`, and ended
-with `TEST SUCCEEDED`. `./apple/ios/Build/build-app.sh` also completed
-successfully.
+D6 runtime semantics remain authoritative: Play/resume, Pause checkpointing,
+Stop checkpoint/retain/release-audio-session, seek/skip, natural completion,
+restart, local/remote source resolution, playback rate, sleep timer, chapters,
+artwork, background audio, cross-device progression reconciliation and download
+protection all remain owned by the existing D6 stack.
 
-D4.5-F, and therefore D4.5 as a whole, remains open for focused physical
-device acceptance. The first cancellation acceptance pass on 23 September 2026
-successfully exercised cancellation several times, but a later run combined
-cancellation with a large "mark all as read" structural Timeline change and
-exposed a UIKit diffable-data-source abort on iOS 27. The crash stack terminates
-in `__UIDiffableDataSource tableView:cellForRowAtIndexPath:`, reached from
-`IOSUIKitArticleTimelineController.requestFeedIconsForVisibleCells()`.
+## 10. Phase sequence
 
-The failure is a Timeline presentation ordering bug rather than a Rust/Core
-cancellation failure. During a structural update, `itemsByID` intentionally
-moves to the new model before the diffable table has necessarily finished
-publishing that snapshot. Calling `tableView.visibleCells` in the feed-icon
-retry path can force UIKit to materialize a cell in that short interval; an old
-identifier that has already been removed from `itemsByID` then makes the cell
-provider return nil and UIKit asserts. Update-side feed-icon/reconfiguration
-paths now enumerate only already-materialized cells through
-`indexPathsForVisibleRows` + `cellForRow(at:)`, which does not request new
-cells from the data source. Focused regression coverage combines a visible
-Timeline, structural removal, and a feed-icon request revision.
+### D1 — Foundation & Migration Spike
 
-Post-fix automated validation on 23 September 2026 executed **351 native iOS
-tests with 0 failures** and ended with `TEST SUCCEEDED`. The run includes both
-`testFeedIconRetryDuringStructuralRemovalDoesNotForceDiffableCellMaterialization`
-and
-`testTimelineFeedIconRetryDoesNotUseMaterializingVisibleCellsAccessor`.
-`./apple/ios/Build/build-app.sh` also completed successfully.
+Complete.
 
-Final physical-device acceptance passed on 23 September 2026 after the diffable
-fix. The owner re-exercised manual Sync cancellation, including the previously
-crashing large mark-all-read scenario, and accepted the result. The accepted
-behavior covers start -> cancel -> immediate restart, coherent scope
-count/`Syncing…` presentation, no cancellation error alert, no stale success
-checkmark or snapshot/count publication from the cancelled generation, and no
-recurrence of the UIKit diffable-data-source crash. D4.5 is therefore closed.
+### D2 — Adaptive Shell & Settings
 
-### D5 — Background Sync, Local Notifications & Widgets
+Complete.
 
-**D5-A — Core-Session Execution Foundation is COMPLETE.**
-The canonical iOS test suite passes after the D5-A integration and
-`./apple/ios/Build/build-app.sh` completes successfully. The native iOS app now has one app-wide `IOSCoreSessionExecutionCoordinator`
-owned by `CoreBootstrapper`. It admits synchronous Core work only for the
-current Core session, tracks admitted work until the underlying
-`AppleCoreExecution` call has actually returned, blocks new admission during
-quiescence, and can forward cooperative cancellation to cancellable runs.
-`NewsreaderStore` and `IOSSearchStore` share this coordinator with the
-bootstrapper; Manual Sync retains its D4.5 presentation/session lifecycle while
-also holding a Core-session lease. Account replacement/removal/deactivation
-quiesce the app-wide Core session before replacing or destroying it. This is
-foundation only: BGTask scheduling, cold-launch readiness, notification delivery
-and WidgetKit work have not started.
+### D3 — Native Timeline / Article Presentation
 
-**D5-B — Cold-Launch Readiness & Credential Accessibility is COMPLETE.**
-The canonical iOS test suite passes after the D5-B integration and
-`./apple/ios/Build/build-app.sh` completes successfully. `CoreBootstrapper.ensureStarted()` is the
-idempotent readiness entry point for foreground and future headless/background
-callers. Concurrent callers await one in-flight bootstrap, while retry,
-reconfiguration, account removal and deactivation retain generation-based stale
-completion suppression. A background launch that occurs before protected
-credentials are available leaves startup retryable rather than converting the
-account into a permanent configuration failure; returning to the active app
-reuses the same readiness path.
+Complete; UIKit Timeline U1-U5 is architecture-frozen.
 
-Native iOS Miniflux credentials now use
-`kSecAttrAccessibleAfterFirstUnlock`. Newly saved items receive that
-accessibility class, and readable credentials created by earlier native builds
-are migrated on load from their previous accessibility class. This deliberately
-uses the migratable AfterFirstUnlock variant rather than a
-`ThisDeviceOnly` class so existing encrypted backup/device-migration semantics
-are not narrowed merely to enable background access. No BGTask registration or
-background Sync execution is part of D5-B.
+### D4 / D4.5 — Actions, Sync, Cancellation
 
-**D5-C — BGAppRefresh Scheduling & Execution is COMPLETE.**
-The canonical iOS test suite passes after the D5-C integration and
-`./apple/ios/Build/build-app.sh` completes successfully. Native iOS registers one `BGAppRefreshTask` identifier
-during application launch through a small `UIApplicationDelegate` bridge. The
-production/upgrade identity retains
-`dev.kevincfechtel.fluxNews.backgroundSync`; the parallel native-development
-identity uses `dev.kevincfechtel.fluxNews.nativeDev.backgroundSync`. The app
-declares only the `fetch` background mode for regular news refresh; no
-`BGProcessingTask` or remote-notification mode is introduced.
+Complete.
 
-`IOSAppRuntime` owns the same `CoreBootstrapper` used by SwiftUI and
-`IOSBackgroundSyncCoordinator`, so a headless BGAppRefresh launch cannot
-construct a second Core. The coordinator reads persisted Core
-`backgroundSyncEnabled`, submits the next refresh with a preferred
-30-minute earliest-begin date, runs `syncCancellable(.background)` through the
-D5-A Core-session execution gate, and completes the OS task exactly once.
-BGTask expiration owns a dedicated run-scoped `SyncCancellation` and Swift
-task cancellation; it has no D4.5 Manual-Sync presentation or user-cancellation
-semantics. Disabled Background Sync cancels pending refresh requests and does
-not enter Core Sync. Successful completion exposes a post-sync hook for later
-D5 notification/widget/media-reconciliation fan-out, but D5-C does not implement
-that fan-out itself.
+### D5 — Background Sync, Notifications & Widgets
 
-The app foreground attachment path also adopts a Core that may already have
-been initialized by the background runtime before SwiftUI installed its
-`onCoreChanged` callback. Focused tests cover one-time registration,
-enabled scheduling, disabled cancellation, successful completion and OS
-expiration/cooperative cancellation.
-
-**D5-C.1 — Lightweight Delta Sync and Resume Full-Reconcile Policy is COMPLETE.**
-Validation is complete across the shared Core and native iOS integration:
-`cargo fmt --check` passes; `cargo test --workspace` passes with
-220 `flux-core` tests and 6 `flux-uniffi` tests; the canonical iOS test gate
-passes with 364 tests and 0 failures; and `./apple/ios/Build/build-app.sh`
-succeeds. Regular iOS Background Sync no
-longer requires the Full unread+starred snapshot once a Full Sync has
-established a Delta baseline. The Rust Core owns the plan decision:
-
-- `.background` is Delta-only. It delivers pending mutations first, then uses
-  Miniflux `changed_after` to fetch changed Entries. It never escalates into a
-  Full Sync inside `BGAppRefreshTask`.
-- `.resume` is requested whenever the app becomes active, but the Core returns
-  a no-op when Background Sync is disabled or the latest successful Sync is
-  younger than 30 minutes and no Full reconciliation is due.
-- Resume performs Full Sync when `full_sync_required` is set, when no valid
-  Delta baseline exists, or when the last Full Sync is at least 24 hours old.
-  Otherwise stale Resume uses Delta.
-- `.manual`, `.appStart`, `.periodic`, and `.widget` retain Full-Sync
-  semantics for now.
-
-A successful Full Sync captures a Miniflux changed-entry high-water mark before
-the Full remote snapshot begins and commits that value as the next Delta
-baseline only after the Full reconciliation succeeds. This ordering allows
-changes racing the Full fetch to be observed again by the next Delta instead of
-being skipped. Delta requests use a small overlap window around the persisted
-cursor so equal/near-boundary `changed_at` values are safely re-read.
-
-Delta Sync does not fetch or reconcile the Feed/Category catalog. A changed
-Entry whose `feed_id` is unknown locally is skipped, while all Entries from
-known Feeds continue to reconcile normally. The successful Delta cursor is
-still advanced and `full_sync_required` is persisted. The later Full Sync is
-independent of the Delta cursor and restores the structural Feed/Category truth.
-Because system-notification preferences exist only for known local Feeds,
-skipped unknown-Feed Entries cannot create notification candidates.
-
-Pending article/media mutations retain their established ordering and safety:
-delivery and durable acknowledgement happen before the Core chooses or executes
-the remote Delta/Full plan. A failed pending delivery still aborts remote fetch;
-successful writes remain durable even if a later Delta step is cancelled.
-Delta reconciliation updates only returned Entries and their enclosures. It
-never applies the Full-Snapshot rule that an Entry absent from the response is
-implicitly read and unstarred.
-
-**D5-D — Mobile Background-Sync Preference & Resume Integration is COMPLETE.**
-Validation is complete across the shared Core and native iOS integration:
-`cargo fmt --check` passes; `cargo test --workspace` passes with
-221 `flux-core` tests and 6 `flux-uniffi` tests; and the canonical iOS
-`./apple/ios/Build/test.sh` gate passes after the D5-D preference integration. D5-C.1 already established the Core-owned Resume
-freshness and Delta-vs-Full policy, so D5-D does not introduce another Swift
-freshness clock or synchronization algorithm.
-
-Native iOS now exposes one `Background Sync` Settings destination backed directly
-by the persisted Core `backgroundSyncEnabled` value. There is no separate mobile
-Sync-on-Start preference. Reading and writing the preference use the app-wide
-`IOSCoreSessionExecutionCoordinator`, preserving the current Core-session and
-quiescence contract.
-
-Turning Background Sync off persists the Core setting and cancels the pending
-`BGAppRefreshTask` request. It does not reinterpret the setting change as
-D4.5-style user cancellation of already-running automatic work. Turning the
-setting on persists the Core value, submits the next refresh request, and asks
-the existing Core-owned Resume path to evaluate whether immediate catch-up work
-is actually needed. The Core still decides no-op vs Delta vs Full using the
-D5-C.1 policy.
-
-The normal app-active lifecycle continues to request `.resume` through
-`IOSBackgroundSyncCoordinator`; Core serialization and post-gate freshness
-evaluation prevent duplicate automatic work after a recent or concurrently
-finishing background/manual Sync. Focused tests cover persisted preference reads,
-disable/cancel scheduling behavior, enable/reschedule behavior, and the
-dedicated Resume trigger.
-
-**D5-E — Native Local Notifications is COMPLETE.** Validation is complete across the native iOS integration and the shared Apple presentation extraction: the canonical iOS `./apple/ios/Build/test.sh` gate passes with 371 tests and 0 failures after the D5-E integration, the new MainActor default-argument warnings have been removed, and `bash apple/macos/Build/build-app.sh` succeeds after moving `SystemNotificationPresentation` into `apple/shared/FluxApple`.
-The existing Core notification-candidate contract remains authoritative; D5-E
-adds no Rust/UniFFI notification-domain logic and no APNs/push infrastructure.
-
-Native iOS now owns local delivery through `UNUserNotificationCenter`.
-Feed Settings expose the existing Core `systemNotificationsEnabled` preference.
-Enabling the preference first resolves native notification authorization; denied
-authorization leaves the Core feed preference disabled and presents a localized
-error. Disabling the preference requires no authorization interaction.
-
-A successful Background Sync hands Core-generated
-`SystemNotificationCandidate` values to `IOSSystemNotificationManager`.
-The BGAppRefresh success fanout is asynchronous and awaited before the OS task is
-completed, so iOS cannot suspend the process merely because Sync finished before
-notification submission. For each candidate the native manager submits one
-immediate local notification and only then acknowledges the candidate through
-the current app-wide Core session. Failed native submission is not acknowledged,
-preserving the existing durable retry semantics.
-
-Notification title/body presentation is shared with macOS through
-`apple/shared/FluxApple/SystemNotificationPresentation.swift`; the former
-macOS-local duplicate has been removed. Foreground notifications use banner/list
-presentation. A notification tap routes to its Core feed ID. Because the first
-native release intentionally owns one scene, an early/cold-launch tap is buffered
-until the app's `NewsreaderStore` presentation handler is attached, then
-consumed exactly once.
-
-Focused native tests cover authorization, denied permission, successful
-delivery-before-ACK, failed-delivery/no-ACK, buffered feed routing, and the
-requirement that BGTask completion waits for post-Sync fanout.
-
-**D5-F — Apple-shared Widget Contract Extraction is COMPLETE.** Validation
-covers the canonical native iOS test gate and a warning-free native macOS
-Universal build after the shared WidgetKit extraction. The existing macOS WidgetKit contract has been moved mechanically
-into `apple/shared/FluxApple`: `WidgetSnapshotV1`, `WidgetSnapshotStore`,
-`WidgetAction`, `WidgetContentModel`, the widget-family presentation policy
-and `WidgetSnapshotWriter`. macOS now references those shared sources instead
-of maintaining private copies.
-
-The durable widget contract remains intentionally separate from UniFFI records,
-Core persistence and account credentials. App/Background execution asks Core for
-the existing compact `WidgetData` projection, serializes the versioned snapshot
-into the configured App Group and asks WidgetKit to reload the two stable widget
-kinds. The extension remains read-only over that snapshot and never opens Core,
-SQLite, Keychain or Miniflux itself.
-
-Widget identity is configuration-driven so the parallel native-development app
-does not collide with the production/Flutter identity. Native Dev uses
-`group.dev.kevincfechtel.fluxNews.nativeDev` and the
-`fluxnews-native-dev` widget URL scheme; Upgrade Test/production retains
-`group.dev.kevincfechtel.fluxNews` and `fluxnews`.
-
-**D5-G — Native iOS WidgetKit, including Lock Screen widgets, is COMPLETE / REAL-DEVICE ACCEPTED.** The canonical iOS test gate passes after
-the WidgetKit integration. A signed NativeDev device archive also succeeds with
-separate host/widget provisioning profiles and the shared
-`group.dev.kevincfechtel.fluxNews.nativeDev` App Group. The archive script now
-supports both NativeDev Release and production-identity Upgrade Test archives
-and verifies the archived host Bundle ID, widget Bundle ID, shared App Group
-entitlements and signatures. The production-identity Upgrade Test archive has also been validated
-successfully. Final D5-G acceptance now requires only the physical-device
-widget/deep-link smoke pass after the final widget presentation polish. The iOS application now embeds a native
-`FluxNewsWidgets` extension using the shared snapshot/presentation contract.
-The Headlines widget supports Home Screen `systemMedium`, `systemLarge` and
-iPad `systemExtraLarge`; the small Headlines family is intentionally not
-offered because a single-headline layout does not provide useful value. The
-Status widget supports Home Screen `systemSmall`/`systemMedium` and the Lock
-Screen families `accessoryInline`, `accessoryCircular` and
-`accessoryRectangular`. Widget branding uses the existing FluxNews book logo
-(`FluxNewsTemplate`) rather than a generic news glyph. The rectangular Lock
-Screen status presents the selected scope and its authoritative count without a
-truncated article teaser. Last-sync presentation continues to use the one global
-Core `last_successful_sync_at` value independent of SyncReason and accepts the
-persisted SQLite UTC timestamp format as well as ISO-8601 snapshots.
-
-All families consume the same configured content scopes
-(All News/Bookmarks/Category/Feed) and the same snapshot counts/articles. Lock
-Screen presentation is deliberately reduced rather than shrinking the Home
-Screen article card: inline shows the FluxNews/count summary, circular presents
-the count in an accessory gauge, and rectangular shows scope/count plus the
-leading article when available.
-
-Native iOS owns snapshot freshness through `IOSWidgetSnapshotCoordinator`.
-The coordinator subscribes to the active Core session and refreshes the App Group
-snapshot after article read/star state events and completed Sync events.
-Successful BGAppRefresh fanout additionally awaits a snapshot refresh before the
-OS task completes. Account/Core detachment invalidates the snapshot and reloads
-WidgetKit.
-
-Widget URLs reuse the shared stable `WidgetAction` contract. iOS registers its
-configuration-specific URL scheme and routes scope actions into
-`NewsreaderStore`, article IDs through Core back into the existing article-open
-policy, and widget Sync through `sync(.widget)` without borrowing the D4.5
-Manual-Sync presentation lifecycle. Focused tests cover snapshot round-trip,
-scope projection, URL action round-trip and the exact three Lock Screen families.
-
-Integrate BGTaskScheduler, local notifications and the native iOS WidgetKit
-presentation using the shared snapshot contract. Background execution shares
-the existing account/Core session, participates in app-wide Core quiescence and
-uses OS-owned cooperative cancellation only for BGTask expiration. It does not
-reuse the D4.5 Manual-Sync presentation lifecycle or expose user cancellation.
-
-Successful background sync updates the App Group widget projection, requests
-targeted WidgetKit reloads, hands Core notification candidates to the native
-notification layer and requests native media-transfer reconciliation. The D5
-transfer-reconciliation trigger/handoff is now implemented through
-`IOSMediaTransferReconciliationHandoff`. A request is buffered when no native
-executor is installed yet and is delivered when D6 attaches that executor;
-multiple pre-install requests coalesce into one reconciliation request. The
-post-Sync fanout requests this handoff independently of whether notification
-candidates exist and still awaits all D5 fanout before BGTask completion. The
-actual persistent iOS transfer executor remains D6 work.
-
-D5 is COMPLETE / architecture-frozen. Final physical-device widget/deep-link smoke validation and the production-identity Upgrade Test archive succeeded; the authoritative closure record is `docs/IOS_D5_FINAL_ACCEPTANCE.md`.
-
-### Phase-D late settings portability & diagnostics completion
-
-The late native iOS diagnostics commitment is now implemented: bounded
-privacy-safe Core/native support logs persist across relaunch, Debug Logging is
-an explicit persisted opt-in, and Developer Diagnostics provides export/share
-and clear actions. The detailed contract and implementation status are recorded
-in [IOS_D4_FOLLOWUP_FINDINGS.md](IOS_D4_FOLLOWUP_FINDINGS.md).
-
-The remaining late Phase-D settings-portability capability is native iOS
-configuration backup/restore using the existing versioned Core/UniFFI backup
-format. It remains scheduled after the Settings surface has stabilized and
-before D10 replacement validation.
+Complete and architecture-frozen.
 
 ### D6 — Native Media & Background Downloads
 
-**Entry status — 25 September 2026:** D1-D5 and the immediate D4 follow-up set
-are closed. The canonical native iOS test gate passed again after the final
-post-D4 presentation/sync polish, including compact swipe-action labels,
-navigation-localization repair, scope-aware pending-new-data presentation for
-feed/category scopes, and global pending-new-data acknowledgement after a
-successful Manual Sync. No additional D1-D5 implementation work is a prerequisite
-for starting D6.
+Implementation-stable/testvalidated. UX observation window remains active; it
+does not block D7.
 
-Bring the existing Listening List/player/download experience to iOS/iPadOS,
-including chapters, artwork, progress, policies, AVAudioSession, background
-audio and true background URLSession downloads. D6 supplies the iOS native
-transfer executor consumed by the transfer-reconciliation handoff established
-in D5. Reuse/refactor Phase-C Apple media code only where needed for actual
-cross-platform use.
+### D7 — Now Playing, Remote Commands & CarPlay
 
-D6 starts from an existing Core/UniFFI media contract and a completed macOS
-reference implementation. The repository-first readiness review and concrete
-execution/work-package contract are maintained in
-[`IOS_D6_NATIVE_MEDIA_IMPLEMENTATION.md`](IOS_D6_NATIVE_MEDIA_IMPLEMENTATION.md).
-D6-0 through D6-F are implemented and testvalidated. The 25 September
-native-media UX follow-ups reorganized Player controls, moved the native iOS
-Listening List from a detail scope to a Search-style fly-over, added read-only
-chapter preview for inactive items, unified long-form playback time formatting,
-refined remote buffering presentation, and corrected cross-device Miniflux
-playback-progress reconciliation while preserving the shared/Core ownership
-contract. The current validation baseline is green: `cargo fmt --check`, the
-full Rust workspace suite (226 `flux-core` + 6 `flux-uniffi`, 0 failures),
-and the canonical iOS gate (459 tests, 0 failures, `TEST SUCCEEDED`).
-
-D6 is now **implementation-stable and testvalidated** and enters an explicit
-real-device **UX observation window**. During this window, presentation-only
-Player/Listening-List refinements may continue without reopening the stable
-playback/runtime ownership contract. D6 is deliberately not yet marked
-architecture-frozen: the remaining D6-G real-device/process-boundary matrix is
-retained as the final closure/freeze gate. D7 may start in parallel because it
-consumes the app-wide playback runtime rather than the mutable SwiftUI Player
-layout. The D6-G evidence matrix is maintained in
-[`IOS_D6_FINAL_ACCEPTANCE.md`](IOS_D6_FINAL_ACCEPTANCE.md).
-The D5 `IOSMediaTransferReconciliationHandoff` remains the authoritative
-bridge from successful background Sync into the D6 transfer runtime. D6 now
-installs the native transfer executor and backs `BrowserScope.listeningList`
-plus the iOS Listening List article/context/swipe actions with the same Core
-media domain. The native Listening List, AVPlayer/AVAudioSession runtime and
-persistent background URLSession executor are implemented; D6-G is limited to
-their remaining real-device/process-boundary acceptance evidence.
-
-### D7 — Now Playing & CarPlay
-
-Complete Now Playing/remote-command integration and the required CarPlay
-experience over the common playback stack. CarPlay is a completion gate.
+D7-0 contract/ownership audit is complete. Productive implementation has not yet
+started. Proceed with D7-A according to
+[IOS_D7_NOW_PLAYING_REMOTE_COMMANDS_CARPLAY.md](IOS_D7_NOW_PLAYING_REMOTE_COMMANDS_CARPLAY.md).
+CarPlay remains a Phase-D completion gate.
 
 ### D8 — Live Activities & Dynamic Island
 
-Implement ActivityKit/Dynamic Island over the common runtime playback state.
-This is a completion gate.
+Not started; outside D7.
 
-### D9 — Full Flutter-to-Native Migration
+## 11. Release/acceptance invariants
 
-Implement the copy/import-only migration against the now-stable native/Core
-target structures. Cover credentials/custom headers, compatible settings/feed
-preferences, playback progress and existing downloads. Exercise interrupted and
-repeated migration safely.
-
-### D10 — Replacement Validation & Release Readiness
-
-Run the real production-identity upgrade path from representative Flutter state
-to the native app and validate Newsreader, sync, widgets, notifications, media,
-downloads, CarPlay and ActivityKit across foreground/background/offline/restart
-conditions and representative compact/regular presentation environments. Quality and regression tests
-must already run throughout D1-D9; D10 is integration/replacement validation,
-not a deferred testing phase.
-
-## 10. Implementation rules for Phase D
-
-1. Do not reopen frozen Core/macOS architecture without concrete evidence that
-   an iOS requirement cannot be expressed through the current boundary.
-2. Inspect current Rust Core and native macOS behavior before treating a Flutter
-   feature as missing.
-3. Flutter is consulted for mobile-only capability and migration evidence, not
-   as a source of architecture.
-4. Extract Apple-shared Swift code on first real reuse; do not front-load a
-   broad macOS refactor.
-5. Each D subphase includes its own tests/build validation. Do not postpone
-   correctness to D10.
-6. Do not add a second durable Swift domain model or direct native SQLite/
-   Miniflux access around Core.
-7. Required capabilities may be isolated into implementation work packages, but
-   CarPlay, Live Activities/Dynamic Island and the production migration path
-   cannot be dropped from Phase D completion.
+1. Rust/Core remains the durable authority for domain, playback progress,
+   downloads and policy.
+2. There is exactly one app-scoped native iOS media/playback runtime and one
+   AVPlayer execution stack.
+3. Now Playing, remote commands, CarPlay and later ActivityKit are projections
+   or command adapters over that runtime; none owns durable playback state.
+4. The UIKit Timeline architecture remains frozen and is not touched by D7.
+5. D6 UI polish remains independent of D7 integration.
+6. CarPlay is release-blocking and requires signed entitlement plus physical
+   acceptance; Simulator-only evidence is insufficient.
+7. Shared Apple code contains only genuinely common semantics/policies, never a
+   second domain or lifecycle owner.
 8. Potentially blocking Rust Core work must not execute on `MainActor` or a
    Swift cooperative executor. `MainActor` owns native presentation inputs,
    request lifecycle, and state publication; a bounded Apple worker policy owns
