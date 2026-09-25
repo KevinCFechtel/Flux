@@ -53,6 +53,7 @@ final class IOSMediaRuntime {
     private(set) var core: Flux?
     private(set) var coreAccessState: IOSMediaCoreAccessState = .detached
     private(set) var lifecycleGeneration: UInt64 = 0
+    private var eventSubscription: EventSubscription?
 
     let coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator
     let mediaTransferReconciliationHandoff: IOSMediaTransferReconciliationHandoff
@@ -103,6 +104,19 @@ final class IOSMediaRuntime {
         }
         self.core = core
         coreAccessState = .attached
+        eventSubscription = nil
+        do {
+            eventSubscription = try core.subscribeEvents(
+                listener: IOSMediaRuntimeEventListener(
+                    runtime: self,
+                    core: core,
+                    generation: lifecycleGeneration
+                )
+            )
+        } catch {
+            // Media sync reconciliation is best-effort presentation refresh.
+            // Playback remains locally durable even if subscription setup fails.
+        }
         if replacingCore {
             playbackCoordinator.replaceCore(with: core)
         } else {
@@ -151,6 +165,7 @@ final class IOSMediaRuntime {
     func detach() {
         guard core != nil || coreAccessState != .detached else { return }
         lifecycleGeneration &+= 1
+        eventSubscription = nil
         core = nil
         coreAccessState = .detached
         transferCoordinator.detach(
@@ -158,6 +173,17 @@ final class IOSMediaRuntime {
             clearingAccountIdentity: true
         )
         playbackCoordinator.detach()
+    }
+
+    func handle(event: CoreEvent, core: Flux, generation: UInt64) {
+        guard generation == lifecycleGeneration,
+              self.core === core else {
+            return
+        }
+        guard case .syncCompleted = event else { return }
+        Task { @MainActor [weak self] in
+            await self?.playbackCoordinator.reconcileAfterSuccessfulSync()
+        }
     }
 
     func sceneWillResignActive() {
@@ -170,6 +196,33 @@ final class IOSMediaRuntime {
 
     func applicationWillTerminate() {
         playbackCoordinator.applicationWillTerminate()
+    }
+}
+
+private final class IOSMediaRuntimeEventListener: EventListener, @unchecked Sendable {
+    weak var runtime: IOSMediaRuntime?
+    let core: Flux
+    let generation: UInt64
+
+    init(
+        runtime: IOSMediaRuntime,
+        core: Flux,
+        generation: UInt64
+    ) {
+        self.runtime = runtime
+        self.core = core
+        self.generation = generation
+    }
+
+    func onEvent(event: CoreEvent) {
+        guard case .syncCompleted = event else { return }
+        Task { @MainActor [weak runtime] in
+            runtime?.handle(
+                event: event,
+                core: core,
+                generation: generation
+            )
+        }
     }
 }
 
