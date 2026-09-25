@@ -23,6 +23,9 @@ struct FluxNewsApp: App {
                 .tint(Color("FluxAccent"))
                 .task {
                     guard !IOSRuntimeLaunchEnvironment.isUnitTestHost else { return }
+                    IOSAppLogger(category: "app").info(
+                        "FluxNews launch version=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown") build=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown") os=\(UIDevice.current.systemVersion)"
+                    )
                     IOSAppRuntime.shared.systemNotificationManager.onFeedSelected = { feedID in
                         newsreaderStore.select(.feed(feedID))
                     }
