@@ -1,6 +1,6 @@
 # iOS D6 Final Acceptance
 
-Status: **IN PROGRESS — D6 player UX follow-up implemented; canonical iOS revalidation plus real-device/process-boundary acceptance pending — 25 September 2026**
+Status: **IN PROGRESS — D6 media UX follow-ups implemented; canonical iOS revalidation plus real-device/process-boundary acceptance pending — 25 September 2026**
 
 This acceptance record closes the implementation portion of **D6 — Native Media & Background Downloads** and defines the remaining D6-G evidence required before D6 can be marked complete and architecture-frozen.
 
@@ -9,14 +9,16 @@ This acceptance record closes the implementation portion of **D6 — Native Medi
 D6-0 through D6-F were implemented and testvalidated at the last accepted
 canonical head.
 
-A subsequent 25 September player-UX follow-up reorganized only the native
-`IOSMediaPlayerView` presentation hierarchy: Stop remains the fourth permanent
-transport control; playback speed and Sleep Timer remain persistently visible;
-Downloads and Restart moved to the More menu; chapter/audio selection and Show
-Notes became descriptive rows. The associated presentation tests were updated.
-Because this UI follow-up is newer than the last accepted 448-test run, the
-canonical iOS gate must be rerun before the new head is recorded as
-testvalidated.
+Subsequent 25 September media-UX follow-ups reorganized the native
+`IOSMediaPlayerView` presentation hierarchy and the Listening List navigation.
+Stop remains the fourth permanent transport control; playback speed and Sleep
+Timer remain persistently visible; Downloads and Restart moved to the More menu;
+chapter/audio selection and Show Notes became descriptive rows. The native iOS
+Listening List now opens as a Search-style fly-over without replacing the
+selected News scope, and its Player is a child sheet of that fly-over. The
+associated presentation/navigation tests were updated. Because these UI
+follow-ups are newer than the last accepted 448-test run, the canonical iOS gate
+must be rerun before the new head is recorded as testvalidated.
 
 The 25 September post-closure audit corrected three narrow follow-ups: Preview
 artwork now uses the canonical Core artwork-source selection without preparing
