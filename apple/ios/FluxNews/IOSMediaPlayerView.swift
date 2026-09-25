@@ -388,6 +388,7 @@ struct IOSMediaPlayerView: View {
             Label(rateLabel(playbackState.playbackRate), systemImage: "speedometer")
         }
         .accessibilityLabel(String(localized: "Playback speed"))
+        .disabled(isPreviewingInactiveItem)
     }
 
     private var chapterMenu: some View {
@@ -414,7 +415,7 @@ struct IOSMediaPlayerView: View {
         } label: {
             Label("Chapters", systemImage: "list.bullet.rectangle")
         }
-        .disabled(playbackState.chapters.isEmpty)
+        .disabled(isPreviewingInactiveItem || playbackState.chapters.isEmpty)
     }
 
     private func enclosureMenu(_ item: ListeningListItem) -> some View {
