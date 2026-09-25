@@ -208,6 +208,8 @@ Therefore:
 - No local `PlaybackState` → adopt remote progression.
 - Remote progression unchanged since the last observed remote baseline → keep local state.
 - Pending local media-progress mutation exists → local state wins.
+- A checkpoint equal to the last known remote progression is not a new local
+  intent and must not create or retain a pending media-progress mutation.
 - Remote progression changed and no local pending intent exists → adopt remote state.
 - A media-progress mutation successfully delivered during the current sync must not be overwritten by an immediately following stale remote snapshot.
 - Backward seeks are legitimate desired states.
