@@ -515,7 +515,7 @@ struct IOSUIKitArticleGeometry: Equatable {
         return .init(width: width, height: width * (1 / ArticlePresentationLayout.portraitImageAspectRatio))
     }
 
-    func metadataLayout(width: CGFloat, hasComments: Bool, hasAudio: Bool, height: CGFloat, accessories: IOSUIKitArticleAccessoryMetrics) -> MetadataLayout {
+    func metadataLayout(width: CGFloat, hasComments: Bool, hasAudio: Bool = false, height: CGFloat, accessories: IOSUIKitArticleAccessoryMetrics) -> MetadataLayout {
         let trailingAccessorySlots = staticAccessorySlotWidths(
             hasComments: hasComments,
             hasAudio: hasAudio,
@@ -546,7 +546,7 @@ struct IOSUIKitArticleGeometry: Equatable {
     /// unread from the outer edge or star from the second position.
     func staticAccessorySlotWidths(
         hasComments: Bool,
-        hasAudio: Bool,
+        hasAudio: Bool = false,
         accessories: IOSUIKitArticleAccessoryMetrics
     ) -> [CGFloat] {
         (hasAudio ? [accessories.comments] : [])
