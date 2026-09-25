@@ -1040,7 +1040,17 @@ struct ArticleRowContent: Equatable, Sendable {
     func select(_ newScope: BrowserScope) {
         markMeaningfulInteraction()
         scope = newScope
-        loadVisibleArticles(acknowledgePending: true, resetSnapshot: true)
+        if newScope == .listeningList {
+            readLifecycle.invalidateArticle()
+            replaceArticles([])
+            selectionTotal = 0
+            resetPresentationState()
+        } else {
+            loadVisibleArticles(
+                acknowledgePending: true,
+                resetSnapshot: true
+            )
+        }
         requestScrollReset()
     }
 
