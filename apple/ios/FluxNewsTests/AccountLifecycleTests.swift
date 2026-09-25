@@ -1665,6 +1665,75 @@ final class AccountLifecycleTests: XCTestCase {
     }
 
     @MainActor
+    func testMediaRuntimeTracksCoreLifecycleAcrossReplacementAndRebuild() async throws {
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let credentialStore = IOSMemoryCredentialStore()
+        try credentialStore.save(account)
+        let core = try makeCore(for: account)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: credentialStore,
+            coreFactory: { _ in core }
+        )
+        let handoff = IOSMediaTransferReconciliationHandoff()
+        let runtime = IOSAppRuntime(
+            bootstrapper: bootstrapper,
+            scheduler: IOSSystemBackgroundTaskScheduler.shared,
+            systemNotificationManager: IOSSystemNotificationManager(center: FakeSystemNotificationCenter()),
+            mediaTransferReconciliationHandoff: handoff
+        )
+
+        XCTAssertNil(runtime.mediaRuntime.core)
+        XCTAssertEqual(runtime.mediaRuntime.coreAccessState, .detached)
+
+        await bootstrapper.start()
+
+        XCTAssertIdentical(runtime.mediaRuntime.core, core)
+        XCTAssertEqual(runtime.mediaRuntime.coreAccessState, .attached)
+
+        await runtime.mediaRuntime.prepareForCoreReplacement()
+        XCTAssertEqual(runtime.mediaRuntime.coreAccessState, .suspendedForCoreReplacement)
+
+        runtime.mediaRuntime.resumeAfterAbortedCoreReplacement()
+        XCTAssertEqual(runtime.mediaRuntime.coreAccessState, .attached)
+
+        runtime.mediaRuntime.prepareForLocalStateRebuild()
+        XCTAssertEqual(runtime.mediaRuntime.coreAccessState, .suspendedForLocalStateRebuild)
+
+        runtime.mediaRuntime.localStateRebuildFinished(with: core)
+        XCTAssertIdentical(runtime.mediaRuntime.core, core)
+        XCTAssertEqual(runtime.mediaRuntime.coreAccessState, .attached)
+
+        runtime.mediaRuntime.detach()
+        XCTAssertNil(runtime.mediaRuntime.core)
+        XCTAssertEqual(runtime.mediaRuntime.coreAccessState, .detached)
+    }
+
+    @MainActor
+    func testMediaRuntimeOwnsSameCoreExecutionCoordinatorAsBootstrapper() throws {
+        let bootstrapper = CoreBootstrapper()
+        let handoff = IOSMediaTransferReconciliationHandoff()
+        let runtime = IOSAppRuntime(
+            bootstrapper: bootstrapper,
+            scheduler: IOSSystemBackgroundTaskScheduler.shared,
+            systemNotificationManager: IOSSystemNotificationManager(center: FakeSystemNotificationCenter()),
+            mediaTransferReconciliationHandoff: handoff
+        )
+
+        XCTAssertIdentical(
+            runtime.mediaRuntime.coreSessionExecutionCoordinator,
+            bootstrapper.coreSessionExecutionCoordinator
+        )
+        XCTAssertIdentical(
+            runtime.mediaRuntime.mediaTransferReconciliationHandoff,
+            handoff
+        )
+    }
+
+    @MainActor
     func testMediaTransferReconciliationHandoffBuffersUntilExecutorInstalls() async {
         let handoff = IOSMediaTransferReconciliationHandoff()
         var reconciliations = 0
