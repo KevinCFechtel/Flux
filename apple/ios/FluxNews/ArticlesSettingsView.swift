@@ -36,7 +36,7 @@ struct ArticlesSettingsView: View {
             Toggle("Remove articles when read", isOn: Binding(get: { store.removeArticlesWhenMarkedRead }, set: store.setRemoveArticlesWhenMarkedRead))
             Toggle("Mark read on scrollover", isOn: Binding(get: { store.markReadOnScrolloverEnabled }, set: store.setMarkReadOnScrolloverEnabled))
 
-            Section("Storage & Reader") {
+            Section {
                 Picker(
                     "Keep read articles",
                     selection: Binding(
@@ -109,6 +109,8 @@ struct ArticlesSettingsView: View {
                     !detailCharacterLimitLoaded
                         || detailCharacterLimitSaving
                 )
+            } header: {
+                Text("Storage & Reader")
             } footer: {
                 Text("Read article retention controls how long synchronized read items remain in local history. The Reader detail limit controls how much article text the Core keeps when a feed uses truncated Reader content.")
             }
@@ -136,7 +138,7 @@ struct ArticlesSettingsView: View {
                 }
             }
 
-            Section("Swipe Actions") {
+            Section {
                 swipeSideSettings(
                     title: String(localized: "Leading Side"),
                     side: .leading
@@ -145,6 +147,8 @@ struct ArticlesSettingsView: View {
                     title: String(localized: "Trailing Side"),
                     side: .trailing
                 )
+            } header: {
+                Text("Swipe Actions")
             } footer: {
                 Text("Each side supports up to two actions. The Full Swipe action is the outer action and runs when you deliberately swipe through the row.")
             }
