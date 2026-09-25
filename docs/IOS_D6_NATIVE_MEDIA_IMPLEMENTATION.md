@@ -738,11 +738,16 @@ The first D6-D slice now provides:
   progress and download summary;
 - live row progress sourced from the existing app-wide playback presentation
   state rather than a second player model;
-- restored Listening List navigation entry;
-- `NewsreaderStore.select(.listeningList)` explicitly stops using the
-  ArticleQuery/Timeline fallback and clears the frozen timeline surface;
-- compact iPhone and regular iPad both route the detail surface to the same
-  native Listening List read model.
+- Listening List is exposed from native iOS navigation as a Search-style
+  fly-over action rather than as the active Article List detail scope;
+- opening the fly-over reloads the dedicated `IOSListeningListStore` without
+  mutating the currently selected News scope, so dismissing it restores the
+  exact underlying News context;
+- the Listening List owns its own `NavigationStack`, while its Player is
+  presented as a child sheet of that fly-over so closing Player returns to the
+  Listening List and closing the Listening List returns to News;
+- shared/Core `BrowserScope.listeningList` remains intact for cross-platform
+  semantics and macOS; native iOS no longer selects it from the navigation UI.
 
 The second D6-D slice now additionally provides:
 
