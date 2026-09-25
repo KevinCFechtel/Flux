@@ -252,10 +252,13 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate {
         handleEventsForBackgroundURLSession identifier: String,
         completionHandler: @escaping () -> Void
     ) {
-        _ = IOSAppRuntime.shared.mediaRuntime.transferCoordinator
+        let handled = IOSAppRuntime.shared.mediaRuntime.transferCoordinator
             .handleBackgroundEvents(
                 identifier: identifier,
                 completionHandler: completionHandler
             )
+        if !handled {
+            completionHandler()
+        }
     }
 }
