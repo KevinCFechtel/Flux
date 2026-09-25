@@ -377,11 +377,11 @@ struct IOSMediaPlayerView: View {
 
     private var artworkTaskKey: String {
         switch playbackState.artworkSource {
-        case let .localReference(reference):
+        case let .some(.localReference(reference)):
             return "local:\(reference)"
-        case let .remoteUrl(url):
+        case let .some(.remoteUrl(url)):
             return "remote:\(url)"
-        case nil:
+        case .none:
             return "none"
         }
     }
