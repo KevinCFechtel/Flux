@@ -655,6 +655,10 @@ final class IOSMediaPlaybackCoordinator {
         category: "media-playback"
     )
 
+    /// Transient D6-G diagnostic for physical-device builds where OSLog cannot
+    /// be inspected through Xcode. Never persisted and never used as domain state.
+    private(set) var lastStartFailureDescription: String?
+
     let sleepTimer: IOSMediaSleepTimer
 
     private var checkpointTimer: Timer?
@@ -783,6 +787,7 @@ final class IOSMediaPlaybackCoordinator {
 
     @discardableResult
     func prepare(enclosureID: Int64) async throws -> PlaybackPreparation {
+        lastStartFailureDescription = nil
         logger.info(
             "prepare requested enclosure=\(enclosureID, privacy: .public)"
         )
@@ -798,6 +803,10 @@ final class IOSMediaPlaybackCoordinator {
                 enclosureID: enclosureID
             )
         } catch {
+            lastStartFailureDescription = startFailureDescription(
+                stage: "core-prepare",
+                error: error
+            )
             logger.error(
                 "prepare Core failed enclosure=\(enclosureID, privacy: .public): \(String(reflecting: error), privacy: .private)"
             )
@@ -832,6 +841,10 @@ final class IOSMediaPlaybackCoordinator {
         do {
             source = try playbackURL(for: preparation)
         } catch {
+            lastStartFailureDescription = startFailureDescription(
+                stage: "source",
+                error: error
+            )
             logger.error(
                 "playback source resolution failed enclosure=\(enclosureID, privacy: .public): \(String(reflecting: error), privacy: .private)"
             )
@@ -851,6 +864,7 @@ final class IOSMediaPlaybackCoordinator {
     }
 
     func play(enclosureID: Int64) async throws {
+        lastStartFailureDescription = nil
         logger.info(
             "play requested enclosure=\(enclosureID, privacy: .public) active=\(self.activeEnclosureID ?? -1, privacy: .public)"
         )
@@ -876,6 +890,10 @@ final class IOSMediaPlaybackCoordinator {
                 "audio session activated enclosure=\(enclosureID, privacy: .public)"
             )
         } catch {
+            lastStartFailureDescription = startFailureDescription(
+                stage: "audio-session",
+                error: error
+            )
             logger.error(
                 "audio session activation failed enclosure=\(enclosureID, privacy: .public): \(String(reflecting: error), privacy: .private)"
             )
@@ -996,6 +1014,13 @@ final class IOSMediaPlaybackCoordinator {
                 return nil
             }
         }
+    }
+
+    private func startFailureDescription(
+        stage: String,
+        error: Error
+    ) -> String {
+        "Playback start failed [\(stage)]: \(error.localizedDescription)"
     }
 
     private func playbackURL(
