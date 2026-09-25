@@ -1014,6 +1014,10 @@ final class IOSMediaPlaybackCoordinator {
     }
 
     func isUsing(enclosureID: Int64) -> Bool {
+        activeEnclosureID == enclosureID
+    }
+
+    func blocksMediaDeletion(enclosureID: Int64) -> Bool {
         activeEnclosureID == enclosureID && engine.isPlaying
     }
 
