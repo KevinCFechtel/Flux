@@ -13,6 +13,39 @@ enum IOSMediaPlayerLayoutMode: Equatable {
     case sideBySide
 }
 
+enum IOSMediaPlayerTransportControl: Hashable {
+    case back15
+    case playPause
+    case forward30
+    case stop
+
+    static let ordered: [Self] = [
+        .back15,
+        .playPause,
+        .forward30,
+        .stop,
+    ]
+}
+
+enum IOSMediaPlayerSecondaryAction: Hashable {
+    case playbackRate
+    case sleepTimer
+    case downloads
+    case restart
+}
+
+enum IOSMediaPlayerActionPlacement {
+    static let persistentStatus: [IOSMediaPlayerSecondaryAction] = [
+        .playbackRate,
+        .sleepTimer,
+    ]
+
+    static let overflow: [IOSMediaPlayerSecondaryAction] = [
+        .downloads,
+        .restart,
+    ]
+}
+
 enum IOSMediaPlayerPreviewPresentation {
     static func isPreviewingInactiveItem(
         item: ListeningListItem?,
@@ -73,6 +106,73 @@ enum IOSMediaChapterListPresentation {
             return positionMs >= chapter.startMs
                 && (end == nil || positionMs < end!)
         }
+    }
+}
+
+struct IOSMediaPlayerChapterSummary: Equatable {
+    let index: Int
+    let count: Int
+    let title: String
+
+    static func resolve(
+        positionMs: UInt64,
+        chapters: [MediaChapter]
+    ) -> Self? {
+        guard let index = IOSMediaChapterListPresentation.activeIndex(
+            positionMs: positionMs,
+            chapters: chapters
+        ) else {
+            return nil
+        }
+        return .init(
+            index: index,
+            count: chapters.count,
+            title: IOSMediaChapterListPresentation.title(
+                chapters[index],
+                index: index
+            )
+        )
+    }
+}
+
+struct IOSMediaPlayerAudioSelection: Equatable {
+    let enclosureID: Int64
+    let index: Int
+    let count: Int
+    let title: String
+
+    static func resolve(
+        item: ListeningListItem,
+        loadedEnclosureID: Int64?
+    ) -> Self? {
+        guard !item.audioEnclosures.isEmpty else { return nil }
+
+        let selected: ListeningListEnclosure
+        if let loadedEnclosureID,
+           let loaded = item.audioEnclosures.first(
+               where: { $0.enclosure.id == loadedEnclosureID }
+           ) {
+            selected = loaded
+        } else {
+            selected = IOSListeningListPresentation.selectedEnclosure(item)
+                ?? item.audioEnclosures[0]
+        }
+
+        guard let index = item.audioEnclosures.firstIndex(
+            where: { $0.enclosure.id == selected.enclosure.id }
+        ) else {
+            return nil
+        }
+
+        return .init(
+            enclosureID: selected.enclosure.id,
+            index: index,
+            count: item.audioEnclosures.count,
+            title: IOSListeningListPresentation.enclosureLabel(
+                selected.enclosure,
+                index: index
+            )
+        )
     }
 }
 
@@ -222,15 +322,8 @@ struct IOSMediaPlayerView: View {
                     Button("Done", action: onDismiss)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    if !isPreviewingInactiveItem,
-                       let enclosureID = playbackState.loadedEnclosure?.id {
-                        Button("Restart") {
-                            Task {
-                                try? await playbackCoordinator.restart(
-                                    enclosureID: enclosureID
-                                )
-                            }
-                        }
+                    if hasOverflowActions {
+                        moreMenu
                     }
                 }
             }
@@ -280,6 +373,15 @@ struct IOSMediaPlayerView: View {
         VStack(spacing: 24) {
             header
 
+            if let item,
+               item.audioEnclosures.count > 1,
+               let audioSelection = IOSMediaPlayerAudioSelection.resolve(
+                   item: item,
+                   loadedEnclosureID: playbackState.loadedEnclosure?.id
+               ) {
+                audioSelectionRow(item, selection: audioSelection)
+            }
+
             if let duration = displayedDurationMs, duration > 0 {
                 VStack(spacing: 8) {
                     Slider(
@@ -316,60 +418,15 @@ struct IOSMediaPlayerView: View {
                 }
             }
 
-            HStack(spacing: 24) {
-                Button {
-                    if !isPreviewingInactiveItem {
-                        playbackCoordinator.skip(bySeconds: -15)
-                    }
-                } label: {
-                    Image(systemName: "gobackward.15")
-                        .font(.title2)
-                }
-                .accessibilityLabel(String(localized: "Back 15 seconds"))
+            transportControls
 
-                Button {
-                    togglePlayback()
-                } label: {
-                    Image(
-                        systemName: displayedIsPlaying
-                            ? "pause.circle.fill"
-                            : "play.circle.fill"
-                    )
-                    .font(.system(size: 54))
-                }
-                .accessibilityLabel(
-                    displayedIsPlaying
-                        ? String(localized: "Pause")
-                        : String(localized: "Play")
-                )
+            persistentStatusControls
 
-                Button {
-                    if !isPreviewingInactiveItem {
-                        playbackCoordinator.stop()
-                    }
-                } label: {
-                    Image(systemName: "stop.circle")
-                        .font(.title2)
-                }
-                .accessibilityLabel(String(localized: "Stop"))
-                .disabled(isPreviewingInactiveItem)
-
-                Button {
-                    if !isPreviewingInactiveItem {
-                        playbackCoordinator.skip(bySeconds: 30)
-                    }
-                } label: {
-                    Image(systemName: "goforward.30")
-                        .font(.title2)
-                }
-                .accessibilityLabel(String(localized: "Forward 30 seconds"))
+            if let chapterSummary {
+                chapterSummaryRow(chapterSummary)
             }
-            .buttonStyle(.plain)
 
-            ViewThatFits(in: .horizontal) {
-                playerActionRow
-                playerActionColumn
-            }
+            showNotesRow
 
             if !isPreviewingInactiveItem
                 && (playbackState.isLoading || playbackState.isBuffering) {
@@ -390,50 +447,251 @@ struct IOSMediaPlayerView: View {
         }
     }
 
-    private var playerActionRow: some View {
-        HStack(spacing: 18) {
+    private var transportControls: some View {
+        HStack(spacing: 24) {
+            ForEach(
+                IOSMediaPlayerTransportControl.ordered,
+                id: \.self
+            ) { control in
+                transportButton(control)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func transportButton(
+        _ control: IOSMediaPlayerTransportControl
+    ) -> some View {
+        switch control {
+        case .back15:
+            Button {
+                if !isPreviewingInactiveItem {
+                    playbackCoordinator.skip(bySeconds: -15)
+                }
+            } label: {
+                Image(systemName: "gobackward.15")
+                    .font(.title2)
+            }
+            .accessibilityLabel(String(localized: "Back 15 seconds"))
+            .disabled(isPreviewingInactiveItem)
+
+        case .playPause:
+            Button {
+                togglePlayback()
+            } label: {
+                Image(
+                    systemName: displayedIsPlaying
+                        ? "pause.circle.fill"
+                        : "play.circle.fill"
+                )
+                .font(.system(size: 54))
+            }
+            .accessibilityLabel(
+                displayedIsPlaying
+                    ? String(localized: "Pause")
+                    : String(localized: "Play")
+            )
+
+        case .forward30:
+            Button {
+                if !isPreviewingInactiveItem {
+                    playbackCoordinator.skip(bySeconds: 30)
+                }
+            } label: {
+                Image(systemName: "goforward.30")
+                    .font(.title2)
+            }
+            .accessibilityLabel(String(localized: "Forward 30 seconds"))
+            .disabled(isPreviewingInactiveItem)
+
+        case .stop:
+            Button {
+                if !isPreviewingInactiveItem {
+                    playbackCoordinator.stop()
+                }
+            } label: {
+                Image(systemName: "stop.circle")
+                    .font(.title2)
+            }
+            .accessibilityLabel(String(localized: "Stop"))
+            .disabled(isPreviewingInactiveItem)
+        }
+    }
+
+    private var persistentStatusControls: some View {
+        HStack(spacing: 10) {
+            ForEach(
+                IOSMediaPlayerActionPlacement.persistentStatus,
+                id: \.self
+            ) { action in
+                persistentStatusControl(action)
+            }
+        }
+        .buttonStyle(.bordered)
+    }
+
+    @ViewBuilder
+    private func persistentStatusControl(
+        _ action: IOSMediaPlayerSecondaryAction
+    ) -> some View {
+        switch action {
+        case .playbackRate:
             rateMenu
-            chapterMenu
+                .frame(maxWidth: .infinity)
+        case .sleepTimer:
             sleepTimerButton
-            if !downloadEnclosures.isEmpty {
-                downloadMenu
-            }
-            if let item, item.audioEnclosures.count > 1 {
-                enclosureMenu(item)
-            }
-            showNotesButton
+                .frame(maxWidth: .infinity)
+        case .downloads, .restart:
+            EmptyView()
         }
-        .labelStyle(.iconOnly)
-        .buttonStyle(.bordered)
     }
 
-    private var playerActionColumn: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 18) {
-                rateMenu
-                chapterMenu
-                sleepTimerButton
-                if !downloadEnclosures.isEmpty {
-                    downloadMenu
-                }
-                if let item, item.audioEnclosures.count > 1 {
-                    enclosureMenu(item)
-                }
-            }
-            showNotesButton
-        }
-        .labelStyle(.iconOnly)
-        .buttonStyle(.bordered)
+    private var chapterSummary: IOSMediaPlayerChapterSummary? {
+        guard !isPreviewingInactiveItem else { return nil }
+        return IOSMediaPlayerChapterSummary.resolve(
+            positionMs: playbackState.positionMs,
+            chapters: playbackState.chapters
+        )
     }
 
-    private var showNotesButton: some View {
+    private func chapterSummaryRow(
+        _ summary: IOSMediaPlayerChapterSummary
+    ) -> some View {
+        Button {
+            presentChapterList()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "list.bullet.rectangle")
+                    .foregroundStyle(Color.accentColor)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(
+                        String(
+                            localized:
+                                "Chapter \(summary.index + 1) of \(summary.count)"
+                        )
+                    )
+                    .font(.subheadline.weight(.semibold))
+
+                    Text(summary.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(
+                Color.secondary.opacity(0.08),
+                in: RoundedRectangle(cornerRadius: 12)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(String(localized: "Chapters"))
+    }
+
+    private var showNotesRow: some View {
         Button {
             onShowNotes()
             showNotesPresented = true
         } label: {
-            Label("Show Notes", systemImage: "doc.text")
+            HStack(spacing: 12) {
+                Image(systemName: "doc.text")
+                    .foregroundStyle(Color.accentColor)
+                Text("Show Notes")
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(
+                Color.secondary.opacity(0.08),
+                in: RoundedRectangle(cornerRadius: 12)
+            )
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
+
+    private func audioSelectionRow(
+        _ item: ListeningListItem,
+        selection: IOSMediaPlayerAudioSelection
+    ) -> some View {
+        Menu {
+            ForEach(
+                Array(item.audioEnclosures.enumerated()),
+                id: \.element.enclosure.id
+            ) { index, enclosure in
+                Button {
+                    onSelectEnclosure(enclosure.enclosure.id)
+                } label: {
+                    if enclosure.enclosure.id == selection.enclosureID {
+                        Label(
+                            IOSListeningListPresentation.enclosureLabel(
+                                enclosure.enclosure,
+                                index: index
+                            ),
+                            systemImage: "checkmark"
+                        )
+                    } else {
+                        Text(
+                            IOSListeningListPresentation.enclosureLabel(
+                                enclosure.enclosure,
+                                index: index
+                            )
+                        )
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "waveform")
+                    .foregroundStyle(Color.accentColor)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(
+                        String(
+                            localized:
+                                "Audio \(selection.index + 1) of \(selection.count)"
+                        )
+                    )
+                    .font(.subheadline.weight(.semibold))
+
+                    Text(selection.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(
+                Color.secondary.opacity(0.08),
+                in: RoundedRectangle(cornerRadius: 12)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(String(localized: "Choose audio"))
+    }
+
 
     private var artwork: some View {
         Group {
@@ -509,6 +767,7 @@ struct IOSMediaPlayerView: View {
                 rateLabel(playbackState.playbackRate),
                 systemImage: "speedometer"
             )
+            .frame(maxWidth: .infinity)
         }
         .accessibilityLabel(String(localized: "Playback speed"))
         .disabled(isPreviewingInactiveItem)
@@ -561,12 +820,7 @@ struct IOSMediaPlayerView: View {
 
     private var chapterMenu: some View {
         Button {
-            chapterListSnapshot = playbackState.chapters
-            chapterInitialIndex = IOSMediaChapterListPresentation.activeIndex(
-                positionMs: playbackState.positionMs,
-                chapters: playbackState.chapters
-            )
-            chapterListPresented = true
+            presentChapterList()
         } label: {
             Label("Chapters", systemImage: "list.bullet.rectangle")
         }
@@ -691,12 +945,13 @@ struct IOSMediaPlayerView: View {
         } label: {
             Label(
                 sleepTimer.isEnabled
-                    ? sleepTimerLabel
+                    ? sleepTimerStatusLabel
                     : String(localized: "Sleep Timer"),
                 systemImage: sleepTimer.isEnabled
                     ? "moon.zzz.fill"
                     : "moon.zzz"
             )
+            .frame(maxWidth: .infinity)
         }
         .popover(
             isPresented: $sleepTimerPresented,
@@ -744,7 +999,7 @@ struct IOSMediaPlayerView: View {
         }
     }
 
-    private var downloadMenu: some View {
+    private var downloadOverflowMenu: some View {
         Menu {
             ForEach(downloadEnclosures) { entry in
                 let action = IOSListeningListPresentation.downloadAction(
@@ -803,24 +1058,62 @@ struct IOSMediaPlayerView: View {
         }
     }
 
-    private func enclosureMenu(_ item: ListeningListItem) -> some View {
+    private var hasOverflowActions: Bool {
+        !downloadEnclosures.isEmpty
+            || (!isPreviewingInactiveItem
+                && playbackState.loadedEnclosure != nil)
+    }
+
+    private var moreMenu: some View {
         Menu {
-            ForEach(Array(item.audioEnclosures.enumerated()), id: \.element.enclosure.id) { index, enclosure in
-                Button {
-                    onSelectEnclosure(enclosure.enclosure.id)
-                } label: {
-                    Text(
-                        IOSListeningListPresentation.enclosureLabel(
-                            enclosure.enclosure,
-                            index: index
-                        )
-                    )
-                }
+            ForEach(
+                IOSMediaPlayerActionPlacement.overflow,
+                id: \.self
+            ) { action in
+                overflowAction(action)
             }
         } label: {
-            Label("Audio", systemImage: "waveform")
+            Image(systemName: "ellipsis.circle")
         }
-        .accessibilityLabel(String(localized: "Choose audio"))
+        .accessibilityLabel(String(localized: "More"))
+    }
+
+    @ViewBuilder
+    private func overflowAction(
+        _ action: IOSMediaPlayerSecondaryAction
+    ) -> some View {
+        switch action {
+        case .downloads:
+            if !downloadEnclosures.isEmpty {
+                downloadOverflowMenu
+            }
+
+        case .restart:
+            if !isPreviewingInactiveItem,
+               let enclosureID = playbackState.loadedEnclosure?.id {
+                Button {
+                    Task {
+                        try? await playbackCoordinator.restart(
+                            enclosureID: enclosureID
+                        )
+                    }
+                } label: {
+                    Label("Restart", systemImage: "arrow.counterclockwise")
+                }
+            }
+
+        case .playbackRate, .sleepTimer:
+            EmptyView()
+        }
+    }
+
+    private func presentChapterList() {
+        chapterListSnapshot = playbackState.chapters
+        chapterInitialIndex = IOSMediaChapterListPresentation.activeIndex(
+            positionMs: playbackState.positionMs,
+            chapters: playbackState.chapters
+        )
+        chapterListPresented = true
     }
 
     private var artworkTaskKey: String {
@@ -867,12 +1160,11 @@ struct IOSMediaPlayerView: View {
         )
     }
 
-    private var sleepTimerLabel: String {
-        let title = String(localized: "Sleep Timer")
+    private var sleepTimerStatusLabel: String {
         guard let remaining = sleepTimer.remainingSeconds else {
-            return title
+            return String(localized: "Sleep Timer")
         }
-        return "\(title) \(sleepTimerRemainingLabel(remaining))"
+        return "\(String(localized: "Stops in")) \(sleepTimerRemainingLabel(remaining))"
     }
 
     private func sleepTimerRemainingLabel(_ seconds: Int) -> String {
