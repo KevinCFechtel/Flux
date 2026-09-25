@@ -479,51 +479,70 @@ D6 adds native settings backed only by current Core APIs:
 
 Settings presentation may be iOS-specific. Values remain Core-owned.
 
-## 11. Actual gap found during readiness review
+## 11. Core/UniFFI gap result
 
 ### Core/UniFFI API contract
 
 **No missing D6 UniFFI API was found.**
 
-### Core implementation consistency: Rebuild Local State
+### D6-0 Core correctness follow-up
 
-One pre-existing Core implementation inconsistency is now directly relevant to
-D6 and must be resolved before D6 is considered complete.
+The readiness review did find one concrete pre-existing Core implementation
+inconsistency that becomes user-visible once D6 exposes native media:
 
-The frozen Phase-B contract requires local media protection and states that a
-rebuilt local set includes articles required by active/existing downloads.
-Saved media and in-progress playback are also durable local media semantics.
+- the previous `clear_synchronized_state_for_rebuild()` deleted every Article;
+- enclosure/media tables are FK descendants with `ON DELETE CASCADE`;
+- this discarded `SavedMedia`, in-progress playback and Requested/Downloaded
+  media even though the frozen Phase-B retention contract defines those states
+  as local protection;
+- physical media files were not removed by Rebuild, so a downloaded item could
+  become an orphan file while its authoritative Core state disappeared.
 
-The current `clear_synchronized_state_for_rebuild()` deletes all rows from
-`articles`. Current media/listening tables are foreign-key descendants with
-`ON DELETE CASCADE`, so this also removes enclosure-bound Listening List,
-SavedMedia, playback and download state. Physical media files are not removed by
-that rebuild path.
+D6-0 now changes the rebuild clear so it preserves only the minimal
+Article -> Feed -> Category graph required by the frozen Phase-B protecting
+states:
 
-That creates a mismatch once native iOS D6 exposes those features: Rebuild can
-leave orphan files while silently discarding Core media ownership/progress.
+- `SavedMedia`;
+- `MediaDownload = Requested`;
+- `MediaDownload = Downloaded`;
+- `PlaybackState = InProgress`;
+- pending `MediaProgressMutation`.
 
-This is an implementation correctness gap, **not** a need for a new Swift
-workaround and not evidence for a new UniFFI API. Resolve it inside Core under a
-focused regression test before D6 closure. The fix must preserve the frozen
-Phase-B domain decisions and must not turn Swift into a media backup layer.
+Ordinary read/star mutation intent is still discarded and the protected Article
+falls back to its last observed remote read/star state before the fresh Full
+Sync. `Failed`, `DeleteRequested`, Completed-only playback,
+AutoDownloadSuppression and unprotected Articles remain reconstructable and do
+not gain rebuild protection. Pending media progression is preserved because it
+is itself one of the frozen protecting media states.
 
-The exact preservation algorithm should be implemented as a focused Core change
-after characterizing all protected media states. Do not casually change
-`rebuild_local_state` semantics from Swift.
+The Core regression test
+`rebuild_clear_preserves_only_phase_b_media_protected_state` covers the
+protecting/non-protecting matrix and verifies that an existing downloaded file
+is not discarded as reconstructable cache.
+
+The complete remote feed/category catalog remains authoritative. A feed absent
+from a complete remote catalog continues to be removed together with its local
+articles and preferences, as already defined by the earlier architecture
+contract; D6 does not silently redefine feed-deletion semantics.
+
+No Swift workaround or new UniFFI API is introduced for D6-0.
 
 ## 12. D6 work packages
 
 ### D6-0 — Rebuild/media Core correctness
 
-- add regression coverage for Rebuild with Listening List/SavedMedia,
-  in-progress playback, Requested/Downloaded media and physical files;
-- make Core rebuild preserve the media-protected local state required by the
-  frozen Phase-B contract while still rebuilding reconstructable synchronized
-  state;
-- confirm no auto-download storm occurs during rebuild;
-- no new UniFFI media API unless a test proves the current boundary cannot
-  express the fix.
+**Implementation status:** Core change and focused storage regression coverage
+are in place; final workspace test execution remains required before this
+package is marked closed.
+
+- Rebuild preserves the frozen Phase-B protecting media states while clearing
+  reconstructable synchronized state.
+- Ordinary read/star pending intent is discarded; pending media progression is
+  preserved with its protected playback state.
+- Downloaded physical media is not invalidated by the rebuild clear.
+- Restore-mode reconciliation remains responsible for preventing an
+  auto-download storm.
+- No new UniFFI media API was required.
 
 ### D6-A — App-scoped media runtime foundation
 
