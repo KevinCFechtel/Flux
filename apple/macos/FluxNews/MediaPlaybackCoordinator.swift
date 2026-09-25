@@ -430,12 +430,6 @@ final class MediaPlaybackCoordinator {
     }
 }
 
-enum MediaPlaybackPresentationStatus: Equatable {
-    case stopped
-    case paused
-    case playing
-}
-
 @MainActor
 final class MediaPlaybackPresentationState: ObservableObject {
     @Published fileprivate(set) var loadedEnclosure: Enclosure?
