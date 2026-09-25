@@ -18,6 +18,7 @@ final class IOSListeningListStore: ObservableObject {
     private var core: Flux?
     private var coreSessionExecutionCoordinator = IOSCoreSessionExecutionCoordinator()
     private var generation: UInt64 = 0
+    private var showNotesGeneration: UInt64 = 0
 
     var count: UInt64 { UInt64(items.count) }
 
@@ -33,6 +34,7 @@ final class IOSListeningListStore: ObservableObject {
 
     func detach() {
         generation &+= 1
+        showNotesGeneration &+= 1
         core = nil
         items = []
         feeds = []
@@ -70,7 +72,7 @@ final class IOSListeningListStore: ObservableObject {
                 }
             ) else { return }
 
-            guard let self, self.generation == request else { return }
+            guard let self, self.showNotesGeneration == request else { return }
             self.isLoading = false
             switch result {
             case let .success((feeds, validatedFeedID, items)):
@@ -145,8 +147,8 @@ final class IOSListeningListStore: ObservableObject {
 
     func loadShowNotes(articleID: Int64) {
         guard let core else { return }
-        generation &+= 1
-        let request = generation
+        showNotesGeneration &+= 1
+        let request = showNotesGeneration
         let coordinator = coreSessionExecutionCoordinator
         showNotesDocument = nil
         showNotesErrorMessage = nil
@@ -173,7 +175,7 @@ final class IOSListeningListStore: ObservableObject {
     }
 
     func clearShowNotes() {
-        generation &+= 1
+        showNotesGeneration &+= 1
         showNotesDocument = nil
         showNotesIsLoading = false
         showNotesErrorMessage = nil
@@ -277,6 +279,40 @@ enum IOSListeningListPresentation {
             durationMs: duration,
             status: status
         )
+    }
+
+    static func enclosureLabel(
+        _ enclosure: Enclosure,
+        index: Int
+    ) -> String {
+        let filename: String?
+        if let url = URL(string: enclosure.url),
+           let decoded = url.lastPathComponent.removingPercentEncoding {
+            let trimmed = decoded.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            filename = trimmed.isEmpty || trimmed == "/" ? nil : trimmed
+        } else {
+            filename = nil
+        }
+
+        let name = filename ?? String(localized: "Audio \(index + 1)")
+        let format = enclosure.mimeType
+            .split(separator: ";", maxSplits: 1)
+            .first
+            .map(String.init) ?? ""
+        let size = enclosure.sizeBytes.map {
+            ByteCountFormatter.string(
+                fromByteCount: Int64(min($0, UInt64(Int64.max))),
+                countStyle: .file
+            )
+        }
+        let details = [format, size]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+        return details.isEmpty
+            ? name
+            : "\(name) (\(details.joined(separator: ", ")))"
     }
 
     static func downloadSummary(
