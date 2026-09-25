@@ -2647,7 +2647,7 @@ impl Store {
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?
             .execute(
-                "DELETE FROM articles WHERE is_read=1 AND is_starred=0 AND published_at < ?1 AND NOT EXISTS(SELECT 1 FROM listening_list l WHERE l.article_id=articles.id) AND NOT EXISTS(SELECT 1 FROM saved_media s JOIN enclosures e ON e.id=s.enclosure_id WHERE e.article_id=articles.id) AND NOT EXISTS(SELECT 1 FROM playback_states p JOIN enclosures e ON e.id=p.enclosure_id WHERE e.article_id=articles.id AND p.status='in_progress') AND NOT EXISTS(SELECT 1 FROM media_downloads d JOIN enclosures e ON e.id=d.enclosure_id WHERE e.article_id=articles.id AND d.state IN ('requested','downloaded'))",
+                "DELETE FROM articles WHERE is_read=1 AND is_starred=0 AND published_at < ?1 AND NOT EXISTS(SELECT 1 FROM listening_list l WHERE l.article_id=articles.id) AND NOT EXISTS(SELECT 1 FROM saved_media s JOIN enclosures e ON e.id=s.enclosure_id WHERE e.article_id=articles.id) AND NOT EXISTS(SELECT 1 FROM playback_states p JOIN enclosures e ON e.id=p.enclosure_id WHERE e.article_id=articles.id AND p.status='in_progress') AND NOT EXISTS(SELECT 1 FROM pending_media_progress_mutations m JOIN enclosures e ON e.id=m.enclosure_id WHERE e.article_id=articles.id) AND NOT EXISTS(SELECT 1 FROM media_downloads d JOIN enclosures e ON e.id=d.enclosure_id WHERE e.article_id=articles.id AND d.state IN ('requested','downloaded'))",
                 [cutoff],
             )
             .map_err(sql_error)?;
@@ -7803,6 +7803,72 @@ mod tests {
             store.media_metadata(1000).unwrap().unwrap().duration_ms,
             Some(90_000)
         );
+    }
+
+    #[test]
+    fn pending_media_progress_mutation_protects_completed_article_from_retention() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let (mut article, enclosure) = media_article_enclosure_pair();
+        article.published_at = "2020-01-01T00:00:00Z".into();
+        article.is_read = true;
+        article.is_starred = false;
+        store
+            .reconcile_with_enclosures(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 10,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                std::slice::from_ref(&article),
+                std::slice::from_ref(&enclosure),
+            )
+            .unwrap();
+
+        store
+            .complete_playback(
+                enclosure.id,
+                Some(60_000),
+                "2026-01-01T00:00:00Z",
+                true,
+            )
+            .unwrap();
+        assert_eq!(
+            store.playback_state(enclosure.id).unwrap().unwrap().status,
+            PlaybackStatus::Completed
+        );
+        assert_eq!(store.pending_media_progress_mutations().unwrap().len(), 1);
+
+        assert_eq!(
+            store
+                .cleanup_expired_read_articles("2025-01-01T00:00:00Z")
+                .unwrap(),
+            0
+        );
+        assert!(store.local_article_state(article.id).unwrap().is_some());
+        assert_eq!(store.pending_media_progress_mutations().unwrap().len(), 1);
+
+        // Once the durable pending mutation has been acknowledged, Completed-only playback
+        // no longer protects the Article from normal retention.
+        let pending = store.pending_media_progress_mutations().unwrap();
+        store
+            .acknowledge_media_progress_mutation(
+                enclosure.id,
+                pending[0].revision,
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .cleanup_expired_read_articles("2025-01-01T00:00:00Z")
+                .unwrap(),
+            1
+        );
+        assert!(store.local_article_state(article.id).unwrap().is_none());
     }
 
     #[test]
