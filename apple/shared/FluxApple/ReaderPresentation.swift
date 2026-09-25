@@ -82,16 +82,22 @@ struct ReaderArticleHeader: View {
 
 struct ReaderDocumentContent: View {
     let document: ReaderDocument
-    let openOriginal: () -> Void
+    let openOriginal: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             ReaderBlocksView(blocks: document.blocks)
-            if let notice = ReaderDocumentNotice.text(simplified: document.hasSimplifiedContent, truncated: document.wasTruncated) {
+            if let notice = ReaderDocumentNotice.text(
+                simplified: document.hasSimplifiedContent,
+                truncated: document.wasTruncated
+            ) {
                 HStack(spacing: 4) {
                     Text(notice)
-                    Text("·").foregroundStyle(.tertiary)
-                    Button("Open Original", action: openOriginal).buttonStyle(.borderless)
+                    if let openOriginal {
+                        Text("·").foregroundStyle(.tertiary)
+                        Button("Open Original", action: openOriginal)
+                            .buttonStyle(.borderless)
+                    }
                 }
                 .font(.footnote)
                 .foregroundStyle(.secondary)
