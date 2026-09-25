@@ -741,6 +741,65 @@ struct IOSMediaPlayerView: View {
         }
     }
 
+    private var downloadMenu: some View {
+        Menu {
+            ForEach(downloadEnclosures) { entry in
+                let action = IOSListeningListPresentation.downloadAction(
+                    download: entry.download,
+                    runtime: transferState.runtime(
+                        for: entry.enclosure.id
+                    )
+                )
+                Button {
+                    onDownloadAction(entry.enclosure.id, action)
+                } label: {
+                    downloadLabel(
+                        action,
+                        enclosureID: entry.enclosure.id
+                    )
+                }
+                .disabled(
+                    action == .cancelling
+                        || action == .pendingDeletion
+                )
+            }
+        } label: {
+            Label("Downloads", systemImage: "arrow.down.circle")
+        }
+    }
+
+    @ViewBuilder
+    private func downloadLabel(
+        _ action: IOSListeningListPresentation.DownloadAction,
+        enclosureID: Int64
+    ) -> some View {
+        switch action {
+        case .download:
+            Label("Download", systemImage: "arrow.down.circle")
+        case .pending:
+            Label("Cancel Download", systemImage: "xmark.circle")
+        case .downloading:
+            if let fraction = transferState.runtime(
+                for: enclosureID
+            )?.fraction {
+                Label(
+                    "\(Int((fraction * 100).rounded()))% downloaded",
+                    systemImage: "xmark.circle"
+                )
+            } else {
+                Label("Cancel Download", systemImage: "xmark.circle")
+            }
+        case .cancelling:
+            Label("Cancelling Download", systemImage: "clock")
+        case .delete:
+            Label("Delete Download", systemImage: "trash")
+        case .pendingDeletion:
+            Label("Deletion Pending", systemImage: "clock")
+        case .retry:
+            Label("Retry Download", systemImage: "arrow.clockwise")
+        }
+    }
+
     private func enclosureMenu(_ item: ListeningListItem) -> some View {
         Menu {
             ForEach(Array(item.audioEnclosures.enumerated()), id: \.element.enclosure.id) { index, enclosure in
@@ -763,7 +822,7 @@ struct IOSMediaPlayerView: View {
 
     private var artworkTaskKey: String {
         if isPreviewingInactiveItem {
-            return "preview:\(item?.articleId ?? -1)"
+            return "preview:\(previewEnclosure?.enclosure.id ?? -1)"
         }
         switch playbackState.artworkSource {
         case let .some(.localReference(reference)):
@@ -778,8 +837,16 @@ struct IOSMediaPlayerView: View {
     @MainActor
     private func loadArtwork() async {
         artworkImage = nil
-        guard !isPreviewingInactiveItem,
-              let source = playbackState.artworkSource else {
+        let source: MediaArtworkSource?
+        if isPreviewingInactiveItem,
+           let enclosureID = previewEnclosure?.enclosure.id {
+            source = await playbackCoordinator.previewArtworkSource(
+                enclosureID: enclosureID
+            )
+        } else {
+            source = playbackState.artworkSource
+        }
+        guard let source else {
             artworkIsLoading = false
             return
         }
