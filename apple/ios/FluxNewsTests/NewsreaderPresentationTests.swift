@@ -5131,6 +5131,95 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testMediaPlayerTransportControlsKeepStopAsFourthPermanentControl() {
+        XCTAssertEqual(
+            IOSMediaPlayerTransportControl.ordered,
+            [.back15, .playPause, .forward30, .stop]
+        )
+    }
+
+    func testMediaPlayerActionPlacementKeepsStatusVisibleAndRareActionsInOverflow() {
+        XCTAssertEqual(
+            IOSMediaPlayerActionPlacement.persistentStatus,
+            [.playbackRate, .sleepTimer]
+        )
+        XCTAssertEqual(
+            IOSMediaPlayerActionPlacement.overflow,
+            [.downloads, .restart]
+        )
+    }
+
+    func testMediaPlayerChapterSummaryUsesCurrentChapterAndCount() {
+        let chapters = [
+            MediaChapter(
+                enclosureId: 7,
+                title: "Intro",
+                startMs: 0,
+                endMs: 60_000,
+                source: .embedded
+            ),
+            MediaChapter(
+                enclosureId: 7,
+                title: "Topic",
+                startMs: 60_000,
+                endMs: nil,
+                source: .embedded
+            )
+        ]
+
+        XCTAssertEqual(
+            IOSMediaPlayerChapterSummary.resolve(
+                positionMs: 90_000,
+                chapters: chapters
+            ),
+            .init(index: 1, count: 2, title: "Topic")
+        )
+    }
+
+    func testMediaPlayerAudioSelectionUsesLoadedEnclosureWhenAvailable() {
+        func audio(_ id: Int64, _ name: String) -> ListeningListEnclosure {
+            ListeningListEnclosure(
+                enclosure: Enclosure(
+                    id: id,
+                    articleId: 101,
+                    url: "https://example.test/\(name).mp3",
+                    mimeType: "audio/mpeg",
+                    sizeBytes: nil,
+                    remoteMediaProgressionSeconds: 0,
+                    mediaKind: .audio
+                ),
+                remotePresent: true,
+                playbackState: nil,
+                download: nil,
+                durationMs: nil
+            )
+        }
+
+        let first = audio(11, "one")
+        let second = audio(12, "two")
+        let item = ListeningListItem(
+            articleId: 101,
+            feedId: 10,
+            title: "Episode",
+            feedTitle: "Feed",
+            publishedAt: "",
+            addedAt: "",
+            remotePresent: true,
+            audioEnclosures: [first, second],
+            activeEnclosureId: 11
+        )
+
+        let selection = IOSMediaPlayerAudioSelection.resolve(
+            item: item,
+            loadedEnclosureID: 12
+        )
+
+        XCTAssertEqual(selection?.enclosureID, 12)
+        XCTAssertEqual(selection?.index, 1)
+        XCTAssertEqual(selection?.count, 2)
+        XCTAssertTrue(selection?.title.contains("two.mp3") == true)
+    }
+
     func testMediaPlayerLayoutPolicyAdaptsBySizeClass() {
         XCTAssertEqual(
             IOSMediaPlayerLayoutPolicy.mode(
