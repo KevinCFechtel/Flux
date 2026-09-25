@@ -61,6 +61,15 @@ final class IOSMediaRuntime {
 
     private unowned let bootstrapper: CoreBootstrapper
 
+    private lazy var playbackCoreAccess = IOSMediaPlaybackCoreAccess(
+        coreSessionExecutionCoordinator: coreSessionExecutionCoordinator
+    )
+
+    lazy var playbackCoordinator = IOSMediaPlaybackCoordinator(
+        coreAccess: playbackCoreAccess,
+        presentationState: playbackPresentationState
+    )
+
     lazy var transferCoordinator = IOSMediaTransferCoordinator(
         bootstrapper: bootstrapper,
         coreSessionExecutionCoordinator: coreSessionExecutionCoordinator,
@@ -76,6 +85,15 @@ final class IOSMediaRuntime {
         self.bootstrapper = bootstrapper
         self.coreSessionExecutionCoordinator = coreSessionExecutionCoordinator
         self.mediaTransferReconciliationHandoff = mediaTransferReconciliationHandoff
+
+        transferCoordinator.setMediaInUseProvider { [weak self] enclosureID in
+            self?.playbackCoordinator.isUsing(enclosureID: enclosureID) ?? false
+        }
+        playbackCoordinator.onPlaybackUseChanged = { [weak self] in
+            Task { @MainActor [weak self] in
+                await self?.transferCoordinator.reconcile()
+            }
+        }
     }
 
     func attach(to core: Flux) {
@@ -84,6 +102,7 @@ final class IOSMediaRuntime {
         }
         self.core = core
         coreAccessState = .attached
+        playbackCoordinator.attach(to: core)
         transferCoordinator.attach(to: core, generation: lifecycleGeneration)
     }
 
@@ -94,6 +113,7 @@ final class IOSMediaRuntime {
         guard core != nil else { return }
         lifecycleGeneration &+= 1
         coreAccessState = .suspendedForCoreReplacement
+        await playbackCoordinator.suspendForCoreLifecycle()
         transferCoordinator.suspendForCoreLifecycle(generation: lifecycleGeneration)
     }
 
@@ -102,6 +122,7 @@ final class IOSMediaRuntime {
         lifecycleGeneration &+= 1
         coreAccessState = .attached
         if let core {
+            playbackCoordinator.resumeCoreAccess(core)
             transferCoordinator.attach(to: core, generation: lifecycleGeneration)
         }
     }
@@ -113,6 +134,9 @@ final class IOSMediaRuntime {
         guard core != nil else { return }
         lifecycleGeneration &+= 1
         coreAccessState = .suspendedForLocalStateRebuild
+        Task { @MainActor [weak self] in
+            await self?.playbackCoordinator.suspendForCoreLifecycle()
+        }
         transferCoordinator.suspendForCoreLifecycle(generation: lifecycleGeneration)
     }
 
@@ -129,7 +153,19 @@ final class IOSMediaRuntime {
             generation: lifecycleGeneration,
             clearingAccountIdentity: true
         )
-        playbackPresentationState.reset()
+        playbackCoordinator.detach()
+    }
+
+    func sceneWillResignActive() {
+        playbackCoordinator.sceneWillResignActive()
+    }
+
+    func sceneDidBecomeActive() {
+        playbackCoordinator.sceneDidBecomeActive()
+    }
+
+    func applicationWillTerminate() {
+        playbackCoordinator.applicationWillTerminate()
     }
 }
 
@@ -248,6 +284,10 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate {
         _ = backgroundRegistration.register()
         IOSAppRuntime.shared.systemNotificationManager.configure()
         return true
+    }
+
+    func applicationWillTerminate(_ application: UIApplication) {
+        IOSAppRuntime.shared.mediaRuntime.applicationWillTerminate()
     }
 
     func application(
