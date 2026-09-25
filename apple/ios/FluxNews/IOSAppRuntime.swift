@@ -44,10 +44,6 @@ enum IOSMediaCoreAccessState: Equatable {
 }
 
 /// App-scoped owner for native media execution.
-///
-/// D6-A intentionally owns only Core attachment/lifecycle here. AVPlayer,
-/// AVAudioSession and the persistent background URLSession are added by the
-/// later D6 execution packages and must remain children of this runtime.
 @MainActor
 final class IOSMediaRuntime {
     private(set) var core: Flux?
@@ -68,6 +64,13 @@ final class IOSMediaRuntime {
 
     lazy var playbackCoordinator = IOSMediaPlaybackCoordinator(
         coreAccess: playbackCoreAccess,
+        presentationState: playbackPresentationState
+    )
+
+    /// App-scoped system Now Playing projection. It observes the same D6
+    /// presentation state as the in-app player and never owns playback state.
+    lazy var nowPlayingCoordinator = IOSNowPlayingCoordinator(
+        playbackCoordinator: playbackCoordinator,
         presentationState: playbackPresentationState
     )
 
@@ -95,6 +98,9 @@ final class IOSMediaRuntime {
                 await self?.transferCoordinator.reconcile()
             }
         }
+        // Instantiate the adapter with the app-scoped media runtime rather than
+        // tying system Now Playing lifetime to any SwiftUI presentation.
+        _ = nowPlayingCoordinator
     }
 
     func attach(to core: Flux) {
@@ -125,9 +131,6 @@ final class IOSMediaRuntime {
         transferCoordinator.attach(to: core, generation: lifecycleGeneration)
     }
 
-    /// Runs before the app-wide Core execution gate closes. Future playback
-    /// ownership uses this point to checkpoint the active medium before Core
-    /// access is suspended.
     func prepareForCoreReplacement() async {
         guard core != nil else { return }
         lifecycleGeneration &+= 1
@@ -146,15 +149,10 @@ final class IOSMediaRuntime {
         }
     }
 
-    /// Called only after the app-wide Core execution coordinator has quiesced.
-    /// Rebuild keeps the same account/Core identity but media callbacks must not
-    /// enter Core until the exclusive rebuild has finished.
     func prepareForLocalStateRebuild() {
         guard core != nil else { return }
         lifecycleGeneration &+= 1
         coreAccessState = .suspendedForLocalStateRebuild
-        // Playback Core access was already checkpointed and detached by the
-        // awaited prepareForCoreReplacement hook before app-wide quiescence.
         transferCoordinator.suspendForCoreLifecycle(generation: lifecycleGeneration)
     }
 
@@ -196,6 +194,7 @@ final class IOSMediaRuntime {
 
     func applicationWillTerminate() {
         playbackCoordinator.applicationWillTerminate()
+        nowPlayingCoordinator.cleanup()
     }
 }
 
@@ -204,11 +203,7 @@ private final class IOSMediaRuntimeEventListener: EventListener, @unchecked Send
     let core: Flux
     let generation: UInt64
 
-    init(
-        runtime: IOSMediaRuntime,
-        core: Flux,
-        generation: UInt64
-    ) {
+    init(runtime: IOSMediaRuntime, core: Flux, generation: UInt64) {
         self.runtime = runtime
         self.core = core
         self.generation = generation
@@ -217,11 +212,7 @@ private final class IOSMediaRuntimeEventListener: EventListener, @unchecked Send
     func onEvent(event: CoreEvent) {
         guard case .syncCompleted = event else { return }
         Task { @MainActor [weak runtime] in
-            runtime?.handle(
-                event: event,
-                core: core,
-                generation: generation
-            )
+            runtime?.handle(event: event, core: core, generation: generation)
         }
     }
 }
@@ -250,8 +241,7 @@ final class IOSAppRuntime {
         )
         let systemNotificationManager = systemNotificationManager ?? IOSSystemNotificationManager.shared
         let widgetSnapshotCoordinator = IOSWidgetSnapshotCoordinator(bootstrapper: bootstrapper)
-        let mediaTransferReconciliationHandoff =
-            mediaTransferReconciliationHandoff ?? IOSMediaTransferReconciliationHandoff.shared
+        let mediaTransferReconciliationHandoff = mediaTransferReconciliationHandoff ?? IOSMediaTransferReconciliationHandoff.shared
         let mediaRuntime = IOSMediaRuntime(
             bootstrapper: bootstrapper,
             coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator,
@@ -264,8 +254,6 @@ final class IOSAppRuntime {
         self.mediaTransferReconciliationHandoff = mediaTransferReconciliationHandoff
         self.mediaRuntime = mediaRuntime
 
-        // Media runtime lifecycle is installed before presentation exists so
-        // headless/background Core bootstrap has the same single app-wide owner.
         bootstrapper.prepareForCoreReplacement = { [weak mediaRuntime] in
             await mediaRuntime?.prepareForCoreReplacement()
         }
@@ -279,42 +267,25 @@ final class IOSAppRuntime {
             mediaRuntime?.localStateRebuildFinished(with: core)
         }
         bootstrapper.onCoreChanged = { [weak mediaRuntime] core in
-            if let core {
-                mediaRuntime?.attach(to: core)
-            } else {
-                mediaRuntime?.detach()
-            }
+            if let core { mediaRuntime?.attach(to: core) }
+            else { mediaRuntime?.detach() }
         }
 
         backgroundSyncCoordinator.onSuccessfulBackgroundSync = {
             [weak bootstrapper, weak systemNotificationManager, weak widgetSnapshotCoordinator, weak mediaTransferReconciliationHandoff]
             metadata in
-            guard let bootstrapper,
-                  let core = bootstrapper.core else {
-                return
-            }
-
+            guard let bootstrapper, let core = bootstrapper.core else { return }
             await widgetSnapshotCoordinator?.refreshNow(for: core)
-
-            if !metadata.systemNotificationCandidates.isEmpty,
-               let systemNotificationManager {
+            if !metadata.systemNotificationCandidates.isEmpty, let systemNotificationManager {
                 await systemNotificationManager.deliver(metadata.systemNotificationCandidates) { candidateID in
-                    guard let result = await bootstrapper.coreSessionExecutionCoordinator
-                        .responsiveResult(
-                            for: core,
-                            {
-                                try core.acknowledgeSystemNotification(candidateId: candidateID)
-                            }
-                        ) else {
-                        return false
-                    }
-                    if case .success = result {
-                        return true
-                    }
+                    guard let result = await bootstrapper.coreSessionExecutionCoordinator.responsiveResult(
+                        for: core,
+                        { try core.acknowledgeSystemNotification(candidateId: candidateID) }
+                    ) else { return false }
+                    if case .success = result { return true }
                     return false
                 }
             }
-
             await mediaTransferReconciliationHandoff?.requestReconciliation()
         }
     }
@@ -335,9 +306,7 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        guard !IOSRuntimeLaunchEnvironment.isUnitTestHost else {
-            return true
-        }
+        guard !IOSRuntimeLaunchEnvironment.isUnitTestHost else { return true }
         _ = backgroundRegistration.register()
         IOSAppRuntime.shared.systemNotificationManager.configure()
         return true
@@ -352,13 +321,10 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate {
         handleEventsForBackgroundURLSession identifier: String,
         completionHandler: @escaping () -> Void
     ) {
-        let handled = IOSAppRuntime.shared.mediaRuntime.transferCoordinator
-            .handleBackgroundEvents(
-                identifier: identifier,
-                completionHandler: completionHandler
-            )
-        if !handled {
-            completionHandler()
-        }
+        let handled = IOSAppRuntime.shared.mediaRuntime.transferCoordinator.handleBackgroundEvents(
+            identifier: identifier,
+            completionHandler: completionHandler
+        )
+        if !handled { completionHandler() }
     }
 }
