@@ -126,6 +126,7 @@ final class IOSMediaTransferCoordinator: NSObject {
     private let sessionIdentifier: String
     private let identityStore: IOSMediaTransferExecutionIdentityStore
     private let fileManager: FileManager
+    private var isMediaInUse: (Int64) -> Bool = { _ in false }
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews",
         category: "media-transfer"
@@ -217,6 +218,12 @@ final class IOSMediaTransferCoordinator: NSObject {
         lifecycleGeneration = generation
         handoff.uninstall()
         presentationState.reset()
+    }
+
+    func setMediaInUseProvider(
+        _ provider: @escaping (Int64) -> Bool
+    ) {
+        isMediaInUse = provider
     }
 
     func reconcile() async {
@@ -397,6 +404,9 @@ final class IOSMediaTransferCoordinator: NSObject {
         }
 
         for work in deletions {
+            guard !isMediaInUse(work.enclosureId) else {
+                continue
+            }
             guard let reference = work.localFile,
                   let destination = try? MediaTransferFileLayout.destination(
                     reference: reference,
