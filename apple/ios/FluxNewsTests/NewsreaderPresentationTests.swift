@@ -5085,14 +5085,49 @@ final class NewsreaderPresentationTests: XCTestCase {
             "62:05"
         )
         let chapter = MediaChapter(
+            enclosureId: 7,
+            title: "cp 2",
             startMs: 65_000,
             endMs: nil,
-            title: "cp 2",
             source: .embedded
         )
         XCTAssertEqual(
             IOSMediaChapterListPresentation.title(chapter, index: 1),
             String(localized: "Chapter 2")
+        )
+    }
+
+    func testMediaChapterListPresentationResolvesActiveChapter() {
+        let chapters = [
+            MediaChapter(
+                enclosureId: 7,
+                title: "Intro",
+                startMs: 0,
+                endMs: nil,
+                source: .embedded
+            ),
+            MediaChapter(
+                enclosureId: 7,
+                title: "Topic",
+                startMs: 60_000,
+                endMs: nil,
+                source: .embedded
+            )
+        ]
+
+        XCTAssertEqual(
+            IOSMediaChapterListPresentation.activeIndex(
+                positionMs: 30_000,
+                chapters: chapters
+            ),
+            0
+        )
+        XCTAssertEqual(
+            IOSMediaChapterListPresentation.activeIndex(
+                positionMs: 90_000,
+                chapters: chapters
+            ),
+            1
         )
     }
 
