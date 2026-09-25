@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import Foundation
 
 enum IOSMediaPlaybackError: LocalizedError {
@@ -448,6 +449,7 @@ protocol IOSMediaPlaybackCoreAccessing: AnyObject {
     func detach()
     func preparePlayback(enclosureID: Int64) async throws -> PlaybackPreparation
     func chapters(enclosureID: Int64) async throws -> [MediaChapter]
+    func metadata(enclosureID: Int64) async -> MediaMetadata?
     func artwork(reference: String) async -> Data?
     func checkpoint(
         enclosureID: Int64,
@@ -498,6 +500,22 @@ final class IOSMediaPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
             throw IOSMediaPlaybackError.sessionUnavailable
         }
         return try result.get()
+    }
+
+    func metadata(enclosureID: Int64) async -> MediaMetadata? {
+        guard let core else { return nil }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: core,
+            { try core.mediaMetadata(enclosureId: enclosureID) }
+        ) else {
+            return nil
+        }
+        switch result {
+        case let .success(metadata):
+            return metadata
+        case .failure:
+            return nil
+        }
     }
 
     func artwork(reference: String) async -> Data? {
@@ -589,12 +607,12 @@ final class IOSMediaPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
 }
 
 @MainActor
-final class IOSMediaSleepTimer {
+final class IOSMediaSleepTimer: ObservableObject {
     static let intervalsMinutes = Array(stride(from: 30, through: 180, by: 15))
 
-    private(set) var isEnabled = false
-    private(set) var intervalMinutes = 30
-    private(set) var remainingSeconds: Int?
+    @Published private(set) var isEnabled = false
+    @Published private(set) var intervalMinutes = 30
+    @Published private(set) var remainingSeconds: Int?
 
     private var deadline: Date?
     private var timer: Timer?
@@ -1020,6 +1038,19 @@ final class IOSMediaPlaybackCoordinator {
 
     func blocksMediaDeletion(enclosureID: Int64) -> Bool {
         activeEnclosureID == enclosureID && engine.isPlaying
+    }
+
+    func previewArtworkSource(
+        enclosureID: Int64
+    ) async -> MediaArtworkSource? {
+        guard let metadata = await coreAccess.metadata(
+            enclosureID: enclosureID
+        ),
+        let reference = metadata.embeddedArtworkReference,
+        !reference.isEmpty else {
+            return nil
+        }
+        return .localReference(reference: reference)
     }
 
     func artwork(source: MediaArtworkSource) async -> Data? {
