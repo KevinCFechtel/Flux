@@ -1445,6 +1445,57 @@ final class NewsreaderD23MutationTests: XCTestCase {
     }
 
     @MainActor
+    func testNewDataNoticeOnlyAppearsForCurrentFeedScope() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.scope = .feed(10)
+        store.accumulateNewData([(feedID: 20, count: 3)])
+
+        XCTAssertTrue(store.hasPendingNewData)
+        XCTAssertFalse(store.hasPendingNewDataForCurrentScope)
+
+        store.scope = .feed(20)
+        XCTAssertTrue(store.hasPendingNewDataForCurrentScope)
+    }
+
+    @MainActor
+    func testNewDataNoticeOnlyAppearsForCurrentCategoryScope() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.setCatalogForTesting(
+            NavigationCatalog(
+                categories: [
+                    Category(id: 1, title: "One"),
+                    Category(id: 2, title: "Two"),
+                ],
+                feeds: [
+                    Feed(id: 10, categoryId: 1, title: "One Feed"),
+                    Feed(id: 20, categoryId: 2, title: "Two Feed"),
+                ]
+            )
+        )
+        store.accumulateNewData([(feedID: 20, count: 3)])
+
+        store.scope = .category(1)
+        XCTAssertFalse(store.hasPendingNewDataForCurrentScope)
+
+        store.scope = .category(2)
+        XCTAssertTrue(store.hasPendingNewDataForCurrentScope)
+    }
+
+    @MainActor
+    func testManualSyncClearsAllPendingNewDataIndependentOfCurrentScope() {
+        let store = NewsreaderStore(defaults: UserDefaults())
+        store.scope = .feed(10)
+        store.accumulateNewData([(feedID: 10, count: 2), (feedID: 20, count: 3)])
+
+        store.completeSyncForTesting(syncMetadata(reason: .manual, dataChanged: true))
+
+        XCTAssertTrue(store.pendingByFeedForTesting.isEmpty)
+        XCTAssertFalse(store.hasPendingNewData)
+        XCTAssertFalse(store.hasPendingNewDataForCurrentScope)
+        XCTAssertFalse(store.hasUnscopedNewDataSignal)
+    }
+
+    @MainActor
     func testCurrentFeedAdoptionLeavesUnrelatedPendingFeed() {
         let store = NewsreaderStore(defaults: UserDefaults())
         store.scope = .feed(10)
