@@ -2,6 +2,12 @@ import Foundation
 import SwiftUI
 import UIKit
 
+struct IOSMediaPlayerDownloadEnclosure: Identifiable {
+    let enclosure: Enclosure
+    let download: MediaDownload?
+    var id: Int64 { enclosure.id }
+}
+
 enum IOSMediaPlayerLayoutMode: Equatable {
     case stacked
     case sideBySide
@@ -75,8 +81,15 @@ struct IOSMediaPlayerView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @ObservedObject var playbackState: IOSMediaPlaybackPresentationState
+    @ObservedObject var transferState: IOSMediaTransferPresentationState
+    @ObservedObject var sleepTimer: IOSMediaSleepTimer
     let playbackCoordinator: IOSMediaPlaybackCoordinator
     let item: ListeningListItem?
+    let downloadEnclosures: [IOSMediaPlayerDownloadEnclosure]
+    let onDownloadAction: (
+        _ enclosureID: Int64,
+        _ action: IOSListeningListPresentation.DownloadAction
+    ) -> Void
     let feedIconFeedID: Int64?
     let feedIconTitle: String
     let feedIconState: (_ feedID: Int64, _ variant: FeedIconVariant) -> IOSFeedIconPresentationState
@@ -93,6 +106,9 @@ struct IOSMediaPlayerView: View {
     @State private var showNotesPresented = false
     @State private var chapterListPresented = false
     @State private var chapterListSnapshot: [MediaChapter] = []
+    @State private var chapterInitialIndex: Int?
+    @State private var ratePickerPresented = false
+    @State private var sleepTimerPresented = false
     @State private var artworkImage: UIImage?
     @State private var artworkIsLoading = false
 
@@ -365,6 +381,10 @@ struct IOSMediaPlayerView: View {
         HStack(spacing: 18) {
             rateMenu
             chapterMenu
+            sleepTimerButton
+            if !downloadEnclosures.isEmpty {
+                downloadMenu
+            }
             if let item, item.audioEnclosures.count > 1 {
                 enclosureMenu(item)
             }
@@ -379,6 +399,10 @@ struct IOSMediaPlayerView: View {
             HStack(spacing: 18) {
                 rateMenu
                 chapterMenu
+                sleepTimerButton
+                if !downloadEnclosures.isEmpty {
+                    downloadMenu
+                }
                 if let item, item.audioEnclosures.count > 1 {
                     enclosureMenu(item)
                 }
