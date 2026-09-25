@@ -408,6 +408,7 @@ protocol IOSMediaPlaybackCoreAccessing: AnyObject {
     func detach()
     func preparePlayback(enclosureID: Int64) async throws -> PlaybackPreparation
     func chapters(enclosureID: Int64) async throws -> [MediaChapter]
+    func artwork(reference: String) async -> Data?
     func checkpoint(
         enclosureID: Int64,
         positionMs: UInt64,
@@ -457,6 +458,22 @@ final class IOSMediaPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
             throw IOSMediaPlaybackError.sessionUnavailable
         }
         return try result.get()
+    }
+
+    func artwork(reference: String) async -> Data? {
+        guard let core else { return nil }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: core,
+            { try core.mediaArtwork(reference: reference) }
+        ) else {
+            return nil
+        }
+        switch result {
+        case let .success(bytes):
+            return bytes.map(Data.init)
+        case .failure:
+            return nil
+        }
     }
 
     func checkpoint(
@@ -888,6 +905,31 @@ final class IOSMediaPlaybackCoordinator {
 
     func isUsing(enclosureID: Int64) -> Bool {
         activeEnclosureID == enclosureID
+    }
+
+    func artwork(source: MediaArtworkSource) async -> Data? {
+        switch source {
+        case let .localReference(reference):
+            return await coreAccess.artwork(reference: reference)
+
+        case let .remoteUrl(urlString):
+            guard let url = URL(string: urlString),
+                  url.scheme == "http" || url.scheme == "https" else {
+                return nil
+            }
+            do {
+                let (data, response) = try await URLSession.shared.data(
+                    from: url
+                )
+                guard let response = response as? HTTPURLResponse,
+                      (200..<300).contains(response.statusCode) else {
+                    return nil
+                }
+                return data
+            } catch {
+                return nil
+            }
+        }
     }
 
     private func playbackURL(
