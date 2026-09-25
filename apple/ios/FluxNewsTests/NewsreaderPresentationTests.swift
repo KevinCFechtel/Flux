@@ -17,6 +17,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         let store = NewsreaderStore(defaults: UserDefaults())
         let read = expectation(description: "read failure")
         let write = expectation(description: "write failure")
+        let mediaWrite = expectation(description: "media write failure")
         store.loadFeedPreferences(feedID: 42) { result in
             if case .success = result { XCTFail("Unexpected read success") }
             read.fulfill()
@@ -25,7 +26,19 @@ final class NewsreaderPresentationTests: XCTestCase {
             if case .success = result { XCTFail("Unexpected write success") }
             write.fulfill()
         }
-        await fulfillment(of: [read, write], timeout: 1)
+        store.setFeedAutoDownloadAudio(
+            feedID: 42,
+            enabled: true
+        ) { result in
+            if case .success = result {
+                XCTFail("Unexpected media write success")
+            }
+            mediaWrite.fulfill()
+        }
+        await fulfillment(
+            of: [read, write, mediaWrite],
+            timeout: 1
+        )
     }
 
     func testFeedSettingsRequestLifecycleRejectsStaleResults() {
