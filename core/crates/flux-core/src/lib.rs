@@ -2912,7 +2912,7 @@ mod tests {
         };
         let b = {
             let core = core.clone();
-            thread::spawn(move || core.sync(SyncReason::Background).unwrap())
+            thread::spawn(move || core.sync(SyncReason::Manual).unwrap())
         };
         for _ in 0..5 {
             core.query_articles(ArticleQuery::default()).unwrap();
