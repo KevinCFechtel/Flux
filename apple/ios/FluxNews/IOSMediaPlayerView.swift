@@ -596,6 +596,13 @@ struct IOSMediaPlayerView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(String(localized: "Chapters"))
+        .popover(
+            isPresented: $chapterListPresented,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            chapterListContent
+        }
     }
 
     private var showNotesRow: some View {
@@ -818,125 +825,113 @@ struct IOSMediaPlayerView: View {
         }
     }
 
-    private var chapterMenu: some View {
-        Button {
-            presentChapterList()
-        } label: {
-            Label("Chapters", systemImage: "list.bullet.rectangle")
-        }
-        .disabled(isPreviewingInactiveItem || playbackState.chapters.isEmpty)
-        .popover(
-            isPresented: $chapterListPresented,
-            attachmentAnchor: .rect(.bounds),
-            arrowEdge: .bottom
-        ) {
-            NavigationStack {
-                ScrollViewReader { proxy in
-                    List {
-                        ForEach(
-                            Array(chapterListSnapshot.enumerated()),
-                            id: \.offset
-                        ) { index, chapter in
-                            let isActive = IOSMediaChapterListPresentation
-                                .activeIndex(
-                                    positionMs: playbackState.positionMs,
-                                    chapters: chapterListSnapshot
-                                ) == index
-                            Button {
-                                playbackCoordinator.seek(toMs: chapter.startMs)
-                                chapterListPresented = false
-                            } label: {
-                                HStack(
-                                    alignment: .firstTextBaseline,
-                                    spacing: 12
-                                ) {
-                                    Image(
-                                        systemName: isActive
-                                            ? "play.fill"
-                                            : "circle.fill"
-                                    )
-                                    .font(.caption2)
-                                    .foregroundStyle(
-                                        isActive
-                                            ? Color.accentColor
-                                            : Color.clear
-                                    )
-                                    .frame(width: 12)
-
-                                    Text(
-                                        IOSMediaChapterListPresentation
-                                            .positionLabel(chapter.startMs)
-                                    )
-                                    .font(.callout.monospacedDigit())
-                                    .foregroundStyle(.secondary)
-                                    .frame(minWidth: 52, alignment: .leading)
-
-                                    Text(
-                                        IOSMediaChapterListPresentation.title(
-                                            chapter,
-                                            index: index
-                                        )
-                                    )
-                                    .fontWeight(
-                                        isActive ? .semibold : .regular
-                                    )
-                                    .foregroundStyle(.primary)
-                                    .multilineTextAlignment(.leading)
-                                    .fixedSize(
-                                        horizontal: false,
-                                        vertical: true
-                                    )
-                                }
-                                .frame(
-                                    maxWidth: .infinity,
-                                    alignment: .leading
+    private var chapterListContent: some View {
+        NavigationStack {
+            ScrollViewReader { proxy in
+                List {
+                    ForEach(
+                        Array(chapterListSnapshot.enumerated()),
+                        id: \.offset
+                    ) { index, chapter in
+                        let isActive = IOSMediaChapterListPresentation
+                            .activeIndex(
+                                positionMs: playbackState.positionMs,
+                                chapters: chapterListSnapshot
+                            ) == index
+                        Button {
+                            playbackCoordinator.seek(toMs: chapter.startMs)
+                            chapterListPresented = false
+                        } label: {
+                            HStack(
+                                alignment: .firstTextBaseline,
+                                spacing: 12
+                            ) {
+                                Image(
+                                    systemName: isActive
+                                        ? "play.fill"
+                                        : "circle.fill"
                                 )
-                                .padding(.vertical, 3)
-                                .background(
+                                .font(.caption2)
+                                .foregroundStyle(
                                     isActive
-                                        ? Color.accentColor.opacity(0.10)
-                                        : Color.clear,
-                                    in: RoundedRectangle(cornerRadius: 8)
+                                        ? Color.accentColor
+                                        : Color.clear
                                 )
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .id(index)
-                        }
-                    }
-                    .listStyle(.plain)
-                    .onAppear {
-                        if let chapterInitialIndex {
-                            DispatchQueue.main.async {
-                                proxy.scrollTo(
-                                    chapterInitialIndex,
-                                    anchor: .center
+                                .frame(width: 12)
+
+                                Text(
+                                    IOSMediaChapterListPresentation
+                                        .positionLabel(chapter.startMs)
+                                )
+                                .font(.callout.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .frame(minWidth: 52, alignment: .leading)
+
+                                Text(
+                                    IOSMediaChapterListPresentation.title(
+                                        chapter,
+                                        index: index
+                                    )
+                                )
+                                .fontWeight(
+                                    isActive ? .semibold : .regular
+                                )
+                                .foregroundStyle(.primary)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(
+                                    horizontal: false,
+                                    vertical: true
                                 )
                             }
+                            .frame(
+                                maxWidth: .infinity,
+                                alignment: .leading
+                            )
+                            .padding(.vertical, 3)
+                            .background(
+                                isActive
+                                    ? Color.accentColor.opacity(0.10)
+                                    : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 8)
+                            )
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
+                        .id(index)
                     }
                 }
-                .navigationTitle("Chapters")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") {
-                            chapterListPresented = false
+                .listStyle(.plain)
+                .onAppear {
+                    if let chapterInitialIndex {
+                        DispatchQueue.main.async {
+                            proxy.scrollTo(
+                                chapterInitialIndex,
+                                anchor: .center
+                            )
                         }
                     }
                 }
             }
-            .frame(
-                minWidth: 340,
-                idealWidth: 440,
-                maxWidth: 520,
-                minHeight: 320,
-                idealHeight: 480
-            )
-            .presentationCompactAdaptation(.sheet)
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
+            .navigationTitle("Chapters")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        chapterListPresented = false
+                    }
+                }
+            }
         }
+        .frame(
+            minWidth: 340,
+            idealWidth: 440,
+            maxWidth: 520,
+            minHeight: 320,
+            idealHeight: 480
+        )
+        .presentationCompactAdaptation(.sheet)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 
     private var sleepTimerButton: some View {
