@@ -96,6 +96,29 @@ enum IOSMediaPlayerPreviewPresentation {
     }
 }
 
+enum IOSMediaTimePresentation {
+    static func label(_ milliseconds: UInt64) -> String {
+        let totalSeconds = milliseconds / 1_000
+        let seconds = totalSeconds % 60
+        let totalMinutes = totalSeconds / 60
+        if totalMinutes >= 60 {
+            let hours = totalMinutes / 60
+            let minutes = totalMinutes % 60
+            return String(
+                format: "%llu:%02llu:%02llu",
+                hours,
+                minutes,
+                seconds
+            )
+        }
+        return String(
+            format: "%llu:%02llu",
+            totalMinutes,
+            seconds
+        )
+    }
+}
+
 enum IOSMediaChapterListPresentation {
     static func title(_ chapter: MediaChapter, index: Int) -> String {
         MediaChapterPresentation.usesGeneratedTitle(chapter.title)
@@ -104,10 +127,7 @@ enum IOSMediaChapterListPresentation {
     }
 
     static func positionLabel(_ milliseconds: UInt64) -> String {
-        let totalSeconds = milliseconds / 1_000
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%02llu:%02llu", minutes, seconds)
+        IOSMediaTimePresentation.label(milliseconds)
     }
 
     static func activeIndex(
@@ -240,6 +260,7 @@ struct IOSMediaPlayerView: View {
     @State private var artworkImage: UIImage?
     @State private var artworkIsLoading = false
     @State private var showPlaybackWaitIndicator = false
+    @State private var previewChapters: [MediaChapter] = []
 
     private var layoutMode: IOSMediaPlayerLayoutMode {
         IOSMediaPlayerLayoutPolicy.mode(
@@ -362,6 +383,9 @@ struct IOSMediaPlayerView: View {
             }
             guard shouldRequestPlaybackWaitIndicator else { return }
             showPlaybackWaitIndicator = true
+        }
+        .task(id: chapterPreviewTaskKey) {
+            await loadPreviewChapters()
         }
     }
 
@@ -544,11 +568,14 @@ struct IOSMediaPlayerView: View {
         }
     }
 
+    private var displayedChapters: [MediaChapter] {
+        isPreviewingInactiveItem ? previewChapters : playbackState.chapters
+    }
+
     private var chapterSummary: IOSMediaPlayerChapterSummary? {
-        guard !isPreviewingInactiveItem else { return nil }
-        return IOSMediaPlayerChapterSummary.resolve(
-            positionMs: playbackState.positionMs,
-            chapters: playbackState.chapters
+        IOSMediaPlayerChapterSummary.resolve(
+            positionMs: displayedPositionMs,
+            chapters: displayedChapters
         )
     }
 
@@ -976,6 +1003,7 @@ struct IOSMediaPlayerView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .disabled(isPreviewingInactiveItem)
                         .id(index)
                     }
                 }
@@ -1182,12 +1210,38 @@ struct IOSMediaPlayerView: View {
     }
 
     private func presentChapterList() {
-        chapterListSnapshot = playbackState.chapters
+        chapterListSnapshot = displayedChapters
         chapterInitialIndex = IOSMediaChapterListPresentation.activeIndex(
-            positionMs: playbackState.positionMs,
-            chapters: playbackState.chapters
+            positionMs: displayedPositionMs,
+            chapters: displayedChapters
         )
         chapterListPresented = true
+    }
+
+    private var chapterPreviewTaskKey: String {
+        guard isPreviewingInactiveItem,
+              let enclosureID = previewEnclosure?.enclosure.id else {
+            return "active"
+        }
+        return "preview:\(enclosureID)"
+    }
+
+    @MainActor
+    private func loadPreviewChapters() async {
+        guard isPreviewingInactiveItem,
+              let enclosureID = previewEnclosure?.enclosure.id else {
+            previewChapters = []
+            return
+        }
+        let chapters = await playbackCoordinator.previewChapters(
+            enclosureID: enclosureID
+        )
+        guard !Task.isCancelled,
+              isPreviewingInactiveItem,
+              previewEnclosure?.enclosure.id == enclosureID else {
+            return
+        }
+        previewChapters = chapters
     }
 
     private var artworkTaskKey: String {
@@ -1269,8 +1323,7 @@ struct IOSMediaPlayerView: View {
     }
 
     private func timeLabel(_ milliseconds: UInt64) -> String {
-        Duration.seconds(Double(milliseconds) / 1_000)
-            .formatted(.time(pattern: .minuteSecond))
+        IOSMediaTimePresentation.label(milliseconds)
     }
 
     private func rateLabel(_ rate: Double) -> String {
