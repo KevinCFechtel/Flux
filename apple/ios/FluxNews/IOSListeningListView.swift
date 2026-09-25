@@ -280,6 +280,9 @@ struct IOSListeningListView: View {
             }
         } label: {
             Image(systemName: "ellipsis.circle")
+                .font(.title3)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .accessibilityLabel(String(localized: "Listening List actions"))
     }
