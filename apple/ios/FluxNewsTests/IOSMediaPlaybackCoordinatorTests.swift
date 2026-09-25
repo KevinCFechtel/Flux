@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import FluxNews
 
@@ -320,7 +321,7 @@ final class IOSMediaPlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(engine.rate, 0.5)
     }
 
-    func testNaturalEndReportsCoreCompletionAndReleasesDeletionDeferral() async throws {
+    func testNaturalEndReportsCoreCompletionAndRequestsTransferReconciliation() async throws {
         let core = FakeIOSPlaybackCoreAccess(status: .inProgress)
         let engine = FakeIOSPlaybackEngine()
         let audio = FakeIOSAudioSession()
