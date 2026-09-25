@@ -298,29 +298,44 @@ struct IOSListeningListView: View {
             Button(role: .destructive) {
                 Task {
                     await store.deleteDownload(
-                        enclosure.enclosure.id
+                        enclosureID: enclosure.enclosure.id
                     )
                 }
             } label: {
                 Label("Delete Download", systemImage: "trash")
             }
 
-        case .requested:
+        case .pending, .downloading:
             Button {
                 Task {
                     await store.cancelDownload(
-                        enclosure.enclosure.id
+                        enclosureID: enclosure.enclosure.id
                     )
                 }
             } label: {
-                Label("Cancel Download", systemImage: "xmark.circle")
+                if action == .downloading,
+                   let fraction = transferState.runtime(
+                       for: enclosure.enclosure.id
+                   )?.fraction {
+                    Label(
+                        String(
+                            localized: "\(Int((fraction * 100).rounded()))% downloaded"
+                        ),
+                        systemImage: "xmark.circle"
+                    )
+                } else {
+                    Label("Cancel Download", systemImage: "xmark.circle")
+                }
             }
 
-        case .failed:
+        case .cancelling:
+            Label("Cancelling Download", systemImage: "clock")
+
+        case .retry:
             Button {
                 Task {
                     await store.retryDownload(
-                        enclosure.enclosure.id
+                        enclosureID: enclosure.enclosure.id
                     )
                 }
             } label: {
@@ -334,7 +349,7 @@ struct IOSListeningListView: View {
             Button {
                 Task {
                     await store.requestDownload(
-                        enclosure.enclosure.id
+                        enclosureID: enclosure.enclosure.id
                     )
                 }
             } label: {
