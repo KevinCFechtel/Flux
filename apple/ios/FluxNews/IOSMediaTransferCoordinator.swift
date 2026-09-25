@@ -128,6 +128,8 @@ final class IOSMediaTransferCoordinator: NSObject {
     private var isMediaInUse: (Int64) -> Bool = { _ in false }
     private let logger = IOSAppLogger(category: "media-transfer")
 
+    var onWorkChanged: (() -> Void)?
+
     private var core: Flux?
     private var lifecycleGeneration: UInt64 = 0
     private var executionToken: String?
@@ -462,6 +464,8 @@ final class IOSMediaTransferCoordinator: NSObject {
             logger.error(
                 "media completion callback rejected enclosure=\(enclosureID): \(String(reflecting: error))"
             )
+        } else {
+            onWorkChanged?()
         }
         presentationState.remove(enclosureID: enclosureID)
     }
@@ -481,6 +485,8 @@ final class IOSMediaTransferCoordinator: NSObject {
             logger.error(
                 "media failure callback rejected enclosure=\(enclosureID): \(String(reflecting: error))"
             )
+        } else {
+            onWorkChanged?()
         }
         presentationState.remove(enclosureID: enclosureID)
     }
@@ -496,6 +502,8 @@ final class IOSMediaTransferCoordinator: NSObject {
             logger.error(
                 "media deletion callback rejected enclosure=\(enclosureID): \(String(reflecting: error))"
             )
+        } else {
+            onWorkChanged?()
         }
         presentationState.remove(enclosureID: enclosureID)
     }
