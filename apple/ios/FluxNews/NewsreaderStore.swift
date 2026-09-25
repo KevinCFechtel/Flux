@@ -499,7 +499,7 @@ struct ArticleRowContent: Equatable, Sendable {
     }
 }
 
-struct IOSArticleAudioActionState: Equatable {
+struct IOSArticleAudioActionState {
     let articleID: Int64
     let enclosures: [Enclosure]
     let isInListeningList: Bool
@@ -552,6 +552,7 @@ struct IOSArticleAudioActionState: Equatable {
     private(set) var categoryCounts: [Int64: UInt64] = [:]
     private(set) var feedCounts: [Int64: UInt64] = [:]
     private(set) var articleAudioActionStates: [Int64: IOSArticleAudioActionState] = [:]
+    var onMediaTransferReconciliationRequested: (() async -> Void)?
     @ObservationIgnored private var feedIconPresentationStates: [IOSFeedIconKey: IOSFeedIconPresentationState] = [:]
     private(set) var isLoading = false
     private(set) var manualSyncState: IOSManualSyncState = .idle
@@ -986,8 +987,7 @@ struct IOSArticleAudioActionState: Equatable {
         if case .success = result {
             refreshArticleAudioActionState(articleID: articleID)
             if reconcileTransfers {
-                await IOSAppRuntime.shared.mediaTransferReconciliationHandoff
-                    .requestReconciliation()
+                await onMediaTransferReconciliationRequested?()
             }
         }
         return result
