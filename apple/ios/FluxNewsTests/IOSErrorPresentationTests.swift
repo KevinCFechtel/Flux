@@ -36,3 +36,118 @@ final class IOSErrorPresentationTests: XCTestCase {
         XCTAssertEqual(IOSErrorPresentation.message(for: AccountValidationError.InvalidResponse, context: .startup), String(localized: "The Miniflux server returned an unexpected response."))
     }
 }
+
+
+final class IOSAppDiagnosticsTests: XCTestCase {
+    private func makeRoot() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("FluxNewsDiagnosticsTests")
+            .appendingPathComponent(UUID().uuidString)
+    }
+
+    private func makeDefaults() -> UserDefaults {
+        let suite = "FluxNewsDiagnosticsTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
+
+    func testDiagnosticsAreBoundedAndDebugIsOptIn() {
+        let diagnostics = IOSAppDiagnostics(
+            defaults: makeDefaults(),
+            rootDirectory: makeRoot(),
+            maxEntries: 3
+        )
+
+        XCTAssertNil(
+            diagnostics.record(
+                level: .debug,
+                category: "test",
+                message: "hidden"
+            )
+        )
+
+        for index in 0..<5 {
+            diagnostics.record(
+                level: .info,
+                category: "test",
+                message: "entry-\(index)"
+            )
+        }
+
+        XCTAssertEqual(
+            diagnostics.snapshot().map(\.message),
+            ["entry-2", "entry-3", "entry-4"]
+        )
+    }
+
+    func testDebugPreferenceAndEntriesSurviveRelaunch() {
+        let root = makeRoot()
+        let defaults = makeDefaults()
+        let first = IOSAppDiagnostics(
+            defaults: defaults,
+            rootDirectory: root
+        )
+        first.setDebugLoggingEnabled(true)
+        first.record(
+            level: .debug,
+            category: "test",
+            message: "debug-entry"
+        )
+
+        let relaunched = IOSAppDiagnostics(
+            defaults: defaults,
+            rootDirectory: root
+        )
+
+        XCTAssertTrue(relaunched.isDebugLoggingEnabled)
+        XCTAssertTrue(
+            relaunched.snapshot().contains {
+                $0.message == "debug-entry"
+            }
+        )
+    }
+
+    func testSensitiveValuesAndCredentialPatternsAreRedactedBeforePersistence() {
+        let diagnostics = IOSAppDiagnostics(
+            defaults: makeDefaults(),
+            rootDirectory: makeRoot()
+        )
+        diagnostics.setSensitiveValues([
+            "super-secret-api-key",
+            "custom-header-secret"
+        ])
+
+        diagnostics.record(
+            level: .error,
+            category: "test",
+            message: "apiKey=other-secret key=super-secret-api-key header=custom-header-secret"
+        )
+
+        let message = diagnostics.snapshot().last?.message ?? ""
+        XCTAssertFalse(message.contains("super-secret-api-key"))
+        XCTAssertFalse(message.contains("custom-header-secret"))
+        XCTAssertFalse(message.contains("other-secret"))
+        XCTAssertTrue(message.contains("<redacted>"))
+    }
+
+    func testExportContainsSupportMetadataAndRecords() throws {
+        let diagnostics = IOSAppDiagnostics(
+            defaults: makeDefaults(),
+            rootDirectory: makeRoot()
+        )
+        diagnostics.record(
+            level: .warning,
+            category: "media-playback",
+            message: "device playback warning"
+        )
+
+        let url = try diagnostics.makeExportURL()
+        let export = try String(contentsOf: url, encoding: .utf8)
+
+        XCTAssertTrue(export.contains("FluxNews Diagnostics"))
+        XCTAssertTrue(export.contains("App version:"))
+        XCTAssertTrue(export.contains("OS:"))
+        XCTAssertTrue(export.contains("[WARNING] [media-playback] device playback warning"))
+    }
+}
