@@ -646,10 +646,7 @@ final class IOSMediaPlaybackCoordinator {
     private let audioSession: IOSMediaAudioSessionManaging
     private let presentationState: IOSMediaPlaybackPresentationState
     private let checkpointInterval: TimeInterval
-    private let logger = Logger(
-        subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews",
-        category: "media-playback"
-    )
+    private let logger = IOSAppLogger(category: "media-playback")
 
     /// Transient D6-G diagnostic for physical-device builds where OSLog cannot
     /// be inspected through Xcode. Never persisted and never used as domain state.
