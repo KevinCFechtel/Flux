@@ -6,8 +6,6 @@ struct IOSListeningListView: View {
     @ObservedObject var playbackState: IOSMediaPlaybackPresentationState
     @ObservedObject var transferState: IOSMediaTransferPresentationState
     let playbackCoordinator: IOSMediaPlaybackCoordinator
-    let showsScopeChooser: Bool
-    let onPresentScopeChooser: () -> Void
     let onOpenPlayer: (_ articleID: Int64) -> Void
     let onPlay: (_ articleID: Int64, _ enclosureID: Int64) -> Void
     let feedIconState: (_ feedID: Int64, _ variant: FeedIconVariant) -> IOSFeedIconPresentationState
@@ -44,26 +42,8 @@ struct IOSListeningListView: View {
             }
         }
         .navigationTitle("Listening List")
-        .navigationBarBackButtonHidden(true)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if showsScopeChooser {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(action: onPresentScopeChooser) {
-                        Image(IOSNavigationButtonPresentation.imageName)
-                            .renderingMode(.template)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(
-                                width: IOSNavigationButtonPresentation.glyphSize,
-                                height: IOSNavigationButtonPresentation.glyphSize
-                            )
-                    }
-                    .accessibilityLabel(
-                        IOSNavigationButtonPresentation.accessibilityLabel
-                    )
-                }
-            }
-
             ToolbarItemGroup(placement: .topBarTrailing) {
                 feedMenu
                 sortMenu
