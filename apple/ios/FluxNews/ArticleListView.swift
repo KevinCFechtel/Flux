@@ -1400,8 +1400,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             let action = UIContextualAction(
                 style: .normal,
                 title: newValue
-                    ? String(localized: "Mark as Read")
-                    : String(localized: "Mark as Unread")
+                    ? String(localized: "Swipe Read")
+                    : String(localized: "Swipe Unread")
             ) { [weak self] _, _, completion in
                 self?.setRead(id: articleID, value: newValue)
                 completion(true)
@@ -1417,8 +1417,8 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             let action = UIContextualAction(
                 style: .normal,
                 title: newValue
-                    ? String(localized: "Star")
-                    : String(localized: "Unstar")
+                    ? String(localized: "Swipe Star")
+                    : String(localized: "Swipe Unstar")
             ) { [weak self] _, _, completion in
                 self?.setStarred(id: articleID, value: newValue)
                 completion(true)
@@ -1434,7 +1434,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             return makeContextSwipeAction(
                 article: item.article,
                 contextAction: .comments,
-                title: String(localized: "Open Comments"),
+                title: String(localized: "Swipe Comments"),
                 systemImage: "bubble.left",
                 backgroundColor: .systemTeal
             )
@@ -1443,7 +1443,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             return makeContextSwipeAction(
                 article: item.article,
                 contextAction: .original,
-                title: String(localized: "Open Original"),
+                title: String(localized: "Swipe Original"),
                 systemImage: "safari",
                 backgroundColor: .systemBlue
             )
@@ -1452,7 +1452,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             return makeContextSwipeAction(
                 article: item.article,
                 contextAction: .miniflux,
-                title: String(localized: "Open in Miniflux"),
+                title: String(localized: "Swipe Miniflux"),
                 systemImage: "arrow.up.forward.app",
                 backgroundColor: .systemIndigo
             )
@@ -1461,7 +1461,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             return makeContextSwipeAction(
                 article: item.article,
                 contextAction: .share,
-                title: String(localized: "Share"),
+                title: String(localized: "Swipe Share"),
                 systemImage: "square.and.arrow.up",
                 backgroundColor: .systemBlue
             )
@@ -1470,7 +1470,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
             return makeContextSwipeAction(
                 article: item.article,
                 contextAction: .saveToService,
-                title: String(localized: "Save to Third-Party Service"),
+                title: String(localized: "Swipe Save"),
                 systemImage: "tray.and.arrow.down",
                 backgroundColor: .systemPurple
             )
