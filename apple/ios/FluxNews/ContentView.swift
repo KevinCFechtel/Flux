@@ -567,6 +567,9 @@ struct ContentView: View {
                     await IOSAppRuntime.shared.mediaTransferReconciliationHandoff
                         .requestReconciliation()
                 }
+                IOSAppRuntime.shared.mediaRuntime.transferCoordinator.onWorkChanged = {
+                    listeningListStore.reload()
+                }
                 newsreaderStore.onMediaTransferReconciliationRequested = {
                     await IOSAppRuntime.shared.mediaTransferReconciliationHandoff
                         .requestReconciliation()
@@ -580,6 +583,7 @@ struct ContentView: View {
                 searchStore.onMediaTransferReconciliationRequested = nil
                 searchStore.detach()
                 listeningListStore.onTransferReconciliationRequested = nil
+                IOSAppRuntime.shared.mediaRuntime.transferCoordinator.onWorkChanged = nil
                 newsreaderStore.onMediaTransferReconciliationRequested = nil
                 listeningListStore.detach()
             }
