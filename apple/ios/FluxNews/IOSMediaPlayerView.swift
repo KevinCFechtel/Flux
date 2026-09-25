@@ -865,10 +865,11 @@ struct IOSMediaPlayerView: View {
     }
 
     private var sleepTimerLabel: String {
+        let title = String(localized: "Sleep Timer")
         guard let remaining = sleepTimer.remainingSeconds else {
-            return String(localized: "Sleep Timer")
+            return title
         }
-        return "Sleep \(sleepTimerRemainingLabel(remaining))"
+        return "\(title) \(sleepTimerRemainingLabel(remaining))"
     }
 
     private func sleepTimerRemainingLabel(_ seconds: Int) -> String {
