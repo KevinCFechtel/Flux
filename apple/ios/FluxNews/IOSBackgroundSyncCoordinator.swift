@@ -1,6 +1,5 @@
 import BackgroundTasks
 import Foundation
-import OSLog
 
 enum IOSBackgroundRefreshConfiguration {
     static let preferredInterval: TimeInterval = 30 * 60
@@ -156,10 +155,7 @@ final class IOSBackgroundSyncCoordinator {
     private let settingsWriter: @Sendable (Flux, Bool) throws -> Void
     private let syncRunner: @Sendable (Flux, SyncCancellation) throws -> SyncOutcome
     private let resumeSyncRunner: @Sendable (Flux, SyncCancellation) throws -> SyncOutcome
-    private let logger = Logger(
-        subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews",
-        category: "background-sync"
-    )
+    private let logger = IOSAppLogger(category: "background-sync")
 
     private var nextRunID: UInt64 = 0
     private var activeRunID: UInt64?
@@ -226,7 +222,7 @@ final class IOSBackgroundSyncCoordinator {
             }
         case let .failure(error):
             logger.error(
-                "Could not read Background Sync setting: \(String(reflecting: error), privacy: .private)"
+                "Could not read Background Sync setting: \(String(reflecting: error))"
             )
         }
     }
@@ -300,7 +296,7 @@ final class IOSBackgroundSyncCoordinator {
             if case let .failure(error) = result,
                !(error is CancellationError) {
                 logger.error(
-                    "Resume Sync failed: \(String(reflecting: error), privacy: .private)"
+                    "Resume Sync failed: \(String(reflecting: error))"
                 )
             }
         }
@@ -378,7 +374,7 @@ final class IOSBackgroundSyncCoordinator {
             }
         case let .failure(error):
             logger.error(
-                "Background Sync setting read failed: \(String(reflecting: error), privacy: .private)"
+                "Background Sync setting read failed: \(String(reflecting: error))"
             )
             return false
         }
@@ -413,7 +409,7 @@ final class IOSBackgroundSyncCoordinator {
         case let .failure(error):
             if !(error is CancellationError) {
                 logger.error(
-                    "Background Sync failed: \(String(reflecting: error), privacy: .private)"
+                    "Background Sync failed: \(String(reflecting: error))"
                 )
             }
             return false
@@ -428,7 +424,7 @@ final class IOSBackgroundSyncCoordinator {
             )
         } catch {
             logger.error(
-                "Could not schedule Background Sync: \(String(reflecting: error), privacy: .private)"
+                "Could not schedule Background Sync: \(String(reflecting: error))"
             )
         }
     }
