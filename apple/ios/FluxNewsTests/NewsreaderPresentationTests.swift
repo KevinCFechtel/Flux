@@ -5054,10 +5054,34 @@ final class NewsreaderPresentationTests: XCTestCase {
             activeEnclosureId: nil
         )
 
-        let summary = IOSListeningListPresentation.downloadSummary(item)
+        let transfers: [Int64: MediaTransferRuntime] = [
+            2: MediaTransferRuntime(
+                enclosureID: 2,
+                bytesReceived: 40,
+                expectedBytes: 100,
+                phase: .transferring
+            )
+        ]
+        let summary = IOSListeningListPresentation.downloadSummary(
+            item,
+            transfers: transfers
+        )
         XCTAssertEqual(summary.downloaded, 1)
         XCTAssertEqual(summary.pending, 2)
         XCTAssertEqual(summary.total, 4)
+        XCTAssertEqual(
+            IOSListeningListPresentation.downloadAction(
+                item.audioEnclosures[1],
+                runtime: transfers[2]
+            ),
+            .downloading
+        )
+        let transfer = IOSListeningListPresentation.transferProgress(
+            item,
+            transfers: transfers
+        )
+        XCTAssertEqual(transfer?.fraction, 0.4)
+        XCTAssertEqual(transfer?.label, String(localized: "40% downloaded"))
     }
 
     func testReaderDocumentNoticePreservesAllContentStates() {
