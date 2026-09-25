@@ -1,6 +1,6 @@
 # iOS D4 follow-up findings
 
-Status: **OPEN / implementation required before final Phase-D acceptance**
+Status: **D4 FOLLOW-UP COMPLETE / canonical iOS test gate passed**
 
 This note records product and contract decisions found during the post-D5 gap
 review against the native Phase-D contract and the former Flutter FluxNews
@@ -12,7 +12,7 @@ regression evidence.
 Flutter remains a behavioral reference, not a parity checklist. The decisions
 below are explicit product decisions for the native iOS/iPadOS client.
 
-## 1. Rebuild Local State — IMPLEMENTED / VALIDATION PENDING
+## 1. Rebuild Local State — COMPLETE
 
 D4.1 already requires **Rebuild Local State** and **Remove Account** as distinct
 operations. Remove Account exists in native iOS; Rebuild Local State is still
@@ -49,10 +49,9 @@ Implementation status:
   failure.
 - Focused AccountLifecycle tests cover credential/Core preservation, app-wide
   quiescence, and failure recovery.
-- Canonical iOS test/build validation is still required before this item is
-  marked complete.
+- 
 
-## 2. Native iOS mutation delivery mode — IMPLEMENTED / VALIDATION PENDING
+## 2. Native iOS mutation delivery mode — COMPLETE
 
 The Rust Core already supports `DeliveryMode::Live` and
 `DeliveryMode::Deferred`. Native iOS Read/Unread and Star/Unstar mutations,
@@ -99,10 +98,9 @@ Implementation status:
 - Focused tests cover first-start Live defaulting, preservation of explicit
   Deferred choice on later startup, and direct Core-backed preference reads and
   writes.
-- Canonical iOS test/build validation is still required before this item is
-  marked complete.
+- 
 
-## 3. UIKit Timeline swipe actions — IMPLEMENTED / VALIDATION PENDING
+## 3. UIKit Timeline swipe actions — COMPLETE
 
 The fixed one-action-per-side implementation is incomplete relative to the
 authoritative mobile interaction contract.
@@ -144,10 +142,9 @@ Implementation status:
   swipe architecture. No placeholder/no-op action is permitted.
 - Focused tests cover 0-2 action normalization, duplicate suppression,
   persistence, outer/full-swipe mapping, and conditional action omission.
-- Canonical iOS test/build validation is still required before this item is
-  marked complete.
+- 
 
-## 4. Missing Core-backed article/settings controls — IMPLEMENTED / VALIDATION PENDING
+## 4. Missing Core-backed article/settings controls — COMPLETE
 
 Native iOS Settings must also expose the already-supported Core settings:
 
@@ -171,8 +168,7 @@ Implementation status:
 - The Core defaults remain authoritative when the user has not changed either
   value.
 - Focused tests cover reading and writing both settings against the real Core.
-- Canonical iOS test/build validation is still required before this item is
-  marked complete.
+- 
 
 ## 5. Configuration backup/restore — PHASE D, DEFERRED UNTIL SETTINGS STABILIZE
 
@@ -235,18 +231,21 @@ Product decision:
 - Treat the legacy Flutter curated-feed surface as retired behavior, not an open
   parity gap.
 
-## Implementation order
+## D4 follow-up acceptance
 
-The immediate D4 follow-up implementation set is:
+The immediate D4 follow-up implementation set is complete and accepted:
 
 1. Rebuild Local State.
 2. Live-by-default mutation delivery plus the user switch.
 3. Full documented mobile swipe-action configuration contract.
 4. Read-retention and Reader detail-limit Settings.
 
-Configuration backup/restore and diagnostics export remain explicit late
-Phase-D completion items. Curated feed onboarding is closed as intentionally
-removed.
+The canonical native iOS `./apple/ios/Build/test.sh` gate passed after the
+combined implementation and the iOS-17 SwiftUI Section compatibility fix.
+
+Configuration backup/restore and diagnostics export remain explicit **late
+Phase-D** completion items rather than D4 blockers. Curated feed onboarding is
+closed as intentionally removed.
 
 ## Scope guard
 
