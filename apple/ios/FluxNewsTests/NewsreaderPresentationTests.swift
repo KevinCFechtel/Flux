@@ -273,6 +273,43 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: collapsedPersistent), .floatingTopTrailing)
     }
 
+    func testPassiveActionFeedbackUsesBoundedTransientPresentation() {
+        XCTAssertEqual(
+            IOSActionFeedbackPresentation.autoDismissDelay,
+            .seconds(3)
+        )
+
+        let first = IOSActionFeedbackItem(
+            id: 1,
+            kind: .addedToListeningList
+        )
+        let replacement = IOSActionFeedbackItem(
+            id: 2,
+            kind: .downloadRequested
+        )
+
+        XCTAssertTrue(
+            IOSActionFeedbackPresentation.shouldDismiss(
+                current: first,
+                id: 1
+            )
+        )
+        XCTAssertFalse(
+            IOSActionFeedbackPresentation.shouldDismiss(
+                current: replacement,
+                id: 1
+            )
+        )
+        XCTAssertEqual(
+            IOSActionFeedbackKind.addedToListeningList.message,
+            String(localized: "Added to Listening List")
+        )
+        XCTAssertEqual(
+            IOSActionFeedbackKind.downloadRequested.symbolName,
+            "arrow.down.circle"
+        )
+    }
+
     func testMoreActionsKeepSettingsAndOnlyOfferNextForSupportedScopes() {
         XCTAssertEqual(IOSMoreAction.actions(for: .feed(1), hasNextScope: true), [.markAllRead, .markAllReadAndNext, .settings])
         XCTAssertEqual(IOSMoreAction.actions(for: .feed(1), hasNextScope: false), [.markAllRead, .settings])
