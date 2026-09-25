@@ -20,7 +20,7 @@ enum IOSMediaBackgroundTransferConfiguration {
 }
 
 private struct IOSMediaTransferTaskIdentity: Codable, Equatable {
-    static let version = 1
+    static let currentVersion = 1
 
     let version: Int
     let executionToken: String
@@ -32,7 +32,7 @@ private struct IOSMediaTransferTaskIdentity: Codable, Equatable {
         enclosureID: Int64,
         localReference: String
     ) {
-        version = Self.version
+        version = Self.currentVersion
         self.executionToken = executionToken
         self.enclosureID = enclosureID
         self.localReference = localReference
@@ -47,7 +47,7 @@ private struct IOSMediaTransferTaskIdentity: Codable, Equatable {
         guard let description,
               let data = Data(base64Encoded: description),
               let identity = try? JSONDecoder().decode(Self.self, from: data),
-              identity.version == version else {
+              identity.version == currentVersion else {
             return nil
         }
         return identity
@@ -299,8 +299,9 @@ final class IOSMediaTransferCoordinator: NSObject {
         }
 
         let requestedIDs = Set(requested.map(\.enclosureId))
-        for (enclosureID, task) in currentTasks where !requestedIDs.contains(enclosureID) {
-            task.cancel()
+        let staleEnclosureIDs = currentTasks.keys.filter { !requestedIDs.contains($0) }
+        for enclosureID in staleEnclosureIDs {
+            currentTasks[enclosureID]?.cancel()
             presentationState.remove(enclosureID: enclosureID)
             currentTasks[enclosureID] = nil
         }
