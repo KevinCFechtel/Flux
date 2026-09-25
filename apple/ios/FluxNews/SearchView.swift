@@ -5,6 +5,7 @@ struct SearchView: View {
     var newsreaderStore: NewsreaderStore
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
+    let onArticleMediaAction: (ArticleSummary, IOSArticleMediaAction) -> Void
     let onSetRead: (ArticleSummary, Bool) -> Void
     let onSetStarred: (ArticleSummary, Bool) -> Void
     @State private var searchInterfacePresented = true
@@ -15,6 +16,7 @@ struct SearchView: View {
             newsreaderStore: newsreaderStore,
             onArticleTap: onArticleTap,
             onArticleAction: onArticleAction,
+            onArticleMediaAction: onArticleMediaAction,
             onSetRead: onSetRead,
             onSetStarred: onSetStarred
         )
@@ -50,6 +52,7 @@ private struct SearchResultsContent: View {
     var newsreaderStore: NewsreaderStore
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
+    let onArticleMediaAction: (ArticleSummary, IOSArticleMediaAction) -> Void
     let onSetRead: (ArticleSummary, Bool) -> Void
     let onSetStarred: (ArticleSummary, Bool) -> Void
 
@@ -84,10 +87,12 @@ private struct SearchResultsContent: View {
                     scrollResetRevision: 0,
                     markReadOnScrolloverEnabled: false,
                     swipeConfiguration: newsreaderStore.articleSwipeConfiguration,
+                    audioActionStates: store.articleAudioActionStates,
                     showsRefreshControl: false,
                     naturalTopContentInset: 0,
                     onArticleTap: onArticleTap,
                     onArticleAction: onArticleAction,
+                    onArticleMediaAction: onArticleMediaAction,
                     onSetRead: onSetRead,
                     onSetStarred: onSetStarred,
                     onRequestFeedIcon: { feedID, variant, displayScale in
