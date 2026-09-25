@@ -460,6 +460,7 @@ protocol IOSMediaPlaybackCoreAccessing: AnyObject {
     func attach(to core: Flux)
     func detach()
     func preparePlayback(enclosureID: Int64) async throws -> PlaybackPreparation
+    func playbackState(enclosureID: Int64) async -> PlaybackState?
     func chapters(enclosureID: Int64) async throws -> [MediaChapter]
     func artworkSource(enclosureID: Int64) async -> MediaArtworkSource?
     func artwork(reference: String) async -> Data?
@@ -501,6 +502,22 @@ final class IOSMediaPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
             throw IOSMediaPlaybackError.sessionUnavailable
         }
         return try result.get()
+    }
+
+    func playbackState(enclosureID: Int64) async -> PlaybackState? {
+        guard let core else { return nil }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: core,
+            { try core.playbackState(enclosureId: enclosureID) }
+        ) else {
+            return nil
+        }
+        switch result {
+        case let .success(state):
+            return state.status == .notStarted ? nil : state
+        case .failure:
+            return nil
+        }
     }
 
     func chapters(enclosureID: Int64) async throws -> [MediaChapter] {
@@ -918,6 +935,52 @@ final class IOSMediaPlaybackCoordinator {
         engine.rate = presentationState.playbackRate
         onPlaybackUseChanged?()
         return preparation
+    }
+
+    func reconcileAfterSuccessfulSync() async {
+        guard let enclosureID = activeEnclosureID else { return }
+
+        // A remote sync must never force-seek actively playing native audio.
+        guard !engine.isPlaying else {
+            logger.info(
+                "playback sync reconcile skipped active playback enclosure=\(enclosureID)"
+            )
+            return
+        }
+
+        guard let state = await coreAccess.playbackState(
+            enclosureID: enclosureID
+        ) else {
+            return
+        }
+
+        // Playback may have changed while the Core read was in flight.
+        guard activeEnclosureID == enclosureID,
+              !engine.isPlaying else {
+            return
+        }
+
+        let targetPosition = state.status == .completed
+            ? (state.durationMs ?? state.positionMs)
+            : state.positionMs
+
+        preparedStatus = state.status
+        if let durationMs = state.durationMs {
+            preparedDurationMs = durationMs
+            lastObservedDurationMs = durationMs
+            presentationState.setDuration(durationMs)
+        }
+
+        guard engine.currentPositionMs != targetPosition
+                || presentationState.positionMs != targetPosition else {
+            return
+        }
+
+        logger.info(
+            "playback sync reconcile enclosure=\(enclosureID) from=\(engine.currentPositionMs) to=\(targetPosition) status=\(String(describing: state.status))"
+        )
+        engine.seek(toMs: targetPosition)
+        presentationState.setPosition(targetPosition)
     }
 
     func play(enclosureID: Int64) async throws {
