@@ -1346,13 +1346,15 @@ in D5. Reuse/refactor Phase-C Apple media code only where needed for actual
 cross-platform use.
 
 D6 starts from an existing Core/UniFFI media contract and a completed macOS
-reference implementation. iOS already has the D5
-`IOSMediaTransferReconciliationHandoff`, which buffers/coalesces reconciliation
-requests until D6 installs a native transfer executor. The presence of shared
-`BrowserScope.listeningList` and iOS semantic Listening List actions is
-preparatory only; it does not mean that the native iOS Listening List, player,
-AVAudioSession lifecycle, or persistent background URLSession transfer executor
-already exists.
+reference implementation. The repository-first readiness review and concrete
+execution/work-package contract are maintained in
+[`IOS_D6_NATIVE_MEDIA_IMPLEMENTATION.md`](IOS_D6_NATIVE_MEDIA_IMPLEMENTATION.md).
+iOS already has the D5 `IOSMediaTransferReconciliationHandoff`, which
+buffers/coalesces reconciliation requests until D6 installs a native transfer
+executor. The presence of shared `BrowserScope.listeningList` and iOS semantic
+Listening List actions is preparatory only; it does not mean that the native
+iOS Listening List, player, AVAudioSession lifecycle, or persistent background
+URLSession transfer executor already exists.
 
 ### D7 — Now Playing & CarPlay
 
