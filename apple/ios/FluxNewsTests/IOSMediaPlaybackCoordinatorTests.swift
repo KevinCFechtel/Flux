@@ -396,6 +396,24 @@ final class IOSMediaPlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(core.checkpoints.last?.1, 24_000)
     }
 
+    func testLocalArtworkUsesCoreAccess() async {
+        let core = FakeIOSPlaybackCoreAccess()
+        let engine = FakeIOSPlaybackEngine()
+        let audio = FakeIOSAudioSession()
+        let coordinator = makeCoordinator(
+            core: core,
+            engine: engine,
+            audio: audio
+        )
+        core.artworkData = Data([1, 2, 3, 4])
+
+        let data = await coordinator.artwork(
+            source: .localReference(reference: "artwork/reference")
+        )
+
+        XCTAssertEqual(data, Data([1, 2, 3, 4]))
+    }
+
     func testAVPlayerMillisecondsRejectsInvalidValues() {
         XCTAssertNil(
             IOSAVPlayerPlaybackEngine.milliseconds(
