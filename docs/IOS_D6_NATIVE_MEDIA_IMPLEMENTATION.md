@@ -786,6 +786,14 @@ The final D6-D implementation slice now additionally provides:
   preserves the prepared enclosure for later resume, and releases AVAudioSession;
 - player Download / Cancel / Retry / Delete controls sourced from the existing
   Core download projection plus app-scoped transfer runtime;
+- Show Notes are an inline disclosure inside the Player's existing ScrollView;
+  expanding lazily requests the existing Reader document, renders it with the
+  shared `ReaderDocumentContent`, keeps loaded content available when collapsed,
+  and reports loading/error/retry inline without a second modal sheet;
+- the resolved playback source is projected as local/remote presentation state;
+  local file playback suppresses transient AVPlayer loading/buffering chrome,
+  while remote loading/buffering uses a delayed 300 ms circular wait indicator
+  around the Play/Pause control instead of a separate bottom status row;
 - chapter presentation marks the active chapter and scrolls to it once when the
   chapter list opens, while subsequent runtime position updates never steal the
   user's manual chapter-list scroll position;
