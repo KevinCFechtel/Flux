@@ -121,16 +121,6 @@ enum IOSArticleListChromePresentation {
     }
 }
 
-enum IOSListeningListNavigationPresentation {
-    static func showsScopeChooser(
-        for presentation: AdaptivePresentation,
-        splitColumnVisibility: NavigationSplitViewVisibility
-    ) -> Bool {
-        !presentation.usesPersistentSplitNavigation
-            || splitColumnVisibility == .detailOnly
-    }
-}
-
 enum IOSArticleListActionChromeMetrics {
     static let floatingHorizontalPadding: CGFloat = 8
     static let floatingVerticalPadding: CGFloat = 5
@@ -402,9 +392,11 @@ struct ContentView: View {
     @StateObject private var listeningListStore = IOSListeningListStore()
     @State private var navigationPresented = false
     @State private var searchPresented = false
-    /// Set while the navigation sheet is closing so that search opens once it is
-    /// actually gone.
+    @State private var listeningListPresented = false
+    /// Set while the navigation sheet is closing so that the requested fly-over
+    /// opens only after the navigation sheet is fully gone.
     @State private var searchPendingAfterNavigationSheet = false
+    @State private var listeningListPendingAfterNavigationSheet = false
     @State private var diagnosticsPresented = false
     @State private var settingsPresented = false
     @State private var splitColumnVisibility: NavigationSplitViewVisibility = .all
@@ -473,10 +465,8 @@ struct ContentView: View {
         }
         .overlay(alignment: .bottom) {
             actionFeedbackOverlay(
-                active: !searchPresented,
-                hasBottomActionBar:
-                    newsreaderStore.scope != .listeningList
-                        && articleListChromeMode == .compactPortrait
+                active: !searchPresented && !listeningListPresented,
+                hasBottomActionBar: articleListChromeMode == .compactPortrait
             )
         }
         .animation(.easeInOut(duration: 0.2), value: actionFeedback?.id)
@@ -522,38 +512,54 @@ struct ContentView: View {
                 articleMediaDownloadButtons
             }
         }
-        .sheet(item: gatedBrowser(active: !searchPresented)) { item in IOSInAppBrowser(url: item.url) }
-        .sheet(item: gatedReaderSheet(active: !searchPresented)) { item in
+        .sheet(isPresented: $listeningListPresented) {
+            NavigationStack {
+                listeningListView
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Done") {
+                                listeningListPresented = false
+                            }
+                        }
+                    }
+            }
+            .sheet(
+                isPresented: Binding(
+                    get: { listeningListPlayerArticleID != nil },
+                    set: { presented in
+                        if !presented {
+                            listeningListPlayerArticleID = nil
+                        }
+                    }
+                ),
+                onDismiss: {
+                    listeningListStore.clearShowNotes()
+                }
+            ) {
+                listeningListPlayerView
+            }
+        }
+        .sheet(
+            item: gatedBrowser(
+                active: !searchPresented && !listeningListPresented
+            )
+        ) { item in
+            IOSInAppBrowser(url: item.url)
+        }
+        .sheet(item: gatedReaderSheet(active: !searchPresented && !listeningListPresented)) { item in
             NavigationStack { readerView(for: item.article) }
         }
-        .sheet(item: gatedShare(active: !searchPresented)) { payload in IOSShareSheet(items: payload.items) }
+        .sheet(item: gatedShare(active: !searchPresented && !listeningListPresented)) { payload in IOSShareSheet(items: payload.items) }
         .sheet(
-            item: gatedArticleMediaPlayer(active: !searchPresented),
+            item: gatedArticleMediaPlayer(active: !searchPresented && !listeningListPresented),
             onDismiss: { listeningListStore.clearShowNotes() }
         ) { presentation in
             articleMediaPlayerView(presentation)
         }
-        .sheet(
-            isPresented: Binding(
-                get: {
-                    !searchPresented && listeningListPlayerArticleID != nil
-                },
-                set: { presented in
-                    if !presented {
-                        listeningListPlayerArticleID = nil
-                    }
-                }
-            ),
-            onDismiss: {
-                listeningListStore.clearShowNotes()
-            }
-        ) {
-            listeningListPlayerView
-        }
         .confirmationDialog(
             "Download Audio",
             isPresented: gatedArticleMediaDownloadPresented(
-                active: !searchPresented
+                active: !searchPresented && !listeningListPresented
             ),
             titleVisibility: .visible
         ) {
@@ -575,12 +581,12 @@ struct ContentView: View {
         .onChange(of: searchPresented) { _, presented in
             if !presented { searchStore.invalidate() }
         }
-        .onChange(of: newsreaderStore.scope) { _, scope in
-            if scope == .listeningList {
-                listeningListStore.reload()
+        .onAppear {
+            if newsreaderStore.scope == .listeningList {
+                newsreaderStore.select(.all)
             }
+            normalizeAdaptiveShell(for: adaptivePresentation)
         }
-        .onAppear { normalizeAdaptiveShell(for: adaptivePresentation) }
         .onOpenURL { url in
             handleWidgetURL(url)
         }
@@ -917,6 +923,7 @@ struct ContentView: View {
                 store: newsreaderStore,
                 sheetPresented: $navigationPresented,
                 presentation: .sidebar,
+                onListeningList: openListeningList,
                 onSearch: openSearch
             )
             .toolbar(removing: .sidebarToggle)
@@ -925,13 +932,30 @@ struct ContentView: View {
         }
         // These presentations outlive an article-navigation reset.
         .sheet(isPresented: $navigationPresented, onDismiss: {
-            guard searchPendingAfterNavigationSheet else { return }
-            searchPendingAfterNavigationSheet = false
-            searchPresented = true
+            if listeningListPendingAfterNavigationSheet {
+                listeningListPendingAfterNavigationSheet = false
+                listeningListStore.reload()
+                listeningListPresented = true
+                return
+            }
+            if searchPendingAfterNavigationSheet {
+                searchPendingAfterNavigationSheet = false
+                searchPresented = true
+            }
         }) {
             NavigationStack {
-                NewsNavigationView(store: newsreaderStore, sheetPresented: $navigationPresented, presentation: .sheet, onSearch: openSearch)
-                    .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { navigationPresented = false } } }
+                NewsNavigationView(
+                    store: newsreaderStore,
+                    sheetPresented: $navigationPresented,
+                    presentation: .sheet,
+                    onListeningList: openListeningList,
+                    onSearch: openSearch
+                )
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { navigationPresented = false }
+                    }
+                }
             }
         }
         .sheet(isPresented: $settingsPresented) { SettingsView(store: newsreaderStore, bootstrapper: bootstrapper, onDiagnostics: { diagnosticsPresented = true }) }
@@ -939,62 +963,59 @@ struct ContentView: View {
 
     @ViewBuilder
     private var adaptiveDetail: some View {
-        if newsreaderStore.scope == .listeningList {
-            IOSListeningListView(
-                store: listeningListStore,
-                playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
-                transferState: IOSAppRuntime.shared.mediaRuntime.transferPresentationState,
-                playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
-                showsScopeChooser:
-                    IOSListeningListNavigationPresentation.showsScopeChooser(
-                        for: adaptivePresentation,
-                        splitColumnVisibility: splitColumnVisibility
-                    ),
-                onPresentScopeChooser: presentArticleListNavigation,
-                onOpenPlayer: openListeningListPlayer,
-                onPlay: playListeningListEnclosure,
-                feedIconState: { feedID, variant in
-                    newsreaderStore.feedIconPresentationState(
-                        for: feedID,
-                        variant: variant
-                    )
-                },
-                onRequestFeedIcon: { feedID, variant in
-                    newsreaderStore.requestFeedIcon(
-                        feedID,
-                        variant: variant
-                    )
-                }
-            )
-        } else {
-            articleList
-                .inspector(isPresented: readerInspectorBinding) {
-                    Group {
-                        if usesReaderInspector, let article = readerArticle?.article {
-                            NavigationStack { readerView(for: article) }
-                        } else if usesReaderInspector {
-                            Color.clear.onAppear { dismissReader() }
-                        }
+        articleList
+            .inspector(isPresented: readerInspectorBinding) {
+                Group {
+                    if usesReaderInspector, let article = readerArticle?.article {
+                        NavigationStack { readerView(for: article) }
+                    } else if usesReaderInspector {
+                        Color.clear.onAppear { dismissReader() }
                     }
                 }
-                .toolbar {
-                    if !adaptivePresentation.usesPersistentSplitNavigation, !capsuleCarriesScopeAction {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button { navigationPresented = true } label: {
-                                Image(IOSNavigationButtonPresentation.imageName)
-                                    .renderingMode(.template)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(
-                                        width: IOSNavigationButtonPresentation.glyphSize,
-                                        height: IOSNavigationButtonPresentation.glyphSize
-                                    )
-                            }
-                            .accessibilityLabel(IOSNavigationButtonPresentation.accessibilityLabel)
+            }
+            .toolbar {
+                if !adaptivePresentation.usesPersistentSplitNavigation,
+                   !capsuleCarriesScopeAction {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { navigationPresented = true } label: {
+                            Image(IOSNavigationButtonPresentation.imageName)
+                                .renderingMode(.template)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(
+                                    width: IOSNavigationButtonPresentation.glyphSize,
+                                    height: IOSNavigationButtonPresentation.glyphSize
+                                )
                         }
+                        .accessibilityLabel(
+                            IOSNavigationButtonPresentation.accessibilityLabel
+                        )
                     }
                 }
-        }
+            }
+    }
+
+    private var listeningListView: some View {
+        IOSListeningListView(
+            store: listeningListStore,
+            playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+            transferState: IOSAppRuntime.shared.mediaRuntime.transferPresentationState,
+            playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
+            onOpenPlayer: openListeningListPlayer,
+            onPlay: playListeningListEnclosure,
+            feedIconState: { feedID, variant in
+                newsreaderStore.feedIconPresentationState(
+                    for: feedID,
+                    variant: variant
+                )
+            },
+            onRequestFeedIcon: { feedID, variant in
+                newsreaderStore.requestFeedIcon(
+                    feedID,
+                    variant: variant
+                )
+            }
+        )
     }
 
     @ViewBuilder
@@ -1244,7 +1265,19 @@ struct ContentView: View {
         )
     }
 
+    private func openListeningList() {
+        searchPendingAfterNavigationSheet = false
+        guard navigationPresented else {
+            listeningListStore.reload()
+            listeningListPresented = true
+            return
+        }
+        listeningListPendingAfterNavigationSheet = true
+        navigationPresented = false
+    }
+
     private func openSearch() {
+        listeningListPendingAfterNavigationSheet = false
         // Presenting while the navigation sheet is still dismissing loses the
         // presentation, so its dismissal callback performs it.
         guard navigationPresented else {
