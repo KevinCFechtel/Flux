@@ -1346,12 +1346,13 @@ D6 starts from an existing Core/UniFFI media contract and a completed macOS
 reference implementation. The repository-first readiness review and concrete
 execution/work-package contract are maintained in
 [`IOS_D6_NATIVE_MEDIA_IMPLEMENTATION.md`](IOS_D6_NATIVE_MEDIA_IMPLEMENTATION.md).
-D6-0 through D6-F are implemented. Their previously accepted automated gates
-were green before the 25 September 2026 post-closure follow-up corrections.
-Those corrections require the current head to rerun the canonical Rust and iOS
-test gates before it is recorded as testvalidated again. After that revalidation,
-D6-G remains the real-device/process-boundary acceptance gate; its evidence
-matrix is maintained in
+D6-0 through D6-F are implemented and testvalidated. After the 25 September
+2026 post-closure follow-up corrections, the corrected implementation state
+through `7acb079d77a1e5812964abd382a2fd43e6067b77` passed `cargo fmt --check`,
+the full Rust workspace suite (224 `flux-core` + 6 `flux-uniffi`, 0
+failures), and the canonical iOS gate (448 tests, 0 failures,
+`TEST SUCCEEDED`). D6-G remains the real-device/process-boundary acceptance
+gate; its evidence matrix is maintained in
 [`IOS_D6_FINAL_ACCEPTANCE.md`](IOS_D6_FINAL_ACCEPTANCE.md).
 The D5 `IOSMediaTransferReconciliationHandoff` remains the authoritative
 bridge from successful background Sync into the D6 transfer runtime. D6 now
