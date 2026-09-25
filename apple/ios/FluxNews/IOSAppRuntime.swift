@@ -97,12 +97,17 @@ final class IOSMediaRuntime {
     }
 
     func attach(to core: Flux) {
+        let replacingCore = self.core != nil && self.core !== core
         if self.core !== core {
             lifecycleGeneration &+= 1
         }
         self.core = core
         coreAccessState = .attached
-        playbackCoordinator.attach(to: core)
+        if replacingCore {
+            playbackCoordinator.replaceCore(with: core)
+        } else {
+            playbackCoordinator.attach(to: core)
+        }
         transferCoordinator.attach(to: core, generation: lifecycleGeneration)
     }
 
