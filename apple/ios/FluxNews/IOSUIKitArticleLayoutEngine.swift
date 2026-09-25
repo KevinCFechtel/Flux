@@ -12,6 +12,7 @@ struct IOSUIKitArticleLayoutInput: Hashable {
     let preview: String
     let hasImage: Bool
     let hasComments: Bool
+    let hasAudio: Bool
     let mode: ArticlePresentationMode
     let previewLines: ArticlePreviewLines
     let containerWidth: CGFloat
@@ -19,7 +20,7 @@ struct IOSUIKitArticleLayoutInput: Hashable {
     let contentSizeCategory: UIContentSizeCategory
     let layoutDirection: UIUserInterfaceLayoutDirection
 
-    init(item: IOSUIKitArticleTimelineItem, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, showsRelativePublicationTime: Bool = false, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
+    init(item: IOSUIKitArticleTimelineItem, hasAudio: Bool = false, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, showsRelativePublicationTime: Bool = false, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
         title = item.content.article.title
         feedTitle = item.content.article.feedTitle
         publishedDate = showsRelativePublicationTime ? item.content.publishedAge : item.content.publishedDate
@@ -28,6 +29,7 @@ struct IOSUIKitArticleLayoutInput: Hashable {
         preview = item.content.article.preview
         hasImage = item.content.imageURL != nil
         hasComments = item.content.hasComments
+        self.hasAudio = hasAudio
         self.mode = mode
         self.previewLines = previewLines
         self.containerWidth = containerWidth
@@ -36,14 +38,14 @@ struct IOSUIKitArticleLayoutInput: Hashable {
         self.layoutDirection = layoutDirection
     }
 
-    init(title: String, feedTitle: String, publishedDate: String, showsRelativePublicationTime: Bool = false, readingTime: String? = nil, preview: String, hasImage: Bool, hasComments: Bool, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
+    init(title: String, feedTitle: String, publishedDate: String, showsRelativePublicationTime: Bool = false, readingTime: String? = nil, preview: String, hasImage: Bool, hasComments: Bool, hasAudio: Bool = false, mode: ArticlePresentationMode, previewLines: ArticlePreviewLines, containerWidth: CGFloat, displayScale: CGFloat, contentSizeCategory: UIContentSizeCategory, layoutDirection: UIUserInterfaceLayoutDirection) {
         self.title = title
         self.feedTitle = feedTitle
         self.publishedDate = publishedDate
         self.showsRelativePublicationTime = showsRelativePublicationTime
         self.readingTime = readingTime
         self.preview = preview
-        self.hasImage = hasImage; self.hasComments = hasComments; self.mode = mode; self.previewLines = previewLines
+        self.hasImage = hasImage; self.hasComments = hasComments; self.hasAudio = hasAudio; self.mode = mode; self.previewLines = previewLines
         self.containerWidth = containerWidth; self.displayScale = displayScale; self.contentSizeCategory = contentSizeCategory
         self.layoutDirection = layoutDirection
     }
@@ -57,6 +59,7 @@ struct IOSUIKitArticleLayoutKey: Hashable {
     let readingTime: String?
     let preview: String
     let hasComments: Bool
+    let hasAudio: Bool
     let variant: IOSUIKitArticleCellLayoutVariant
     let previewLines: ArticlePreviewLines
     let containerWidthPixels: Int
@@ -89,6 +92,7 @@ struct IOSUIKitArticleLayoutKey: Hashable {
         readingTime = input.readingTime
         preview = input.preview
         hasComments = input.hasComments
+        hasAudio = input.hasAudio
         previewLines = input.previewLines
         containerWidthPixels = Self.canonicalContainerWidthPixels(input.containerWidth, displayScale: scale)
         displayScaleHundredths = Self.canonicalDisplayScaleHundredths(scale)
@@ -511,8 +515,12 @@ struct IOSUIKitArticleGeometry: Equatable {
         return .init(width: width, height: width * (1 / ArticlePresentationLayout.portraitImageAspectRatio))
     }
 
-    func metadataLayout(width: CGFloat, hasComments: Bool, height: CGFloat, accessories: IOSUIKitArticleAccessoryMetrics) -> MetadataLayout {
-        let trailingAccessorySlots = staticAccessorySlotWidths(hasComments: hasComments, accessories: accessories)
+    func metadataLayout(width: CGFloat, hasComments: Bool, hasAudio: Bool, height: CGFloat, accessories: IOSUIKitArticleAccessoryMetrics) -> MetadataLayout {
+        let trailingAccessorySlots = staticAccessorySlotWidths(
+            hasComments: hasComments,
+            hasAudio: hasAudio,
+            accessories: accessories
+        )
         let commentsWidth = hasComments ? accessories.comments : 0
         let trailingAccessoriesWidth = trailingAccessorySlots.reduce(0, +) + CGFloat(max(0, trailingAccessorySlots.count - 1)) * Self.metadataAccessorySpacing
         // Leading edge: feed icon, then the feed name. Trailing edge is the
@@ -536,8 +544,14 @@ struct IOSUIKitArticleGeometry: Equatable {
     /// Existing horizontal slots in coordinate order. A future audio slot is
     /// inserted on the leading/inner side of comments; it must never displace
     /// unread from the outer edge or star from the second position.
-    func staticAccessorySlotWidths(hasComments: Bool, accessories: IOSUIKitArticleAccessoryMetrics) -> [CGFloat] {
-        (hasComments ? [accessories.comments] : []) + [accessories.star, accessories.unread]
+    func staticAccessorySlotWidths(
+        hasComments: Bool,
+        hasAudio: Bool,
+        accessories: IOSUIKitArticleAccessoryMetrics
+    ) -> [CGFloat] {
+        (hasAudio ? [accessories.comments] : [])
+            + (hasComments ? [accessories.comments] : [])
+            + [accessories.star, accessories.unread]
     }
 
     struct MetadataLayout: Equatable {
@@ -684,6 +698,7 @@ enum IOSUIKitArticleLayoutEngine {
         let metadataLayout = geometry.metadataLayout(
             width: infoWidth,
             hasComments: input.hasComments,
+            hasAudio: input.hasAudio,
             height: metadataHeight,
             accessories: accessories
         )
