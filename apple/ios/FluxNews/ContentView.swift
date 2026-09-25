@@ -370,64 +370,39 @@ struct ContentView: View {
                 NavigationStack { readerView(for: item.article) }
             }
             .sheet(item: gatedShare(active: true)) { payload in IOSShareSheet(items: payload.items) }
+            .sheet(
+                item: gatedArticleMediaPlayer(active: true),
+                onDismiss: { listeningListStore.clearShowNotes() }
+            ) { presentation in
+                articleMediaPlayerView(presentation)
+            }
+            .confirmationDialog(
+                "Download Audio",
+                isPresented: gatedArticleMediaDownloadPresented(active: true),
+                titleVisibility: .visible
+            ) {
+                articleMediaDownloadButtons
+            }
         }
         .sheet(item: gatedBrowser(active: !searchPresented)) { item in IOSInAppBrowser(url: item.url) }
         .sheet(item: gatedReaderSheet(active: !searchPresented)) { item in
             NavigationStack { readerView(for: item.article) }
         }
         .sheet(item: gatedShare(active: !searchPresented)) { payload in IOSShareSheet(items: payload.items) }
-        .sheet(item: $articleMediaPlayer, onDismiss: {
-            listeningListStore.clearShowNotes()
-        }) { presentation in
-            IOSMediaPlayerView(
-                playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
-                playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
-                item: nil,
-                showNotesDocument: listeningListStore.showNotesDocument,
-                showNotesIsLoading: listeningListStore.showNotesIsLoading,
-                showNotesErrorMessage: listeningListStore.showNotesErrorMessage,
-                onSelectEnclosure: { _ in },
-                onShowNotes: {
-                    listeningListStore.loadShowNotes(
-                        articleID: presentation.article.id
-                    )
-                },
-                onDismiss: {
-                    articleMediaPlayer = nil
-                }
-            )
+        .sheet(
+            item: gatedArticleMediaPlayer(active: !searchPresented),
+            onDismiss: { listeningListStore.clearShowNotes() }
+        ) { presentation in
+            articleMediaPlayerView(presentation)
         }
         .confirmationDialog(
             "Download Audio",
-            isPresented: Binding(
-                get: { articleMediaDownloadChoice != nil },
-                set: { if !$0 { articleMediaDownloadChoice = nil } }
+            isPresented: gatedArticleMediaDownloadPresented(
+                active: !searchPresented
             ),
             titleVisibility: .visible
         ) {
-            if let choice = articleMediaDownloadChoice {
-                ForEach(
-                    Array(choice.enclosures.enumerated()),
-                    id: \.element.id
-                ) { index, enclosure in
-                    Button(
-                        IOSArticleAudioPresentation.enclosureLabel(
-                            enclosure,
-                            index: index
-                        )
-                    ) {
-                        performArticleDownload(
-                            article: choice.article,
-                            enclosure: enclosure,
-                            source: choice.source
-                        )
-                        articleMediaDownloadChoice = nil
-                    }
-                }
-            }
-            Button("Cancel", role: .cancel) {
-                articleMediaDownloadChoice = nil
-            }
+            articleMediaDownloadButtons
         }
         .alert("Unable to Open Article", isPresented: Binding(get: { articleOpenError != nil }, set: { if !$0 { articleOpenError = nil } })) {
             Button("OK", role: .cancel) { articleOpenError = nil }
@@ -488,6 +463,78 @@ struct ContentView: View {
                 listeningListStore.detach()
             }
             consumePendingWidgetActionIfReady()
+        }
+    }
+
+    private func gatedArticleMediaPlayer(
+        active: Bool
+    ) -> Binding<IOSArticleMediaPlayerPresentation?> {
+        Binding(
+            get: { active ? articleMediaPlayer : nil },
+            set: { if active { articleMediaPlayer = $0 } }
+        )
+    }
+
+    private func gatedArticleMediaDownloadPresented(
+        active: Bool
+    ) -> Binding<Bool> {
+        Binding(
+            get: { active && articleMediaDownloadChoice != nil },
+            set: {
+                if active && !$0 {
+                    articleMediaDownloadChoice = nil
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func articleMediaPlayerView(
+        _ presentation: IOSArticleMediaPlayerPresentation
+    ) -> some View {
+        IOSMediaPlayerView(
+            playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+            playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
+            item: nil,
+            showNotesDocument: listeningListStore.showNotesDocument,
+            showNotesIsLoading: listeningListStore.showNotesIsLoading,
+            showNotesErrorMessage: listeningListStore.showNotesErrorMessage,
+            onSelectEnclosure: { _ in },
+            onShowNotes: {
+                listeningListStore.loadShowNotes(
+                    articleID: presentation.article.id
+                )
+            },
+            onDismiss: {
+                articleMediaPlayer = nil
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var articleMediaDownloadButtons: some View {
+        if let choice = articleMediaDownloadChoice {
+            ForEach(
+                Array(choice.enclosures.enumerated()),
+                id: \.element.id
+            ) { index, enclosure in
+                Button(
+                    IOSArticleAudioPresentation.enclosureLabel(
+                        enclosure,
+                        index: index
+                    )
+                ) {
+                    performArticleDownload(
+                        article: choice.article,
+                        enclosure: enclosure,
+                        source: choice.source
+                    )
+                    articleMediaDownloadChoice = nil
+                }
+            }
+        }
+        Button("Cancel", role: .cancel) {
+            articleMediaDownloadChoice = nil
         }
     }
 
