@@ -3326,7 +3326,7 @@ private struct ArticleListBottomOverlay: View {
         Group {
             if store.scrolloverUndoVisible {
                 ScrolloverUndoPresentation(store: store)
-            } else if store.hasPendingNewData || store.hasUnscopedNewDataSignal {
+            } else if store.hasPendingNewDataForCurrentScope {
                 Button("New articles available") { store.adoptVisibleSnapshot() }
                     .buttonStyle(.borderedProminent)
                     .padding(.bottom, 12)
