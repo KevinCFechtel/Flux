@@ -57,10 +57,15 @@ enum IOSMediaPlayerLayoutPolicy {
 struct IOSMediaPlayerView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.colorScheme) private var colorScheme
 
     @ObservedObject var playbackState: IOSMediaPlaybackPresentationState
     let playbackCoordinator: IOSMediaPlaybackCoordinator
     let item: ListeningListItem?
+    let feedIconFeedID: Int64?
+    let feedIconTitle: String
+    let feedIconState: (_ feedID: Int64, _ variant: FeedIconVariant) -> IOSFeedIconPresentationState
+    let onRequestFeedIcon: (_ feedID: Int64, _ variant: FeedIconVariant) -> Void
     let showNotesDocument: ReaderDocument?
     let showNotesIsLoading: Bool
     let showNotesErrorMessage: String?
@@ -395,15 +400,40 @@ struct IOSMediaPlayerView: View {
     private var header: some View {
         VStack(spacing: 6) {
             Text(displayedTitle)
-            .font(.title2.bold())
-            .multilineTextAlignment(.center)
+                .font(.title2.bold())
+                .multilineTextAlignment(.center)
 
             if !displayedFeedTitle.isEmpty {
-                Text(displayedFeedTitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    if let feedIconFeedID {
+                        FeedIconView(
+                            feedID: feedIconFeedID,
+                            title: feedIconTitle,
+                            state: feedIconState(
+                                feedIconFeedID,
+                                feedIconVariant
+                            ),
+                            onRequest: {
+                                onRequestFeedIcon(
+                                    feedIconFeedID,
+                                    feedIconVariant
+                                )
+                            },
+                            size: 18
+                        )
+                    }
+                    Text(displayedFeedTitle)
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var feedIconVariant: FeedIconVariant {
+        IOSFeedIconPresentation.variant(
+            isDark: colorScheme == .dark
+        )
     }
 
     private var rateMenu: some View {
