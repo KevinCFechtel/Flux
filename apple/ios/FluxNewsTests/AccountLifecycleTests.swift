@@ -1665,6 +1665,49 @@ final class AccountLifecycleTests: XCTestCase {
     }
 
     @MainActor
+    func testMediaRuntimeOwnsAndResetsTransientPresentationState() throws {
+        let bootstrapper = CoreBootstrapper()
+        let runtime = IOSAppRuntime(
+            bootstrapper: bootstrapper,
+            scheduler: IOSSystemBackgroundTaskScheduler.shared,
+            systemNotificationManager: IOSSystemNotificationManager(center: FakeSystemNotificationCenter()),
+            mediaTransferReconciliationHandoff: IOSMediaTransferReconciliationHandoff()
+        )
+        let core = try makeCore(
+            for: IOSMinifluxCredentials(
+                server: "https://miniflux.example",
+                apiKey: "key",
+                customHeaders: []
+            )
+        )
+
+        runtime.mediaRuntime.attach(to: core)
+        runtime.mediaRuntime.playbackPresentationState.setStatus(.playing)
+        runtime.mediaRuntime.playbackPresentationState.setPlaybackRate(1.7)
+        runtime.mediaRuntime.transferPresentationState.set(
+            MediaTransferRuntime(
+                enclosureID: 42,
+                bytesReceived: 25,
+                expectedBytes: 100,
+                phase: .transferring
+            )
+        )
+
+        XCTAssertEqual(runtime.mediaRuntime.playbackPresentationState.status, .playing)
+        XCTAssertEqual(runtime.mediaRuntime.playbackPresentationState.playbackRate, 1.7)
+        XCTAssertEqual(
+            runtime.mediaRuntime.transferPresentationState.runtime(for: 42)?.fraction,
+            0.25
+        )
+
+        runtime.mediaRuntime.detach()
+
+        XCTAssertEqual(runtime.mediaRuntime.playbackPresentationState.status, .stopped)
+        XCTAssertEqual(runtime.mediaRuntime.playbackPresentationState.playbackRate, 1.0)
+        XCTAssertNil(runtime.mediaRuntime.transferPresentationState.runtime(for: 42))
+    }
+
+    @MainActor
     func testMediaRuntimeTracksCoreLifecycleAcrossReplacementAndRebuild() async throws {
         let account = IOSMinifluxCredentials(
             server: "https://miniflux.example",
