@@ -161,10 +161,22 @@ struct NewsNavigationView: View {
         onSearch()
     }
 
-    private func scopeRow(_ title: String, systemImage: String, scope: BrowserScope, count: UInt64) -> some View {
-        Label { labelTitle(title, count: count) } icon: { Image(systemName: systemImage) }
+    private func scopeRow(_ title: LocalizedStringKey, systemImage: String, scope: BrowserScope, count: UInt64) -> some View {
+        Label { localizedLabelTitle(title, count: count) } icon: { Image(systemName: systemImage) }
             .tag(scope)
         .accessibilityValue(count == 0 ? String(localized: "No unread articles") : String(localized: "\(count) unread article"))
+    }
+
+    private func localizedLabelTitle(_ title: LocalizedStringKey, count: UInt64) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            if count > 0 {
+                Text(count > 999 ? "999+" : "\(count)")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            }
+        }
     }
 
     private func categoryNavigationRow(categoryID: Int64, title: String, count: UInt64) -> some View {
