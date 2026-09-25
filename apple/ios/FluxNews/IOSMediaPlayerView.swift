@@ -48,6 +48,9 @@ enum IOSMediaPlayerActionPlacement {
 
 enum IOSMediaPlayerWaitIndicatorPolicy {
     static let delay: Duration = .milliseconds(300)
+    static let playPauseDiameter: CGFloat = 54
+    static let ringDiameter: CGFloat = 72
+    static let ringLineWidth: CGFloat = 3
 
     static func shouldRequestIndicator(
         isPreviewingInactiveItem: Bool,
@@ -58,6 +61,32 @@ enum IOSMediaPlayerWaitIndicatorPolicy {
         !isPreviewingInactiveItem
             && source == .remote
             && (isLoading || isBuffering)
+    }
+}
+
+private struct IOSMediaPlayerBufferingRing: View {
+    var body: some View {
+        TimelineView(.animation) { context in
+            let phase = context.date.timeIntervalSinceReferenceDate
+                .truncatingRemainder(dividingBy: 1)
+
+            Circle()
+                .trim(from: 0.06, to: 0.78)
+                .stroke(
+                    Color.accentColor,
+                    style: StrokeStyle(
+                        lineWidth: IOSMediaPlayerWaitIndicatorPolicy.ringLineWidth,
+                        lineCap: .round
+                    )
+                )
+                .rotationEffect(.degrees(phase * 360))
+        }
+        .frame(
+            width: IOSMediaPlayerWaitIndicatorPolicy.ringDiameter,
+            height: IOSMediaPlayerWaitIndicatorPolicy.ringDiameter
+        )
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
     }
 }
 
@@ -497,16 +526,21 @@ struct IOSMediaPlayerView: View {
                             ? "pause.circle.fill"
                             : "play.circle.fill"
                     )
-                    .font(.system(size: 54))
+                    .font(
+                        .system(
+                            size: IOSMediaPlayerWaitIndicatorPolicy
+                                .playPauseDiameter
+                        )
+                    )
 
                     if showPlaybackWaitIndicator {
-                        ProgressView()
-                            .controlSize(.small)
-                            .scaleEffect(2.35)
-                            .frame(width: 66, height: 66)
+                        IOSMediaPlayerBufferingRing()
                     }
                 }
-                .frame(width: 66, height: 66)
+                .frame(
+                    width: IOSMediaPlayerWaitIndicatorPolicy.ringDiameter,
+                    height: IOSMediaPlayerWaitIndicatorPolicy.ringDiameter
+                )
             }
             .accessibilityLabel(
                 displayedIsPlaying
