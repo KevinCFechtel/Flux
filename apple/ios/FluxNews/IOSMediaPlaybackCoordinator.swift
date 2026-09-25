@@ -935,6 +935,7 @@ final class IOSMediaPlaybackCoordinator {
         presentationState.setPosition(engine.currentPositionMs)
         presentationState.setStatus(.paused)
         stopCheckpointTimer()
+        onPlaybackUseChanged?()
         Task { @MainActor [weak self] in
             await self?.checkpoint()
         }
@@ -945,6 +946,7 @@ final class IOSMediaPlaybackCoordinator {
         presentationState.setPosition(engine.currentPositionMs)
         presentationState.setStatus(.stopped)
         stopCheckpointTimer()
+        onPlaybackUseChanged?()
         Task { @MainActor [weak self] in
             await self?.checkpoint()
         }
@@ -1012,7 +1014,7 @@ final class IOSMediaPlaybackCoordinator {
     }
 
     func isUsing(enclosureID: Int64) -> Bool {
-        activeEnclosureID == enclosureID
+        activeEnclosureID == enclosureID && engine.isPlaying
     }
 
     func artwork(source: MediaArtworkSource) async -> Data? {
