@@ -349,7 +349,17 @@ enum IOSListeningListPresentation {
         _ enclosure: ListeningListEnclosure,
         runtime: MediaTransferRuntime?
     ) -> DownloadAction {
-        switch enclosure.download?.state {
+        downloadAction(
+            download: enclosure.download,
+            runtime: runtime
+        )
+    }
+
+    static func downloadAction(
+        download: MediaDownload?,
+        runtime: MediaTransferRuntime?
+    ) -> DownloadAction {
+        switch download?.state {
         case .downloaded:
             return .delete
         case .requested:
