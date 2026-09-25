@@ -16,6 +16,8 @@ private final class FakeIOSPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
     var chaptersValue: [MediaChapter] = []
     var artworkSourceValue: MediaArtworkSource?
     var artworkSourceRequests: [Int64] = []
+    var playbackStateValue: PlaybackState?
+    var playbackStateRequests: [Int64] = []
     var artworkData: Data?
     var prepareError: Error?
     var checkpoints: [(Int64, UInt64, UInt64?)] = []
@@ -60,6 +62,11 @@ private final class FakeIOSPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
     func preparePlayback(enclosureID: Int64) async throws -> PlaybackPreparation {
         if let prepareError { throw prepareError }
         return preparation
+    }
+
+    func playbackState(enclosureID: Int64) async -> PlaybackState? {
+        playbackStateRequests.append(enclosureID)
+        return playbackStateValue
     }
 
     func chapters(enclosureID: Int64) async throws -> [MediaChapter] {
@@ -339,6 +346,69 @@ final class IOSMediaPlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(core.checkpoints.last?.1, 33_000)
         XCTAssertEqual(audio.deactivateCount, 1)
         XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
+    }
+
+    func testSuccessfulSyncReconcilesStoppedRuntimeToNewerCorePlaybackPosition() async throws {
+        let core = FakeIOSPlaybackCoreAccess(status: .inProgress)
+        let engine = FakeIOSPlaybackEngine()
+        let audio = FakeIOSAudioSession()
+        let state = IOSMediaPlaybackPresentationState()
+        let coordinator = IOSMediaPlaybackCoordinator(
+            coreAccess: core,
+            presentationState: state,
+            engine: engine,
+            audioSession: audio
+        )
+
+        try await coordinator.play(enclosureID: 7)
+        engine.currentPositionMs = 36_000
+        coordinator.stop()
+        await Task.yield()
+
+        core.playbackStateValue = PlaybackState(
+            enclosureId: 7,
+            positionMs: 6_201_000,
+            durationMs: 7_200_000,
+            status: .inProgress,
+            updatedAt: "2026-09-25T18:00:00Z"
+        )
+
+        await coordinator.reconcileAfterSuccessfulSync()
+
+        XCTAssertEqual(core.playbackStateRequests, [7])
+        XCTAssertEqual(engine.currentPositionMs, 6_201_000)
+        XCTAssertEqual(state.positionMs, 6_201_000)
+        XCTAssertEqual(state.durationMs, 7_200_000)
+        XCTAssertFalse(engine.isPlaying)
+    }
+
+    func testSuccessfulSyncDoesNotForceSeekActivelyPlayingRuntime() async throws {
+        let core = FakeIOSPlaybackCoreAccess(status: .inProgress)
+        let engine = FakeIOSPlaybackEngine()
+        let audio = FakeIOSAudioSession()
+        let state = IOSMediaPlaybackPresentationState()
+        let coordinator = IOSMediaPlaybackCoordinator(
+            coreAccess: core,
+            presentationState: state,
+            engine: engine,
+            audioSession: audio
+        )
+
+        try await coordinator.play(enclosureID: 7)
+        engine.currentPositionMs = 36_000
+        core.playbackStateValue = PlaybackState(
+            enclosureId: 7,
+            positionMs: 6_201_000,
+            durationMs: 7_200_000,
+            status: .inProgress,
+            updatedAt: "2026-09-25T18:00:00Z"
+        )
+
+        await coordinator.reconcileAfterSuccessfulSync()
+
+        XCTAssertEqual(core.playbackStateRequests, [])
+        XCTAssertEqual(engine.currentPositionMs, 36_000)
+        XCTAssertTrue(engine.isPlaying)
     }
 
     func testSceneDeactivationCheckpointsWithoutPausingBackgroundAudio() async throws {
