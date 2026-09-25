@@ -248,10 +248,11 @@ final class IOSAppDiagnostics: @unchecked Sendable {
         guard var data = try? encoder.encode(entry) else { return }
         data.append(0x0A)
 
+        let attributes = try? fileManager.attributesOfItem(
+            atPath: logFileURL.path
+        )
         let currentBytes =
-            (try? fileManager.attributesOfItem(
-                atPath: logFileURL.path
-            )[.size] as? NSNumber)?.intValue ?? 0
+            (attributes?[.size] as? NSNumber)?.intValue ?? 0
 
         if currentBytes + data.count > maxFileBytes {
             rewriteLocked()
