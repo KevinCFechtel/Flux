@@ -428,16 +428,27 @@ The list consumes `core.listeningList(...)` and
 Preserve Phase-C semantics:
 
 - one row/card per article;
+- tapping a row opens the Player for that Listening List item without starting
+  playback;
+- row-local Play/Pause starts or controls playback without opening the Player;
 - multiple audio enclosures represented within that article;
 - recently added default sort;
 - publication-date alternative;
 - optional feed filter;
 - playback progress;
-- per-enclosure download/progress status;
+- per-enclosure download/progress status derived from the Core projection plus
+  the app-scoped native transfer runtime;
+- active URLSession transfer byte progress updates the visible row directly;
+- terminal native transfer completion/failure/deletion refreshes the Listening
+  List Core projection automatically;
 - aggregate enclosure status where useful.
 
 Do not add a separate Downloads destination. Download state is represented
 within the Listening List/article media experience.
+
+Deletion deferral applies while the enclosure is actually playing. Pause/Stop
+releases that deferral and triggers transfer reconciliation so a pending delete
+cannot remain stuck until process relaunch.
 
 ### 8.3 Player presentation
 
