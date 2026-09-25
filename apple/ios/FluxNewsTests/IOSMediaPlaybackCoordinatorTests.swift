@@ -6,6 +6,7 @@ import XCTest
 private final class FakeIOSPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
     var preparation: PlaybackPreparation
     var chaptersValue: [MediaChapter] = []
+    var artworkData: Data?
     var checkpoints: [(Int64, UInt64, UInt64?)] = []
     var completedCalls: [(Int64, UInt64?)] = []
     var restarted: [Int64] = []
@@ -51,6 +52,10 @@ private final class FakeIOSPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
 
     func chapters(enclosureID: Int64) async throws -> [MediaChapter] {
         chaptersValue
+    }
+
+    func artwork(reference: String) async -> Data? {
+        artworkData
     }
 
     func checkpoint(
