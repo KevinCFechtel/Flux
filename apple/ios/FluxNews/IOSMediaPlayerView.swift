@@ -729,9 +729,12 @@ struct IOSMediaPlayerView: View {
                 .disabled(!sleepTimer.isEnabled)
 
                 if let remaining = sleepTimer.remainingSeconds {
-                    Text("Stops in \(sleepTimerRemainingLabel(remaining))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text(
+                        "\(String(localized: "Stops in")) "
+                            + sleepTimerRemainingLabel(remaining)
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
             }
             .padding(20)
