@@ -430,6 +430,30 @@ final class IOSMediaPlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(engine.rate, 0.5)
     }
 
+    func testPreparePublishesResolvedRemotePlaybackSource() async throws {
+        let core = FakeIOSPlaybackCoreAccess()
+        let engine = FakeIOSPlaybackEngine()
+        let audio = FakeIOSAudioSession()
+        let state = IOSMediaPlaybackPresentationState()
+        let coordinator = IOSMediaPlaybackCoordinator(
+            coreAccess: core,
+            presentationState: state,
+            engine: engine,
+            audioSession: audio
+        )
+
+        _ = try await coordinator.prepare(enclosureID: 7)
+
+        XCTAssertEqual(state.playbackSource, .remote)
+        XCTAssertEqual(
+            engine.loadedURL?.absoluteString,
+            "https://example.test/audio.mp3"
+        )
+
+        state.reset()
+        XCTAssertNil(state.playbackSource)
+    }
+
     func testNaturalEndReportsCoreCompletionAndRequestsTransferReconciliation() async throws {
         let core = FakeIOSPlaybackCoreAccess(status: .inProgress)
         let engine = FakeIOSPlaybackEngine()
