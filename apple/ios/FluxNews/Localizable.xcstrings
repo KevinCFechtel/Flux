@@ -254,6 +254,16 @@
         }
       }
     },
+    "Add to Listening List": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zur Hörliste hinzufügen"
+          }
+        }
+      }
+    },
     "All Articles": {
       "extractionState": "stale",
       "localizations": {
@@ -577,6 +587,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Fertig"
+          }
+        }
+      }
+    },
+    "Download Audio": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio herunterladen"
           }
         }
       }
@@ -1341,6 +1361,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Account entfernen"
+          }
+        }
+      }
+    },
+    "Remove from Listening List": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aus Hörliste entfernen"
           }
         }
       }
