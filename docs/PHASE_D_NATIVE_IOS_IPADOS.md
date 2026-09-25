@@ -1,6 +1,6 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: D1-D4 COMPLETE / D4 FOLLOW-UP COMPLETE / D4.5 COMPLETE / D5 COMPLETE & ARCHITECTURE-FROZEN / D6 IMPLEMENTATION COMPLETE — D6-G ACCEPTANCE ACTIVE / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D4 COMPLETE / D4 FOLLOW-UP COMPLETE / D4.5 COMPLETE / D5 COMPLETE & ARCHITECTURE-FROZEN / D6 IMPLEMENTATION STABLE & TESTVALIDATED — UX OBSERVATION WINDOW ACTIVE / D7 READY TO START / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
 > replaces the existing Flutter iOS/iPadOS client with a native Swift client:
@@ -1348,16 +1348,24 @@ D6 starts from an existing Core/UniFFI media contract and a completed macOS
 reference implementation. The repository-first readiness review and concrete
 execution/work-package contract are maintained in
 [`IOS_D6_NATIVE_MEDIA_IMPLEMENTATION.md`](IOS_D6_NATIVE_MEDIA_IMPLEMENTATION.md).
-D6-0 through D6-F were implemented and testvalidated through
-`7acb079d77a1e5812964abd382a2fd43e6067b77`: `cargo fmt --check`, the full
-Rust workspace suite (224 `flux-core` + 6 `flux-uniffi`, 0 failures), and
-the canonical iOS gate (448 tests, 0 failures, `TEST SUCCEEDED`) were green.
-Later 25 September native-media UX follow-ups reorganized Player controls and
-moved the native iOS Listening List from a detail scope to a Search-style
-fly-over while preserving the shared/Core scope contract. Presentation and
-navigation tests were updated; the canonical iOS gate must be rerun before the
-new head is recorded as testvalidated. D6-G otherwise remains the
-real-device/process-boundary acceptance gate; its evidence matrix is maintained in
+D6-0 through D6-F are implemented and testvalidated. The 25 September
+native-media UX follow-ups reorganized Player controls, moved the native iOS
+Listening List from a detail scope to a Search-style fly-over, added read-only
+chapter preview for inactive items, unified long-form playback time formatting,
+refined remote buffering presentation, and corrected cross-device Miniflux
+playback-progress reconciliation while preserving the shared/Core ownership
+contract. The current validation baseline is green: `cargo fmt --check`, the
+full Rust workspace suite (226 `flux-core` + 6 `flux-uniffi`, 0 failures),
+and the canonical iOS gate (459 tests, 0 failures, `TEST SUCCEEDED`).
+
+D6 is now **implementation-stable and testvalidated** and enters an explicit
+real-device **UX observation window**. During this window, presentation-only
+Player/Listening-List refinements may continue without reopening the stable
+playback/runtime ownership contract. D6 is deliberately not yet marked
+architecture-frozen: the remaining D6-G real-device/process-boundary matrix is
+retained as the final closure/freeze gate. D7 may start in parallel because it
+consumes the app-wide playback runtime rather than the mutable SwiftUI Player
+layout. The D6-G evidence matrix is maintained in
 [`IOS_D6_FINAL_ACCEPTANCE.md`](IOS_D6_FINAL_ACCEPTANCE.md).
 The D5 `IOSMediaTransferReconciliationHandoff` remains the authoritative
 bridge from successful background Sync into the D6 transfer runtime. D6 now
