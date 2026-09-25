@@ -339,10 +339,8 @@ struct IOSListeningListView: View {
                 store.reload()
             } catch {
                 playbackState.setErrorMessage(
-                    IOSErrorPresentation.message(
-                        for: error,
-                        context: .contentLoad
-                    )
+                    playbackCoordinator.lastStartFailureDescription
+                        ?? error.localizedDescription
                 )
             }
         }
