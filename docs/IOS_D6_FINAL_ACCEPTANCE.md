@@ -1,16 +1,24 @@
 # iOS D6 Final Acceptance
 
-Status: **IN PROGRESS — implementation/test gates complete; real-device and process-boundary acceptance pending — 25 September 2026**
+Status: **IN PROGRESS — post-closure follow-up corrections implemented; canonical revalidation plus real-device/process-boundary acceptance pending — 25 September 2026**
 
 This acceptance record closes the implementation portion of **D6 — Native Media & Background Downloads** and defines the remaining D6-G evidence required before D6 can be marked complete and architecture-frozen.
 
 ## Current closure state
 
-D6-0 through D6-F are implemented and testvalidated.
+D6-0 through D6-F remain implemented. Their previously accepted automated gates
+were green before the 25 September post-closure audit.
 
-The canonical native iOS test gate is green after the final D6-F Media Settings work. D6-G is now the only open D6 package.
+That audit corrected three narrow follow-ups: Preview artwork now uses the
+canonical Core artwork-source selection without preparing playback; the German
+D6 media string catalog was completed; and the canonical iOS test script now
+selects an available iPhone Simulator instead of assuming a fixed model.
 
-No further product implementation is currently required for D6-G unless a real-device/process-boundary check exposes a concrete regression.
+Because those changes are newer than the last accepted canonical run, the
+current head must pass the Rust workspace validation and
+`./apple/ios/Build/test.sh` again before D6-0 through D6-F are recorded as
+testvalidated at the new head. After that, D6-G remains the only open acceptance
+package unless the rerun exposes a concrete regression.
 
 ## Automated evidence already accepted
 
