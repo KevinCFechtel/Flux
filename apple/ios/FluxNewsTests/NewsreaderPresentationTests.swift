@@ -4173,11 +4173,11 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(leading.actions.count, 2)
         XCTAssertEqual(
             leading.actions.first?.title,
-            String(localized: "Mark as Read")
+            String(localized: "Swipe Read")
         )
         XCTAssertEqual(
             leading.actions.last?.title,
-            String(localized: "Open Original")
+            String(localized: "Swipe Original")
         )
     }
 
@@ -4227,7 +4227,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(configuration.actions.count, 1)
         XCTAssertEqual(
             configuration.actions.first?.title,
-            String(localized: "Share")
+            String(localized: "Swipe Share")
         )
         XCTAssertFalse(configuration.performsFirstActionWithFullSwipe)
     }
