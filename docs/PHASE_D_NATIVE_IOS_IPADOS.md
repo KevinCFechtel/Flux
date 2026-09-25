@@ -1,6 +1,6 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: D1-D4 BASELINE COMPLETE / D4 FOLLOW-UP OPEN / D4.5 COMPLETE / D5 COMPLETE & ARCHITECTURE-FROZEN / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D4 COMPLETE / D4 FOLLOW-UP COMPLETE / D4.5 COMPLETE / D5 COMPLETE & ARCHITECTURE-FROZEN / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
 > replaces the existing Flutter iOS/iPadOS client with a native Swift client:
@@ -1292,7 +1292,9 @@ validation:
 - native iOS diagnostics export with bounded privacy-safe Core/native logs,
   persistent Debug Logging control, and explicit clear/export actions.
 
-The accepted details and the immediate D4 follow-up work are recorded in
+The immediate D4 follow-up work is complete and test-validated. The remaining
+late Phase-D settings-portability/diagnostics commitments and their accepted
+contracts are recorded in
 [IOS_D4_FOLLOWUP_FINDINGS.md](IOS_D4_FOLLOWUP_FINDINGS.md).
 
 ### D6 — Native Media & Background Downloads
