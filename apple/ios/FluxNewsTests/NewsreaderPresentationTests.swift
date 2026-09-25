@@ -5001,6 +5001,80 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(lifecycle.isCurrentSelectionCount(syncCount))
     }
 
+    @MainActor
+    func testInactiveListeningListPlayerPreviewKeepsActivePlaybackSeparate() {
+        let activeEnclosure = Enclosure(
+            id: 1,
+            articleId: 10,
+            url: "https://example.test/active.mp3",
+            mimeType: "audio/mpeg",
+            sizeBytes: nil,
+            remoteMediaProgressionSeconds: 0,
+            mediaKind: .audio
+        )
+        let previewEnclosure = Enclosure(
+            id: 2,
+            articleId: 20,
+            url: "https://example.test/preview.mp3",
+            mimeType: "audio/mpeg",
+            sizeBytes: nil,
+            remoteMediaProgressionSeconds: 0,
+            mediaKind: .audio
+        )
+        let previewItem = ListeningListItem(
+            articleId: 20,
+            feedId: 2,
+            title: "Preview Episode",
+            feedTitle: "Preview Feed",
+            publishedAt: "2026-09-25T00:00:00Z",
+            addedAt: "2026-09-25T00:00:00Z",
+            remotePresent: true,
+            audioEnclosures: [
+                ListeningListEnclosure(
+                    enclosure: previewEnclosure,
+                    remotePresent: true,
+                    playbackState: PlaybackState(
+                        enclosureId: 2,
+                        positionMs: 12_000,
+                        durationMs: 90_000,
+                        status: .inProgress,
+                        updatedAt: nil
+                    ),
+                    download: nil,
+                    durationMs: 90_000
+                )
+            ],
+            activeEnclosureId: 2
+        )
+        let runtime = IOSMediaPlaybackPresentationState()
+        runtime.setLoadedMedia(
+            enclosure: activeEnclosure,
+            feedTitle: "Active Feed",
+            mediaTitle: "Active Episode",
+            artworkSource: nil,
+            chapters: [],
+            positionMs: 45_000,
+            durationMs: 120_000
+        )
+        runtime.setStatus(.playing)
+
+        XCTAssertEqual(
+            IOSMediaPlayerPreviewPresentation.isPreviewingInactiveItem(
+                item: previewItem,
+                loadedEnclosureID: runtime.loadedEnclosure?.id
+            ),
+            true
+        )
+        XCTAssertEqual(
+            IOSMediaPlayerPreviewPresentation.positionMs(
+                item: previewItem,
+                loadedEnclosureID: runtime.loadedEnclosure?.id,
+                runtimePositionMs: runtime.positionMs
+            ),
+            12_000
+        )
+    }
+
     func testMediaPlayerLayoutPolicyAdaptsBySizeClass() {
         XCTAssertEqual(
             IOSMediaPlayerLayoutPolicy.mode(
