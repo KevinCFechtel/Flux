@@ -1314,19 +1314,16 @@ D5 is COMPLETE / architecture-frozen. Final physical-device widget/deep-link smo
 
 ### Phase-D late settings portability & diagnostics completion
 
-Two product capabilities remain part of Phase D but are intentionally scheduled
-after the Settings surface has largely stabilized and before D10 replacement
-validation:
+The late native iOS diagnostics commitment is now implemented: bounded
+privacy-safe Core/native support logs persist across relaunch, Debug Logging is
+an explicit persisted opt-in, and Developer Diagnostics provides export/share
+and clear actions. The detailed contract and implementation status are recorded
+in [IOS_D4_FOLLOWUP_FINDINGS.md](IOS_D4_FOLLOWUP_FINDINGS.md).
 
-- native iOS configuration backup/restore using the existing versioned
-  Core/UniFFI backup format;
-- native iOS diagnostics export with bounded privacy-safe Core/native logs,
-  persistent Debug Logging control, and explicit clear/export actions.
-
-The immediate D4 follow-up work is complete and test-validated. The remaining
-late Phase-D settings-portability/diagnostics commitments and their accepted
-contracts are recorded in
-[IOS_D4_FOLLOWUP_FINDINGS.md](IOS_D4_FOLLOWUP_FINDINGS.md).
+The remaining late Phase-D settings-portability capability is native iOS
+configuration backup/restore using the existing versioned Core/UniFFI backup
+format. It remains scheduled after the Settings surface has stabilized and
+before D10 replacement validation.
 
 ### D6 — Native Media & Background Downloads
 
