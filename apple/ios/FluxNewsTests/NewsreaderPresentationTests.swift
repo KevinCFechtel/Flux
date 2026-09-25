@@ -5106,6 +5106,33 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testListeningListPlaybackActionReflectsRuntimeState() {
+        XCTAssertEqual(
+            IOSListeningListPresentation.playbackAction(
+                enclosureID: 7,
+                loadedEnclosureID: 7,
+                status: .playing
+            ),
+            .pause
+        )
+        XCTAssertEqual(
+            IOSListeningListPresentation.playbackAction(
+                enclosureID: 7,
+                loadedEnclosureID: 7,
+                status: .paused
+            ),
+            .play
+        )
+        XCTAssertEqual(
+            IOSListeningListPresentation.playbackAction(
+                enclosureID: 7,
+                loadedEnclosureID: 8,
+                status: .playing
+            ),
+            .play
+        )
+    }
+
     @MainActor
     func testListeningListPresentationPrefersActiveEnclosureAndRuntimeProgress() {
         let first = ListeningListEnclosure(
