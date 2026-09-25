@@ -620,9 +620,13 @@ the current Core API does not expose a complete global list of all
 `Downloaded` rows; deleting files merely because they are absent from
 `downloadsRequiringTransfer/deletion` would remove valid completed downloads.
 
-The remaining D6-B integration item is playback-aware deletion deferral. It is
-wired only after D6-C provides the authoritative native in-use playback runtime
-state; until then D6-B must not invent an independent playback owner.
+The persistent transfer core through this point was validated by the canonical
+iOS test gate and macOS app build. The final D6-B integration dependency is now
+implemented together with D6-C: DeleteRequested work consults the authoritative
+app-scoped playback runtime and defers physical deletion while that enclosure is
+still prepared/in use. Playback-use changes request another reconciliation, so
+deferred deletion is retried after the native player releases the enclosure.
+This final cross-package wiring is pending the next canonical iOS validation.
 
 - stable background-session identifier per app identity;
 - background URLSession delegate;
@@ -635,6 +639,40 @@ state; until then D6-B must not invent an independent playback owner.
 - focused process/lifecycle recovery tests.
 
 ### D6-C — Playback + AVAudioSession
+
+**Implementation status:** **ACTIVE / first runtime slice implemented,
+validation pending.** iOS now has an app-scoped
+`IOSMediaPlaybackCoordinator` under `IOSMediaRuntime`, an
+`IOSAVPlayerPlaybackEngine`, and an iOS-specific
+`IOSMediaAudioSessionCoordinator`. Core calls are asynchronous and pass only
+through the existing `IOSCoreSessionExecutionCoordinator`; no Swift media
+domain persistence was added.
+
+The current slice implements:
+
+- AVPlayer prepare/play/pause/stop/seek/skip and 0.5x-3.0x rate;
+- local downloaded-file preference with remote HTTP(S) fallback;
+- InProgress resume position from `PlaybackPreparation`;
+- chapters and transient article/feed/artwork metadata;
+- approximately 20-second checkpoints while playing;
+- checkpoints on pause, stop, seek, scene deactivation, interruption, route loss
+  and Core replacement;
+- Core completion, restart and observed-duration callbacks;
+- spoken-audio `AVAudioSession` playback configuration with AirPlay and
+  Bluetooth A2DP support;
+- interruption handling with conditional resume;
+- old-route-device-unavailable handling;
+- background audio mode in Info.plist; scene deactivation checkpoints but does
+  not pause playback;
+- sleep-timer semantics without unloading the prepared item;
+- successful account/Core replacement explicitly unloads the previous account's
+  player item before attaching the new Core; aborted replacement resumes the
+  original Core without destroying playback;
+- playback ownership wired into D6-B deletion deferral;
+- focused fake-engine/fake-audio-session tests for resume position, checkpoints,
+  interruption, route loss, playback rate, completion, duration and sleep timer.
+
+Now Playing/remote commands remain absent and therefore stay in D7.
 
 - AVPlayer engine and iOS playback coordinator;
 - app-wide playback state;
