@@ -4,80 +4,66 @@ struct IOSListeningListView: View {
     @ObservedObject var store: IOSListeningListStore
     @ObservedObject var playbackState: IOSMediaPlaybackPresentationState
     let playbackCoordinator: IOSMediaPlaybackCoordinator
-
-    @State private var playerPresented = false
-    @State private var playerArticleID: Int64?
+    let showsScopeChooser: Bool
+    let onPresentScopeChooser: () -> Void
+    let onStartPlayback: (_ articleID: Int64, _ enclosureID: Int64) -> Void
 
     private static let isoFormatter = ISO8601DateFormatter()
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if store.isLoading && store.items.isEmpty {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let error = store.errorMessage, store.items.isEmpty {
-                    ContentUnavailableView {
-                        Label("Listening List", systemImage: "headphones")
-                    } description: {
-                        Text(error)
-                    } actions: {
-                        Button("Retry") { store.reload() }
-                    }
-                } else if store.items.isEmpty {
-                    ContentUnavailableView(
-                        "Listening List is Empty",
-                        systemImage: "headphones",
-                        description: Text(
-                            "Add audio news to your Listening List to find them here."
-                        )
+        Group {
+            if store.isLoading && store.items.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = store.errorMessage, store.items.isEmpty {
+                ContentUnavailableView {
+                    Label("Listening List", systemImage: "headphones")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Retry") { store.reload() }
+                }
+            } else if store.items.isEmpty {
+                ContentUnavailableView(
+                    "Listening List is Empty",
+                    systemImage: "headphones",
+                    description: Text(
+                        "Add audio news to your Listening List to find them here."
                     )
-                } else {
-                    List(store.items, id: \.articleId) { item in
-                        row(item)
-                    }
-                    .refreshable { store.reload() }
-                }
-            }
-            .navigationTitle("Listening List")
-            .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    feedMenu
-                    sortMenu
-                }
-            }
-            .sheet(isPresented: $playerPresented, onDismiss: {
-                store.clearShowNotes()
-            }) {
-                IOSMediaPlayerView(
-                    playbackState: playbackState,
-                    playbackCoordinator: playbackCoordinator,
-                    item: playerItem,
-                    showNotesDocument: store.showNotesDocument,
-                    showNotesIsLoading: store.showNotesIsLoading,
-                    showNotesErrorMessage: store.showNotesErrorMessage,
-                    onSelectEnclosure: { enclosureID in
-                        startPlayback(
-                            articleID: playerArticleID,
-                            enclosureID: enclosureID
-                        )
-                    },
-                    onShowNotes: {
-                        if let playerArticleID {
-                            store.loadShowNotes(articleID: playerArticleID)
-                        }
-                    },
-                    onDismiss: {
-                        playerPresented = false
-                    }
                 )
+            } else {
+                List(store.items, id: \.articleId) { item in
+                    row(item)
+                }
+                .refreshable { store.reload() }
             }
         }
-    }
+        .navigationTitle("Listening List")
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            if showsScopeChooser {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: onPresentScopeChooser) {
+                        Image(IOSNavigationButtonPresentation.imageName)
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(
+                                width: IOSNavigationButtonPresentation.glyphSize,
+                                height: IOSNavigationButtonPresentation.glyphSize
+                            )
+                    }
+                    .accessibilityLabel(
+                        IOSNavigationButtonPresentation.accessibilityLabel
+                    )
+                }
+            }
 
-    private var playerItem: ListeningListItem? {
-        guard let playerArticleID else { return nil }
-        return store.items.first { $0.articleId == playerArticleID }
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                feedMenu
+                sortMenu
+            }
+        }
     }
 
     @ViewBuilder
@@ -324,26 +310,10 @@ struct IOSListeningListView: View {
     }
 
     private func startPlayback(
-        articleID: Int64?,
+        articleID: Int64,
         enclosureID: Int64
     ) {
-        if let articleID {
-            playerArticleID = articleID
-        }
-        playerPresented = true
-        Task {
-            do {
-                try await playbackCoordinator.play(
-                    enclosureID: enclosureID
-                )
-                store.reload()
-            } catch {
-                playbackState.setErrorMessage(
-                    playbackCoordinator.lastStartFailureDescription
-                        ?? error.localizedDescription
-                )
-            }
-        }
+        onStartPlayback(articleID, enclosureID)
     }
 
     private var feedMenu: some View {
