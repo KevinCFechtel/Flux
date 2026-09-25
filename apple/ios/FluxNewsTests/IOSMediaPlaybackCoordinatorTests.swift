@@ -14,6 +14,7 @@ final class IOSMediaAudioSessionConfigurationTests: XCTestCase {
 private final class FakeIOSPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
     var preparation: PlaybackPreparation
     var chaptersValue: [MediaChapter] = []
+    var metadataValue: MediaMetadata?
     var artworkData: Data?
     var prepareError: Error?
     var checkpoints: [(Int64, UInt64, UInt64?)] = []
@@ -62,6 +63,10 @@ private final class FakeIOSPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
 
     func chapters(enclosureID: Int64) async throws -> [MediaChapter] {
         chaptersValue
+    }
+
+    func metadata(enclosureID: Int64) async -> MediaMetadata? {
+        metadataValue
     }
 
     func artwork(reference: String) async -> Data? {
@@ -491,6 +496,32 @@ final class IOSMediaPlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(engine.unloadCount, 0)
         XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
         XCTAssertEqual(core.checkpoints.last?.1, 24_000)
+    }
+
+    func testPreviewArtworkSourceUsesExtractedMetadataWithoutPreparing() async {
+        let core = FakeIOSPlaybackCoreAccess()
+        let engine = FakeIOSPlaybackEngine()
+        let audio = FakeIOSAudioSession()
+        let coordinator = makeCoordinator(
+            core: core,
+            engine: engine,
+            audio: audio
+        )
+        core.metadataValue = MediaMetadata(
+            enclosureId: 7,
+            durationMs: 120_000,
+            embeddedArtworkReference: "metadata/artwork-test.png"
+        )
+
+        let source = await coordinator.previewArtworkSource(
+            enclosureID: 7
+        )
+
+        XCTAssertEqual(
+            source,
+            .localReference(reference: "metadata/artwork-test.png")
+        )
+        XCTAssertNil(engine.loadedURL)
     }
 
     func testLocalArtworkUsesCoreAccess() async {
