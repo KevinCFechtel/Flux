@@ -255,6 +255,18 @@ private struct IOSArticleListVerticalToolbarEnvironment<Content: View>: View {
 }
 #endif
 
+private struct IOSArticleMediaPlayerPresentation: Identifiable {
+    let article: ArticleSummary
+    let enclosureID: Int64
+    var id: String { "\(article.id):\(enclosureID)" }
+}
+
+private struct IOSArticleMediaDownloadChoice: Identifiable {
+    let article: ArticleSummary
+    let enclosures: [Enclosure]
+    var id: Int64 { article.id }
+}
+
 struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -287,6 +299,8 @@ struct ContentView: View {
     @State private var syncPresentationGeneration: UInt64 = 0
     @State private var saveToServiceFeedbackTrigger: UInt64 = 0
     @State private var pendingWidgetAction: WidgetAction?
+    @State private var articleMediaPlayer: IOSArticleMediaPlayerPresentation?
+    @State private var articleMediaDownloadChoice: IOSArticleMediaDownloadChoice?
 
     /// The capsule already opens the scope chooser, so a second control for the
     /// same action would be pure redundancy.
@@ -356,6 +370,58 @@ struct ContentView: View {
             NavigationStack { readerView(for: item.article) }
         }
         .sheet(item: gatedShare(active: !searchPresented)) { payload in IOSShareSheet(items: payload.items) }
+        .sheet(item: $articleMediaPlayer, onDismiss: {
+            listeningListStore.clearShowNotes()
+        }) { presentation in
+            IOSMediaPlayerView(
+                playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+                playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
+                item: nil,
+                showNotesDocument: listeningListStore.showNotesDocument,
+                showNotesIsLoading: listeningListStore.showNotesIsLoading,
+                showNotesErrorMessage: listeningListStore.showNotesErrorMessage,
+                onSelectEnclosure: { _ in },
+                onShowNotes: {
+                    listeningListStore.loadShowNotes(
+                        articleID: presentation.article.id
+                    )
+                },
+                onDismiss: {
+                    articleMediaPlayer = nil
+                }
+            )
+        }
+        .confirmationDialog(
+            "Download Audio",
+            isPresented: Binding(
+                get: { articleMediaDownloadChoice != nil },
+                set: { if !$0 { articleMediaDownloadChoice = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let choice = articleMediaDownloadChoice {
+                ForEach(
+                    Array(choice.enclosures.enumerated()),
+                    id: \.element.id
+                ) { index, enclosure in
+                    Button(
+                        IOSArticleAudioPresentation.enclosureLabel(
+                            enclosure,
+                            index: index
+                        )
+                    ) {
+                        performArticleDownload(
+                            article: choice.article,
+                            enclosure: enclosure
+                        )
+                        articleMediaDownloadChoice = nil
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                articleMediaDownloadChoice = nil
+            }
+        }
         .alert("Unable to Open Article", isPresented: Binding(get: { articleOpenError != nil }, set: { if !$0 { articleOpenError = nil } })) {
             Button("OK", role: .cancel) { articleOpenError = nil }
         } message: { Text(articleOpenError ?? "") }
@@ -398,10 +464,15 @@ struct ContentView: View {
                     await IOSAppRuntime.shared.mediaTransferReconciliationHandoff
                         .requestReconciliation()
                 }
+                newsreaderStore.onMediaTransferReconciliationRequested = {
+                    await IOSAppRuntime.shared.mediaTransferReconciliationHandoff
+                        .requestReconciliation()
+                }
                 searchStore.onLocalFirstMutation = { newsreaderStore.loadNavigationAndCounts() }
             } else {
                 searchStore.detach()
                 listeningListStore.onTransferReconciliationRequested = nil
+                newsreaderStore.onMediaTransferReconciliationRequested = nil
                 listeningListStore.detach()
             }
             consumePendingWidgetActionIfReady()
@@ -513,7 +584,8 @@ struct ContentView: View {
                     naturalTopContentInset: naturalTopContentInset,
                     usesNativeTopEdgeEffect: usesNativeTopEdgeEffect,
                     onArticleTap: openArticle,
-                    onArticleAction: handleArticleAction
+                    onArticleAction: handleArticleAction,
+                    onArticleMediaAction: handleArticleMediaAction
                 )
             }
         )
@@ -816,6 +888,156 @@ struct ContentView: View {
                     actionError = IOSErrorPresentation.message(for: error, context: .articleAction)
                 }
             }
+        }
+    }
+
+    private func handleArticleMediaAction(
+        _ article: ArticleSummary,
+        _ action: IOSArticleMediaAction
+    ) {
+        switch action {
+        case let .play(enclosureID):
+            articleMediaPlayer = .init(
+                article: article,
+                enclosureID: enclosureID
+            )
+            Task {
+                do {
+                    try await IOSAppRuntime.shared.mediaRuntime
+                        .playbackCoordinator.play(enclosureID: enclosureID)
+                } catch {
+                    actionError = IOSErrorPresentation.message(
+                        for: error,
+                        context: .articleAction
+                    )
+                    articleMediaPlayer = nil
+                }
+            }
+
+        case let .setListeningList(enabled):
+            Task {
+                let result = await newsreaderStore
+                    .setArticleListeningListMembership(
+                        articleID: article.id,
+                        isInListeningList: enabled
+                    )
+                presentArticleMediaMutationResult(
+                    result,
+                    success: enabled
+                        ? String(localized: "Added to Listening List")
+                        : String(localized: "Removed from Listening List")
+                )
+            }
+
+        case let .requestDownload(enclosureID):
+            Task {
+                let result = await newsreaderStore.requestArticleDownload(
+                    articleID: article.id,
+                    enclosureID: enclosureID
+                )
+                presentArticleMediaMutationResult(
+                    result,
+                    success: String(localized: "Download requested")
+                )
+            }
+
+        case let .cancelDownload(enclosureID):
+            Task {
+                let result = await newsreaderStore.cancelArticleDownload(
+                    articleID: article.id,
+                    enclosureID: enclosureID
+                )
+                presentArticleMediaMutationResult(
+                    result,
+                    success: String(localized: "Download cancelled")
+                )
+            }
+
+        case let .retryDownload(enclosureID):
+            Task {
+                let result = await newsreaderStore.retryArticleDownload(
+                    articleID: article.id,
+                    enclosureID: enclosureID
+                )
+                presentArticleMediaMutationResult(
+                    result,
+                    success: String(localized: "Download requested")
+                )
+            }
+
+        case let .deleteDownload(enclosureID):
+            Task {
+                let result = await newsreaderStore.deleteArticleDownload(
+                    articleID: article.id,
+                    enclosureID: enclosureID
+                )
+                presentArticleMediaMutationResult(
+                    result,
+                    success: String(localized: "Download deletion requested")
+                )
+            }
+
+        case .configuredDownloadAudio:
+            let enclosures = IOSArticleAudioPresentation.downloadableEnclosures(
+                newsreaderStore.articleAudioActionStates[article.id]
+            )
+            if enclosures.count == 1, let enclosure = enclosures.first {
+                performArticleDownload(
+                    article: article,
+                    enclosure: enclosure
+                )
+            } else if !enclosures.isEmpty {
+                articleMediaDownloadChoice = .init(
+                    article: article,
+                    enclosures: enclosures
+                )
+            }
+        }
+    }
+
+    private func performArticleDownload(
+        article: ArticleSummary,
+        enclosure: Enclosure
+    ) {
+        let action = IOSArticleAudioPresentation.downloadAction(
+            newsreaderStore.articleAudioActionStates[article.id]?
+                .downloads[enclosure.id]
+        )
+        Task {
+            let result: Result<Void, Error>
+            switch action {
+            case .retry:
+                result = await newsreaderStore.retryArticleDownload(
+                    articleID: article.id,
+                    enclosureID: enclosure.id
+                )
+            case .download:
+                result = await newsreaderStore.requestArticleDownload(
+                    articleID: article.id,
+                    enclosureID: enclosure.id
+                )
+            case .pending, .delete, .pendingDeletion:
+                return
+            }
+            presentArticleMediaMutationResult(
+                result,
+                success: String(localized: "Download requested")
+            )
+        }
+    }
+
+    private func presentArticleMediaMutationResult(
+        _ result: Result<Void, Error>,
+        success: String
+    ) {
+        switch result {
+        case .success:
+            actionConfirmation = success
+        case let .failure(error):
+            actionError = IOSErrorPresentation.message(
+                for: error,
+                context: .articleAction
+            )
         }
     }
 
