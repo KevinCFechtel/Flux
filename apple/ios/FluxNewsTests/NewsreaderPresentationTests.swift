@@ -5181,6 +5181,63 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testMediaPlayerWaitIndicatorOnlyAppliesToRemoteActivePlayback() {
+        XCTAssertFalse(
+            IOSMediaPlayerWaitIndicatorPolicy.shouldRequestIndicator(
+                isPreviewingInactiveItem: false,
+                source: .local,
+                isLoading: true,
+                isBuffering: true
+            )
+        )
+        XCTAssertTrue(
+            IOSMediaPlayerWaitIndicatorPolicy.shouldRequestIndicator(
+                isPreviewingInactiveItem: false,
+                source: .remote,
+                isLoading: true,
+                isBuffering: false
+            )
+        )
+        XCTAssertTrue(
+            IOSMediaPlayerWaitIndicatorPolicy.shouldRequestIndicator(
+                isPreviewingInactiveItem: false,
+                source: .remote,
+                isLoading: false,
+                isBuffering: true
+            )
+        )
+        XCTAssertFalse(
+            IOSMediaPlayerWaitIndicatorPolicy.shouldRequestIndicator(
+                isPreviewingInactiveItem: true,
+                source: .remote,
+                isLoading: true,
+                isBuffering: true
+            )
+        )
+    }
+
+    func testMediaPlayerShowNotesAreInlineDisclosureNotNestedSheet() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+        let playerSource = try String(
+            contentsOf: testsDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("FluxNews/IOSMediaPlayerView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(playerSource.contains("showNotesExpanded"))
+        XCTAssertTrue(playerSource.contains("private var showNotesSection"))
+        XCTAssertTrue(
+            playerSource.contains(
+                "ReaderDocumentContent(\n                            document: showNotesDocument"
+            )
+        )
+        XCTAssertFalse(
+            playerSource.contains(".sheet(isPresented: $showNotesPresented)")
+        )
+    }
+
     func testMediaPlayerChapterSummaryUsesCurrentChapterAndCount() {
         let chapters = [
             MediaChapter(
