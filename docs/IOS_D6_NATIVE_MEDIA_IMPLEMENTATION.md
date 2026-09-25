@@ -689,8 +689,7 @@ Now Playing/remote commands remain absent and therefore stay in D7.
 
 ### D6-D — Listening List native presentation
 
-**Implementation status:** **IMPLEMENTATION COMPLETE / final validation
-pending.** D6-B and D6-C runtime/execution are closed and testvalidated. The
+**Implementation status:** **CLOSED / testvalidated.** D6-B and D6-C runtime/execution are closed and testvalidated. The
 first two D6-D Listening List/Player slices passed the canonical iOS test gate
 (and the shared Reader change also passed the macOS build). D6-D now owns the
 user-facing iOS media presentation over those app-scoped runtimes. The Listening List remains a separate read model and
@@ -754,7 +753,7 @@ The final D6-D implementation slice now additionally provides:
 No persistent mini-player, MediaPlayer API, Now Playing, remote commands or
 ActivityKit work was introduced; those remain D7/D8 as contracted.
 
-D6-D can be closed after the final canonical iOS validation of this slice.
+The final canonical iOS validation passed; D6-D is closed.
 
 - real Listening List store/read model;
 - restore navigation entry;
@@ -765,6 +764,12 @@ D6-D can be closed after the final canonical iOS validation of this slice.
 - Player presentation entry points.
 
 ### D6-E — Article/media actions
+
+**Implementation status:** **ACTIVE.** D6-D is closed and testvalidated.
+D6-E now wires media semantics into ordinary article actions without changing
+the frozen Timeline geometry/image/Scrollover architecture. Audio availability
+must come only from the batched Core projection; visible cells never issue
+per-row media queries.
 
 - batched article audio projection;
 - Play / Listening List / Download actions;
