@@ -100,6 +100,11 @@ The old enclosure-centered Saved Media API may remain temporarily for migration,
 but new Phase-C UI uses the News-centered Listening List contract. Old APIs are
 deprecated only after callers have migrated.
 
+Listening List membership is durable user state. While a News remains in the
+Listening List, normal read-article retention must not delete the News or
+cascade away that membership. Explicit Listening List removal and the
+remove-completed policy remain the mechanisms that intentionally remove it.
+
 ### 2.4 Listening List mutations
 
 Expose News-centered operations:
