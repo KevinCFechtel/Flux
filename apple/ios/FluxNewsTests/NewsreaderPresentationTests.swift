@@ -2826,6 +2826,41 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(layoutMetrics(mode: .visual, width: 760, hasImage: true).variant, .visualLandscape)
     }
 
+    func testAudioAccessoryReservesFeedTitleWidth() {
+        let geometry = IOSUIKitArticleGeometry(
+            mode: .visual,
+            containerWidth: 390
+        )
+        let accessories = IOSUIKitArticleAccessoryMetrics(
+            contentSizeCategory: .large
+        )
+
+        let withoutAudio = geometry.metadataLayout(
+            width: 358,
+            hasComments: false,
+            hasAudio: false,
+            height: 22,
+            accessories: accessories
+        )
+        let withAudio = geometry.metadataLayout(
+            width: 358,
+            hasComments: false,
+            hasAudio: true,
+            height: 22,
+            accessories: accessories
+        )
+
+        XCTAssertLessThan(
+            withAudio.feedTitleWidth,
+            withoutAudio.feedTitleWidth
+        )
+        XCTAssertEqual(
+            withoutAudio.feedTitleWidth - withAudio.feedTitleWidth,
+            accessories.comments + IOSUIKitArticleGeometry.metadataAccessorySpacing,
+            accuracy: 0.5
+        )
+    }
+
     func testArticleAccessoryOrderingIsStableAcrossHorizontalAndVerticalLayouts() {
         XCTAssertEqual(IOSArticleAccessoryOrdering.outerToInner, [.unread, .star, .comments, .audio])
         XCTAssertEqual(IOSArticleAccessoryOrdering.horizontalLeadingToTrailing, [.audio, .comments, .star, .unread])
