@@ -54,6 +54,7 @@ final class IOSAVPlayerPlaybackEngine: IOSNativePlaybackEngine {
     private var readinessObservation: NSKeyValueObservation?
     private var timeControlObservation: NSKeyValueObservation?
     private weak var observedItem: AVPlayerItem?
+    private var currentSourceIsLocal = false
 
     private(set) var currentPositionMs: UInt64 = 0
     private(set) var durationMs: UInt64?
@@ -86,7 +87,9 @@ final class IOSAVPlayerPlaybackEngine: IOSNativePlaybackEngine {
                 self.isPlaying = isPlaying
                 self.onPlaybackStateChanged?(isPlaying)
                 self.onBufferingChanged?(
-                    player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                    !self.currentSourceIsLocal
+                        && player.timeControlStatus
+                            == .waitingToPlayAtSpecifiedRate
                 )
             }
         }
@@ -99,10 +102,12 @@ final class IOSAVPlayerPlaybackEngine: IOSNativePlaybackEngine {
         let item = AVPlayerItem(url: url)
         removeItemObservers()
         observedItem = item
+        currentSourceIsLocal = url.isFileURL
         currentPositionMs = 0
         durationMs = nil
         isPlaying = false
-        onLoadingChanged?(true)
+        onLoadingChanged?(!currentSourceIsLocal)
+        onBufferingChanged?(false)
 
         readinessObservation = item.observe(
             \.status,
@@ -118,7 +123,9 @@ final class IOSAVPlayerPlaybackEngine: IOSNativePlaybackEngine {
                 switch item.status {
                 case .readyToPlay:
                     self.logger.info("AVPlayer item ready")
-                    self.onLoadingChanged?(false)
+                    if !self.currentSourceIsLocal {
+                        self.onLoadingChanged?(false)
+                    }
                 case .failed:
                     let message = item.error?.localizedDescription
                         ?? "Media playback failed."
@@ -150,7 +157,9 @@ final class IOSAVPlayerPlaybackEngine: IOSNativePlaybackEngine {
                     return
                 }
                 self.durationMs = duration
-                self.onLoadingChanged?(false)
+                if !self.currentSourceIsLocal {
+                    self.onLoadingChanged?(false)
+                }
                 self.onDuration?(duration)
             }
         }
@@ -217,6 +226,9 @@ final class IOSAVPlayerPlaybackEngine: IOSNativePlaybackEngine {
         currentPositionMs = 0
         durationMs = nil
         isPlaying = false
+        currentSourceIsLocal = false
+        onLoadingChanged?(false)
+        onBufferingChanged?(false)
     }
 
     func seek(toMs: UInt64) {
@@ -894,6 +906,9 @@ final class IOSMediaPlaybackCoordinator {
         }
         logger.info(
             "playback source enclosure=\(enclosureID) local=\(source.isFileURL) scheme=\(source.scheme ?? "none")"
+        )
+        presentationState.setPlaybackSource(
+            source.isFileURL ? .local : .remote
         )
         let startAt =
             preparation.playbackState.status == .inProgress
