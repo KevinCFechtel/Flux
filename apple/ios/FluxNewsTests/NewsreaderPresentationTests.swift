@@ -4266,6 +4266,128 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(cell.accessibilityLabel?.contains(String(localized: ", starred")) == true)
     }
 
+    func testListeningListSwipeActionIsConfigurableSemanticAction() {
+        XCTAssertTrue(IOSArticleSwipeAction.allCases.contains(.listeningList))
+        XCTAssertEqual(
+            IOSArticleSwipeAction.listeningList.title,
+            String(localized: "Listening List")
+        )
+        XCTAssertNil(IOSArticleSwipeAction.listeningList.contextAction)
+
+        let configured = IOSArticleSwipeConfiguration.defaultConfiguration
+            .setting(
+                .listeningList,
+                side: .trailing,
+                slot: .additional
+            )
+        XCTAssertEqual(
+            configured.additionalAction(for: .trailing),
+            .listeningList
+        )
+        XCTAssertEqual(
+            configured.fullSwipeAction(for: .trailing),
+            .starUnstar
+        )
+    }
+
+    @MainActor
+    func testUIKitTimelineListeningListSwipeUsesBatchedAudioMembership() async throws {
+        let bridge = IOSUIKitArticleTimelinePresentationBridge()
+        let controller = IOSUIKitArticleTimelineController()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 800)
+        controller.view.layoutIfNeeded()
+        let article = timelineArticle(id: 1)
+        bridge.replaceArticleStates([
+            article.id: .init(
+                isRead: false,
+                isStarred: false,
+                revision: 0
+            )
+        ])
+        let enclosure = Enclosure(
+            id: 10,
+            articleId: article.id,
+            url: "https://example.test/audio.mp3",
+            mimeType: "audio/mpeg",
+            sizeBytes: nil,
+            remoteMediaProgressionSeconds: 0,
+            mediaKind: .audio
+        )
+
+        func state(isInListeningList: Bool) -> IOSArticleAudioActionState {
+            IOSArticleAudioActionState(
+                articleID: article.id,
+                enclosures: [enclosure],
+                isInListeningList: isInListeningList,
+                downloads: [:]
+            )
+        }
+
+        func update(_ audioState: IOSArticleAudioActionState?) {
+            controller.update(
+                structuralState: timelineStructuralState([article], revision: 1),
+                presentationBridge: bridge,
+                feedIconPresentationBridge: bridge,
+                mode: .visual,
+                previewLines: .standard,
+                iconVariant: .normal,
+                feedIconRequestRevision: 0,
+                scrollResetRevision: 0,
+                markReadOnScrolloverEnabled: false,
+                swipeConfiguration: .init(
+                    leading: [.listeningList],
+                    trailing: []
+                ),
+                audioActionStates: audioState.map { [article.id: $0] } ?? [:],
+                showsRefreshControl: false
+            )
+        }
+
+        update(state(isInListeningList: false))
+        await controller.settleForTesting()
+        let table = controller.tableViewForTesting
+        let addConfiguration = try XCTUnwrap(
+            controller.tableView(
+                table,
+                leadingSwipeActionsConfigurationForRowAt: IndexPath(
+                    row: 0,
+                    section: 0
+                )
+            )
+        )
+        XCTAssertEqual(
+            addConfiguration.actions.first?.title,
+            String(localized: "Add to Listening List")
+        )
+        XCTAssertTrue(addConfiguration.performsFirstActionWithFullSwipe)
+
+        update(state(isInListeningList: true))
+        let removeConfiguration = try XCTUnwrap(
+            controller.tableView(
+                table,
+                leadingSwipeActionsConfigurationForRowAt: IndexPath(
+                    row: 0,
+                    section: 0
+                )
+            )
+        )
+        XCTAssertEqual(
+            removeConfiguration.actions.first?.title,
+            String(localized: "Remove from Listening List")
+        )
+
+        update(nil)
+        XCTAssertNil(
+            controller.tableView(
+                table,
+                leadingSwipeActionsConfigurationForRowAt: IndexPath(
+                    row: 0,
+                    section: 0
+                )
+            )
+        )
+    }
+
     func testDownloadAudioSwipeActionIsConfigurableSemanticAction() {
         XCTAssertTrue(IOSArticleSwipeAction.allCases.contains(.downloadAudio))
         XCTAssertEqual(

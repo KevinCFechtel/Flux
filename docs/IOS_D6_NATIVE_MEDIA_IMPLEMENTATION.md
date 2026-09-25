@@ -781,8 +781,12 @@ The first D6-E slice now provides:
 - native Article context-menu Audio actions for Play, Add/Remove Listening
   List and per-enclosure Download/Cancel/Retry/Delete;
 - multiple audio enclosures represented as native submenus;
-- semantic `Download Audio` added to the existing configurable swipe action
-  set without changing the zero/one/two-per-side storage contract;
+- semantic `Listening List` toggle and `Download Audio` added to the existing
+  configurable swipe action set without changing the zero/one/two-per-side
+  storage contract;
+- the Listening List swipe action is derived only from the batched article audio
+  projection, renders Add or Remove from current Core membership, and is omitted
+  for rows without audio;
 - conditional swipe rendering: Download Audio is omitted for rows without
   downloadable audio and never promotes another conditional action into Full
   Swipe;

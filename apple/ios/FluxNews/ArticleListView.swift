@@ -183,6 +183,7 @@ enum IOSArticleSwipeAction: String, CaseIterable, Hashable {
     case comments
     case share
     case saveToService
+    case listeningList
     case downloadAudio
 
     var title: String {
@@ -194,6 +195,7 @@ enum IOSArticleSwipeAction: String, CaseIterable, Hashable {
         case .comments: String(localized: "Open Comments")
         case .share: String(localized: "Share")
         case .saveToService: String(localized: "Save to Third-Party Service")
+        case .listeningList: String(localized: "Listening List")
         case .downloadAudio: String(localized: "Download Audio")
         }
     }
@@ -212,7 +214,7 @@ enum IOSArticleSwipeAction: String, CaseIterable, Hashable {
             .share
         case .saveToService:
             .saveToService
-        case .downloadAudio:
+        case .listeningList, .downloadAudio:
             nil
         }
     }
@@ -1539,6 +1541,30 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
                 systemImage: "tray.and.arrow.down",
                 backgroundColor: .systemPurple
             )
+
+        case .listeningList:
+            guard let state = audioActionStates[articleID],
+                  !state.audioEnclosures.isEmpty else {
+                return nil
+            }
+            let shouldAdd = !state.isInListeningList
+            let action = UIContextualAction(
+                style: .normal,
+                title: shouldAdd
+                    ? String(localized: "Add to Listening List")
+                    : String(localized: "Remove from Listening List")
+            ) { [weak self] _, _, completion in
+                self?.onArticleMediaAction?(
+                    item.article,
+                    .setListeningList(shouldAdd)
+                )
+                completion(true)
+            }
+            action.image = UIImage(
+                systemName: shouldAdd ? "plus.circle" : "minus.circle"
+            )
+            action.backgroundColor = .systemIndigo
+            return action
 
         case .downloadAudio:
             guard !IOSArticleAudioPresentation.downloadableEnclosures(

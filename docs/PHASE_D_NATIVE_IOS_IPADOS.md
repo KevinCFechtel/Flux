@@ -1352,12 +1352,13 @@ execution/work-package contract are maintained in
 D6-0 through D6-F are now implemented and testvalidated. D6-G is the remaining
 real-device/process-boundary acceptance gate; its evidence matrix is maintained
 in [`IOS_D6_FINAL_ACCEPTANCE.md`](IOS_D6_FINAL_ACCEPTANCE.md).
-iOS already has the D5 `IOSMediaTransferReconciliationHandoff`, which
-buffers/coalesces reconciliation requests until D6 installs a native transfer
-executor. The presence of shared `BrowserScope.listeningList` and iOS semantic
-Listening List actions is preparatory only; it does not mean that the native
-iOS Listening List, player, AVAudioSession lifecycle, or persistent background
-URLSession transfer executor already exists.
+The D5 `IOSMediaTransferReconciliationHandoff` remains the authoritative
+bridge from successful background Sync into the D6 transfer runtime. D6 now
+installs the native transfer executor and backs `BrowserScope.listeningList`
+plus the iOS Listening List article/context/swipe actions with the same Core
+media domain. The native Listening List, AVPlayer/AVAudioSession runtime and
+persistent background URLSession executor are implemented; D6-G is limited to
+their remaining real-device/process-boundary acceptance evidence.
 
 ### D7 — Now Playing & CarPlay
 

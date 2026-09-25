@@ -121,11 +121,13 @@ Current default actions are Read/Unread and Star/Unstar on their established sid
 
 For native iOS Phase D, the currently implemented configurable semantic set is
 Read/Unread, Star/Unstar, Open Original, Open in Miniflux, Open Comments, Share,
-and Save to Third-Party Service. Conditional actions are omitted for rows where
-their precondition is unavailable. Audio Download remains a D6 media action and
-must not appear as a placeholder before the native media/download handler
-exists; D6 can add it to this semantic set without changing the 0-2-per-side
-contract.
+Save to Third-Party Service, Listening List, and Download Audio. Conditional
+actions are omitted for rows where their precondition is unavailable. The
+Listening List action derives Add/Remove from the batched article-audio
+projection and appears only for News with audio; Download Audio appears only
+when that same projection exposes at least one downloadable enclosure. These D6
+media actions preserve the existing 0-2-per-side contract and must never add
+per-row Core media queries.
 
 ## 8. Scope-level Mark as Read
 
