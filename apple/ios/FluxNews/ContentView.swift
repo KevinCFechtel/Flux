@@ -644,7 +644,9 @@ struct ContentView: View {
                 store: listeningListStore,
                 playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
                 playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
-                showsScopeChooser: !adaptivePresentation.usesPersistentSplitNavigation,
+                showsScopeChooser:
+                    !adaptivePresentation.usesPersistentSplitNavigation
+                        || splitColumnVisibility == .detailOnly,
                 onPresentScopeChooser: presentArticleListNavigation,
                 onStartPlayback: startListeningListPlayback
             )
