@@ -83,6 +83,17 @@ struct ReaderArticleHeader: View {
 struct ReaderDocumentContent: View {
     let document: ReaderDocument
     let openOriginal: (() -> Void)?
+    let contentPadding: CGFloat
+
+    init(
+        document: ReaderDocument,
+        openOriginal: (() -> Void)?,
+        contentPadding: CGFloat = 24
+    ) {
+        self.document = document
+        self.openOriginal = openOriginal
+        self.contentPadding = contentPadding
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -105,7 +116,7 @@ struct ReaderDocumentContent: View {
             }
         }
         .frame(maxWidth: 680, alignment: .leading)
-        .padding(24)
+        .padding(contentPadding)
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
