@@ -1,0 +1,621 @@
+# iOS/iPadOS D6 — Native Media & Background Downloads
+
+Status: **authoritative D6 implementation plan / readiness contract**  
+Date: 25 September 2026  
+Repository baseline reviewed: `main` at `3d6b59202c61d1537784c8be9544c88e1a38c95e`
+
+This document refines the D6 roadmap in
+[`PHASE_D_NATIVE_IOS_IPADOS.md`](PHASE_D_NATIVE_IOS_IPADOS.md). The Phase-D
+document remains authoritative for the overall native replacement architecture;
+this file is the concrete D6 execution contract.
+
+The review was repository-first. The current Rust Core/UniFFI implementation,
+Phase-B media contract, Phase-B8 native execution contract, completed Phase-C
+macOS implementation, shared Apple sources, current native iOS runtime and the
+legacy Flutter client were inspected before defining this plan.
+
+## 1. D6 boundary
+
+D6 implements the native iOS/iPadOS media experience over the existing Core
+media domain:
+
+- Listening List;
+- article/media actions;
+- in-app audio playback through AVPlayer;
+- playback progress and completion;
+- chapters;
+- show notes through the existing Reader contract;
+- in-app artwork where required;
+- media/download settings and policies;
+- AVAudioSession lifecycle and background audio;
+- true persistent background downloads through a background URLSession;
+- transfer reconciliation against Core durable intent;
+- recovery across foreground/background, scene lifecycle and process relaunch.
+
+D6 does **not** implement:
+
+- MPNowPlayingInfoCenter;
+- MPRemoteCommandCenter;
+- lock-screen / Control Center command integration;
+- CarPlay;
+- ActivityKit;
+- Live Activities;
+- Dynamic Island.
+
+Now Playing, remote commands and CarPlay remain D7. ActivityKit / Dynamic
+Island remain D8. D6 must expose one coherent runtime state that those later
+phases can consume without introducing another player or transfer stack.
+
+## 2. Ownership
+
+The ownership boundary is unchanged.
+
+### Rust Core remains authoritative for durable domain state
+
+Core owns:
+
+- enclosure identity and article relation;
+- Listening List membership and ordering;
+- playback position/status and Miniflux progression reconciliation;
+- download intent and durable download state;
+- download origin/failure semantics;
+- media metadata, chapters and artwork references;
+- download policies and retention;
+- per-feed automatic download policy;
+- cleanup decisions;
+- Miniflux reconciliation.
+
+Swift must not create a second durable media-domain model and must not access
+SQLite or Miniflux directly.
+
+### Native iOS owns runtime execution
+
+Native iOS owns:
+
+- AVPlayer execution;
+- AVAudioSession;
+- runtime play/pause/buffering/loading state;
+- playback-rate runtime;
+- sleep-timer runtime;
+- background URLSession task execution;
+- native transfer progress;
+- native transfer task identity/registry;
+- filesystem moves/deletes required by URLSession;
+- application/process lifecycle integration;
+- native presentation.
+
+Native transfer task identity is execution metadata, not domain state. It may be
+persisted only as the minimum opaque native execution identity required to
+restore OS-owned background tasks.
+
+## 3. Readiness findings
+
+### 3.1 Already available in Core / UniFFI
+
+No new D6 domain API is required by the current product contract.
+
+The current UniFFI surface already exposes the required records and operations,
+including:
+
+- `ListeningListItem`, `ListeningListEnclosure`, `ListeningListFeed`;
+- `Enclosure` and media classification;
+- `PlaybackState` and `PlaybackPreparation`;
+- `MediaChapter`, `MediaArtworkSource`, media metadata;
+- `MediaDownload`, `MediaTransferWork`, download state/origin/failure;
+- `CoreSettings` media policy fields;
+- `article_enclosures`;
+- batched `article_audio_action_states`;
+- `listening_list`, `listening_list_feeds`,
+  `is_in_listening_list`, add/remove Listening List;
+- `prepare_playback`, `checkpoint_playback`,
+  `playback_completed`, `restart_playback`,
+  `observe_media_duration`;
+- `media_chapters`, `media_artwork`;
+- `media_download`, request/cancel/retry/delete download;
+- `downloads_requiring_transfer` and `downloads_requiring_deletion`;
+- transfer completion/failure/deletion callbacks;
+- media cleanup and all current media-policy setters;
+- per-feed automatic audio-download preference.
+
+The native implementation must consume these APIs rather than reconstructing
+relationships with many per-row calls.
+
+### 3.2 Existing iOS preparation
+
+The current iOS code already provides:
+
+- shared `BrowserScope.listeningList`;
+- title/action semantics that understand that scope;
+- the prepared but deliberately hidden Listening List navigation entry;
+- mobile article-action semantics that reserve media work for D6;
+- the app-wide `CoreBootstrapper` and
+  `IOSCoreSessionExecutionCoordinator`;
+- single-scene app ownership;
+- D5 `IOSMediaTransferReconciliationHandoff`;
+- successful-background-sync fanout into that handoff;
+- the app-specific Core media root under the configured storage namespace.
+
+The Listening List navigation entry remains hidden until its real D6 query and
+presentation exist. It must not be enabled while it still aliases the normal
+article query.
+
+## 4. Phase-C reuse
+
+Phase C is the primary native reference, not a presentation template.
+
+### 4.1 Good candidates for direct reuse or small extraction
+
+Extract only when the first iOS consumer is added:
+
+- pure media playback presentation state;
+- pure transfer presentation/runtime progress state;
+- sleep-timer semantics;
+- deterministic/safe media transfer file-layout helpers;
+- AVPlayer engine behavior that is genuinely identical across Apple platforms;
+- small action/presentation helpers whose semantics are platform-independent.
+
+Any extraction must keep the macOS behavior unchanged and must be covered by
+the existing macOS media tests plus new iOS tests.
+
+### 4.2 Components that must not be shared wholesale
+
+Do **not** move the following macOS classes unchanged into FluxApple:
+
+- `MediaPlaybackCoordinator`;
+- `MediaTransferCoordinator`;
+- the foreground `URLSessionMediaTransferEngine`;
+- macOS Player/Popover UI;
+- macOS remote-control / Now Playing integration;
+- macOS media-root selection.
+
+Reasons:
+
+1. The macOS playback coordinator performs synchronous local Core calls from its
+   MainActor orchestration. Phase D requires iOS Core/UniFFI work to pass
+   through the existing app-wide Core-session execution boundary.
+2. iOS playback additionally owns AVAudioSession interruption/route/background
+   lifecycle.
+3. The macOS transfer coordinator owns in-memory foreground tasks. iOS requires
+   a persistent background URLSession whose tasks survive process suspension
+   and may cause relaunch.
+4. macOS and iOS presentation/navigation are intentionally different.
+
+Reuse the semantics, tests and pure building blocks; keep platform execution
+coordinators platform-specific unless later evidence proves a smaller common
+orchestration layer is both real and behavior-preserving.
+
+## 5. App-wide iOS media runtime
+
+D6 introduces one app-scoped media runtime owned by `IOSAppRuntime`.
+
+Conceptually:
+
+```text
+IOSAppRuntime
+  |
+  +-- CoreBootstrapper / IOSCoreSessionExecutionCoordinator
+  |
+  +-- IOSMediaRuntime
+        |
+        +-- IOSMediaPlaybackCoordinator
+        |     +-- AVPlayer
+        |     +-- AVAudioSession coordinator
+        |     +-- transient playback presentation state
+        |
+        +-- IOSMediaTransferCoordinator
+              +-- persistent background URLSession
+              +-- transient transfer presentation state
+              +-- filesystem execution
+```
+
+`NewsreaderStore`, the UIKit Timeline, Listening List views and Player views
+are consumers/controllers of this runtime. None of them owns AVPlayer,
+AVAudioSession or the background session.
+
+The runtime attaches to exactly the current Core session and uses the same
+`IOSCoreSessionExecutionCoordinator` as other iOS Core callers. Core/session
+generation checks prevent stale results from publishing after account
+replacement.
+
+### Core lifecycle
+
+Before account/Core replacement or removal, the media runtime must:
+
+- stop admitting new Core work;
+- checkpoint active playback where the current Core is still valid;
+- detach Core-facing callbacks;
+- cancel or disown native transfers belonging to the old account execution
+  generation before a replacement Core can consume them;
+- allow app-wide Core quiescence to finish.
+
+A failed account replacement may reattach the still-current Core through the
+existing aborted-replacement path.
+
+A local-state rebuild keeps the same account/Core object but temporarily
+detaches media Core access while the exclusive rebuild runs. Runtime playback
+must not issue Core callbacks into the quiesced session.
+
+## 6. Persistent iOS background transfer executor
+
+### 6.1 Background session
+
+Use one app-owned background `URLSession` for media transfers with a stable,
+configuration-specific identifier. Native Dev and production/Upgrade Test must
+not share a session identifier.
+
+The session:
+
+- uses `URLSessionConfiguration.background(withIdentifier:)`;
+- enables launch events;
+- applies the Core network policy through native URLSession constraints;
+- uses download tasks only for D6 media transfers;
+- is owned by a long-lived delegate, not by an individual Swift Task;
+- is recreated with the same identifier after process relaunch.
+
+The background session identifier belongs in build/configuration rather than
+being inferred differently by views.
+
+### 6.2 Native transfer identity
+
+Each OS task carries a versioned native task description containing at least:
+
+- an opaque current account-execution generation;
+- Core enclosure ID.
+
+The generation is native execution ownership, not media domain state. It must
+survive process relaunch for the same active account and roll before a new
+account can adopt tasks from the previous account.
+
+Do not store OS task IDs in Core SQLite.
+
+### 6.3 D5 handoff integration
+
+`IOSMediaTransferReconciliationHandoff` remains the **only** post-sync
+transfer handoff.
+
+When the D6 executor is attached to a ready Core session it installs exactly one
+handler into the existing handoff:
+
+```text
+D5 successful background sync
+       |
+       v
+IOSMediaTransferReconciliationHandoff
+       |
+       v
+IOSMediaTransferCoordinator.reconcile()
+```
+
+Pre-install requests continue to coalesce exactly as D5 already guarantees.
+D6 must not add another pending flag, notification, event bus or post-sync
+transfer trigger.
+
+Detach/uninstall the handler when no valid media executor/Core session is
+attached.
+
+### 6.4 Reconciliation algorithm
+
+Each reconciliation compares:
+
+```text
+Core desired transfer/deletion work
++ restored OS background tasks
++ native execution generation
++ actual media files
++ currently playing enclosure
+```
+
+Required behavior follows the frozen Phase-B contract:
+
+- Requested + matching OS task -> keep task.
+- Requested + no OS task + no completed file -> create task.
+- Requested + already completed file -> report completion to Core.
+- Downloaded + existing file -> valid.
+- Requested task no longer desired -> cancel it.
+- Orphan task for another execution generation/account -> cancel it.
+- Orphan native file with no valid Core ownership -> remove it.
+- DeleteRequested -> delete file, then confirm deletion.
+- File used by active playback -> defer deletion until playback releases it.
+- A stale Core callback rejection is not reclassified as a transfer failure.
+
+The completion callback is sent only after the downloaded temporary file has
+been moved to the deterministic media location and its size is known.
+
+Because the URLSession temporary file is valid only during the delegate
+callback, `didFinishDownloadingTo` must move it synchronously into the app's
+media area before returning. Domain acknowledgement may happen afterward.
+
+If Core is temporarily unavailable when an OS transfer completes, the durable
+Core Requested state plus the already-moved deterministic file must allow the
+next reconciliation to report completion without redownloading it. D6 must not
+invent a second durable Swift completion queue merely to bridge this case.
+
+### 6.5 Relaunch callback
+
+`UIApplicationDelegate.application(_:handleEventsForBackgroundURLSession:
+completionHandler:)` is part of D6.
+
+The delegate hands the system completion handler to the app-owned media runtime,
+ensures the normal single Core bootstrap path is used, restores the session,
+reconciles native/Core ownership, and calls the system completion handler only
+after the background session reports that its queued delegate events are
+finished.
+
+A background URLSession relaunch must never construct an independent second Core
+against the same storage.
+
+## 7. Playback runtime and AVAudioSession
+
+### 7.1 Playback
+
+The iOS playback coordinator follows the proven Phase-C behavior:
+
+- prefer a validated readable local file from `PlaybackPreparation`;
+- otherwise stream the remote enclosure URL;
+- restore an `InProgress` position;
+- maintain high-frequency position only in native runtime state;
+- checkpoint approximately every 20 seconds while playing;
+- checkpoint on pause, stop, seek/chapter seek, media switch, interruption and
+  foreground-to-background lifecycle;
+- use explicit Core completion and restart operations;
+- report newly observed duration through Core;
+- support 0.5x–3.0x playback rate;
+- support the existing sleep-timer semantics;
+- load chapters from Core.
+
+Core calls are executed through the app-wide iOS Core-session execution
+coordinator rather than synchronously blocking MainActor.
+
+### 7.2 AVAudioSession
+
+D6 owns AVAudioSession. It must:
+
+- use an audio-session configuration suitable for spoken/background playback;
+- support background audio;
+- handle interruptions;
+- handle route changes, including route loss;
+- preserve Bluetooth and AirPlay playback;
+- resume only when the interruption semantics and previous runtime state make
+  resume appropriate;
+- checkpoint before an interruption/route event that stops playback.
+
+Backgrounding the app must checkpoint but must **not** pause audio merely because
+the scene becomes inactive.
+
+`Info.plist` must add the audio background mode. Background URLSession itself
+does not create a second BGTaskScheduler path.
+
+### 7.3 D7/D8 readiness
+
+The D6 playback presentation state must expose enough transient information for
+later system integrations to observe:
+
+- active enclosure;
+- article/feed title;
+- artwork source/data where available;
+- playing/paused state;
+- position/duration;
+- playback rate.
+
+D6 must not call MediaPlayer or ActivityKit APIs.
+
+## 8. Listening List and player presentation
+
+### 8.1 Navigation
+
+Restore the existing prepared Listening List navigation entry only once the real
+D6 read model is wired.
+
+- Compact iPhone: selecting Listening List closes the navigation sheet and
+  replaces the article detail surface with the Listening List.
+- Regular iPad: Listening List is a normal sidebar destination and replaces the
+  article detail surface in the second column.
+- It is not an `ArticleQuery` alias and does not reuse the UIKit Article
+  Timeline data model.
+
+The frozen UIKit Article Timeline remains untouched except for consuming the
+later batched article-audio action projection.
+
+### 8.2 Listening List presentation
+
+The list consumes `core.listeningList(...)` and
+`core.listeningListFeeds()`.
+
+Preserve Phase-C semantics:
+
+- one row/card per article;
+- multiple audio enclosures represented within that article;
+- recently added default sort;
+- publication-date alternative;
+- optional feed filter;
+- playback progress;
+- per-enclosure download/progress status;
+- aggregate enclosure status where useful.
+
+Do not add a separate Downloads destination. Download state is represented
+within the Listening List/article media experience.
+
+### 8.3 Player presentation
+
+The Player is native iOS presentation over the app-scoped runtime, not the
+runtime owner.
+
+D6 uses a temporary native Player presentation rather than introducing a
+persistent mini-player. Dismissing the Player must not destroy active playback.
+
+Show Notes reuse the existing ReaderDocument/Reader presentation path. The
+Player must not fetch article HTML directly.
+
+Exact visual polish/detents can adapt by size class, but no third durable
+navigation/domain model is introduced.
+
+## 9. Article/media actions
+
+D6 wires the existing batched `article_audio_action_states` projection into
+article presentation. Do not introduce per-visible-row Core queries.
+
+Supported native actions follow Phase C/mobile semantics:
+
+- Play;
+- Add/remove Listening List as appropriate;
+- Download / cancel / retry / delete according to Core state;
+- multiple audio enclosures -> native chooser before an enclosure-specific
+  action;
+- configured Download Audio swipe action becomes available only after this D6
+  handler exists.
+
+Timeline geometry/image/Scrollover architecture remains frozen.
+
+## 10. Media settings
+
+D6 adds native settings backed only by current Core APIs:
+
+- automatic download when added to Listening List;
+- remove completed items from Listening List;
+- delete download after playback;
+- download network policy;
+- download retention;
+- per-feed automatic audio download.
+
+Settings presentation may be iOS-specific. Values remain Core-owned.
+
+## 11. Actual gap found during readiness review
+
+### Core/UniFFI API contract
+
+**No missing D6 UniFFI API was found.**
+
+### Core implementation consistency: Rebuild Local State
+
+One pre-existing Core implementation inconsistency is now directly relevant to
+D6 and must be resolved before D6 is considered complete.
+
+The frozen Phase-B contract requires local media protection and states that a
+rebuilt local set includes articles required by active/existing downloads.
+Saved media and in-progress playback are also durable local media semantics.
+
+The current `clear_synchronized_state_for_rebuild()` deletes all rows from
+`articles`. Current media/listening tables are foreign-key descendants with
+`ON DELETE CASCADE`, so this also removes enclosure-bound Listening List,
+SavedMedia, playback and download state. Physical media files are not removed by
+that rebuild path.
+
+That creates a mismatch once native iOS D6 exposes those features: Rebuild can
+leave orphan files while silently discarding Core media ownership/progress.
+
+This is an implementation correctness gap, **not** a need for a new Swift
+workaround and not evidence for a new UniFFI API. Resolve it inside Core under a
+focused regression test before D6 closure. The fix must preserve the frozen
+Phase-B domain decisions and must not turn Swift into a media backup layer.
+
+The exact preservation algorithm should be implemented as a focused Core change
+after characterizing all protected media states. Do not casually change
+`rebuild_local_state` semantics from Swift.
+
+## 12. D6 work packages
+
+### D6-0 — Rebuild/media Core correctness
+
+- add regression coverage for Rebuild with Listening List/SavedMedia,
+  in-progress playback, Requested/Downloaded media and physical files;
+- make Core rebuild preserve the media-protected local state required by the
+  frozen Phase-B contract while still rebuilding reconstructable synchronized
+  state;
+- confirm no auto-download storm occurs during rebuild;
+- no new UniFFI media API unless a test proves the current boundary cannot
+  express the fix.
+
+### D6-A — App-scoped media runtime foundation
+
+- add `IOSMediaRuntime` under `IOSAppRuntime`;
+- define Core attach/detach/quiescence ownership;
+- add transient playback/transfer presentation states;
+- extract only pure Phase-C Apple helpers that now gain an actual iOS consumer;
+- add lifecycle tests;
+- no UI yet.
+
+### D6-B — Persistent background transfer executor
+
+- stable background-session identifier per app identity;
+- background URLSession delegate;
+- native execution-generation/task-description identity;
+- D5 handoff installation;
+- OS-task/Core/file reconciliation;
+- AppDelegate background-session relaunch callback;
+- Core callbacks and filesystem recovery;
+- cancellation/deletion/in-use semantics;
+- focused process/lifecycle recovery tests.
+
+### D6-C — Playback + AVAudioSession
+
+- AVPlayer engine and iOS playback coordinator;
+- app-wide playback state;
+- Core checkpoints/completion/restart/duration;
+- AVAudioSession category/activation/interruption/route handling;
+- audio background mode;
+- chapters, rate and sleep timer;
+- local/remote source fallback;
+- lifecycle/relaunch tests.
+
+### D6-D — Listening List native presentation
+
+- real Listening List store/read model;
+- restore navigation entry;
+- iPhone/iPad adaptive list;
+- feed filter/sort;
+- multiple enclosures;
+- progress/download presentation;
+- Player presentation entry points.
+
+### D6-E — Article/media actions
+
+- batched article audio projection;
+- Play / Listening List / Download actions;
+- multi-enclosure chooser;
+- enable configured Download Audio swipe action;
+- no structural Timeline changes.
+
+### D6-F — Media policies/settings
+
+- global media settings;
+- per-feed automatic-download setting;
+- transfer reconciliation when policy changes where required;
+- localization/accessibility.
+
+### D6-G — D6 integration/acceptance
+
+Validate at least:
+
+- stream remote media;
+- play downloaded media;
+- resume/checkpoint/restart/completion;
+- chapter seek and show notes;
+- interruption and route change;
+- background audio while app is inactive;
+- background download while suspended;
+- process kill/relaunch with active background transfer;
+- transfer completion while foreground UI is absent;
+- cancel/retry/delete;
+- network-policy waiting/recovery;
+- account replacement/removal with outstanding transfer;
+- Rebuild with media state;
+- multiple enclosures;
+- Listening List on compact iPhone and regular iPad;
+- D5 background-sync -> existing transfer handoff -> D6 executor;
+- no regressions in frozen UIKit Timeline, D4.5 sync or D5 fanout.
+
+## 13. Recommended implementation order
+
+1. **D6-0**: fix the concrete Core Rebuild/media inconsistency under tests.
+2. **D6-A**: establish app-wide iOS media ownership and lifecycle.
+3. **D6-B**: build persistent transfer execution and recovery before exposing
+   Download actions.
+4. **D6-C**: add playback/AVAudioSession over the same app-owned runtime.
+5. **D6-D**: expose the Listening List and Player presentation.
+6. **D6-E**: add article/swipe media actions using batched projections.
+7. **D6-F**: expose policies/settings after the executor consumes them.
+8. **D6-G**: run combined real-device/process-boundary acceptance.
+
+This order avoids exposing UI actions whose native executor is not yet present,
+keeps D5's handoff authoritative, and creates the playback state that D7/D8 can
+later consume without moving those phases forward.
