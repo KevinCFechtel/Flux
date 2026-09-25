@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 import UserNotifications
 
 enum IOSSystemNotificationAuthorizationStatus: Equatable {
@@ -89,10 +88,7 @@ final class IOSSystemNotificationManager: NSObject, UNUserNotificationCenterDele
     }
 
     private let center: IOSSystemNotificationCenter
-    private let logger = Logger(
-        subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews",
-        category: "notification"
-    )
+    private let logger = IOSAppLogger(category: "notification")
     private var pendingFeedID: Int64?
 
     var onFeedSelected: ((Int64) -> Void)? {
@@ -145,13 +141,13 @@ final class IOSSystemNotificationManager: NSObject, UNUserNotificationCenterDele
                 )
                 guard await acknowledge(candidate.candidateId) else {
                     logger.error(
-                        "system notification ACK failed candidate_id=\(candidate.candidateId, privacy: .public)"
+                        "system notification ACK failed candidate_id=\(candidate.candidateId)"
                     )
                     continue
                 }
             } catch {
                 logger.error(
-                    "system notification delivery failed candidate_id=\(candidate.candidateId, privacy: .public) error=\(String(reflecting: error), privacy: .private)"
+                    "system notification delivery failed candidate_id=\(candidate.candidateId) error=\(String(reflecting: error))"
                 )
             }
         }
