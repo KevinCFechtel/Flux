@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct IOSListeningListView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var store: IOSListeningListStore
     @ObservedObject var playbackState: IOSMediaPlaybackPresentationState
     @ObservedObject var transferState: IOSMediaTransferPresentationState
@@ -9,6 +10,8 @@ struct IOSListeningListView: View {
     let onPresentScopeChooser: () -> Void
     let onOpenPlayer: (_ articleID: Int64) -> Void
     let onPlay: (_ articleID: Int64, _ enclosureID: Int64) -> Void
+    let feedIconState: (_ feedID: Int64, _ variant: FeedIconVariant) -> IOSFeedIconPresentationState
+    let onRequestFeedIcon: (_ feedID: Int64, _ variant: FeedIconVariant) -> Void
 
     private static let isoFormatter = ISO8601DateFormatter()
 
@@ -83,6 +86,21 @@ struct IOSListeningListView: View {
                     .foregroundStyle(.primary)
 
                     HStack(spacing: 6) {
+                        FeedIconView(
+                            feedID: item.feedId,
+                            title: item.feedTitle,
+                            state: feedIconState(
+                                item.feedId,
+                                feedIconVariant
+                            ),
+                            onRequest: {
+                                onRequestFeedIcon(
+                                    item.feedId,
+                                    feedIconVariant
+                                )
+                            },
+                            size: 16
+                        )
                         Text(
                             IOSListeningListPresentation.textOrFallback(
                                 item.feedTitle,
@@ -445,6 +463,12 @@ struct IOSListeningListView: View {
         let total = Duration.seconds(Double(duration) / 1_000)
             .formatted(.time(pattern: .minuteSecond))
         return "\(position) / \(total)"
+    }
+
+    private var feedIconVariant: FeedIconVariant {
+        IOSFeedIconPresentation.variant(
+            isDark: colorScheme == .dark
+        )
     }
 
     private func mediaStatusMetric(
