@@ -261,6 +261,7 @@ struct ContentView: View {
     @ObservedObject var bootstrapper: CoreBootstrapper
     var newsreaderStore: NewsreaderStore
     @StateObject private var searchStore = IOSSearchStore()
+    @StateObject private var listeningListStore = IOSListeningListStore()
     @State private var navigationPresented = false
     @State private var searchPresented = false
     /// Set while the navigation sheet is closing so that search opens once it is
@@ -374,6 +375,11 @@ struct ContentView: View {
         .onChange(of: searchPresented) { _, presented in
             if !presented { searchStore.invalidate() }
         }
+        .onChange(of: newsreaderStore.scope) { _, scope in
+            if scope == .listeningList {
+                listeningListStore.reload()
+            }
+        }
         .onAppear { normalizeAdaptiveShell(for: adaptivePresentation) }
         .onOpenURL { url in
             handleWidgetURL(url)
@@ -384,9 +390,14 @@ struct ContentView: View {
                     to: core,
                     coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
                 )
+                listeningListStore.attach(
+                    to: core,
+                    coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
+                )
                 searchStore.onLocalFirstMutation = { newsreaderStore.loadNavigationAndCounts() }
             } else {
                 searchStore.detach()
+                listeningListStore.detach()
             }
             consumePendingWidgetActionIfReady()
         }
@@ -419,18 +430,16 @@ struct ContentView: View {
         .sheet(isPresented: $settingsPresented) { SettingsView(store: newsreaderStore, bootstrapper: bootstrapper, onDiagnostics: { diagnosticsPresented = true }) }
     }
 
+    @ViewBuilder
     private var adaptiveDetail: some View {
-        Group {
+        if newsreaderStore.scope == .listeningList {
+            IOSListeningListView(
+                store: listeningListStore,
+                playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState
+            )
+        } else {
             articleList
                 .inspector(isPresented: readerInspectorBinding) {
-                    // Presentation and content derive from the same optional. If
-                    // the article is gone the panel closes itself rather than
-                    // standing there empty.
-                    //
-                    // Gated on the presentation kind as well: where the reader is
-                    // a sheet, building this content anyway put `readerView`'s
-                    // toolbar into the timeline's navigation bar — a second Done
-                    // button that shoved the title capsule aside.
                     Group {
                         if usesReaderInspector, let article = readerArticle?.article {
                             NavigationStack { readerView(for: article) }
@@ -447,9 +456,12 @@ struct ContentView: View {
                                     .renderingMode(.template)
                                     .resizable()
                                     .scaledToFit()
-                                    .frame(width: IOSNavigationButtonPresentation.glyphSize, height: IOSNavigationButtonPresentation.glyphSize)
+                                    .frame(
+                                        width: IOSNavigationButtonPresentation.glyphSize,
+                                        height: IOSNavigationButtonPresentation.glyphSize
+                                    )
                             }
-                                .accessibilityLabel(IOSNavigationButtonPresentation.accessibilityLabel)
+                            .accessibilityLabel(IOSNavigationButtonPresentation.accessibilityLabel)
                         }
                     }
                 }
