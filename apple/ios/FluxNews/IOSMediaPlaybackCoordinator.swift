@@ -279,8 +279,8 @@ protocol IOSMediaAudioSessionManaging: AnyObject {
     var onInterruptionEndedShouldResume: ((Bool) -> Void)? { get set }
     var onOldDeviceUnavailable: (() -> Void)? { get set }
 
-    func activate() throws
-    func deactivateIfIdle() throws
+    func activate() async throws
+    func deactivateIfIdle()
 }
 
 @MainActor
@@ -291,6 +291,9 @@ final class IOSMediaAudioSessionCoordinator: IOSMediaAudioSessionManaging {
 
     private let session: AVAudioSession
     private let notificationCenter: NotificationCenter
+    private let activationQueue = DispatchQueue(
+        label: "dev.kevincfechtel.fluxNews.audio-session"
+    )
     private var interruptionObserver: NSObjectProtocol?
     private var routeObserver: NSObjectProtocol?
 
@@ -322,21 +325,36 @@ final class IOSMediaAudioSessionCoordinator: IOSMediaAudioSessionManaging {
         }
     }
 
-    func activate() throws {
-        do {
-            try session.setCategory(
-                .playback,
-                mode: .spokenAudio,
-                options: [.allowAirPlay, .allowBluetoothA2DP]
-            )
-            try session.setActive(true)
-        } catch {
-            throw IOSMediaPlaybackError.audioSession
+    func activate() async throws {
+        let session = session
+        let activationQueue = activationQueue
+        try await withCheckedThrowingContinuation { continuation in
+            activationQueue.async {
+                do {
+                    try session.setCategory(
+                        .playback,
+                        mode: .spokenAudio,
+                        options: [.allowAirPlay, .allowBluetoothA2DP]
+                    )
+                    try session.setActive(true)
+                    continuation.resume(returning: ())
+                } catch {
+                    continuation.resume(
+                        throwing: IOSMediaPlaybackError.audioSession
+                    )
+                }
+            }
         }
     }
 
-    func deactivateIfIdle() throws {
-        try session.setActive(false, options: [.notifyOthersOnDeactivation])
+    func deactivateIfIdle() {
+        let session = session
+        activationQueue.async {
+            try? session.setActive(
+                false,
+                options: [.notifyOthersOnDeactivation]
+            )
+        }
     }
 
     private func handleInterruption(_ notification: Notification) {
@@ -691,7 +709,7 @@ final class IOSMediaPlaybackCoordinator {
         coreAccess.detach()
         coreAccess.attach(to: core)
         presentationState.reset()
-        try? audioSession.deactivateIfIdle()
+        audioSession.deactivateIfIdle()
         onPlaybackUseChanged?()
     }
 
@@ -779,7 +797,7 @@ final class IOSMediaPlaybackCoordinator {
             return
         }
 
-        try audioSession.activate()
+        try await audioSession.activate()
         engine.play()
         if engine.isPlaying {
             presentationState.setStatus(.playing)
@@ -823,7 +841,7 @@ final class IOSMediaPlaybackCoordinator {
             await self.checkpoint()
             self.stopCheckpointTimer()
             self.engine.unload()
-            try? self.audioSession.deactivateIfIdle()
+            self.audioSession.deactivateIfIdle()
         }
     }
 
