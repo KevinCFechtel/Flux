@@ -6360,10 +6360,7 @@ mod tests {
         let restarted = store.playback_state(10).unwrap().unwrap();
         assert_eq!(restarted.status, PlaybackStatus::InProgress);
         assert_eq!(restarted.position_ms, 0);
-        assert_eq!(
-            store.pending_media_progress_mutations().unwrap()[0].progression_seconds,
-            0
-        );
+        assert!(store.pending_media_progress_mutations().unwrap().is_empty());
     }
 
     #[test]
@@ -7855,21 +7852,10 @@ mod tests {
             .unwrap();
 
         store
-            .checkpoint_playback(
-                enclosure.id,
-                36_000,
-                None,
-                "2026-09-25T18:00:00Z",
-                true,
-            )
+            .checkpoint_playback(enclosure.id, 36_000, None, "2026-09-25T18:00:00Z", true)
             .unwrap();
 
-        assert!(
-            store
-                .pending_media_progress_mutations()
-                .unwrap()
-                .is_empty()
-        );
+        assert!(store.pending_media_progress_mutations().unwrap().is_empty());
     }
 
     #[test]
@@ -7896,13 +7882,7 @@ mod tests {
             .unwrap();
 
         store
-            .checkpoint_playback(
-                enclosure.id,
-                40_000,
-                None,
-                "2026-09-25T18:00:00Z",
-                true,
-            )
+            .checkpoint_playback(enclosure.id, 40_000, None, "2026-09-25T18:00:00Z", true)
             .unwrap();
         assert_eq!(
             store
@@ -7914,21 +7894,10 @@ mod tests {
         );
 
         store
-            .checkpoint_playback(
-                enclosure.id,
-                36_000,
-                None,
-                "2026-09-25T18:01:00Z",
-                true,
-            )
+            .checkpoint_playback(enclosure.id, 36_000, None, "2026-09-25T18:01:00Z", true)
             .unwrap();
 
-        assert!(
-            store
-                .pending_media_progress_mutations()
-                .unwrap()
-                .is_empty()
-        );
+        assert!(store.pending_media_progress_mutations().unwrap().is_empty());
     }
 
     #[test]
