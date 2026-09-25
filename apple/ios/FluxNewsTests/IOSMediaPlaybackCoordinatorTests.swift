@@ -229,6 +229,24 @@ final class IOSMediaPlaybackCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
     }
 
+    func testPausedPlaybackNoLongerBlocksDownloadDeletion() async throws {
+        let core = FakeIOSPlaybackCoreAccess()
+        let engine = FakeIOSPlaybackEngine()
+        let audio = FakeIOSAudioSession()
+        let coordinator = makeCoordinator(
+            core: core,
+            engine: engine,
+            audio: audio
+        )
+
+        try await coordinator.play(enclosureID: 7)
+        XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
+
+        coordinator.pause()
+
+        XCTAssertFalse(coordinator.isUsing(enclosureID: 7))
+    }
+
     func testPlaybackStartDiagnosticIdentifiesCorePreparationFailure() async {
         let core = FakeIOSPlaybackCoreAccess()
         core.prepareError = NSError(
