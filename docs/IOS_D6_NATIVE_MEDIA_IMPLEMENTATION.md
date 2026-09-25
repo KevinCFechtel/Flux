@@ -410,6 +410,10 @@ D6 read model is wired.
   replaces the article detail surface with the Listening List.
 - Regular iPad: Listening List is a normal sidebar destination and replaces the
   article detail surface in the second column.
+- The Listening List consumes the app shell's existing NavigationSplitView
+  ownership and must not introduce a nested NavigationStack inside the detail
+  column. When compact or when the sidebar is hidden, it exposes the same
+  app-shell scope chooser path used by the article detail surface.
 - It is not an `ArticleQuery` alias and does not reuse the UIKit Article
   Timeline data model.
 
@@ -442,6 +446,9 @@ runtime owner.
 
 D6 uses a temporary native Player presentation rather than introducing a
 persistent mini-player. Dismissing the Player must not destroy active playback.
+The app shell owns the Player sheet, analogous to Search's app-shell
+presentation ownership, so the Listening List itself remains a pure detail
+surface and cannot interfere with navigation-sheet dismissal.
 
 Show Notes reuse the existing ReaderDocument/Reader presentation path. The
 Player must not fetch article HTML directly.
