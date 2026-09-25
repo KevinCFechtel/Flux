@@ -273,7 +273,7 @@ final class IOSMediaPlaybackCoordinatorTests: XCTestCase {
         } catch {
             XCTAssertEqual(
                 coordinator.lastStartFailureDescription,
-                "Playback start failed [core-prepare]: prepare failed"
+                "\(String(localized: "Playback start failed", bundle: .main)) [core-prepare]: prepare failed"
             )
         }
     }
@@ -295,7 +295,7 @@ final class IOSMediaPlaybackCoordinatorTests: XCTestCase {
         } catch {
             XCTAssertEqual(
                 coordinator.lastStartFailureDescription,
-                "Playback start failed [audio-session]: activation failed"
+                "\(String(localized: "Playback start failed", bundle: .main)) [audio-session]: activation failed"
             )
         }
     }
