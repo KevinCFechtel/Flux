@@ -676,45 +676,10 @@ struct ContentView: View {
     }
 
     private func openListeningListPlayer(articleID: Int64) {
+        // Opening a Listening List item is presentation-only. It must never
+        // prepare or replace the currently loaded enclosure; playback switches
+        // only when the user explicitly presses Play or chooses an enclosure.
         listeningListPlayerArticleID = articleID
-        guard let item = listeningListStore.items.first(
-            where: { $0.articleId == articleID }
-        ) else {
-            return
-        }
-
-        let playbackState = IOSAppRuntime.shared.mediaRuntime
-            .playbackPresentationState
-        if let loadedEnclosureID = playbackState.loadedEnclosure?.id,
-           item.audioEnclosures.contains(
-               where: { $0.enclosure.id == loadedEnclosureID }
-           ) {
-            // Opening the Player for the item that already owns the prepared or
-            // playing enclosure is presentation-only. Re-preparing here would
-            // reload the last persisted Core checkpoint and seek active playback
-            // backwards.
-            return
-        }
-
-        let preferred = IOSListeningListPresentation.selectedEnclosure(item)
-            ?? item.audioEnclosures.first
-        guard let enclosureID = preferred?.enclosure.id else { return }
-
-        Task {
-            do {
-                _ = try await IOSAppRuntime.shared.mediaRuntime
-                    .playbackCoordinator.prepare(enclosureID: enclosureID)
-                listeningListStore.reload()
-            } catch {
-                let coordinator = IOSAppRuntime.shared.mediaRuntime
-                    .playbackCoordinator
-                IOSAppRuntime.shared.mediaRuntime.playbackPresentationState
-                    .setErrorMessage(
-                        coordinator.lastStartFailureDescription
-                            ?? error.localizedDescription
-                    )
-            }
-        }
     }
 
     private func playListeningListEnclosure(
