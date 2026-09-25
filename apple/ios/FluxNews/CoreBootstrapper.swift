@@ -226,6 +226,74 @@ final class CoreBootstrapper: ObservableObject {
         return result
     }
 
+    func mediaSettings() async -> Result<CoreSettings, Error> {
+        guard let activeCore = core else {
+            return .failure(SettingsAccessError.coreUnavailable)
+        }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            { try activeCore.coreSettings() }
+        ) else {
+            return .failure(SettingsAccessError.sessionUnavailable)
+        }
+        return result
+    }
+
+    func setDownloadNetworkPolicyPreference(
+        _ policy: DownloadNetworkPolicy
+    ) async -> Result<Void, Error> {
+        await updateMediaSetting {
+            try $0.setDownloadNetworkPolicy(policy: policy)
+        }
+    }
+
+    func setDownloadRetentionPreference(
+        _ retention: DownloadRetention
+    ) async -> Result<Void, Error> {
+        await updateMediaSetting {
+            try $0.setDownloadRetention(retention: retention)
+        }
+    }
+
+    func setDeleteAfterPlaybackPreference(
+        _ enabled: Bool
+    ) async -> Result<Void, Error> {
+        await updateMediaSetting {
+            try $0.setDeleteAfterPlayback(enabled: enabled)
+        }
+    }
+
+    func setAutoDownloadListeningListPreference(
+        _ enabled: Bool
+    ) async -> Result<Void, Error> {
+        await updateMediaSetting {
+            try $0.setAutoDownloadListeningList(enabled: enabled)
+        }
+    }
+
+    func setRemoveCompletedListeningListPreference(
+        _ enabled: Bool
+    ) async -> Result<Void, Error> {
+        await updateMediaSetting {
+            try $0.setRemoveCompletedListeningList(enabled: enabled)
+        }
+    }
+
+    private func updateMediaSetting(
+        _ change: @escaping @Sendable (Flux) throws -> Void
+    ) async -> Result<Void, Error> {
+        guard let activeCore = core else {
+            return .failure(SettingsAccessError.coreUnavailable)
+        }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            { try change(activeCore) }
+        ) else {
+            return .failure(SettingsAccessError.sessionUnavailable)
+        }
+        return result
+    }
+
     func configure(server: String, apiKey: String, headers: [IOSCustomHTTPHeader]) async {
         guard !isConfiguring, localStateRebuildState != .rebuilding else { return }
         localStateRebuildState = .idle
