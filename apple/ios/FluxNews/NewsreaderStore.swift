@@ -2346,7 +2346,10 @@ struct IOSArticleAudioActionState {
         let removedIDs = ids.filter { loadedArticlesByID.removeValue(forKey: $0) != nil }
         guard !removedIDs.isEmpty else { return }
         hasLoadedArticles = !loadedArticlesByID.isEmpty
-        for id in removedIDs { rowPresentationStates[id] = nil }
+        for id in removedIDs {
+            rowPresentationStates[id] = nil
+            articleAudioActionStates[id] = nil
+        }
         timelinePresentationBridge.removeArticleStates(removedIDs)
         pendingScrolloverReadPresentationIDs.subtract(removedIDs)
         timelineStructuralStorage.items.removeAll(where: { removalSet.contains($0.article.id) })
