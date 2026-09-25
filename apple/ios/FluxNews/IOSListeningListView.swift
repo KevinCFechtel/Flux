@@ -138,18 +138,18 @@ struct IOSListeningListView: View {
                 transfers: transferState.transfers
             )
             HStack(spacing: 10) {
-                HStack(spacing: 6) {
-                    Label(
+                HStack(spacing: 12) {
+                    mediaStatusMetric(
                         enclosureLabel(item.audioEnclosures.count),
                         systemImage: "waveform"
                     )
                     if downloads.downloaded > 0 {
-                        Label(
+                        mediaStatusMetric(
                             String(localized: "\(downloads.downloaded) downloaded"),
                             systemImage: "arrow.down.circle.fill"
                         )
                     } else if downloads.pending > 0 {
-                        Label(
+                        mediaStatusMetric(
                             String(localized: "\(downloads.pending) pending"),
                             systemImage: "clock"
                         )
@@ -445,6 +445,18 @@ struct IOSListeningListView: View {
         let total = Duration.seconds(Double(duration) / 1_000)
             .formatted(.time(pattern: .minuteSecond))
         return "\(position) / \(total)"
+    }
+
+    private func mediaStatusMetric(
+        _ text: String,
+        systemImage: String
+    ) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: systemImage)
+                .imageScale(.small)
+            Text(text)
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func enclosureLabel(_ count: Int) -> String {
