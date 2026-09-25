@@ -478,14 +478,8 @@ struct IOSMediaPlayerView: View {
                     if showPlaybackWaitIndicator {
                         ProgressView()
                             .controlSize(.small)
+                            .scaleEffect(2.35)
                             .frame(width: 66, height: 66)
-                            .background(
-                                Circle()
-                                    .stroke(
-                                        Color.accentColor.opacity(0.28),
-                                        lineWidth: 2
-                                    )
-                            )
                     }
                 }
                 .frame(width: 66, height: 66)
@@ -685,7 +679,6 @@ struct IOSMediaPlayerView: View {
                         ProgressView("Loading article…")
                             .frame(maxWidth: .infinity)
                             .padding(20)
-                            .onAppear(perform: onShowNotes)
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
