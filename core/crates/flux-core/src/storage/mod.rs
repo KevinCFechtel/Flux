@@ -151,14 +151,79 @@ impl Store {
         tx.commit().map_err(sql_error)?;
         Ok(())
     }
-    /// Discards server-derived state while preserving account association and user configuration.
+    /// Discards reconstructable synchronized state while preserving durable local media work.
     pub fn clear_synchronized_state_for_rebuild(&self) -> Result<(), CoreError> {
         let mut connection = self
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let tx = connection.transaction().map_err(sql_error)?;
-        clear_synchronized_state(&tx, false)?;
+
+        // Rebuild intentionally drops ordinary article mutation/notification bookkeeping, but
+        // Phase-B media state is durable local state rather than reconstructable sync state.
+        // Keep the minimal Article -> Feed -> Category graph required by a protecting media
+        // state so SavedMedia, active/downloaded transfers and in-progress playback survive
+        // the fresh authoritative sync that follows this clear.
+        tx.execute_batch(
+            "DELETE FROM notification_candidate_articles;
+             DELETE FROM system_notification_candidates;
+             DELETE FROM pending_system_notifications;
+             DELETE FROM system_notified_articles;
+             DELETE FROM pending_mutations;",
+        )
+        .map_err(sql_error)?;
+
+        tx.execute(
+            "DELETE FROM articles
+             WHERE NOT EXISTS(
+                 SELECT 1
+                 FROM saved_media s
+                 JOIN enclosures e ON e.id=s.enclosure_id
+                 WHERE e.article_id=articles.id
+             )
+             AND NOT EXISTS(
+                 SELECT 1
+                 FROM playback_states p
+                 JOIN enclosures e ON e.id=p.enclosure_id
+                 WHERE e.article_id=articles.id AND p.status='in_progress'
+             )
+             AND NOT EXISTS(
+                 SELECT 1
+                 FROM pending_media_progress_mutations m
+                 JOIN enclosures e ON e.id=m.enclosure_id
+                 WHERE e.article_id=articles.id
+             )
+             AND NOT EXISTS(
+                 SELECT 1
+                 FROM media_downloads d
+                 JOIN enclosures e ON e.id=d.enclosure_id
+                 WHERE e.article_id=articles.id AND d.state IN ('requested','downloaded')
+             )",
+            [],
+        )
+        .map_err(sql_error)?;
+
+        // Parent rows are synchronized data too, but protected Articles still require their
+        // foreign-key parents until the following Full Sync refreshes the authoritative catalog.
+        tx.execute(
+            "DELETE FROM feeds
+             WHERE NOT EXISTS(SELECT 1 FROM articles a WHERE a.feed_id=feeds.id)",
+            [],
+        )
+        .map_err(sql_error)?;
+        tx.execute(
+            "DELETE FROM categories
+             WHERE NOT EXISTS(SELECT 1 FROM feeds f WHERE f.category_id=categories.id)",
+            [],
+        )
+        .map_err(sql_error)?;
+
+        tx.execute(
+            "DELETE FROM core_settings
+             WHERE key IN ('last_successful_sync_at','last_full_sync_at','delta_sync_cursor','full_sync_required','full_sync_reason')",
+            [],
+        )
+        .map_err(sql_error)?;
         tx.commit().map_err(sql_error)
     }
     /// Restores all Core-owned persistent state to fresh-install defaults.
@@ -7721,6 +7786,154 @@ mod tests {
             store.media_metadata(1000).unwrap().unwrap().duration_ms,
             Some(90_000)
         );
+    }
+
+    #[test]
+    fn rebuild_clear_preserves_only_phase_b_media_protected_state() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 10,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        let articles = (1_i64..=8)
+            .map(|offset| Article {
+                id: 100 + offset,
+                feed_id: 10,
+                title: format!("Article {offset}"),
+                url: format!("https://example.test/{offset}"),
+                comments_url: String::new(),
+                published_at: "2026-01-01T00:00:00Z".into(),
+                is_read: true,
+                is_starred: false,
+                raw_html_content: String::new(),
+                reading_time_minutes: 0,
+                preview: String::new(),
+                image_url: None,
+            })
+            .collect::<Vec<_>>();
+        let enclosures = articles
+            .iter()
+            .enumerate()
+            .map(|(index, article)| Enclosure {
+                id: 1001 + index as i64,
+                article_id: article.id,
+                url: format!("https://cdn.test/{}.mp3", 1001 + index as i64),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: Some(4096),
+                remote_media_progression_seconds: 0,
+            })
+            .collect::<Vec<_>>();
+        store
+            .reconcile_with_enclosures(&categories, &feeds, &articles, &enclosures)
+            .unwrap();
+
+        // Protect Article 101 through SavedMedia.
+        store.save_media(1001, "2026-01-01T00:00:00Z").unwrap();
+        store.add_to_listening_list(101, "2026-01-01T00:00:00Z").unwrap();
+
+        // Protect Article 102 through InProgress playback + a pending media progression.
+        store
+            .checkpoint_playback(1002, 5_000, Some(60_000), "2026-01-01T00:00:01Z", true)
+            .unwrap();
+
+        // Protect Article 103 through Requested download.
+        store.request_download(1003, DownloadOrigin::Manual).unwrap();
+
+        // Protect Article 104 through a completed local download and verify the physical file
+        // is not treated as reconstructable cache.
+        let local_dir = media.join("enclosure");
+        std::fs::create_dir_all(&local_dir).unwrap();
+        let local_file = local_dir.join("1004.mp3");
+        std::fs::write(&local_file, b"media").unwrap();
+        store.request_download(1004, DownloadOrigin::Manual).unwrap();
+        store
+            .download_finished(1004, "enclosure/1004.mp3", 5)
+            .unwrap();
+
+        // These states are explicitly non-protecting in the frozen Phase-B contract.
+        store.request_download(1005, DownloadOrigin::Manual).unwrap();
+        store
+            .download_failed(1005, DownloadFailureKind::Network)
+            .unwrap();
+
+        store.request_download(1006, DownloadOrigin::Manual).unwrap();
+        let deleting_file = local_dir.join("1006.mp3");
+        std::fs::write(&deleting_file, b"media").unwrap();
+        store
+            .download_finished(1006, "enclosure/1006.mp3", 5)
+            .unwrap();
+        store.request_download_deletion(1006).unwrap();
+
+        store
+            .checkpoint_playback(1007, 30_000, Some(30_000), "2026-01-01T00:00:02Z", false)
+            .unwrap();
+        store
+            .complete_playback(1007, Some(30_000), "2026-01-01T00:00:03Z", false)
+            .unwrap();
+
+        // Article 108 has no media protection at all.
+        store
+            .set_state_bulk(&[101], MutationField::Read, false)
+            .unwrap();
+
+        store.clear_synchronized_state_for_rebuild().unwrap();
+
+        for article_id in [101, 102, 103, 104] {
+            assert!(
+                store.local_article_state(article_id).unwrap().is_some(),
+                "media-protected Article {article_id} must survive rebuild clear"
+            );
+        }
+        for article_id in [105, 106, 107, 108] {
+            assert!(
+                store.local_article_state(article_id).unwrap().is_none(),
+                "non-protecting Article {article_id} must be reconstructable"
+            );
+        }
+
+        assert!(store.saved_media(1001).unwrap().is_some());
+        assert!(store.is_in_listening_list(101).unwrap());
+        assert_eq!(
+            store.playback_state(1002).unwrap().unwrap().status,
+            PlaybackStatus::InProgress
+        );
+        assert_eq!(
+            store
+                .pending_media_progress_mutations()
+                .unwrap()
+                .into_iter()
+                .map(|mutation| mutation.enclosure_id)
+                .collect::<Vec<_>>(),
+            vec![1002]
+        );
+        assert_eq!(
+            store.media_download(1003).unwrap().unwrap().state,
+            DownloadState::Requested
+        );
+        assert_eq!(
+            store.media_download(1004).unwrap().unwrap().state,
+            DownloadState::Downloaded
+        );
+        assert!(local_file.exists());
+
+        assert!(store.media_download(1005).unwrap().is_none());
+        assert!(store.media_download(1006).unwrap().is_none());
+        assert!(store.playback_state(1007).unwrap().is_none());
+        assert!(store.pending_mutations().unwrap().is_empty());
+
+        // The minimal FK parents of protected media remain until the subsequent Full Sync
+        // refreshes the authoritative catalog.
+        let catalog = store.navigation_catalog().unwrap();
+        assert_eq!(catalog.categories, categories);
+        assert_eq!(catalog.feeds, feeds);
     }
 
     #[test]
