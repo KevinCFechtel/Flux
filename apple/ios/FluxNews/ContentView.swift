@@ -653,6 +653,20 @@ struct ContentView: View {
             playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
             playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
             item: item,
+            feedIconFeedID: item?.feedId,
+            feedIconTitle: item?.feedTitle ?? "",
+            feedIconState: { feedID, variant in
+                newsreaderStore.feedIconPresentationState(
+                    for: feedID,
+                    variant: variant
+                )
+            },
+            onRequestFeedIcon: { feedID, variant in
+                newsreaderStore.requestFeedIcon(
+                    feedID,
+                    variant: variant
+                )
+            },
             showNotesDocument: listeningListStore.showNotesDocument,
             showNotesIsLoading: listeningListStore.showNotesIsLoading,
             showNotesErrorMessage: listeningListStore.showNotesErrorMessage,
@@ -711,6 +725,20 @@ struct ContentView: View {
             playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
             playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
             item: nil,
+            feedIconFeedID: presentation.article.feedId,
+            feedIconTitle: presentation.article.feedTitle,
+            feedIconState: { feedID, variant in
+                newsreaderStore.feedIconPresentationState(
+                    for: feedID,
+                    variant: variant
+                )
+            },
+            onRequestFeedIcon: { feedID, variant in
+                newsreaderStore.requestFeedIcon(
+                    feedID,
+                    variant: variant
+                )
+            },
             showNotesDocument: listeningListStore.showNotesDocument,
             showNotesIsLoading: listeningListStore.showNotesIsLoading,
             showNotesErrorMessage: listeningListStore.showNotesErrorMessage,
@@ -795,7 +823,19 @@ struct ContentView: View {
                     ),
                 onPresentScopeChooser: presentArticleListNavigation,
                 onOpenPlayer: openListeningListPlayer,
-                onPlay: playListeningListEnclosure
+                onPlay: playListeningListEnclosure,
+                feedIconState: { feedID, variant in
+                    newsreaderStore.feedIconPresentationState(
+                        for: feedID,
+                        variant: variant
+                    )
+                },
+                onRequestFeedIcon: { feedID, variant in
+                    newsreaderStore.requestFeedIcon(
+                        feedID,
+                        variant: variant
+                    )
+                }
             )
         } else {
             articleList
