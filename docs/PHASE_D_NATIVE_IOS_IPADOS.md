@@ -1,6 +1,6 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: D1-D4 COMPLETE / D4 FOLLOW-UP COMPLETE / D4.5 COMPLETE / D5 COMPLETE & ARCHITECTURE-FROZEN / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D4 COMPLETE / D4 FOLLOW-UP COMPLETE / D4.5 COMPLETE / D5 COMPLETE & ARCHITECTURE-FROZEN / D6 NEXT / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
 > replaces the existing Flutter iOS/iPadOS client with a native Swift client:
@@ -1330,12 +1330,29 @@ contracts are recorded in
 
 ### D6 — Native Media & Background Downloads
 
+**Entry status — 25 September 2026:** D1-D5 and the immediate D4 follow-up set
+are closed. The canonical native iOS test gate passed again after the final
+post-D4 presentation/sync polish, including compact swipe-action labels,
+navigation-localization repair, scope-aware pending-new-data presentation for
+feed/category scopes, and global pending-new-data acknowledgement after a
+successful Manual Sync. No additional D1-D5 implementation work is a prerequisite
+for starting D6.
+
 Bring the existing Listening List/player/download experience to iOS/iPadOS,
 including chapters, artwork, progress, policies, AVAudioSession, background
 audio and true background URLSession downloads. D6 supplies the iOS native
 transfer executor consumed by the transfer-reconciliation handoff established
 in D5. Reuse/refactor Phase-C Apple media code only where needed for actual
 cross-platform use.
+
+D6 starts from an existing Core/UniFFI media contract and a completed macOS
+reference implementation. iOS already has the D5
+`IOSMediaTransferReconciliationHandoff`, which buffers/coalesces reconciliation
+requests until D6 installs a native transfer executor. The presence of shared
+`BrowserScope.listeningList` and iOS semantic Listening List actions is
+preparatory only; it does not mean that the native iOS Listening List, player,
+AVAudioSession lifecycle, or persistent background URLSession transfer executor
+already exists.
 
 ### D7 — Now Playing & CarPlay
 
