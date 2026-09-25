@@ -729,7 +729,7 @@ final class IOSMediaPlaybackCoordinator {
         coreAccess.detach()
         presentationState.reset()
         onPlaybackUseChanged?()
-        try? audioSession.deactivateIfIdle()
+        audioSession.deactivateIfIdle()
     }
 
     func suspendForCoreLifecycle() async {
