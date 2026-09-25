@@ -137,8 +137,8 @@ struct IOSListeningListView: View {
                 item,
                 transfers: transferState.transfers
             )
-            HStack(spacing: 12) {
-                HStack(spacing: 12) {
+            HStack(spacing: 10) {
+                HStack(spacing: 6) {
                     Label(
                         enclosureLabel(item.audioEnclosures.count),
                         systemImage: "waveform"
