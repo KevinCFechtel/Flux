@@ -1,13 +1,9 @@
 import Foundation
-import OSLog
 
 @MainActor
 final class IOSWidgetSnapshotCoordinator {
     private let bootstrapper: CoreBootstrapper
-    private let logger = Logger(
-        subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews",
-        category: "widget_snapshot"
-    )
+    private let logger = IOSAppLogger(category: "widget_snapshot")
     private var eventSubscription: EventSubscription?
     private var refreshTask: Task<Void, Never>?
     private var generation: UInt64 = 0
@@ -30,7 +26,7 @@ final class IOSWidgetSnapshotCoordinator {
             )
         } catch {
             logger.error(
-                "Widget event subscription failed error=\(String(reflecting: error), privacy: .private)"
+                "Widget event subscription failed error=\(String(reflecting: error))"
             )
         }
         refresh(for: core, generation: current)
@@ -47,7 +43,7 @@ final class IOSWidgetSnapshotCoordinator {
             WidgetTimelineReloader.reloadAll()
         } catch {
             logger.error(
-                "Widget snapshot invalidation failed error=\(String(reflecting: error), privacy: .private)"
+                "Widget snapshot invalidation failed error=\(String(reflecting: error))"
             )
         }
     }
@@ -99,7 +95,7 @@ final class IOSWidgetSnapshotCoordinator {
             WidgetTimelineReloader.reloadAll()
         case let .failure(error):
             logger.error(
-                "Widget snapshot refresh failed error=\(String(reflecting: error), privacy: .private)"
+                "Widget snapshot refresh failed error=\(String(reflecting: error))"
             )
         }
     }
