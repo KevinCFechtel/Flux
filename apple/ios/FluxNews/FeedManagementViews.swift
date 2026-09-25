@@ -199,6 +199,13 @@ struct IOSFeedSettingsView: View {
                         )
                     )
                     Toggle("Open in Miniflux", isOn: Binding(get: { preferences.openInMiniflux }, set: updateOpenInMiniflux))
+                    Toggle(
+                        "Automatically Download Audio",
+                        isOn: Binding(
+                            get: { preferences.autoDownloadAudio },
+                            set: updateAutoDownloadAudio
+                        )
+                    )
                 }
                 .disabled(isSaving)
             } else {
@@ -253,6 +260,15 @@ struct IOSFeedSettingsView: View {
     }
 
     private func updateOpenInMiniflux(_ enabled: Bool) { update { completion in store.setFeedOpenInMiniflux(feedID: target.id, enabled: enabled, completion: completion) } }
+    private func updateAutoDownloadAudio(_ enabled: Bool) {
+        update { completion in
+            store.setFeedAutoDownloadAudio(
+                feedID: target.id,
+                enabled: enabled,
+                completion: completion
+            )
+        }
+    }
     private func update(_ change: (@escaping (Result<Void, Error>) -> Void) -> Void) {
         let generation = requestLifecycle.begin()
         isSaving = true
