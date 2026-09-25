@@ -190,6 +190,27 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testListeningListScopeChooserFollowsVisibleNavigationOwnership() {
+        XCTAssertTrue(
+            IOSListeningListNavigationPresentation.showsScopeChooser(
+                for: .compact,
+                splitColumnVisibility: .detailOnly
+            )
+        )
+        XCTAssertTrue(
+            IOSListeningListNavigationPresentation.showsScopeChooser(
+                for: .regular,
+                splitColumnVisibility: .detailOnly
+            )
+        )
+        XCTAssertFalse(
+            IOSListeningListNavigationPresentation.showsScopeChooser(
+                for: .regular,
+                splitColumnVisibility: .all
+            )
+        )
+    }
+
     func testCompactShellRejectsPersistentSidebarVisibility() {
         XCTAssertEqual(
             AdaptiveShellTransitionPolicy.constrainedSplitColumnVisibility(
