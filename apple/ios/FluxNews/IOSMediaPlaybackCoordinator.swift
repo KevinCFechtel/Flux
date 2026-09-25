@@ -947,6 +947,7 @@ final class IOSMediaPlaybackCoordinator {
         presentationState.setStatus(.stopped)
         stopCheckpointTimer()
         onPlaybackUseChanged?()
+        audioSession.deactivateIfIdle()
         Task { @MainActor [weak self] in
             await self?.checkpoint()
         }
