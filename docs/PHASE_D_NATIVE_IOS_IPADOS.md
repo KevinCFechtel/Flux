@@ -1,6 +1,6 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: D1-D4 COMPLETE / D4 FOLLOW-UP COMPLETE / D4.5 COMPLETE / D5 COMPLETE & ARCHITECTURE-FROZEN / D6 NEXT / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D4 COMPLETE / D4 FOLLOW-UP COMPLETE / D4.5 COMPLETE / D5 COMPLETE & ARCHITECTURE-FROZEN / D6 IMPLEMENTATION COMPLETE — D6-G ACCEPTANCE ACTIVE / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
 > replaces the existing Flutter iOS/iPadOS client with a native Swift client:
@@ -1349,6 +1349,9 @@ D6 starts from an existing Core/UniFFI media contract and a completed macOS
 reference implementation. The repository-first readiness review and concrete
 execution/work-package contract are maintained in
 [`IOS_D6_NATIVE_MEDIA_IMPLEMENTATION.md`](IOS_D6_NATIVE_MEDIA_IMPLEMENTATION.md).
+D6-0 through D6-F are now implemented and testvalidated. D6-G is the remaining
+real-device/process-boundary acceptance gate; its evidence matrix is maintained
+in [`IOS_D6_FINAL_ACCEPTANCE.md`](IOS_D6_FINAL_ACCEPTANCE.md).
 iOS already has the D5 `IOSMediaTransferReconciliationHandoff`, which
 buffers/coalesces reconciliation requests until D6 installs a native transfer
 executor. The presence of shared `BrowserScope.listeningList` and iOS semantic
