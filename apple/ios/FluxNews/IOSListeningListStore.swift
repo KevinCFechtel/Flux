@@ -210,6 +210,21 @@ final class IOSListeningListStore: ObservableObject {
 }
 
 enum IOSListeningListPresentation {
+    enum DownloadAction: Equatable {
+        case download
+        case pending
+        case downloading
+        case cancelling
+        case delete
+        case pendingDeletion
+        case retry
+    }
+
+    struct TransferProgress: Equatable {
+        let fraction: Double?
+        let label: String
+    }
+
     struct Progress: Equatable {
         let positionMs: UInt64
         let durationMs: UInt64?
@@ -315,16 +330,89 @@ enum IOSListeningListPresentation {
             : "\(name) (\(details.joined(separator: ", ")))"
     }
 
+    static func downloadAction(
+        _ enclosure: ListeningListEnclosure,
+        runtime: MediaTransferRuntime?
+    ) -> DownloadAction {
+        switch enclosure.download?.state {
+        case .downloaded:
+            return .delete
+        case .requested:
+            switch runtime?.phase {
+            case .transferring:
+                return .downloading
+            case .cancelling:
+                return .cancelling
+            case .starting, nil:
+                return .pending
+            }
+        case .deleteRequested:
+            return .pendingDeletion
+        case .failed:
+            return .retry
+        case .notDownloaded, nil:
+            return .download
+        }
+    }
+
     static func downloadSummary(
-        _ item: ListeningListItem
+        _ item: ListeningListItem,
+        transfers: [Int64: MediaTransferRuntime] = [:]
     ) -> (downloaded: Int, total: Int, pending: Int) {
-        let states = item.audioEnclosures.compactMap(\.download?.state)
+        let actions = item.audioEnclosures.map {
+            downloadAction(
+                $0,
+                runtime: transfers[$0.enclosure.id]
+            )
+        }
         return (
-            states.filter { $0 == .downloaded }.count,
+            actions.filter { $0 == .delete }.count,
             item.audioEnclosures.count,
-            states.filter {
-                $0 == .requested || $0 == .deleteRequested
+            actions.filter {
+                switch $0 {
+                case .pending, .downloading, .cancelling, .pendingDeletion:
+                    true
+                case .download, .delete, .retry:
+                    false
+                }
             }.count
+        )
+    }
+
+    static func transferProgress(
+        _ item: ListeningListItem,
+        transfers: [Int64: MediaTransferRuntime]
+    ) -> TransferProgress? {
+        let active = item.audioEnclosures.compactMap { enclosure -> MediaTransferRuntime? in
+            transfers[enclosure.enclosure.id]
+        }
+        guard !active.isEmpty else { return nil }
+
+        if let runtime = active.first(where: { $0.phase == .transferring }) {
+            let label: String
+            if let fraction = runtime.fraction {
+                label = String(
+                    localized: "\(Int((fraction * 100).rounded()))% downloaded"
+                )
+            } else {
+                label = String(localized: "Downloading")
+            }
+            return .init(
+                fraction: runtime.fraction,
+                label: label
+            )
+        }
+
+        if active.contains(where: { $0.phase == .cancelling }) {
+            return .init(
+                fraction: nil,
+                label: String(localized: "Cancelling Download")
+            )
+        }
+
+        return .init(
+            fraction: nil,
+            label: String(localized: "Preparing Download")
         )
     }
 }
