@@ -287,7 +287,7 @@ struct IOSMediaPlayerView: View {
                 }
             }
 
-            HStack(spacing: 30) {
+            HStack(spacing: 24) {
                 Button {
                     if !isPreviewingInactiveItem {
                         playbackCoordinator.skip(bySeconds: -15)
@@ -313,6 +313,17 @@ struct IOSMediaPlayerView: View {
                         ? String(localized: "Pause")
                         : String(localized: "Play")
                 )
+
+                Button {
+                    if !isPreviewingInactiveItem {
+                        playbackCoordinator.stop()
+                    }
+                } label: {
+                    Image(systemName: "stop.circle")
+                        .font(.title2)
+                }
+                .accessibilityLabel(String(localized: "Stop"))
+                .disabled(isPreviewingInactiveItem)
 
                 Button {
                     if !isPreviewingInactiveItem {
