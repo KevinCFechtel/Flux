@@ -502,6 +502,7 @@ D6-0 now changes the rebuild clear so it preserves only the minimal
 Article -> Feed -> Category graph required by the frozen Phase-B protecting
 states:
 
+- Phase-C Listening List membership;
 - `SavedMedia`;
 - `MediaDownload = Requested`;
 - `MediaDownload = Downloaded`;
@@ -516,9 +517,11 @@ not gain rebuild protection. Pending media progression is preserved because it
 is itself one of the frozen protecting media states.
 
 The Core regression test
-`rebuild_clear_preserves_only_phase_b_media_protected_state` covers the
-protecting/non-protecting matrix and verifies that an existing downloaded file
-is not discarded as reconstructable cache.
+`rebuild_clear_preserves_durable_media_and_listening_state` covers the
+protecting/non-protecting matrix, including a pure Listening List item, and
+verifies that an existing downloaded file is not discarded as reconstructable
+cache. A separate `listening_list_membership_protects_article_from_normal_retention`
+regression test covers the Phase-C retention invariant.
 
 The complete remote feed/category catalog remains authoritative. A feed absent
 from a complete remote catalog continues to be removed together with its local
@@ -535,8 +538,10 @@ No Swift workaround or new UniFFI API is introduced for D6-0.
 are in place; final workspace test execution remains required before this
 package is marked closed.
 
-- Rebuild preserves the frozen Phase-B protecting media states while clearing
-  reconstructable synchronized state.
+- Rebuild preserves the frozen Phase-B protecting media states plus durable
+  Phase-C Listening List membership while clearing reconstructable synchronized
+  state.
+- Normal read-article retention now preserves Listening List membership.
 - Ordinary read/star pending intent is discarded; pending media progression is
   preserved with its protected playback state.
 - Downloaded physical media is not invalidated by the rebuild clear.
