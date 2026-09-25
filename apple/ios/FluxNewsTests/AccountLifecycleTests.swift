@@ -487,6 +487,73 @@ final class AccountLifecycleTests: XCTestCase {
     }
 
     @MainActor
+    func testMediaPolicyPreferencesReadAndWriteCoreSettings() async throws {
+        let suiteName = "FluxNews.MediaSettings.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            true,
+            forKey: "FluxNews.iOS.mutationDeliveryDefaultApplied.v1"
+        )
+
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core },
+            defaults: defaults
+        )
+        await bootstrapper.start()
+
+        let initial = await bootstrapper.mediaSettings()
+        switch initial {
+        case let .success(settings):
+            XCTAssertEqual(settings.downloadNetworkPolicy, .anyNetwork)
+            XCTAssertEqual(settings.downloadRetention, .forever)
+            XCTAssertFalse(settings.deleteAfterPlayback)
+            XCTAssertFalse(settings.autoDownloadListeningList)
+            XCTAssertFalse(settings.removeCompletedListeningList)
+        case let .failure(error):
+            XCTFail("Unexpected media settings read failure: \(error)")
+        }
+
+        if case let .failure(error) =
+            await bootstrapper.setDownloadNetworkPolicyPreference(.unmeteredOnly) {
+            XCTFail("Unexpected network-policy write failure: \(error)")
+        }
+        if case let .failure(error) =
+            await bootstrapper.setDownloadRetentionPreference(.days(days: 30)) {
+            XCTFail("Unexpected retention write failure: \(error)")
+        }
+        if case let .failure(error) =
+            await bootstrapper.setDeleteAfterPlaybackPreference(true) {
+            XCTFail("Unexpected delete-after-playback write failure: \(error)")
+        }
+        if case let .failure(error) =
+            await bootstrapper.setAutoDownloadListeningListPreference(true) {
+            XCTFail("Unexpected auto-download write failure: \(error)")
+        }
+        if case let .failure(error) =
+            await bootstrapper
+                .setRemoveCompletedListeningListPreference(true) {
+            XCTFail("Unexpected completed-item write failure: \(error)")
+        }
+
+        let settings = try core.coreSettings()
+        XCTAssertEqual(settings.downloadNetworkPolicy, .unmeteredOnly)
+        XCTAssertEqual(settings.downloadRetention, .days(days: 30))
+        XCTAssertTrue(settings.deleteAfterPlayback)
+        XCTAssertTrue(settings.autoDownloadListeningList)
+        XCTAssertTrue(settings.removeCompletedListeningList)
+    }
+
+    @MainActor
     func testStoredCredentialsActivateWithHeaders() async throws {
         let credentials = IOSMinifluxCredentials(
             server: "https://miniflux.example",
