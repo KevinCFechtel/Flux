@@ -805,8 +805,7 @@ The first D6-E slice now provides:
 
 ### D6-F — Media policies/settings
 
-**Implementation status:** **ACTIVE / first settings slice implemented,
-validation pending.** The existing CoreSettings and FeedPreferences remain
+**Implementation status:** **CLOSED / testvalidated.** The existing CoreSettings and FeedPreferences remain
 authoritative; iOS adds no parallel persistence.
 
 The first D6-F slice provides:
@@ -834,6 +833,11 @@ The first D6-F slice provides:
 - localization/accessibility.
 
 ### D6-G — D6 integration/acceptance
+
+**Implementation status:** **ACTIVE / implementation complete; physical-device
+and process-boundary acceptance pending.** The authoritative acceptance matrix
+and closure evidence are recorded in
+[IOS_D6_FINAL_ACCEPTANCE.md](IOS_D6_FINAL_ACCEPTANCE.md).
 
 Validate at least:
 
