@@ -1664,6 +1664,45 @@ final class AccountLifecycleTests: XCTestCase {
         XCTAssertEqual(selectedFeedIDs, [42, 43])
     }
 
+    func testMediaBackgroundTransferIdentifierIsStableAndAppScoped() {
+        let identifier = IOSMediaBackgroundTransferConfiguration.sessionIdentifier
+        XCTAssertTrue(identifier.hasSuffix(".mediaTransfers.v1"))
+        XCTAssertTrue(identifier.contains(Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews"))
+    }
+
+    func testMediaBackgroundTransferConfigurationEnablesLaunchEvents() {
+        let identifier = "dev.kevincfechtel.fluxNews.tests.mediaTransfers.v1"
+        let configuration = IOSMediaBackgroundTransferConfiguration.makeSessionConfiguration(
+            identifier: identifier
+        )
+
+        XCTAssertEqual(configuration.identifier, identifier)
+        XCTAssertTrue(configuration.sessionSendsLaunchEvents)
+        XCTAssertFalse(configuration.isDiscretionary)
+    }
+
+    @MainActor
+    func testMediaTransferCoordinatorRejectsForeignBackgroundSessionIdentifier() {
+        let bootstrapper = CoreBootstrapper()
+        let handoff = IOSMediaTransferReconciliationHandoff()
+        let runtime = IOSAppRuntime(
+            bootstrapper: bootstrapper,
+            scheduler: IOSSystemBackgroundTaskScheduler.shared,
+            systemNotificationManager: IOSSystemNotificationManager(center: FakeSystemNotificationCenter()),
+            mediaTransferReconciliationHandoff: handoff
+        )
+        var completed = false
+
+        let handled = runtime.mediaRuntime.transferCoordinator.handleBackgroundEvents(
+            identifier: "other.bundle.mediaTransfers.v1"
+        ) {
+            completed = true
+        }
+
+        XCTAssertFalse(handled)
+        XCTAssertFalse(completed)
+    }
+
     @MainActor
     func testMediaRuntimeOwnsAndResetsTransientPresentationState() throws {
         let bootstrapper = CoreBootstrapper()
