@@ -292,6 +292,18 @@ protocol IOSMediaAudioSessionManaging: AnyObject {
     func deactivateIfIdle()
 }
 
+enum IOSMediaAudioSessionConfiguration {
+    static let category: AVAudioSession.Category = .playback
+    static let mode: AVAudioSession.Mode = .spokenAudio
+
+    // Playback already enables ordinary AirPlay and Bluetooth A2DP routing.
+    // Apple documents allowAirPlay as an explicit option for playAndRecord;
+    // passing it with playback can make the category configuration invalid on
+    // physical devices even though Simulator does not expose the same route
+    // validation.
+    static let options: AVAudioSession.CategoryOptions = []
+}
+
 @MainActor
 final class IOSMediaAudioSessionCoordinator: IOSMediaAudioSessionManaging {
     var onInterruptionBegan: (() -> Void)?
@@ -303,6 +315,7 @@ final class IOSMediaAudioSessionCoordinator: IOSMediaAudioSessionManaging {
     private let activationQueue = DispatchQueue(
         label: "dev.kevincfechtel.fluxNews.audio-session"
     )
+    private let logger = IOSAppLogger(category: "media-playback")
     private var interruptionObserver: NSObjectProtocol?
     private var routeObserver: NSObjectProtocol?
 
@@ -337,17 +350,34 @@ final class IOSMediaAudioSessionCoordinator: IOSMediaAudioSessionManaging {
     func activate() async throws {
         let session = session
         let activationQueue = activationQueue
+        let logger = logger
         try await withCheckedThrowingContinuation { continuation in
             activationQueue.async {
                 do {
                     try session.setCategory(
-                        .playback,
-                        mode: .spokenAudio,
-                        options: [.allowAirPlay, .allowBluetoothA2DP]
+                        IOSMediaAudioSessionConfiguration.category,
+                        mode: IOSMediaAudioSessionConfiguration.mode,
+                        options: IOSMediaAudioSessionConfiguration.options
                     )
+                } catch {
+                    let nsError = error as NSError
+                    logger.error(
+                        "AVAudioSession setCategory failed domain=\(nsError.domain) code=\(nsError.code) description=\(nsError.localizedDescription)"
+                    )
+                    continuation.resume(
+                        throwing: IOSMediaPlaybackError.audioSession
+                    )
+                    return
+                }
+
+                do {
                     try session.setActive(true)
                     continuation.resume(returning: ())
                 } catch {
+                    let nsError = error as NSError
+                    logger.error(
+                        "AVAudioSession setActive failed domain=\(nsError.domain) code=\(nsError.code) description=\(nsError.localizedDescription)"
+                    )
                     continuation.resume(
                         throwing: IOSMediaPlaybackError.audioSession
                     )
