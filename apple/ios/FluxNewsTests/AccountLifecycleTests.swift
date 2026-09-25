@@ -1664,6 +1664,74 @@ final class AccountLifecycleTests: XCTestCase {
         XCTAssertEqual(selectedFeedIDs, [42, 43])
     }
 
+    func testMediaTransferTaskIdentityRoundTripsVersionedMetadata() throws {
+        let identity = IOSMediaTransferTaskIdentity(
+            executionToken: "token-a",
+            enclosureID: 42,
+            localReference: "downloads/token-a/enclosure-42.mp3"
+        )
+
+        XCTAssertEqual(
+            IOSMediaTransferTaskIdentity.decode(identity.taskDescription),
+            identity
+        )
+        XCTAssertNil(IOSMediaTransferTaskIdentity.decode("not-base64"))
+    }
+
+    func testMediaTransferExecutionIdentityPersistsForSameAccountAndRollsForDifferentAccount() {
+        let suiteName = "FluxNewsTests.mediaTransferIdentity.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            XCTFail("Could not create isolated UserDefaults")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = IOSMediaTransferExecutionIdentityStore(defaults: defaults)
+        let first = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "one",
+            customHeaders: []
+        )
+        let second = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "two",
+            customHeaders: []
+        )
+
+        let firstToken = store.token(for: first)
+        XCTAssertEqual(store.token(for: first), firstToken)
+
+        let secondToken = store.token(for: second)
+        XCTAssertNotEqual(secondToken, firstToken)
+
+        store.clear()
+        XCTAssertNotEqual(store.token(for: second), secondToken)
+    }
+
+    func testMediaTransferFileLayoutNamespacesIOSExecutorFiles() throws {
+        let reference = MediaTransferFileLayout.reference(
+            executionNamespace: "account-token",
+            enclosureID: 42,
+            url: "https://cdn.example/episode.mp3",
+            mimeType: "audio/mpeg"
+        )
+
+        XCTAssertEqual(
+            reference,
+            "downloads/account-token/enclosure-42.mp3"
+        )
+
+        let root = URL(fileURLWithPath: "/tmp/flux-media", isDirectory: true)
+        let destination = try MediaTransferFileLayout.destination(
+            reference: reference,
+            under: root
+        )
+        XCTAssertEqual(
+            destination.path,
+            "/tmp/flux-media/downloads/account-token/enclosure-42.mp3"
+        )
+    }
+
     func testMediaBackgroundTransferIdentifierIsStableAndAppScoped() {
         let identifier = IOSMediaBackgroundTransferConfiguration.sessionIdentifier
         XCTAssertTrue(identifier.hasSuffix(".mediaTransfers.v1"))
