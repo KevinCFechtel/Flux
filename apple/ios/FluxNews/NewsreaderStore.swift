@@ -1503,6 +1503,29 @@ struct IOSArticleAudioActionState {
         updateFeedPreferences(feedID: feedID, change: { try $0.setFeedOpenInMiniflux(feedId: feedID, enabled: enabled) }, completion: completion)
     }
 
+    func setFeedAutoDownloadAudio(
+        feedID: Int64,
+        enabled: Bool,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        updateFeedPreferences(
+            feedID: feedID,
+            change: {
+                try $0.setFeedAutoDownloadAudio(
+                    feedId: feedID,
+                    enabled: enabled
+                )
+            }
+        ) { [weak self] result in
+            if case .success = result {
+                Task {
+                    await self?.onMediaTransferReconciliationRequested?()
+                }
+            }
+            completion(result)
+        }
+    }
+
     func setFeedSystemNotificationsEnabled(feedID: Int64, enabled: Bool, completion: @escaping (Result<Void, Error>) -> Void) {
         updateFeedPreferences(
             feedID: feedID,
