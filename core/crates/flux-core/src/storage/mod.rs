@@ -7856,12 +7856,7 @@ mod tests {
         // Once the durable pending mutation has been acknowledged, Completed-only playback
         // no longer protects the Article from normal retention.
         let pending = store.pending_media_progress_mutations().unwrap();
-        store
-            .acknowledge_media_progress_mutation(
-                enclosure.id,
-                pending[0].revision,
-            )
-            .unwrap();
+        store.acknowledge_media_progress(&pending[0]).unwrap();
         assert_eq!(
             store
                 .cleanup_expired_read_articles("2025-01-01T00:00:00Z")
