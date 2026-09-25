@@ -188,6 +188,11 @@ impl Store {
             "DELETE FROM articles
              WHERE NOT EXISTS(
                  SELECT 1
+                 FROM listening_list l
+                 WHERE l.article_id=articles.id
+             )
+             AND NOT EXISTS(
+                 SELECT 1
                  FROM saved_media s
                  JOIN enclosures e ON e.id=s.enclosure_id
                  WHERE e.article_id=articles.id
@@ -2641,7 +2646,7 @@ impl Store {
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?
             .execute(
-                "DELETE FROM articles WHERE is_read=1 AND is_starred=0 AND published_at < ?1 AND NOT EXISTS(SELECT 1 FROM saved_media s JOIN enclosures e ON e.id=s.enclosure_id WHERE e.article_id=articles.id) AND NOT EXISTS(SELECT 1 FROM playback_states p JOIN enclosures e ON e.id=p.enclosure_id WHERE e.article_id=articles.id AND p.status='in_progress') AND NOT EXISTS(SELECT 1 FROM media_downloads d JOIN enclosures e ON e.id=d.enclosure_id WHERE e.article_id=articles.id AND d.state IN ('requested','downloaded'))",
+                "DELETE FROM articles WHERE is_read=1 AND is_starred=0 AND published_at < ?1 AND NOT EXISTS(SELECT 1 FROM listening_list l WHERE l.article_id=articles.id) AND NOT EXISTS(SELECT 1 FROM saved_media s JOIN enclosures e ON e.id=s.enclosure_id WHERE e.article_id=articles.id) AND NOT EXISTS(SELECT 1 FROM playback_states p JOIN enclosures e ON e.id=p.enclosure_id WHERE e.article_id=articles.id AND p.status='in_progress') AND NOT EXISTS(SELECT 1 FROM media_downloads d JOIN enclosures e ON e.id=d.enclosure_id WHERE e.article_id=articles.id AND d.state IN ('requested','downloaded'))",
                 [cutoff],
             )
             .map_err(sql_error)?;
@@ -7800,6 +7805,86 @@ mod tests {
     }
 
     #[test]
+    fn listening_list_membership_protects_article_from_normal_retention() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 10,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
+        let articles = [
+            Article {
+                id: 101,
+                feed_id: 10,
+                title: "Listening List".into(),
+                url: "https://example.test/listening".into(),
+                comments_url: String::new(),
+                published_at: "2020-01-01T00:00:00Z".into(),
+                is_read: true,
+                is_starred: false,
+                raw_html_content: String::new(),
+                reading_time_minutes: 0,
+                preview: String::new(),
+                image_url: None,
+            },
+            Article {
+                id: 102,
+                feed_id: 10,
+                title: "Expired".into(),
+                url: "https://example.test/expired".into(),
+                comments_url: String::new(),
+                published_at: "2020-01-01T00:00:00Z".into(),
+                is_read: true,
+                is_starred: false,
+                raw_html_content: String::new(),
+                reading_time_minutes: 0,
+                preview: String::new(),
+                image_url: None,
+            },
+        ];
+        let enclosures = [
+            Enclosure {
+                id: 1001,
+                article_id: 101,
+                url: "https://cdn.test/1001.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+            Enclosure {
+                id: 1002,
+                article_id: 102,
+                url: "https://cdn.test/1002.mp3".into(),
+                mime_type: "audio/mpeg".into(),
+                size_bytes: None,
+                remote_media_progression_seconds: 0,
+            },
+        ];
+        store
+            .reconcile_with_enclosures(&categories, &feeds, &articles, &enclosures)
+            .unwrap();
+        store
+            .add_to_listening_list(101, "2026-01-01T00:00:00Z")
+            .unwrap();
+
+        assert_eq!(
+            store
+                .cleanup_expired_read_articles("2025-01-01T00:00:00Z")
+                .unwrap(),
+            1
+        );
+        assert!(store.local_article_state(101).unwrap().is_some());
+        assert!(store.is_in_listening_list(101).unwrap());
+        assert!(store.local_article_state(102).unwrap().is_none());
+    }
+
+    #[test]
     fn rebuild_clear_preserves_only_phase_b_media_protected_state() {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
@@ -7814,7 +7899,7 @@ mod tests {
             category_id: 1,
             title: "Feed".into(),
         }];
-        let articles = (1_i64..=8)
+        let articles = (1_i64..=9)
             .map(|offset| Article {
                 id: 100 + offset,
                 feed_id: 10,
@@ -7890,14 +7975,20 @@ mod tests {
             .complete_playback(1007, Some(30_000), "2026-01-01T00:00:03Z", false)
             .unwrap();
 
-        // Article 108 has no media protection at all.
+        // Pure Phase-C Listening List membership is durable user state and must protect
+        // the News even without SavedMedia, playback or a download.
+        store
+            .add_to_listening_list(109, "2026-01-01T00:00:04Z")
+            .unwrap();
+
+        // Article 108 has no media/listening protection at all.
         store
             .set_state_bulk(&[101], MutationField::Read, false)
             .unwrap();
 
         store.clear_synchronized_state_for_rebuild().unwrap();
 
-        for article_id in [101, 102, 103, 104] {
+        for article_id in [101, 102, 103, 104, 109] {
             assert!(
                 store.local_article_state(article_id).unwrap().is_some(),
                 "media-protected Article {article_id} must survive rebuild clear"
@@ -7912,6 +8003,7 @@ mod tests {
 
         assert!(store.saved_media(1001).unwrap().is_some());
         assert!(store.is_in_listening_list(101).unwrap());
+        assert!(store.is_in_listening_list(109).unwrap());
         assert!(
             store.local_article_state(101).unwrap().unwrap().is_read,
             "discarded ordinary read mutation must fall back to last remote state"
