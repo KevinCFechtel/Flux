@@ -306,6 +306,7 @@ struct ContentView: View {
     @State private var saveToServiceFeedbackTrigger: UInt64 = 0
     @State private var pendingWidgetAction: WidgetAction?
     @State private var articleMediaPlayer: IOSArticleMediaPlayerPresentation?
+    @State private var listeningListPlayerArticleID: Int64?
     @State private var articleMediaDownloadChoice: IOSArticleMediaDownloadChoice?
 
     /// The capsule already opens the scope chooser, so a second control for the
@@ -394,6 +395,23 @@ struct ContentView: View {
             onDismiss: { listeningListStore.clearShowNotes() }
         ) { presentation in
             articleMediaPlayerView(presentation)
+        }
+        .sheet(
+            isPresented: Binding(
+                get: {
+                    !searchPresented && listeningListPlayerArticleID != nil
+                },
+                set: { presented in
+                    if !presented {
+                        listeningListPlayerArticleID = nil
+                    }
+                }
+            ),
+            onDismiss: {
+                listeningListStore.clearShowNotes()
+            }
+        ) {
+            listeningListPlayerView
         }
         .confirmationDialog(
             "Download Audio",
@@ -489,6 +507,60 @@ struct ContentView: View {
     }
 
     @ViewBuilder
+    private var listeningListPlayerView: some View {
+        let item = listeningListPlayerArticleID.flatMap { articleID in
+            listeningListStore.items.first { $0.articleId == articleID }
+        }
+
+        IOSMediaPlayerView(
+            playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+            playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
+            item: item,
+            showNotesDocument: listeningListStore.showNotesDocument,
+            showNotesIsLoading: listeningListStore.showNotesIsLoading,
+            showNotesErrorMessage: listeningListStore.showNotesErrorMessage,
+            onSelectEnclosure: { enclosureID in
+                if let articleID = listeningListPlayerArticleID {
+                    startListeningListPlayback(
+                        articleID: articleID,
+                        enclosureID: enclosureID
+                    )
+                }
+            },
+            onShowNotes: {
+                if let articleID = listeningListPlayerArticleID {
+                    listeningListStore.loadShowNotes(articleID: articleID)
+                }
+            },
+            onDismiss: {
+                listeningListPlayerArticleID = nil
+            }
+        )
+    }
+
+    private func startListeningListPlayback(
+        articleID: Int64,
+        enclosureID: Int64
+    ) {
+        listeningListPlayerArticleID = articleID
+        Task {
+            do {
+                try await IOSAppRuntime.shared.mediaRuntime
+                    .playbackCoordinator.play(enclosureID: enclosureID)
+                listeningListStore.reload()
+            } catch {
+                let coordinator = IOSAppRuntime.shared.mediaRuntime
+                    .playbackCoordinator
+                IOSAppRuntime.shared.mediaRuntime.playbackPresentationState
+                    .setErrorMessage(
+                        coordinator.lastStartFailureDescription
+                            ?? error.localizedDescription
+                    )
+            }
+        }
+    }
+
+    @ViewBuilder
     private func articleMediaPlayerView(
         _ presentation: IOSArticleMediaPlayerPresentation
     ) -> some View {
@@ -571,7 +643,10 @@ struct ContentView: View {
             IOSListeningListView(
                 store: listeningListStore,
                 playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
-                playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator
+                playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
+                showsScopeChooser: !adaptivePresentation.usesPersistentSplitNavigation,
+                onPresentScopeChooser: presentArticleListNavigation,
+                onStartPlayback: startListeningListPlayback
             )
         } else {
             articleList
