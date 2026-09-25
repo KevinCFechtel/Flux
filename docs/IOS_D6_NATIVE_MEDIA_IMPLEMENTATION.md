@@ -765,11 +765,38 @@ The final canonical iOS validation passed; D6-D is closed.
 
 ### D6-E — Article/media actions
 
-**Implementation status:** **ACTIVE.** D6-D is closed and testvalidated.
-D6-E now wires media semantics into ordinary article actions without changing
-the frozen Timeline geometry/image/Scrollover architecture. Audio availability
-must come only from the batched Core projection; visible cells never issue
-per-row media queries.
+**Implementation status:** **ACTIVE / first implementation slice complete,
+validation pending.** D6-D is closed and testvalidated. D6-E now wires media
+semantics into ordinary article actions without changing the frozen Timeline
+geometry/image/Scrollover architecture. Audio availability comes only from the
+batched Core projection; visible cells never issue per-row media queries.
+
+The first D6-E slice now provides:
+
+- generation-safe batched `articleAudioActionStates(articleIds:)` projection
+  for the loaded News Timeline;
+- the same batched projection for Search results, preserving the existing
+  shared swipe-configuration semantics;
+- projection cleanup on Timeline row removal, account detach, Search clear and
+  new Search generations;
+- native Article context-menu Audio actions for Play, Add/Remove Listening
+  List and per-enclosure Download/Cancel/Retry/Delete;
+- multiple audio enclosures represented as native submenus;
+- semantic `Download Audio` added to the existing configurable swipe action
+  set without changing the zero/one/two-per-side storage contract;
+- conditional swipe rendering: Download Audio is omitted for rows without
+  downloadable audio and never promotes another conditional action into Full
+  Swipe;
+- multiple downloadable enclosures use a native chooser before the
+  enclosure-specific mutation;
+- article Play opens the same app-scoped D6 Player runtime; no second player
+  state is created;
+- News and Search media mutations both fan into the existing D6-B transfer
+  reconciliation handoff;
+- Player/download chooser presentation follows the existing frontmost-surface
+  rule so Search-sheet actions present above Search rather than behind it;
+- focused tests for Download Audio configuration and conditional downloadable
+  enclosure filtering.
 
 - batched article audio projection;
 - Play / Listening List / Download actions;
