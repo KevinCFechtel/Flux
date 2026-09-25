@@ -876,6 +876,12 @@ impl FluxCore {
     pub fn media_metadata(&self, enclosure_id: i64) -> Result<Option<MediaMetadata>, CoreError> {
         self.store.media_metadata(enclosure_id)
     }
+    pub fn media_artwork_source(
+        &self,
+        enclosure_id: i64,
+    ) -> Result<Option<domain::MediaArtworkSource>, CoreError> {
+        self.store.media_artwork_source(enclosure_id)
+    }
     pub fn media_artwork(&self, reference: &str) -> Result<Option<Vec<u8>>, CoreError> {
         self.store.media_artwork(reference)
     }
