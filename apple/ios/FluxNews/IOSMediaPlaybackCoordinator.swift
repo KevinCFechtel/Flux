@@ -1,0 +1,958 @@
+import AVFoundation
+import Foundation
+import OSLog
+
+enum IOSMediaPlaybackError: LocalizedError {
+    case coreUnavailable
+    case sessionUnavailable
+    case invalidMediaURL
+    case audioSession
+
+    var errorDescription: String? {
+        switch self {
+        case .coreUnavailable:
+            return "The media Core is unavailable."
+        case .sessionUnavailable:
+            return "The media Core session is unavailable."
+        case .invalidMediaURL:
+            return "The media URL is not playable."
+        case .audioSession:
+            return "The audio session could not be activated."
+        }
+    }
+}
+
+@MainActor
+protocol IOSNativePlaybackEngine: AnyObject {
+    var currentPositionMs: UInt64 { get }
+    var durationMs: UInt64? { get }
+    var isPlaying: Bool { get }
+    var rate: Double { get set }
+
+    var onEnded: (@MainActor () -> Void)? { get set }
+    var onDuration: (@MainActor (UInt64) -> Void)? { get set }
+    var onPosition: (@MainActor (UInt64) -> Void)? { get set }
+    var onPlaybackStateChanged: (@MainActor (Bool) -> Void)? { get set }
+    var onLoadingChanged: (@MainActor (Bool) -> Void)? { get set }
+    var onBufferingChanged: (@MainActor (Bool) -> Void)? { get set }
+    var onError: (@MainActor (String) -> Void)? { get set }
+
+    func load(url: URL, startAtMs: UInt64)
+    func play()
+    func pause()
+    func unload()
+    func seek(toMs: UInt64)
+}
+
+@MainActor
+final class IOSAVPlayerPlaybackEngine: IOSNativePlaybackEngine {
+    private let player = AVPlayer()
+    private var endObserver: NSObjectProtocol?
+    private var timeObserver: Any?
+    private var durationObservation: NSKeyValueObservation?
+    private var readinessObservation: NSKeyValueObservation?
+    private var timeControlObservation: NSKeyValueObservation?
+    private weak var observedItem: AVPlayerItem?
+
+    private(set) var currentPositionMs: UInt64 = 0
+    private(set) var durationMs: UInt64?
+    private(set) var isPlaying = false
+
+    var rate: Double = 1.0 {
+        didSet {
+            if isPlaying {
+                player.rate = Float(rate)
+            }
+        }
+    }
+
+    var onEnded: (@MainActor () -> Void)?
+    var onDuration: (@MainActor (UInt64) -> Void)?
+    var onPosition: (@MainActor (UInt64) -> Void)?
+    var onPlaybackStateChanged: (@MainActor (Bool) -> Void)?
+    var onLoadingChanged: (@MainActor (Bool) -> Void)?
+    var onBufferingChanged: (@MainActor (Bool) -> Void)?
+    var onError: (@MainActor (String) -> Void)?
+
+    init() {
+        timeControlObservation = player.observe(
+            \.timeControlStatus,
+            options: [.initial, .new]
+        ) { [weak self] player, _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let isPlaying = player.timeControlStatus == .playing
+                self.isPlaying = isPlaying
+                self.onPlaybackStateChanged?(isPlaying)
+                self.onBufferingChanged?(
+                    player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                )
+            }
+        }
+    }
+
+    func load(url: URL, startAtMs: UInt64) {
+        let item = AVPlayerItem(url: url)
+        removeItemObservers()
+        observedItem = item
+        currentPositionMs = 0
+        durationMs = nil
+        isPlaying = false
+        onLoadingChanged?(true)
+
+        readinessObservation = item.observe(
+            \.status,
+            options: [.initial, .new]
+        ) { [weak self, weak observedItem = item] item, _ in
+            Task { @MainActor [weak self, weak observedItem] in
+                guard let self,
+                      let observedItem,
+                      self.observedItem === observedItem else {
+                    return
+                }
+
+                switch item.status {
+                case .readyToPlay:
+                    self.onLoadingChanged?(false)
+                case .failed:
+                    self.onLoadingChanged?(false)
+                    self.onError?(
+                        item.error?.localizedDescription
+                            ?? "Media playback failed."
+                    )
+                default:
+                    break
+                }
+            }
+        }
+
+        durationObservation = item.observe(
+            \AVPlayerItem.duration,
+            options: [.initial, .new]
+        ) { [weak self, weak observedItem = item] _, _ in
+            guard let observedItem else { return }
+            Task { @MainActor [weak self, weak observedItem] in
+                guard let self,
+                      let observedItem,
+                      self.observedItem === observedItem,
+                      let duration = Self.milliseconds(
+                        observedItem.duration,
+                        requiresPositive: true
+                      ),
+                      self.durationMs != duration else {
+                    return
+                }
+                self.durationMs = duration
+                self.onLoadingChanged?(false)
+                self.onDuration?(duration)
+            }
+        }
+
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self, weak item] _ in
+            Task { @MainActor [weak self, weak item] in
+                guard let self,
+                      let item,
+                      self.observedItem === item else {
+                    return
+                }
+                self.isPlaying = false
+                self.currentPositionMs =
+                    self.durationMs ?? self.currentPositionMs
+                self.onEnded?()
+            }
+        }
+
+        player.replaceCurrentItem(with: item)
+        timeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.5, preferredTimescale: 1_000),
+            queue: .main
+        ) { [weak self, weak item] time in
+            Task { @MainActor [weak self, weak item] in
+                guard let self,
+                      let item,
+                      self.observedItem === item,
+                      let position = Self.milliseconds(
+                        time,
+                        requiresPositive: false
+                      ) else {
+                    return
+                }
+                self.currentPositionMs = position
+                self.onPosition?(position)
+            }
+        }
+
+        seek(toMs: startAtMs)
+    }
+
+    func play() {
+        player.playImmediately(atRate: Float(rate))
+    }
+
+    func pause() {
+        player.pause()
+        updatePosition()
+        isPlaying = false
+        onPlaybackStateChanged?(false)
+    }
+
+    func unload() {
+        player.pause()
+        removeItemObservers()
+        player.replaceCurrentItem(with: nil)
+        currentPositionMs = 0
+        durationMs = nil
+        isPlaying = false
+    }
+
+    func seek(toMs: UInt64) {
+        let time = CMTime(
+            seconds: Double(toMs) / 1_000,
+            preferredTimescale: 1_000
+        )
+        player.seek(to: time) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.updatePosition()
+            }
+        }
+    }
+
+    static func milliseconds(
+        _ time: CMTime,
+        requiresPositive: Bool
+    ) -> UInt64? {
+        guard time.isValid, time.isNumeric else { return nil }
+        let seconds = time.seconds
+        guard seconds.isFinite,
+              seconds >= 0,
+              (!requiresPositive || seconds > 0) else {
+            return nil
+        }
+        let milliseconds = seconds * 1_000
+        guard milliseconds <= Double(UInt64.max) else { return nil }
+        return UInt64(milliseconds)
+    }
+
+    private func updatePosition() {
+        guard let position = Self.milliseconds(
+            player.currentTime(),
+            requiresPositive: false
+        ) else {
+            return
+        }
+        currentPositionMs = position
+        onPosition?(position)
+    }
+
+    private func removeItemObservers() {
+        if let timeObserver {
+            player.removeTimeObserver(timeObserver)
+            self.timeObserver = nil
+        }
+        durationObservation = nil
+        readinessObservation = nil
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+            self.endObserver = nil
+        }
+        observedItem = nil
+    }
+
+    deinit {
+        if let timeObserver {
+            player.removeTimeObserver(timeObserver)
+        }
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+        }
+        timeControlObservation = nil
+    }
+}
+
+@MainActor
+protocol IOSMediaAudioSessionManaging: AnyObject {
+    var onInterruptionBegan: (() -> Void)? { get set }
+    var onInterruptionEndedShouldResume: ((Bool) -> Void)? { get set }
+    var onOldDeviceUnavailable: (() -> Void)? { get set }
+
+    func activate() throws
+    func deactivateIfIdle() throws
+}
+
+@MainActor
+final class IOSMediaAudioSessionCoordinator: IOSMediaAudioSessionManaging {
+    var onInterruptionBegan: (() -> Void)?
+    var onInterruptionEndedShouldResume: ((Bool) -> Void)?
+    var onOldDeviceUnavailable: (() -> Void)?
+
+    private let session: AVAudioSession
+    private let notificationCenter: NotificationCenter
+    private var interruptionObserver: NSObjectProtocol?
+    private var routeObserver: NSObjectProtocol?
+
+    init(
+        session: AVAudioSession = .sharedInstance(),
+        notificationCenter: NotificationCenter = .default
+    ) {
+        self.session = session
+        self.notificationCenter = notificationCenter
+
+        interruptionObserver = notificationCenter.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: session,
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor [weak self] in
+                self?.handleInterruption(notification)
+            }
+        }
+
+        routeObserver = notificationCenter.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: session,
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor [weak self] in
+                self?.handleRouteChange(notification)
+            }
+        }
+    }
+
+    func activate() throws {
+        do {
+            try session.setCategory(
+                .playback,
+                mode: .spokenAudio,
+                options: [.allowAirPlay, .allowBluetoothA2DP]
+            )
+            try session.setActive(true)
+        } catch {
+            throw IOSMediaPlaybackError.audioSession
+        }
+    }
+
+    func deactivateIfIdle() throws {
+        try session.setActive(false, options: [.notifyOthersOnDeactivation])
+    }
+
+    private func handleInterruption(_ notification: Notification) {
+        guard let rawType = notification.userInfo?[
+            AVAudioSessionInterruptionTypeKey
+        ] as? UInt,
+        let type = AVAudioSession.InterruptionType(rawValue: rawType) else {
+            return
+        }
+
+        switch type {
+        case .began:
+            onInterruptionBegan?()
+        case .ended:
+            let rawOptions = notification.userInfo?[
+                AVAudioSessionInterruptionOptionKey
+            ] as? UInt ?? 0
+            let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
+            onInterruptionEndedShouldResume?(
+                options.contains(.shouldResume)
+            )
+        @unknown default:
+            break
+        }
+    }
+
+    private func handleRouteChange(_ notification: Notification) {
+        guard let rawReason = notification.userInfo?[
+            AVAudioSessionRouteChangeReasonKey
+        ] as? UInt,
+        let reason = AVAudioSession.RouteChangeReason(rawValue: rawReason),
+        reason == .oldDeviceUnavailable else {
+            return
+        }
+        onOldDeviceUnavailable?()
+    }
+
+    deinit {
+        if let interruptionObserver {
+            notificationCenter.removeObserver(interruptionObserver)
+        }
+        if let routeObserver {
+            notificationCenter.removeObserver(routeObserver)
+        }
+    }
+}
+
+@MainActor
+final class IOSMediaPlaybackCoreAccess {
+    private let coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator
+    private var core: Flux?
+
+    init(coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator) {
+        self.coreSessionExecutionCoordinator = coreSessionExecutionCoordinator
+    }
+
+    func attach(to core: Flux) {
+        self.core = core
+    }
+
+    func detach() {
+        core = nil
+    }
+
+    func preparePlayback(
+        enclosureID: Int64
+    ) async throws -> PlaybackPreparation {
+        let core = try requireCore()
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: core,
+            { try core.preparePlayback(enclosureId: enclosureID) }
+        ) else {
+            throw IOSMediaPlaybackError.sessionUnavailable
+        }
+        return try result.get()
+    }
+
+    func chapters(enclosureID: Int64) async throws -> [MediaChapter] {
+        let core = try requireCore()
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: core,
+            { try core.mediaChapters(enclosureId: enclosureID) }
+        ) else {
+            throw IOSMediaPlaybackError.sessionUnavailable
+        }
+        return try result.get()
+    }
+
+    func checkpoint(
+        enclosureID: Int64,
+        positionMs: UInt64,
+        durationMs: UInt64?
+    ) async {
+        guard let core else { return }
+        _ = await coreSessionExecutionCoordinator.responsiveResult(
+            for: core,
+            {
+                try core.checkpointPlayback(
+                    enclosureId: enclosureID,
+                    positionMs: positionMs,
+                    durationMs: durationMs
+                )
+            }
+        )
+    }
+
+    func completed(
+        enclosureID: Int64,
+        durationMs: UInt64?
+    ) async throws {
+        let core = try requireCore()
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: core,
+            {
+                try core.playbackCompleted(
+                    enclosureId: enclosureID,
+                    durationMs: durationMs
+                )
+            }
+        ) else {
+            throw IOSMediaPlaybackError.sessionUnavailable
+        }
+        try result.get()
+    }
+
+    func restart(enclosureID: Int64) async throws {
+        let core = try requireCore()
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: core,
+            { try core.restartPlayback(enclosureId: enclosureID) }
+        ) else {
+            throw IOSMediaPlaybackError.sessionUnavailable
+        }
+        try result.get()
+    }
+
+    func observeDuration(
+        enclosureID: Int64,
+        durationMs: UInt64
+    ) async {
+        guard let core else { return }
+        _ = await coreSessionExecutionCoordinator.responsiveResult(
+            for: core,
+            {
+                try core.observeMediaDuration(
+                    enclosureId: enclosureID,
+                    durationMs: durationMs
+                )
+            }
+        )
+    }
+
+    private func requireCore() throws -> Flux {
+        guard let core else {
+            throw IOSMediaPlaybackError.coreUnavailable
+        }
+        return core
+    }
+}
+
+@MainActor
+final class IOSMediaSleepTimer {
+    static let intervalsMinutes = Array(stride(from: 30, through: 180, by: 15))
+
+    private(set) var isEnabled = false
+    private(set) var intervalMinutes = 30
+    private(set) var remainingSeconds: Int?
+
+    private var deadline: Date?
+    private var timer: Timer?
+    private let now: () -> Date
+    var onFire: (() -> Void)?
+
+    init(now: @escaping () -> Date = { Date() }) {
+        self.now = now
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        if enabled {
+            start(intervalMinutes: intervalMinutes)
+        } else {
+            disable()
+        }
+    }
+
+    func setInterval(_ minutes: Int) {
+        guard Self.intervalsMinutes.contains(minutes) else { return }
+        intervalMinutes = minutes
+        if isEnabled {
+            start(intervalMinutes: minutes)
+        }
+    }
+
+    func evaluate(at date: Date? = nil) {
+        guard isEnabled, let deadline else { return }
+        let current = date ?? now()
+        if current >= deadline {
+            timer?.invalidate()
+            timer = nil
+            self.deadline = nil
+            isEnabled = false
+            remainingSeconds = nil
+            onFire?()
+        } else {
+            remainingSeconds = max(
+                1,
+                Int(ceil(deadline.timeIntervalSince(current)))
+            )
+        }
+    }
+
+    private func start(intervalMinutes: Int) {
+        timer?.invalidate()
+        let deadline = now().addingTimeInterval(
+            TimeInterval(intervalMinutes * 60)
+        )
+        self.deadline = deadline
+        isEnabled = true
+        remainingSeconds = intervalMinutes * 60
+        timer = Timer.scheduledTimer(
+            withTimeInterval: 1,
+            repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.evaluate()
+            }
+        }
+    }
+
+    private func disable() {
+        timer?.invalidate()
+        timer = nil
+        deadline = nil
+        isEnabled = false
+        remainingSeconds = nil
+    }
+
+    deinit {
+        timer?.invalidate()
+    }
+}
+
+@MainActor
+final class IOSMediaPlaybackCoordinator {
+    private let coreAccess: IOSMediaPlaybackCoreAccess
+    private let engine: IOSNativePlaybackEngine
+    private let audioSession: IOSMediaAudioSessionManaging
+    private let presentationState: IOSMediaPlaybackPresentationState
+    private let checkpointInterval: TimeInterval
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews",
+        category: "media-playback"
+    )
+
+    let sleepTimer: IOSMediaSleepTimer
+
+    private var checkpointTimer: Timer?
+    private(set) var activeEnclosureID: Int64?
+    private var completionSent = false
+    private var preparedDurationMs: UInt64?
+    private var lastObservedDurationMs: UInt64?
+    private var preparedStatus: PlaybackStatus = .notStarted
+    private var shouldResumeAfterInterruption = false
+
+    var onPlaybackUseChanged: (() -> Void)?
+
+    init(
+        coreAccess: IOSMediaPlaybackCoreAccess,
+        presentationState: IOSMediaPlaybackPresentationState,
+        engine: IOSNativePlaybackEngine? = nil,
+        audioSession: IOSMediaAudioSessionManaging? = nil,
+        checkpointInterval: TimeInterval = 20,
+        sleepTimer: IOSMediaSleepTimer? = nil
+    ) {
+        self.coreAccess = coreAccess
+        self.presentationState = presentationState
+        self.engine = engine ?? IOSAVPlayerPlaybackEngine()
+        self.audioSession = audioSession ?? IOSMediaAudioSessionCoordinator()
+        self.checkpointInterval = checkpointInterval
+        self.sleepTimer = sleepTimer ?? IOSMediaSleepTimer()
+
+        self.engine.onEnded = { @MainActor [weak self] in
+            self?.handleNaturalEnd()
+        }
+        self.engine.onDuration = { @MainActor [weak self] duration in
+            self?.handleDuration(duration)
+        }
+        self.engine.onPosition = { @MainActor [weak self] position in
+            self?.presentationState.setPosition(position)
+        }
+        self.engine.onPlaybackStateChanged = { @MainActor [weak self] isPlaying in
+            guard let self else { return }
+            if isPlaying {
+                self.presentationState.setStatus(.playing)
+                self.startCheckpointTimer()
+            }
+        }
+        self.engine.onLoadingChanged = { @MainActor [weak self] loading in
+            self?.presentationState.setLoading(loading)
+        }
+        self.engine.onBufferingChanged = { @MainActor [weak self] buffering in
+            self?.presentationState.setBuffering(buffering)
+        }
+        self.engine.onError = { @MainActor [weak self] message in
+            self?.presentationState.setErrorMessage(message)
+        }
+
+        self.audioSession.onInterruptionBegan = { [weak self] in
+            self?.handleInterruptionBegan()
+        }
+        self.audioSession.onInterruptionEndedShouldResume = { [weak self] shouldResume in
+            self?.handleInterruptionEnded(shouldResume: shouldResume)
+        }
+        self.audioSession.onOldDeviceUnavailable = { [weak self] in
+            self?.handleRouteLoss()
+        }
+        self.sleepTimer.onFire = { [weak self] in
+            self?.pause()
+        }
+    }
+
+    func attach(to core: Flux) {
+        coreAccess.attach(to: core)
+    }
+
+    func detach() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.checkpoint()
+            self.stopCheckpointTimer()
+            self.engine.unload()
+            self.activeEnclosureID = nil
+            self.coreAccess.detach()
+            self.presentationState.reset()
+            self.onPlaybackUseChanged?()
+            try? self.audioSession.deactivateIfIdle()
+        }
+    }
+
+    func suspendForCoreLifecycle() async {
+        await checkpoint()
+        stopCheckpointTimer()
+        coreAccess.detach()
+    }
+
+    func resumeCoreAccess(_ core: Flux) {
+        coreAccess.attach(to: core)
+        if engine.isPlaying {
+            startCheckpointTimer()
+        }
+    }
+
+    @discardableResult
+    func prepare(enclosureID: Int64) async throws -> PlaybackPreparation {
+        if activeEnclosureID != enclosureID {
+            await checkpoint()
+            engine.pause()
+            stopCheckpointTimer()
+        }
+
+        let preparation = try await coreAccess.preparePlayback(
+            enclosureID: enclosureID
+        )
+        let chapters = (try? await coreAccess.chapters(
+            enclosureID: enclosureID
+        )) ?? []
+
+        activeEnclosureID = enclosureID
+        completionSent = false
+        preparedDurationMs =
+            preparation.durationMs ?? preparation.playbackState.durationMs
+        lastObservedDurationMs = preparedDurationMs
+        preparedStatus = preparation.playbackState.status
+
+        presentationState.setLoadedMedia(
+            enclosure: preparation.enclosure,
+            feedTitle: preparation.feedTitle,
+            mediaTitle: preparation.articleTitle,
+            artworkSource: preparation.artworkSource,
+            chapters: chapters,
+            positionMs: preparation.playbackState.positionMs,
+            durationMs: preparedDurationMs
+        )
+
+        let source = try playbackURL(for: preparation)
+        let startAt =
+            preparation.playbackState.status == .inProgress
+                ? preparation.playbackState.positionMs
+                : 0
+        engine.load(url: source, startAtMs: startAt)
+        engine.rate = presentationState.playbackRate
+        onPlaybackUseChanged?()
+        return preparation
+    }
+
+    func play(enclosureID: Int64) async throws {
+        if activeEnclosureID != enclosureID {
+            _ = try await prepare(enclosureID: enclosureID)
+        }
+        guard activeEnclosureID == enclosureID,
+              preparedStatus != .completed else {
+            return
+        }
+
+        try audioSession.activate()
+        engine.play()
+        if engine.isPlaying {
+            presentationState.setStatus(.playing)
+            startCheckpointTimer()
+        }
+    }
+
+    func pause() {
+        engine.pause()
+        presentationState.setPosition(engine.currentPositionMs)
+        presentationState.setStatus(.paused)
+        stopCheckpointTimer()
+        Task { @MainActor [weak self] in
+            await self?.checkpoint()
+        }
+    }
+
+    func stop() {
+        engine.pause()
+        presentationState.setPosition(engine.currentPositionMs)
+        presentationState.setStatus(.stopped)
+        stopCheckpointTimer()
+        Task { @MainActor [weak self] in
+            await self?.checkpoint()
+        }
+    }
+
+    func sceneWillResignActive() {
+        Task { @MainActor [weak self] in
+            await self?.checkpoint()
+        }
+    }
+
+    func sceneDidBecomeActive() {
+        sleepTimer.evaluate()
+    }
+
+    func applicationWillTerminate() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.checkpoint()
+            self.stopCheckpointTimer()
+            self.engine.unload()
+            try? self.audioSession.deactivateIfIdle()
+        }
+    }
+
+    func seek(toMs: UInt64) {
+        engine.seek(toMs: toMs)
+        presentationState.setPosition(toMs)
+        Task { @MainActor [weak self] in
+            await self?.checkpoint()
+        }
+    }
+
+    func skip(bySeconds seconds: Double) {
+        guard seconds.isFinite else { return }
+        let current = Double(engine.currentPositionMs) / 1_000
+        let target = max(0, current + seconds)
+        let bounded = presentationState.durationMs.map {
+            min(target, Double($0) / 1_000)
+        } ?? target
+        seek(toMs: UInt64(max(0, bounded * 1_000).rounded()))
+    }
+
+    func restart(enclosureID: Int64) async throws {
+        let wasPlaying = engine.isPlaying
+        let wasStopped = presentationState.status == .stopped
+        let wasCompleted = preparedStatus == .completed
+
+        try await coreAccess.restart(enclosureID: enclosureID)
+        _ = try await prepare(enclosureID: enclosureID)
+
+        if wasPlaying || wasCompleted {
+            try await play(enclosureID: enclosureID)
+        } else if wasStopped {
+            presentationState.setStatus(.stopped)
+        }
+    }
+
+    func setPlaybackRate(_ rate: Double) {
+        guard rate.isFinite else { return }
+        let clamped = min(3.0, max(0.5, rate))
+        let rounded = (clamped * 10).rounded() / 10
+        presentationState.setPlaybackRate(rounded)
+        engine.rate = rounded
+    }
+
+    func isUsing(enclosureID: Int64) -> Bool {
+        activeEnclosureID == enclosureID
+    }
+
+    private func playbackURL(
+        for preparation: PlaybackPreparation
+    ) throws -> URL {
+        if let localFile = preparation.localFile,
+           let mediaRoot = IOSMediaTransferPathConfiguration.mediaRootURL,
+           let localURL = try? MediaTransferFileLayout.destination(
+            reference: localFile,
+            under: mediaRoot
+           ),
+           FileManager.default.isReadableFile(atPath: localURL.path) {
+            return localURL
+        }
+
+        guard let remoteURL = URL(string: preparation.enclosure.url),
+              remoteURL.scheme == "http" || remoteURL.scheme == "https" else {
+            throw IOSMediaPlaybackError.invalidMediaURL
+        }
+        return remoteURL
+    }
+
+    private func checkpoint() async {
+        guard let activeEnclosureID else { return }
+        await coreAccess.checkpoint(
+            enclosureID: activeEnclosureID,
+            positionMs: engine.currentPositionMs,
+            durationMs: engine.durationMs ?? preparedDurationMs
+        )
+    }
+
+    private func handleNaturalEnd() {
+        guard let activeEnclosureID, !completionSent else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.coreAccess.completed(
+                    enclosureID: activeEnclosureID,
+                    durationMs: self.engine.durationMs
+                        ?? self.preparedDurationMs
+                )
+                self.completionSent = true
+                self.preparedStatus = .completed
+                self.presentationState.setStatus(.paused)
+                self.presentationState.setPosition(
+                    self.engine.currentPositionMs
+                )
+                self.stopCheckpointTimer()
+                self.onPlaybackUseChanged?()
+            } catch {
+                self.presentationState.setStatus(.paused)
+                self.logger.error(
+                    "media completion failed: \(String(reflecting: error), privacy: .private)"
+                )
+            }
+        }
+    }
+
+    private func handleDuration(_ duration: UInt64) {
+        guard lastObservedDurationMs != duration else { return }
+        lastObservedDurationMs = duration
+        preparedDurationMs = duration
+        presentationState.setDuration(duration)
+        guard let activeEnclosureID else { return }
+
+        Task { @MainActor [weak self] in
+            await self?.coreAccess.observeDuration(
+                enclosureID: activeEnclosureID,
+                durationMs: duration
+            )
+        }
+    }
+
+    private func handleInterruptionBegan() {
+        shouldResumeAfterInterruption = engine.isPlaying
+        engine.pause()
+        presentationState.setStatus(.paused)
+        stopCheckpointTimer()
+        Task { @MainActor [weak self] in
+            await self?.checkpoint()
+        }
+    }
+
+    private func handleInterruptionEnded(shouldResume: Bool) {
+        guard shouldResumeAfterInterruption else { return }
+        shouldResumeAfterInterruption = false
+        guard shouldResume,
+              let activeEnclosureID else {
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await self.play(enclosureID: activeEnclosureID)
+        }
+    }
+
+    private func handleRouteLoss() {
+        guard engine.isPlaying else { return }
+        engine.pause()
+        presentationState.setStatus(.paused)
+        stopCheckpointTimer()
+        Task { @MainActor [weak self] in
+            await self?.checkpoint()
+        }
+    }
+
+    private func startCheckpointTimer() {
+        guard checkpointTimer == nil else { return }
+        checkpointTimer = Timer.scheduledTimer(
+            withTimeInterval: checkpointInterval,
+            repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.engine.isPlaying else { return }
+                await self.checkpoint()
+            }
+        }
+    }
+
+    private func stopCheckpointTimer() {
+        checkpointTimer?.invalidate()
+        checkpointTimer = nil
+    }
+}
