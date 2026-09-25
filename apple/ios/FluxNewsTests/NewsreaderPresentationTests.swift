@@ -190,24 +190,56 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
-    func testListeningListScopeChooserFollowsVisibleNavigationOwnership() {
-        XCTAssertTrue(
-            IOSListeningListNavigationPresentation.showsScopeChooser(
-                for: .compact,
-                splitColumnVisibility: .detailOnly
-            )
+    func testListeningListUsesSearchStyleFlyoverNavigationInsteadOfScopeDetail() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+        let iosDirectory = testsDirectory.deletingLastPathComponent()
+        let navigationSource = try String(
+            contentsOf: iosDirectory
+                .appendingPathComponent("FluxNews/NewsNavigationView.swift"),
+            encoding: .utf8
         )
+        let contentSource = try String(
+            contentsOf: iosDirectory
+                .appendingPathComponent("FluxNews/ContentView.swift"),
+            encoding: .utf8
+        )
+        let listeningListSource = try String(
+            contentsOf: iosDirectory
+                .appendingPathComponent("FluxNews/IOSListeningListView.swift"),
+            encoding: .utf8
+        )
+
         XCTAssertTrue(
-            IOSListeningListNavigationPresentation.showsScopeChooser(
-                for: .regular,
-                splitColumnVisibility: .detailOnly
+            navigationSource.contains(
+                "accessibilityIdentifier(\"navigation.listeningList\")"
             )
         )
         XCTAssertFalse(
-            IOSListeningListNavigationPresentation.showsScopeChooser(
-                for: .regular,
-                splitColumnVisibility: .all
+            navigationSource.contains(
+                "scopeRow(\"Listening List\""
             )
+        )
+        XCTAssertTrue(
+            contentSource.contains(
+                ".sheet(isPresented: $listeningListPresented)"
+            )
+        )
+        XCTAssertTrue(
+            contentSource.contains(
+                "get: { listeningListPlayerArticleID != nil }"
+            )
+        )
+        XCTAssertFalse(
+            contentSource.contains(
+                "if newsreaderStore.scope == .listeningList {\n            IOSListeningListView"
+            )
+        )
+        XCTAssertFalse(
+            listeningListSource.contains("showsScopeChooser")
+        )
+        XCTAssertFalse(
+            listeningListSource.contains("onPresentScopeChooser")
         )
     }
 
