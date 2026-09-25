@@ -9,6 +9,11 @@ final class IOSListeningListStore: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published var sort: ListeningListSort = .recentlyAdded
     @Published var feedID: Int64?
+    @Published private(set) var showNotesDocument: ReaderDocument?
+    @Published private(set) var showNotesIsLoading = false
+    @Published private(set) var showNotesErrorMessage: String?
+
+    var onTransferReconciliationRequested: (() async -> Void)?
 
     private var core: Flux?
     private var coreSessionExecutionCoordinator = IOSCoreSessionExecutionCoordinator()
@@ -34,6 +39,9 @@ final class IOSListeningListStore: ObservableObject {
         feedID = nil
         isLoading = false
         errorMessage = nil
+        showNotesDocument = nil
+        showNotesIsLoading = false
+        showNotesErrorMessage = nil
     }
 
     func reload() {
@@ -89,6 +97,113 @@ final class IOSListeningListStore: ObservableObject {
         guard self.feedID != feedID else { return }
         self.feedID = feedID
         reload()
+    }
+
+    func removeFromListeningList(articleID: Int64) async {
+        await mutate(
+            { core in try core.removeFromListeningList(articleId: articleID) },
+            reconcileTransfers: true
+        )
+    }
+
+    func requestDownload(enclosureID: Int64) async {
+        await mutate(
+            { core in
+                try core.requestDownload(
+                    enclosureId: enclosureID,
+                    origin: .manual
+                )
+            },
+            reconcileTransfers: true
+        )
+    }
+
+    func cancelDownload(enclosureID: Int64) async {
+        await mutate(
+            { core in try core.cancelDownload(enclosureId: enclosureID) },
+            reconcileTransfers: true
+        )
+    }
+
+    func retryDownload(enclosureID: Int64) async {
+        await mutate(
+            { core in try core.retryDownload(enclosureId: enclosureID) },
+            reconcileTransfers: true
+        )
+    }
+
+    func deleteDownload(enclosureID: Int64) async {
+        await mutate(
+            {
+                core in try core.requestDownloadDeletion(
+                    enclosureId: enclosureID
+                )
+            },
+            reconcileTransfers: true
+        )
+    }
+
+    func loadShowNotes(articleID: Int64) {
+        guard let core else { return }
+        generation &+= 1
+        let request = generation
+        let coordinator = coreSessionExecutionCoordinator
+        showNotesDocument = nil
+        showNotesErrorMessage = nil
+        showNotesIsLoading = true
+
+        Task { [weak self, core, coordinator] in
+            let result = await coordinator.responsiveResult(
+                for: core,
+                { try core.readerDocument(articleId: articleID) }
+            )
+            guard let self, self.generation == request else { return }
+            self.showNotesIsLoading = false
+            guard let result else { return }
+            switch result {
+            case let .success(document):
+                self.showNotesDocument = document
+            case let .failure(error):
+                self.showNotesErrorMessage = IOSErrorPresentation.message(
+                    for: error,
+                    context: .reader
+                )
+            }
+        }
+    }
+
+    func clearShowNotes() {
+        generation &+= 1
+        showNotesDocument = nil
+        showNotesIsLoading = false
+        showNotesErrorMessage = nil
+    }
+
+    private func mutate(
+        _ operation: @escaping @Sendable (Flux) throws -> Void,
+        reconcileTransfers: Bool
+    ) async {
+        guard let core else { return }
+        let coordinator = coreSessionExecutionCoordinator
+        guard let result = await coordinator.responsiveResult(
+            for: core,
+            { try operation(core) }
+        ) else {
+            return
+        }
+
+        switch result {
+        case .success:
+            if reconcileTransfers {
+                await onTransferReconciliationRequested?()
+            }
+            reload()
+        case let .failure(error):
+            errorMessage = IOSErrorPresentation.message(
+                for: error,
+                context: .contentLoad
+            )
+        }
     }
 }
 
