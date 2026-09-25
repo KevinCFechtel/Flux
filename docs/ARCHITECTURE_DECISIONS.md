@@ -799,23 +799,33 @@ Manual Account save remains intentionally different from backup restore:
 manual edits validate credentials with `GET /v1/version` before commit; backup
 restore never performs that validation.
 
-`rebuild_local_state()` destructively clears synchronized local state,
-pending mutations, notification bookkeeping, sync metadata, and regenerable
-Core caches, then immediately performs a fresh Miniflux sync. It preserves
-the canonical account association, CoreSettings, FeedPreferences, native
-settings, and platform credentials. If that immediate sync fails, the old
-local dataset is not restored. Schema-v7 orphan preferences make this
-preservation possible; normal authoritative reconciliation removes preferences
-for feed IDs absent from the returned catalog.
-Cache cleanup is best-effort after the authoritative database clear: a cleanup
-failure is diagnostic only and never restores discarded synchronized state.
+`rebuild_local_state()` clears reconstructable synchronized article state,
+ordinary read/star pending mutations, notification bookkeeping, sync metadata,
+and regenerable Core caches, then immediately performs a fresh Miniflux sync.
+It preserves the canonical account association, CoreSettings, FeedPreferences,
+native settings, platform credentials, and the minimal local Article -> Feed ->
+Category graph required by Phase-B protecting media state. Protecting media
+state is `SavedMedia`, `MediaDownload = Requested`/`Downloaded`,
+`PlaybackState = InProgress`, or a pending MediaProgressMutation. Pending
+media progression remains part of that durable media state; discarded ordinary
+read/star intent falls back to the last observed remote article state before
+the rebuild sync. Failed/DeleteRequested downloads, Completed-only playback,
+AutoDownloadSuppression, and otherwise reconstructable articles do not gain
+rebuild protection. If the immediate sync fails, reconstructable discarded
+state is not restored. Schema-v7 orphan preferences make FeedPreferences
+preservation possible; normal authoritative reconciliation still removes
+preferences and feed/article state for feeds absent from the complete remote
+catalog. Cache cleanup is best-effort after the authoritative database clear:
+a cleanup failure is diagnostic only and never restores discarded synchronized
+state.
 
-`reset_core_state()` restores all Core-owned persisted state to fresh-install
+`reset_core_state()` restores Core-owned database state to fresh-install
 semantics: synchronized data, CoreSettings customizations, FeedPreferences,
-base-url association, sync metadata, and regenerable caches are removed or
-reset. It does not contact Miniflux and does not manipulate Keychain,
-UserDefaults, or native OS registrations. The media root is currently
-unaffected because durable download/media state is not implemented yet.
+base-url association, sync metadata, and Core media rows are removed or reset.
+It does not contact Miniflux and does not manipulate Keychain, UserDefaults,
+native OS registrations, or perform account-removal filesystem orchestration.
+Account removal uses the separate account-state path, which also clears the
+Core media root.
 
 Account/server replacement, Rebuild, and Full Reset intentionally have
 different FeedPreferences policies: account replacement and Full Reset remove
