@@ -449,7 +449,7 @@ protocol IOSMediaPlaybackCoreAccessing: AnyObject {
     func detach()
     func preparePlayback(enclosureID: Int64) async throws -> PlaybackPreparation
     func chapters(enclosureID: Int64) async throws -> [MediaChapter]
-    func metadata(enclosureID: Int64) async -> MediaMetadata?
+    func artworkSource(enclosureID: Int64) async -> MediaArtworkSource?
     func artwork(reference: String) async -> Data?
     func checkpoint(
         enclosureID: Int64,
@@ -502,17 +502,17 @@ final class IOSMediaPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
         return try result.get()
     }
 
-    func metadata(enclosureID: Int64) async -> MediaMetadata? {
+    func artworkSource(enclosureID: Int64) async -> MediaArtworkSource? {
         guard let core else { return nil }
         guard let result = await coreSessionExecutionCoordinator.responsiveResult(
             for: core,
-            { try core.mediaMetadata(enclosureId: enclosureID) }
+            { try core.mediaArtworkSource(enclosureId: enclosureID) }
         ) else {
             return nil
         }
         switch result {
-        case let .success(metadata):
-            return metadata
+        case let .success(source):
+            return source
         case .failure:
             return nil
         }
@@ -1043,14 +1043,7 @@ final class IOSMediaPlaybackCoordinator {
     func previewArtworkSource(
         enclosureID: Int64
     ) async -> MediaArtworkSource? {
-        guard let metadata = await coreAccess.metadata(
-            enclosureID: enclosureID
-        ),
-        let reference = metadata.embeddedArtworkReference,
-        !reference.isEmpty else {
-            return nil
-        }
-        return .localReference(reference: reference)
+        await coreAccess.artworkSource(enclosureID: enclosureID)
     }
 
     func artwork(source: MediaArtworkSource) async -> Data? {
