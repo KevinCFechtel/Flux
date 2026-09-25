@@ -20,8 +20,11 @@ Play/Pause, while resolved local-file playback suppresses that transient chrome.
 The native iOS Listening List now opens as a Search-style fly-over without
 replacing the selected News scope, and its Player is a child sheet of that
 fly-over. A cross-device playback regression found during Android/legacy
-FluxNews interoperability testing was also corrected: after SyncCompleted, a
-loaded but idle iOS player now adopts the reconciled Core playback position,
+FluxNews interoperability testing was also corrected at both layers: Core no
+longer queues a lifecycle checkpoint as a new remote intent when that checkpoint
+equals the last known Miniflux progression, preventing an idle iOS device from
+writing an old baseline back before the next fetch. After SyncCompleted, a
+loaded but idle iOS player also adopts the reconciled Core playback position,
 while actively playing audio is never force-seeked by remote sync. The
 associated presentation/navigation/playback tests were updated. Because these
 follow-ups are newer than the last accepted 448-test run, the canonical iOS
