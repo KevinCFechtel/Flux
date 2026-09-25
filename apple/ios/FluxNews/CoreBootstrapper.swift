@@ -1,6 +1,5 @@
 import Combine
 import Foundation
-import OSLog
 
 @MainActor
 final class CoreBootstrapper: ObservableObject {
@@ -57,7 +56,7 @@ final class CoreBootstrapper: ObservableObject {
     private let accountValidator: @Sendable (IOSMinifluxCredentials) throws -> AccountValidationAttempt
     private let localStateRebuilder: @Sendable (Flux) throws -> SyncCompleted
     private let defaults: UserDefaults
-    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews", category: "core")
+    private let logger = IOSAppLogger(category: "core")
     private var bootstrapGeneration: UInt64 = 0
     private var startupTask: Task<Void, Never>?
     private var startupTaskGeneration: UInt64?
@@ -134,7 +133,7 @@ final class CoreBootstrapper: ObservableObject {
         } catch {
             guard generation == bootstrapGeneration else { return }
             state = .recoverableError(Self.safeMessage(for: error))
-            logger.error("Core startup failed: \(String(reflecting: error), privacy: .private)")
+            logger.error("Core startup failed: \(String(reflecting: error))")
         }
     }
 
@@ -393,7 +392,7 @@ final class CoreBootstrapper: ObservableObject {
         case let .failure(error):
             localStateRebuildState = .failed
             logger.error(
-                "Local state rebuild failed after destructive reset: \(String(reflecting: error), privacy: .private)"
+                "Local state rebuild failed after destructive reset: \(String(reflecting: error))"
             )
         }
     }
@@ -453,6 +452,10 @@ final class CoreBootstrapper: ObservableObject {
                 return false
             }
         }
+
+        IOSAppDiagnostics.shared.setSensitiveValues(
+            [account.apiKey] + account.customHeaders.map(\.value)
+        )
 
         let factory = coreFactory
         let result = await AppleCoreExecution.shared.responsiveResult {
@@ -537,14 +540,19 @@ final class CoreBootstrapper: ObservableObject {
 
     private nonisolated static func makeCore(_ account: IOSMinifluxCredentials) throws -> Flux {
         let paths = try CorePaths()
-        return try Flux.initialize(config: InitializationConfig(
-            persistentData: paths.persistentData.path,
-            cache: paths.cache.path,
-            media: paths.media.path,
-            baseUrl: account.server,
-            apiKey: account.apiKey,
-            customHeaders: account.customHeaders.map { HttpHeader(name: $0.name, value: $0.value) }
-        ))
+        return try Flux.initializeWithDiagnostics(
+            config: InitializationConfig(
+                persistentData: paths.persistentData.path,
+                cache: paths.cache.path,
+                media: paths.media.path,
+                baseUrl: account.server,
+                apiKey: account.apiKey,
+                customHeaders: account.customHeaders.map {
+                    HttpHeader(name: $0.name, value: $0.value)
+                }
+            ),
+            listener: IOSCoreDiagnosticListener.shared
+        )
     }
 
     private nonisolated static func validateAccount(_ account: IOSMinifluxCredentials) -> AccountValidationAttempt {
