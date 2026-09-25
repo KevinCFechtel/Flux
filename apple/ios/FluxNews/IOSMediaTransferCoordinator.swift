@@ -34,6 +34,7 @@ final class IOSMediaTransferCoordinator: NSObject {
     private var lifecycleGeneration: UInt64 = 0
     private var backgroundEventsCompletionHandler: (() -> Void)?
     private var backgroundEventsFinished = false
+    private var backgroundReconciliationFinished = false
 
     private lazy var session: URLSession = {
         URLSession(
@@ -147,11 +148,13 @@ final class IOSMediaTransferCoordinator: NSObject {
         _ = session
         backgroundEventsCompletionHandler = completionHandler
         backgroundEventsFinished = false
+        backgroundReconciliationFinished = false
 
         Task { @MainActor [weak self] in
             guard let self else { return }
             _ = await bootstrapper.ensureStarted()
             await reconcile()
+            backgroundReconciliationFinished = true
             finishBackgroundEventsIfPossible()
         }
         return true
@@ -166,6 +169,7 @@ final class IOSMediaTransferCoordinator: NSObject {
 
     private func finishBackgroundEventsIfPossible() {
         guard backgroundEventsFinished,
+              backgroundReconciliationFinished,
               let completionHandler = backgroundEventsCompletionHandler else {
             return
         }
