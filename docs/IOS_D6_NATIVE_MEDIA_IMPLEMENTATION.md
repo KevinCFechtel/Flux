@@ -802,9 +802,12 @@ ActivityKit work was introduced; those remain D7/D8 as contracted.
 The original D6-D canonical iOS validation passed. A 25 September 2026
 post-closure audit found and corrected a preview-artwork fallback gap, incomplete
 German D6 localization, and a fixed-simulator assumption in the canonical iOS
-test script. These follow-up changes require the canonical iOS and Rust
-validation gates to be rerun before the current head is recorded as
-testvalidated; the D6-D architecture remains closed.
+test script. The corrected implementation state through
+`7acb079d77a1e5812964abd382a2fd43e6067b77` was then revalidated successfully:
+`cargo fmt --manifest-path core/Cargo.toml --all -- --check` passed, the Rust
+workspace passed with 224 `flux-core` tests plus 6 `flux-uniffi` tests and no
+failures, and `./apple/ios/Build/test.sh` passed 448 iOS tests with 0 failures.
+The D6-D architecture remains closed.
 
 - real Listening List store/read model;
 - restore navigation entry;
