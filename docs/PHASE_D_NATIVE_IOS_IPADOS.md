@@ -132,8 +132,10 @@ authoritative for layout; device name is not.
 
 In compact presentation, the app starts directly in the Article List.
 Navigation is transient and opens as a native sheet containing All News,
-Starred, Listening List, Categories and Feeds. Selecting a scope closes the
-sheet and updates the list.
+Starred, Categories and Feeds plus auxiliary Search and Listening List actions.
+Selecting a News scope closes the sheet and updates the Article List. Search and
+Listening List instead open their own native fly-over sheets without changing
+the selected News scope.
 
 ### Regular presentation
 
@@ -1350,8 +1352,10 @@ D6-0 through D6-F were implemented and testvalidated through
 `7acb079d77a1e5812964abd382a2fd43e6067b77`: `cargo fmt --check`, the full
 Rust workspace suite (224 `flux-core` + 6 `flux-uniffi`, 0 failures), and
 the canonical iOS gate (448 tests, 0 failures, `TEST SUCCEEDED`) were green.
-A later 25 September native-player UX-only follow-up reorganized player controls
-and updated presentation tests; the canonical iOS gate must be rerun before that
+Later 25 September native-media UX follow-ups reorganized Player controls and
+moved the native iOS Listening List from a detail scope to a Search-style
+fly-over while preserving the shared/Core scope contract. Presentation and
+navigation tests were updated; the canonical iOS gate must be rerun before the
 new head is recorded as testvalidated. D6-G otherwise remains the
 real-device/process-boundary acceptance gate; its evidence matrix is maintained in
 [`IOS_D6_FINAL_ACCEPTANCE.md`](IOS_D6_FINAL_ACCEPTANCE.md).
