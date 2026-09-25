@@ -1,6 +1,76 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%lld audio": {
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Audio-Datei"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Audio-Dateien"
+                }
+              }
+            }
+          }
+        },
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld audio"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld audio"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld downloaded": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld heruntergeladen"
+          }
+        }
+      }
+    },
+    "%lld pending": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld ausstehend"
+          }
+        }
+      }
+    },
+    "1 audio": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 Audio-Datei"
+          }
+        }
+      }
+    },
     "%lld article": {
       "extractionState": "stale",
       "localizations": {
