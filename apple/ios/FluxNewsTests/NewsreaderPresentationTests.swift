@@ -4613,6 +4613,37 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(lifecycle.isCurrentSelectionCount(syncCount))
     }
 
+    func testMediaPlayerLayoutPolicyAdaptsBySizeClass() {
+        XCTAssertEqual(
+            IOSMediaPlayerLayoutPolicy.mode(
+                horizontalSizeClass: .compact,
+                verticalSizeClass: .regular
+            ),
+            .stacked
+        )
+        XCTAssertEqual(
+            IOSMediaPlayerLayoutPolicy.mode(
+                horizontalSizeClass: .regular,
+                verticalSizeClass: .regular
+            ),
+            .sideBySide
+        )
+        XCTAssertEqual(
+            IOSMediaPlayerLayoutPolicy.mode(
+                horizontalSizeClass: .regular,
+                verticalSizeClass: .compact
+            ),
+            .sideBySide
+        )
+        XCTAssertEqual(
+            IOSMediaPlayerLayoutPolicy.mode(
+                horizontalSizeClass: .compact,
+                verticalSizeClass: .compact
+            ),
+            .sideBySide
+        )
+    }
+
     @MainActor
     func testListeningListPresentationPrefersActiveEnclosureAndRuntimeProgress() {
         let first = ListeningListEnclosure(
