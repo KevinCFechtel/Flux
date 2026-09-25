@@ -26,17 +26,27 @@ struct FluxNewsApp: App {
                     IOSAppRuntime.shared.systemNotificationManager.onFeedSelected = { feedID in
                         newsreaderStore.select(.feed(feedID))
                     }
+                    let runtimePrepareForCoreReplacement = bootstrapper.prepareForCoreReplacement
+                    let runtimeCoreReplacementAborted = bootstrapper.onCoreReplacementAborted
+                    let runtimePrepareForLocalStateRebuild = bootstrapper.prepareForLocalStateRebuild
+                    let runtimeLocalStateRebuildFinished = bootstrapper.onLocalStateRebuildFinished
+                    let runtimeCoreChanged = bootstrapper.onCoreChanged
+
                     bootstrapper.prepareForCoreReplacement = {
                         await newsreaderStore.quiesceManualSyncForCoreReplacement()
+                        await runtimePrepareForCoreReplacement?()
                     }
                     bootstrapper.onCoreReplacementAborted = {
+                        runtimeCoreReplacementAborted?()
                         newsreaderStore.resumeManualSyncAfterAbortedCoreReplacement()
                     }
                     bootstrapper.prepareForLocalStateRebuild = {
+                        runtimePrepareForLocalStateRebuild?()
                         IOSAppRuntime.shared.widgetSnapshotCoordinator.detach()
                         newsreaderStore.detach()
                     }
                     bootstrapper.onLocalStateRebuildFinished = { core in
+                        runtimeLocalStateRebuildFinished?(core)
                         IOSAppRuntime.shared.widgetSnapshotCoordinator.attach(to: core)
                         newsreaderStore.attach(
                             to: core,
@@ -44,6 +54,7 @@ struct FluxNewsApp: App {
                         )
                     }
                     bootstrapper.onCoreChanged = { core in
+                        runtimeCoreChanged?(core)
                         if let core {
                             IOSAppRuntime.shared.widgetSnapshotCoordinator.attach(to: core)
                             newsreaderStore.attach(
