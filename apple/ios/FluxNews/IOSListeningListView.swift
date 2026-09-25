@@ -467,13 +467,11 @@ struct IOSListeningListView: View {
     private func progressLabel(
         _ progress: IOSListeningListPresentation.Progress
     ) -> String {
-        let position = Duration.seconds(Double(progress.positionMs) / 1_000)
-            .formatted(.time(pattern: .minuteSecond))
+        let position = IOSMediaTimePresentation.label(progress.positionMs)
         guard let duration = progress.durationMs else {
             return position
         }
-        let total = Duration.seconds(Double(duration) / 1_000)
-            .formatted(.time(pattern: .minuteSecond))
+        let total = IOSMediaTimePresentation.label(duration)
         return "\(position) / \(total)"
     }
 
