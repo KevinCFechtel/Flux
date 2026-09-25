@@ -4053,6 +4053,27 @@ fn queue_media_progress(
 ) -> Result<(), CoreError> {
     let seconds = i64::try_from(seconds)
         .map_err(|_| CoreError::data("media progression exceeds SQLite range"))?;
+    let remote_baseline: i64 = tx
+        .query_row(
+            "SELECT remote_media_progression_seconds FROM enclosures WHERE id=?1",
+            [enclosure_id],
+            |row| row.get(0),
+        )
+        .map_err(sql_error)?;
+
+    if remote_baseline == seconds {
+        // A lifecycle checkpoint at the already-known remote position is not a
+        // new local intent. Remove any obsolete pending write so another device
+        // may advance Miniflux without this device writing the old baseline back
+        // before its next fetch.
+        tx.execute(
+            "DELETE FROM pending_media_progress_mutations WHERE enclosure_id=?1",
+            [enclosure_id],
+        )
+        .map_err(sql_error)?;
+        return Ok(());
+    }
+
     tx.execute("INSERT INTO pending_media_progress_mutations(enclosure_id,progression_seconds,revision) VALUES(?1,?2,1) ON CONFLICT(enclosure_id) DO UPDATE SET progression_seconds=excluded.progression_seconds,revision=pending_media_progress_mutations.revision+1 WHERE pending_media_progress_mutations.progression_seconds != excluded.progression_seconds", params![enclosure_id,seconds]).map_err(sql_error)?;
     Ok(())
 }
@@ -4157,10 +4178,10 @@ fn reconcile_remote_enclosures(
         if should_adopt {
             reconcile_playback_progress(tx, enclosure, old)?;
         }
-        if stale_write && let Some(old) = old {
+        if stale_write && let Some(written) = written {
             tx.execute(
                 "UPDATE enclosures SET remote_media_progression_seconds=?1 WHERE id=?2",
-                params![old, enclosure.id],
+                params![written, enclosure.id],
             )
             .map_err(sql_error)?;
         }
@@ -7807,6 +7828,106 @@ mod tests {
         assert_eq!(
             store.media_metadata(1000).unwrap().unwrap().duration_ms,
             Some(90_000)
+        );
+    }
+
+    #[test]
+    fn checkpoint_at_known_remote_progress_does_not_queue_media_mutation() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let (article, mut enclosure) = media_article_enclosure_pair();
+        enclosure.remote_media_progression_seconds = 36;
+        store
+            .reconcile_with_enclosures(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 10,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                &[article],
+                &[enclosure.clone()],
+            )
+            .unwrap();
+
+        store
+            .checkpoint_playback(
+                enclosure.id,
+                36_000,
+                None,
+                "2026-09-25T18:00:00Z",
+                true,
+            )
+            .unwrap();
+
+        assert!(
+            store
+                .pending_media_progress_mutations()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn checkpoint_returning_to_remote_baseline_clears_obsolete_pending_intent() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let (article, mut enclosure) = media_article_enclosure_pair();
+        enclosure.remote_media_progression_seconds = 36;
+        store
+            .reconcile_with_enclosures(
+                &[Category {
+                    id: 1,
+                    title: "Category".into(),
+                }],
+                &[Feed {
+                    id: 10,
+                    category_id: 1,
+                    title: "Feed".into(),
+                }],
+                &[article],
+                &[enclosure.clone()],
+            )
+            .unwrap();
+
+        store
+            .checkpoint_playback(
+                enclosure.id,
+                40_000,
+                None,
+                "2026-09-25T18:00:00Z",
+                true,
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .pending_media_progress_mutations()
+                .unwrap()
+                .first()
+                .map(|pending| pending.progression_seconds),
+            Some(40)
+        );
+
+        store
+            .checkpoint_playback(
+                enclosure.id,
+                36_000,
+                None,
+                "2026-09-25T18:01:00Z",
+                true,
+            )
+            .unwrap();
+
+        assert!(
+            store
+                .pending_media_progress_mutations()
+                .unwrap()
+                .is_empty()
         );
     }
 
