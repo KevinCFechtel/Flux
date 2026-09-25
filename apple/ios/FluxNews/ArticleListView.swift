@@ -3480,6 +3480,7 @@ struct ArticleListView: View {
     var usesNativeTopEdgeEffect = true
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
+    let onArticleMediaAction: (ArticleSummary, IOSArticleMediaAction) -> Void
 
     var body: some View {
         let emptyState = IOSArticleListEmptyState.resolve(
