@@ -11,13 +11,13 @@ enum IOSMediaPlaybackError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .coreUnavailable:
-            return "The media Core is unavailable."
+            return String(localized: "The media Core is unavailable.")
         case .sessionUnavailable:
-            return "The media Core session is unavailable."
+            return String(localized: "The media Core session is unavailable.")
         case .invalidMediaURL:
-            return "The media URL is not playable."
+            return String(localized: "The media URL is not playable.")
         case .audioSession:
-            return "The audio session could not be activated."
+            return String(localized: "The audio session could not be activated.")
         }
     }
 }
@@ -1075,7 +1075,7 @@ final class IOSMediaPlaybackCoordinator {
         stage: String,
         error: Error
     ) -> String {
-        "Playback start failed [\(stage)]: \(error.localizedDescription)"
+        "\(String(localized: "Playback start failed")) [\(stage)]: \(error.localizedDescription)"
     }
 
     private func playbackURL(
