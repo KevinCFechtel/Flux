@@ -3571,6 +3571,56 @@
           }
         }
       }
+    },
+    "The media Core is unavailable.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Medien-Core ist nicht verfügbar."
+          }
+        }
+      }
+    },
+    "The media Core session is unavailable.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Medien-Core-Sitzung ist nicht verfügbar."
+          }
+        }
+      }
+    },
+    "The media URL is not playable.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Medien-URL kann nicht wiedergegeben werden."
+          }
+        }
+      }
+    },
+    "The audio session could not be activated.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Audiositzung konnte nicht aktiviert werden."
+          }
+        }
+      }
+    },
+    "Playback start failed": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wiedergabe konnte nicht gestartet werden"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
