@@ -3,10 +3,12 @@ import SwiftUI
 struct IOSListeningListView: View {
     @ObservedObject var store: IOSListeningListStore
     @ObservedObject var playbackState: IOSMediaPlaybackPresentationState
+    @ObservedObject var transferState: IOSMediaTransferPresentationState
     let playbackCoordinator: IOSMediaPlaybackCoordinator
     let showsScopeChooser: Bool
     let onPresentScopeChooser: () -> Void
-    let onStartPlayback: (_ articleID: Int64, _ enclosureID: Int64) -> Void
+    let onOpenPlayer: (_ articleID: Int64) -> Void
+    let onPlay: (_ articleID: Int64, _ enclosureID: Int64) -> Void
 
     private static let isoFormatter = ISO8601DateFormatter()
 
@@ -121,7 +123,10 @@ struct IOSListeningListView: View {
                 }
             }
 
-            let downloads = IOSListeningListPresentation.downloadSummary(item)
+            let downloads = IOSListeningListPresentation.downloadSummary(
+                item,
+                transfers: transferState.transfers
+            )
             HStack(spacing: 12) {
                 Label(
                     enclosureLabel(item.audioEnclosures.count),
@@ -143,8 +148,33 @@ struct IOSListeningListView: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+
+            if let transfer = IOSListeningListPresentation.transferProgress(
+                item,
+                transfers: transferState.transfers
+            ) {
+                HStack(spacing: 8) {
+                    if let fraction = transfer.fraction {
+                        ProgressView(value: fraction)
+                    } else {
+                        ProgressView()
+                    }
+                    Text(transfer.label)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .padding(.vertical, 4)
+        .background {
+            Button {
+                onOpenPlayer(item.articleId)
+            } label: {
+                Color.clear
+            }
+            .buttonStyle(.plain)
+            .accessibilityHidden(true)
+        }
         .accessibilityElement(children: .contain)
     }
 
@@ -157,9 +187,9 @@ struct IOSListeningListView: View {
                 if isCurrent && playbackState.status == .playing {
                     playbackCoordinator.pause()
                 } else {
-                    startPlayback(
-                        articleID: item.articleId,
-                        enclosureID: enclosure.enclosure.id
+                    onPlay(
+                        item.articleId,
+                        enclosure.enclosure.id
                     )
                 }
             } label: {
@@ -180,9 +210,9 @@ struct IOSListeningListView: View {
                     id: \.element.enclosure.id
                 ) { index, enclosure in
                     Button {
-                        startPlayback(
-                            articleID: item.articleId,
-                            enclosureID: enclosure.enclosure.id
+                        onPlay(
+                            item.articleId,
+                            enclosure.enclosure.id
                         )
                     } label: {
                         Text(
@@ -208,9 +238,9 @@ struct IOSListeningListView: View {
             ) { index, enclosure in
                 Menu {
                     Button {
-                        startPlayback(
-                            articleID: item.articleId,
-                            enclosureID: enclosure.enclosure.id
+                        onPlay(
+                            item.articleId,
+                            enclosure.enclosure.id
                         )
                     } label: {
                         Label("Play", systemImage: "play.fill")
@@ -259,12 +289,16 @@ struct IOSListeningListView: View {
         _ enclosure: ListeningListEnclosure,
         label: String
     ) -> some View {
-        switch enclosure.download?.state {
-        case .downloaded:
+        let action = IOSListeningListPresentation.downloadAction(
+            enclosure,
+            runtime: transferState.runtime(for: enclosure.enclosure.id)
+        )
+        switch action {
+        case .delete:
             Button(role: .destructive) {
                 Task {
                     await store.deleteDownload(
-                        enclosureID: enclosure.enclosure.id
+                        enclosure.enclosure.id
                     )
                 }
             } label: {
@@ -275,7 +309,7 @@ struct IOSListeningListView: View {
             Button {
                 Task {
                     await store.cancelDownload(
-                        enclosureID: enclosure.enclosure.id
+                        enclosure.enclosure.id
                     )
                 }
             } label: {
@@ -286,34 +320,27 @@ struct IOSListeningListView: View {
             Button {
                 Task {
                     await store.retryDownload(
-                        enclosureID: enclosure.enclosure.id
+                        enclosure.enclosure.id
                     )
                 }
             } label: {
                 Label("Retry Download", systemImage: "arrow.clockwise")
             }
 
-        case .deleteRequested:
+        case .pendingDeletion:
             Label("Deletion Pending", systemImage: "clock")
 
-        case .notDownloaded, nil:
+        case .download:
             Button {
                 Task {
                     await store.requestDownload(
-                        enclosureID: enclosure.enclosure.id
+                        enclosure.enclosure.id
                     )
                 }
             } label: {
                 Label("Download", systemImage: "arrow.down.circle")
             }
         }
-    }
-
-    private func startPlayback(
-        articleID: Int64,
-        enclosureID: Int64
-    ) {
-        onStartPlayback(articleID, enclosureID)
     }
 
     private var feedMenu: some View {
