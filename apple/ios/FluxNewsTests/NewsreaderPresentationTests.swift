@@ -5238,6 +5238,13 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testMediaTimePresentationAddsHoursOnlyWhenNeeded() {
+        XCTAssertEqual(IOSMediaTimePresentation.label(0), "0:00")
+        XCTAssertEqual(IOSMediaTimePresentation.label(65_000), "1:05")
+        XCTAssertEqual(IOSMediaTimePresentation.label(3_599_000), "59:59")
+        XCTAssertEqual(IOSMediaTimePresentation.label(3_725_000), "1:02:05")
+    }
+
     func testMediaPlayerChapterSummaryUsesCurrentChapterAndCount() {
         let chapters = [
             MediaChapter(
