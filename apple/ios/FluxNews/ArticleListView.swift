@@ -112,6 +112,59 @@ enum IOSArticleContextAction: Equatable {
     case saveToService
 }
 
+enum IOSArticleMediaAction: Equatable {
+    case play(enclosureID: Int64)
+    case setListeningList(Bool)
+    case requestDownload(enclosureID: Int64)
+    case cancelDownload(enclosureID: Int64)
+    case retryDownload(enclosureID: Int64)
+    case deleteDownload(enclosureID: Int64)
+    case configuredDownloadAudio
+}
+
+enum IOSArticleAudioPresentation {
+    enum DownloadAction: Equatable {
+        case download
+        case pending
+        case delete
+        case retry
+        case pendingDeletion
+    }
+
+    static func downloadAction(_ download: MediaDownload?) -> DownloadAction {
+        switch download?.state {
+        case .downloaded:
+            .delete
+        case .requested:
+            .pending
+        case .deleteRequested:
+            .pendingDeletion
+        case .failed:
+            .retry
+        case .notDownloaded, nil:
+            .download
+        }
+    }
+
+    static func downloadableEnclosures(
+        _ state: IOSArticleAudioActionState?
+    ) -> [Enclosure] {
+        guard let state else { return [] }
+        return state.audioEnclosures.filter { enclosure in
+            switch downloadAction(state.downloads[enclosure.id]) {
+            case .download, .retry:
+                true
+            case .pending, .delete, .pendingDeletion:
+                false
+            }
+        }
+    }
+
+    static func enclosureLabel(_ enclosure: Enclosure, index: Int) -> String {
+        IOSListeningListPresentation.enclosureLabel(enclosure, index: index)
+    }
+}
+
 enum IOSArticleSwipeSide: Hashable {
     case leading
     case trailing
@@ -130,6 +183,7 @@ enum IOSArticleSwipeAction: String, CaseIterable, Hashable {
     case comments
     case share
     case saveToService
+    case downloadAudio
 
     var title: String {
         switch self {
@@ -140,6 +194,7 @@ enum IOSArticleSwipeAction: String, CaseIterable, Hashable {
         case .comments: String(localized: "Open Comments")
         case .share: String(localized: "Share")
         case .saveToService: String(localized: "Save to Third-Party Service")
+        case .downloadAudio: String(localized: "Download Audio")
         }
     }
 
@@ -157,6 +212,8 @@ enum IOSArticleSwipeAction: String, CaseIterable, Hashable {
             .share
         case .saveToService:
             .saveToService
+        case .downloadAudio:
+            nil
         }
     }
 }
@@ -429,11 +486,13 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
     let scrollResetRevision: UInt64
     let markReadOnScrolloverEnabled: Bool
     var swipeConfiguration: IOSArticleSwipeConfiguration = .defaultConfiguration
+    var audioActionStates: [Int64: IOSArticleAudioActionState] = [:]
     let showsRefreshControl: Bool
     let naturalTopContentInset: CGFloat
     var usesNativeTopEdgeEffect = true
     let onArticleTap: (ArticleSummary) -> Void
     let onArticleAction: (ArticleSummary, IOSArticleContextAction) -> Void
+    var onArticleMediaAction: (ArticleSummary, IOSArticleMediaAction) -> Void = { _, _ in }
     let onSetRead: (ArticleSummary, Bool) -> Void
     let onSetStarred: (ArticleSummary, Bool) -> Void
     let onRequestFeedIcon: (Int64, FeedIconVariant, CGFloat) -> Void
@@ -461,6 +520,7 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
     private func update(_ controller: IOSUIKitArticleTimelineController) {
         controller.onArticleTap = onArticleTap
         controller.onArticleAction = onArticleAction
+        controller.onArticleMediaAction = onArticleMediaAction
         controller.onSetRead = onSetRead
         controller.onSetStarred = onSetStarred
         controller.onRequestFeedIcon = onRequestFeedIcon
@@ -482,6 +542,7 @@ struct IOSUIKitArticleTimelineView: UIViewControllerRepresentable {
             scrollResetRevision: scrollResetRevision,
             markReadOnScrolloverEnabled: markReadOnScrolloverEnabled,
             swipeConfiguration: swipeConfiguration,
+            audioActionStates: audioActionStates,
             showsRefreshControl: showsRefreshControl,
             naturalTopContentInset: naturalTopContentInset,
             usesNativeTopEdgeEffect: usesNativeTopEdgeEffect
@@ -535,6 +596,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
 
     var onArticleTap: ((ArticleSummary) -> Void)?
     var onArticleAction: ((ArticleSummary, IOSArticleContextAction) -> Void)?
+    var onArticleMediaAction: ((ArticleSummary, IOSArticleMediaAction) -> Void)?
     var onSetRead: ((ArticleSummary, Bool) -> Void)?
     var onSetStarred: ((ArticleSummary, Bool) -> Void)?
     var onRequestFeedIcon: ((Int64, FeedIconVariant, CGFloat) -> Void)?
@@ -561,6 +623,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
     private var scrollResetRevision: UInt64?
     private var markReadOnScrolloverEnabled = false
     private var swipeConfiguration = IOSArticleSwipeConfiguration.defaultConfiguration
+    private var audioActionStates: [Int64: IOSArticleAudioActionState] = [:]
     private var showsRefreshControl = true
     private var naturalTopContentInset: CGFloat = 0
     private var usesNativeTopEdgeEffect = true
@@ -948,6 +1011,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         scrollResetRevision newScrollResetRevision: UInt64,
         markReadOnScrolloverEnabled newMarkReadOnScrolloverEnabled: Bool,
         swipeConfiguration newSwipeConfiguration: IOSArticleSwipeConfiguration = .defaultConfiguration,
+        audioActionStates newAudioActionStates: [Int64: IOSArticleAudioActionState] = [:],
         showsRefreshControl newShowsRefreshControl: Bool,
         naturalTopContentInset newNaturalTopContentInset: CGFloat = 0,
         usesNativeTopEdgeEffect newUsesNativeTopEdgeEffect: Bool = true
@@ -978,6 +1042,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         scrollResetRevision = newScrollResetRevision
         markReadOnScrolloverEnabled = newMarkReadOnScrolloverEnabled
         swipeConfiguration = newSwipeConfiguration
+        audioActionStates = newAudioActionStates
         showsRefreshControl = newShowsRefreshControl
         naturalTopContentInset = clampedNaturalTopContentInset
         usesNativeTopEdgeEffect = newUsesNativeTopEdgeEffect
@@ -1474,6 +1539,26 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
                 systemImage: "tray.and.arrow.down",
                 backgroundColor: .systemPurple
             )
+
+        case .downloadAudio:
+            guard !IOSArticleAudioPresentation.downloadableEnclosures(
+                audioActionStates[articleID]
+            ).isEmpty else {
+                return nil
+            }
+            let action = UIContextualAction(
+                style: .normal,
+                title: String(localized: "Swipe Download Audio")
+            ) { [weak self] _, _, completion in
+                self?.onArticleMediaAction?(
+                    item.article,
+                    .configuredDownloadAudio
+                )
+                completion(true)
+            }
+            action.image = UIImage(systemName: "arrow.down.circle")
+            action.backgroundColor = .systemGreen
+            return action
         }
     }
 
@@ -1508,6 +1593,7 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
                     self?.setRead(id: id, value: !current.isRead)
                 },
                 UIMenu(options: .displayInline, children: self.contextNavigationActions(for: item)),
+                self.contextAudioMenu(for: item),
                 UIMenu(options: .displayInline, children: [
                     UIAction(title: String(localized: "Save to Third-Party Service"), image: UIImage(systemName: "tray.and.arrow.down")) { [weak self] _ in
                         self?.onArticleAction?(item.article, .saveToService)
@@ -1539,6 +1625,149 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         parameters.backgroundColor = .systemBackground
         parameters.visiblePath = UIBezierPath(roundedRect: cell.bounds, cornerRadius: 16)
         return UITargetedPreview(view: cell, parameters: parameters)
+    }
+
+    private func contextAudioMenu(
+        for item: IOSUIKitArticleTimelineItem
+    ) -> UIMenu {
+        guard let state = audioActionStates[item.article.id],
+              !state.audioEnclosures.isEmpty else {
+            return UIMenu(options: .displayInline, children: [])
+        }
+
+        var children: [UIMenuElement] = [
+            UIAction(
+                title: state.isInListeningList
+                    ? String(localized: "Remove from Listening List")
+                    : String(localized: "Add to Listening List"),
+                image: UIImage(
+                    systemName: state.isInListeningList
+                        ? "minus.circle"
+                        : "plus.circle"
+                )
+            ) { [weak self] _ in
+                self?.onArticleMediaAction?(
+                    item.article,
+                    .setListeningList(!state.isInListeningList)
+                )
+            }
+        ]
+
+        if state.audioEnclosures.count == 1,
+           let enclosure = state.audioEnclosures.first {
+            children.append(contentsOf: contextEnclosureActions(
+                article: item.article,
+                enclosure: enclosure,
+                index: 0,
+                state: state
+            ))
+        } else {
+            for (index, enclosure) in state.audioEnclosures.enumerated() {
+                children.append(
+                    UIMenu(
+                        title: IOSArticleAudioPresentation.enclosureLabel(
+                            enclosure,
+                            index: index
+                        ),
+                        image: UIImage(systemName: "waveform"),
+                        children: contextEnclosureActions(
+                            article: item.article,
+                            enclosure: enclosure,
+                            index: index,
+                            state: state
+                        )
+                    )
+                )
+            }
+        }
+
+        return UIMenu(
+            title: String(localized: "Audio"),
+            image: UIImage(systemName: "headphones"),
+            children: children
+        )
+    }
+
+    private func contextEnclosureActions(
+        article: ArticleSummary,
+        enclosure: Enclosure,
+        index: Int,
+        state: IOSArticleAudioActionState
+    ) -> [UIMenuElement] {
+        var actions: [UIMenuElement] = [
+            UIAction(
+                title: String(localized: "Play"),
+                image: UIImage(systemName: "play.fill")
+            ) { [weak self] _ in
+                self?.onArticleMediaAction?(
+                    article,
+                    .play(enclosureID: enclosure.id)
+                )
+            }
+        ]
+
+        let download = state.downloads[enclosure.id]
+        switch IOSArticleAudioPresentation.downloadAction(download) {
+        case .download:
+            actions.append(
+                UIAction(
+                    title: String(localized: "Download"),
+                    image: UIImage(systemName: "arrow.down.circle")
+                ) { [weak self] _ in
+                    self?.onArticleMediaAction?(
+                        article,
+                        .requestDownload(enclosureID: enclosure.id)
+                    )
+                }
+            )
+        case .retry:
+            actions.append(
+                UIAction(
+                    title: String(localized: "Retry Download"),
+                    image: UIImage(systemName: "arrow.clockwise")
+                ) { [weak self] _ in
+                    self?.onArticleMediaAction?(
+                        article,
+                        .retryDownload(enclosureID: enclosure.id)
+                    )
+                }
+            )
+        case .delete:
+            actions.append(
+                UIAction(
+                    title: String(localized: "Delete Download"),
+                    image: UIImage(systemName: "trash"),
+                    attributes: .destructive
+                ) { [weak self] _ in
+                    self?.onArticleMediaAction?(
+                        article,
+                        .deleteDownload(enclosureID: enclosure.id)
+                    )
+                }
+            )
+        case .pending:
+            actions.append(
+                UIAction(
+                    title: String(localized: "Cancel Download"),
+                    image: UIImage(systemName: "xmark.circle")
+                ) { [weak self] _ in
+                    self?.onArticleMediaAction?(
+                        article,
+                        .cancelDownload(enclosureID: enclosure.id)
+                    )
+                }
+            )
+        case .pendingDeletion:
+            actions.append(
+                UIAction(
+                    title: String(localized: "Deletion Pending"),
+                    image: UIImage(systemName: "clock"),
+                    attributes: .disabled
+                ) { _ in }
+            )
+        }
+
+        return actions
     }
 
     private func contextNavigationActions(for item: IOSUIKitArticleTimelineItem) -> [UIMenuElement] {
@@ -3285,11 +3514,13 @@ struct ArticleListView: View {
                     scrollResetRevision: store.scrollResetRevision,
                     markReadOnScrolloverEnabled: store.markReadOnScrolloverEnabled,
                     swipeConfiguration: store.articleSwipeConfiguration,
+                    audioActionStates: store.articleAudioActionStates,
                     showsRefreshControl: true,
                     naturalTopContentInset: naturalTopContentInset,
                     usesNativeTopEdgeEffect: usesNativeTopEdgeEffect,
                     onArticleTap: onArticleTap,
                     onArticleAction: onArticleAction,
+                    onArticleMediaAction: onArticleMediaAction,
                     onSetRead: { article, read in store.setRead(article, read: read) },
                     onSetStarred: { article, starred in store.setStarred(article, starred: starred) },
                     onRequestFeedIcon: { feedID, variant, displayScale in store.requestFeedIcon(feedID, variant: variant, displayScale: displayScale) },
