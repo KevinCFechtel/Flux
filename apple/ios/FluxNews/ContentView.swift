@@ -356,17 +356,32 @@ private struct IOSActionFeedbackBanner: View {
     let item: IOSActionFeedbackItem
 
     var body: some View {
-        Label(item.kind.message, systemImage: item.kind.symbolName)
-            .font(.callout.weight(.medium))
-            .multilineTextAlignment(.center)
-            .lineLimit(2)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(.regularMaterial, in: Capsule())
-            .shadow(radius: 4, y: 2)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(item.kind.message)
-            .allowsHitTesting(false)
+        Label {
+            Text(item.kind.message)
+                .foregroundStyle(.primary)
+        } icon: {
+            Image(systemName: item.kind.symbolName)
+                .foregroundStyle(Color.accentColor)
+        }
+        .font(.callout.weight(.semibold))
+        .multilineTextAlignment(.center)
+        .lineLimit(2)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background {
+            ArticleListChromeCapsuleBackground(
+                usesSystemToolbarGlass: false,
+                isInteractive: false
+            )
+        }
+        .overlay {
+            Capsule()
+                .stroke(Color.accentColor.opacity(0.28), lineWidth: 1)
+        }
+        .shadow(radius: 5, y: 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(item.kind.message)
+        .allowsHitTesting(false)
     }
 }
 
@@ -448,7 +463,7 @@ struct ContentView: View {
                 StartupView(bootstrapper: bootstrapper)
             }
         }
-        .overlay(alignment: .top) {
+        .overlay(alignment: .bottom) {
             actionFeedbackOverlay(active: !searchPresented)
         }
         .animation(.easeInOut(duration: 0.2), value: actionFeedback?.id)
@@ -466,7 +481,7 @@ struct ContentView: View {
                         }
                     }
             }
-            .overlay(alignment: .top) {
+            .overlay(alignment: .bottom) {
                 actionFeedbackOverlay(active: true)
             }
             .animation(.easeInOut(duration: 0.2), value: actionFeedback?.id)
@@ -1028,8 +1043,8 @@ struct ContentView: View {
         if active, let feedback = actionFeedback {
             IOSActionFeedbackBanner(item: feedback)
                 .padding(.horizontal, 16)
-                .safeAreaPadding(.top, 52)
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .safeAreaPadding(.bottom, 18)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
                 .task(id: feedback.id) {
                     do {
                         try await Task.sleep(
