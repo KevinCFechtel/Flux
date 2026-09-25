@@ -904,7 +904,10 @@ struct IOSArticleAudioActionState {
             return
         }
 
-        articleAudioActionGeneration &+= 1
+        if replacing {
+            articleAudioActionGeneration &+= 1
+            articleAudioActionStates = [:]
+        }
         let generation = articleAudioActionGeneration
         let coordinator = coreSessionExecutionCoordinator
 
