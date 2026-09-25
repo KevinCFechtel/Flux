@@ -7,6 +7,41 @@ enum IOSMediaPlayerLayoutMode: Equatable {
     case sideBySide
 }
 
+enum IOSMediaPlayerPreviewPresentation {
+    static func isPreviewingInactiveItem(
+        item: ListeningListItem?,
+        loadedEnclosureID: Int64?
+    ) -> Bool {
+        guard let item else { return false }
+        guard let loadedEnclosureID else { return true }
+        return !item.audioEnclosures.contains(
+            where: { $0.enclosure.id == loadedEnclosureID }
+        )
+    }
+
+    static func preferredEnclosure(
+        item: ListeningListItem?
+    ) -> ListeningListEnclosure? {
+        guard let item else { return nil }
+        return IOSListeningListPresentation.selectedEnclosure(item)
+            ?? item.audioEnclosures.first
+    }
+
+    static func positionMs(
+        item: ListeningListItem?,
+        loadedEnclosureID: Int64?,
+        runtimePositionMs: UInt64
+    ) -> UInt64 {
+        guard isPreviewingInactiveItem(
+            item: item,
+            loadedEnclosureID: loadedEnclosureID
+        ) else {
+            return runtimePositionMs
+        }
+        return preferredEnclosure(item: item)?.playbackState?.positionMs ?? 0
+    }
+}
+
 enum IOSMediaPlayerLayoutPolicy {
     static func mode(
         horizontalSizeClass: UserInterfaceSizeClass?,
@@ -47,15 +82,14 @@ struct IOSMediaPlayerView: View {
     }
 
     private var previewEnclosure: ListeningListEnclosure? {
-        guard let item else { return nil }
-        return IOSListeningListPresentation.selectedEnclosure(item)
-            ?? item.audioEnclosures.first
+        IOSMediaPlayerPreviewPresentation.preferredEnclosure(item: item)
     }
 
     private var isPreviewingInactiveItem: Bool {
-        guard let item else { return false }
-        guard let loadedID = playbackState.loadedEnclosure?.id else { return true }
-        return !item.audioEnclosures.contains(where: { $0.enclosure.id == loadedID })
+        IOSMediaPlayerPreviewPresentation.isPreviewingInactiveItem(
+            item: item,
+            loadedEnclosureID: playbackState.loadedEnclosure?.id
+        )
     }
 
     private var displayedTitle: String {
@@ -81,10 +115,11 @@ struct IOSMediaPlayerView: View {
     }
 
     private var displayedPositionMs: UInt64 {
-        if isPreviewingInactiveItem {
-            return previewEnclosure?.playbackState?.positionMs ?? 0
-        }
-        return playbackState.positionMs
+        IOSMediaPlayerPreviewPresentation.positionMs(
+            item: item,
+            loadedEnclosureID: playbackState.loadedEnclosure?.id,
+            runtimePositionMs: playbackState.positionMs
+        )
     }
 
     private var displayedDurationMs: UInt64? {
