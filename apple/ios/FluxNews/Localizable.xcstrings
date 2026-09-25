@@ -726,6 +726,16 @@
         }
       }
     },
+    "Stops in": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stoppt in"
+          }
+        }
+      }
+    },
     "Stop": {
       "localizations": {
         "de": {
