@@ -1346,9 +1346,13 @@ D6 starts from an existing Core/UniFFI media contract and a completed macOS
 reference implementation. The repository-first readiness review and concrete
 execution/work-package contract are maintained in
 [`IOS_D6_NATIVE_MEDIA_IMPLEMENTATION.md`](IOS_D6_NATIVE_MEDIA_IMPLEMENTATION.md).
-D6-0 through D6-F are now implemented and testvalidated. D6-G is the remaining
-real-device/process-boundary acceptance gate; its evidence matrix is maintained
-in [`IOS_D6_FINAL_ACCEPTANCE.md`](IOS_D6_FINAL_ACCEPTANCE.md).
+D6-0 through D6-F are implemented. Their previously accepted automated gates
+were green before the 25 September 2026 post-closure follow-up corrections.
+Those corrections require the current head to rerun the canonical Rust and iOS
+test gates before it is recorded as testvalidated again. After that revalidation,
+D6-G remains the real-device/process-boundary acceptance gate; its evidence
+matrix is maintained in
+[`IOS_D6_FINAL_ACCEPTANCE.md`](IOS_D6_FINAL_ACCEPTANCE.md).
 The D5 `IOSMediaTransferReconciliationHandoff` remains the authoritative
 bridge from successful background Sync into the D6 transfer runtime. D6 now
 installs the native transfer executor and backs `BrowserScope.listeningList`
