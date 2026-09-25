@@ -4613,6 +4613,136 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(lifecycle.isCurrentSelectionCount(syncCount))
     }
 
+    @MainActor
+    func testListeningListPresentationPrefersActiveEnclosureAndRuntimeProgress() {
+        let first = ListeningListEnclosure(
+            enclosure: Enclosure(
+                id: 11,
+                articleId: 101,
+                url: "https://example.test/one.mp3",
+                mimeType: "audio/mpeg",
+                sizeBytes: 100,
+                remoteMediaProgressionSeconds: 0,
+                mediaKind: .audio
+            ),
+            remotePresent: true,
+            playbackState: nil,
+            download: nil,
+            durationMs: 60_000
+        )
+        let second = ListeningListEnclosure(
+            enclosure: Enclosure(
+                id: 12,
+                articleId: 101,
+                url: "https://example.test/two.mp3",
+                mimeType: "audio/mpeg",
+                sizeBytes: 200,
+                remoteMediaProgressionSeconds: 0,
+                mediaKind: .audio
+            ),
+            remotePresent: true,
+            playbackState: PlaybackState(
+                enclosureId: 12,
+                positionMs: 5_000,
+                durationMs: 100_000,
+                status: .inProgress,
+                updatedAt: nil
+            ),
+            download: nil,
+            durationMs: 100_000
+        )
+        let item = ListeningListItem(
+            articleId: 101,
+            feedId: 10,
+            title: "Episode",
+            feedTitle: "Feed",
+            publishedAt: "2026-09-25T00:00:00Z",
+            addedAt: "2026-09-25T00:00:00Z",
+            remotePresent: true,
+            audioEnclosures: [first, second],
+            activeEnclosureId: 12
+        )
+        let runtime = IOSMediaPlaybackPresentationState()
+        runtime.setLoadedMedia(
+            enclosure: second.enclosure,
+            feedTitle: "Feed",
+            mediaTitle: "Episode",
+            artworkSource: nil,
+            chapters: [],
+            positionMs: 25_000,
+            durationMs: 100_000
+        )
+        runtime.setStatus(.playing)
+
+        XCTAssertEqual(
+            IOSListeningListPresentation.selectedEnclosure(item)?.enclosure.id,
+            12
+        )
+        let progress = IOSListeningListPresentation.progress(
+            item,
+            runtime: runtime
+        )
+        XCTAssertEqual(progress?.positionMs, 25_000)
+        XCTAssertEqual(progress?.durationMs, 100_000)
+        XCTAssertEqual(progress?.status, .inProgress)
+        XCTAssertEqual(progress?.fraction, 0.25)
+    }
+
+    func testListeningListDownloadSummarySeparatesDownloadedAndPending() {
+        func enclosure(
+            id: Int64,
+            state: DownloadState?
+        ) -> ListeningListEnclosure {
+            ListeningListEnclosure(
+                enclosure: Enclosure(
+                    id: id,
+                    articleId: 101,
+                    url: "https://example.test/\(id).mp3",
+                    mimeType: "audio/mpeg",
+                    sizeBytes: nil,
+                    remoteMediaProgressionSeconds: 0,
+                    mediaKind: .audio
+                ),
+                remotePresent: true,
+                playbackState: nil,
+                download: state.map {
+                    MediaDownload(
+                        enclosureId: id,
+                        state: $0,
+                        origin: .manual,
+                        localFile: nil,
+                        fileSizeBytes: nil,
+                        downloadedAt: nil,
+                        failureKind: nil
+                    )
+                },
+                durationMs: nil
+            )
+        }
+
+        let item = ListeningListItem(
+            articleId: 101,
+            feedId: 10,
+            title: "Episode",
+            feedTitle: "Feed",
+            publishedAt: "",
+            addedAt: "",
+            remotePresent: true,
+            audioEnclosures: [
+                enclosure(id: 1, state: .downloaded),
+                enclosure(id: 2, state: .requested),
+                enclosure(id: 3, state: .deleteRequested),
+                enclosure(id: 4, state: .failed),
+            ],
+            activeEnclosureId: nil
+        )
+
+        let summary = IOSListeningListPresentation.downloadSummary(item)
+        XCTAssertEqual(summary.downloaded, 1)
+        XCTAssertEqual(summary.pending, 2)
+        XCTAssertEqual(summary.total, 4)
+    }
+
     func testReaderDocumentNoticePreservesAllContentStates() {
         XCTAssertNil(ReaderDocumentNotice.text(simplified: false, truncated: false))
         XCTAssertEqual(ReaderDocumentNotice.text(simplified: true, truncated: false), "Some content was simplified")
