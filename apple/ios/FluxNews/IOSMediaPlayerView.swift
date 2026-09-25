@@ -1,7 +1,28 @@
 import Foundation
 import SwiftUI
+import UIKit
+
+enum IOSMediaPlayerLayoutMode: Equatable {
+    case stacked
+    case sideBySide
+}
+
+enum IOSMediaPlayerLayoutPolicy {
+    static func mode(
+        horizontalSizeClass: UserInterfaceSizeClass?,
+        verticalSizeClass: UserInterfaceSizeClass?
+    ) -> IOSMediaPlayerLayoutMode {
+        if horizontalSizeClass == .regular || verticalSizeClass == .compact {
+            return .sideBySide
+        }
+        return .stacked
+    }
+}
 
 struct IOSMediaPlayerView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
     @ObservedObject var playbackState: IOSMediaPlaybackPresentationState
     let playbackCoordinator: IOSMediaPlaybackCoordinator
     let item: ListeningListItem?
@@ -15,115 +36,46 @@ struct IOSMediaPlayerView: View {
     @State private var seekPosition: Double = 0
     @State private var isSeeking = false
     @State private var showNotesPresented = false
+    @State private var artworkImage: UIImage?
+    @State private var artworkIsLoading = false
+
+    private var layoutMode: IOSMediaPlayerLayoutMode {
+        IOSMediaPlayerLayoutPolicy.mode(
+            horizontalSizeClass: horizontalSizeClass,
+            verticalSizeClass: verticalSizeClass
+        )
+    }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                header
-
-                if let duration = playbackState.durationMs, duration > 0 {
-                    VStack(spacing: 8) {
-                        Slider(
-                            value: Binding(
-                                get: {
-                                    isSeeking
-                                        ? seekPosition
-                                        : Double(playbackState.positionMs)
-                                },
-                                set: { seekPosition = $0 }
-                            ),
-                            in: 0...Double(duration),
-                            onEditingChanged: { editing in
-                                isSeeking = editing
-                                if editing {
-                                    seekPosition = Double(playbackState.positionMs)
-                                } else {
-                                    playbackCoordinator.seek(
-                                        toMs: UInt64(max(0, seekPosition))
-                                    )
-                                }
-                            }
-                        )
-
-                        HStack {
-                            Text(timeLabel(playbackState.positionMs))
-                            Spacer()
-                            Text(timeLabel(duration))
+            Group {
+                switch layoutMode {
+                case .stacked:
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            artwork
+                                .frame(maxWidth: 300)
+                            controls
                         }
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: 560)
+                        .padding(24)
+                        .frame(maxWidth: .infinity)
+                    }
+
+                case .sideBySide:
+                    ScrollView {
+                        HStack(alignment: .top, spacing: 32) {
+                            artwork
+                                .frame(maxWidth: 360)
+
+                            controls
+                                .frame(maxWidth: 520)
+                        }
+                        .padding(28)
+                        .frame(maxWidth: .infinity, alignment: .center)
                     }
                 }
-
-                HStack(spacing: 30) {
-                    Button {
-                        playbackCoordinator.skip(bySeconds: -15)
-                    } label: {
-                        Image(systemName: "gobackward.15")
-                            .font(.title2)
-                    }
-                    .accessibilityLabel(String(localized: "Back 15 seconds"))
-
-                    Button {
-                        togglePlayback()
-                    } label: {
-                        Image(
-                            systemName: playbackState.status == .playing
-                                ? "pause.circle.fill"
-                                : "play.circle.fill"
-                        )
-                        .font(.system(size: 54))
-                    }
-                    .accessibilityLabel(
-                        playbackState.status == .playing
-                            ? String(localized: "Pause")
-                            : String(localized: "Play")
-                    )
-
-                    Button {
-                        playbackCoordinator.skip(bySeconds: 30)
-                    } label: {
-                        Image(systemName: "goforward.30")
-                            .font(.title2)
-                    }
-                    .accessibilityLabel(String(localized: "Forward 30 seconds"))
-                }
-                .buttonStyle(.plain)
-
-                HStack(spacing: 18) {
-                    rateMenu
-                    chapterMenu
-                    if let item, item.audioEnclosures.count > 1 {
-                        enclosureMenu(item)
-                    }
-                    Button {
-                        onShowNotes()
-                        showNotesPresented = true
-                    } label: {
-                        Label("Show Notes", systemImage: "doc.text")
-                    }
-                }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.bordered)
-
-                if playbackState.isLoading || playbackState.isBuffering {
-                    ProgressView(
-                        playbackState.isBuffering
-                            ? "Buffering…"
-                            : "Loading…"
-                    )
-                }
-
-                if let error = playbackState.errorMessage {
-                    Text(error)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                        .multilineTextAlignment(.center)
-                }
-
-                Spacer(minLength: 0)
             }
-            .padding(24)
             .navigationTitle("Player")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -179,6 +131,168 @@ struct IOSMediaPlayerView: View {
         .onAppear {
             seekPosition = Double(playbackState.positionMs)
         }
+        .task(id: artworkTaskKey) {
+            await loadArtwork()
+        }
+    }
+
+    private var controls: some View {
+        VStack(spacing: 24) {
+            header
+
+            if let duration = playbackState.durationMs, duration > 0 {
+                VStack(spacing: 8) {
+                    Slider(
+                        value: Binding(
+                            get: {
+                                isSeeking
+                                    ? seekPosition
+                                    : Double(playbackState.positionMs)
+                            },
+                            set: { seekPosition = $0 }
+                        ),
+                        in: 0...Double(duration),
+                        onEditingChanged: { editing in
+                            isSeeking = editing
+                            if editing {
+                                seekPosition = Double(playbackState.positionMs)
+                            } else {
+                                playbackCoordinator.seek(
+                                    toMs: UInt64(max(0, seekPosition))
+                                )
+                            }
+                        }
+                    )
+
+                    HStack {
+                        Text(timeLabel(playbackState.positionMs))
+                        Spacer()
+                        Text(timeLabel(duration))
+                    }
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(spacing: 30) {
+                Button {
+                    playbackCoordinator.skip(bySeconds: -15)
+                } label: {
+                    Image(systemName: "gobackward.15")
+                        .font(.title2)
+                }
+                .accessibilityLabel(String(localized: "Back 15 seconds"))
+
+                Button {
+                    togglePlayback()
+                } label: {
+                    Image(
+                        systemName: playbackState.status == .playing
+                            ? "pause.circle.fill"
+                            : "play.circle.fill"
+                    )
+                    .font(.system(size: 54))
+                }
+                .accessibilityLabel(
+                    playbackState.status == .playing
+                        ? String(localized: "Pause")
+                        : String(localized: "Play")
+                )
+
+                Button {
+                    playbackCoordinator.skip(bySeconds: 30)
+                } label: {
+                    Image(systemName: "goforward.30")
+                        .font(.title2)
+                }
+                .accessibilityLabel(String(localized: "Forward 30 seconds"))
+            }
+            .buttonStyle(.plain)
+
+            ViewThatFits(in: .horizontal) {
+                playerActionRow
+                playerActionColumn
+            }
+
+            if playbackState.isLoading || playbackState.isBuffering {
+                ProgressView(
+                    playbackState.isBuffering
+                        ? "Buffering…"
+                        : "Loading…"
+                )
+            }
+
+            if let error = playbackState.errorMessage {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+            }
+        }
+    }
+
+    private var playerActionRow: some View {
+        HStack(spacing: 18) {
+            rateMenu
+            chapterMenu
+            if let item, item.audioEnclosures.count > 1 {
+                enclosureMenu(item)
+            }
+            showNotesButton
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.bordered)
+    }
+
+    private var playerActionColumn: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 18) {
+                rateMenu
+                chapterMenu
+                if let item, item.audioEnclosures.count > 1 {
+                    enclosureMenu(item)
+                }
+            }
+            showNotesButton
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.bordered)
+    }
+
+    private var showNotesButton: some View {
+        Button {
+            onShowNotes()
+            showNotesPresented = true
+        } label: {
+            Label("Show Notes", systemImage: "doc.text")
+        }
+    }
+
+    private var artwork: some View {
+        Group {
+            if let artworkImage {
+                Image(uiImage: artworkImage)
+                    .resizable()
+                    .scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                    .accessibilityLabel(String(localized: "Media artwork"))
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(.secondary.opacity(0.12))
+                    if artworkIsLoading {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "waveform")
+                            .font(.system(size: 54))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .aspectRatio(1, contentMode: .fit)
+                .accessibilityHidden(true)
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var header: some View {
@@ -227,7 +341,11 @@ struct IOSMediaPlayerView: View {
                     Button {
                         playbackCoordinator.seek(toMs: chapter.startMs)
                     } label: {
-                        Text(chapter.title.isEmpty ? timeLabel(chapter.startMs) : chapter.title)
+                        Text(
+                            chapter.title.isEmpty
+                                ? timeLabel(chapter.startMs)
+                                : chapter.title
+                        )
                     }
                 }
             }
@@ -255,6 +373,32 @@ struct IOSMediaPlayerView: View {
             Label("Audio", systemImage: "waveform")
         }
         .accessibilityLabel(String(localized: "Choose audio"))
+    }
+
+    private var artworkTaskKey: String {
+        switch playbackState.artworkSource {
+        case let .localReference(reference):
+            return "local:\(reference)"
+        case let .remoteUrl(url):
+            return "remote:\(url)"
+        case nil:
+            return "none"
+        }
+    }
+
+    @MainActor
+    private func loadArtwork() async {
+        artworkImage = nil
+        guard let source = playbackState.artworkSource else {
+            artworkIsLoading = false
+            return
+        }
+
+        artworkIsLoading = true
+        let data = await playbackCoordinator.artwork(source: source)
+        guard !Task.isCancelled else { return }
+        artworkImage = data.flatMap(UIImage.init(data:))
+        artworkIsLoading = false
     }
 
     private func togglePlayback() {
