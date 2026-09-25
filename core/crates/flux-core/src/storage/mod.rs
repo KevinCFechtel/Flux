@@ -7320,7 +7320,11 @@ mod tests {
             category_id: 1,
             title: "Feed".into(),
         }];
-        let (article, enclosure) = media_article_enclosure_pair();
+        let (article, mut enclosure) = media_article_enclosure_pair();
+        // This test isolates the Phase-B DownloadState retention contract. Audio download
+        // requests intentionally create independent Phase-C Listening List membership, which
+        // would keep protecting the Article after the Download itself becomes Failed.
+        enclosure.mime_type = "video/mp4".into();
         store
             .reconcile_with_enclosures(
                 &category,
@@ -7333,6 +7337,7 @@ mod tests {
         store
             .request_download(1000, DownloadOrigin::Manual)
             .unwrap();
+        assert!(!store.is_in_listening_list(article.id).unwrap());
         assert_eq!(
             store
                 .cleanup_expired_read_articles("2030-01-01T00:00:00Z")
@@ -7980,13 +7985,24 @@ mod tests {
         let enclosures = articles
             .iter()
             .enumerate()
-            .map(|(index, article)| Enclosure {
-                id: 1001 + index as i64,
-                article_id: article.id,
-                url: format!("https://cdn.test/{}.mp3", 1001 + index as i64),
-                mime_type: "audio/mpeg".into(),
-                size_bytes: Some(4096),
-                remote_media_progression_seconds: 0,
+            .map(|(index, article)| {
+                let enclosure_id = 1001 + index as i64;
+                Enclosure {
+                    id: enclosure_id,
+                    article_id: article.id,
+                    url: format!("https://cdn.test/{enclosure_id}.mp3"),
+                    // Articles 105/106 exercise Failed/DeleteRequested as explicitly
+                    // non-protecting Phase-B states. Keep those enclosures non-audio so
+                    // request_download() does not add the separate Phase-C Listening List
+                    // protection that this matrix is not testing.
+                    mime_type: if matches!(article.id, 105 | 106) {
+                        "video/mp4".into()
+                    } else {
+                        "audio/mpeg".into()
+                    },
+                    size_bytes: Some(4096),
+                    remote_media_progression_seconds: 0,
+                }
             })
             .collect::<Vec<_>>();
         store
