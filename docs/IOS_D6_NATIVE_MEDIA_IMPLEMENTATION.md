@@ -1,6 +1,6 @@
 # iOS/iPadOS D6 — Native Media & Background Downloads
 
-Status: **authoritative D6 implementation plan / readiness contract**  
+Status: **implementation-stable / testvalidated; UX observation window active; final D6-G freeze pending**  
 Date: 25 September 2026  
 Repository baseline reviewed: `main` at `3d6b59202c61d1537784c8be9544c88e1a38c95e`
 
@@ -909,9 +909,13 @@ The first D6-F slice provides:
 
 ### D6-G — D6 integration/acceptance
 
-**Implementation status:** **ACTIVE / implementation complete; physical-device
-and process-boundary acceptance pending.** The authoritative acceptance matrix
-and closure evidence are recorded in
+**Implementation status:** **OBSERVATION / FINAL-FREEZE GATE — implementation
+stable and testvalidated; physical-device UX observation plus remaining
+process-boundary acceptance retained.** The current implementation is explicitly
+stable enough for D7 to begin. Ordinary Player/Listening-List presentation
+polish may continue during the observation window, but later phases must consume
+the existing app-wide playback runtime rather than depend on the mutable SwiftUI
+layout. The authoritative acceptance matrix and closure evidence are recorded in
 [IOS_D6_FINAL_ACCEPTANCE.md](IOS_D6_FINAL_ACCEPTANCE.md).
 
 Validate at least:
