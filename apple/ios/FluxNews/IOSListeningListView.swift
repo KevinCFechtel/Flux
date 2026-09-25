@@ -104,6 +104,11 @@ struct IOSListeningListView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onOpenPlayer(item.articleId)
+                }
 
                 Spacer(minLength: 8)
                 itemMenu(item)
@@ -121,6 +126,11 @@ struct IOSListeningListView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onOpenPlayer(item.articleId)
+                }
             }
 
             let downloads = IOSListeningListPresentation.downloadSummary(
@@ -128,22 +138,29 @@ struct IOSListeningListView: View {
                 transfers: transferState.transfers
             )
             HStack(spacing: 12) {
-                Label(
-                    enclosureLabel(item.audioEnclosures.count),
-                    systemImage: "waveform"
-                )
-                if downloads.downloaded > 0 {
+                HStack(spacing: 12) {
                     Label(
-                        String(localized: "\(downloads.downloaded) downloaded"),
-                        systemImage: "arrow.down.circle.fill"
+                        enclosureLabel(item.audioEnclosures.count),
+                        systemImage: "waveform"
                     )
-                } else if downloads.pending > 0 {
-                    Label(
-                        String(localized: "\(downloads.pending) pending"),
-                        systemImage: "clock"
-                    )
+                    if downloads.downloaded > 0 {
+                        Label(
+                            String(localized: "\(downloads.downloaded) downloaded"),
+                            systemImage: "arrow.down.circle.fill"
+                        )
+                    } else if downloads.pending > 0 {
+                        Label(
+                            String(localized: "\(downloads.pending) pending"),
+                            systemImage: "clock"
+                        )
+                    }
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onOpenPlayer(item.articleId)
+                }
+
                 primaryPlayControl(item)
             }
             .font(.caption)
@@ -163,18 +180,14 @@ struct IOSListeningListView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onOpenPlayer(item.articleId)
+                }
             }
         }
         .padding(.vertical, 4)
-        .background {
-            Button {
-                onOpenPlayer(item.articleId)
-            } label: {
-                Color.clear
-            }
-            .buttonStyle(.plain)
-            .accessibilityHidden(true)
-        }
         .accessibilityElement(children: .contain)
     }
 
