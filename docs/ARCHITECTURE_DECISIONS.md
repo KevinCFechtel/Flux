@@ -805,8 +805,9 @@ and regenerable Core caches, then immediately performs a fresh Miniflux sync.
 It preserves the canonical account association, CoreSettings, FeedPreferences,
 native settings, platform credentials, and the minimal local Article -> Feed ->
 Category graph required by Phase-B protecting media state. Protecting media
-state is `SavedMedia`, `MediaDownload = Requested`/`Downloaded`,
-`PlaybackState = InProgress`, or a pending MediaProgressMutation. Pending
+state is Phase-C `ListeningList` membership, Phase-B `SavedMedia`,
+`MediaDownload = Requested`/`Downloaded`, `PlaybackState = InProgress`,
+or a pending MediaProgressMutation. Pending
 media progression remains part of that durable media state; discarded ordinary
 read/star intent falls back to the last observed remote article state before
 the rebuild sync. Failed/DeleteRequested downloads, Completed-only playback,
@@ -1207,6 +1208,10 @@ clients to render rows without N+1 state stitching.
 The normal Reader contract remains separate. Article-to-media discovery is
 exposed through a generic Core/UniFFI `article_enclosures(article_id)` relation
 query rather than embedding media state into `ReaderDocument`.
+
+Listening List membership is durable user state and protects its News/article
+from normal read-article retention until the membership is explicitly removed
+or a configured completion policy removes it.
 
 ### Listening List and download invariants
 
