@@ -768,6 +768,21 @@ The second D6-D slice now additionally provides:
 The final D6-D implementation slice now additionally provides:
 
 - Player artwork from the existing `MediaArtworkSource` contract;
+- extracted local audio artwork can be resolved from existing Core
+  `MediaMetadata.embedded_artwork_reference` while merely previewing a
+  Listening List item, without preparing/replacing active playback;
+- player Sleep Timer presentation over the existing app-scoped
+  `IOSMediaSleepTimer`, including 30–180 minute intervals and live remaining
+  time;
+- playback-speed presentation with quick presets plus 0.1x adjustment across
+  the existing 0.5x–3.0x coordinator contract;
+- Stop as a distinct playback action: it checkpoints the current position,
+  preserves the prepared enclosure for later resume, and releases AVAudioSession;
+- player Download / Cancel / Retry / Delete controls sourced from the existing
+  Core download projection plus app-scoped transfer runtime;
+- chapter presentation marks the active chapter and scrolls to it once when the
+  chapter list opens, while subsequent runtime position updates never steal the
+  user's manual chapter-list scroll position;
 - local artwork bytes through `core.mediaArtwork(reference:)` on the existing
   iOS Core-session execution gate;
 - remote HTTP(S) artwork fallback using the same Phase-C source semantics;
