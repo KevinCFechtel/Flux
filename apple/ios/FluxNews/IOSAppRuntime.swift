@@ -56,6 +56,8 @@ final class IOSMediaRuntime {
 
     let coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator
     let mediaTransferReconciliationHandoff: IOSMediaTransferReconciliationHandoff
+    let playbackPresentationState = IOSMediaPlaybackPresentationState()
+    let transferPresentationState = IOSMediaTransferPresentationState()
 
     init(
         coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator,
@@ -81,6 +83,7 @@ final class IOSMediaRuntime {
         lifecycleGeneration &+= 1
         coreAccessState = .suspendedForCoreReplacement
         mediaTransferReconciliationHandoff.uninstall()
+        transferPresentationState.reset()
     }
 
     func resumeAfterAbortedCoreReplacement() {
@@ -97,6 +100,7 @@ final class IOSMediaRuntime {
         lifecycleGeneration &+= 1
         coreAccessState = .suspendedForLocalStateRebuild
         mediaTransferReconciliationHandoff.uninstall()
+        transferPresentationState.reset()
     }
 
     func localStateRebuildFinished(with core: Flux) {
@@ -109,6 +113,8 @@ final class IOSMediaRuntime {
         core = nil
         coreAccessState = .detached
         mediaTransferReconciliationHandoff.uninstall()
+        playbackPresentationState.reset()
+        transferPresentationState.reset()
     }
 }
 
