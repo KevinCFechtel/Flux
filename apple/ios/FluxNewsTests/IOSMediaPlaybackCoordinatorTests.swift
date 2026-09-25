@@ -241,10 +241,12 @@ final class IOSMediaPlaybackCoordinatorTests: XCTestCase {
 
         try await coordinator.play(enclosureID: 7)
         XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
+        XCTAssertTrue(coordinator.blocksMediaDeletion(enclosureID: 7))
 
         coordinator.pause()
 
-        XCTAssertFalse(coordinator.isUsing(enclosureID: 7))
+        XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
+        XCTAssertFalse(coordinator.blocksMediaDeletion(enclosureID: 7))
     }
 
     func testPlaybackStartDiagnosticIdentifiesCorePreparationFailure() async {
