@@ -42,6 +42,7 @@
 		D6A2 /* FluxNews/IOSMediaPresentationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B2 /* FluxNews/IOSMediaPresentationState.swift */; };
 		D6A4 /* FluxNews/IOSMediaTransferCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B4 /* FluxNews/IOSMediaTransferCoordinator.swift */; };
 		D6A5 /* FluxNews/IOSMediaPlaybackCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B5 /* FluxNews/IOSMediaPlaybackCoordinator.swift */; };
+		D6T1 /* FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6T2 /* FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift */; };
 		A41 /* FluxNews/BackgroundSyncSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B41 /* FluxNews/BackgroundSyncSettingsView.swift */; };
 		A42 /* FluxNews/IOSSystemNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B42 /* FluxNews/IOSSystemNotificationManager.swift */; };
 		A43 /* ../shared/FluxApple/SystemNotificationPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B43 /* ../shared/FluxApple/SystemNotificationPresentation.swift */; };
@@ -150,6 +151,7 @@
 		D6B2 /* FluxNews/IOSMediaPresentationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSMediaPresentationState.swift; sourceTree = SOURCE_ROOT; };
 		D6B4 /* FluxNews/IOSMediaTransferCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSMediaTransferCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		D6B5 /* FluxNews/IOSMediaPlaybackCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSMediaPlaybackCoordinator.swift; sourceTree = SOURCE_ROOT; };
+		D6T2 /* FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift; sourceTree = SOURCE_ROOT; };
 		B41 /* FluxNews/BackgroundSyncSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncSettingsView.swift; sourceTree = "<group>"; };
 		B42 /* FluxNews/IOSSystemNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSystemNotificationManager.swift; sourceTree = "<group>"; };
 		B43 /* ../shared/FluxApple/SystemNotificationPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/SystemNotificationPresentation.swift; sourceTree = SOURCE_ROOT; };
@@ -246,6 +248,7 @@
 				D6B2 /* FluxNews/IOSMediaPresentationState.swift */,
 				D6B4 /* FluxNews/IOSMediaTransferCoordinator.swift */,
 				D6B5 /* FluxNews/IOSMediaPlaybackCoordinator.swift */,
+				D6T2 /* FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift */,
 				B21 /* FluxNews/SearchView.swift */,
 				B22 /* FluxNewsTests/IOSSearchStoreTests.swift */,
 				B26 /* FluxNewsTests/AccountLifecycleTests.swift */,
@@ -523,6 +526,7 @@
 				A24 /* FluxNewsTests/AccountLifecycleTests.swift in Sources */,
 				A33 /* FluxNewsTests/IOSErrorPresentationTests.swift in Sources */,
 				A36 /* FluxNewsTests/AppleCoreExecutionTests.swift in Sources */,
+				D6T1 /* FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
