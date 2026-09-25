@@ -80,6 +80,7 @@ struct FluxNewsApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     guard !IOSRuntimeLaunchEnvironment.isUnitTestHost else { return }
                     if phase == .active {
+                        IOSAppRuntime.shared.mediaRuntime.sceneDidBecomeActive()
                         Task {
                             if let core = await bootstrapper.ensureStarted(),
                                newsreaderStore.core !== core {
@@ -92,6 +93,7 @@ struct FluxNewsApp: App {
                             IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
                         }
                     } else {
+                        IOSAppRuntime.shared.mediaRuntime.sceneWillResignActive()
                         newsreaderStore.flushScrolloverPersistenceForLifecycle()
                     }
                 }
