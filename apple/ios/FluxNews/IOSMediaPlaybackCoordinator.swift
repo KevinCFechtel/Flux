@@ -678,6 +678,23 @@ final class IOSMediaPlaybackCoordinator {
         coreAccess.attach(to: core)
     }
 
+    func replaceCore(with core: Flux) {
+        stopCheckpointTimer()
+        engine.pause()
+        engine.unload()
+        activeEnclosureID = nil
+        completionSent = false
+        preparedDurationMs = nil
+        lastObservedDurationMs = nil
+        preparedStatus = .notStarted
+        shouldResumeAfterInterruption = false
+        coreAccess.detach()
+        coreAccess.attach(to: core)
+        presentationState.reset()
+        try? audioSession.deactivateIfIdle()
+        onPlaybackUseChanged?()
+    }
+
     func detach() {
         Task { @MainActor [weak self] in
             guard let self else { return }
