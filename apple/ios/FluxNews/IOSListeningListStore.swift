@@ -72,7 +72,7 @@ final class IOSListeningListStore: ObservableObject {
                 }
             ) else { return }
 
-            guard let self, self.showNotesGeneration == request else { return }
+            guard let self, self.generation == request else { return }
             self.isLoading = false
             switch result {
             case let .success((feeds, validatedFeedID, items)):
@@ -159,7 +159,7 @@ final class IOSListeningListStore: ObservableObject {
                 for: core,
                 { try core.readerDocument(articleId: articleID) }
             )
-            guard let self, self.generation == request else { return }
+            guard let self, self.showNotesGeneration == request else { return }
             self.showNotesIsLoading = false
             guard let result else { return }
             switch result {
