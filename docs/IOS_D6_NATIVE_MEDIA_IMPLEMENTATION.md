@@ -537,9 +537,9 @@ No Swift workaround or new UniFFI API is introduced for D6-0.
 
 ### D6-0 — Rebuild/media Core correctness
 
-**Implementation status:** Core change and focused storage regression coverage
-are in place; final workspace test execution remains required before this
-package is marked closed.
+**Implementation status:** **CLOSED / testvalidated.** The focused regression
+tests and the full `flux-core` suite passed on 25 September 2026 after the
+retention/rebuild corrections and test-isolation follow-up.
 
 - Rebuild preserves the frozen Phase-B protecting media states plus durable
   Phase-C Listening List membership while clearing reconstructable synchronized
@@ -555,6 +555,12 @@ package is marked closed.
 - No new UniFFI media API was required.
 
 ### D6-A — App-scoped media runtime foundation
+
+**Implementation status:** **ACTIVE.** The first ownership/lifecycle slice is
+implemented: `IOSMediaRuntime` is app-scoped under `IOSAppRuntime`, shares
+the bootstrapper's `IOSCoreSessionExecutionCoordinator`, owns the existing D5
+transfer-reconciliation handoff, and participates in Core replacement/rebuild
+attach-suspend-resume-detach lifecycle before presentation is attached.
 
 - add `IOSMediaRuntime` under `IOSAppRuntime`;
 - define Core attach/detach/quiescence ownership;
