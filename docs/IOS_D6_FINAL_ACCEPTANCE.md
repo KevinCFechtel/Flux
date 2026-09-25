@@ -1,8 +1,8 @@
 # iOS D6 Final Acceptance
 
-Status: **IN PROGRESS — D6 media UX follow-ups implemented; canonical iOS revalidation plus real-device/process-boundary acceptance pending — 25 September 2026**
+Status: **IMPLEMENTATION STABLE / TESTVALIDATED — real-device UX observation window active; final D6-G process-boundary acceptance and architecture freeze intentionally deferred — 25 September 2026**
 
-This acceptance record closes the implementation portion of **D6 — Native Media & Background Downloads** and defines the remaining D6-G evidence required before D6 can be marked complete and architecture-frozen.
+This acceptance record closes and testvalidates the implementation portion of **D6 — Native Media & Background Downloads**. D6 now remains open only as a deliberate real-device UX observation window plus the retained D6-G process-boundary/final-freeze gate. D7 may proceed in parallel over the stable app-wide playback runtime.
 
 ## Current closure state
 
@@ -36,17 +36,21 @@ playback; the German D6 media string catalog was completed; and the canonical
 iOS test script now selects an available iPhone Simulator instead of assuming a
 fixed model.
 
-The corrected implementation state through
-`7acb079d77a1e5812964abd382a2fd43e6067b77` passed the canonical gates on
-25 September 2026:
+The final 25 September implementation state passed the canonical gates:
 
 - `cargo fmt --manifest-path core/Cargo.toml --all -- --check`;
-- `cargo test --manifest-path core/Cargo.toml --workspace`: 224 `flux-core`
+- `cargo test --manifest-path core/Cargo.toml --workspace`: 226 `flux-core`
   tests + 6 `flux-uniffi` tests, 0 failures;
-- `./apple/ios/Build/test.sh`: 448 tests, 0 failures, `TEST SUCCEEDED`.
+- `./apple/ios/Build/test.sh`: 459 tests, 0 failures, `TEST SUCCEEDED`.
 
-D6-G is therefore the only remaining acceptance package unless its real-device
-or process-boundary checks expose a concrete regression.
+The current D6 implementation is therefore **stable and testvalidated**.
+D6-G remains the final closure/freeze package. It is intentionally deferred
+while the current Player and Listening List spend several days in real-device
+UX use. Presentation-only refinements discovered during that observation window
+may be applied without blocking D7, provided they do not change app-wide
+playback ownership, Core durability/sync semantics, AVAudioSession/background
+execution, or the stable playback-state projection consumed by later OS
+integrations.
 
 ## Automated evidence already accepted
 
@@ -114,7 +118,18 @@ Run the real-device checks in this order so earlier failures isolate the smalles
 8. G15 — compact/regular presentation acceptance.
 9. G16-G17 — D5/D6 integration and final regression smoke.
 
-## D6 closure gate
+## D6 observation-window and closure gate
+
+Current state: **implementation-stable / testvalidated / not yet
+architecture-frozen**. D7 is allowed to proceed over the stable playback
+runtime while D6 UI/UX remains under real-device observation.
+
+Presentation-only changes remain permitted during this window, including Player
+layout, spacing, labels/icons, chapter/Show Notes presentation, buffering chrome,
+time formatting and Listening List presentation. Changes to playback semantics,
+runtime ownership, Core/Miniflux durability, AVAudioSession/background behavior,
+or transfer ownership are not considered ordinary UX polish and require an
+explicit D6 contract review.
 
 D6 may be marked **COMPLETE / architecture-frozen** when:
 
