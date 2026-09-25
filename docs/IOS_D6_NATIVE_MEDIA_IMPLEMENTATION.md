@@ -578,9 +578,12 @@ is part of D6-A.
 
 ### D6-B — Persistent background transfer executor
 
-**Implementation status:** **ACTIVE.** The first executor-foundation slice is
-implemented. iOS now has an app-owned `IOSMediaTransferCoordinator` with a
-stable bundle-scoped background-session identifier
+**Implementation status:** **ACTIVE.** The persistent executor core is now
+implemented, but final D6-B validation and playback-in-use deletion deferral are
+still open.
+
+iOS owns one app-scoped `IOSMediaTransferCoordinator` with a stable
+bundle-scoped background-session identifier
 (`<bundle-id>.mediaTransfers.v1`), launch events enabled, Core admission
 through the existing `IOSCoreSessionExecutionCoordinator`, installation into
 the existing D5 `IOSMediaTransferReconciliationHandoff`, and
@@ -588,10 +591,38 @@ the existing D5 `IOSMediaTransferReconciliationHandoff`, and
 system completion handler is gated on both URLSession delegate-event completion
 and Core reconciliation. No parallel post-sync handoff was introduced.
 
-The current `reconcile()` intentionally only reads Core settings/desired
-transfer/deletion work through the app-wide gate. OS-task restoration,
-task-description ownership, file moves, completion/failure callbacks and
-delete execution are the next D6-B slice.
+The executor now also implements:
+
+- a persisted opaque execution token derived from a SHA-256 credential
+  fingerprint; the same account/process relaunch reuses the token, a different
+  account rolls it, and explicit Core/account detach clears it;
+- versioned URLSession task descriptions carrying execution token, enclosure ID
+  and deterministic local reference;
+- cancellation of malformed/foreign/duplicate tasks;
+- restoration of matching OS-owned background download tasks;
+- startup/Core-attach reconciliation even without a buffered D5 request;
+- creation of missing download tasks from Core `Requested` work;
+- Core network-policy mapping to URLRequest expensive/constrained access;
+- executor-token namespaced media paths so a later account cannot adopt an old
+  account's files;
+- synchronous move of the URLSession temporary file into the durable Media root
+  inside `didFinishDownloadingTo`;
+- delayed Core `downloadFinished` acknowledgement after that durable move;
+- recovery where an already-moved file plus durable Core `Requested` state is
+  recognized and acknowledged after a later bootstrap/reconciliation;
+- transfer failure callbacks through the app-wide Core execution gate;
+- DeleteRequested file deletion followed by Core `downloadDeleted`;
+- shared deterministic/safe file-layout semantics with the frozen macOS path.
+
+The executor intentionally does **not** keep a second durable Swift completion
+queue. Generic orphan-file deletion is also deliberately not performed because
+the current Core API does not expose a complete global list of all
+`Downloaded` rows; deleting files merely because they are absent from
+`downloadsRequiringTransfer/deletion` would remove valid completed downloads.
+
+The remaining D6-B integration item is playback-aware deletion deferral. It is
+wired only after D6-C provides the authoritative native in-use playback runtime
+state; until then D6-B must not invent an independent playback owner.
 
 - stable background-session identifier per app identity;
 - background URLSession delegate;
