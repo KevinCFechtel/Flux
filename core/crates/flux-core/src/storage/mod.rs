@@ -173,6 +173,17 @@ impl Store {
         )
         .map_err(sql_error)?;
 
+        // Clearing the ordinary article mutation outbox also relinquishes those local
+        // desired read/star values. Protected media Articles fall back to the last remote state
+        // until the following Full Sync refreshes them.
+        tx.execute(
+            "UPDATE articles
+             SET is_read=COALESCE(remote_is_read,is_read),
+                 is_starred=COALESCE(remote_is_starred,is_starred)",
+            [],
+        )
+        .map_err(sql_error)?;
+
         tx.execute(
             "DELETE FROM articles
              WHERE NOT EXISTS(
@@ -7901,6 +7912,10 @@ mod tests {
 
         assert!(store.saved_media(1001).unwrap().is_some());
         assert!(store.is_in_listening_list(101).unwrap());
+        assert!(
+            store.local_article_state(101).unwrap().unwrap().is_read,
+            "discarded ordinary read mutation must fall back to last remote state"
+        );
         assert_eq!(
             store.playback_state(1002).unwrap().unwrap().status,
             PlaybackStatus::InProgress
