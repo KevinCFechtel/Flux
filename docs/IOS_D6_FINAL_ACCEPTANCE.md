@@ -1,24 +1,30 @@
 # iOS D6 Final Acceptance
 
-Status: **IN PROGRESS — post-closure follow-up corrections implemented; canonical revalidation plus real-device/process-boundary acceptance pending — 25 September 2026**
+Status: **IN PROGRESS — implementation and canonical automated validation complete; real-device/process-boundary acceptance pending — 25 September 2026**
 
 This acceptance record closes the implementation portion of **D6 — Native Media & Background Downloads** and defines the remaining D6-G evidence required before D6 can be marked complete and architecture-frozen.
 
 ## Current closure state
 
-D6-0 through D6-F remain implemented. Their previously accepted automated gates
-were green before the 25 September post-closure audit.
+D6-0 through D6-F are implemented and testvalidated.
 
-That audit corrected three narrow follow-ups: Preview artwork now uses the
-canonical Core artwork-source selection without preparing playback; the German
-D6 media string catalog was completed; and the canonical iOS test script now
-selects an available iPhone Simulator instead of assuming a fixed model.
+The 25 September post-closure audit corrected three narrow follow-ups: Preview
+artwork now uses the canonical Core artwork-source selection without preparing
+playback; the German D6 media string catalog was completed; and the canonical
+iOS test script now selects an available iPhone Simulator instead of assuming a
+fixed model.
 
-Because those changes are newer than the last accepted canonical run, the
-current head must pass the Rust workspace validation and
-`./apple/ios/Build/test.sh` again before D6-0 through D6-F are recorded as
-testvalidated at the new head. After that, D6-G remains the only open acceptance
-package unless the rerun exposes a concrete regression.
+The corrected implementation state through
+`7acb079d77a1e5812964abd382a2fd43e6067b77` passed the canonical gates on
+25 September 2026:
+
+- `cargo fmt --manifest-path core/Cargo.toml --all -- --check`;
+- `cargo test --manifest-path core/Cargo.toml --workspace`: 224 `flux-core`
+  tests + 6 `flux-uniffi` tests, 0 failures;
+- `./apple/ios/Build/test.sh`: 448 tests, 0 failures, `TEST SUCCEEDED`.
+
+D6-G is therefore the only remaining acceptance package unless its real-device
+or process-boundary checks expose a concrete regression.
 
 ## Automated evidence already accepted
 
