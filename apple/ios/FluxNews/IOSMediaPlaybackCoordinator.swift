@@ -696,17 +696,22 @@ final class IOSMediaPlaybackCoordinator {
     }
 
     func detach() {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.checkpoint()
-            self.stopCheckpointTimer()
-            self.engine.unload()
-            self.activeEnclosureID = nil
-            self.coreAccess.detach()
-            self.presentationState.reset()
-            self.onPlaybackUseChanged?()
-            try? self.audioSession.deactivateIfIdle()
-        }
+        // Lifecycle preparation checkpoints before Core admission is closed.
+        // Detach itself must be synchronous: callers rely on returning with no
+        // stale player ownership or presentation state from the previous Core.
+        stopCheckpointTimer()
+        engine.pause()
+        engine.unload()
+        activeEnclosureID = nil
+        completionSent = false
+        preparedDurationMs = nil
+        lastObservedDurationMs = nil
+        preparedStatus = .notStarted
+        shouldResumeAfterInterruption = false
+        coreAccess.detach()
+        presentationState.reset()
+        onPlaybackUseChanged?()
+        try? audioSession.deactivateIfIdle()
     }
 
     func suspendForCoreLifecycle() async {
