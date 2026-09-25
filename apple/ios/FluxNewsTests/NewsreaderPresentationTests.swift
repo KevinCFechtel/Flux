@@ -4053,10 +4053,10 @@ final class NewsreaderPresentationTests: XCTestCase {
 
         XCTAssertTrue(leading.performsFirstActionWithFullSwipe)
         XCTAssertEqual(leading.actions.count, 1)
-        XCTAssertEqual(leading.actions.first?.title, String(localized: "Mark as Read"))
+        XCTAssertEqual(leading.actions.first?.title, String(localized: "Swipe Read"))
         XCTAssertTrue(trailing.performsFirstActionWithFullSwipe)
         XCTAssertEqual(trailing.actions.count, 1)
-        XCTAssertEqual(trailing.actions.first?.title, String(localized: "Star"))
+        XCTAssertEqual(trailing.actions.first?.title, String(localized: "Swipe Star"))
     }
 
     func testSwipeConfigurationStoresInnerToOuterAndCapsAtTwoActions() {
