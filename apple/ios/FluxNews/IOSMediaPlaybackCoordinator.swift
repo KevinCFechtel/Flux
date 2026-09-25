@@ -351,7 +351,8 @@ final class IOSMediaAudioSessionCoordinator: IOSMediaAudioSessionManaging {
         let session = session
         let activationQueue = activationQueue
         let logger = logger
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<Void, any Error>) in
             activationQueue.async {
                 do {
                     try session.setCategory(
