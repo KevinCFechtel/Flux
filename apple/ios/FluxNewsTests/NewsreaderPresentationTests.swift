@@ -3260,8 +3260,14 @@ final class NewsreaderPresentationTests: XCTestCase {
         await gate.waitUntilStarted(count: 1)
         coordinator.replaceWindow(with: [second], visibleCount: 1)
         coordinator.replaceWindow(with: [latest], visibleCount: 1)
+
+        // Superseded Tasks are cancelled but can still enter the injected
+        // measurement closure before observing cancellation. Wait until all
+        // three generations have reached the gate before the final release;
+        // otherwise releaseAll() can race ahead of the latest generation and
+        // leave that fake measurement suspended indefinitely.
         await gate.releaseAll()
-        await gate.waitUntilStarted(count: 2)
+        await gate.waitUntilStarted(count: 3)
         await gate.releaseAll()
         await waitUntil { coordinator.snapshot().measurementsCompleted > 0 }
 
