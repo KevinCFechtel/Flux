@@ -578,7 +578,7 @@ is part of D6-A.
 
 ### D6-B — Persistent background transfer executor
 
-**Implementation status:** **ACTIVE.** The persistent executor core is now
+**Implementation status:** **CLOSED / testvalidated.** The persistent executor core is now
 implemented, but final D6-B validation and playback-in-use deletion deferral are
 still open.
 
@@ -626,7 +626,7 @@ implemented together with D6-C: DeleteRequested work consults the authoritative
 app-scoped playback runtime and defers physical deletion while that enclosure is
 still prepared/in use. Playback-use changes request another reconciliation, so
 deferred deletion is retried after the native player releases the enclosure.
-This final cross-package wiring is pending the next canonical iOS validation.
+This final cross-package wiring is validated by the canonical iOS test gate.
 
 - stable background-session identifier per app identity;
 - background URLSession delegate;
@@ -640,7 +640,7 @@ This final cross-package wiring is pending the next canonical iOS validation.
 
 ### D6-C — Playback + AVAudioSession
 
-**Implementation status:** **ACTIVE / first runtime slice testvalidated.** iOS now has an app-scoped
+**Implementation status:** **CLOSED / testvalidated.** iOS now has an app-scoped
 `IOSMediaPlaybackCoordinator` under `IOSMediaRuntime`, an
 `IOSAVPlayerPlaybackEngine`, and an iOS-specific
 `IOSMediaAudioSessionCoordinator`. Core calls are asynchronous and pass only
@@ -688,6 +688,12 @@ Now Playing/remote commands remain absent and therefore stay in D7.
 - lifecycle/relaunch tests.
 
 ### D6-D — Listening List native presentation
+
+**Implementation status:** **ACTIVE.** D6-B and D6-C runtime/execution are
+closed and testvalidated. D6-D now owns the first user-facing iOS media
+presentation over those app-scoped runtimes. The Listening List remains a
+separate read model and must not route through the frozen UIKit Article
+Timeline or its ArticleQuery fallback.
 
 - real Listening List store/read model;
 - restore navigation entry;
