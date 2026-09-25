@@ -123,6 +123,11 @@ enum IOSArticleMediaAction: Equatable {
 }
 
 enum IOSArticleAudioPresentation {
+    static func hasAudio(_ state: IOSArticleAudioActionState?) -> Bool {
+        guard let state else { return false }
+        return !state.audioEnclosures.isEmpty
+    }
+
     enum DownloadAction: Equatable {
         case download
         case pending
@@ -1035,6 +1040,18 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         let wasAtNaturalTop = structuralRevision == nil
             || abs(tableView.contentOffset.y + tableView.adjustedContentInset.top) <= 0.5
         let topEdgePolicyChanged = usesNativeTopEdgeEffect != newUsesNativeTopEdgeEffect
+        let previousAudioArticleIDs = Set(
+            audioActionStates.compactMap { articleID, state in
+                IOSArticleAudioPresentation.hasAudio(state) ? articleID : nil
+            }
+        )
+        let newAudioArticleIDs = Set(
+            newAudioActionStates.compactMap { articleID, state in
+                IOSArticleAudioPresentation.hasAudio(state) ? articleID : nil
+            }
+        )
+        let audioAvailabilityChangedIDs = previousAudioArticleIDs
+            .symmetricDifference(newAudioArticleIDs)
 
         mode = newMode
         previewLines = newPreviewLines
@@ -1045,6 +1062,17 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         markReadOnScrolloverEnabled = newMarkReadOnScrolloverEnabled
         swipeConfiguration = newSwipeConfiguration
         audioActionStates = newAudioActionStates
+        if !audioAvailabilityChangedIDs.isEmpty {
+            for cell in materializedVisibleArticleCells() {
+                guard let articleID = cell.representedArticleID,
+                      audioAvailabilityChangedIDs.contains(articleID) else {
+                    continue
+                }
+                cell.updateAudioAvailability(
+                    newAudioArticleIDs.contains(articleID)
+                )
+            }
+        }
         showsRefreshControl = newShowsRefreshControl
         naturalTopContentInset = clampedNaturalTopContentInset
         usesNativeTopEdgeEffect = newUsesNativeTopEdgeEffect
@@ -1194,6 +1222,9 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         performanceMetrics.recordConfigure()
         cell.configure(
             item: item,
+            hasAudio: IOSArticleAudioPresentation.hasAudio(
+                audioActionStates[item.article.id]
+            ),
             mode: mode,
             previewLines: previewLines,
             showRelativePublicationTime: showRelativePublicationTime,
@@ -1319,6 +1350,11 @@ final class IOSUIKitArticleTimelineController: UIViewController, UITableViewDele
         cell.updateFeedIcon(
             image: feedIconPresentationBridge?.feedIcon(for: item.article.feedId, variant: iconVariant),
             title: item.content.article.feedTitle
+        )
+        cell.updateAudioAvailability(
+            IOSArticleAudioPresentation.hasAudio(
+                audioActionStates[articleID]
+            )
         )
     }
 
@@ -2386,6 +2422,8 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private let feedIconImageView = UIImageView()
     private let feedIconFallbackLabel = UILabel()
     private let feedTitleLabel = UILabel()
+    private let audioContainer = UIView()
+    private let audioImageView = UIImageView(image: UIImage(systemName: "headphones"))
     private let publicationTimeIconView = UIImageView(image: UIImage(systemName: "clock.arrow.circlepath"))
     private let dateLabel = UILabel()
     private let landscapeReadingTimeContainer = UIView()
@@ -2417,6 +2455,9 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var landscapeImageHeightConstraint: NSLayoutConstraint!
     private var commentsWidthConstraint: NSLayoutConstraint!
     private var commentsToStarSpacingConstraint: NSLayoutConstraint!
+    private var audioWidthConstraint: NSLayoutConstraint!
+    private var audioHeightConstraint: NSLayoutConstraint!
+    private var audioToCommentsSpacingConstraint: NSLayoutConstraint!
     private var metadataFeedTitleDefaultTrailingConstraint: NSLayoutConstraint!
     private var metadataFeedTitlePortraitTrailingConstraint: NSLayoutConstraint!
     private var publicationTimeIconWidthConstraint: NSLayoutConstraint!
@@ -2483,6 +2524,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
     private var currentIsRead = false
     private var currentIsStarred = false
     private var currentHasComments = false
+    private var currentHasAudio = false
     /// Late image arrivals normally fade in. The timeline disables that
     /// transition while the table is actively moving so image pixels still
     /// appear immediately without adding overlapping Core Animation work.
@@ -2562,6 +2604,16 @@ final class IOSUIKitArticleCell: UITableViewCell {
         feedTitleLabel.numberOfLines = 1
         feedTitleLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        audioContainer.translatesAutoresizingMaskIntoConstraints = false
+        audioImageView.translatesAutoresizingMaskIntoConstraints = false
+        audioImageView.tintColor = Self.supportingTextColor
+        audioImageView.contentMode = .scaleAspectFit
+        audioContainer.addSubview(audioImageView)
+        NSLayoutConstraint.activate([
+            audioImageView.centerXAnchor.constraint(equalTo: audioContainer.centerXAnchor),
+            audioImageView.centerYAnchor.constraint(equalTo: audioContainer.centerYAnchor),
+        ])
+
         commentsContainer.translatesAutoresizingMaskIntoConstraints = false
         commentsImageView.translatesAutoresizingMaskIntoConstraints = false
         commentsImageView.tintColor = Self.supportingTextColor
@@ -2623,15 +2675,19 @@ final class IOSUIKitArticleCell: UITableViewCell {
         metadataRow.addSubview(unreadIndicator)
         metadataRow.addSubview(feedIconContainer)
         metadataRow.addSubview(feedTitleLabel)
+        metadataRow.addSubview(audioContainer)
         metadataRow.addSubview(commentsContainer)
         metadataRow.addSubview(starImageView)
+        audioWidthConstraint = audioContainer.widthAnchor.constraint(equalToConstant: 0)
+        audioHeightConstraint = audioContainer.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.commentSlotSize)
         commentsWidthConstraint = commentsContainer.widthAnchor.constraint(equalToConstant: 0)
         commentsHeightConstraint = commentsContainer.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.commentSlotSize)
         starWidth = starImageView.widthAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize)
         starHeight = starImageView.heightAnchor.constraint(equalToConstant: IOSUIKitArticleGeometry.starSlotSize)
         commentsToStarSpacingConstraint = commentsContainer.trailingAnchor.constraint(equalTo: starImageView.leadingAnchor)
+        audioToCommentsSpacingConstraint = audioContainer.trailingAnchor.constraint(equalTo: commentsContainer.leadingAnchor)
         metadataFeedTitleDefaultTrailingConstraint = feedTitleLabel.trailingAnchor.constraint(
-            equalTo: commentsContainer.leadingAnchor,
+            equalTo: audioContainer.leadingAnchor,
             constant: -IOSUIKitArticleGeometry.metadataTitleSpacing
         )
         metadataFeedTitlePortraitTrailingConstraint = feedTitleLabel.trailingAnchor.constraint(equalTo: metadataRow.trailingAnchor)
@@ -2646,6 +2702,10 @@ final class IOSUIKitArticleCell: UITableViewCell {
             metadataFeedTitleDefaultTrailingConstraint,
             feedTitleLabel.topAnchor.constraint(equalTo: metadataRow.topAnchor),
             feedTitleLabel.bottomAnchor.constraint(equalTo: metadataRow.bottomAnchor),
+            audioContainer.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
+            audioWidthConstraint,
+            audioHeightConstraint,
+            audioToCommentsSpacingConstraint,
             commentsContainer.centerYAnchor.constraint(equalTo: metadataRow.centerYAnchor),
             commentsWidthConstraint,
             commentsHeightConstraint,
@@ -3026,6 +3086,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
 
     func configure(
         item: IOSUIKitArticleTimelineItem,
+        hasAudio: Bool = false,
         mode: ArticlePresentationMode,
         previewLines: ArticlePreviewLines,
         showRelativePublicationTime: Bool = false,
@@ -3045,6 +3106,7 @@ final class IOSUIKitArticleCell: UITableViewCell {
         currentShowsRelativePublicationTime = showRelativePublicationTime
         currentPublishedDate = showRelativePublicationTime ? item.content.publishedAge : item.content.publishedDate
         currentReadingTime = item.content.readingTime
+        updateAudioAvailability(hasAudio)
         titleLabel.text = currentTitle
         feedTitleLabel.text = currentFeedTitle
         dateLabel.text = item.content.readingTime == nil
@@ -3223,11 +3285,28 @@ final class IOSUIKitArticleCell: UITableViewCell {
         landscapeReadingTimeLabel.textColor = supporting
         previewLabel.textColor = supporting
         commentsImageView.tintColor = supporting
+        audioImageView.tintColor = supporting
         let unreadOpacity = ArticlePresentationLayout.internalUnreadIndicatorOpacity(isRead: isRead)
         unreadIndicator.alpha = unreadOpacity
         // The fixed trailing/rail slot remains allocated when the star is not visible.
         starImageView.alpha = isStarred ? 1 : 0
         updateAccessibility()
+    }
+
+    func updateAudioAvailability(_ hasAudio: Bool) {
+        currentHasAudio = hasAudio
+        audioContainer.isHidden = !hasAudio
+        let slot = preparedLayoutMetrics?.starFrame.width
+            ?? IOSUIKitArticleGeometry.commentSlotSize
+        audioWidthConstraint.constant = hasAudio ? slot : 0
+        audioHeightConstraint.constant = slot
+        audioToCommentsSpacingConstraint.constant = hasAudio
+            ? -IOSUIKitArticleGeometry.metadataAccessorySpacing
+            : 0
+        landscapeReadingTimeIconView.image = UIImage(
+            systemName: hasAudio ? "headphones" : "doc.text"
+        )
+        contentView.setNeedsLayout()
     }
 
     func updateFeedIcon(image: UIImage?, title: String) {
