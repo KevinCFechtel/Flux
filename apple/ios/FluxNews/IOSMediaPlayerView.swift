@@ -46,6 +46,59 @@ struct IOSMediaPlayerView: View {
         )
     }
 
+    private var previewEnclosure: ListeningListEnclosure? {
+        guard let item else { return nil }
+        return IOSListeningListPresentation.selectedEnclosure(item)
+            ?? item.audioEnclosures.first
+    }
+
+    private var isPreviewingInactiveItem: Bool {
+        guard let item else { return false }
+        guard let loadedID = playbackState.loadedEnclosure?.id else { return true }
+        return !item.audioEnclosures.contains(where: { $0.enclosure.id == loadedID })
+    }
+
+    private var displayedTitle: String {
+        if isPreviewingInactiveItem, let item {
+            return IOSListeningListPresentation.textOrFallback(
+                item.title,
+                fallback: String(localized: "Audio")
+            )
+        }
+        return playbackState.mediaTitle.isEmpty
+            ? String(localized: "Audio")
+            : playbackState.mediaTitle
+    }
+
+    private var displayedFeedTitle: String {
+        if isPreviewingInactiveItem, let item {
+            return IOSListeningListPresentation.textOrFallback(
+                item.feedTitle,
+                fallback: String(localized: "Unknown Feed")
+            )
+        }
+        return playbackState.feedTitle
+    }
+
+    private var displayedPositionMs: UInt64 {
+        if isPreviewingInactiveItem {
+            return previewEnclosure?.playbackState?.positionMs ?? 0
+        }
+        return playbackState.positionMs
+    }
+
+    private var displayedDurationMs: UInt64? {
+        if isPreviewingInactiveItem {
+            return previewEnclosure?.durationMs
+                ?? previewEnclosure?.playbackState?.durationMs
+        }
+        return playbackState.durationMs
+    }
+
+    private var displayedIsPlaying: Bool {
+        !isPreviewingInactiveItem && playbackState.status == .playing
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -83,7 +136,8 @@ struct IOSMediaPlayerView: View {
                     Button("Done", action: onDismiss)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    if let enclosureID = playbackState.loadedEnclosure?.id {
+                    if !isPreviewingInactiveItem,
+                       let enclosureID = playbackState.loadedEnclosure?.id {
                         Button("Restart") {
                             Task {
                                 try? await playbackCoordinator.restart(
@@ -129,7 +183,7 @@ struct IOSMediaPlayerView: View {
             }
         }
         .onAppear {
-            seekPosition = Double(playbackState.positionMs)
+            seekPosition = Double(displayedPositionMs)
         }
         .task(id: artworkTaskKey) {
             await loadArtwork()
@@ -140,14 +194,14 @@ struct IOSMediaPlayerView: View {
         VStack(spacing: 24) {
             header
 
-            if let duration = playbackState.durationMs, duration > 0 {
+            if let duration = displayedDurationMs, duration > 0 {
                 VStack(spacing: 8) {
                     Slider(
                         value: Binding(
                             get: {
                                 isSeeking
                                     ? seekPosition
-                                    : Double(playbackState.positionMs)
+                                    : Double(displayedPositionMs)
                             },
                             set: { seekPosition = $0 }
                         ),
@@ -155,17 +209,19 @@ struct IOSMediaPlayerView: View {
                         onEditingChanged: { editing in
                             isSeeking = editing
                             if editing {
-                                seekPosition = Double(playbackState.positionMs)
+                                seekPosition = Double(displayedPositionMs)
                             } else {
-                                playbackCoordinator.seek(
-                                    toMs: UInt64(max(0, seekPosition))
-                                )
+                                if !isPreviewingInactiveItem {
+                                    playbackCoordinator.seek(
+                                        toMs: UInt64(max(0, seekPosition))
+                                    )
+                                }
                             }
                         }
                     )
 
                     HStack {
-                        Text(timeLabel(playbackState.positionMs))
+                        Text(timeLabel(displayedPositionMs))
                         Spacer()
                         Text(timeLabel(duration))
                     }
@@ -176,7 +232,9 @@ struct IOSMediaPlayerView: View {
 
             HStack(spacing: 30) {
                 Button {
-                    playbackCoordinator.skip(bySeconds: -15)
+                    if !isPreviewingInactiveItem {
+                        playbackCoordinator.skip(bySeconds: -15)
+                    }
                 } label: {
                     Image(systemName: "gobackward.15")
                         .font(.title2)
@@ -187,20 +245,22 @@ struct IOSMediaPlayerView: View {
                     togglePlayback()
                 } label: {
                     Image(
-                        systemName: playbackState.status == .playing
+                        systemName: displayedIsPlaying
                             ? "pause.circle.fill"
                             : "play.circle.fill"
                     )
                     .font(.system(size: 54))
                 }
                 .accessibilityLabel(
-                    playbackState.status == .playing
+                    displayedIsPlaying
                         ? String(localized: "Pause")
                         : String(localized: "Play")
                 )
 
                 Button {
-                    playbackCoordinator.skip(bySeconds: 30)
+                    if !isPreviewingInactiveItem {
+                        playbackCoordinator.skip(bySeconds: 30)
+                    }
                 } label: {
                     Image(systemName: "goforward.30")
                         .font(.title2)
@@ -214,7 +274,8 @@ struct IOSMediaPlayerView: View {
                 playerActionColumn
             }
 
-            if playbackState.isLoading || playbackState.isBuffering {
+            if !isPreviewingInactiveItem
+                && (playbackState.isLoading || playbackState.isBuffering) {
                 ProgressView(
                     playbackState.isBuffering
                         ? "Buffering…"
@@ -222,7 +283,8 @@ struct IOSMediaPlayerView: View {
                 )
             }
 
-            if let error = playbackState.errorMessage {
+            if !isPreviewingInactiveItem,
+               let error = playbackState.errorMessage {
                 Text(error)
                     .font(.footnote)
                     .foregroundStyle(.red)
@@ -297,16 +359,12 @@ struct IOSMediaPlayerView: View {
 
     private var header: some View {
         VStack(spacing: 6) {
-            Text(
-                playbackState.mediaTitle.isEmpty
-                    ? String(localized: "Audio")
-                    : playbackState.mediaTitle
-            )
+            Text(displayedTitle)
             .font(.title2.bold())
             .multilineTextAlignment(.center)
 
-            if !playbackState.feedTitle.isEmpty {
-                Text(playbackState.feedTitle)
+            if !displayedFeedTitle.isEmpty {
+                Text(displayedFeedTitle)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -380,6 +438,9 @@ struct IOSMediaPlayerView: View {
     }
 
     private var artworkTaskKey: String {
+        if isPreviewingInactiveItem {
+            return "preview:\(item?.articleId ?? -1)"
+        }
         switch playbackState.artworkSource {
         case let .some(.localReference(reference)):
             return "local:\(reference)"
@@ -393,7 +454,8 @@ struct IOSMediaPlayerView: View {
     @MainActor
     private func loadArtwork() async {
         artworkImage = nil
-        guard let source = playbackState.artworkSource else {
+        guard !isPreviewingInactiveItem,
+              let source = playbackState.artworkSource else {
             artworkIsLoading = false
             return
         }
@@ -406,6 +468,12 @@ struct IOSMediaPlayerView: View {
     }
 
     private func togglePlayback() {
+        if isPreviewingInactiveItem {
+            guard let enclosureID = previewEnclosure?.enclosure.id else { return }
+            onSelectEnclosure(enclosureID)
+            return
+        }
+
         guard let enclosureID = playbackState.loadedEnclosure?.id else { return }
         if playbackState.status == .playing {
             playbackCoordinator.pause()
