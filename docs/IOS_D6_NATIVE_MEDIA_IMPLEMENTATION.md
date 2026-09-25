@@ -668,6 +668,8 @@ The current slice implements:
 - successful account/Core replacement explicitly unloads the previous account's
   player item before attaching the new Core; aborted replacement resumes the
   original Core without destroying playback;
+- explicit detach is synchronous for player ownership and presentation reset;
+  progress checkpointing remains in the ordered pre-quiescence replacement hook;
 - playback ownership wired into D6-B deletion deferral;
 - focused fake-engine/fake-audio-session tests for resume position, checkpoints,
   interruption, route loss, playback rate, completion, duration and sleep timer.
