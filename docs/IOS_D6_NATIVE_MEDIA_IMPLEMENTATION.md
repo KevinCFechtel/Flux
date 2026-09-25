@@ -640,8 +640,7 @@ This final cross-package wiring is pending the next canonical iOS validation.
 
 ### D6-C — Playback + AVAudioSession
 
-**Implementation status:** **ACTIVE / first runtime slice implemented,
-validation pending.** iOS now has an app-scoped
+**Implementation status:** **ACTIVE / first runtime slice testvalidated.** iOS now has an app-scoped
 `IOSMediaPlaybackCoordinator` under `IOSMediaRuntime`, an
 `IOSAVPlayerPlaybackEngine`, and an iOS-specific
 `IOSMediaAudioSessionCoordinator`. Core calls are asynchronous and pass only
@@ -672,7 +671,10 @@ The current slice implements:
   progress checkpointing remains in the ordered pre-quiescence replacement hook;
 - playback ownership wired into D6-B deletion deferral;
 - focused fake-engine/fake-audio-session tests for resume position, checkpoints,
-  interruption, route loss, playback rate, completion, duration and sleep timer.
+  interruption, route loss, playback rate, completion, duration and sleep timer;
+- canonical iOS tests and macOS build are green for this runtime slice;
+- AVAudioSession activation/deactivation is serialized off the MainActor to avoid
+  the simulator/runtime main-thread hang warning while keeping the iOS 17 API floor.
 
 Now Playing/remote commands remain absent and therefore stay in D7.
 
