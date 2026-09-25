@@ -556,11 +556,16 @@ retention/rebuild corrections and test-isolation follow-up.
 
 ### D6-A — App-scoped media runtime foundation
 
-**Implementation status:** **ACTIVE.** The first ownership/lifecycle slice is
-implemented: `IOSMediaRuntime` is app-scoped under `IOSAppRuntime`, shares
-the bootstrapper's `IOSCoreSessionExecutionCoordinator`, owns the existing D5
+**Implementation status:** **IMPLEMENTED / validation pending.**
+`IOSMediaRuntime` is app-scoped under `IOSAppRuntime`, shares the
+bootstrapper's `IOSCoreSessionExecutionCoordinator`, owns the existing D5
 transfer-reconciliation handoff, and participates in Core replacement/rebuild
-attach-suspend-resume-detach lifecycle before presentation is attached.
+attach-suspend-resume-detach lifecycle before presentation is attached. It now
+also owns transient iOS playback/transfer presentation state. The first real
+Phase-C reuse is deliberately small: only the pure playback-status and
+transfer-runtime value types moved to `apple/shared/FluxApple`; the macOS and
+iOS mutable presentation owners remain platform-local. No AVPlayer,
+AVAudioSession or transfer executor is part of D6-A.
 
 - add `IOSMediaRuntime` under `IOSAppRuntime`;
 - define Core attach/detach/quiescence ownership;
