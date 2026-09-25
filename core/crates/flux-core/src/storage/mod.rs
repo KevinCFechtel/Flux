@@ -7836,12 +7836,7 @@ mod tests {
             .unwrap();
 
         store
-            .complete_playback(
-                enclosure.id,
-                Some(60_000),
-                "2026-01-01T00:00:00Z",
-                true,
-            )
+            .complete_playback(enclosure.id, Some(60_000), "2026-01-01T00:00:00Z", true)
             .unwrap();
         assert_eq!(
             store.playback_state(enclosure.id).unwrap().unwrap().status,
@@ -8011,7 +8006,9 @@ mod tests {
 
         // Protect Article 101 through SavedMedia.
         store.save_media(1001, "2026-01-01T00:00:00Z").unwrap();
-        store.add_to_listening_list(101, "2026-01-01T00:00:00Z").unwrap();
+        store
+            .add_to_listening_list(101, "2026-01-01T00:00:00Z")
+            .unwrap();
 
         // Protect Article 102 through InProgress playback + a pending media progression.
         store
@@ -8019,7 +8016,9 @@ mod tests {
             .unwrap();
 
         // Protect Article 103 through Requested download.
-        store.request_download(1003, DownloadOrigin::Manual).unwrap();
+        store
+            .request_download(1003, DownloadOrigin::Manual)
+            .unwrap();
 
         // Protect Article 104 through a completed local download and verify the physical file
         // is not treated as reconstructable cache.
@@ -8027,18 +8026,24 @@ mod tests {
         std::fs::create_dir_all(&local_dir).unwrap();
         let local_file = local_dir.join("1004.mp3");
         std::fs::write(&local_file, b"media").unwrap();
-        store.request_download(1004, DownloadOrigin::Manual).unwrap();
+        store
+            .request_download(1004, DownloadOrigin::Manual)
+            .unwrap();
         store
             .download_finished(1004, "enclosure/1004.mp3", 5)
             .unwrap();
 
         // These states are explicitly non-protecting in the frozen Phase-B contract.
-        store.request_download(1005, DownloadOrigin::Manual).unwrap();
+        store
+            .request_download(1005, DownloadOrigin::Manual)
+            .unwrap();
         store
             .download_failed(1005, DownloadFailureKind::Network)
             .unwrap();
 
-        store.request_download(1006, DownloadOrigin::Manual).unwrap();
+        store
+            .request_download(1006, DownloadOrigin::Manual)
+            .unwrap();
         let deleting_file = local_dir.join("1006.mp3");
         std::fs::write(&deleting_file, b"media").unwrap();
         store
