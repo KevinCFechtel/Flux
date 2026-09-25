@@ -4253,6 +4253,99 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertTrue(cell.accessibilityLabel?.contains(String(localized: ", starred")) == true)
     }
 
+    func testDownloadAudioSwipeActionIsConfigurableSemanticAction() {
+        XCTAssertTrue(IOSArticleSwipeAction.allCases.contains(.downloadAudio))
+        XCTAssertEqual(
+            IOSArticleSwipeAction.downloadAudio.title,
+            "Download Audio"
+        )
+        XCTAssertNil(IOSArticleSwipeAction.downloadAudio.contextAction)
+
+        let configured = IOSArticleSwipeConfiguration.defaultConfiguration
+            .setting(
+                .downloadAudio,
+                side: .trailing,
+                slot: .additional
+            )
+        XCTAssertEqual(
+            configured.additionalAction(for: .trailing),
+            .downloadAudio
+        )
+        XCTAssertEqual(
+            configured.fullSwipeAction(for: .trailing),
+            .starUnstar
+        )
+    }
+
+    func testArticleAudioPresentationFiltersDownloadableEnclosures() {
+        func enclosure(_ id: Int64) -> Enclosure {
+            Enclosure(
+                id: id,
+                articleId: 7,
+                url: "https://example.test/\(id).mp3",
+                mimeType: "audio/mpeg",
+                sizeBytes: nil,
+                remoteMediaProgressionSeconds: 0,
+                mediaKind: .audio
+            )
+        }
+
+        func download(_ id: Int64, _ state: DownloadState) -> MediaDownload {
+            MediaDownload(
+                enclosureId: id,
+                state: state,
+                origin: .manual,
+                localFile: nil,
+                fileSizeBytes: nil,
+                downloadedAt: nil,
+                failureKind: nil
+            )
+        }
+
+        let state = IOSArticleAudioActionState(
+            articleID: 7,
+            enclosures: [
+                enclosure(1),
+                enclosure(2),
+                enclosure(3),
+                enclosure(4),
+                enclosure(5),
+            ],
+            isInListeningList: false,
+            downloads: [
+                2: download(2, .requested),
+                3: download(3, .downloaded),
+                4: download(4, .deleteRequested),
+                5: download(5, .failed),
+            ]
+        )
+
+        XCTAssertEqual(
+            IOSArticleAudioPresentation.downloadableEnclosures(state).map(\.id),
+            [1, 5]
+        )
+        XCTAssertEqual(
+            IOSArticleAudioPresentation.downloadAction(state.downloads[1]),
+            .download
+        )
+        XCTAssertEqual(
+            IOSArticleAudioPresentation.downloadAction(state.downloads[2]),
+            .pending
+        )
+        XCTAssertEqual(
+            IOSArticleAudioPresentation.downloadAction(state.downloads[3]),
+            .delete
+        )
+        XCTAssertEqual(
+            IOSArticleAudioPresentation.downloadAction(state.downloads[4]),
+            .pendingDeletion
+        )
+        XCTAssertEqual(
+            IOSArticleAudioPresentation.downloadAction(state.downloads[5]),
+            .retry
+        )
+    }
+
     func testArticleContextMenuExposesDistinctNativeActions() {
         let actions: [IOSArticleContextAction] = [
             .starred, .read, .original, .reader, .miniflux, .comments, .copyLink, .share, .saveToService
