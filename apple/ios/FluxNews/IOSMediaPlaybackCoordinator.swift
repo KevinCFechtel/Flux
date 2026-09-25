@@ -47,6 +47,10 @@ protocol IOSNativePlaybackEngine: AnyObject {
 @MainActor
 final class IOSAVPlayerPlaybackEngine: IOSNativePlaybackEngine {
     private let player = AVPlayer()
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews",
+        category: "media-playback"
+    )
     private var endObserver: NSObjectProtocol?
     private var timeObserver: Any?
     private var durationObservation: NSKeyValueObservation?
@@ -92,6 +96,9 @@ final class IOSAVPlayerPlaybackEngine: IOSNativePlaybackEngine {
     }
 
     func load(url: URL, startAtMs: UInt64) {
+        logger.info(
+            "AVPlayer load scheme=\(url.scheme ?? "none", privacy: .public) local=\(url.isFileURL, privacy: .public) startMs=\(startAtMs, privacy: .public)"
+        )
         let item = AVPlayerItem(url: url)
         removeItemObservers()
         observedItem = item
@@ -113,13 +120,16 @@ final class IOSAVPlayerPlaybackEngine: IOSNativePlaybackEngine {
 
                 switch item.status {
                 case .readyToPlay:
+                    self.logger.info("AVPlayer item ready")
                     self.onLoadingChanged?(false)
                 case .failed:
-                    self.onLoadingChanged?(false)
-                    self.onError?(
-                        item.error?.localizedDescription
-                            ?? "Media playback failed."
+                    let message = item.error?.localizedDescription
+                        ?? "Media playback failed."
+                    self.logger.error(
+                        "AVPlayer item failed: \(message, privacy: .public)"
                     )
+                    self.onLoadingChanged?(false)
+                    self.onError?(message)
                 default:
                     break
                 }
@@ -190,6 +200,9 @@ final class IOSAVPlayerPlaybackEngine: IOSNativePlaybackEngine {
     }
 
     func play() {
+        logger.info(
+            "AVPlayer play rate=\(self.rate, privacy: .public)"
+        )
         player.playImmediately(atRate: Float(rate))
     }
 
@@ -680,6 +693,9 @@ final class IOSMediaPlaybackCoordinator {
         }
         self.engine.onPlaybackStateChanged = { @MainActor [weak self] isPlaying in
             guard let self else { return }
+            self.logger.info(
+                "AVPlayer playback state playing=\(isPlaying, privacy: .public)"
+            )
             if isPlaying {
                 self.presentationState.setStatus(.playing)
                 self.startCheckpointTimer()
@@ -692,6 +708,9 @@ final class IOSMediaPlaybackCoordinator {
             self?.presentationState.setBuffering(buffering)
         }
         self.engine.onError = { @MainActor [weak self] message in
+            self?.logger.error(
+                "playback engine error: \(message, privacy: .public)"
+            )
             self?.presentationState.setErrorMessage(message)
         }
 
@@ -764,14 +783,29 @@ final class IOSMediaPlaybackCoordinator {
 
     @discardableResult
     func prepare(enclosureID: Int64) async throws -> PlaybackPreparation {
+        logger.info(
+            "prepare requested enclosure=\(enclosureID, privacy: .public)"
+        )
         if activeEnclosureID != enclosureID {
             await checkpoint()
             engine.pause()
             stopCheckpointTimer()
         }
 
-        let preparation = try await coreAccess.preparePlayback(
-            enclosureID: enclosureID
+        let preparation: PlaybackPreparation
+        do {
+            preparation = try await coreAccess.preparePlayback(
+                enclosureID: enclosureID
+            )
+        } catch {
+            logger.error(
+                "prepare Core failed enclosure=\(enclosureID, privacy: .public): \(String(reflecting: error), privacy: .private)"
+            )
+            throw error
+        }
+
+        logger.info(
+            "prepare Core ok enclosure=\(enclosureID, privacy: .public) status=\(String(describing: preparation.playbackState.status), privacy: .public) localFile=\(preparation.localFile != nil, privacy: .public) durationMs=\(preparation.durationMs ?? preparation.playbackState.durationMs ?? 0, privacy: .public)"
         )
         let chapters = (try? await coreAccess.chapters(
             enclosureID: enclosureID
@@ -794,7 +828,18 @@ final class IOSMediaPlaybackCoordinator {
             durationMs: preparedDurationMs
         )
 
-        let source = try playbackURL(for: preparation)
+        let source: URL
+        do {
+            source = try playbackURL(for: preparation)
+        } catch {
+            logger.error(
+                "playback source resolution failed enclosure=\(enclosureID, privacy: .public): \(String(reflecting: error), privacy: .private)"
+            )
+            throw error
+        }
+        logger.info(
+            "playback source enclosure=\(enclosureID, privacy: .public) local=\(source.isFileURL, privacy: .public) scheme=\(source.scheme ?? "none", privacy: .public)"
+        )
         let startAt =
             preparation.playbackState.status == .inProgress
                 ? preparation.playbackState.positionMs
@@ -806,15 +851,36 @@ final class IOSMediaPlaybackCoordinator {
     }
 
     func play(enclosureID: Int64) async throws {
+        logger.info(
+            "play requested enclosure=\(enclosureID, privacy: .public) active=\(self.activeEnclosureID ?? -1, privacy: .public)"
+        )
         if activeEnclosureID != enclosureID {
             _ = try await prepare(enclosureID: enclosureID)
         }
-        guard activeEnclosureID == enclosureID,
-              preparedStatus != .completed else {
+        guard activeEnclosureID == enclosureID else {
+            logger.error(
+                "play aborted because active enclosure mismatch requested=\(enclosureID, privacy: .public) active=\(self.activeEnclosureID ?? -1, privacy: .public)"
+            )
+            return
+        }
+        guard preparedStatus != .completed else {
+            logger.notice(
+                "play ignored because enclosure is already completed enclosure=\(enclosureID, privacy: .public)"
+            )
             return
         }
 
-        try await audioSession.activate()
+        do {
+            try await audioSession.activate()
+            logger.info(
+                "audio session activated enclosure=\(enclosureID, privacy: .public)"
+            )
+        } catch {
+            logger.error(
+                "audio session activation failed enclosure=\(enclosureID, privacy: .public): \(String(reflecting: error), privacy: .private)"
+            )
+            throw error
+        }
         engine.play()
         if engine.isPlaying {
             presentationState.setStatus(.playing)
@@ -942,7 +1008,14 @@ final class IOSMediaPlaybackCoordinator {
             under: mediaRoot
            ),
            FileManager.default.isReadableFile(atPath: localURL.path) {
+            logger.info("using downloaded local media file")
             return localURL
+        }
+
+        if preparation.localFile != nil {
+            logger.notice(
+                "downloaded media reference unavailable; falling back to remote URL"
+            )
         }
 
         guard let remoteURL = URL(string: preparation.enclosure.url),
