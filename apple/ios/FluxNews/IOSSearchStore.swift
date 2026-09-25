@@ -46,6 +46,7 @@ final class IOSSearchStore: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var readCompletionFeedbackRevision: UInt64 = 0
     @Published private(set) var starCompletionFeedbackRevision: UInt64 = 0
+    @Published private(set) var articleAudioActionStates: [Int64: IOSArticleAudioActionState] = [:]
 
     private enum MutationFeedback {
         case read
@@ -59,6 +60,8 @@ final class IOSSearchStore: ObservableObject {
     private var searchReferenceDate = Date.now
     private let pageSize = IOSSearchPaginationPolicy.pageSize
     var onLocalFirstMutation: () -> Void = {}
+    var onMediaTransferReconciliationRequested: (() async -> Void)?
+    private var articleAudioActionGeneration: UInt64 = 0
 
     func attach(
         to core: Flux,
@@ -229,6 +232,151 @@ final class IOSSearchStore: ObservableObject {
         }
     }
 
+    func setArticleListeningListMembership(
+        articleID: Int64,
+        isInListeningList: Bool
+    ) async -> Result<Void, Error> {
+        await mutateArticleMedia(
+            articleID: articleID,
+            operation: { core in
+                if isInListeningList {
+                    try core.addToListeningList(articleId: articleID)
+                } else {
+                    try core.removeFromListeningList(articleId: articleID)
+                }
+            },
+            reconcileTransfers: true
+        )
+    }
+
+    func requestArticleDownload(
+        articleID: Int64,
+        enclosureID: Int64
+    ) async -> Result<Void, Error> {
+        await mutateArticleMedia(
+            articleID: articleID,
+            operation: { core in
+                try core.requestDownload(
+                    enclosureId: enclosureID,
+                    origin: .manual
+                )
+            },
+            reconcileTransfers: true
+        )
+    }
+
+    func cancelArticleDownload(
+        articleID: Int64,
+        enclosureID: Int64
+    ) async -> Result<Void, Error> {
+        await mutateArticleMedia(
+            articleID: articleID,
+            operation: { core in
+                try core.cancelDownload(enclosureId: enclosureID)
+            },
+            reconcileTransfers: true
+        )
+    }
+
+    func retryArticleDownload(
+        articleID: Int64,
+        enclosureID: Int64
+    ) async -> Result<Void, Error> {
+        await mutateArticleMedia(
+            articleID: articleID,
+            operation: { core in
+                try core.retryDownload(enclosureId: enclosureID)
+            },
+            reconcileTransfers: true
+        )
+    }
+
+    func deleteArticleDownload(
+        articleID: Int64,
+        enclosureID: Int64
+    ) async -> Result<Void, Error> {
+        await mutateArticleMedia(
+            articleID: articleID,
+            operation: { core in
+                try core.requestDownloadDeletion(enclosureId: enclosureID)
+            },
+            reconcileTransfers: true
+        )
+    }
+
+    private func loadArticleAudioActionStates(
+        for articleIDs: [Int64]
+    ) {
+        guard let core else { return }
+        articleAudioActionGeneration &+= 1
+        let generation = articleAudioActionGeneration
+        let ids = Array(Set(articleIDs))
+        guard !ids.isEmpty else {
+            articleAudioActionStates = [:]
+            return
+        }
+
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        Task { [weak self, core, sessionCoordinator] in
+            guard let result = await sessionCoordinator.responsiveResult(
+                for: core,
+                { try core.articleAudioActionStates(articleIds: ids) }
+            ) else { return }
+            guard let self,
+                  self.articleAudioActionGeneration == generation else {
+                return
+            }
+
+            switch result {
+            case let .success(values):
+                self.articleAudioActionStates = Dictionary(
+                    uniqueKeysWithValues: values.map { value in
+                        (
+                            value.articleId,
+                            IOSArticleAudioActionState(
+                                articleID: value.articleId,
+                                enclosures: value.enclosures,
+                                isInListeningList: value.isInListeningList,
+                                downloads: Dictionary(
+                                    uniqueKeysWithValues: value.downloads.map {
+                                        ($0.enclosureId, $0)
+                                    }
+                                )
+                            )
+                        )
+                    }
+                )
+            case .failure:
+                self.articleAudioActionStates = [:]
+            }
+        }
+    }
+
+    private func mutateArticleMedia(
+        articleID: Int64,
+        operation: @escaping @Sendable (Flux) throws -> Void,
+        reconcileTransfers: Bool
+    ) async -> Result<Void, Error> {
+        guard let core else {
+            return .failure(IOSCoreError.notConfigured)
+        }
+        let sessionCoordinator = coreSessionExecutionCoordinator
+        guard let result = await sessionCoordinator.responsiveResult(
+            for: core,
+            { try operation(core) }
+        ) else {
+            return .failure(IOSCoreError.notConfigured)
+        }
+
+        if case .success = result {
+            loadArticleAudioActionStates(for: results.map(\.id))
+            if reconcileTransfers {
+                await onMediaTransferReconciliationRequested?()
+            }
+        }
+        return result
+    }
+
     private func mutate(
         articleID: Int64,
         read: Bool? = nil,
@@ -299,6 +447,7 @@ final class IOSSearchStore: ObservableObject {
             items: value.map { .init(article: $0, content: ArticleRowContent(article: $0, referenceDate: searchReferenceDate)) },
             revision: timelineStructuralState.revision &+ 1
         )
+        loadArticleAudioActionStates(for: value.map(\.id))
     }
 
 }
