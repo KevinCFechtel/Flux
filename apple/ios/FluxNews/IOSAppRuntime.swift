@@ -125,7 +125,10 @@ final class IOSMediaRuntime {
         lifecycleGeneration &+= 1
         core = nil
         coreAccessState = .detached
-        transferCoordinator.detach(generation: lifecycleGeneration)
+        transferCoordinator.detach(
+            generation: lifecycleGeneration,
+            clearingAccountIdentity: true
+        )
         playbackPresentationState.reset()
     }
 }
