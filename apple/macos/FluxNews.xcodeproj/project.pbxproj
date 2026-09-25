@@ -64,6 +64,7 @@
 		A60 /* MacOSPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60 /* MacOSPresentation.swift */; };
 		A61 /* MacOSPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60 /* MacOSPresentation.swift */; };
 		A62 /* ReaderPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B61 /* ReaderPresentation.swift */; };
+		D6M1 /* MediaPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6M2 /* MediaPresentation.swift */; };
 		A6 /* Generated/flux_uniffi.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6 /* Generated/flux_uniffi.swift */; };
 		A7 /* KeyboardCommandObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7 /* KeyboardCommandObserver.swift */; };
 		A8 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8 /* CredentialStore.swift */; };
@@ -148,6 +149,7 @@
 		B56 /* MediaRemoteControlCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaRemoteControlCoordinator.swift; sourceTree = "<group>"; };
 		B60 /* MacOSPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOSPresentation.swift; sourceTree = "<group>"; };
 		B61 /* ReaderPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ReaderPresentation.swift; path = ../../shared/FluxApple/ReaderPresentation.swift; sourceTree = "<group>"; };
+		D6M2 /* MediaPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MediaPresentation.swift; path = ../../shared/FluxApple/MediaPresentation.swift; sourceTree = "<group>"; };
 		B6 /* Generated/flux_uniffi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Generated/flux_uniffi.swift; sourceTree = "<group>"; };
 		B7 /* KeyboardCommandObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardCommandObserver.swift; sourceTree = "<group>"; };
 		B8 /* CredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; };
@@ -231,6 +233,7 @@
 				B56 /* MediaRemoteControlCoordinator.swift */,
 				B60 /* MacOSPresentation.swift */,
 				B61 /* ReaderPresentation.swift */,
+				D6M2 /* MediaPresentation.swift */,
 				B31 /* FluxNews.entitlements */,
 				B13 /* FluxNewsTemplate.svg */,
 				B14 /* Localizable.xcstrings */,
@@ -440,6 +443,7 @@
 				A59 /* MediaRemoteControlCoordinator.swift in Sources */,
 				A60 /* MacOSPresentation.swift in Sources */,
 				A62 /* ReaderPresentation.swift in Sources */,
+				D6M1 /* MediaPresentation.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
