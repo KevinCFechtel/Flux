@@ -5093,7 +5093,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
         XCTAssertEqual(
             IOSMediaChapterListPresentation.title(chapter, index: 1),
-            String(localized: "Chapter 2")
+            String(localized: "Chapter \(2)", bundle: .main)
         )
     }
 
@@ -5340,7 +5340,10 @@ final class NewsreaderPresentationTests: XCTestCase {
             transfers: transfers
         )
         XCTAssertEqual(transfer?.fraction, 0.4)
-        XCTAssertEqual(transfer?.label, String(localized: "40% downloaded"))
+        XCTAssertEqual(
+            transfer?.label,
+            String(localized: "\(40)% downloaded", bundle: .main)
+        )
     }
 
     func testReaderDocumentNoticePreservesAllContentStates() {
