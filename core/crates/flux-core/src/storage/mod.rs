@@ -160,9 +160,10 @@ impl Store {
         let tx = connection.transaction().map_err(sql_error)?;
 
         // Rebuild intentionally drops ordinary article mutation/notification bookkeeping, but
-        // Phase-B media state is durable local state rather than reconstructable sync state.
-        // Keep the minimal Article -> Feed -> Category graph required by a protecting media
-        // state so SavedMedia, active/downloaded transfers and in-progress playback survive
+        // Phase-B media state and Phase-C Listening List membership are durable local state
+        // rather than reconstructable sync state. Keep the minimal Article -> Feed -> Category
+        // graph required by protecting media/listening state so Listening List, SavedMedia,
+        // active/downloaded transfers and in-progress playback survive
         // the fresh authoritative sync that follows this clear.
         tx.execute_batch(
             "DELETE FROM notification_candidate_articles;
@@ -7885,7 +7886,7 @@ mod tests {
     }
 
     #[test]
-    fn rebuild_clear_preserves_only_phase_b_media_protected_state() {
+    fn rebuild_clear_preserves_durable_media_and_listening_state() {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
