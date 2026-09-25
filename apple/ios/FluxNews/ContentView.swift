@@ -283,6 +283,93 @@ private struct IOSArticleMediaDownloadChoice: Identifiable {
     var id: String { "\(source)-\(article.id)" }
 }
 
+enum IOSActionFeedbackKind: CaseIterable, Equatable {
+    case linkCopied
+    case savedToService
+    case noThirdPartyIntegration
+    case addedToListeningList
+    case removedFromListeningList
+    case downloadRequested
+    case downloadCancelled
+    case downloadDeletionRequested
+
+    var message: String {
+        switch self {
+        case .linkCopied:
+            String(localized: "Link copied")
+        case .savedToService:
+            String(localized: "Saved to third-party service")
+        case .noThirdPartyIntegration:
+            String(localized: "No third-party integration is configured in Miniflux")
+        case .addedToListeningList:
+            String(localized: "Added to Listening List")
+        case .removedFromListeningList:
+            String(localized: "Removed from Listening List")
+        case .downloadRequested:
+            String(localized: "Download requested")
+        case .downloadCancelled:
+            String(localized: "Download cancelled")
+        case .downloadDeletionRequested:
+            String(localized: "Download deletion requested")
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .linkCopied:
+            "doc.on.doc"
+        case .savedToService:
+            "checkmark.circle.fill"
+        case .noThirdPartyIntegration:
+            "info.circle"
+        case .addedToListeningList:
+            "headphones"
+        case .removedFromListeningList:
+            "minus.circle"
+        case .downloadRequested:
+            "arrow.down.circle"
+        case .downloadCancelled:
+            "xmark.circle"
+        case .downloadDeletionRequested:
+            "trash"
+        }
+    }
+}
+
+struct IOSActionFeedbackItem: Equatable, Identifiable {
+    let id: UInt64
+    let kind: IOSActionFeedbackKind
+}
+
+enum IOSActionFeedbackPresentation {
+    static let autoDismissDelay: Duration = .seconds(3)
+
+    static func shouldDismiss(
+        current: IOSActionFeedbackItem?,
+        id: UInt64
+    ) -> Bool {
+        current?.id == id
+    }
+}
+
+private struct IOSActionFeedbackBanner: View {
+    let item: IOSActionFeedbackItem
+
+    var body: some View {
+        Label(item.kind.message, systemImage: item.kind.symbolName)
+            .font(.callout.weight(.medium))
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(radius: 4, y: 2)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(item.kind.message)
+            .allowsHitTesting(false)
+    }
+}
+
 struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -307,7 +394,8 @@ struct ContentView: View {
     @State private var readerErrorMessage: String?
     @State private var readerGeneration = 0
     @State private var sharePayload: IOSSharePayload?
-    @State private var actionConfirmation: String?
+    @State private var actionFeedback: IOSActionFeedbackItem?
+    @State private var actionFeedbackGeneration: UInt64 = 0
     @State private var actionError: String?
     @State private var markReadConfirmationPresented = false
     @State private var markReadWorkflow: IOSMarkReadWorkflow = .read
@@ -360,6 +448,10 @@ struct ContentView: View {
                 StartupView(bootstrapper: bootstrapper)
             }
         }
+        .overlay(alignment: .top) {
+            actionFeedbackOverlay(active: !searchPresented)
+        }
+        .animation(.easeInOut(duration: 0.2), value: actionFeedback?.id)
         .sheet(isPresented: $diagnosticsPresented) { DeveloperDiagnosticsView(bootstrapper: bootstrapper) }
         // A sheet rather than a pushed destination: the timeline is the detail
         // column of a split view that collapses on a phone, and a destination
@@ -374,6 +466,10 @@ struct ContentView: View {
                         }
                     }
             }
+            .overlay(alignment: .top) {
+                actionFeedbackOverlay(active: true)
+            }
+            .animation(.easeInOut(duration: 0.2), value: actionFeedback?.id)
             // Only one sheet can be presented per view, so what the results open
             // has to hang off the search sheet while it is up.
             .sheet(item: gatedBrowser(active: true)) { item in IOSInAppBrowser(url: item.url) }
@@ -438,9 +534,6 @@ struct ContentView: View {
         .alert("Action Failed", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
             Button("OK", role: .cancel) { actionError = nil }
         } message: { Text(actionError ?? "") }
-        .alert("Article Action", isPresented: Binding(get: { actionConfirmation != nil }, set: { if !$0 { actionConfirmation = nil } })) {
-            Button("OK", role: .cancel) { actionConfirmation = nil }
-        } message: { Text(actionConfirmation ?? "") }
         .sensoryFeedback(.success, trigger: saveToServiceFeedbackTrigger)
         .confirmationDialog(markReadDialogTitle, isPresented: $markReadConfirmationPresented, titleVisibility: .visible) {
             Button(markReadDialogTitle, role: .destructive) { performMarkReadWorkflow() }
@@ -897,6 +990,41 @@ struct ContentView: View {
         )
     }
 
+    @ViewBuilder
+    private func actionFeedbackOverlay(active: Bool) -> some View {
+        if active, let feedback = actionFeedback {
+            IOSActionFeedbackBanner(item: feedback)
+                .padding(.horizontal, 16)
+                .safeAreaPadding(.top, 52)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .task(id: feedback.id) {
+                    do {
+                        try await Task.sleep(
+                            for: IOSActionFeedbackPresentation.autoDismissDelay
+                        )
+                    } catch {
+                        return
+                    }
+                    guard !Task.isCancelled,
+                          IOSActionFeedbackPresentation.shouldDismiss(
+                            current: actionFeedback,
+                            id: feedback.id
+                          ) else {
+                        return
+                    }
+                    actionFeedback = nil
+                }
+        }
+    }
+
+    private func showActionFeedback(_ kind: IOSActionFeedbackKind) {
+        actionFeedbackGeneration &+= 1
+        actionFeedback = IOSActionFeedbackItem(
+            id: actionFeedbackGeneration,
+            kind: kind
+        )
+    }
+
     private func openSearch() {
         // Presenting while the navigation sheet is still dismissing loses the
         // presentation, so its dismissal callback performs it.
@@ -1024,7 +1152,7 @@ struct ContentView: View {
             browser = IOSBrowserURL(url: url)
         case .copyLink:
             UIPasteboard.general.string = article.url
-             actionConfirmation = String(localized: "Link copied")
+             showActionFeedback(.linkCopied)
         case .share:
             guard let url = IOSArticleContextMenuPolicy.originalURL(article.url) else {
                  actionError = String(localized: "The article does not have a valid web URL.")
@@ -1040,9 +1168,9 @@ struct ContentView: View {
                     }
                     switch value {
                     case .saved:
-                        actionConfirmation = String(localized: "Saved to third-party service")
+                        showActionFeedback(.savedToService)
                     case .noIntegrationConfigured:
-                        actionConfirmation = String(localized: "No third-party integration is configured in Miniflux")
+                        showActionFeedback(.noThirdPartyIntegration)
                     }
                 case let .failure(error):
                     actionError = IOSErrorPresentation.message(for: error, context: .articleAction)
@@ -1084,8 +1212,8 @@ struct ContentView: View {
                 presentArticleMediaMutationResult(
                     result,
                     success: enabled
-                        ? String(localized: "Added to Listening List")
-                        : String(localized: "Removed from Listening List")
+                        ? .addedToListeningList
+                        : .removedFromListeningList
                 )
             }
 
@@ -1097,7 +1225,7 @@ struct ContentView: View {
                 )
                 presentArticleMediaMutationResult(
                     result,
-                    success: String(localized: "Download requested")
+                    success: .downloadRequested
                 )
             }
 
@@ -1109,7 +1237,7 @@ struct ContentView: View {
                 )
                 presentArticleMediaMutationResult(
                     result,
-                    success: String(localized: "Download cancelled")
+                    success: .downloadCancelled
                 )
             }
 
@@ -1121,7 +1249,7 @@ struct ContentView: View {
                 )
                 presentArticleMediaMutationResult(
                     result,
-                    success: String(localized: "Download requested")
+                    success: .downloadRequested
                 )
             }
 
@@ -1133,7 +1261,7 @@ struct ContentView: View {
                 )
                 presentArticleMediaMutationResult(
                     result,
-                    success: String(localized: "Download deletion requested")
+                    success: .downloadDeletionRequested
                 )
             }
 
@@ -1200,18 +1328,18 @@ struct ContentView: View {
             }
             presentArticleMediaMutationResult(
                 result,
-                success: String(localized: "Download requested")
+                success: .downloadRequested
             )
         }
     }
 
     private func presentArticleMediaMutationResult(
         _ result: Result<Void, Error>,
-        success: String
+        success: IOSActionFeedbackKind
     ) {
         switch result {
         case .success:
-            actionConfirmation = success
+            showActionFeedback(success)
         case let .failure(error):
             actionError = IOSErrorPresentation.message(
                 for: error,
@@ -1253,8 +1381,8 @@ struct ContentView: View {
                 presentArticleMediaMutationResult(
                     result,
                     success: enabled
-                        ? String(localized: "Added to Listening List")
-                        : String(localized: "Removed from Listening List")
+                        ? .addedToListeningList
+                        : .removedFromListeningList
                 )
             }
 
@@ -1266,7 +1394,7 @@ struct ContentView: View {
                 )
                 presentArticleMediaMutationResult(
                     result,
-                    success: String(localized: "Download requested")
+                    success: .downloadRequested
                 )
             }
 
@@ -1278,7 +1406,7 @@ struct ContentView: View {
                 )
                 presentArticleMediaMutationResult(
                     result,
-                    success: String(localized: "Download cancelled")
+                    success: .downloadCancelled
                 )
             }
 
@@ -1290,7 +1418,7 @@ struct ContentView: View {
                 )
                 presentArticleMediaMutationResult(
                     result,
-                    success: String(localized: "Download requested")
+                    success: .downloadRequested
                 )
             }
 
@@ -1302,7 +1430,7 @@ struct ContentView: View {
                 )
                 presentArticleMediaMutationResult(
                     result,
-                    success: String(localized: "Download deletion requested")
+                    success: .downloadDeletionRequested
                 )
             }
 
@@ -1338,7 +1466,7 @@ struct ContentView: View {
             browser = IOSBrowserURL(url: url)
         case .copyLink:
             UIPasteboard.general.string = article.url
-             actionConfirmation = String(localized: "Link copied")
+             showActionFeedback(.linkCopied)
         case .share:
              guard let url = IOSArticleContextMenuPolicy.originalURL(article.url) else { actionError = String(localized: "The article does not have a valid web URL."); return }
             sharePayload = IOSSharePayload(items: [article.title, url])
@@ -1351,9 +1479,9 @@ struct ContentView: View {
                     }
                     switch value {
                     case .saved:
-                        actionConfirmation = String(localized: "Saved to third-party service")
+                        showActionFeedback(.savedToService)
                     case .noIntegrationConfigured:
-                        actionConfirmation = String(localized: "No third-party integration is configured in Miniflux")
+                        showActionFeedback(.noThirdPartyIntegration)
                     }
                 case let .failure(error):
                     actionError = IOSErrorPresentation.message(for: error, context: .articleAction)
