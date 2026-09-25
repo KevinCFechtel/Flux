@@ -689,10 +689,11 @@ Now Playing/remote commands remain absent and therefore stay in D7.
 
 ### D6-D — Listening List native presentation
 
-**Implementation status:** **ACTIVE / first presentation slice implemented,
+**Implementation status:** **ACTIVE / second presentation slice implemented,
 validation pending.** D6-B and D6-C runtime/execution are closed and
-testvalidated. D6-D now owns the first user-facing iOS media presentation over
-those app-scoped runtimes. The Listening List remains a separate read model and
+testvalidated. The first D6-D Listening List read-model/navigation slice passed
+the canonical iOS test gate. D6-D now owns the user-facing iOS media
+presentation over those app-scoped runtimes. The Listening List remains a separate read model and
 does not route through the frozen UIKit Article Timeline or its ArticleQuery
 fallback.
 
@@ -714,8 +715,29 @@ The first D6-D slice now provides:
 - compact iPhone and regular iPad both route the detail surface to the same
   native Listening List read model.
 
-Player controls, enclosure actions, Show Notes and final adaptive Player
-presentation remain the next D6-D slice.
+The second D6-D slice now additionally provides:
+
+- native Player sheet over the existing app-scoped playback coordinator;
+- Play/Pause, ±15/30 second skip, seek slider and restart;
+- 0.5x-3.0x playback-rate selection;
+- chapter selection/seeking from the already-loaded Core chapters;
+- multiple-enclosure selection without creating another playback owner;
+- per-enclosure Download / Cancel / Retry / Delete actions backed by the
+  existing Core mutation APIs;
+- Listening List removal;
+- all download mutations fan back into the existing D6-B reconciliation
+  handoff rather than a parallel executor path;
+- Show Notes loaded with `readerDocument(articleId:)` through the same
+  Core-session execution gate and rendered by the existing
+  `ReaderDocumentContent`;
+- `ReaderDocumentContent` now permits an absent Open Original action so Player
+  Show Notes can reuse the Reader renderer without fabricating an
+  `ArticleSummary` or URL;
+- focused presentation coverage for active-enclosure/runtime-progress selection
+  and download summaries.
+
+Artwork rendering and final real-device adaptive polish remain before D6-D can
+be closed.
 
 - real Listening List store/read model;
 - restore navigation entry;
