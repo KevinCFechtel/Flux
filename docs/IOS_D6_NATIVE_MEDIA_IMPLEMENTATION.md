@@ -520,8 +520,11 @@ The Core regression test
 `rebuild_clear_preserves_durable_media_and_listening_state` covers the
 protecting/non-protecting matrix, including a pure Listening List item, and
 verifies that an existing downloaded file is not discarded as reconstructable
-cache. A separate `listening_list_membership_protects_article_from_normal_retention`
-regression test covers the Phase-C retention invariant.
+cache. Separate
+`listening_list_membership_protects_article_from_normal_retention` and
+`pending_media_progress_mutation_protects_completed_article_from_retention`
+regressions cover the Phase-C Listening List invariant and the frozen Phase-B
+pending-progress protection rule during normal retention cleanup.
 
 The complete remote feed/category catalog remains authoritative. A feed absent
 from a complete remote catalog continues to be removed together with its local
@@ -542,6 +545,8 @@ package is marked closed.
   Phase-C Listening List membership while clearing reconstructable synchronized
   state.
 - Normal read-article retention now preserves Listening List membership.
+- Normal read-article retention now also honors pending MediaProgressMutation
+  protection even when playback is already Completed.
 - Ordinary read/star pending intent is discarded; pending media progression is
   preserved with its protected playback state.
 - Downloaded physical media is not invalidated by the rebuild clear.
