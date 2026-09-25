@@ -1,6 +1,5 @@
 import CryptoKit
 import Foundation
-import OSLog
 
 enum IOSMediaBackgroundTransferConfiguration {
     static var sessionIdentifier: String {
@@ -127,10 +126,7 @@ final class IOSMediaTransferCoordinator: NSObject {
     private let identityStore: IOSMediaTransferExecutionIdentityStore
     private let fileManager: FileManager
     private var isMediaInUse: (Int64) -> Bool = { _ in false }
-    private let logger = Logger(
-        subsystem: Bundle.main.bundleIdentifier ?? "dev.kevincfechtel.fluxNews",
-        category: "media-transfer"
-    )
+    private let logger = IOSAppLogger(category: "media-transfer")
 
     private var core: Flux?
     private var lifecycleGeneration: UInt64 = 0
@@ -260,7 +256,7 @@ final class IOSMediaTransferCoordinator: NSObject {
             )
         case let .failure(error):
             logger.error(
-                "media reconciliation Core query failed: \(String(reflecting: error), privacy: .private)"
+                "media reconciliation Core query failed: \(String(reflecting: error))"
             )
         }
     }
@@ -421,7 +417,7 @@ final class IOSMediaTransferCoordinator: NSObject {
                 await reportDeletion(enclosureID: work.enclosureId, core: core)
             } catch {
                 logger.error(
-                    "media deletion failed enclosure=\(work.enclosureId, privacy: .public): \(String(reflecting: error), privacy: .private)"
+                    "media deletion failed enclosure=\(work.enclosureId): \(String(reflecting: error))"
                 )
             }
         }
@@ -464,7 +460,7 @@ final class IOSMediaTransferCoordinator: NSObject {
         }
         if case let .failure(error) = result {
             logger.error(
-                "media completion callback rejected enclosure=\(enclosureID, privacy: .public): \(String(reflecting: error), privacy: .private)"
+                "media completion callback rejected enclosure=\(enclosureID): \(String(reflecting: error))"
             )
         }
         presentationState.remove(enclosureID: enclosureID)
@@ -483,7 +479,7 @@ final class IOSMediaTransferCoordinator: NSObject {
         }
         if case let .failure(error) = result {
             logger.error(
-                "media failure callback rejected enclosure=\(enclosureID, privacy: .public): \(String(reflecting: error), privacy: .private)"
+                "media failure callback rejected enclosure=\(enclosureID): \(String(reflecting: error))"
             )
         }
         presentationState.remove(enclosureID: enclosureID)
@@ -498,7 +494,7 @@ final class IOSMediaTransferCoordinator: NSObject {
         }
         if case let .failure(error) = result {
             logger.error(
-                "media deletion callback rejected enclosure=\(enclosureID, privacy: .public): \(String(reflecting: error), privacy: .private)"
+                "media deletion callback rejected enclosure=\(enclosureID): \(String(reflecting: error))"
             )
         }
         presentationState.remove(enclosureID: enclosureID)
