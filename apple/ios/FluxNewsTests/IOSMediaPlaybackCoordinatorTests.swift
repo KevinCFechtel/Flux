@@ -7,6 +7,7 @@ private final class FakeIOSPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
     var preparation: PlaybackPreparation
     var chaptersValue: [MediaChapter] = []
     var artworkData: Data?
+    var prepareError: Error?
     var checkpoints: [(Int64, UInt64, UInt64?)] = []
     var completedCalls: [(Int64, UInt64?)] = []
     var restarted: [Int64] = []
@@ -47,7 +48,8 @@ private final class FakeIOSPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
     func detach() {}
 
     func preparePlayback(enclosureID: Int64) async throws -> PlaybackPreparation {
-        preparation
+        if let prepareError { throw prepareError }
+        return preparation
     }
 
     func chapters(enclosureID: Int64) async throws -> [MediaChapter] {
@@ -158,9 +160,11 @@ private final class FakeIOSAudioSession: IOSMediaAudioSessionManaging {
 
     private(set) var activateCount = 0
     private(set) var deactivateCount = 0
+    var activationError: Error?
 
     func activate() async throws {
         activateCount += 1
+        if let activationError { throw activationError }
     }
 
     func deactivateIfIdle() {
@@ -215,6 +219,50 @@ final class IOSMediaPlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(engine.loadedStartMs, 35_000)
         XCTAssertEqual(engine.loadedURL?.absoluteString, "https://example.test/audio.mp3")
         XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
+    }
+
+    func testPlaybackStartDiagnosticIdentifiesCorePreparationFailure() async {
+        let core = FakeIOSPlaybackCoreAccess()
+        core.prepareError = NSError(
+            domain: "FluxNewsTests.Playback",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "prepare failed"]
+        )
+        let engine = FakeIOSPlaybackEngine()
+        let audio = FakeIOSAudioSession()
+        let coordinator = makeCoordinator(core: core, engine: engine, audio: audio)
+
+        do {
+            try await coordinator.play(enclosureID: 7)
+            XCTFail("Expected playback preparation to fail")
+        } catch {
+            XCTAssertEqual(
+                coordinator.lastStartFailureDescription,
+                "Playback start failed [core-prepare]: prepare failed"
+            )
+        }
+    }
+
+    func testPlaybackStartDiagnosticIdentifiesAudioSessionFailure() async {
+        let core = FakeIOSPlaybackCoreAccess()
+        let engine = FakeIOSPlaybackEngine()
+        let audio = FakeIOSAudioSession()
+        audio.activationError = NSError(
+            domain: "FluxNewsTests.Playback",
+            code: 2,
+            userInfo: [NSLocalizedDescriptionKey: "activation failed"]
+        )
+        let coordinator = makeCoordinator(core: core, engine: engine, audio: audio)
+
+        do {
+            try await coordinator.play(enclosureID: 7)
+            XCTFail("Expected audio-session activation to fail")
+        } catch {
+            XCTAssertEqual(
+                coordinator.lastStartFailureDescription,
+                "Playback start failed [audio-session]: activation failed"
+            )
+        }
     }
 
     func testPauseCheckpointsAndKeepsPreparedMediaOwned() async throws {
