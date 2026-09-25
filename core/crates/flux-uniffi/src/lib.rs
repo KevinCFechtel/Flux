@@ -1250,6 +1250,15 @@ impl Flux {
             .map(|value| value.map(Into::into))
             .map_err(map_error)
     }
+    pub fn media_artwork_source(
+        &self,
+        enclosure_id: i64,
+    ) -> Result<Option<MediaArtworkSource>, FluxError> {
+        self.core
+            .media_artwork_source(enclosure_id)
+            .map(|value| value.map(Into::into))
+            .map_err(map_error)
+    }
     pub fn media_artwork(&self, reference: String) -> Result<Option<Vec<u8>>, FluxError> {
         self.core.media_artwork(&reference).map_err(map_error)
     }
