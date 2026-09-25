@@ -57,6 +57,10 @@ Core owns:
 - enclosure identity and article relation;
 - Listening List membership and ordering;
 - playback position/status and Miniflux progression reconciliation;
+- after successful Core sync, native iOS reconciles an already loaded but idle
+  (paused/stopped) AVPlayer runtime to the Core playback position so a newer
+  cross-device Miniflux progression is reflected before the next local
+  checkpoint; actively playing audio is never force-seeked by remote sync;
 - download intent and durable download state;
 - download origin/failure semantics;
 - media metadata, chapters and artwork references;
