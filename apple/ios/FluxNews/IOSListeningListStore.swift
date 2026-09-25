@@ -210,6 +210,11 @@ final class IOSListeningListStore: ObservableObject {
 }
 
 enum IOSListeningListPresentation {
+    enum PlaybackAction: Equatable {
+        case play
+        case pause
+    }
+
     enum DownloadAction: Equatable {
         case download
         case pending
@@ -237,6 +242,16 @@ enum IOSListeningListPresentation {
                 1
             )
         }
+    }
+
+    static func playbackAction(
+        enclosureID: Int64,
+        loadedEnclosureID: Int64?,
+        status: MediaPlaybackPresentationStatus
+    ) -> PlaybackAction {
+        loadedEnclosureID == enclosureID && status == .playing
+            ? .pause
+            : .play
     }
 
     static func textOrFallback(_ value: String, fallback: String) -> String {
