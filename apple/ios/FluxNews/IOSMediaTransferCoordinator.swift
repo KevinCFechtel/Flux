@@ -191,6 +191,14 @@ final class IOSMediaTransferCoordinator: NSObject {
                 }
                 await self.reconcile()
             }
+
+            // Process relaunch/normal app startup is itself a recovery boundary.
+            // Reconcile once even when D5 has no buffered post-sync request.
+            guard self.core === core,
+                  self.lifecycleGeneration == generation else {
+                return
+            }
+            await self.reconcile()
         }
     }
 
