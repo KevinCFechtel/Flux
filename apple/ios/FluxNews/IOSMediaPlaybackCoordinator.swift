@@ -1124,6 +1124,12 @@ final class IOSMediaPlaybackCoordinator {
         await coreAccess.artworkSource(enclosureID: enclosureID)
     }
 
+    func previewChapters(
+        enclosureID: Int64
+    ) async -> [MediaChapter] {
+        (try? await coreAccess.chapters(enclosureID: enclosureID)) ?? []
+    }
+
     func artwork(source: MediaArtworkSource) async -> Data? {
         switch source {
         case let .localReference(reference):
