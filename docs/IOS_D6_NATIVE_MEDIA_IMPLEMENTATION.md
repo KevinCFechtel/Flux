@@ -765,8 +765,7 @@ The final canonical iOS validation passed; D6-D is closed.
 
 ### D6-E — Article/media actions
 
-**Implementation status:** **ACTIVE / first implementation slice complete,
-validation pending.** D6-D is closed and testvalidated. D6-E now wires media
+**Implementation status:** **CLOSED / testvalidated.** D6-D is closed and testvalidated. D6-E now wires media
 semantics into ordinary article actions without changing the frozen Timeline
 geometry/image/Scrollover architecture. Audio availability comes only from the
 batched Core projection; visible cells never issue per-row media queries.
@@ -805,6 +804,29 @@ The first D6-E slice now provides:
 - no structural Timeline changes.
 
 ### D6-F — Media policies/settings
+
+**Implementation status:** **ACTIVE / first settings slice implemented,
+validation pending.** The existing CoreSettings and FeedPreferences remain
+authoritative; iOS adds no parallel persistence.
+
+The first D6-F slice provides:
+
+- a native Media settings destination;
+- Download Network policy: Any Network / Unmetered Networks Only;
+- Download Retention: Forever / 7 / 30 / 90 days;
+- Delete Download After Playback;
+- Automatically Download Listening List Audio;
+- Remove Completed Items from Listening List;
+- rollback/error presentation when a Core settings write fails;
+- successful global media-policy writes request the existing D6-B transfer
+  reconciliation handoff;
+- per-feed "Automatically Download Audio" in the existing Feed Settings view;
+- successful per-feed auto-download changes request the same transfer
+  reconciliation handoff;
+- Core/session access stays behind the existing
+  IOSCoreSessionExecutionCoordinator;
+- focused CoreSettings read/write coverage and unconfigured feed-setting
+  failure coverage.
 
 - global media settings;
 - per-feed automatic-download setting;
