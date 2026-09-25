@@ -337,13 +337,17 @@ struct IOSMediaPlayerView: View {
             if playbackState.chapters.isEmpty {
                 Text("No Chapters")
             } else {
-                ForEach(Array(playbackState.chapters.enumerated()), id: \.offset) { _, chapter in
+                ForEach(Array(playbackState.chapters.enumerated()), id: \.offset) { index, chapter in
                     Button {
                         playbackCoordinator.seek(toMs: chapter.startMs)
                     } label: {
                         Text(
-                            chapter.title.isEmpty
-                                ? timeLabel(chapter.startMs)
+                            MediaChapterPresentation.usesGeneratedTitle(
+                                chapter.title
+                            )
+                                ? String(
+                                    localized: "Chapter \(index + 1)"
+                                )
                                 : chapter.title
                         )
                     }
