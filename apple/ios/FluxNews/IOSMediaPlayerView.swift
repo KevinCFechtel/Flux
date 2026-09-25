@@ -489,23 +489,61 @@ struct IOSMediaPlayerView: View {
     }
 
     private var rateMenu: some View {
-        Menu {
-            ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0], id: \.self) { rate in
-                Button {
-                    playbackCoordinator.setPlaybackRate(rate)
-                } label: {
-                    if playbackState.playbackRate == rate {
-                        Label(rateLabel(rate), systemImage: "checkmark")
-                    } else {
-                        Text(rateLabel(rate))
-                    }
-                }
-            }
+        Button {
+            ratePickerPresented = true
         } label: {
-            Label(rateLabel(playbackState.playbackRate), systemImage: "speedometer")
+            Label(
+                rateLabel(playbackState.playbackRate),
+                systemImage: "speedometer"
+            )
         }
         .accessibilityLabel(String(localized: "Playback speed"))
         .disabled(isPreviewingInactiveItem)
+        .popover(
+            isPresented: $ratePickerPresented,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            VStack(spacing: 18) {
+                Text("Playback speed")
+                    .font(.headline)
+
+                HStack(spacing: 20) {
+                    Button {
+                        adjustPlaybackRate(by: -0.1)
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .font(.title2)
+                    }
+                    .disabled(playbackState.playbackRate <= 0.5)
+
+                    Text(rateLabel(playbackState.playbackRate))
+                        .font(.title2.monospacedDigit())
+                        .frame(minWidth: 72)
+
+                    Button {
+                        adjustPlaybackRate(by: 0.1)
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title2)
+                    }
+                    .disabled(playbackState.playbackRate >= 3.0)
+                }
+
+                HStack(spacing: 8) {
+                    ForEach([0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
+                        Button(rateLabel(rate)) {
+                            playbackCoordinator.setPlaybackRate(rate)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
+            .padding(20)
+            .frame(minWidth: 320)
+            .presentationCompactAdaptation(.sheet)
+            .presentationDetents([.height(220)])
+        }
     }
 
     private var chapterMenu: some View {
@@ -589,6 +627,62 @@ struct IOSMediaPlayerView: View {
         }
     }
 
+    private var sleepTimerButton: some View {
+        Button {
+            sleepTimerPresented = true
+        } label: {
+            Label(
+                sleepTimer.isEnabled
+                    ? sleepTimerLabel
+                    : String(localized: "Sleep Timer"),
+                systemImage: sleepTimer.isEnabled
+                    ? "moon.zzz.fill"
+                    : "moon.zzz"
+            )
+        }
+        .popover(
+            isPresented: $sleepTimerPresented,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            VStack(alignment: .leading, spacing: 16) {
+                Toggle(
+                    "Sleep Timer",
+                    isOn: Binding(
+                        get: { sleepTimer.isEnabled },
+                        set: sleepTimer.setEnabled
+                    )
+                )
+
+                Picker(
+                    "Duration",
+                    selection: Binding(
+                        get: { sleepTimer.intervalMinutes },
+                        set: sleepTimer.setInterval
+                    )
+                ) {
+                    ForEach(
+                        IOSMediaSleepTimer.intervalsMinutes,
+                        id: \.self
+                    ) { minutes in
+                        Text("\(minutes) min").tag(minutes)
+                    }
+                }
+                .disabled(!sleepTimer.isEnabled)
+
+                if let remaining = sleepTimer.remainingSeconds {
+                    Text("Stops in \(sleepTimerRemainingLabel(remaining))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(20)
+            .frame(minWidth: 300)
+            .presentationCompactAdaptation(.sheet)
+            .presentationDetents([.height(260)])
+        }
+    }
+
     private func enclosureMenu(_ item: ListeningListItem) -> some View {
         Menu {
             ForEach(Array(item.audioEnclosures.enumerated()), id: \.element.enclosure.id) { index, enclosure in
@@ -637,6 +731,27 @@ struct IOSMediaPlayerView: View {
         guard !Task.isCancelled else { return }
         artworkImage = data.flatMap(UIImage.init(data:))
         artworkIsLoading = false
+    }
+
+    private func adjustPlaybackRate(by delta: Double) {
+        playbackCoordinator.setPlaybackRate(
+            playbackState.playbackRate + delta
+        )
+    }
+
+    private var sleepTimerLabel: String {
+        guard let remaining = sleepTimer.remainingSeconds else {
+            return String(localized: "Sleep Timer")
+        }
+        return "Sleep \(sleepTimerRemainingLabel(remaining))"
+    }
+
+    private func sleepTimerRemainingLabel(_ seconds: Int) -> String {
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+        return remainder == 0
+            ? "\(minutes)m"
+            : "\(minutes)m \(remainder)s"
     }
 
     private func togglePlayback() {
