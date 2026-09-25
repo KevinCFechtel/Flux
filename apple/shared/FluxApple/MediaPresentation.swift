@@ -23,3 +23,24 @@ struct MediaTransferRuntime: Equatable {
         return min(max(Double(bytesReceived) / Double(expectedBytes), 0), 1)
     }
 }
+
+
+enum MediaChapterPresentation {
+    static func usesGeneratedTitle(_ title: String) -> Bool {
+        let normalized = title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .filter { $0.isLetter || $0.isNumber }
+
+        guard !normalized.isEmpty else { return true }
+
+        for prefix in ["cp", "ch", "chp", "chap", "chapter"] {
+            guard normalized.hasPrefix(prefix) else { continue }
+            let suffix = normalized.dropFirst(prefix.count)
+            if !suffix.isEmpty && suffix.allSatisfy(\.isNumber) {
+                return true
+            }
+        }
+        return false
+    }
+}
