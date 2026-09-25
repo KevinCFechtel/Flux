@@ -5075,6 +5075,27 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testMediaChapterListPresentationFormatsPositionAndGeneratedTitle() {
+        XCTAssertEqual(
+            IOSMediaChapterListPresentation.positionLabel(65_000),
+            "01:05"
+        )
+        XCTAssertEqual(
+            IOSMediaChapterListPresentation.positionLabel(3_725_000),
+            "62:05"
+        )
+        let chapter = MediaChapter(
+            startMs: 65_000,
+            endMs: nil,
+            title: "cp 2",
+            source: .embedded
+        )
+        XCTAssertEqual(
+            IOSMediaChapterListPresentation.title(chapter, index: 1),
+            String(localized: "Chapter 2")
+        )
+    }
+
     func testMediaPlayerLayoutPolicyAdaptsBySizeClass() {
         XCTAssertEqual(
             IOSMediaPlayerLayoutPolicy.mode(
