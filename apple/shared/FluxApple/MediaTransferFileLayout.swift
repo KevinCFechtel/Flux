@@ -7,8 +7,17 @@ enum MediaTransferError: Error, Equatable {
 }
 
 enum MediaTransferFileLayout {
-    static func reference(enclosureID: Int64, url: String, mimeType: String) -> String {
-        "downloads/enclosure-\(enclosureID).\(audioExtension(url: url, mimeType: mimeType))"
+    static func reference(
+        executionNamespace: String? = nil,
+        enclosureID: Int64,
+        url: String,
+        mimeType: String
+    ) -> String {
+        let filename = "enclosure-\(enclosureID).\(audioExtension(url: url, mimeType: mimeType))"
+        guard let executionNamespace, !executionNamespace.isEmpty else {
+            return "downloads/\(filename)"
+        }
+        return "downloads/\(executionNamespace)/\(filename)"
     }
 
     static func audioExtension(url: String, mimeType: String) -> String {
