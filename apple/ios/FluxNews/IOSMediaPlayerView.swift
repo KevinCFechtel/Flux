@@ -42,6 +42,21 @@ enum IOSMediaPlayerPreviewPresentation {
     }
 }
 
+enum IOSMediaChapterListPresentation {
+    static func title(_ chapter: MediaChapter, index: Int) -> String {
+        MediaChapterPresentation.usesGeneratedTitle(chapter.title)
+            ? String(localized: "Chapter \(index + 1)")
+            : chapter.title
+    }
+
+    static func positionLabel(_ milliseconds: UInt64) -> String {
+        let totalSeconds = milliseconds / 1_000
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return String(format: "%02llu:%02llu", minutes, seconds)
+    }
+}
+
 enum IOSMediaPlayerLayoutPolicy {
     static func mode(
         horizontalSizeClass: UserInterfaceSizeClass?,
@@ -76,6 +91,8 @@ struct IOSMediaPlayerView: View {
     @State private var seekPosition: Double = 0
     @State private var isSeeking = false
     @State private var showNotesPresented = false
+    @State private var chapterListPresented = false
+    @State private var chapterListSnapshot: [MediaChapter] = []
     @State private var artworkImage: UIImage?
     @State private var artworkIsLoading = false
 
@@ -457,30 +474,84 @@ struct IOSMediaPlayerView: View {
     }
 
     private var chapterMenu: some View {
-        Menu {
-            if playbackState.chapters.isEmpty {
-                Text("No Chapters")
-            } else {
-                ForEach(Array(playbackState.chapters.enumerated()), id: \.offset) { index, chapter in
-                    Button {
-                        playbackCoordinator.seek(toMs: chapter.startMs)
-                    } label: {
-                        Text(
-                            MediaChapterPresentation.usesGeneratedTitle(
-                                chapter.title
-                            )
-                                ? String(
-                                    localized: "Chapter \(index + 1)"
-                                )
-                                : chapter.title
-                        )
-                    }
-                }
-            }
+        Button {
+            chapterListSnapshot = playbackState.chapters
+            chapterListPresented = true
         } label: {
             Label("Chapters", systemImage: "list.bullet.rectangle")
         }
         .disabled(isPreviewingInactiveItem || playbackState.chapters.isEmpty)
+        .popover(
+            isPresented: $chapterListPresented,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            NavigationStack {
+                List {
+                    ForEach(
+                        Array(chapterListSnapshot.enumerated()),
+                        id: \.offset
+                    ) { index, chapter in
+                        Button {
+                            playbackCoordinator.seek(toMs: chapter.startMs)
+                            chapterListPresented = false
+                        } label: {
+                            HStack(
+                                alignment: .firstTextBaseline,
+                                spacing: 12
+                            ) {
+                                Text(
+                                    IOSMediaChapterListPresentation
+                                        .positionLabel(chapter.startMs)
+                                )
+                                .font(.callout.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .frame(minWidth: 52, alignment: .leading)
+
+                                Text(
+                                    IOSMediaChapterListPresentation.title(
+                                        chapter,
+                                        index: index
+                                    )
+                                )
+                                .foregroundStyle(.primary)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(
+                                    horizontal: false,
+                                    vertical: true
+                                )
+                            }
+                            .frame(
+                                maxWidth: .infinity,
+                                alignment: .leading
+                            )
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .listStyle(.plain)
+                .navigationTitle("Chapters")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") {
+                            chapterListPresented = false
+                        }
+                    }
+                }
+            }
+            .frame(
+                minWidth: 340,
+                idealWidth: 440,
+                maxWidth: 520,
+                minHeight: 320,
+                idealHeight: 480
+            )
+            .presentationCompactAdaptation(.sheet)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private func enclosureMenu(_ item: ListeningListItem) -> some View {
