@@ -273,6 +273,21 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(IOSArticleListChromePresentation.actionPlacement(for: collapsedPersistent), .floatingTopTrailing)
     }
 
+    func testActionFeedbackClearsBottomActionBarChrome() {
+        XCTAssertEqual(
+            IOSActionFeedbackPresentation.bottomPadding(
+                hasBottomActionBar: false
+            ),
+            18
+        )
+        XCTAssertEqual(
+            IOSActionFeedbackPresentation.bottomPadding(
+                hasBottomActionBar: true
+            ),
+            72
+        )
+    }
+
     func testPassiveActionFeedbackUsesBoundedTransientPresentation() {
         XCTAssertEqual(
             IOSActionFeedbackPresentation.autoDismissDelay,
