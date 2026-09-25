@@ -19,9 +19,13 @@ Remote loading/buffering is represented by a delayed circular indicator around
 Play/Pause, while resolved local-file playback suppresses that transient chrome.
 The native iOS Listening List now opens as a Search-style fly-over without
 replacing the selected News scope, and its Player is a child sheet of that
-fly-over. The associated presentation/navigation tests were updated. Because
-these UI follow-ups are newer than the last accepted 448-test run, the canonical
-iOS gate must be rerun before the new head is recorded as testvalidated.
+fly-over. A cross-device playback regression found during Android/legacy
+FluxNews interoperability testing was also corrected: after SyncCompleted, a
+loaded but idle iOS player now adopts the reconciled Core playback position,
+while actively playing audio is never force-seeked by remote sync. The
+associated presentation/navigation/playback tests were updated. Because these
+follow-ups are newer than the last accepted 448-test run, the canonical iOS
+gate must be rerun before the new head is recorded as testvalidated.
 
 The 25 September post-closure audit corrected three narrow follow-ups: Preview
 artwork now uses the canonical Core artwork-source selection without preparing
