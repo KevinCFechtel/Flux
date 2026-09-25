@@ -61,6 +61,19 @@ enum IOSMediaChapterListPresentation {
         let seconds = totalSeconds % 60
         return String(format: "%02llu:%02llu", minutes, seconds)
     }
+
+    static func activeIndex(
+        positionMs: UInt64,
+        chapters: [MediaChapter]
+    ) -> Int? {
+        chapters.indices.last { index in
+            let chapter = chapters[index]
+            let end = chapter.endMs
+                ?? chapters.dropFirst(index + 1).first?.startMs
+            return positionMs >= chapter.startMs
+                && (end == nil || positionMs < end!)
+        }
+    }
 }
 
 enum IOSMediaPlayerLayoutPolicy {
@@ -549,6 +562,10 @@ struct IOSMediaPlayerView: View {
     private var chapterMenu: some View {
         Button {
             chapterListSnapshot = playbackState.chapters
+            chapterInitialIndex = IOSMediaChapterListPresentation.activeIndex(
+                positionMs: playbackState.positionMs,
+                chapters: playbackState.chapters
+            )
             chapterListPresented = true
         } label: {
             Label("Chapters", systemImage: "list.bullet.rectangle")
@@ -560,50 +577,91 @@ struct IOSMediaPlayerView: View {
             arrowEdge: .bottom
         ) {
             NavigationStack {
-                List {
-                    ForEach(
-                        Array(chapterListSnapshot.enumerated()),
-                        id: \.offset
-                    ) { index, chapter in
-                        Button {
-                            playbackCoordinator.seek(toMs: chapter.startMs)
-                            chapterListPresented = false
-                        } label: {
-                            HStack(
-                                alignment: .firstTextBaseline,
-                                spacing: 12
-                            ) {
-                                Text(
-                                    IOSMediaChapterListPresentation
-                                        .positionLabel(chapter.startMs)
-                                )
-                                .font(.callout.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .frame(minWidth: 52, alignment: .leading)
-
-                                Text(
-                                    IOSMediaChapterListPresentation.title(
-                                        chapter,
-                                        index: index
+                ScrollViewReader { proxy in
+                    List {
+                        ForEach(
+                            Array(chapterListSnapshot.enumerated()),
+                            id: \.offset
+                        ) { index, chapter in
+                            let isActive = IOSMediaChapterListPresentation
+                                .activeIndex(
+                                    positionMs: playbackState.positionMs,
+                                    chapters: chapterListSnapshot
+                                ) == index
+                            Button {
+                                playbackCoordinator.seek(toMs: chapter.startMs)
+                                chapterListPresented = false
+                            } label: {
+                                HStack(
+                                    alignment: .firstTextBaseline,
+                                    spacing: 12
+                                ) {
+                                    Image(
+                                        systemName: isActive
+                                            ? "play.fill"
+                                            : "circle.fill"
                                     )
+                                    .font(.caption2)
+                                    .foregroundStyle(
+                                        isActive
+                                            ? Color.accentColor
+                                            : Color.clear
+                                    )
+                                    .frame(width: 12)
+
+                                    Text(
+                                        IOSMediaChapterListPresentation
+                                            .positionLabel(chapter.startMs)
+                                    )
+                                    .font(.callout.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                    .frame(minWidth: 52, alignment: .leading)
+
+                                    Text(
+                                        IOSMediaChapterListPresentation.title(
+                                            chapter,
+                                            index: index
+                                        )
+                                    )
+                                    .fontWeight(
+                                        isActive ? .semibold : .regular
+                                    )
+                                    .foregroundStyle(.primary)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(
+                                        horizontal: false,
+                                        vertical: true
+                                    )
+                                }
+                                .frame(
+                                    maxWidth: .infinity,
+                                    alignment: .leading
                                 )
-                                .foregroundStyle(.primary)
-                                .multilineTextAlignment(.leading)
-                                .fixedSize(
-                                    horizontal: false,
-                                    vertical: true
+                                .padding(.vertical, 3)
+                                .background(
+                                    isActive
+                                        ? Color.accentColor.opacity(0.10)
+                                        : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 8)
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .id(index)
+                        }
+                    }
+                    .listStyle(.plain)
+                    .onAppear {
+                        if let chapterInitialIndex {
+                            DispatchQueue.main.async {
+                                proxy.scrollTo(
+                                    chapterInitialIndex,
+                                    anchor: .center
                                 )
                             }
-                            .frame(
-                                maxWidth: .infinity,
-                                alignment: .leading
-                            )
-                            .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
                     }
                 }
-                .listStyle(.plain)
                 .navigationTitle("Chapters")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
