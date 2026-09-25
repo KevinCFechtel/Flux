@@ -49,15 +49,23 @@ struct NewsNavigationView: View {
     var store: NewsreaderStore
     @Binding var sheetPresented: Bool
     let presentation: NewsNavigationPresentation
+    let onListeningList: () -> Void
     let onSearch: () -> Void
     @State private var addDestination: IOSNavigationAddDestination?
     @State private var feedSettingsTarget: IOSFeedSettingsTarget?
     @State private var expansionState = NewsNavigationExpansionState()
 
-    init(store: NewsreaderStore, sheetPresented: Binding<Bool>, presentation: NewsNavigationPresentation, onSearch: @escaping () -> Void = {}) {
+    init(
+        store: NewsreaderStore,
+        sheetPresented: Binding<Bool>,
+        presentation: NewsNavigationPresentation,
+        onListeningList: @escaping () -> Void = {},
+        onSearch: @escaping () -> Void = {}
+    ) {
         self.store = store
         self._sheetPresented = sheetPresented
         self.presentation = presentation
+        self.onListeningList = onListeningList
         self.onSearch = onSearch
     }
 
@@ -79,7 +87,7 @@ struct NewsNavigationView: View {
             Section("News") {
                 scopeRow("All News", systemImage: "newspaper", scope: .all, count: store.unreadTotal)
                 scopeRow("Starred", systemImage: "star", scope: .starred, count: store.starredTotal)
-                scopeRow("Listening List", systemImage: "headphones", scope: .listeningList, count: 0)
+                listeningListRow
                 searchRow
             }
             Section("Feeds") {
@@ -136,6 +144,20 @@ struct NewsNavigationView: View {
     }
 
     private func feedTitle(_ feedID: Int64) -> String { store.catalog.feeds.first { $0.id == feedID }?.title ?? String(localized: "Feed") }
+    private var listeningListRow: some View {
+        Button(action: requestListeningList) {
+            Label {
+                Text("Listening List")
+                    .foregroundStyle(.primary)
+            } icon: {
+                Image(systemName: "headphones")
+                    .foregroundStyle(.tint)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("navigation.listeningList")
+    }
+
     private var searchRow: some View {
         Button(action: requestSearch) {
             Label {
@@ -148,6 +170,12 @@ struct NewsNavigationView: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("navigation.search")
+    }
+
+    private func requestListeningList() {
+        // Like Search, the host owns presentation sequencing so the transient
+        // navigation sheet can fully dismiss before the Listening List appears.
+        onListeningList()
     }
 
     private func requestSearch() {
