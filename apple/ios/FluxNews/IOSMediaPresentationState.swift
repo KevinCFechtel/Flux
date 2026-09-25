@@ -1,6 +1,11 @@
 import Combine
 import Foundation
 
+enum IOSMediaPlaybackSource: Equatable, Hashable {
+    case local
+    case remote
+}
+
 @MainActor
 final class IOSMediaPlaybackPresentationState: ObservableObject {
     @Published private(set) var loadedEnclosure: Enclosure?
@@ -11,6 +16,7 @@ final class IOSMediaPlaybackPresentationState: ObservableObject {
     @Published private(set) var status: MediaPlaybackPresentationStatus = .stopped
     @Published private(set) var positionMs: UInt64 = 0
     @Published private(set) var durationMs: UInt64?
+    @Published private(set) var playbackSource: IOSMediaPlaybackSource?
     @Published private(set) var isLoading = false
     @Published private(set) var isBuffering = false
     @Published private(set) var errorMessage: String?
@@ -25,6 +31,7 @@ final class IOSMediaPlaybackPresentationState: ObservableObject {
         status = .stopped
         positionMs = 0
         durationMs = nil
+        playbackSource = nil
         isLoading = false
         isBuffering = false
         errorMessage = nil
@@ -47,6 +54,7 @@ final class IOSMediaPlaybackPresentationState: ObservableObject {
         self.chapters = chapters
         self.positionMs = positionMs
         self.durationMs = durationMs
+        playbackSource = nil
         status = .paused
         isLoading = false
         isBuffering = false
@@ -63,6 +71,10 @@ final class IOSMediaPlaybackPresentationState: ObservableObject {
 
     func setDuration(_ durationMs: UInt64?) {
         self.durationMs = durationMs
+    }
+
+    func setPlaybackSource(_ playbackSource: IOSMediaPlaybackSource?) {
+        self.playbackSource = playbackSource
     }
 
     func setLoading(_ isLoading: Bool) {
