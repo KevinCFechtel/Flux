@@ -556,16 +556,18 @@ retention/rebuild corrections and test-isolation follow-up.
 
 ### D6-A — App-scoped media runtime foundation
 
-**Implementation status:** **IMPLEMENTED / validation pending.**
+**Implementation status:** **CLOSED / testvalidated.**
 `IOSMediaRuntime` is app-scoped under `IOSAppRuntime`, shares the
 bootstrapper's `IOSCoreSessionExecutionCoordinator`, owns the existing D5
 transfer-reconciliation handoff, and participates in Core replacement/rebuild
-attach-suspend-resume-detach lifecycle before presentation is attached. It now
-also owns transient iOS playback/transfer presentation state. The first real
-Phase-C reuse is deliberately small: only the pure playback-status and
-transfer-runtime value types moved to `apple/shared/FluxApple`; the macOS and
-iOS mutable presentation owners remain platform-local. No AVPlayer,
-AVAudioSession or transfer executor is part of D6-A.
+attach-suspend-resume-detach lifecycle before presentation is attached. It also
+owns transient iOS playback/transfer presentation state. The first real
+Phase-C reuse is deliberately small: only pure playback-status,
+transfer-runtime and deterministic media-file-layout values live in
+`apple/shared/FluxApple`; the macOS and iOS mutable presentation/execution
+owners remain platform-local. Canonical iOS tests and the macOS app build passed
+on 25 September 2026 after the shared extraction. No AVPlayer or AVAudioSession
+is part of D6-A.
 
 - add `IOSMediaRuntime` under `IOSAppRuntime`;
 - define Core attach/detach/quiescence ownership;
@@ -575,6 +577,21 @@ AVAudioSession or transfer executor is part of D6-A.
 - no UI yet.
 
 ### D6-B — Persistent background transfer executor
+
+**Implementation status:** **ACTIVE.** The first executor-foundation slice is
+implemented. iOS now has an app-owned `IOSMediaTransferCoordinator` with a
+stable bundle-scoped background-session identifier
+(`<bundle-id>.mediaTransfers.v1`), launch events enabled, Core admission
+through the existing `IOSCoreSessionExecutionCoordinator`, installation into
+the existing D5 `IOSMediaTransferReconciliationHandoff`, and
+`UIApplicationDelegate.handleEventsForBackgroundURLSession` routing. The
+system completion handler is gated on both URLSession delegate-event completion
+and Core reconciliation. No parallel post-sync handoff was introduced.
+
+The current `reconcile()` intentionally only reads Core settings/desired
+transfer/deletion work through the app-wide gate. OS-task restoration,
+task-description ownership, file moves, completion/failure callbacks and
+delete execution are the next D6-B slice.
 
 - stable background-session identifier per app identity;
 - background URLSession delegate;
