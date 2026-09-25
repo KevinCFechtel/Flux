@@ -3,6 +3,11 @@ import Combine
 import Foundation
 import MediaPlayer
 
+// Compatibility names keep the existing Phase-C test surface while the
+// implementation itself is owned by the shared Apple semantic layer.
+typealias NowPlayingProjection = AppleNowPlayingProjection
+typealias MediaRemoteCommand = AppleMediaRemoteCommand
+
 enum NowPlayingArtwork {
     static func fallbackData(bundle: Bundle = .main) -> Data? {
         guard let url = bundle.url(forResource: "FallbackArtwork", withExtension: "png") else { return nil }
