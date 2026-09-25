@@ -5,6 +5,10 @@ struct DeveloperDiagnosticsView: View {
     @State private var legacyResult = LegacyStateDiscovery.probe()
     @State private var imageCacheDiagnostics: ArticleImageCacheDiagnosticsSnapshot?
     @State private var imagePresentationDiagnostics: ArticleImagePresentationDiagnosticsSnapshot?
+    @State private var debugLoggingEnabled = IOSAppDiagnostics.shared.isDebugLoggingEnabled
+    @State private var diagnosticsCount = IOSAppDiagnostics.shared.count
+    @State private var diagnosticsExportURL: URL?
+    @State private var diagnosticsExportError: String?
 
     var body: some View {
         NavigationStack {
@@ -14,6 +18,46 @@ struct DeveloperDiagnosticsView: View {
                     if case let .ready(health) = bootstrapper.state { LabeledContent("Smoke test", value: health) }
                     if case let .recoverableError(message) = bootstrapper.state { Text(message).foregroundStyle(.red) }
                 }
+                Section("Support Diagnostics") {
+                    Toggle("Debug Logging", isOn: Binding(
+                        get: { debugLoggingEnabled },
+                        set: { enabled in
+                            debugLoggingEnabled = enabled
+                            IOSAppDiagnostics.shared.setDebugLoggingEnabled(enabled)
+                            refreshSupportDiagnostics()
+                        }
+                    ))
+
+                    LabeledContent("Stored records", value: "\(diagnosticsCount)")
+
+                    Button("Prepare Diagnostics Export") {
+                        prepareDiagnosticsExport()
+                    }
+
+                    if let diagnosticsExportURL {
+                        ShareLink(item: diagnosticsExportURL) {
+                            Label("Export Diagnostics", systemImage: "square.and.arrow.up")
+                        }
+                    }
+
+                    Button("Clear Diagnostics", role: .destructive) {
+                        IOSAppDiagnostics.shared.clear()
+                        diagnosticsExportURL = nil
+                        diagnosticsExportError = nil
+                        refreshSupportDiagnostics()
+                    }
+
+                    if let diagnosticsExportError {
+                        Text(diagnosticsExportError)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+
+                    Text("Info, warning and error diagnostics are stored in a bounded local support log. Debug and trace records are added only while Debug Logging is enabled. Credentials and registered custom-header values are redacted before persistence and export.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Sandbox paths") { Text(bootstrapper.pathsDescription).font(.footnote.monospaced()).textSelection(.enabled) }
                 Section("Legacy migration feasibility") {
                     ForEach(LegacyStateDiscovery.redactedSummary(legacyResult).sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
@@ -93,6 +137,7 @@ struct DeveloperDiagnosticsView: View {
             .task {
                 await refreshImageCacheDiagnostics()
                 refreshImagePresentationDiagnostics()
+                refreshSupportDiagnostics()
             }
         }
     }
@@ -107,6 +152,22 @@ struct DeveloperDiagnosticsView: View {
         imagePresentationDiagnostics = ArticleImagePresentationDiagnosticsSnapshot(
             metrics: IOSArticleImagePresentationScheduler.shared.metrics()
         )
+    }
+
+    private func refreshSupportDiagnostics() {
+        debugLoggingEnabled = IOSAppDiagnostics.shared.isDebugLoggingEnabled
+        diagnosticsCount = IOSAppDiagnostics.shared.count
+    }
+
+    private func prepareDiagnosticsExport() {
+        do {
+            diagnosticsExportURL = try IOSAppDiagnostics.shared.makeExportURL()
+            diagnosticsExportError = nil
+            refreshSupportDiagnostics()
+        } catch {
+            diagnosticsExportURL = nil
+            diagnosticsExportError = error.localizedDescription
+        }
     }
 
     private func localizedDiagnosticLabel(_ key: String) -> String {
