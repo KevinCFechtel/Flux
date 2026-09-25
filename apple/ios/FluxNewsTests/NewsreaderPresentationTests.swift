@@ -5110,11 +5110,11 @@ final class NewsreaderPresentationTests: XCTestCase {
     func testMediaChapterListPresentationFormatsPositionAndGeneratedTitle() {
         XCTAssertEqual(
             IOSMediaChapterListPresentation.positionLabel(65_000),
-            "01:05"
+            "1:05"
         )
         XCTAssertEqual(
             IOSMediaChapterListPresentation.positionLabel(3_725_000),
-            "62:05"
+            "1:02:05"
         )
         let chapter = MediaChapter(
             enclosureId: 7,
