@@ -343,6 +343,13 @@ struct IOSActionFeedbackItem: Equatable, Identifiable {
 
 enum IOSActionFeedbackPresentation {
     static let autoDismissDelay: Duration = .seconds(3)
+    static let baseBottomPadding: CGFloat = 18
+    static let bottomActionBarClearance: CGFloat = 54
+
+    static func bottomPadding(hasBottomActionBar: Bool) -> CGFloat {
+        baseBottomPadding
+            + (hasBottomActionBar ? bottomActionBarClearance : 0)
+    }
 
     static func shouldDismiss(
         current: IOSActionFeedbackItem?,
@@ -464,7 +471,12 @@ struct ContentView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            actionFeedbackOverlay(active: !searchPresented)
+            actionFeedbackOverlay(
+                active: !searchPresented,
+                hasBottomActionBar:
+                    newsreaderStore.scope != .listeningList
+                        && articleListChromeMode == .compactPortrait
+            )
         }
         .animation(.easeInOut(duration: 0.2), value: actionFeedback?.id)
         .sheet(isPresented: $diagnosticsPresented) { DeveloperDiagnosticsView(bootstrapper: bootstrapper) }
@@ -482,7 +494,10 @@ struct ContentView: View {
                     }
             }
             .overlay(alignment: .bottom) {
-                actionFeedbackOverlay(active: true)
+                actionFeedbackOverlay(
+                    active: true,
+                    hasBottomActionBar: false
+                )
             }
             .animation(.easeInOut(duration: 0.2), value: actionFeedback?.id)
             // Only one sheet can be presented per view, so what the results open
@@ -667,6 +682,20 @@ struct ContentView: View {
         ) else {
             return
         }
+
+        let playbackState = IOSAppRuntime.shared.mediaRuntime
+            .playbackPresentationState
+        if let loadedEnclosureID = playbackState.loadedEnclosure?.id,
+           item.audioEnclosures.contains(
+               where: { $0.enclosure.id == loadedEnclosureID }
+           ) {
+            // Opening the Player for the item that already owns the prepared or
+            // playing enclosure is presentation-only. Re-preparing here would
+            // reload the last persisted Core checkpoint and seek active playback
+            // backwards.
+            return
+        }
+
         let preferred = IOSListeningListPresentation.selectedEnclosure(item)
             ?? item.audioEnclosures.first
         guard let enclosureID = preferred?.enclosure.id else { return }
@@ -1039,11 +1068,19 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func actionFeedbackOverlay(active: Bool) -> some View {
+    private func actionFeedbackOverlay(
+        active: Bool,
+        hasBottomActionBar: Bool
+    ) -> some View {
         if active, let feedback = actionFeedback {
             IOSActionFeedbackBanner(item: feedback)
                 .padding(.horizontal, 16)
-                .safeAreaPadding(.bottom, 18)
+                .safeAreaPadding(
+                    .bottom,
+                    IOSActionFeedbackPresentation.bottomPadding(
+                        hasBottomActionBar: hasBottomActionBar
+                    )
+                )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .task(id: feedback.id) {
                     do {
