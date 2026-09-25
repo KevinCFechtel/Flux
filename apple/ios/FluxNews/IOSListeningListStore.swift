@@ -127,6 +127,7 @@ enum IOSListeningListPresentation {
             : nil
     }
 
+    @MainActor
     static func progress(
         _ item: ListeningListItem,
         runtime: IOSMediaPlaybackPresentationState
