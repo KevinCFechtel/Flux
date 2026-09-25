@@ -7,7 +7,7 @@ private final class FakeIOSPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
     var preparation: PlaybackPreparation
     var chaptersValue: [MediaChapter] = []
     var checkpoints: [(Int64, UInt64, UInt64?)] = []
-    var completed: [(Int64, UInt64?)] = []
+    var completedCalls: [(Int64, UInt64?)] = []
     var restarted: [Int64] = []
     var observedDurations: [(Int64, UInt64)] = []
 
@@ -62,7 +62,7 @@ private final class FakeIOSPlaybackCoreAccess: IOSMediaPlaybackCoreAccessing {
     }
 
     func completed(enclosureID: Int64, durationMs: UInt64?) async throws {
-        completed.append((enclosureID, durationMs))
+        completedCalls.append((enclosureID, durationMs))
     }
 
     func restart(enclosureID: Int64) async throws {
@@ -341,8 +341,8 @@ final class IOSMediaPlaybackCoordinatorTests: XCTestCase {
         await Task.yield()
         await Task.yield()
 
-        XCTAssertEqual(core.completed.count, 1)
-        XCTAssertEqual(core.completed.first?.0, 7)
+        XCTAssertEqual(core.completedCalls.count, 1)
+        XCTAssertEqual(core.completedCalls.first?.0, 7)
         XCTAssertEqual(useChanges, 2)
     }
 
