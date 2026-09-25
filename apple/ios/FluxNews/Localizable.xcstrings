@@ -611,6 +611,16 @@
         }
       }
     },
+    "Swipe Download Audio": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio herunterladen"
+          }
+        }
+      }
+    },
     "Download metadata": {
       "extractionState": "stale",
       "localizations": {
