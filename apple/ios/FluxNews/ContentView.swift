@@ -261,10 +261,16 @@ private struct IOSArticleMediaPlayerPresentation: Identifiable {
     var id: String { "\(article.id):\(enclosureID)" }
 }
 
+private enum IOSArticleMediaSource {
+    case news
+    case search
+}
+
 private struct IOSArticleMediaDownloadChoice: Identifiable {
     let article: ArticleSummary
     let enclosures: [Enclosure]
-    var id: Int64 { article.id }
+    let source: IOSArticleMediaSource
+    var id: String { "\(source)-\(article.id)" }
 }
 
 struct ContentView: View {
@@ -412,7 +418,8 @@ struct ContentView: View {
                     ) {
                         performArticleDownload(
                             article: choice.article,
-                            enclosure: enclosure
+                            enclosure: enclosure,
+                            source: choice.source
                         )
                         articleMediaDownloadChoice = nil
                     }
@@ -468,8 +475,13 @@ struct ContentView: View {
                     await IOSAppRuntime.shared.mediaTransferReconciliationHandoff
                         .requestReconciliation()
                 }
+                searchStore.onMediaTransferReconciliationRequested = {
+                    await IOSAppRuntime.shared.mediaTransferReconciliationHandoff
+                        .requestReconciliation()
+                }
                 searchStore.onLocalFirstMutation = { newsreaderStore.loadNavigationAndCounts() }
             } else {
+                searchStore.onMediaTransferReconciliationRequested = nil
                 searchStore.detach()
                 listeningListStore.onTransferReconciliationRequested = nil
                 newsreaderStore.onMediaTransferReconciliationRequested = nil
@@ -734,7 +746,19 @@ struct ContentView: View {
     }
 
     private var searchView: some View {
-        SearchView(store: searchStore, newsreaderStore: newsreaderStore, onArticleTap: openSearchArticle, onArticleAction: handleSearchArticleAction, onSetRead: { article, read in searchStore.setRead(article, read: read) }, onSetStarred: { article, starred in searchStore.setStarred(article, starred: starred) })
+        SearchView(
+            store: searchStore,
+            newsreaderStore: newsreaderStore,
+            onArticleTap: openSearchArticle,
+            onArticleAction: handleSearchArticleAction,
+            onArticleMediaAction: handleSearchArticleMediaAction,
+            onSetRead: { article, read in
+                searchStore.setRead(article, read: read)
+            },
+            onSetStarred: { article, starred in
+                searchStore.setStarred(article, starred: starred)
+            }
+        )
     }
 
     private func openSearch() {
@@ -984,12 +1008,14 @@ struct ContentView: View {
             if enclosures.count == 1, let enclosure = enclosures.first {
                 performArticleDownload(
                     article: article,
-                    enclosure: enclosure
+                    enclosure: enclosure,
+                    source: .news
                 )
             } else if !enclosures.isEmpty {
                 articleMediaDownloadChoice = .init(
                     article: article,
-                    enclosures: enclosures
+                    enclosures: enclosures,
+                    source: .news
                 )
             }
         }
@@ -997,26 +1023,43 @@ struct ContentView: View {
 
     private func performArticleDownload(
         article: ArticleSummary,
-        enclosure: Enclosure
+        enclosure: Enclosure,
+        source: IOSArticleMediaSource
     ) {
+        let state = switch source {
+        case .news:
+            newsreaderStore.articleAudioActionStates[article.id]
+        case .search:
+            searchStore.articleAudioActionStates[article.id]
+        }
         let action = IOSArticleAudioPresentation.downloadAction(
-            newsreaderStore.articleAudioActionStates[article.id]?
-                .downloads[enclosure.id]
+            state?.downloads[enclosure.id]
         )
+
         Task {
             let result: Result<Void, Error>
-            switch action {
-            case .retry:
+            switch (source, action) {
+            case (.news, .retry):
                 result = await newsreaderStore.retryArticleDownload(
                     articleID: article.id,
                     enclosureID: enclosure.id
                 )
-            case .download:
+            case (.news, .download):
                 result = await newsreaderStore.requestArticleDownload(
                     articleID: article.id,
                     enclosureID: enclosure.id
                 )
-            case .pending, .delete, .pendingDeletion:
+            case (.search, .retry):
+                result = await searchStore.retryArticleDownload(
+                    articleID: article.id,
+                    enclosureID: enclosure.id
+                )
+            case (.search, .download):
+                result = await searchStore.requestArticleDownload(
+                    articleID: article.id,
+                    enclosureID: enclosure.id
+                )
+            case (_, .pending), (_, .delete), (_, .pendingDeletion):
                 return
             }
             presentArticleMediaMutationResult(
@@ -1038,6 +1081,112 @@ struct ContentView: View {
                 for: error,
                 context: .articleAction
             )
+        }
+    }
+
+    private func handleSearchArticleMediaAction(
+        _ article: ArticleSummary,
+        _ action: IOSArticleMediaAction
+    ) {
+        switch action {
+        case let .play(enclosureID):
+            articleMediaPlayer = .init(
+                article: article,
+                enclosureID: enclosureID
+            )
+            Task {
+                do {
+                    try await IOSAppRuntime.shared.mediaRuntime
+                        .playbackCoordinator.play(enclosureID: enclosureID)
+                } catch {
+                    actionError = IOSErrorPresentation.message(
+                        for: error,
+                        context: .articleAction
+                    )
+                    articleMediaPlayer = nil
+                }
+            }
+
+        case let .setListeningList(enabled):
+            Task {
+                let result = await searchStore
+                    .setArticleListeningListMembership(
+                        articleID: article.id,
+                        isInListeningList: enabled
+                    )
+                presentArticleMediaMutationResult(
+                    result,
+                    success: enabled
+                        ? String(localized: "Added to Listening List")
+                        : String(localized: "Removed from Listening List")
+                )
+            }
+
+        case let .requestDownload(enclosureID):
+            Task {
+                let result = await searchStore.requestArticleDownload(
+                    articleID: article.id,
+                    enclosureID: enclosureID
+                )
+                presentArticleMediaMutationResult(
+                    result,
+                    success: String(localized: "Download requested")
+                )
+            }
+
+        case let .cancelDownload(enclosureID):
+            Task {
+                let result = await searchStore.cancelArticleDownload(
+                    articleID: article.id,
+                    enclosureID: enclosureID
+                )
+                presentArticleMediaMutationResult(
+                    result,
+                    success: String(localized: "Download cancelled")
+                )
+            }
+
+        case let .retryDownload(enclosureID):
+            Task {
+                let result = await searchStore.retryArticleDownload(
+                    articleID: article.id,
+                    enclosureID: enclosureID
+                )
+                presentArticleMediaMutationResult(
+                    result,
+                    success: String(localized: "Download requested")
+                )
+            }
+
+        case let .deleteDownload(enclosureID):
+            Task {
+                let result = await searchStore.deleteArticleDownload(
+                    articleID: article.id,
+                    enclosureID: enclosureID
+                )
+                presentArticleMediaMutationResult(
+                    result,
+                    success: String(localized: "Download deletion requested")
+                )
+            }
+
+        case .configuredDownloadAudio:
+            let enclosures = IOSArticleAudioPresentation.downloadableEnclosures(
+                searchStore.articleAudioActionStates[article.id]
+            )
+            if enclosures.count == 1, let enclosure = enclosures.first {
+                performArticleDownload(
+                    article: article,
+                    enclosure: enclosure,
+                    source: .search
+                )
+            } else if !enclosures.isEmpty {
+                articleMediaDownloadChoice = .init(
+                    article: article,
+                    enclosures: enclosures,
+                    source: .search
+                )
+            }
         }
     }
 
