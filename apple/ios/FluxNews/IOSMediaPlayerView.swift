@@ -46,6 +46,21 @@ enum IOSMediaPlayerActionPlacement {
     ]
 }
 
+enum IOSMediaPlayerWaitIndicatorPolicy {
+    static let delay: Duration = .milliseconds(300)
+
+    static func shouldRequestIndicator(
+        isPreviewingInactiveItem: Bool,
+        source: IOSMediaPlaybackSource?,
+        isLoading: Bool,
+        isBuffering: Bool
+    ) -> Bool {
+        !isPreviewingInactiveItem
+            && source == .remote
+            && (isLoading || isBuffering)
+    }
+}
+
 enum IOSMediaPlayerPreviewPresentation {
     static func isPreviewingInactiveItem(
         item: ListeningListItem?,
@@ -216,7 +231,7 @@ struct IOSMediaPlayerView: View {
 
     @State private var seekPosition: Double = 0
     @State private var isSeeking = false
-    @State private var showNotesPresented = false
+    @State private var showNotesExpanded = false
     @State private var chapterListPresented = false
     @State private var chapterListSnapshot: [MediaChapter] = []
     @State private var chapterInitialIndex: Int?
@@ -224,6 +239,7 @@ struct IOSMediaPlayerView: View {
     @State private var sleepTimerPresented = false
     @State private var artworkImage: UIImage?
     @State private var artworkIsLoading = false
+    @State private var showPlaybackWaitIndicator = false
 
     private var layoutMode: IOSMediaPlayerLayoutMode {
         IOSMediaPlayerLayoutPolicy.mode(
@@ -327,45 +343,25 @@ struct IOSMediaPlayerView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showNotesPresented) {
-                NavigationStack {
-                    Group {
-                        if showNotesIsLoading {
-                            ProgressView("Loading article…")
-                        } else if let showNotesErrorMessage {
-                            ContentUnavailableView(
-                                "Unable to load article",
-                                systemImage: "exclamationmark.triangle",
-                                description: Text(showNotesErrorMessage)
-                            )
-                        } else if let showNotesDocument {
-                            ScrollView {
-                                ReaderDocumentContent(
-                                    document: showNotesDocument,
-                                    openOriginal: nil
-                                )
-                            }
-                        } else {
-                            ProgressView("Loading article…")
-                        }
-                    }
-                    .navigationTitle("Show Notes")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") {
-                                showNotesPresented = false
-                            }
-                        }
-                    }
-                }
-            }
         }
         .onAppear {
             seekPosition = Double(displayedPositionMs)
         }
         .task(id: artworkTaskKey) {
             await loadArtwork()
+        }
+        .task(id: playbackWaitTaskKey) {
+            showPlaybackWaitIndicator = false
+            guard shouldRequestPlaybackWaitIndicator else { return }
+            do {
+                try await Task.sleep(
+                    for: IOSMediaPlayerWaitIndicatorPolicy.delay
+                )
+            } catch {
+                return
+            }
+            guard shouldRequestPlaybackWaitIndicator else { return }
+            showPlaybackWaitIndicator = true
         }
     }
 
@@ -426,16 +422,7 @@ struct IOSMediaPlayerView: View {
                 chapterSummaryRow(chapterSummary)
             }
 
-            showNotesRow
-
-            if !isPreviewingInactiveItem
-                && (playbackState.isLoading || playbackState.isBuffering) {
-                ProgressView(
-                    playbackState.isBuffering
-                        ? "Buffering…"
-                        : "Loading…"
-                )
-            }
+            showNotesSection
 
             if !isPreviewingInactiveItem,
                let error = playbackState.errorMessage {
@@ -480,12 +467,28 @@ struct IOSMediaPlayerView: View {
             Button {
                 togglePlayback()
             } label: {
-                Image(
-                    systemName: displayedIsPlaying
-                        ? "pause.circle.fill"
-                        : "play.circle.fill"
-                )
-                .font(.system(size: 54))
+                ZStack {
+                    Image(
+                        systemName: displayedIsPlaying
+                            ? "pause.circle.fill"
+                            : "play.circle.fill"
+                    )
+                    .font(.system(size: 54))
+
+                    if showPlaybackWaitIndicator {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 66, height: 66)
+                            .background(
+                                Circle()
+                                    .stroke(
+                                        Color.accentColor.opacity(0.28),
+                                        lineWidth: 2
+                                    )
+                            )
+                    }
+                }
+                .frame(width: 66, height: 66)
             }
             .accessibilityLabel(
                 displayedIsPlaying
@@ -605,30 +608,113 @@ struct IOSMediaPlayerView: View {
         }
     }
 
-    private var showNotesRow: some View {
-        Button {
-            onShowNotes()
-            showNotesPresented = true
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "doc.text")
-                    .foregroundStyle(Color.accentColor)
-                Text("Show Notes")
-                    .font(.subheadline.weight(.semibold))
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
+    private var showNotesSection: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showNotesExpanded.toggle()
+                }
+                if showNotesExpanded,
+                   showNotesDocument == nil,
+                   !showNotesIsLoading {
+                    onShowNotes()
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "doc.text")
+                        .foregroundStyle(Color.accentColor)
+                    Text("Show Notes")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 8)
+                    Image(
+                        systemName: showNotesExpanded
+                            ? "chevron.up"
+                            : "chevron.down"
+                    )
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(
-                Color.secondary.opacity(0.08),
-                in: RoundedRectangle(cornerRadius: 12)
+            .buttonStyle(.plain)
+            .accessibilityValue(
+                showNotesExpanded
+                    ? String(localized: "Expanded")
+                    : String(localized: "Collapsed")
             )
-            .contentShape(Rectangle())
+
+            if showNotesExpanded {
+                Divider()
+                    .padding(.horizontal, 12)
+
+                Group {
+                    if showNotesIsLoading {
+                        ProgressView("Loading article…")
+                            .frame(maxWidth: .infinity)
+                            .padding(20)
+                    } else if let showNotesErrorMessage {
+                        VStack(spacing: 10) {
+                            Label(
+                                "Unable to load article",
+                                systemImage: "exclamationmark.triangle"
+                            )
+                            .font(.subheadline.weight(.semibold))
+
+                            Text(showNotesErrorMessage)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+
+                            Button("Retry") {
+                                onShowNotes()
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(20)
+                    } else if let showNotesDocument {
+                        ReaderDocumentContent(
+                            document: showNotesDocument,
+                            openOriginal: nil,
+                            contentPadding: 12
+                        )
+                        .textSelection(.enabled)
+                    } else {
+                        ProgressView("Loading article…")
+                            .frame(maxWidth: .infinity)
+                            .padding(20)
+                            .onAppear(perform: onShowNotes)
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
-        .buttonStyle(.plain)
+        .background(
+            Color.secondary.opacity(0.08),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var shouldRequestPlaybackWaitIndicator: Bool {
+        IOSMediaPlayerWaitIndicatorPolicy.shouldRequestIndicator(
+            isPreviewingInactiveItem: isPreviewingInactiveItem,
+            source: playbackState.playbackSource,
+            isLoading: playbackState.isLoading,
+            isBuffering: playbackState.isBuffering
+        )
+    }
+
+    private var playbackWaitTaskKey: String {
+        [
+            playbackState.playbackSource == .local ? "local" :
+                playbackState.playbackSource == .remote ? "remote" : "none",
+            playbackState.isLoading ? "loading" : "idle",
+            playbackState.isBuffering ? "buffering" : "steady",
+            isPreviewingInactiveItem ? "preview" : "active",
+        ].joined(separator: ":")
     }
 
     private func audioSelectionRow(
