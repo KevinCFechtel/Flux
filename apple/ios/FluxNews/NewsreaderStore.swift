@@ -548,6 +548,27 @@ struct ArticleRowContent: Equatable, Sendable {
     private(set) var pendingNewByFeed: [Int64: Int] = [:]
     private(set) var hasPendingNewData = false
     private(set) var hasUnscopedNewDataSignal = false
+
+    var hasPendingNewDataForCurrentScope: Bool {
+        if hasUnscopedNewDataSignal { return true }
+
+        switch scope {
+        case .all, .starred:
+            return hasPendingNewData
+        case let .category(id):
+            let feedIDs = catalog.feeds
+                .filter { $0.categoryId == id }
+                .map(\.id)
+            return PendingNewDataAggregation.count(
+                feedIDs: feedIDs,
+                pendingByFeed: pendingNewByFeed
+            ) > 0
+        case let .feed(id):
+            return (pendingNewByFeed[id] ?? 0) > 0
+        case .search, .listeningList:
+            return false
+        }
+    }
     private(set) var snapshotRevision: UInt64 = 0
     private(set) var scrollResetRevision: UInt64 = 0
     var scope: BrowserScope = .all
@@ -1854,7 +1875,10 @@ struct ArticleRowContent: Equatable, Sendable {
         switch action {
         case .replace:
             hasUnscopedNewDataSignal = false
-            if metadata.reason == .manual { acknowledgePendingForCurrentScope() }
+            if metadata.reason == .manual {
+                pending.adoptAll()
+                publishPending()
+            }
             replaceSnapshot(shouldResetScroll: metadata.reason == .manual, afterLoad: afterSnapshot)
         case .signalNewData:
             if metadata.newArticlesByFeed.isEmpty { hasUnscopedNewDataSignal = true }
