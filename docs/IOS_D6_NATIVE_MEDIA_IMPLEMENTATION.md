@@ -472,6 +472,12 @@ navigation/domain model is introduced.
 D6 wires the existing batched `article_audio_action_states` projection into
 article presentation. Do not introduce per-visible-row Core queries.
 
+The same batched projection also drives lightweight Timeline affordances:
+articles with at least one audio enclosure show a headphones indicator in the
+feed metadata row, and the existing reading-time glyph switches to a listening
+glyph for those rows. This remains presentation-only; no per-row media query or
+new Timeline domain state is introduced.
+
 Supported native actions follow Phase C/mobile semantics:
 
 - Play;
