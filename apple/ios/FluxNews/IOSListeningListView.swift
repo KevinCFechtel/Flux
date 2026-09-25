@@ -3,6 +3,10 @@ import SwiftUI
 struct IOSListeningListView: View {
     @ObservedObject var store: IOSListeningListStore
     @ObservedObject var playbackState: IOSMediaPlaybackPresentationState
+    let playbackCoordinator: IOSMediaPlaybackCoordinator
+
+    @State private var playerPresented = false
+    @State private var playerArticleID: Int64?
 
     private static let isoFormatter = ISO8601DateFormatter()
 
@@ -42,35 +46,80 @@ struct IOSListeningListView: View {
                     sortMenu
                 }
             }
+            .sheet(isPresented: $playerPresented, onDismiss: {
+                store.clearShowNotes()
+            }) {
+                IOSMediaPlayerView(
+                    playbackState: playbackState,
+                    playbackCoordinator: playbackCoordinator,
+                    item: playerItem,
+                    showNotesDocument: store.showNotesDocument,
+                    showNotesIsLoading: store.showNotesIsLoading,
+                    showNotesErrorMessage: store.showNotesErrorMessage,
+                    onSelectEnclosure: { enclosureID in
+                        startPlayback(
+                            articleID: playerArticleID,
+                            enclosureID: enclosureID
+                        )
+                    },
+                    onShowNotes: {
+                        if let playerArticleID {
+                            store.loadShowNotes(articleID: playerArticleID)
+                        }
+                    },
+                    onDismiss: {
+                        playerPresented = false
+                    }
+                )
+            }
         }
+    }
+
+    private var playerItem: ListeningListItem? {
+        guard let playerArticleID else { return nil }
+        return store.items.first { $0.articleId == playerArticleID }
     }
 
     @ViewBuilder
     private func row(_ item: ListeningListItem) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(
-                IOSListeningListPresentation.textOrFallback(
-                    item.title,
-                    fallback: String(localized: "Untitled News")
-                )
-            )
-            .font(.headline)
-            .foregroundStyle(.primary)
-
-            HStack(spacing: 6) {
-                Text(
-                    IOSListeningListPresentation.textOrFallback(
-                        item.feedTitle,
-                        fallback: String(localized: "Unknown Feed")
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(
+                        IOSListeningListPresentation.textOrFallback(
+                            item.title,
+                            fallback: String(localized: "Untitled News")
+                        )
                     )
-                )
-                if let date = Self.isoFormatter.date(from: item.publishedAt) {
-                    Text("·")
-                    Text(date.formatted(date: .abbreviated, time: .omitted))
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+
+                    HStack(spacing: 6) {
+                        Text(
+                            IOSListeningListPresentation.textOrFallback(
+                                item.feedTitle,
+                                fallback: String(localized: "Unknown Feed")
+                            )
+                        )
+                        if let date = Self.isoFormatter.date(
+                            from: item.publishedAt
+                        ) {
+                            Text("·")
+                            Text(
+                                date.formatted(
+                                    date: .abbreviated,
+                                    time: .omitted
+                                )
+                            )
+                        }
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                 }
+
+                Spacer(minLength: 8)
+                itemMenu(item)
             }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
 
             if let progress = IOSListeningListPresentation.progress(
                 item,
@@ -103,12 +152,200 @@ struct IOSListeningListView: View {
                         systemImage: "clock"
                     )
                 }
+                Spacer()
+                primaryPlayControl(item)
             }
             .font(.caption)
             .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private func primaryPlayControl(_ item: ListeningListItem) -> some View {
+        if let enclosure = IOSListeningListPresentation.selectedEnclosure(item) {
+            let isCurrent = playbackState.loadedEnclosure?.id
+                == enclosure.enclosure.id
+            Button {
+                if isCurrent && playbackState.status == .playing {
+                    playbackCoordinator.pause()
+                } else {
+                    startPlayback(
+                        articleID: item.articleId,
+                        enclosureID: enclosure.enclosure.id
+                    )
+                }
+            } label: {
+                Label(
+                    isCurrent && playbackState.status == .playing
+                        ? String(localized: "Pause")
+                        : String(localized: "Play"),
+                    systemImage: isCurrent && playbackState.status == .playing
+                        ? "pause.fill"
+                        : "play.fill"
+                )
+            }
+            .buttonStyle(.bordered)
+        } else if !item.audioEnclosures.isEmpty {
+            Menu {
+                ForEach(
+                    Array(item.audioEnclosures.enumerated()),
+                    id: \.element.enclosure.id
+                ) { index, enclosure in
+                    Button {
+                        startPlayback(
+                            articleID: item.articleId,
+                            enclosureID: enclosure.enclosure.id
+                        )
+                    } label: {
+                        Text(
+                            IOSListeningListPresentation.enclosureLabel(
+                                enclosure.enclosure,
+                                index: index
+                            )
+                        )
+                    }
+                }
+            } label: {
+                Label("Play", systemImage: "play.fill")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private func itemMenu(_ item: ListeningListItem) -> some View {
+        Menu {
+            ForEach(
+                Array(item.audioEnclosures.enumerated()),
+                id: \.element.enclosure.id
+            ) { index, enclosure in
+                Menu {
+                    Button {
+                        startPlayback(
+                            articleID: item.articleId,
+                            enclosureID: enclosure.enclosure.id
+                        )
+                    } label: {
+                        Label("Play", systemImage: "play.fill")
+                    }
+
+                    downloadAction(
+                        enclosure,
+                        label: IOSListeningListPresentation.enclosureLabel(
+                            enclosure.enclosure,
+                            index: index
+                        )
+                    )
+                } label: {
+                    Label(
+                        IOSListeningListPresentation.enclosureLabel(
+                            enclosure.enclosure,
+                            index: index
+                        ),
+                        systemImage: "waveform"
+                    )
+                }
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                Task {
+                    await store.removeFromListeningList(
+                        articleID: item.articleId
+                    )
+                }
+            } label: {
+                Label(
+                    "Remove from Listening List",
+                    systemImage: "minus.circle"
+                )
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .accessibilityLabel(String(localized: "Listening List actions"))
+    }
+
+    @ViewBuilder
+    private func downloadAction(
+        _ enclosure: ListeningListEnclosure,
+        label: String
+    ) -> some View {
+        switch enclosure.download?.state {
+        case .downloaded:
+            Button(role: .destructive) {
+                Task {
+                    await store.deleteDownload(
+                        enclosureID: enclosure.enclosure.id
+                    )
+                }
+            } label: {
+                Label("Delete Download", systemImage: "trash")
+            }
+
+        case .requested:
+            Button {
+                Task {
+                    await store.cancelDownload(
+                        enclosureID: enclosure.enclosure.id
+                    )
+                }
+            } label: {
+                Label("Cancel Download", systemImage: "xmark.circle")
+            }
+
+        case .failed:
+            Button {
+                Task {
+                    await store.retryDownload(
+                        enclosureID: enclosure.enclosure.id
+                    )
+                }
+            } label: {
+                Label("Retry Download", systemImage: "arrow.clockwise")
+            }
+
+        case .deleteRequested:
+            Label("Deletion Pending", systemImage: "clock")
+
+        case .notDownloaded, nil:
+            Button {
+                Task {
+                    await store.requestDownload(
+                        enclosureID: enclosure.enclosure.id
+                    )
+                }
+            } label: {
+                Label("Download", systemImage: "arrow.down.circle")
+            }
+        }
+    }
+
+    private func startPlayback(
+        articleID: Int64?,
+        enclosureID: Int64
+    ) {
+        if let articleID {
+            playerArticleID = articleID
+        }
+        playerPresented = true
+        Task {
+            do {
+                try await playbackCoordinator.play(
+                    enclosureID: enclosureID
+                )
+                store.reload()
+            } catch {
+                playbackState.setErrorMessage(
+                    IOSErrorPresentation.message(
+                        for: error,
+                        context: .contentLoad
+                    )
+                )
+            }
+        }
     }
 
     private var feedMenu: some View {
