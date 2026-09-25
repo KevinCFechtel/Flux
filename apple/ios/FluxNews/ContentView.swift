@@ -977,10 +977,10 @@ struct ContentView: View {
                     try await IOSAppRuntime.shared.mediaRuntime
                         .playbackCoordinator.play(enclosureID: enclosureID)
                 } catch {
-                    actionError = IOSErrorPresentation.message(
-                        for: error,
-                        context: .articleAction
-                    )
+                    let coordinator = IOSAppRuntime.shared.mediaRuntime
+                        .playbackCoordinator
+                    actionError = coordinator.lastStartFailureDescription
+                        ?? error.localizedDescription
                     articleMediaPlayer = nil
                 }
             }
@@ -1146,10 +1146,10 @@ struct ContentView: View {
                     try await IOSAppRuntime.shared.mediaRuntime
                         .playbackCoordinator.play(enclosureID: enclosureID)
                 } catch {
-                    actionError = IOSErrorPresentation.message(
-                        for: error,
-                        context: .articleAction
-                    )
+                    let coordinator = IOSAppRuntime.shared.mediaRuntime
+                        .playbackCoordinator
+                    actionError = coordinator.lastStartFailureDescription
+                        ?? error.localizedDescription
                     articleMediaPlayer = nil
                 }
             }
