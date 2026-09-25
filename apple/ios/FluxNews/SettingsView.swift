@@ -25,6 +25,18 @@ struct SettingsView: View {
                     Label("Navigation", systemImage: "sidebar.leading")
                 }
                 NavigationLink {
+                    IOSMediaSettingsView(
+                        bootstrapper: bootstrapper,
+                        onPolicyChanged: {
+                            await IOSAppRuntime.shared
+                                .mediaTransferReconciliationHandoff
+                                .requestReconciliation()
+                        }
+                    )
+                } label: {
+                    Label("Media", systemImage: "headphones")
+                }
+                NavigationLink {
                     BackgroundSyncSettingsView(
                         coordinator: IOSAppRuntime.shared.backgroundSyncCoordinator
                     )
