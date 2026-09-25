@@ -3621,6 +3621,26 @@
           }
         }
       }
+    },
+    "Chapter %lld of %lld": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kapitel %1$lld von %2$lld"
+          }
+        }
+      }
+    },
+    "Audio %lld of %lld": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio %1$lld von %2$lld"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
