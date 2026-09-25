@@ -212,23 +212,23 @@ struct IOSListeningListView: View {
     @ViewBuilder
     private func primaryPlayControl(_ item: ListeningListItem) -> some View {
         if let enclosure = IOSListeningListPresentation.selectedEnclosure(item) {
-            let isCurrent = playbackState.loadedEnclosure?.id
-                == enclosure.enclosure.id
+            let action = IOSListeningListPresentation.playbackAction(
+                enclosureID: enclosure.enclosure.id,
+                loadedEnclosureID: playbackState.loadedEnclosure?.id,
+                status: playbackState.status
+            )
             Button {
-                if isCurrent && playbackState.status == .playing {
-                    playbackCoordinator.pause()
-                } else {
-                    onPlay(
-                        item.articleId,
-                        enclosure.enclosure.id
-                    )
-                }
+                performPlaybackAction(
+                    action,
+                    item: item,
+                    enclosureID: enclosure.enclosure.id
+                )
             } label: {
                 Label(
-                    isCurrent && playbackState.status == .playing
+                    action == .pause
                         ? String(localized: "Pause")
                         : String(localized: "Play"),
-                    systemImage: isCurrent && playbackState.status == .playing
+                    systemImage: action == .pause
                         ? "pause.fill"
                         : "play.fill"
                 )
@@ -268,13 +268,26 @@ struct IOSListeningListView: View {
                 id: \.element.enclosure.id
             ) { index, enclosure in
                 Menu {
+                    let action = IOSListeningListPresentation.playbackAction(
+                        enclosureID: enclosure.enclosure.id,
+                        loadedEnclosureID: playbackState.loadedEnclosure?.id,
+                        status: playbackState.status
+                    )
                     Button {
-                        onPlay(
-                            item.articleId,
-                            enclosure.enclosure.id
+                        performPlaybackAction(
+                            action,
+                            item: item,
+                            enclosureID: enclosure.enclosure.id
                         )
                     } label: {
-                        Label("Play", systemImage: "play.fill")
+                        Label(
+                            action == .pause
+                                ? String(localized: "Pause")
+                                : String(localized: "Play"),
+                            systemImage: action == .pause
+                                ? "pause.fill"
+                                : "play.fill"
+                        )
                     }
 
                     downloadAction(
@@ -316,6 +329,19 @@ struct IOSListeningListView: View {
                 .contentShape(Rectangle())
         }
         .accessibilityLabel(String(localized: "Listening List actions"))
+    }
+
+    private func performPlaybackAction(
+        _ action: IOSListeningListPresentation.PlaybackAction,
+        item: ListeningListItem,
+        enclosureID: Int64
+    ) {
+        switch action {
+        case .pause:
+            playbackCoordinator.pause()
+        case .play:
+            onPlay(item.articleId, enclosureID)
+        }
     }
 
     @ViewBuilder
