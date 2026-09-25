@@ -471,6 +471,12 @@ Supported native actions follow Phase C/mobile semantics:
 - configured Download Audio swipe action becomes available only after this D6
   handler exists.
 
+Successful, non-actionable article/media feedback is presented non-modally as a
+short-lived material pill (3 seconds) and a newer feedback event supersedes the
+older timer. Error feedback remains modal where acknowledgement or recovery is
+required. Actionable banners such as pending-new-data adoption are not converted
+to auto-dismissing feedback.
+
 Timeline geometry/image/Scrollover architecture remains frozen.
 
 ## 10. Media settings
