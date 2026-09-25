@@ -513,6 +513,37 @@ Implement existing open routing, in-app browser, temporary Reader presentation,
 article actions/share and the dedicated paginated remote Search screen using the
 existing Core API.
 
+#### D1-D3 legacy FluxNews gap review — COMPLETE
+
+A post-D5 review compared the completed native D1-D3 scope with the former
+Flutter FluxNews client. No additional **open, unassigned** D1-D3 gaps remain.
+
+- **D1** is infrastructure/replacement feasibility rather than UI parity.
+  Access to legacy production identity/storage is proven here; actual import of
+  compatible Flutter state remains intentionally owned by **D9**.
+- **D2** covers the accepted native Newsreader contract: adaptive navigation,
+  Visual/Visual Compact/Compact presentation, preview lines, Startup Scope, Hide
+  Empty, Remove When Read, pull-to-refresh, Scrollover/Undo, stable snapshots and
+  the documented configurable swipe-action contract.
+- Legacy Flutter AppBar/FAB/Glass/layout switches and configurable
+  tap/long-press behavior are not missing D2 work. They are intentionally
+  replaced by the native adaptive presentation and native context-menu model.
+  Swipe configuration is the explicit native exception now covered by the
+  mobile semantic contract.
+- **D3** covers remote Miniflux Search with pagination, ReaderDocument-based
+  temporary Reader presentation, article routing and the supported article
+  actions (Original, Miniflux, Comments, Copy Link, Share and third-party save).
+- Legacy inline article expansion / Split tap modes are intentionally replaced
+  by the native Open Link / temporary Reader product model.
+- The legacy **Download Audio** article/swipe action is not a D3 gap; it belongs
+  to **D6**, where the native iOS media/download executor and handler become
+  available.
+
+Therefore D1-D3 are considered complete against the current native product
+contract. This does not mean byte-for-byte Flutter behavior parity: explicitly
+retired behavior remains retired, D6 owns media actions, and D9 owns legacy
+state migration.
+
 ### D4 — Settings & Native Presentation Quality
 
 D4 is subdivided into D4.1-D4.5. D4.1 introduces the independent native
