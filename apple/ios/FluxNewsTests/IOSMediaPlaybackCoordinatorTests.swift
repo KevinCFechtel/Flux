@@ -517,10 +517,12 @@ final class IOSMediaPlaybackCoordinatorTests: XCTestCase {
             enclosureID: 7
         )
 
-        XCTAssertEqual(
-            source,
-            .localReference(reference: "metadata/artwork-test.png")
-        )
+        switch source {
+        case let .localReference(reference):
+            XCTAssertEqual(reference, "metadata/artwork-test.png")
+        case .remoteUrl, .none:
+            XCTFail("Expected extracted local artwork reference")
+        }
         XCTAssertNil(engine.loadedURL)
     }
 
