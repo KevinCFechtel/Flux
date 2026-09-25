@@ -394,9 +394,14 @@ struct ContentView: View {
                     to: core,
                     coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
                 )
+                listeningListStore.onTransferReconciliationRequested = {
+                    await IOSAppRuntime.shared.mediaTransferReconciliationHandoff
+                        .requestReconciliation()
+                }
                 searchStore.onLocalFirstMutation = { newsreaderStore.loadNavigationAndCounts() }
             } else {
                 searchStore.detach()
+                listeningListStore.onTransferReconciliationRequested = nil
                 listeningListStore.detach()
             }
             consumePendingWidgetActionIfReady()
@@ -435,7 +440,8 @@ struct ContentView: View {
         if newsreaderStore.scope == .listeningList {
             IOSListeningListView(
                 store: listeningListStore,
-                playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState
+                playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+                playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator
             )
         } else {
             articleList
