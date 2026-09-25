@@ -19,7 +19,7 @@ enum IOSMediaBackgroundTransferConfiguration {
     }
 }
 
-private struct IOSMediaTransferTaskIdentity: Codable, Equatable {
+struct IOSMediaTransferTaskIdentity: Codable, Equatable {
     static let currentVersion = 1
 
     let version: Int
@@ -54,7 +54,7 @@ private struct IOSMediaTransferTaskIdentity: Codable, Equatable {
     }
 }
 
-private final class IOSMediaTransferExecutionIdentityStore {
+final class IOSMediaTransferExecutionIdentityStore {
     private enum Key {
         static let fingerprint = "FluxNews.iOS.mediaTransfer.accountFingerprint.v1"
         static let token = "FluxNews.iOS.mediaTransfer.executionToken.v1"
