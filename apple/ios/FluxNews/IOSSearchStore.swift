@@ -307,11 +307,14 @@ final class IOSSearchStore: ObservableObject {
     private func loadArticleAudioActionStates(
         for articleIDs: [Int64]
     ) {
-        guard let core else { return }
         articleAudioActionGeneration &+= 1
         let generation = articleAudioActionGeneration
         let ids = Array(Set(articleIDs))
         guard !ids.isEmpty else {
+            articleAudioActionStates = [:]
+            return
+        }
+        guard let core else {
             articleAudioActionStates = [:]
             return
         }
