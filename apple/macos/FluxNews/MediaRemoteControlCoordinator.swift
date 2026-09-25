@@ -3,65 +3,11 @@ import Combine
 import Foundation
 import MediaPlayer
 
-struct NowPlayingProjection: Equatable {
-    let title: String
-    let sourceTitle: String
-    let durationSeconds: Double?
-    let elapsedSeconds: Double
-    let effectivePlaybackRate: Double
-    let defaultPlaybackRate: Double
-    let playbackState: MediaPlaybackPresentationStatus
-    let assetURL: URL?
-    let artworkData: Data?
-
-    @MainActor
-    static func make(state: MediaPlaybackPresentationState, artworkData: Data? = nil, fallbackArtworkData: Data? = nil) -> NowPlayingProjection? {
-        guard let enclosure = state.loadedEnclosure else { return nil }
-        return make(title: state.mediaTitle, sourceTitle: state.feedTitle, enclosureURL: enclosure.url, durationMs: state.durationMs, positionMs: state.positionMs, status: state.status, playbackRate: state.playbackRate, errorMessage: state.errorMessage, artworkData: artworkData ?? fallbackArtworkData)
-    }
-
-    static func make(title: String, sourceTitle: String, enclosureURL: String, durationMs: UInt64?, positionMs: UInt64, status: MediaPlaybackPresentationStatus, playbackRate: Double, errorMessage: String?, artworkData: Data? = nil, fallbackArtworkData: Data? = nil) -> NowPlayingProjection {
-        let duration = durationMs.flatMap { milliseconds in
-            let seconds = Double(milliseconds) / 1_000
-            return seconds.isFinite && seconds > 0 ? seconds : nil
-        }
-        let rawElapsed = Double(positionMs) / 1_000
-        let elapsed = rawElapsed.isFinite && rawElapsed >= 0
-            ? min(rawElapsed, duration ?? rawElapsed)
-            : 0
-        let configuredRate = playbackRate.isFinite ? min(3.0, max(0.5, playbackRate)) : 1.0
-        let isPlaying = status == .playing && errorMessage == nil
-        let assetURL = URL(string: enclosureURL).flatMap { url in
-            url.scheme == "http" || url.scheme == "https" ? url : nil
-        }
-        return NowPlayingProjection(
-            title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "FluxNews Audio" : title,
-            sourceTitle: sourceTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "FluxNews" : sourceTitle,
-            durationSeconds: duration,
-            elapsedSeconds: elapsed,
-            effectivePlaybackRate: isPlaying ? configuredRate : 0,
-            defaultPlaybackRate: configuredRate,
-            playbackState: isPlaying ? .playing : status,
-            assetURL: assetURL,
-            artworkData: artworkData ?? fallbackArtworkData
-        )
-    }
-}
-
 enum NowPlayingArtwork {
     static func fallbackData(bundle: Bundle = .main) -> Data? {
         guard let url = bundle.url(forResource: "FallbackArtwork", withExtension: "png") else { return nil }
         return try? Data(contentsOf: url)
     }
-}
-
-enum MediaRemoteCommand: Equatable {
-    case play
-    case pause
-    case toggle
-    case skipBackward
-    case skipForward
-    case seek(seconds: Double)
 }
 
 @MainActor
@@ -135,8 +81,9 @@ final class MediaRemoteControlCoordinator {
         add(center.playCommand) { [weak self] _ in self?.dispatch(.play) ?? .commandFailed }
         add(center.pauseCommand) { [weak self] _ in self?.dispatch(.pause) ?? .commandFailed }
         add(center.togglePlayPauseCommand) { [weak self] _ in self?.dispatch(.toggle) ?? .commandFailed }
-        center.skipBackwardCommand.preferredIntervals = [NSNumber(value: 30)]
-        center.skipForwardCommand.preferredIntervals = [NSNumber(value: 30)]
+        let skipInterval = NSNumber(value: AppleMediaRemoteCommandPolicy.skipIntervalSeconds)
+        center.skipBackwardCommand.preferredIntervals = [skipInterval]
+        center.skipForwardCommand.preferredIntervals = [skipInterval]
         add(center.skipBackwardCommand) { [weak self] _ in self?.dispatch(.skipBackward) ?? .commandFailed }
         add(center.skipForwardCommand) { [weak self] _ in self?.dispatch(.skipForward) ?? .commandFailed }
         add(center.changePlaybackPositionCommand) { [weak self] event in
@@ -155,13 +102,13 @@ final class MediaRemoteControlCoordinator {
         registrations.removeAll()
     }
 
-    func dispatch(_ command: MediaRemoteCommand) -> MPRemoteCommandHandlerStatus {
+    func dispatch(_ command: AppleMediaRemoteCommand) -> MPRemoteCommandHandlerStatus {
         switch command {
         case .play: return handlePlay()
         case .pause: return handlePause()
         case .toggle: return handleToggle()
-        case .skipBackward: return handleSkip(seconds: -30)
-        case .skipForward: return handleSkip(seconds: 30)
+        case .skipBackward: return handleSkip(seconds: -AppleMediaRemoteCommandPolicy.skipIntervalSeconds)
+        case .skipForward: return handleSkip(seconds: AppleMediaRemoteCommandPolicy.skipIntervalSeconds)
         case let .seek(seconds): return handleSeek(seconds: seconds)
         }
     }
@@ -203,9 +150,25 @@ final class MediaRemoteControlCoordinator {
         return .success
     }
 
+    private func projection() -> AppleNowPlayingProjection? {
+        guard let enclosure = presentationState.loadedEnclosure else { return nil }
+        return AppleNowPlayingProjection.make(
+            title: presentationState.mediaTitle,
+            sourceTitle: presentationState.feedTitle,
+            enclosureURL: enclosure.url,
+            durationMs: presentationState.durationMs,
+            positionMs: presentationState.positionMs,
+            status: presentationState.status,
+            playbackRate: presentationState.playbackRate,
+            errorMessage: presentationState.errorMessage,
+            artworkData: artworkData,
+            fallbackArtworkData: fallbackArtworkData
+        )
+    }
+
     private func publish() {
         requestArtworkIfNeeded()
-        guard let projection = NowPlayingProjection.make(state: presentationState, artworkData: artworkData, fallbackArtworkData: fallbackArtworkData) else {
+        guard let projection = projection() else {
             nowPlaying.nowPlayingInfo = nil
             nowPlaying.playbackState = .unknown
             return
@@ -234,7 +197,7 @@ final class MediaRemoteControlCoordinator {
     }
 
     private func publishElapsed() {
-        guard let projection = NowPlayingProjection.make(state: presentationState, artworkData: artworkData, fallbackArtworkData: fallbackArtworkData), var info = nowPlaying.nowPlayingInfo else {
+        guard let projection = projection(), var info = nowPlaying.nowPlayingInfo else {
             publish()
             return
         }
