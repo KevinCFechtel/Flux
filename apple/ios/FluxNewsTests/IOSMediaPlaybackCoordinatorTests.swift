@@ -313,6 +313,27 @@ final class IOSMediaPlaybackCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
     }
 
+    func testStopCheckpointsAndReleasesAudioSession() async throws {
+        let core = FakeIOSPlaybackCoreAccess(status: .inProgress)
+        let engine = FakeIOSPlaybackEngine()
+        let audio = FakeIOSAudioSession()
+        let coordinator = makeCoordinator(
+            core: core,
+            engine: engine,
+            audio: audio
+        )
+
+        try await coordinator.play(enclosureID: 7)
+        engine.currentPositionMs = 33_000
+        coordinator.stop()
+        await Task.yield()
+
+        XCTAssertFalse(engine.isPlaying)
+        XCTAssertEqual(core.checkpoints.last?.1, 33_000)
+        XCTAssertEqual(audio.deactivateCount, 1)
+        XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
+    }
+
     func testSceneDeactivationCheckpointsWithoutPausingBackgroundAudio() async throws {
         let core = FakeIOSPlaybackCoreAccess(status: .inProgress)
         let engine = FakeIOSPlaybackEngine()
