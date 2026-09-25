@@ -268,7 +268,8 @@ private struct IOSArticleListVerticalToolbarEnvironment<Content: View>: View {
 private struct IOSArticleMediaPlayerPresentation: Identifiable {
     let article: ArticleSummary
     let enclosureID: Int64
-    var id: String { "\(article.id):\(enclosureID)" }
+    let source: IOSArticleMediaSource
+    var id: String { "\(source):\(article.id):\(enclosureID)" }
 }
 
 private enum IOSArticleMediaSource {
@@ -651,8 +652,22 @@ struct ContentView: View {
 
         IOSMediaPlayerView(
             playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+            transferState: IOSAppRuntime.shared.mediaRuntime.transferPresentationState,
+            sleepTimer: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator.sleepTimer,
             playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
             item: item,
+            downloadEnclosures: item?.audioEnclosures.map {
+                IOSMediaPlayerDownloadEnclosure(
+                    enclosure: $0.enclosure,
+                    download: $0.download
+                )
+            } ?? [],
+            onDownloadAction: { enclosureID, action in
+                handleListeningListPlayerDownloadAction(
+                    enclosureID: enclosureID,
+                    action: action
+                )
+            },
             feedIconFeedID: item?.feedId,
             feedIconTitle: item?.feedTitle ?? "",
             feedIconState: { feedID, variant in
@@ -689,6 +704,34 @@ struct ContentView: View {
         )
     }
 
+    private func handleListeningListPlayerDownloadAction(
+        enclosureID: Int64,
+        action: IOSListeningListPresentation.DownloadAction
+    ) {
+        Task {
+            switch action {
+            case .download:
+                await listeningListStore.requestDownload(
+                    enclosureID: enclosureID
+                )
+            case .pending, .downloading:
+                await listeningListStore.cancelDownload(
+                    enclosureID: enclosureID
+                )
+            case .retry:
+                await listeningListStore.retryDownload(
+                    enclosureID: enclosureID
+                )
+            case .delete:
+                await listeningListStore.deleteDownload(
+                    enclosureID: enclosureID
+                )
+            case .cancelling, .pendingDeletion:
+                break
+            }
+        }
+    }
+
     private func openListeningListPlayer(articleID: Int64) {
         // Opening a Listening List item is presentation-only. It must never
         // prepare or replace the currently loaded enclosure; playback switches
@@ -721,10 +764,32 @@ struct ContentView: View {
     private func articleMediaPlayerView(
         _ presentation: IOSArticleMediaPlayerPresentation
     ) -> some View {
+        let audioState = switch presentation.source {
+        case .news:
+            newsreaderStore.articleAudioActionStates[presentation.article.id]
+        case .search:
+            searchStore.articleAudioActionStates[presentation.article.id]
+        }
+
         IOSMediaPlayerView(
             playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+            transferState: IOSAppRuntime.shared.mediaRuntime.transferPresentationState,
+            sleepTimer: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator.sleepTimer,
             playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
             item: nil,
+            downloadEnclosures: audioState?.audioEnclosures.map {
+                IOSMediaPlayerDownloadEnclosure(
+                    enclosure: $0,
+                    download: audioState?.downloads[$0.id]
+                )
+            } ?? [],
+            onDownloadAction: { enclosureID, action in
+                handleArticlePlayerDownloadAction(
+                    presentation: presentation,
+                    enclosureID: enclosureID,
+                    action: action
+                )
+            },
             feedIconFeedID: presentation.article.feedId,
             feedIconTitle: presentation.article.feedTitle,
             feedIconState: { feedID, variant in
@@ -752,6 +817,70 @@ struct ContentView: View {
                 articleMediaPlayer = nil
             }
         )
+    }
+
+    private func handleArticlePlayerDownloadAction(
+        presentation: IOSArticleMediaPlayerPresentation,
+        enclosureID: Int64,
+        action: IOSListeningListPresentation.DownloadAction
+    ) {
+        Task {
+            let result: Result<Void, Error>
+            switch (presentation.source, action) {
+            case (.news, .download):
+                result = await newsreaderStore.requestArticleDownload(
+                    articleID: presentation.article.id,
+                    enclosureID: enclosureID
+                )
+            case (.news, .pending), (.news, .downloading):
+                result = await newsreaderStore.cancelArticleDownload(
+                    articleID: presentation.article.id,
+                    enclosureID: enclosureID
+                )
+            case (.news, .retry):
+                result = await newsreaderStore.retryArticleDownload(
+                    articleID: presentation.article.id,
+                    enclosureID: enclosureID
+                )
+            case (.news, .delete):
+                result = await newsreaderStore.deleteArticleDownload(
+                    articleID: presentation.article.id,
+                    enclosureID: enclosureID
+                )
+            case (.search, .download):
+                result = await searchStore.requestArticleDownload(
+                    articleID: presentation.article.id,
+                    enclosureID: enclosureID
+                )
+            case (.search, .pending), (.search, .downloading):
+                result = await searchStore.cancelArticleDownload(
+                    articleID: presentation.article.id,
+                    enclosureID: enclosureID
+                )
+            case (.search, .retry):
+                result = await searchStore.retryArticleDownload(
+                    articleID: presentation.article.id,
+                    enclosureID: enclosureID
+                )
+            case (.search, .delete):
+                result = await searchStore.deleteArticleDownload(
+                    articleID: presentation.article.id,
+                    enclosureID: enclosureID
+                )
+            case (_, .cancelling), (_, .pendingDeletion):
+                return
+            }
+
+            switch result {
+            case .success:
+                break
+            case let .failure(error):
+                actionError = IOSErrorPresentation.message(
+                    for: error,
+                    context: .articleAction
+                )
+            }
+        }
     }
 
     @ViewBuilder
@@ -1277,7 +1406,8 @@ struct ContentView: View {
         case let .play(enclosureID):
             articleMediaPlayer = .init(
                 article: article,
-                enclosureID: enclosureID
+                enclosureID: enclosureID,
+                source: .news
             )
             Task {
                 do {
@@ -1446,7 +1576,8 @@ struct ContentView: View {
         case let .play(enclosureID):
             articleMediaPlayer = .init(
                 article: article,
-                enclosureID: enclosureID
+                enclosureID: enclosureID,
+                source: .search
             )
             Task {
                 do {
