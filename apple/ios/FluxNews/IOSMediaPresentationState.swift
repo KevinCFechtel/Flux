@@ -324,6 +324,10 @@ final class IOSNowPlayingCoordinator {
 final class IOSCarPlayCoordinator {
     private weak var interfaceController: CPInterfaceController?
     private let mediaRuntime: IOSMediaRuntime
+    private let rootListTemplate = CPListTemplate(
+        title: String(localized: "Listening List"),
+        sections: []
+    )
     private var loadGeneration: UInt64 = 0
     private var selectedFeedID: Int64?
     private var feeds: [ListeningListFeed] = []
@@ -338,6 +342,7 @@ final class IOSCarPlayCoordinator {
 
     func connect(interfaceController: CPInterfaceController) {
         self.interfaceController = interfaceController
+        installRootTemplate()
         showLoadingRoot()
         reloadListeningList()
     }
@@ -350,7 +355,7 @@ final class IOSCarPlayCoordinator {
 
     func reloadListeningList() {
         guard let core = mediaRuntime.core else {
-            showMessageRoot(title: String(localized: "Listening List"), message: String(localized: "Media is not available yet."))
+            showMessageRoot(message: String(localized: "Media is not available yet."))
             return
         }
 
@@ -367,7 +372,10 @@ final class IOSCarPlayCoordinator {
                     let validatedFeedID = requestedFeedID.flatMap { id in
                         feeds.contains(where: { $0.feedId == id }) ? id : nil
                     }
-                    let items = try core.listeningList(feedId: validatedFeedID, sort: .recentlyAdded)
+                    let allItems = try core.listeningList(feedId: nil, sort: .recentlyAdded)
+                    let items = validatedFeedID.map { feedID in
+                        allItems.filter { $0.feedId == feedID }
+                    } ?? allItems
                     return (feeds, validatedFeedID, items)
                 }
             ) else { return }
@@ -380,7 +388,7 @@ final class IOSCarPlayCoordinator {
                 self.visibleItems = items
                 self.showListeningList(items)
             case .failure:
-                self.showMessageRoot(title: String(localized: "Listening List"), message: String(localized: "The Listening List could not be loaded."))
+                self.showMessageRoot(message: String(localized: "The Listening List could not be loaded."))
             }
         }
     }
@@ -399,47 +407,44 @@ final class IOSCarPlayCoordinator {
             .store(in: &cancellables)
     }
 
+    private func installRootTemplate() {
+        interfaceController?.setRootTemplate(rootListTemplate, animated: false, completion: nil)
+    }
+
     private func showLoadingRoot() {
         let item = CPListItem(text: String(localized: "Loading…"), detailText: nil)
         item.isEnabled = false
-        setRoot(CPListTemplate(title: String(localized: "Listening List"), sections: [CPListSection(items: [item])]))
+        rootListTemplate.updateSections([CPListSection(items: [item])])
     }
 
-    private func showMessageRoot(title: String, message: String) {
+    private func showMessageRoot(message: String) {
         let item = CPListItem(text: message, detailText: nil)
         item.isEnabled = false
-        let template = CPListTemplate(title: title, sections: [CPListSection(items: [item])])
-        configureFilterButton(on: template)
-        setRoot(template)
+        rootListTemplate.updateSections([CPListSection(items: [item])])
+        configureFilterButton()
     }
 
     private func showListeningList(_ items: [ListeningListItem]) {
         listItemsByEnclosureID.removeAll()
         guard !items.isEmpty else {
-            showMessageRoot(title: String(localized: "Listening List"), message: String(localized: "No audio items available."))
+            showMessageRoot(message: String(localized: "No audio items available."))
             return
         }
 
         let limit = CPListTemplate.maximumItemCount
         let projected = items.prefix(limit).map(makeListItem)
-        let template = CPListTemplate(
-            title: selectedFeedTitle ?? String(localized: "Listening List"),
-            sections: [CPListSection(items: Array(projected))]
-        )
-        configureFilterButton(on: template)
-        setRoot(template)
+        rootListTemplate.updateSections([CPListSection(items: Array(projected))])
+        configureFilterButton()
         refreshPlaybackIndicators()
         loadArtworkForVisibleItems(generation: loadGeneration)
     }
 
-    private var selectedFeedTitle: String? {
-        guard let selectedFeedID else { return nil }
-        return feeds.first(where: { $0.feedId == selectedFeedID })?.feedTitle
-    }
-
-    private func configureFilterButton(on template: CPListTemplate) {
-        guard !feeds.isEmpty else { return }
-        template.trailingNavigationBarButtons = [
+    private func configureFilterButton() {
+        guard !feeds.isEmpty else {
+            rootListTemplate.trailingNavigationBarButtons = []
+            return
+        }
+        rootListTemplate.trailingNavigationBarButtons = [
             CPBarButton(title: String(localized: "Filter")) { [weak self] _ in
                 self?.showFeedFilter()
             }
@@ -574,10 +579,6 @@ final class IOSCarPlayCoordinator {
                 listItem.setImage(image)
             }
         }
-    }
-
-    private func setRoot(_ template: CPTemplate) {
-        interfaceController?.setRootTemplate(template, animated: true, completion: nil)
     }
 }
 
