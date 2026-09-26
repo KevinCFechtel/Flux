@@ -727,21 +727,31 @@ explicit Open Original and Open in Miniflux actions remain available.
 
 Appearance follows the native platform without a Flux Light/Dark/System
 setting; iOS Liquid Glass behavior is likewise platform-owned without a
-Flux setting.
+Flux setting. The legacy OLED/True-Black toggle is also retired: Apple clients
+use system semantic colors, materials and native Dark Mode so OLED-capable
+hardware receives the platform-appropriate darkest presentation without a
+Flux-specific option.
 
 Feed icons are always shown where the product design calls for them.
 Automatic icon contrast handling is implementation behavior, not a user
-preference, and there is no per-feed icon-contrast override.
+preference, and there is no per-feed icon-contrast override. Feed icons are
+regenerable cache; there is no user-facing "delete feed icons only" control.
+
+Article-image cache age is not a user preference. Native clients own bounded
+decoded-image caching, normal platform HTTP caching, memory-pressure handling
+and eviction/tuning. The legacy user-selectable image-cache duration is retired.
 
 The following FluxNews legacy concepts are intentionally not carried
 into the shared Flux settings model: fixed stored-article/starred
 limits, configurable sync/search result-count limits, legacy read-sync
 day windows superseded by retention, preview character-truncation
-controls, legacy HTML/truncation workarounds, and
-Flutter/mobile-specific AppBar/FAB/Glass interaction settings.
-Tap/long-press/swipe customization is not part of the current shared
-settings target and may only be reconsidered later as platform-native
-presentation behavior.
+controls, legacy HTML/truncation workarounds, the per-feed
+`preferParagraph` and `preferAttachmentImage` presentation preferences, the
+legacy `showHeadlineOnTop` layout toggle, and Flutter/mobile-specific
+AppBar/FAB/Glass interaction settings. Tap/long-press customization is not part
+of the current shared settings target and may only be reconsidered later as
+platform-native presentation behavior. iOS swipe customization remains a
+platform-native setting over semantic actions.
 
 Secrets and potentially secret-bearing configuration never enter
 ordinary core settings persistence. The Miniflux API key and custom HTTP
@@ -970,15 +980,20 @@ states. Snapshot creation time is distinct from Core's optional global
 time.
 
 The snapshot contains the complete compact feed/category catalog (stable IDs,
-titles, and feed category IDs) for future per-widget AppIntent/AppEntity
-configuration. It has one bounded common article cache rather than
-scope-specific duplicates: up to 12 newest unread articles per feed plus up to
-48 newest starred articles globally, deduplicated by article ID and ordered
-newest-first. These fixed limits preserve quiet-feed coverage and several
-large-widget pages without serializing the full local article store. Feed icons
-are normalized Core PNGs copied by the native app into bounded App Group files;
-the extension performs no network fetch and handles absent files with a native
-fallback.
+titles, and feed category IDs) for per-widget AppIntent/AppEntity
+configuration. Widget article data remains a bounded App Group projection rather
+than a serialized copy of the local article store. The original D5
+`WidgetSnapshotV1` uses up to 12 newest unread articles per feed plus up to 48
+newest starred articles globally, deduplicated by article ID and ordered
+newest-first.
+
+D9 adds per-widget Unread/All and Newest/Oldest configuration. If V1 cannot
+correctly satisfy those combinations for every supported widget capacity, the
+native app must write a versioned backward-safe snapshot extension containing a
+bounded candidate set sufficient for both read filters and both sort directions.
+The extension still performs no Core, SQLite, Miniflux, credential or network
+access. Feed icons remain normalized Core PNGs copied by the native app into
+bounded App Group files; absent files use a native fallback.
 
 Core supplies authoritative counts separately from that bounded cache: global
 unread, global starred, per-feed unread, and per-category unread. Therefore a
@@ -986,14 +1001,16 @@ widget can compare its locally available matching articles with the
 authoritative count. Cache exhaustion with a larger authoritative count leads
 to a future native "More News in FluxNews" action, not a large-unread warning.
 
-Planned Headlines instance scopes are All News, Category ID, Feed ID, and
-Bookmarks. All News, Category, and Feed intrinsically show unread articles;
-Bookmarks show starred articles regardless of read state. There is no global or
-per-widget unread-only setting. Article snapshots retain Article ID so a future
-tap enters the normal FluxNews article-open path, including Click on News and
-per-feed Open in Miniflux behavior; widgets do not choose their own destination.
-There is no widget-specific Open in Miniflux or translucent-background
-preference.
+Headlines instance scopes are All News, Category ID, Feed ID, and Bookmarks.
+D9 adds a per-instance **Unread / All** read filter and **Newest First / Oldest
+First** sort order. The read filter applies inside the configured scope; for
+Bookmarks, All means all retained starred articles and Unread means unread
+starred articles.
+
+Article snapshots retain Article ID so a tap enters the normal FluxNews
+article-open path, including the per-feed Open in Miniflux behavior; widgets do
+not choose their own destination. There is no widget-specific Open in Miniflux
+or translucent-background preference.
 
 The native app invalidates the App Group snapshot and icon cache before account
 replacement, configuration import, rebuild, and full reset so discarded
@@ -1008,13 +1025,13 @@ falling back to All News. Headlines render the bounded cache; Compact Status
 renders the authoritative configured-scope count and optional
 `last_successful_sync_at`.
 
-Headlines is a bounded latest-articles view, not a pageable article list. Its
-WidgetFamily layout determines the capacity: one article in `systemSmall`,
-three in `systemMedium`, seven in `systemLarge`, and twelve in
-`systemExtraLarge`. It renders the latest available matching articles up to
-that capacity, without an overflow row. Pagination is deferred because the
-current WidgetKit interaction boundary has no durable per-instance identity;
-the snapshot remains suitable for a future instance-aware mechanism.
+Headlines is a bounded configured-order article view, not a pageable article
+list. Its WidgetFamily layout determines the capacity: one article in
+`systemSmall`, three in `systemMedium`, seven in `systemLarge`, and twelve
+in `systemExtraLarge`. It renders matching articles up to that capacity using
+the configured read filter and sort order, without an overflow row. Pagination
+remains outside the initial contract; the bounded snapshot rather than the
+extension owns the candidate-data limit.
 
 Widget article links carry only an article ID and are handled by the main app
 through the same normal article-open route as a list click. Compact Status opens

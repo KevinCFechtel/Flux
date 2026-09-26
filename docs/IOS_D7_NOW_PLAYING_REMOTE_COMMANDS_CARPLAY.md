@@ -1,9 +1,10 @@
 # iOS D7 — Now Playing, Remote Commands, and CarPlay
 
-> **Status: CONTRACT / IMPLEMENTATION NOT STARTED**
+> **Status: COMPLETE / ARCHITECTURE-FROZEN**
 >
 > Repository-first audit baseline: `main` at `8931fb2fff8284ef82f38b53634f8d2e699fa7d7` (25 September 2026).
-> `docs/PHASE_D_NATIVE_IOS_IPADOS.md` remains the authoritative Phase-D contract. This document narrows D7 without changing the frozen Phase A/B/C, D5, or UIKit Timeline contracts. D6 remains implementation-stable/testvalidated with its real-device UX observation window open.
+> Completion state recorded against `main` at `a8a4bff4b0ff4df19cedd3bb55dad7a3b01453b7` (26 September 2026).
+> `docs/PHASE_D_NATIVE_IOS_IPADOS.md` remains the authoritative Phase-D contract. D7 is implemented over the existing D6 runtime without changing the frozen Phase A/B/C, D5, or UIKit Timeline ownership boundaries.
 
 ## 1. Audit result
 
@@ -54,15 +55,26 @@ D7-A should extract only platform-neutral Apple media semantics to `apple/shared
 
 Do **not** move `MPNowPlayingInfoCenter`, `MPRemoteCommandCenter`, `MPMediaItemArtwork`, AppKit/UIKit image construction, AVAudioSession, CarPlay scenes/templates, or app-runtime ownership into shared code. The shared layer remains a projection/policy layer, not a state owner.
 
-## 3. Current D7 gaps
+## 3. Completion state
 
-There is currently no iOS `MPNowPlayingInfoCenter` adapter, no iOS `MPRemoteCommandCenter` adapter, and no CarPlay implementation. D6 intentionally left all three to D7.
+D7 is implemented in the native iOS target:
 
-The native development entitlement currently contains only the native-dev App Group. The upgrade-test entitlement already carries `com.apple.developer.carplay-audio`, matching the historical production identity. D7 therefore needs a deliberate signing/capability plan for a CarPlay-testable development identity; entitlement availability must be verified in the actual signed build/profile and must not be assumed merely from a source `.entitlements` file.
+- the shared Apple projection/remote-command vocabulary lives in
+  `apple/shared/FluxApple/MediaPresentation.swift`;
+- iOS publishes the single D6 playback presentation through
+  `MPNowPlayingInfoCenter`;
+- `MPRemoteCommandCenter` commands route back into the existing
+  `IOSMediaPlaybackCoordinator`;
+- the CarPlay audio scene is declared in the native `Info.plist` and attaches
+  to the process-scoped app/media runtime;
+- CarPlay browsing and playback reuse Core-backed Listening List/media state and
+  the same playback coordinator rather than creating a queue or second player;
+- the native development signing/profile path includes the required CarPlay
+  Audio capability;
+- canonical iOS and macOS test/build gates are green at completion.
 
-The current iOS `Info.plist` declares background `audio`/`fetch` and a scene manifest with `UIApplicationSupportsMultipleScenes = false`, but no CarPlay scene configuration. Modern CarPlay audio UI must use the CarPlay framework/template scene path. `MPPlayableContentManager`/`MPPlayableContentDelegate` are deprecated and must not become the new architecture.
-
-CarPlay introduces an important lifecycle distinction: the phone UI remains intentionally single-scene, while CarPlay requires a `CPTemplateApplicationScene`. Adding the CarPlay scene must not be interpreted as enabling a second independent Flux application/Core/media runtime. The CarPlay scene is a platform presentation endpoint attached to `IOSAppRuntime.shared.mediaRuntime`.
+The audit text below remains the architectural contract that constrained the
+implementation; it is no longer a list of missing productive features.
 
 ## 4. Ownership and lifecycle decisions
 
@@ -147,43 +159,43 @@ Acceptance:
 - ownership frozen before implementation;
 - no Core change justified.
 
-### D7-A — Shared Apple media projection
+### D7-A — Shared Apple media projection — COMPLETE
 
 Extract the proven semantic subset from macOS into `apple/shared/FluxApple` and migrate macOS to it without behavior change. Add focused shared tests for fallback titles, duration/elapsed bounding, rates, stopped/paused/playing projection, invalid URLs, and error behavior.
 
 Gate: macOS tests remain green before iOS consumes the projection.
 
-### D7-B — iOS Now Playing adapter
+### D7-B — iOS Now Playing adapter — COMPLETE
 
 Add the app-scoped iOS adapter under `IOSMediaRuntime`; publish title, feed/podcast, duration, elapsed time, effective/default rate, asset URL where valid, playback state, and artwork. Reuse existing artwork/Core access; no UI dependency.
 
 Gate: unit tests with injected/fake Now Playing sink plus existing iOS suite/build.
 
-### D7-C — iOS Remote Commands
+### D7-C — iOS Remote Commands — COMPLETE
 
 Register play/pause/toggle/skip/seek once, route only to the existing playback coordinator, remove registrations on cleanup, and explicitly disable unsupported stop/next/previous commands.
 
 Gate: command dispatch/status tests, duplicate-registration test, no-loaded-item failures, seek bounds, and lifecycle cleanup.
 
-### D7-D — System playback lifecycle and real-device Now Playing acceptance
+### D7-D — System playback lifecycle and real-device Now Playing acceptance — COMPLETE
 
 Validate lock screen, Control Center, headset/Bluetooth commands, background audio, interruptions, route changes, rate/elapsed publication, artwork replacement, pause/resume, Stop-from-app followed by remote Play, natural completion, and cross-device reconciliation while paused versus actively playing.
 
 This phase is deliberately before CarPlay so the common OS media contract is stable first.
 
-### D7-E — CarPlay scene, entitlement, and browsing
+### D7-E — CarPlay scene, entitlement, and browsing — COMPLETE
 
 Add the CarPlay scene manifest/configuration, scene delegate/coordinator, development signing strategy, Core-backed Listening List browser, feed navigation if retained, selection, loading/error/empty states, and bounded template item counts according to CarPlay APIs.
 
 Gate: CarPlay Simulator browse/navigation tests plus source-level/unit tests for browsing projection and selection identity.
 
-### D7-F — CarPlay playback integration
+### D7-F — CarPlay playback integration — COMPLETE
 
 Connect CarPlay selection to the existing playback coordinator, present `CPNowPlayingTemplate`, and verify transport controls/current playback are the same state as phone/lock-screen playback. No CarPlay-specific player or queue.
 
 Gate: switching control between phone UI, lock screen/Control Center, and CarPlay never creates divergent state or duplicate playback.
 
-### D7-G — Integration and real-device acceptance
+### D7-G — Integration and real-device acceptance — COMPLETE
 
 Run full Rust/native test gates and physical-device CarPlay acceptance. D7 closes only when Now Playing/remote commands and CarPlay pass the acceptance matrix below.
 
@@ -275,4 +287,5 @@ D7 is complete when:
 - lock-screen/Control Center/background and physical CarPlay acceptance are recorded;
 - D6 presentation can still evolve without changes to D7 architecture.
 
-Only after those gates should D7 be marked complete/architecture-frozen in the Phase-D contract.
+Those gates are satisfied for the current implementation. D7 is therefore
+complete and architecture-frozen in the Phase-D contract.

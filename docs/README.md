@@ -6,7 +6,8 @@ This directory is intentionally small.
 
 - `ARCHITECTURE_DECISIONS.md` — explicitly agreed target architecture for the shared Rust core and native macOS/iOS/Android clients. This is the primary architecture authority.
 - `MOBILE_PRODUCT_SEMANTICS.md` — shared native-mobile behavior contract for iOS/iPadOS and future Android work. It captures product semantics that must not be rediscovered per platform while deliberately leaving SwiftUI/UIKit/Compose and OS-integration mechanics platform-specific.
-- `PHASE_D_NATIVE_IOS_IPADOS.md` — authoritative Phase-D contract and roadmap for the native iOS/iPadOS replacement, including Apple sharing boundaries, development/production identities, migration safety, mobile UX, system integrations, and D1–D10 sequencing.
+- `PHASE_D_NATIVE_IOS_IPADOS.md` — authoritative Phase-D contract and roadmap for the native iOS/iPadOS replacement, including Apple sharing boundaries, development/production identities, migration safety, mobile UX, system integrations, and the active D1–D9 sequencing.
+- `IOS_D9_FLUTTER_REPLACEMENT_COMPLETION.md` — final native replacement-completion contract: retained Flutter migration/parity release gates, Settings/widget completion work, and explicit retired/replaced legacy behaviors.
 - `PHASE_D_D1_STATUS.md` — historical snapshot of the completed/frozen D1 foundation and early D2.1 progress; it is not a current status authority.
 
 ## Phase status
@@ -14,7 +15,7 @@ This directory is intentionally small.
 - **Phase A — Newsreader Completion:** complete and architecture-frozen.
 - **Phase B — Shared Podcast / Media Core:** complete and architecture-frozen.
 - **Phase C — Native macOS Audio Experience:** complete and architecture-frozen. `PHASE_C_NATIVE_MACOS_AUDIO.md` remains the implemented Phase-C contract even if historical wording inside that document still describes it as planned.
-- **Phase D — Native iOS/iPadOS:** in progress. `PHASE_D_NATIVE_IOS_IPADOS.md` remains authoritative for the Phase-D architecture and roadmap; implementation status must be taken from the current repository/Phase-D work rather than stale historical status wording.
+- **Phase D — Native iOS/iPadOS:** in progress. D7 is complete and architecture-frozen; D8 is deprecated from the current replacement roadmap/deferred for a distinct future use case; D9 is the active final Flutter-replacement completion block. `PHASE_D_NATIVE_IOS_IPADOS.md` remains authoritative for architecture and sequencing.
 
 A physical-device production-upgrade smoke confirmation remains required before final Flutter-to-native replacement/release.
 

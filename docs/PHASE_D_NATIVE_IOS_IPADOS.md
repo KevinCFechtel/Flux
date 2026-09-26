@@ -1,6 +1,6 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: D1-D4 COMPLETE / D4 FOLLOW-UP COMPLETE / D4.5 COMPLETE / D5 COMPLETE & ARCHITECTURE-FROZEN / D6 IMPLEMENTATION STABLE & TESTVALIDATED — UX OBSERVATION WINDOW ACTIVE / D7-0 CONTRACT AUDIT COMPLETE — D7-A READY / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D5 COMPLETE / D6 IMPLEMENTATION STABLE & TESTVALIDATED — UX OBSERVATION WINDOW ACTIVE / D7 COMPLETE & ARCHITECTURE-FROZEN / D8 DEFERRED — NOT REQUIRED FOR REPLACEMENT / D9 PLANNED — FINAL FLUTTER REPLACEMENT COMPLETION GATE / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
 > replaces the existing Flutter iOS/iPadOS client with a native Swift client:
@@ -479,7 +479,10 @@ from successful background Sync into the D6 transfer runtime. D6 installs the
 native transfer executor and backs `BrowserScope.listeningList` with the Core
 Listening List read model.
 
-D5 widget and notification contracts remain unchanged by D7.
+D5 widget and notification ownership remains unchanged by D7. D9 may add
+per-instance widget read-filter/sort configuration and, if necessary, a
+versioned bounded snapshot extension, without moving Core/database/network or
+credential access into the WidgetKit extension.
 
 ## 9. D6 native media status
 
@@ -527,14 +530,31 @@ does not block D7.
 
 ### D7 — Now Playing, Remote Commands & CarPlay
 
-D7-0 contract/ownership audit is complete. Productive implementation has not yet
-started. Proceed with D7-A according to
+Complete and architecture-frozen. The native app uses the single D6 playback
+runtime for Now Playing, remote commands and CarPlay; the development entitlement
+and CarPlay scene are integrated and the canonical iOS/macOS test/build gates
+are green. See
 [IOS_D7_NOW_PLAYING_REMOTE_COMMANDS_CARPLAY.md](IOS_D7_NOW_PLAYING_REMOTE_COMMANDS_CARPLAY.md).
-CarPlay remains a Phase-D completion gate.
 
 ### D8 — Live Activities & Dynamic Island
 
-Not started; outside D7.
+Deferred and removed from the current native replacement completion path. The
+system Now Playing experience already supplies the appropriate audio presentation
+on supported Dynamic Island devices. A custom ActivityKit lifecycle may only be
+reopened for a distinct future live-state product requirement. See
+[IOS_D8_ACTIVITYKIT_DECISION.md](IOS_D8_ACTIVITYKIT_DECISION.md).
+
+### D9 — Flutter Replacement Completion / Legacy-Parity Closure
+
+Planned final replacement-completion block. D9 closes the explicitly retained
+release gaps from the repository-first FluxNews audit: production migration,
+config backup/restore UI, configurable Bottom Action Bar, full retained language
+set, downloaded-data management, widget Unread/All plus Newest/Oldest
+configuration, and final Settings account/about information.
+
+D9 also records the intentionally retired/replaced behaviors so they are not
+reintroduced later as accidental parity work. See
+[IOS_D9_FLUTTER_REPLACEMENT_COMPLETION.md](IOS_D9_FLUTTER_REPLACEMENT_COMPLETION.md).
 
 ## 11. Release/acceptance invariants
 

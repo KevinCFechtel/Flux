@@ -1,6 +1,6 @@
 # D8 — ActivityKit / Live Activities
 
-> **Status: DEFERRED — NOT REQUIRED FOR THE NATIVE FLUTTER REPLACEMENT**
+> **Status: DEPRECATED FOR THE CURRENT REPLACEMENT ROADMAP / DEFERRED FOR A DISTINCT FUTURE USE CASE**
 >
 > Decision date: 26 September 2026.
 
@@ -41,4 +41,6 @@ D8 should only be reopened when there is a concrete product requirement for live
 3. does not duplicate D7 audio Now Playing behavior;
 4. can remain a projection over existing Core/native runtime ownership rather than becoming a new state authority.
 
-Until such a requirement exists, D8 is intentionally deferred rather than incomplete.
+Until such a requirement exists, D8 is intentionally outside the active
+replacement roadmap rather than incomplete. D9 follows D8 as the final active
+native replacement-completion block.
