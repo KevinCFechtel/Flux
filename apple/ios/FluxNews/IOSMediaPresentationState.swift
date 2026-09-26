@@ -1,3 +1,4 @@
+import CarPlay
 import Combine
 import Foundation
 import MediaPlayer
@@ -403,5 +404,187 @@ final class IOSNowPlayingCoordinator {
             self.artworkData = data
             self.publish()
         }
+    }
+}
+
+@MainActor
+final class IOSCarPlayCoordinator {
+    private weak var interfaceController: CPInterfaceController?
+    private let mediaRuntime: IOSMediaRuntime
+    private var loadGeneration: UInt64 = 0
+
+    init(mediaRuntime: IOSMediaRuntime) {
+        self.mediaRuntime = mediaRuntime
+    }
+
+    func connect(interfaceController: CPInterfaceController) {
+        self.interfaceController = interfaceController
+        showLoadingRoot()
+        reloadListeningList()
+    }
+
+    func disconnect() {
+        loadGeneration &+= 1
+        interfaceController = nil
+    }
+
+    func reloadListeningList() {
+        guard let core = mediaRuntime.core else {
+            showMessageRoot(
+                title: String(localized: "Listening List"),
+                message: String(localized: "Media is not available yet.")
+            )
+            return
+        }
+
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        let executionCoordinator = mediaRuntime.coreSessionExecutionCoordinator
+
+        Task { @MainActor [weak self, core, executionCoordinator] in
+            guard let result = await executionCoordinator.responsiveResult(
+                for: core,
+                { try core.listeningList(feedId: nil, sort: .recentlyAdded) }
+            ) else {
+                return
+            }
+            guard let self,
+                  self.loadGeneration == generation,
+                  self.mediaRuntime.core === core else {
+                return
+            }
+
+            switch result {
+            case let .success(items):
+                self.showListeningList(items)
+            case .failure:
+                self.showMessageRoot(
+                    title: String(localized: "Listening List"),
+                    message: String(localized: "The Listening List could not be loaded.")
+                )
+            }
+        }
+    }
+
+    private func showLoadingRoot() {
+        let item = CPListItem(
+            text: String(localized: "Loading…"),
+            detailText: nil
+        )
+        item.isEnabled = false
+        setRoot(
+            CPListTemplate(
+                title: String(localized: "Listening List"),
+                sections: [CPListSection(items: [item])]
+            )
+        )
+    }
+
+    private func showMessageRoot(title: String, message: String) {
+        let item = CPListItem(text: message, detailText: nil)
+        item.isEnabled = false
+        setRoot(
+            CPListTemplate(
+                title: title,
+                sections: [CPListSection(items: [item])]
+            )
+        )
+    }
+
+    private func showListeningList(_ items: [ListeningListItem]) {
+        guard !items.isEmpty else {
+            showMessageRoot(
+                title: String(localized: "Listening List"),
+                message: String(localized: "No audio items available.")
+            )
+            return
+        }
+
+        let limit = CPListTemplate.maximumItemCount
+        let projected = items.prefix(limit).map(makeListItem)
+        setRoot(
+            CPListTemplate(
+                title: String(localized: "Listening List"),
+                sections: [CPListSection(items: Array(projected))]
+            )
+        )
+    }
+
+    private func makeListItem(_ item: ListeningListItem) -> CPListItem {
+        let title = IOSListeningListPresentation.textOrFallback(
+            item.title,
+            fallback: String(localized: "Untitled")
+        )
+        let feedTitle = IOSListeningListPresentation.textOrFallback(
+            item.feedTitle,
+            fallback: String(localized: "Unknown Feed")
+        )
+        let listItem = CPListItem(text: title, detailText: feedTitle)
+
+        guard let selected = IOSListeningListPresentation.selectedEnclosure(item) else {
+            listItem.isEnabled = false
+            if item.audioEnclosures.count > 1 {
+                listItem.setDetailText(String(localized: "Multiple audio files"))
+            }
+            return listItem
+        }
+
+        let enclosureID = selected.enclosure.id
+        listItem.handler = { [weak self] _, completion in
+            Task { @MainActor [weak self] in
+                guard let self else {
+                    completion()
+                    return
+                }
+                do {
+                    try await self.mediaRuntime.playbackCoordinator.play(
+                        enclosureID: enclosureID
+                    )
+                    self.interfaceController?.pushTemplate(
+                        CPNowPlayingTemplate.shared,
+                        animated: true,
+                        completion: nil
+                    )
+                } catch {
+                    // Playback error remains projected by the shared media
+                    // runtime/Now Playing path; CarPlay owns no parallel state.
+                }
+                completion()
+            }
+        }
+        return listItem
+    }
+
+    private func setRoot(_ template: CPTemplate) {
+        interfaceController?.setRootTemplate(
+            template,
+            animated: true,
+            completion: nil
+        )
+    }
+}
+
+@MainActor
+@objc(IOSCarPlaySceneDelegate)
+final class IOSCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
+    private var coordinator: IOSCarPlayCoordinator?
+
+    func templateApplicationScene(
+        _ templateApplicationScene: CPTemplateApplicationScene,
+        didConnect interfaceController: CPInterfaceController
+    ) {
+        let coordinator = IOSCarPlayCoordinator(
+            mediaRuntime: IOSAppRuntime.shared.mediaRuntime
+        )
+        self.coordinator = coordinator
+        coordinator.connect(interfaceController: interfaceController)
+    }
+
+    func templateApplicationScene(
+        _ templateApplicationScene: CPTemplateApplicationScene,
+        didDisconnectInterfaceController interfaceController: CPInterfaceController
+    ) {
+        coordinator?.disconnect()
+        coordinator = nil
     }
 }
