@@ -1141,16 +1141,40 @@ diagnostic messages, not localized UI strings.
 
 ## 20. Logging and diagnostics
 
-Normal structured logs have limited detail and roughly seven-day
-retention. An explicit debug mode may collect more detail with a shorter
-retention of roughly two to three days.
+Normal structured logs have limited detail and bounded local retention. An
+explicit Debug Logging mode may collect additional Debug/Trace detail; ordinary
+Info/Warning/Error support records remain available without enabling it.
 
-Core and native logs should be combinable for diagnostics/support
-export.
+Core and native logs should be combined into one native support-log projection
+for diagnostics/support export. On iOS/iPadOS, the existing
+`IOSAppDiagnostics` / `IOSAppLogger` store is the authoritative native
+support-log surface: it is bounded, persists across relaunches, receives Core
+diagnostic records, mirrors retained records to Apple's unified logging, and is
+support infrastructure rather than domain state.
 
-Secrets (API keys, authorization headers, tokens, passwords,
-credentials) are never logged. Prefer preventing sensitive fields from
-reaching logging APIs rather than relying only on redaction.
+Native iOS Settings exposes this support capability directly rather than through
+a permanent developer-only screen:
+
+- Debug Logging on/off;
+- retained record count;
+- structured Log Viewer;
+- search and severity filtering;
+- native export/share;
+- confirmed Clear Logs.
+
+The Log Viewer consumes the same retained structured entries; it must not create
+another logging store. Export includes useful environment metadata such as app
+version/build and OS/device class while remaining privacy-sanitized.
+
+Secrets (API keys, authorization headers, tokens, passwords, credentials and
+registered sensitive custom-header values) are never intentionally retained or
+exported. Prefer preventing sensitive fields from reaching logging APIs and keep
+the existing redaction/sanitization boundary as defense in depth.
+
+Development-only sandbox paths, migration probes, image/cache metrics and
+Timeline performance counters are not production Settings. Account connection
+validation may expose bounded technical **Connection Details** when useful for
+support, but should not be labeled as Developer Diagnostics.
 
 ## 21. Testing philosophy
 

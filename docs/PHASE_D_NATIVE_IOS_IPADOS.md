@@ -550,7 +550,8 @@ Planned final replacement-completion block. D9 closes the explicitly retained
 release gaps from the repository-first FluxNews audit: production migration,
 config backup/restore UI, configurable Bottom Action Bar, full retained language
 set, downloaded-data management, widget Unread/All plus Newest/Oldest
-configuration, and final Settings account/about information.
+configuration, final Settings account/about information, and production
+logging/support diagnostics with a native log viewer and export.
 
 D9 also records the intentionally retired/replaced behaviors so they are not
 reintroduced later as accidental parity work. See

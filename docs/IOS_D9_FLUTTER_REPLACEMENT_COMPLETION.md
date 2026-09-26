@@ -118,6 +118,77 @@ Settings must provide normal user-facing access to:
 Developer Diagnostics is not a substitute for this normal user-facing
 information.
 
+### D9-H — Logging & Support Diagnostics
+
+Logging becomes a normal user/support Settings destination rather than a
+Developer Diagnostics-only surface.
+
+The existing `IOSAppDiagnostics` / `IOSAppLogger` implementation remains the
+single native support-log store. D9 must not introduce a second log database or
+duplicate Core/native logging path.
+
+The Settings surface must provide:
+
+- **Debug Logging** toggle using the existing persisted preference;
+- current retained record count;
+- **Log Viewer**;
+- the existing diagnostics export through the native share/file flow;
+- destructive **Clear Logs** with confirmation;
+- concise privacy/retention explanation.
+
+Normal Info/Warning/Error records remain available without Debug Logging.
+Debug/Trace records are retained only while Debug Logging is enabled. Existing
+bounded persistence, Core diagnostic bridging, unified logging mirroring, and
+credential/custom-header redaction remain authoritative.
+
+The Log Viewer must operate directly on the retained structured
+`IOSAppLogEntry` records and provide at least:
+
+- newest-first browsing;
+- timestamp, level, category/module and message;
+- text search across category and message;
+- level filtering for Trace, Debug, Info, Warning and Error plus All;
+- refresh/reload;
+- copy of an individual record or its visible text.
+
+The existing export remains the support handoff format and continues to include
+retained native/Core records together with app version/build, OS version, device
+class, Debug Logging state and record count. Export must remain privacy-sanitized.
+
+A legacy **Clear Logs on Start** preference is not restored. The bounded native
+support log and explicit Clear Logs action replace that Flutter-era behavior.
+
+### Developer Diagnostics retirement
+
+The current `DeveloperDiagnosticsView` is temporary development scaffolding and
+must not remain a normal production Settings destination after D9.
+
+Only the following durable support capability moves out of it:
+
+- the complete Support Diagnostics/logging feature described in D9-H.
+
+The remaining sections do **not** move into normal Settings:
+
+- Rust Core status/smoke-test presentation;
+- sandbox paths;
+- legacy migration feasibility/probe output;
+- Article Image Presentation metrics;
+- Article Image Cache metrics;
+- Timeline Performance counters/reset/print controls.
+
+Those are development/performance instruments. They may remain compile-time
+DEBUG/performance diagnostics where useful, but they are not production product
+settings.
+
+One related support affordance already lives outside the Developer Diagnostics
+screen and should remain: failed account validation may expose technical
+connection details under **Account**. Its user-facing label should be
+**Connection Details** (or equivalent), not **Developer Diagnostics**.
+
+Migration failures that require user action belong to the D9-A migration flow
+with normal error/retry presentation; the legacy read-only probe itself does not
+become a permanent Settings feature.
+
 ## 4. D9 Widget configuration extension
 
 The existing D5 WidgetKit architecture remains authoritative: the extension is
@@ -199,8 +270,14 @@ D9 is complete only when:
    no widget-specific Miniflux destination setting;
 8. Settings exposes Miniflux version, insecure-HTTP warning, Open Source, and
    About/version/legal information;
-9. no retired legacy toggle listed in this document is reintroduced;
-10. the canonical Rust, native iOS and affected shared-Apple/macOS regression
+9. Settings exposes Debug Logging, a searchable/filterable structured Log
+   Viewer, privacy-sanitized export, retained-record count and confirmed Clear
+   Logs using the existing `IOSAppDiagnostics` store;
+10. the production Settings hierarchy no longer depends on
+    `DeveloperDiagnosticsView`; only normal Account connection details and the
+    migrated logging/support surface remain user-facing;
+11. no retired legacy toggle listed in this document is reintroduced;
+12. the canonical Rust, native iOS and affected shared-Apple/macOS regression
     gates remain green.
 
 After D9 acceptance, no known release-blocking Flutter replacement gap remains
