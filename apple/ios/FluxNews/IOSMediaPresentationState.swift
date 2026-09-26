@@ -445,7 +445,7 @@ final class IOSCarPlayCoordinator {
         var filterItems: [CPListItem] = []
 
         let all = CPListItem(text: String(localized: "All Feeds"), detailText: nil)
-        all.accessoryType = selectedFeedID == nil ? .checkmark : .none
+        all.setAccessoryImage(selectedFeedID == nil ? UIImage(systemName: "checkmark") : nil)
         all.handler = { [weak self] _, completion in
             self?.selectFeed(nil)
             completion()
@@ -456,7 +456,7 @@ final class IOSCarPlayCoordinator {
         for feed in feeds.prefix(remaining) {
             let detail = String(localized: "\(feed.itemCount) items")
             let item = CPListItem(text: feed.feedTitle, detailText: detail)
-            item.accessoryType = selectedFeedID == feed.feedId ? .checkmark : .none
+            item.setAccessoryImage(selectedFeedID == feed.feedId ? UIImage(systemName: "checkmark") : nil)
             item.handler = { [weak self] _, completion in
                 self?.selectFeed(feed.feedId)
                 completion()
