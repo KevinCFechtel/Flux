@@ -133,7 +133,9 @@ final class IOSNowPlayingCoordinator {
     private let playbackCoordinator: IOSMediaPlaybackCoordinator
     private let presentationState: IOSMediaPlaybackPresentationState
     private let nowPlaying: IOSNowPlayingInfoPublishing
+    private let remoteCommandCenter: MPRemoteCommandCenter
     private var cancellables = Set<AnyCancellable>()
+    private var commandRegistrations: [(MPRemoteCommand, Any)] = []
     private var artworkGeneration = 0
     private var artworkSource: MediaArtworkSource?
     private var artworkData: Data?
@@ -141,19 +143,25 @@ final class IOSNowPlayingCoordinator {
     private var publishedArtwork: MPMediaItemArtwork?
     private var hasPublishedArtwork = false
 
+    private(set) var remoteCommandRegistrationCount = 0
+
     init(
         playbackCoordinator: IOSMediaPlaybackCoordinator,
         presentationState: IOSMediaPlaybackPresentationState,
-        nowPlaying: IOSNowPlayingInfoPublishing = MPNowPlayingInfoCenter.default()
+        nowPlaying: IOSNowPlayingInfoPublishing = MPNowPlayingInfoCenter.default(),
+        remoteCommandCenter: MPRemoteCommandCenter = .shared()
     ) {
         self.playbackCoordinator = playbackCoordinator
         self.presentationState = presentationState
         self.nowPlaying = nowPlaying
+        self.remoteCommandCenter = remoteCommandCenter
         observePresentationState()
+        startRemoteCommands()
         publish()
     }
 
     func cleanup() {
+        removeRemoteCommandTargets()
         cancellables.removeAll()
         artworkGeneration += 1
         artworkSource = nil
@@ -162,6 +170,28 @@ final class IOSNowPlayingCoordinator {
         publishedArtwork = nil
         hasPublishedArtwork = false
         clear()
+    }
+
+    func startRemoteCommands() {
+        guard commandRegistrations.isEmpty else { return }
+        registerRemoteCommands()
+    }
+
+    func dispatch(_ command: AppleMediaRemoteCommand) -> MPRemoteCommandHandlerStatus {
+        switch command {
+        case .play:
+            return handlePlay()
+        case .pause:
+            return handlePause()
+        case .toggle:
+            return handleToggle()
+        case .skipBackward:
+            return handleSkip(seconds: -AppleMediaRemoteCommandPolicy.skipIntervalSeconds)
+        case .skipForward:
+            return handleSkip(seconds: AppleMediaRemoteCommandPolicy.skipIntervalSeconds)
+        case let .seek(seconds):
+            return handleSeek(seconds: seconds)
+        }
     }
 
     private func observePresentationState() {
@@ -181,6 +211,110 @@ final class IOSNowPlayingCoordinator {
         )
         .sink { [weak self] _ in self?.publish() }
         .store(in: &cancellables)
+    }
+
+    private func registerRemoteCommands() {
+        remoteCommandRegistrationCount += 1
+
+        remoteCommandCenter.nextTrackCommand.isEnabled = false
+        remoteCommandCenter.previousTrackCommand.isEnabled = false
+        remoteCommandCenter.stopCommand.isEnabled = false
+
+        add(remoteCommandCenter.playCommand) { [weak self] _ in
+            self?.dispatch(.play) ?? .commandFailed
+        }
+        add(remoteCommandCenter.pauseCommand) { [weak self] _ in
+            self?.dispatch(.pause) ?? .commandFailed
+        }
+        add(remoteCommandCenter.togglePlayPauseCommand) { [weak self] _ in
+            self?.dispatch(.toggle) ?? .commandFailed
+        }
+
+        let skipInterval = NSNumber(value: AppleMediaRemoteCommandPolicy.skipIntervalSeconds)
+        remoteCommandCenter.skipBackwardCommand.preferredIntervals = [skipInterval]
+        remoteCommandCenter.skipForwardCommand.preferredIntervals = [skipInterval]
+        add(remoteCommandCenter.skipBackwardCommand) { [weak self] _ in
+            self?.dispatch(.skipBackward) ?? .commandFailed
+        }
+        add(remoteCommandCenter.skipForwardCommand) { [weak self] _ in
+            self?.dispatch(.skipForward) ?? .commandFailed
+        }
+        add(remoteCommandCenter.changePlaybackPositionCommand) { [weak self] event in
+            guard let event = event as? MPChangePlaybackPositionCommandEvent else {
+                return .commandFailed
+            }
+            return self?.dispatch(.seek(seconds: event.positionTime)) ?? .commandFailed
+        }
+    }
+
+    private func add(
+        _ command: MPRemoteCommand,
+        handler: @escaping (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus
+    ) {
+        command.isEnabled = true
+        commandRegistrations.append((command, command.addTarget(handler: handler)))
+    }
+
+    private func removeRemoteCommandTargets() {
+        for (command, token) in commandRegistrations {
+            command.removeTarget(token)
+        }
+        commandRegistrations.removeAll()
+    }
+
+    private func handlePlay() -> MPRemoteCommandHandlerStatus {
+        guard let enclosureID = presentationState.loadedEnclosure?.id else {
+            return .commandFailed
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await self.playbackCoordinator.play(enclosureID: enclosureID)
+        }
+        return .success
+    }
+
+    private func handlePause() -> MPRemoteCommandHandlerStatus {
+        guard presentationState.loadedEnclosure != nil else {
+            return .commandFailed
+        }
+        playbackCoordinator.pause()
+        return .success
+    }
+
+    private func handleToggle() -> MPRemoteCommandHandlerStatus {
+        guard presentationState.loadedEnclosure != nil else {
+            return .commandFailed
+        }
+        if presentationState.status == .playing {
+            playbackCoordinator.pause()
+            return .success
+        }
+        return handlePlay()
+    }
+
+    private func handleSkip(seconds: Double) -> MPRemoteCommandHandlerStatus {
+        guard presentationState.loadedEnclosure != nil else {
+            return .commandFailed
+        }
+        playbackCoordinator.skip(bySeconds: seconds)
+        return .success
+    }
+
+    private func handleSeek(seconds: Double) -> MPRemoteCommandHandlerStatus {
+        guard seconds.isFinite,
+              seconds >= 0,
+              presentationState.loadedEnclosure != nil else {
+            return .commandFailed
+        }
+        let bounded = presentationState.durationMs.map {
+            min(seconds, Double($0) / 1_000)
+        } ?? seconds
+        guard bounded.isFinite,
+              bounded <= Double(UInt64.max) / 1_000 else {
+            return .commandFailed
+        }
+        playbackCoordinator.seek(toMs: UInt64(bounded * 1_000))
+        return .success
     }
 
     private func projection() -> AppleNowPlayingProjection? {
