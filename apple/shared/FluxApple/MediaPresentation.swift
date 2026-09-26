@@ -19,6 +19,18 @@ enum AppleMediaRemoteCommandPolicy {
     static let skipIntervalSeconds: Double = 30
 }
 
+enum AppleFallbackArtwork {
+    static func data(bundle: Bundle = .main) -> Data? {
+        guard let url = bundle.url(
+            forResource: "FallbackArtwork",
+            withExtension: "png"
+        ) else {
+            return nil
+        }
+        return try? Data(contentsOf: url)
+    }
+}
+
 struct AppleNowPlayingProjection: Equatable {
     let title: String
     let sourceTitle: String
@@ -40,7 +52,7 @@ struct AppleNowPlayingProjection: Equatable {
         playbackRate: Double,
         errorMessage: String?,
         artworkData: Data? = nil,
-        fallbackArtworkData: Data? = nil
+        fallbackArtworkData: Data? = AppleFallbackArtwork.data()
     ) -> AppleNowPlayingProjection {
         let duration = durationMs.flatMap { milliseconds in
             let seconds = Double(milliseconds) / 1_000
