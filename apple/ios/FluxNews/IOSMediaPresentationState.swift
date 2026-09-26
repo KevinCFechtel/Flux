@@ -179,27 +179,37 @@ final class IOSCarPlayCoordinator {
     private var loadGeneration: UInt64 = 0
     private var selectedFeedID: Int64?
     private var feeds: [ListeningListFeed] = []
-    private var allItems: [ListeningListItem] = []
     private var visibleItems: [ListeningListItem] = []
     private var listItemsByEnclosureID: [Int64: CPListItem] = [:]
     private var cancellables = Set<AnyCancellable>()
 
     init(mediaRuntime: IOSMediaRuntime) { self.mediaRuntime = mediaRuntime; observePlaybackState() }
     func connect(interfaceController: CPInterfaceController) { self.interfaceController = interfaceController; installRootTemplate(); reloadListeningList() }
-    func disconnect() { loadGeneration &+= 1; interfaceController = nil; rootListTemplate = nil; allItems.removeAll(); visibleItems.removeAll(); listItemsByEnclosureID.removeAll() }
+    func disconnect() { loadGeneration &+= 1; interfaceController = nil; rootListTemplate = nil; visibleItems.removeAll(); listItemsByEnclosureID.removeAll() }
 
     func reloadListeningList() {
         guard let core = mediaRuntime.core else { updateRootMessage(String(localized: "Media is not available yet.")); return }
-        loadGeneration &+= 1; let generation = loadGeneration; let executionCoordinator = mediaRuntime.coreSessionExecutionCoordinator
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        let requestedFeedID = selectedFeedID
+        let executionCoordinator = mediaRuntime.coreSessionExecutionCoordinator
         Task { @MainActor [weak self, core, executionCoordinator] in
-            guard let result = await executionCoordinator.responsiveResult(for: core, { let feeds = try core.listeningListFeeds(); let items = try core.listeningList(feedId: nil, sort: .recentlyAdded); return (feeds, items) }) else { return }
+            guard let result = await executionCoordinator.responsiveResult(for: core, {
+                let feeds = try core.listeningListFeeds()
+                let validatedFeedID = requestedFeedID.flatMap { id in
+                    feeds.contains(where: { $0.feedId == id }) ? id : nil
+                }
+                let items = try core.listeningList(feedId: validatedFeedID, sort: .recentlyAdded)
+                return (feeds, validatedFeedID, items)
+            }) else { return }
             guard let self, self.loadGeneration == generation, self.mediaRuntime.core === core else { return }
             switch result {
-            case let .success((feeds, items)):
+            case let .success((feeds, validatedFeedID, items)):
                 self.feeds = feeds
-                if let selectedFeedID = self.selectedFeedID, !feeds.contains(where: { $0.feedId == selectedFeedID }) { self.selectedFeedID = nil }
-                self.allItems = items; self.applySelectedFeed()
-            case .failure: self.updateRootMessage(String(localized: "The Listening List could not be loaded."))
+                self.selectedFeedID = validatedFeedID
+                self.showListeningList(items)
+            case .failure:
+                self.updateRootMessage(String(localized: "The Listening List could not be loaded."))
             }
         }
     }
@@ -210,7 +220,6 @@ final class IOSCarPlayCoordinator {
     }
     private func installRootTemplate() { let loading = CPListItem(text: String(localized: "Loading…"), detailText: nil); loading.isEnabled = false; let template = CPListTemplate(title: String(localized: "Listening List"), sections: [CPListSection(items: [loading])]); rootListTemplate = template; interfaceController?.setRootTemplate(template, animated: true, completion: nil) }
     private func updateRootMessage(_ message: String) { guard let template = rootListTemplate else { return }; listItemsByEnclosureID.removeAll(); visibleItems.removeAll(); let item = CPListItem(text: message, detailText: nil); item.isEnabled = false; template.updateSections([CPListSection(items: [item])]); configureFilterButton(on: template) }
-    private func applySelectedFeed() { let items = selectedFeedID.map { id in allItems.filter { $0.feedId == id } } ?? allItems; showListeningList(items) }
     private func showListeningList(_ items: [ListeningListItem]) {
         guard let template = rootListTemplate else { return }; listItemsByEnclosureID.removeAll(); visibleItems = items
         if items.isEmpty { let message = CPListItem(text: String(localized: "No audio items available."), detailText: nil); message.isEnabled = false; template.updateSections([CPListSection(items: [message])]); configureFilterButton(on: template); return }
@@ -224,7 +233,7 @@ final class IOSCarPlayCoordinator {
         for feed in feeds.prefix(remaining) { let item = CPListItem(text: feed.feedTitle, detailText: String(localized: "\(feed.itemCount) items")); item.setAccessoryImage(selectedFeedID == feed.feedId ? UIImage(systemName: "checkmark") : nil); item.handler = { [weak self] _, completion in self?.selectFeed(feed.feedId); completion() }; filterItems.append(item) }
         interfaceController.pushTemplate(CPListTemplate(title: String(localized: "Filter by Feed"), sections: [CPListSection(items: filterItems)]), animated: true, completion: nil)
     }
-    private func selectFeed(_ feedID: Int64?) { selectedFeedID = feedID; applySelectedFeed(); interfaceController?.popTemplate(animated: true, completion: nil) }
+    private func selectFeed(_ feedID: Int64?) { selectedFeedID = feedID; interfaceController?.popTemplate(animated: true, completion: nil); reloadListeningList() }
     private func makeListItem(_ item: ListeningListItem) -> CPListItem {
         let title = IOSListeningListPresentation.textOrFallback(item.title, fallback: String(localized: "Untitled")); let feedTitle = IOSListeningListPresentation.textOrFallback(item.feedTitle, fallback: String(localized: "Unknown Feed"))
         guard let selected = IOSListeningListPresentation.selectedEnclosure(item) else { let detail = item.audioEnclosures.count > 1 ? String(localized: "Multiple audio files") : feedTitle; let listItem = CPListItem(text: title, detailText: detail); listItem.isEnabled = false; return listItem }
