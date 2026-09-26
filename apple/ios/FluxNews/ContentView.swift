@@ -591,7 +591,7 @@ struct ContentView: View {
             handleWidgetURL(url)
         }
         .task(id: bootstrapper.coreRevision) {
-            if let core = newsreaderStore.core {
+            if let core = bootstrapper.core {
                 searchStore.attach(
                     to: core,
                     coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
