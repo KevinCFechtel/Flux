@@ -296,6 +296,7 @@ final class IOSNowPlayingCoordinator {
         nowPlaying.nowPlayingInfo = info
         nowPlaying.playbackState = projection.playbackState == .playing ? .playing : .paused
     }
+
     private func clear() {
         nowPlaying.nowPlayingInfo = nil
         nowPlaying.playbackState = .unknown
@@ -594,20 +595,36 @@ final class IOSCarPlayCoordinator {
 @objc(IOSCarPlaySceneDelegate)
 final class IOSCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private var coordinator: IOSCarPlayCoordinator?
+    private var startupTask: Task<Void, Never>?
 
     func templateApplicationScene(
         _ templateApplicationScene: CPTemplateApplicationScene,
         didConnect interfaceController: CPInterfaceController
     ) {
-        let coordinator = IOSCarPlayCoordinator(mediaRuntime: IOSAppRuntime.shared.mediaRuntime)
+        let runtime = IOSAppRuntime.shared
+        let coordinator = IOSCarPlayCoordinator(mediaRuntime: runtime.mediaRuntime)
         self.coordinator = coordinator
         coordinator.connect(interfaceController: interfaceController)
+
+        startupTask?.cancel()
+        startupTask = Task { @MainActor [weak self, weak coordinator] in
+            guard let self, let coordinator else { return }
+            guard await runtime.bootstrapper.ensureStarted() != nil else {
+                guard !Task.isCancelled, self.coordinator === coordinator else { return }
+                coordinator.reloadListeningList()
+                return
+            }
+            guard !Task.isCancelled, self.coordinator === coordinator else { return }
+            coordinator.reloadListeningList()
+        }
     }
 
     func templateApplicationScene(
         _ templateApplicationScene: CPTemplateApplicationScene,
         didDisconnectInterfaceController interfaceController: CPInterfaceController
     ) {
+        startupTask?.cancel()
+        startupTask = nil
         coordinator?.disconnect()
         coordinator = nil
     }
