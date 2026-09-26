@@ -145,9 +145,10 @@ final class IOSNowPlayingCoordinator {
         switch command {
         case .play: return handlePlay()
         case .pause: return handlePause()
+        case .stop: return handleStop()
         case .toggle: return handleToggle()
-        case .skipBackward: return handleSkip(seconds: -AppleMediaRemoteCommandPolicy.skipIntervalSeconds)
-        case .skipForward: return handleSkip(seconds: AppleMediaRemoteCommandPolicy.skipIntervalSeconds)
+        case .skipBackward: return handleSkip(seconds: -AppleMediaRemoteCommandPolicy.skipBackwardIntervalSeconds)
+        case .skipForward: return handleSkip(seconds: AppleMediaRemoteCommandPolicy.skipForwardIntervalSeconds)
         case let .seek(seconds): return handleSeek(seconds: seconds)
         }
     }
@@ -175,15 +176,14 @@ final class IOSNowPlayingCoordinator {
         remoteCommandRegistrationCount += 1
         remoteCommandCenter.nextTrackCommand.isEnabled = false
         remoteCommandCenter.previousTrackCommand.isEnabled = false
-        remoteCommandCenter.stopCommand.isEnabled = false
 
         add(remoteCommandCenter.playCommand) { [weak self] _ in self?.dispatch(.play) ?? .commandFailed }
         add(remoteCommandCenter.pauseCommand) { [weak self] _ in self?.dispatch(.pause) ?? .commandFailed }
+        add(remoteCommandCenter.stopCommand) { [weak self] _ in self?.dispatch(.stop) ?? .commandFailed }
         add(remoteCommandCenter.togglePlayPauseCommand) { [weak self] _ in self?.dispatch(.toggle) ?? .commandFailed }
 
-        let skipInterval = NSNumber(value: AppleMediaRemoteCommandPolicy.skipIntervalSeconds)
-        remoteCommandCenter.skipBackwardCommand.preferredIntervals = [skipInterval]
-        remoteCommandCenter.skipForwardCommand.preferredIntervals = [skipInterval]
+        remoteCommandCenter.skipBackwardCommand.preferredIntervals = [NSNumber(value: AppleMediaRemoteCommandPolicy.skipBackwardIntervalSeconds)]
+        remoteCommandCenter.skipForwardCommand.preferredIntervals = [NSNumber(value: AppleMediaRemoteCommandPolicy.skipForwardIntervalSeconds)]
         add(remoteCommandCenter.skipBackwardCommand) { [weak self] _ in self?.dispatch(.skipBackward) ?? .commandFailed }
         add(remoteCommandCenter.skipForwardCommand) { [weak self] _ in self?.dispatch(.skipForward) ?? .commandFailed }
         add(remoteCommandCenter.changePlaybackPositionCommand) { [weak self] event in
@@ -214,6 +214,12 @@ final class IOSNowPlayingCoordinator {
     private func handlePause() -> MPRemoteCommandHandlerStatus {
         guard presentationState.loadedEnclosure != nil else { return .commandFailed }
         playbackCoordinator.pause()
+        return .success
+    }
+
+    private func handleStop() -> MPRemoteCommandHandlerStatus {
+        guard presentationState.loadedEnclosure != nil else { return .commandFailed }
+        playbackCoordinator.stop()
         return .success
     }
 
