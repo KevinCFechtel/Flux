@@ -9,6 +9,7 @@ enum MediaPlaybackPresentationStatus: Equatable {
 enum AppleMediaRemoteCommand: Equatable {
     case play
     case pause
+    case stop
     case toggle
     case skipBackward
     case skipForward
@@ -16,7 +17,8 @@ enum AppleMediaRemoteCommand: Equatable {
 }
 
 enum AppleMediaRemoteCommandPolicy {
-    static let skipIntervalSeconds: Double = 30
+    static let skipBackwardIntervalSeconds: Double = 15
+    static let skipForwardIntervalSeconds: Double = 30
 }
 
 enum AppleFallbackArtwork {
