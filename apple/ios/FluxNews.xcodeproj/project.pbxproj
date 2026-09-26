@@ -69,6 +69,7 @@
 		D6A8 /* FluxNews/IOSMediaPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B8 /* FluxNews/IOSMediaPlayerView.swift */; };
 		D6A9 /* FluxNews/IOSMediaSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B9 /* FluxNews/IOSMediaSettingsView.swift */; };
 		D6T1 /* FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6T2 /* FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift */; };
+		E1069888306786CC0009BBFC /* FallbackArtwork.png in Resources */ = {isa = PBXBuildFile; fileRef = E1069887306786CC0009BBFC /* FallbackArtwork.png */; };
 		E17F743830471E2D00698DA5 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = E17F743730471E2D00698DA5 /* AppIcon.icon */; };
 		E17F744030471E2D00698DA5 /* FluxUniFFI.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */; };
 		E17F744130471E2D00698DA5 /* FluxUniFFI.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -183,6 +184,7 @@
 		D6B8 /* FluxNews/IOSMediaPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSMediaPlayerView.swift; sourceTree = SOURCE_ROOT; };
 		D6B9 /* FluxNews/IOSMediaSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSMediaSettingsView.swift; sourceTree = SOURCE_ROOT; };
 		D6T2 /* FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift; sourceTree = SOURCE_ROOT; };
+		E1069887306786CC0009BBFC /* FallbackArtwork.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = FallbackArtwork.png; sourceTree = "<group>"; };
 		E17F743330471C1900698DA5 /* FluxNewsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FluxNewsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E17F743730471E2D00698DA5 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = FluxUniFFI.xcframework; path = ../Build/Products/FluxUniFFI/FluxUniFFI.xcframework; sourceTree = "<group>"; };
@@ -229,6 +231,7 @@
 		G1 = {
 			isa = PBXGroup;
 			children = (
+				E1069887306786CC0009BBFC /* FallbackArtwork.png */,
 				G2 /* FluxNews */,
 				G3 /* FluxNews */,
 				B4 /* flux_uniffi.swift */,
@@ -433,6 +436,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E1069888306786CC0009BBFC /* FallbackArtwork.png in Resources */,
 				E182A752304B521300F49A9B /* Assets.xcassets in Resources */,
 				E17F743830471E2D00698DA5 /* AppIcon.icon in Resources */,
 				E182A753304B521300F49A9B /* Localizable.xcstrings in Resources */,
