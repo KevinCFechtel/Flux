@@ -81,14 +81,13 @@ final class MediaRemoteControlCoordinator {
         let center = MPRemoteCommandCenter.shared()
         center.nextTrackCommand.isEnabled = false
         center.previousTrackCommand.isEnabled = false
-        center.stopCommand.isEnabled = false
 
         add(center.playCommand) { [weak self] _ in self?.dispatch(.play) ?? .commandFailed }
         add(center.pauseCommand) { [weak self] _ in self?.dispatch(.pause) ?? .commandFailed }
+        add(center.stopCommand) { [weak self] _ in self?.dispatch(.stop) ?? .commandFailed }
         add(center.togglePlayPauseCommand) { [weak self] _ in self?.dispatch(.toggle) ?? .commandFailed }
-        let skipInterval = NSNumber(value: AppleMediaRemoteCommandPolicy.skipIntervalSeconds)
-        center.skipBackwardCommand.preferredIntervals = [skipInterval]
-        center.skipForwardCommand.preferredIntervals = [skipInterval]
+        center.skipBackwardCommand.preferredIntervals = [NSNumber(value: AppleMediaRemoteCommandPolicy.skipBackwardIntervalSeconds)]
+        center.skipForwardCommand.preferredIntervals = [NSNumber(value: AppleMediaRemoteCommandPolicy.skipForwardIntervalSeconds)]
         add(center.skipBackwardCommand) { [weak self] _ in self?.dispatch(.skipBackward) ?? .commandFailed }
         add(center.skipForwardCommand) { [weak self] _ in self?.dispatch(.skipForward) ?? .commandFailed }
         add(center.changePlaybackPositionCommand) { [weak self] event in
@@ -111,9 +110,10 @@ final class MediaRemoteControlCoordinator {
         switch command {
         case .play: return handlePlay()
         case .pause: return handlePause()
+        case .stop: return handleStop()
         case .toggle: return handleToggle()
-        case .skipBackward: return handleSkip(seconds: -AppleMediaRemoteCommandPolicy.skipIntervalSeconds)
-        case .skipForward: return handleSkip(seconds: AppleMediaRemoteCommandPolicy.skipIntervalSeconds)
+        case .skipBackward: return handleSkip(seconds: -AppleMediaRemoteCommandPolicy.skipBackwardIntervalSeconds)
+        case .skipForward: return handleSkip(seconds: AppleMediaRemoteCommandPolicy.skipForwardIntervalSeconds)
         case let .seek(seconds): return handleSeek(seconds: seconds)
         }
     }
@@ -131,6 +131,12 @@ final class MediaRemoteControlCoordinator {
     private func handlePause() -> MPRemoteCommandHandlerStatus {
         guard presentationState.loadedEnclosure != nil else { return .commandFailed }
         playbackCoordinator.pause()
+        return .success
+    }
+
+    private func handleStop() -> MPRemoteCommandHandlerStatus {
+        guard presentationState.loadedEnclosure != nil else { return .commandFailed }
+        playbackCoordinator.stop()
         return .success
     }
 
