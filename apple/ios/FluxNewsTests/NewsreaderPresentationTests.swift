@@ -57,6 +57,113 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(IOSBottomAction.defaultActions.contains(.settings))
     }
 
+    func testArticleListActionPolicyPreservesPersistedOrder() {
+        XCTAssertEqual(
+            IOSArticleListActionPolicy.normalizedActions(
+                from: ["search", "sync", "more", "filterAndSort"]
+            ),
+            [.search, .sync, .more, .filterAndSort]
+        )
+    }
+
+    @MainActor
+    func testArticleListActionPreferencesRoundTripPersistedOrder() {
+        let suite = "FluxNews.ArticleListActionPreferences.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let preferences = IOSArticleListActionPreferences(defaults: defaults)
+        preferences.setActions([.listeningList, .sync, .more, .search])
+
+        XCTAssertEqual(
+            IOSArticleListActionPreferences(defaults: defaults).actions,
+            [.listeningList, .sync, .more, .search]
+        )
+    }
+
+    func testArticleListActionPolicyIgnoresUnknownIDsAndDuplicates() {
+        XCTAssertEqual(
+            IOSArticleListActionPolicy.normalizedActions(
+                from: ["sync", "futureAction", "sync", "search", "search"]
+            ),
+            [.sync, .search, .more]
+        )
+    }
+
+    func testArticleListActionPolicyGuaranteesMoreAndDefaultsInvalidConfigurations() {
+        XCTAssertEqual(
+            IOSArticleListActionPolicy.normalizedActions(from: ["listeningList"]),
+            [.listeningList, .more]
+        )
+        XCTAssertEqual(
+            IOSArticleListActionPolicy.normalizedActions(from: []),
+            IOSBottomAction.defaultActions
+        )
+        XCTAssertEqual(
+            IOSArticleListActionPolicy.normalizedActions(from: ["futureAction"]),
+            IOSBottomAction.defaultActions
+        )
+    }
+
+    @MainActor
+    func testNowPlayingVisibilityTracksLoadedMediaRatherThanPlaybackStatus() {
+        let configured = [IOSBottomAction.sync, .nowPlaying, .more]
+        let state = IOSMediaPlaybackPresentationState()
+
+        XCTAssertEqual(
+            IOSArticleListActionPolicy.visibleActions(
+                configuredActions: configured,
+                hasLoadedMedia: state.loadedEnclosure != nil
+            ),
+            [.sync, .more]
+        )
+
+        state.setLoadedMedia(
+            enclosure: Enclosure(
+                id: 1,
+                articleId: 2,
+                url: "https://example.test/episode.mp3",
+                mimeType: "audio/mpeg",
+                sizeBytes: nil,
+                remoteMediaProgressionSeconds: 0,
+                mediaKind: .audio
+            ),
+            feedTitle: "Feed",
+            mediaTitle: "Episode",
+            artworkSource: nil,
+            chapters: [],
+            positionMs: 0,
+            durationMs: nil
+        )
+        state.setStatus(.playing)
+        XCTAssertEqual(
+            IOSArticleListActionPolicy.visibleActions(
+                configuredActions: configured,
+                hasLoadedMedia: state.loadedEnclosure != nil
+            ),
+            configured
+        )
+
+        state.setStatus(.paused)
+        XCTAssertEqual(
+            IOSArticleListActionPolicy.visibleActions(
+                configuredActions: configured,
+                hasLoadedMedia: state.loadedEnclosure != nil
+            ),
+            configured
+        )
+
+        state.setStatus(.stopped)
+        XCTAssertEqual(
+            IOSArticleListActionPolicy.visibleActions(
+                configuredActions: configured,
+                hasLoadedMedia: state.loadedEnclosure != nil
+            ),
+            configured
+        )
+        XCTAssertEqual(configured, [.sync, .nowPlaying, .more])
+    }
+
     func testFloatingActionGroupUsesStableCapsuleMetrics() {
         XCTAssertEqual(IOSArticleListActionChromeMetrics.floatingHorizontalPadding, 8)
         XCTAssertEqual(IOSArticleListActionChromeMetrics.floatingVerticalPadding, 5)

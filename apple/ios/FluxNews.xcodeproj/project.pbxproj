@@ -55,6 +55,7 @@
 		A52 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = E182A754304B521300F49A9B /* Localizable.xcstrings */; };
 		A53 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E182A751304B521300F49A9B /* Assets.xcassets */; };
 		A54 /* IOSAppDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B48 /* IOSAppDiagnostics.swift */; };
+		A55 /* ArticleListActionsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B49 /* ArticleListActionsSettingsView.swift */; };
 		A6 /* FluxNewsTests/LegacyStateDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8 /* FluxNewsTests/LegacyStateDiscoveryTests.swift */; };
 		A7 /* ../shared/FluxApple/BrowserPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9 /* ../shared/FluxApple/BrowserPresentation.swift */; };
 		A8 /* ../shared/FluxApple/ScrolloverPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10 /* ../shared/FluxApple/ScrolloverPresentation.swift */; };
@@ -163,6 +164,7 @@
 		B46 /* ../shared/FluxApple/WidgetPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/WidgetPresentation.swift; sourceTree = SOURCE_ROOT; };
 		B47 /* ../shared/FluxApple/WidgetSnapshotWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../shared/FluxApple/WidgetSnapshotWriter.swift; sourceTree = SOURCE_ROOT; };
 		B48 /* IOSAppDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSAppDiagnostics.swift; sourceTree = "<group>"; };
+		B49 /* ArticleListActionsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArticleListActionsSettingsView.swift; sourceTree = "<group>"; };
 		B5 /* LegacyStateDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyStateDiscovery.swift; sourceTree = "<group>"; };
 		B6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B7 /* FluxNewsUpgradeTest.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FluxNewsUpgradeTest.entitlements; sourceTree = "<group>"; };
@@ -295,6 +297,7 @@
 				B25 /* AccountConfigurationView.swift */,
 				B27 /* SettingsView.swift */,
 				B28 /* ArticlesSettingsView.swift */,
+				B49 /* ArticleListActionsSettingsView.swift */,
 				B29 /* NavigationSettingsView.swift */,
 				B30 /* FeedManagementViews.swift */,
 				B41 /* BackgroundSyncSettingsView.swift */,
@@ -493,6 +496,7 @@
 				A11 /* FluxNews/NewsNavigationView.swift in Sources */,
 				A12 /* FluxNews/DeveloperDiagnosticsView.swift in Sources */,
 				A54 /* IOSAppDiagnostics.swift in Sources */,
+				A55 /* ArticleListActionsSettingsView.swift in Sources */,
 				A18 /* FluxNews/IOSSearchStore.swift in Sources */,
 				A19 /* FluxNews/SearchView.swift in Sources */,
 				A21 /* IOSCredentialStore.swift in Sources */,
