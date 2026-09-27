@@ -29,4 +29,32 @@ final class LegacyStateDiscoveryTests: XCTestCase {
         XCTAssertEqual(summary["Keychain credentials"], "accessible")
         XCTAssertEqual(summary["API key"], "absent")
     }
+
+    func testAccountImportRequiresCompleteAccountAndPairsHeadersByLegacyID() {
+        let account = LegacyStateDiscovery.parseAccountImport([
+            "minifluxURL": " https://miniflux.example/ ",
+            "minifluxAPIKey": " secret-key ",
+            "customHeadersKey_1": " X-First ",
+            "customHeadersValue_1": "one",
+            "customHeadersKey_2": "X-Second",
+            "customHeadersValue_2": "two",
+            "customHeadersKey_incomplete": "X-Ignored"
+        ])
+
+        XCTAssertEqual(account?.serverURL, "https://miniflux.example/")
+        XCTAssertEqual(account?.apiKey, "secret-key")
+        XCTAssertEqual(account?.customHeaders, [
+            .init(name: "X-First", value: "one"),
+            .init(name: "X-Second", value: "two")
+        ])
+    }
+
+    func testAccountImportRejectsMissingCredentials() {
+        XCTAssertNil(LegacyStateDiscovery.parseAccountImport([
+            "minifluxURL": "https://miniflux.example/"
+        ]))
+        XCTAssertNil(LegacyStateDiscovery.parseAccountImport([
+            "minifluxAPIKey": "secret-key"
+        ]))
+    }
 }
