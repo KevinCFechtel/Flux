@@ -110,14 +110,11 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
 
         let importResult = await coordinator.migrateAccountIfNeeded()
         XCTAssertEqual(importResult, .imported)
-        XCTAssertEqual(
-            try store.load(),
-            IOSMinifluxCredentials(
-                server: legacy.serverURL,
-                apiKey: legacy.apiKey,
-                customHeaders: legacy.customHeaders.map { .init(name: $0.name, value: $0.value) }
-            )
-        )
+        let stored = try XCTUnwrap(store.load())
+        XCTAssertEqual(stored.server, legacy.serverURL)
+        XCTAssertEqual(stored.apiKey, legacy.apiKey)
+        XCTAssertEqual(stored.customHeaders.map(\.name), legacy.customHeaders.map(\.name))
+        XCTAssertEqual(stored.customHeaders.map(\.value), legacy.customHeaders.map(\.value))
         XCTAssertNotNil(bootstrapper.core)
         let secondResult = await coordinator.migrateAccountIfNeeded()
         XCTAssertEqual(secondResult, .nativeAccountWins)
