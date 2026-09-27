@@ -22,6 +22,17 @@ struct LegacyDiscoveryResult: Equatable {
     let legacyCache: Bool
 }
 
+struct LegacyAccountImport: Equatable {
+    struct Header: Equatable {
+        let name: String
+        let value: String
+    }
+
+    let serverURL: String
+    let apiKey: String
+    let customHeaders: [Header]
+}
+
 enum LegacyStateDiscovery {
     static let productionBundleID = "dev.kevincfechtel.fluxNews"
     static let applicationGroup = "group.dev.kevincfechtel.fluxNews"
@@ -80,6 +91,52 @@ enum LegacyStateDiscovery {
         )
     }
 
+    /// Reads only the legacy Flutter secure-storage namespace and returns the
+    /// account material that has a direct native equivalent. This is a source
+    /// reader for the D9 copy/import migration; it never writes to Keychain,
+    /// native storage, Core storage, or the legacy store.
+    static func readAccountImport() -> LegacyAccountImport? {
+        guard Bundle.main.bundleIdentifier == productionBundleID else { return nil }
+        return parseAccountImport(keychainValues())
+    }
+
+    /// Pure decoder kept separate from Keychain access so migration semantics can
+    /// be regression-tested without creating or mutating legacy credentials.
+    static func parseAccountImport(_ values: [String: String]) -> LegacyAccountImport? {
+        guard let rawServer = values[accountURLKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawServer.isEmpty,
+              let rawAPIKey = values[accountAPIKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawAPIKey.isEmpty else {
+            return nil
+        }
+
+        let headerIDs = Set(values.keys.compactMap { key -> String? in
+            if key.hasPrefix(customHeaderKeyPrefix) {
+                return String(key.dropFirst(customHeaderKeyPrefix.count))
+            }
+            if key.hasPrefix(customHeaderValuePrefix) {
+                return String(key.dropFirst(customHeaderValuePrefix.count))
+            }
+            return nil
+        })
+
+        let headers = headerIDs.sorted().compactMap { id -> LegacyAccountImport.Header? in
+            guard let rawName = values[customHeaderKeyPrefix + id],
+                  let rawValue = values[customHeaderValuePrefix + id] else {
+                return nil
+            }
+            let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            return .init(name: name, value: rawValue)
+        }
+
+        return LegacyAccountImport(
+            serverURL: rawServer,
+            apiKey: rawAPIKey,
+            customHeaders: headers
+        )
+    }
+
     static func redactedSummary(_ result: LegacyDiscoveryResult) -> [String: String] {
         [
             "Production identity": result.productionIdentity.rawValue,
@@ -98,9 +155,12 @@ enum LegacyStateDiscovery {
         ]
     }
 
+    // Only settings with a retained native/Core semantic belong here. Explicitly
+    // retired Flutter preferences such as useBlackMode and the replaced mobile
+    // syncOnStart preference must not be counted as D9 migration candidates.
     private static let compatibleSettings: Set<String> = [
-        "brightnessMode", "useBlackMode", "activateTruncate", "charactersToTruncate",
-        "syncOnStart", "autoDownloadAudioAfterSync", "downloadAudioOnlyOnWifi",
+        "brightnessMode", "activateTruncate", "charactersToTruncate",
+        "autoDownloadAudioAfterSync", "downloadAudioOnlyOnWifi",
         "deleteAudioAfterPlayback", "audioDownloadRetentionDays"
     ]
 
@@ -125,6 +185,30 @@ enum LegacyStateDiscovery {
         let items = (result as? [[CFString: Any]]) ?? []
         let accounts = Set(items.compactMap { $0[kSecAttrAccount] as? String })
         return (.accessible, accounts)
+    }
+
+    private static func keychainValues() -> [String: String] {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: flutterKeychainService,
+            kSecMatchLimit: kSecMatchLimitAll,
+            kSecReturnAttributes: true,
+            kSecReturnData: true
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let items = result as? [[CFString: Any]] else {
+            return [:]
+        }
+
+        return items.reduce(into: [:]) { values, item in
+            guard let account = item[kSecAttrAccount] as? String,
+                  let data = item[kSecValueData] as? Data,
+                  let value = String(data: data, encoding: .utf8) else {
+                return
+            }
+            values[account] = value
+        }
     }
 
     private static func countAudioFiles(in directory: URL?, fileManager: FileManager) -> Int {
