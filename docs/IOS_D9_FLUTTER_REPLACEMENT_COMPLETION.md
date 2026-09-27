@@ -35,6 +35,11 @@ non-reconstructable state such as account association/credentials, custom HTTP
 headers, compatible Core/native settings, compatible feed preferences, media
 policies, playback progress, and valid downloaded-media association.
 
+`autoDownloadAudioAfterSync` is deliberately not migrated: Flutter used it to
+download audio for newly synchronized articles, while the Core auto-download
+policy applies when an article enters Listening List. These triggers differ, and
+D9 does not introduce a replacement sync-triggered download policy.
+
 The migration remains idempotent, restart-safe, and non-destructive to legacy
 storage. Existing valid native/Core state wins.
 

@@ -89,7 +89,7 @@ enum LegacyStateDiscovery {
                 }
                 return nil
             }).count,
-            compatibleSettingCount: accounts.intersection(compatibleSettings).count,
+            compatibleSettingCount: accounts.intersection(auditedSettings).count,
             feedPreferencePresent: accounts.contains(feedSettingsKey),
             playbackProgressCount: accounts.filter { $0.hasPrefix(playbackPrefix) }.count,
             downloadMetadataCount: accounts.filter { key in
@@ -238,14 +238,16 @@ enum LegacyStateDiscovery {
     // Only settings with a retained native/Core semantic belong here. Explicitly
     // retired Flutter preferences such as useBlackMode and the replaced mobile
     // syncOnStart preference must not be counted as D9 migration candidates.
-    private static let compatibleSettings: Set<String> = [
+    // Includes recognized legacy values retained for the upgrade diagnostic.
+    // `autoDownloadAudioAfterSync` is not a compatible Core media policy.
+    private static let auditedSettings: Set<String> = [
         "brightnessMode", "activateTruncate", "charactersToTruncate",
         "autoDownloadAudioAfterSync", "downloadAudioOnlyOnWifi",
         "deleteAudioAfterPlayback", "audioDownloadRetentionDays"
     ]
 
     private static let compatibleMediaSettings: Set<String> = [
-        "autoDownloadAudioAfterSync", "downloadAudioOnlyOnWifi",
+        "downloadAudioOnlyOnWifi",
         "deleteAudioAfterPlayback", "audioDownloadRetentionDays"
     ]
 

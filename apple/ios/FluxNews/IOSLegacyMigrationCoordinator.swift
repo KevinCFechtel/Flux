@@ -27,14 +27,12 @@ enum IOSLegacyDownloadMigrationOutcome: Equatable {
 }
 
 struct IOSLegacyMediaSettingsImport: Equatable {
-    let autoDownloadListeningList: Bool?
     let unmeteredOnly: Bool?
     let deleteAfterPlayback: Bool?
     let retentionDays: UInt32?
 
     var isEmpty: Bool {
-        autoDownloadListeningList == nil && unmeteredOnly == nil &&
-            deleteAfterPlayback == nil && retentionDays == nil
+        unmeteredOnly == nil && deleteAfterPlayback == nil && retentionDays == nil
     }
 
     static func parse(_ values: [String: String]) -> Self {
@@ -51,7 +49,6 @@ struct IOSLegacyMediaSettingsImport: Equatable {
             .flatMap { $0 > 0 ? $0 : nil }
 
         return Self(
-            autoDownloadListeningList: parseBool("autoDownloadAudioAfterSync"),
             unmeteredOnly: parseBool("downloadAudioOnlyOnWifi"),
             deleteAfterPlayback: parseBool("deleteAudioAfterPlayback"),
             retentionDays: retentionDays
@@ -190,11 +187,6 @@ final class IOSLegacyMigrationCoordinator {
            case let .failure(error) = await bootstrapper.setDeleteAfterPlaybackPreference(deleteAfterPlayback) {
             return mediaSettingsWriteFailed(error)
         }
-        if let autoDownloadListeningList = legacySettings.autoDownloadListeningList,
-           case let .failure(error) = await bootstrapper.setAutoDownloadListeningListPreference(autoDownloadListeningList) {
-            return mediaSettingsWriteFailed(error)
-        }
-
         defaults.set(true, forKey: DefaultsKey.mediaSettingsMigrationCompleted)
         logger.info("Legacy media policy settings copied into Core settings.")
         return .imported

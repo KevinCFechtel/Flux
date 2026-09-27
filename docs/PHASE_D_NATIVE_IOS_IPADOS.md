@@ -114,6 +114,10 @@ Migrate when semantically compatible and not reconstructable from Miniflux:
 - playback progress;
 - existing downloaded media with correct enclosure association.
 
+The Flutter `autoDownloadAudioAfterSync` preference is not compatible with the
+Core policy that auto-downloads when an article enters Listening List, so it is
+not migrated. D9 does not add a replacement sync-triggered download policy.
+
 Do not migrate the Flutter article/feed/category cache, widget cache/snapshots,
 temporary UI/runtime state, the old explicit Light/Dark choice, or obsolete
 Flutter-only preferences. Synchronized read/unread/starred state is rebuilt via

@@ -66,7 +66,7 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         defaults.set(account.server, forKey: "FluxNews.iOS.legacyMigration.account.v1.server")
     }
 
-    func testLegacyMediaSettingsParserMapsRetainedSemantics() {
+    func testLegacyMediaSettingsParserExcludesIncompatibleSyncTriggeredAutoDownload() {
         let parsed = IOSLegacyMediaSettingsImport.parse([
             "autoDownloadAudioAfterSync": "true",
             "downloadAudioOnlyOnWifi": " false ",
@@ -75,7 +75,6 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             "useBlackMode": "true"
         ])
 
-        XCTAssertEqual(parsed.autoDownloadListeningList, true)
         XCTAssertEqual(parsed.unmeteredOnly, false)
         XCTAssertEqual(parsed.deleteAfterPlayback, true)
         XCTAssertEqual(parsed.retentionDays, 14)
@@ -92,7 +91,6 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             "syncOnStart": "true"
         ])
 
-        XCTAssertNil(parsed.autoDownloadListeningList)
         XCTAssertNil(parsed.unmeteredOnly)
         XCTAssertNil(parsed.deleteAfterPlayback)
         XCTAssertNil(parsed.retentionDays)
@@ -270,7 +268,6 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
         markAccountAsMigrated(account, defaults: defaults)
         let legacyValues = [
-            "autoDownloadAudioAfterSync": "true",
             "downloadAudioOnlyOnWifi": "true",
             "deleteAudioAfterPlayback": "true",
             "audioDownloadRetentionDays": "14"
@@ -287,7 +284,33 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         XCTAssertEqual(settings.downloadNetworkPolicy, .unmeteredOnly)
         XCTAssertEqual(settings.downloadRetention, .days(days: 14))
         XCTAssertTrue(settings.deleteAfterPlayback)
-        XCTAssertTrue(settings.autoDownloadListeningList)
+        XCTAssertFalse(settings.autoDownloadListeningList)
+    }
+
+    @MainActor
+    func testMediaSettingsMigrationNeverChangesListeningListAutoDownload() async throws {
+        for legacyValue in ["true", "false"] {
+            for nativeValue in [true, false] {
+                let (defaults, suite) = makeDefaults()
+                defer { defaults.removePersistentDomain(forName: suite) }
+                let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+                let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+                markAccountAsMigrated(account, defaults: defaults)
+                let core = try XCTUnwrap(bootstrapper.core)
+                try core.setAutoDownloadListeningList(enabled: nativeValue)
+                let coordinator = IOSLegacyMigrationCoordinator(
+                    bootstrapper: bootstrapper,
+                    defaults: defaults,
+                    legacyMediaSettingsReader: {
+                        IOSLegacyMediaSettingsImport.parse(["autoDownloadAudioAfterSync": legacyValue])
+                    }
+                )
+
+                let outcome = await coordinator.migrateMediaSettingsIfNeeded()
+                XCTAssertEqual(outcome, .imported)
+                XCTAssertEqual(try core.coreSettings().autoDownloadListeningList, nativeValue)
+            }
+        }
     }
 
     @MainActor
@@ -369,7 +392,7 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
         let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
         markAccountAsMigrated(account, defaults: defaults)
-        let legacyValues = ["autoDownloadAudioAfterSync": "true"]
+        let legacyValues = ["downloadAudioOnlyOnWifi": "true"]
         var reads = 0
         let coordinator = IOSLegacyMigrationCoordinator(
             bootstrapper: bootstrapper,
@@ -385,7 +408,7 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         let failedOutcome = await coordinator.migrateMediaSettingsIfNeeded()
         XCTAssertEqual(failedOutcome, .retryableFailure)
         XCTAssertFalse(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.mediaSettings.v1.completed"))
-        XCTAssertEqual(legacyValues, ["autoDownloadAudioAfterSync": "true"])
+        XCTAssertEqual(legacyValues, ["downloadAudioOnlyOnWifi": "true"])
 
         bootstrapper.coreSessionExecutionCoordinator.resume(core)
         let retryOutcome = await coordinator.migrateMediaSettingsIfNeeded()
@@ -393,7 +416,7 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         XCTAssertTrue(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.mediaSettings.v1.completed"))
         XCTAssertEqual(reads, 2)
         let settings = try XCTUnwrap(try bootstrapper.core?.coreSettings())
-        XCTAssertTrue(settings.autoDownloadListeningList)
+        XCTAssertFalse(settings.autoDownloadListeningList)
     }
 
     @MainActor
