@@ -38,6 +38,11 @@ struct LegacyPlaybackProgressImport: Equatable {
     let positionMs: UInt64
 }
 
+struct LegacyDownloadImport: Equatable {
+    let enclosureID: Int64
+    let sourceFile: URL
+}
+
 enum LegacyStateDiscovery {
     static let productionBundleID = "dev.kevincfechtel.fluxNews"
     static let applicationGroup = "group.dev.kevincfechtel.fluxNews"
@@ -123,6 +128,21 @@ enum LegacyStateDiscovery {
         return parsePlaybackProgressImports(values)
     }
 
+    /// Reads only primary attachment-ID download paths. URL-keyed values and
+    /// filenames are not identity evidence and are intentionally ignored.
+    static func readDownloadImports(
+        fileManager: FileManager = .default,
+        homeDirectory: URL? = nil
+    ) -> [LegacyDownloadImport]? {
+        guard Bundle.main.bundleIdentifier == productionBundleID,
+              let values = keychainValues() else { return nil }
+        let library = homeDirectory ?? fileManager.urls(for: .libraryDirectory, in: .userDomainMask).first
+        guard let audioCache = library?.appendingPathComponent("Application Support/audio_cache", isDirectory: true) else {
+            return nil
+        }
+        return parseDownloadImports(values, audioCache: audioCache, fileManager: fileManager)
+    }
+
     /// Pure decoder kept separate from Keychain access so migration semantics can
     /// be regression-tested without creating or mutating legacy credentials.
     static func parseAccountImport(_ values: [String: String]) -> LegacyAccountImport? {
@@ -173,6 +193,28 @@ enum LegacyStateDiscovery {
             return LegacyPlaybackProgressImport(articleID: articleID, positionMs: positionMs)
         }
         .sorted { $0.articleID < $1.articleID }
+    }
+
+    static func parseDownloadImports(
+        _ values: [String: String],
+        audioCache: URL,
+        fileManager: FileManager = .default
+    ) -> [LegacyDownloadImport] {
+        let root = audioCache.standardizedFileURL.path + "/"
+        return values.compactMap { key, value in
+            guard key.hasPrefix(downloadPathPrefix),
+                  !key.hasPrefix(downloadPathByURLPrefix),
+                  let enclosureID = Int64(key.dropFirst(downloadPathPrefix.count)), enclosureID > 0 else {
+                return nil
+            }
+            let source = URL(fileURLWithPath: value).standardizedFileURL
+            guard source.path.hasPrefix(root),
+                  source.deletingPathExtension().lastPathComponent.hasPrefix(audioFilePrefix),
+                  (try? source.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+                  fileManager.isReadableFile(atPath: source.path) else { return nil }
+            return LegacyDownloadImport(enclosureID: enclosureID, sourceFile: source)
+        }
+        .sorted { $0.enclosureID < $1.enclosureID }
     }
 
     static func redactedSummary(_ result: LegacyDiscoveryResult) -> [String: String] {

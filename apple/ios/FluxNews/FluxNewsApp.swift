@@ -78,14 +78,17 @@ struct FluxNewsApp: App {
                         )
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
+                        _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                     } else if bootstrapper.core != nil {
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
+                        _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                     } else if bootstrapper.core == nil,
                               case .accountRequired = bootstrapper.state {
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateAccountIfNeeded()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
+                        _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                     }
                     await IOSAppRuntime.shared.backgroundSyncCoordinator.refreshScheduling()
                     IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
@@ -103,15 +106,18 @@ struct FluxNewsApp: App {
                                     coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
                                 )
                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
-                                _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
+                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
+                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                             } else if bootstrapper.core != nil {
                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
-                                _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
+                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
+                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                             } else if bootstrapper.core == nil,
                                       case .accountRequired = bootstrapper.state {
                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateAccountIfNeeded()
                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
-                                _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
+                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
+                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                             }
                             IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
                         }

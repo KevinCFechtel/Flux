@@ -253,6 +253,19 @@ final class CoreBootstrapper: ObservableObject {
         return result
     }
 
+    func importLegacyDownload(
+        enclosureID: Int64,
+        localFile: String,
+        fileSizeBytes: UInt64
+    ) async -> Result<LegacyDownloadImportOutcome, Error> {
+        guard let activeCore = core else { return .failure(SettingsAccessError.coreUnavailable) }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            { try activeCore.importLegacyDownload(enclosureId: enclosureID, localFile: localFile, fileSizeBytes: fileSizeBytes) }
+        ) else { return .failure(SettingsAccessError.sessionUnavailable) }
+        return result
+    }
+
     func setDownloadNetworkPolicyPreference(
         _ policy: DownloadNetworkPolicy
     ) async -> Result<Void, Error> {

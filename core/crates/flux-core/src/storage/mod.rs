@@ -11,7 +11,7 @@ use crate::domain::{
     ArticleSummary, Category, ContinueListeningItem, CoreError, CoreSettings, DeliveryMode,
     DetailRenderingMode, DiscoveryMode, DownloadFailureKind, DownloadNetworkPolicy, DownloadOrigin,
     DownloadRetention, DownloadState, Enclosure, Feed, FeedPreferences,
-    FeedSystemNotificationSetting, LegacyPlaybackImport, LegacyPlaybackImportResult,
+    FeedSystemNotificationSetting, LegacyDownloadImportOutcome, LegacyPlaybackImport, LegacyPlaybackImportResult,
     ListeningListEnclosure, ListeningListFeed, ListeningListItem, ListeningListSort,
     MediaArtworkSource, MediaChapter, MediaChapterSource, MediaDownload, MediaMetadata,
     MediaTransferWork, MutationField, NavigationCatalog, NavigationCountMode, NavigationProjection,
@@ -1926,6 +1926,49 @@ impl Store {
             }
         }
         tx.commit().map_err(sql_error)
+    }
+
+    pub fn import_legacy_download(
+        &self,
+        enclosure_id: i64,
+        local_file: &str,
+        file_size_bytes: u64,
+    ) -> Result<LegacyDownloadImportOutcome, CoreError> {
+        if local_file.trim().is_empty() {
+            return Err(CoreError::data("legacy download requires a non-empty local file reference"));
+        }
+        let size = i64::try_from(file_size_bytes)
+            .map_err(|_| CoreError::data("legacy download file size exceeds SQLite range"))?;
+        let analyzed = resolve_media_reference(&self.media_root, local_file)
+            .map(|path| analyze_file(&path))
+            .unwrap_or_default();
+        let mut connection = self.connection.lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        let article_html: Option<String> = tx.query_row(
+            "SELECT a.raw_html_content FROM articles a JOIN enclosures e ON e.article_id=a.id WHERE e.id=?1",
+            [enclosure_id], |row| row.get(0),
+        ).optional().map_err(sql_error)?;
+        let Some(article_html) = article_html else {
+            return Ok(LegacyDownloadImportOutcome::MissingEnclosure);
+        };
+        if read_download_state(&tx, enclosure_id)?.is_some() {
+            return Ok(LegacyDownloadImportOutcome::AlreadyPresent);
+        }
+        if is_audio_enclosure(&tx, enclosure_id)? {
+            let article_id: i64 = tx.query_row(
+                "SELECT article_id FROM enclosures WHERE id=?1", [enclosure_id], |row| row.get(0),
+            ).map_err(sql_error)?;
+            ensure_listening_membership(&tx, article_id, &Utc::now().to_rfc3339())?;
+        }
+        tx.execute(
+            "INSERT INTO media_downloads(enclosure_id,state,origin,local_file,file_size_bytes,downloaded_at,failure_kind) VALUES(?1,'downloaded','manual',?2,?3,?4,NULL)",
+            params![enclosure_id, local_file, size, Utc::now().to_rfc3339()],
+        ).map_err(sql_error)?;
+        let artwork_reference = self.persist_artwork(&analyzed.artwork)?;
+        persist_media_metadata(&tx, enclosure_id, &article_html, &analyzed, artwork_reference.as_deref())?;
+        tx.commit().map_err(sql_error)?;
+        Ok(LegacyDownloadImportOutcome::Imported)
     }
 
     pub fn download_failed(
@@ -7030,6 +7073,34 @@ mod tests {
             .unwrap();
         store.request_download_deletion(1000).unwrap();
         assert!(store.auto_download_suppressed(1000).unwrap());
+    }
+
+    #[test]
+    fn legacy_download_import_is_idempotent_and_preserves_existing_core_state() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let category = [Category { id: 1, title: "Category".into() }];
+        let feeds = [Feed { id: 10, category_id: 1, title: "Feed".into() }];
+        let (article, enclosure) = media_article_enclosure_pair();
+        store.reconcile_with_enclosures(&category, &feeds, &[article], &[enclosure]).unwrap();
+
+        assert_eq!(
+            store.import_legacy_download(1000, "downloads/legacy/enclosure-1000.mp3", 4096).unwrap(),
+            LegacyDownloadImportOutcome::Imported
+        );
+        let imported = store.media_download(1000).unwrap().unwrap();
+        assert_eq!(imported.state, DownloadState::Downloaded);
+        assert_eq!(imported.origin, Some(DownloadOrigin::Manual));
+        assert!(store.is_in_listening_list(100).unwrap());
+        assert_eq!(
+            store.import_legacy_download(1000, "downloads/legacy/enclosure-1000.mp3", 4096).unwrap(),
+            LegacyDownloadImportOutcome::AlreadyPresent
+        );
+        assert_eq!(
+            store.import_legacy_download(9999, "downloads/legacy/enclosure-9999.mp3", 4096).unwrap(),
+            LegacyDownloadImportOutcome::MissingEnclosure
+        );
     }
 
     #[test]

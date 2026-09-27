@@ -495,6 +495,12 @@ pub struct LegacyPlaybackImportResult {
     pub skipped_ambiguous: u32,
     pub already_present: u32,
 }
+#[derive(uniffi::Enum)]
+pub enum LegacyDownloadImportOutcome {
+    Imported,
+    AlreadyPresent,
+    MissingEnclosure,
+}
 #[derive(uniffi::Record)]
 pub struct PlaybackPreparation {
     pub enclosure: Enclosure,
@@ -1213,6 +1219,17 @@ impl Flux {
     ) -> Result<(), FluxError> {
         self.core
             .download_finished(enclosure_id, &local_file, file_size_bytes)
+            .map_err(map_error)
+    }
+    pub fn import_legacy_download(
+        &self,
+        enclosure_id: i64,
+        local_file: String,
+        file_size_bytes: u64,
+    ) -> Result<LegacyDownloadImportOutcome, FluxError> {
+        self.core
+            .import_legacy_download(enclosure_id, &local_file, file_size_bytes)
+            .map(Into::into)
             .map_err(map_error)
     }
     pub fn download_failed(
@@ -2418,6 +2435,15 @@ impl From<domain::LegacyPlaybackImportResult> for LegacyPlaybackImportResult {
             skipped_missing: value.skipped_missing,
             skipped_ambiguous: value.skipped_ambiguous,
             already_present: value.already_present,
+        }
+    }
+}
+impl From<domain::LegacyDownloadImportOutcome> for LegacyDownloadImportOutcome {
+    fn from(value: domain::LegacyDownloadImportOutcome) -> Self {
+        match value {
+            domain::LegacyDownloadImportOutcome::Imported => Self::Imported,
+            domain::LegacyDownloadImportOutcome::AlreadyPresent => Self::AlreadyPresent,
+            domain::LegacyDownloadImportOutcome::MissingEnclosure => Self::MissingEnclosure,
         }
     }
 }

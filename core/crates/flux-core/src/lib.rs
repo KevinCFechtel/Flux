@@ -34,7 +34,7 @@ use domain::{
     DiscoverSubscriptionsRequest, DiscoveredSubscription, DownloadFailureKind,
     DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, DownloadState, Enclosure, FeedIcon,
     FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, LegacyPlaybackImport,
-    LegacyPlaybackImportResult, ListeningListFeed, ListeningListItem, ListeningListSort,
+    LegacyDownloadImportOutcome, LegacyPlaybackImportResult, ListeningListFeed, ListeningListItem, ListeningListSort,
     MediaChapter, MediaDownload, MediaMetadata, MediaTransferWork, MutationField, MutationResult,
     NavigationCatalog, NavigationCountMode, NavigationProjection, PlaybackPreparation,
     PlaybackState, ReadArticleRetention, ReaderDocument, RuntimeHealth, RuntimeHealthStatus,
@@ -938,6 +938,21 @@ impl FluxCore {
             .map_err(|_| CoreError::internal("sync gate poisoned"))?;
         self.store
             .download_finished(enclosure_id, local_file, file_size_bytes)
+    }
+    /// Registers a verified legacy file copied by a platform adapter. Unlike
+    /// normal transfer completion, this never replaces existing Core state.
+    pub fn import_legacy_download(
+        &self,
+        enclosure_id: i64,
+        local_file: &str,
+        file_size_bytes: u64,
+    ) -> Result<LegacyDownloadImportOutcome, CoreError> {
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.store
+            .import_legacy_download(enclosure_id, local_file, file_size_bytes)
     }
     pub fn download_failed(
         &self,

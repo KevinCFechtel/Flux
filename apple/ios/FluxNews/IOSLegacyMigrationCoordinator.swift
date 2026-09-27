@@ -22,6 +22,10 @@ enum IOSLegacyPlaybackMigrationOutcome: Equatable {
     case retryableFailure
 }
 
+enum IOSLegacyDownloadMigrationOutcome: Equatable {
+    case notEligible, alreadyCompleted, imported, retryableFailure
+}
+
 struct IOSLegacyMediaSettingsImport: Equatable {
     let autoDownloadListeningList: Bool?
     let unmeteredOnly: Bool?
@@ -62,6 +66,7 @@ final class IOSLegacyMigrationCoordinator {
         static let migratedAccountServer = "FluxNews.iOS.legacyMigration.account.v1.server"
         static let mediaSettingsMigrationCompleted = "FluxNews.iOS.legacyMigration.mediaSettings.v1.completed"
         static let playbackMigrationCompleted = "FluxNews.iOS.legacyMigration.playback.v1.completed"
+        static let downloadMigrationCompleted = "FluxNews.iOS.legacyMigration.downloads.v1.completed"
     }
 
     private let bootstrapper: CoreBootstrapper
@@ -69,6 +74,7 @@ final class IOSLegacyMigrationCoordinator {
     private let legacyAccountReader: () -> LegacyAccountImport?
     private let legacyMediaSettingsReader: () -> IOSLegacyMediaSettingsImport?
     private let legacyPlaybackReader: () -> [LegacyPlaybackProgressImport]?
+    private let legacyDownloadReader: () -> [LegacyDownloadImport]?
     private let logger = IOSAppLogger(category: "legacy_migration")
     private var inFlight = false
 
@@ -77,13 +83,15 @@ final class IOSLegacyMigrationCoordinator {
         defaults: UserDefaults = .standard,
         legacyAccountReader: @escaping () -> LegacyAccountImport? = LegacyStateDiscovery.readAccountImport,
         legacyMediaSettingsReader: @escaping () -> IOSLegacyMediaSettingsImport? = LegacyStateDiscovery.readMediaSettingsImport,
-        legacyPlaybackReader: @escaping () -> [LegacyPlaybackProgressImport]? = LegacyStateDiscovery.readPlaybackProgressImports
+        legacyPlaybackReader: @escaping () -> [LegacyPlaybackProgressImport]? = LegacyStateDiscovery.readPlaybackProgressImports,
+        legacyDownloadReader: @escaping () -> [LegacyDownloadImport]? = { LegacyStateDiscovery.readDownloadImports() }
     ) {
         self.bootstrapper = bootstrapper
         self.defaults = defaults
         self.legacyAccountReader = legacyAccountReader
         self.legacyMediaSettingsReader = legacyMediaSettingsReader
         self.legacyPlaybackReader = legacyPlaybackReader
+        self.legacyDownloadReader = legacyDownloadReader
     }
 
     /// Imports only when native credentials are absent. The completion marker is
@@ -227,6 +235,43 @@ final class IOSLegacyMigrationCoordinator {
             logger.error("Legacy playback migration remains retryable: \(String(reflecting: error))")
             return .retryableFailure
         }
+    }
+
+    @discardableResult
+    func migrateDownloadsIfNeeded() async -> IOSLegacyDownloadMigrationOutcome {
+        guard !inFlight else { return .retryableFailure }
+        inFlight = true
+        defer { inFlight = false }
+        do { guard try isCurrentMigratedAccount() else { return .notEligible } }
+        catch { return .retryableFailure }
+        guard !defaults.bool(forKey: DefaultsKey.downloadMigrationCompleted) else { return .alreadyCompleted }
+        guard let records = legacyDownloadReader(), let mediaRoot = IOSMediaTransferPathConfiguration.mediaRootURL else {
+            return .retryableFailure
+        }
+        let fileManager = FileManager.default
+        for record in records {
+            let reference = "downloads/legacy/enclosure-\(record.enclosureID).audio"
+            guard let size = try? record.sourceFile.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+                  size > 0 else { continue }
+            let destination: URL
+            do {
+                destination = try MediaTransferFileLayout.destination(reference: reference, under: mediaRoot)
+                try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+                if !fileManager.fileExists(atPath: destination.path) {
+                    try fileManager.copyItem(at: record.sourceFile, to: destination)
+                }
+            } catch { return .retryableFailure }
+            switch await bootstrapper.importLegacyDownload(enclosureID: record.enclosureID, localFile: reference, fileSizeBytes: UInt64(size)) {
+            case .success(.imported): break
+            case .success(.alreadyPresent), .success(.missingEnclosure):
+                // This destination is unique to this migration and was never Core state.
+                try? fileManager.removeItem(at: destination)
+            case .failure: return .retryableFailure
+            }
+        }
+        defaults.set(true, forKey: DefaultsKey.downloadMigrationCompleted)
+        logger.info("Legacy downloads copied into Core media storage.")
+        return .imported
     }
 
     private func mediaSettingsWriteFailed(_ error: Error) -> IOSLegacyMediaSettingsMigrationOutcome {

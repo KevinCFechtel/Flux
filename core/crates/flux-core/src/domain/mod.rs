@@ -301,6 +301,15 @@ pub struct MediaDownload {
     pub failure_kind: Option<DownloadFailureKind>,
 }
 
+/// Outcome of importing a legacy file that has already been copied into the
+/// Core-owned media root. Existing Core download state always wins.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LegacyDownloadImportOutcome {
+    Imported,
+    AlreadyPresent,
+    MissingEnclosure,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MediaTransferWork {
     pub enclosure_id: i64,
