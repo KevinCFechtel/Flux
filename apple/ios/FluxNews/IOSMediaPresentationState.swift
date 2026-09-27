@@ -158,12 +158,17 @@ final class IOSNowPlayingCoordinator {
             .sink { [weak self] _ in self?.publishElapsed() }
             .store(in: &cancellables)
 
+        // @Published emits before the backing property changes. Pass the status
+        // through so Stop clears the system projection in that same emission.
+        presentationState.$status
+            .sink { [weak self] status in self?.publish(status: status) }
+            .store(in: &cancellables)
+
         Publishers.MergeMany(
             presentationState.$loadedEnclosure.map { _ in () }.eraseToAnyPublisher(),
             presentationState.$feedTitle.map { _ in () }.eraseToAnyPublisher(),
             presentationState.$mediaTitle.map { _ in () }.eraseToAnyPublisher(),
             presentationState.$artworkSource.map { _ in () }.eraseToAnyPublisher(),
-            presentationState.$status.map { _ in () }.eraseToAnyPublisher(),
             presentationState.$durationMs.map { _ in () }.eraseToAnyPublisher(),
             presentationState.$playbackRate.map { _ in () }.eraseToAnyPublisher(),
             presentationState.$errorMessage.map { _ in () }.eraseToAnyPublisher()
@@ -246,7 +251,9 @@ final class IOSNowPlayingCoordinator {
         return .success
     }
 
-    private func projection() -> AppleNowPlayingProjection? {
+    private func projection(
+        status: MediaPlaybackPresentationStatus
+    ) -> AppleNowPlayingProjection? {
         guard let enclosure = presentationState.loadedEnclosure else { return nil }
         return AppleNowPlayingProjection.make(
             title: presentationState.mediaTitle,
@@ -254,16 +261,24 @@ final class IOSNowPlayingCoordinator {
             enclosureURL: enclosure.url,
             durationMs: presentationState.durationMs,
             positionMs: presentationState.positionMs,
-            status: presentationState.status,
+            status: status,
             playbackRate: presentationState.playbackRate,
             errorMessage: presentationState.errorMessage,
             artworkData: artworkData
         )
     }
 
-    private func publish() {
+    private func publish(
+        status: MediaPlaybackPresentationStatus? = nil
+    ) {
+        let status = status ?? presentationState.status
+        guard status != .stopped,
+              let projection = projection(status: status)
+        else {
+            clear()
+            return
+        }
         requestArtworkIfNeeded()
-        guard let projection = projection() else { clear(); return }
 
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: projection.title,
@@ -289,7 +304,13 @@ final class IOSNowPlayingCoordinator {
     }
 
     private func publishElapsed() {
-        guard let projection = projection(), var info = nowPlaying.nowPlayingInfo else { publish(); return }
+        guard presentationState.status != .stopped,
+              let projection = projection(status: presentationState.status),
+              var info = nowPlaying.nowPlayingInfo
+        else {
+            publish()
+            return
+        }
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = projection.elapsedSeconds
         info[MPNowPlayingInfoPropertyPlaybackRate] = projection.effectivePlaybackRate
         info[MPNowPlayingInfoPropertyDefaultPlaybackRate] = projection.defaultPlaybackRate

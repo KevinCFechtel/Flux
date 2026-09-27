@@ -106,14 +106,15 @@ final class NewsreaderPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testNowPlayingVisibilityTracksLoadedMediaRatherThanPlaybackStatus() {
+    func testNowPlayingVisibilityTracksPlayableLoadedMediaWithoutChangingConfiguration() {
         let configured = [IOSBottomAction.sync, .nowPlaying, .more]
         let state = IOSMediaPlaybackPresentationState()
 
         XCTAssertEqual(
             IOSArticleListActionPolicy.visibleActions(
                 configuredActions: configured,
-                hasLoadedMedia: state.loadedEnclosure != nil
+                hasLoadedMedia: state.loadedEnclosure != nil,
+                playbackStatus: state.status
             ),
             [.sync, .more]
         )
@@ -139,7 +140,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(
             IOSArticleListActionPolicy.visibleActions(
                 configuredActions: configured,
-                hasLoadedMedia: state.loadedEnclosure != nil
+                hasLoadedMedia: state.loadedEnclosure != nil,
+                playbackStatus: state.status
             ),
             configured
         )
@@ -148,7 +150,8 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(
             IOSArticleListActionPolicy.visibleActions(
                 configuredActions: configured,
-                hasLoadedMedia: state.loadedEnclosure != nil
+                hasLoadedMedia: state.loadedEnclosure != nil,
+                playbackStatus: state.status
             ),
             configured
         )
@@ -157,11 +160,68 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(
             IOSArticleListActionPolicy.visibleActions(
                 configuredActions: configured,
-                hasLoadedMedia: state.loadedEnclosure != nil
+                hasLoadedMedia: state.loadedEnclosure != nil,
+                playbackStatus: state.status
             ),
-            configured
+            [.sync, .more]
         )
         XCTAssertEqual(configured, [.sync, .nowPlaying, .more])
+    }
+
+    func testNowPlayingPlayerPresentationFindsLoadedListeningListItem() {
+        let enclosure = Enclosure(
+            id: 7,
+            articleId: 70,
+            url: "https://example.test/episode.mp3",
+            mimeType: "audio/mpeg",
+            sizeBytes: nil,
+            remoteMediaProgressionSeconds: 0,
+            mediaKind: .audio
+        )
+        let item = ListeningListItem(
+            articleId: 70,
+            feedId: 9,
+            title: "Episode with notes",
+            feedTitle: "Feed",
+            publishedAt: "",
+            addedAt: "",
+            remotePresent: true,
+            audioEnclosures: [
+                ListeningListEnclosure(
+                    enclosure: enclosure,
+                    remotePresent: true,
+                    playbackState: nil,
+                    download: nil,
+                    durationMs: nil
+                )
+            ],
+            activeEnclosureId: 7
+        )
+
+        let resolved = IOSListeningListPlayerPresentation.item(
+            for: enclosure,
+            in: [item]
+        )
+
+        XCTAssertEqual(resolved?.articleId, item.articleId)
+        XCTAssertEqual(resolved?.feedId, item.feedId)
+        XCTAssertEqual(resolved?.audioEnclosures.first?.enclosure.id, enclosure.id)
+    }
+
+    func testNowPlayingPlayerPresentationFallsBackWhenLoadedItemIsMissing() {
+        let enclosure = Enclosure(
+            id: 7,
+            articleId: 70,
+            url: "https://example.test/episode.mp3",
+            mimeType: "audio/mpeg",
+            sizeBytes: nil,
+            remoteMediaProgressionSeconds: 0,
+            mediaKind: .audio
+        )
+
+        XCTAssertNil(
+            IOSListeningListPlayerPresentation.item(for: enclosure, in: [])
+        )
     }
 
     func testFloatingActionGroupUsesStableCapsuleMetrics() {

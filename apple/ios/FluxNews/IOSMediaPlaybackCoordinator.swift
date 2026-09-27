@@ -254,8 +254,15 @@ final class IOSMediaAudioSessionCoordinator: IOSMediaAudioSessionManaging {
     }
 
     func deactivateIfIdle() {
-        let session = session
-        activationQueue.async { try? session.setActive(false, options: [.notifyOthersOnDeactivation]) }
+        let session = session; let logger = logger
+        activationQueue.async {
+            do {
+                try session.setActive(false, options: [.notifyOthersOnDeactivation])
+            } catch {
+                let nsError = error as NSError
+                logger.error("AVAudioSession deactivation failed domain=\(nsError.domain) code=\(nsError.code) description=\(nsError.localizedDescription)")
+            }
+        }
     }
 
     private func handleInterruption(_ notification: Notification) {

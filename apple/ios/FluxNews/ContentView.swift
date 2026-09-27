@@ -88,10 +88,27 @@ enum IOSArticleListActionPolicy {
 
     static func visibleActions(
         configuredActions: [IOSBottomAction],
-        hasLoadedMedia: Bool
+        hasLoadedMedia: Bool,
+        playbackStatus: MediaPlaybackPresentationStatus
     ) -> [IOSBottomAction] {
         configuredActions.filter { action in
-            action != .nowPlaying || hasLoadedMedia
+            action != .nowPlaying
+                || (hasLoadedMedia && playbackStatus != .stopped)
+        }
+    }
+}
+
+enum IOSListeningListPlayerPresentation {
+    static func item(
+        for loadedEnclosure: Enclosure?,
+        in items: [ListeningListItem]
+    ) -> ListeningListItem? {
+        guard let loadedEnclosure else { return nil }
+        return items.first { item in
+            item.articleId == loadedEnclosure.articleId
+                && item.audioEnclosures.contains {
+                    $0.enclosure.id == loadedEnclosure.id
+                }
         }
     }
 }
@@ -754,6 +771,16 @@ struct ContentView: View {
             listeningListStore.items.first { $0.articleId == articleID }
         }
 
+        mediaPlayerView(item: item) {
+            listeningListPlayerArticleID = nil
+        }
+    }
+
+    @ViewBuilder
+    private func mediaPlayerView(
+        item: ListeningListItem?,
+        onDismiss: @escaping () -> Void
+    ) -> some View {
         IOSMediaPlayerView(
             playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
             transferState: IOSAppRuntime.shared.mediaRuntime.transferPresentationState,
@@ -790,7 +817,7 @@ struct ContentView: View {
             showNotesIsLoading: listeningListStore.showNotesIsLoading,
             showNotesErrorMessage: listeningListStore.showNotesErrorMessage,
             onSelectEnclosure: { enclosureID in
-                if let articleID = listeningListPlayerArticleID {
+                if let articleID = item?.articleId {
                     playListeningListEnclosure(
                         articleID: articleID,
                         enclosureID: enclosureID
@@ -798,36 +825,25 @@ struct ContentView: View {
                 }
             },
             onShowNotes: {
-                if let articleID = listeningListPlayerArticleID {
+                if let articleID = item?.articleId {
                     listeningListStore.loadShowNotes(articleID: articleID)
                 }
             },
-            onDismiss: {
-                listeningListPlayerArticleID = nil
-            }
+            onDismiss: onDismiss
         )
     }
 
+    @ViewBuilder
     private var nowPlayingPlayerView: some View {
-        IOSMediaPlayerView(
-            playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
-            transferState: IOSAppRuntime.shared.mediaRuntime.transferPresentationState,
-            sleepTimer: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator.sleepTimer,
-            playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
-            item: nil,
-            downloadEnclosures: [],
-            onDownloadAction: { _, _ in },
-            feedIconFeedID: nil,
-            feedIconTitle: "",
-            feedIconState: { _, _ in IOSFeedIconPresentationState() },
-            onRequestFeedIcon: { _, _ in },
-            showNotesDocument: nil,
-            showNotesIsLoading: false,
-            showNotesErrorMessage: nil,
-            onSelectEnclosure: { _ in },
-            onShowNotes: {},
-            onDismiss: { nowPlayingPresented = false }
+        let item = IOSListeningListPlayerPresentation.item(
+            for: IOSAppRuntime.shared.mediaRuntime
+                .playbackPresentationState.loadedEnclosure,
+            in: listeningListStore.items
         )
+        mediaPlayerView(item: item) {
+            nowPlayingPresented = false
+            listeningListStore.clearShowNotes()
+        }
     }
 
     private func handleListeningListPlayerDownloadAction(
@@ -1231,7 +1247,9 @@ struct ContentView: View {
         let actions = IOSArticleListActionPolicy.visibleActions(
             configuredActions: articleListActionPreferences.actions,
             hasLoadedMedia: IOSAppRuntime.shared.mediaRuntime
-                .playbackPresentationState.loadedEnclosure != nil
+                .playbackPresentationState.loadedEnclosure != nil,
+            playbackStatus: IOSAppRuntime.shared.mediaRuntime
+                .playbackPresentationState.status
         )
         ForEach(actions) { action in
             articleListActionButton(action)
