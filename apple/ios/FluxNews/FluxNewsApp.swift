@@ -76,6 +76,9 @@ struct FluxNewsApp: App {
                             to: core,
                             coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
                         )
+                    } else if bootstrapper.core == nil,
+                              case .accountRequired = bootstrapper.state {
+                        _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateAccountIfNeeded()
                     }
                     await IOSAppRuntime.shared.backgroundSyncCoordinator.refreshScheduling()
                     IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
@@ -92,6 +95,9 @@ struct FluxNewsApp: App {
                                     to: core,
                                     coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
                                 )
+                            } else if bootstrapper.core == nil,
+                                      case .accountRequired = bootstrapper.state {
+                                _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateAccountIfNeeded()
                             }
                             IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
                         }
