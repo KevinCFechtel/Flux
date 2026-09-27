@@ -43,6 +43,39 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         )
     }
 
+    func testLegacyMediaSettingsParserMapsRetainedSemantics() {
+        let parsed = IOSLegacyMediaSettingsImport.parse([
+            "autoDownloadAudioAfterSync": "true",
+            "downloadAudioOnlyOnWifi": " false ",
+            "deleteAudioAfterPlayback": "TRUE",
+            "audioDownloadRetentionDays": " 14 ",
+            "useBlackMode": "true"
+        ])
+
+        XCTAssertEqual(parsed.autoDownloadListeningList, true)
+        XCTAssertEqual(parsed.unmeteredOnly, false)
+        XCTAssertEqual(parsed.deleteAfterPlayback, true)
+        XCTAssertEqual(parsed.retentionDays, 14)
+        XCTAssertFalse(parsed.isEmpty)
+    }
+
+    func testLegacyMediaSettingsParserIgnoresInvalidAndRetiredValues() {
+        let parsed = IOSLegacyMediaSettingsImport.parse([
+            "autoDownloadAudioAfterSync": "yes",
+            "downloadAudioOnlyOnWifi": "",
+            "deleteAudioAfterPlayback": "1",
+            "audioDownloadRetentionDays": "0",
+            "brightnessMode": "dark",
+            "syncOnStart": "true"
+        ])
+
+        XCTAssertNil(parsed.autoDownloadListeningList)
+        XCTAssertNil(parsed.unmeteredOnly)
+        XCTAssertNil(parsed.deleteAfterPlayback)
+        XCTAssertNil(parsed.retentionDays)
+        XCTAssertTrue(parsed.isEmpty)
+    }
+
     @MainActor
     func testNativeAccountWinsWithoutReadingLegacyState() async throws {
         let (defaults, suite) = makeDefaults()
