@@ -97,7 +97,17 @@ enum LegacyStateDiscovery {
     /// native storage, Core storage, or the legacy store.
     static func readAccountImport() -> LegacyAccountImport? {
         guard Bundle.main.bundleIdentifier == productionBundleID else { return nil }
-        return parseAccountImport(keychainValues())
+        guard let values = keychainValues() else { return nil }
+        return parseAccountImport(values)
+    }
+
+    /// Reads only the four retained media policy values from the same Flutter
+    /// secure-storage namespace as account import. It never mutates Keychain.
+    static func readMediaSettingsImport() -> IOSLegacyMediaSettingsImport? {
+        guard Bundle.main.bundleIdentifier == productionBundleID,
+              let values = keychainValues() else { return nil }
+        let mediaValues = values.filter { compatibleMediaSettings.contains($0.key) }
+        return IOSLegacyMediaSettingsImport.parse(mediaValues)
     }
 
     /// Pure decoder kept separate from Keychain access so migration semantics can
@@ -164,6 +174,11 @@ enum LegacyStateDiscovery {
         "deleteAudioAfterPlayback", "audioDownloadRetentionDays"
     ]
 
+    private static let compatibleMediaSettings: Set<String> = [
+        "autoDownloadAudioAfterSync", "downloadAudioOnlyOnWifi",
+        "deleteAudioAfterPlayback", "audioDownloadRetentionDays"
+    ]
+
     private static let downloadMetadataPrefixes = [
         downloadPathPrefix, downloadPathByURLPrefix, downloadTimestampPrefix,
         downloadTitlePrefix, downloadFeedTitlePrefix
@@ -187,7 +202,7 @@ enum LegacyStateDiscovery {
         return (.accessible, accounts)
     }
 
-    private static func keychainValues() -> [String: String] {
+    private static func keychainValues() -> [String: String]? {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: flutterKeychainService,
@@ -196,10 +211,11 @@ enum LegacyStateDiscovery {
             kSecReturnData: true
         ]
         var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let items = result as? [[CFString: Any]] else {
-            return [:]
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            return nil
         }
+        let items = (result as? [[CFString: Any]]) ?? []
 
         return items.reduce(into: [:]) { values, item in
             guard let account = item[kSecAttrAccount] as? String,

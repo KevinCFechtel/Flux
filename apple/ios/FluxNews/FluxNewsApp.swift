@@ -76,9 +76,13 @@ struct FluxNewsApp: App {
                             to: core,
                             coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
                         )
+                        _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
+                    } else if bootstrapper.core != nil {
+                        _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
                     } else if bootstrapper.core == nil,
                               case .accountRequired = bootstrapper.state {
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateAccountIfNeeded()
+                        _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
                     }
                     await IOSAppRuntime.shared.backgroundSyncCoordinator.refreshScheduling()
                     IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
@@ -95,9 +99,13 @@ struct FluxNewsApp: App {
                                     to: core,
                                     coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
                                 )
+                                _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
+                            } else if bootstrapper.core != nil {
+                                _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
                             } else if bootstrapper.core == nil,
                                       case .accountRequired = bootstrapper.state {
                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateAccountIfNeeded()
+                                _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
                             }
                             IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
                         }

@@ -43,6 +43,29 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         )
     }
 
+    @MainActor
+    private func makeReadyBootstrapper(
+        account: IOSMinifluxCredentials,
+        defaults: UserDefaults
+    ) async throws -> (CoreBootstrapper, IOSMemoryCredentialStore) {
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { [weak self] credentials in
+                try XCTUnwrap(self).makeCore(for: credentials)
+            },
+            defaults: defaults
+        )
+        await bootstrapper.start()
+        XCTAssertNotNil(bootstrapper.core)
+        return (bootstrapper, store)
+    }
+
+    private func markAccountAsMigrated(_ account: IOSMinifluxCredentials, defaults: UserDefaults) {
+        defaults.set(account.server, forKey: "FluxNews.iOS.legacyMigration.account.v1.server")
+    }
+
     func testLegacyMediaSettingsParserMapsRetainedSemantics() {
         let parsed = IOSLegacyMediaSettingsImport.parse([
             "autoDownloadAudioAfterSync": "true",
@@ -149,6 +172,10 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         XCTAssertEqual(stored.customHeaders.map(\.name), legacy.customHeaders.map(\.name))
         XCTAssertEqual(stored.customHeaders.map(\.value), legacy.customHeaders.map(\.value))
         XCTAssertNotNil(bootstrapper.core)
+        XCTAssertEqual(
+            defaults.string(forKey: "FluxNews.iOS.legacyMigration.account.v1.server"),
+            legacy.serverURL
+        )
         let secondResult = await coordinator.migrateAccountIfNeeded()
         XCTAssertEqual(secondResult, .nativeAccountWins)
     }
@@ -210,5 +237,139 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         let result = await coordinator.migrateAccountIfNeeded()
         XCTAssertEqual(result, .alreadyCompleted)
         XCTAssertFalse(legacyRead)
+    }
+
+    @MainActor
+    func testMediaSettingsMigrationImportsAllRetainedValues() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        markAccountAsMigrated(account, defaults: defaults)
+        let legacyValues = [
+            "autoDownloadAudioAfterSync": "true",
+            "downloadAudioOnlyOnWifi": "true",
+            "deleteAudioAfterPlayback": "true",
+            "audioDownloadRetentionDays": "14"
+        ]
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyMediaSettingsReader: { IOSLegacyMediaSettingsImport.parse(legacyValues) }
+        )
+
+        let outcome = await coordinator.migrateMediaSettingsIfNeeded()
+        XCTAssertEqual(outcome, .imported)
+        let settings = try XCTUnwrap(try bootstrapper.core?.coreSettings())
+        XCTAssertEqual(settings.downloadNetworkPolicy, .unmeteredOnly)
+        XCTAssertEqual(settings.downloadRetention, .days(days: 14))
+        XCTAssertTrue(settings.deleteAfterPlayback)
+        XCTAssertTrue(settings.autoDownloadListeningList)
+    }
+
+    @MainActor
+    func testMediaSettingsMigrationWritesOnlyPresentValues() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        markAccountAsMigrated(account, defaults: defaults)
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyMediaSettingsReader: {
+                IOSLegacyMediaSettingsImport.parse(["deleteAudioAfterPlayback": "true"])
+            }
+        )
+
+        let outcome = await coordinator.migrateMediaSettingsIfNeeded()
+        XCTAssertEqual(outcome, .imported)
+        let settings = try XCTUnwrap(try bootstrapper.core?.coreSettings())
+        XCTAssertEqual(settings.downloadNetworkPolicy, .anyNetwork)
+        XCTAssertEqual(settings.downloadRetention, .forever)
+        XCTAssertTrue(settings.deleteAfterPlayback)
+        XCTAssertFalse(settings.autoDownloadListeningList)
+    }
+
+    @MainActor
+    func testMediaSettingsMigrationSkipsNativeOrDifferentMigratedAccount() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://native.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        var legacyRead = false
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyMediaSettingsReader: {
+                legacyRead = true
+                return IOSLegacyMediaSettingsImport.parse(["deleteAudioAfterPlayback": "true"])
+            }
+        )
+
+        let nativeOutcome = await coordinator.migrateMediaSettingsIfNeeded()
+        XCTAssertEqual(nativeOutcome, .notEligible)
+        XCTAssertFalse(legacyRead)
+        defaults.set("https://old-migrated.example", forKey: "FluxNews.iOS.legacyMigration.account.v1.server")
+        let oldAccountOutcome = await coordinator.migrateMediaSettingsIfNeeded()
+        XCTAssertEqual(oldAccountOutcome, .notEligible)
+        XCTAssertFalse(legacyRead)
+    }
+
+    @MainActor
+    func testMediaSettingsCompletionMarkerPreventsAnotherRead() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        markAccountAsMigrated(account, defaults: defaults)
+        defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.mediaSettings.v1.completed")
+        var legacyRead = false
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyMediaSettingsReader: {
+                legacyRead = true
+                return IOSLegacyMediaSettingsImport.parse([:])
+            }
+        )
+
+        let outcome = await coordinator.migrateMediaSettingsIfNeeded()
+        XCTAssertEqual(outcome, .alreadyCompleted)
+        XCTAssertFalse(legacyRead)
+    }
+
+    @MainActor
+    func testMediaSettingsFailureRetriesWithoutMutatingLegacyState() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        markAccountAsMigrated(account, defaults: defaults)
+        let legacyValues = ["autoDownloadAudioAfterSync": "true"]
+        var reads = 0
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyMediaSettingsReader: {
+                reads += 1
+                return IOSLegacyMediaSettingsImport.parse(legacyValues)
+            }
+        )
+        let core = try XCTUnwrap(bootstrapper.core)
+        await bootstrapper.coreSessionExecutionCoordinator.quiesce()
+
+        let failedOutcome = await coordinator.migrateMediaSettingsIfNeeded()
+        XCTAssertEqual(failedOutcome, .retryableFailure)
+        XCTAssertFalse(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.mediaSettings.v1.completed"))
+        XCTAssertEqual(legacyValues, ["autoDownloadAudioAfterSync": "true"])
+
+        bootstrapper.coreSessionExecutionCoordinator.resume(core)
+        let retryOutcome = await coordinator.migrateMediaSettingsIfNeeded()
+        XCTAssertEqual(retryOutcome, .imported)
+        XCTAssertTrue(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.mediaSettings.v1.completed"))
+        XCTAssertEqual(reads, 2)
+        let settings = try XCTUnwrap(try bootstrapper.core?.coreSettings())
+        XCTAssertTrue(settings.autoDownloadListeningList)
     }
 }
