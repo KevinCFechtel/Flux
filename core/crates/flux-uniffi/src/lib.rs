@@ -486,7 +486,7 @@ pub struct ContinueListeningItem {
 pub struct LegacyPlaybackImport {
     pub article_id: i64,
     pub position_ms: u64,
-    pub updated_at: String,
+    pub updated_at: Option<String>,
 }
 #[derive(uniffi::Record)]
 pub struct LegacyPlaybackImportResult {

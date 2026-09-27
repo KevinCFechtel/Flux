@@ -92,6 +92,9 @@ copying its implicit completion convention:
   from `continue_listening()`;
 - positive legacy progress may become `InProgress` and queues normal Core media
   progression delivery;
+- a legacy source without a historical timestamp is retained with Core's
+  explicit oldest-sortable migration timestamp, never the import time, so it
+  cannot falsely outrank known playback in Continue Listening;
 - zero does not queue remote progression or overwrite existing Core playback;
 - existing playback state wins, and repeated imports are harmless;
 - `import_legacy_playback()` does not write a global completion marker, including

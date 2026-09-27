@@ -2326,6 +2326,8 @@ impl Store {
     }
 
     /// Imports article-keyed legacy progress without guessing an enclosure.
+    /// An unknown legacy timestamp is persisted as the oldest sortable value so
+    /// it cannot be promoted above known playback in Continue Listening.
     /// Completion of the overall platform migration belongs to the native
     /// coordinator, which also evaluates non-Core legacy sources.
     pub fn import_legacy_playback(
@@ -2388,7 +2390,10 @@ impl Store {
                 record.position_ms,
                 None,
                 PlaybackStatus::InProgress,
-                &record.updated_at,
+                record
+                    .updated_at
+                    .as_deref()
+                    .unwrap_or(LEGACY_PLAYBACK_UPDATED_AT_UNKNOWN),
             )?;
             queue_media_progress(&tx, enclosure_id, record.position_ms / 1_000)?;
             result.imported += 1;
@@ -3519,6 +3524,8 @@ impl Store {
         Ok(NavigationCatalog { categories, feeds })
     }
 }
+
+const LEGACY_PLAYBACK_UPDATED_AT_UNKNOWN: &str = "0001-01-01T00:00:00Z";
 fn scoped_counts(connection: &Connection, sql: &str) -> Result<Vec<WidgetScopedCount>, CoreError> {
     let mut statement = connection.prepare(sql).map_err(sql_error)?;
     statement
@@ -6720,27 +6727,27 @@ mod tests {
             LegacyPlaybackImport {
                 article_id: 1,
                 position_ms: 0,
-                updated_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: Some("2026-01-01T00:00:00Z".into()),
             },
             LegacyPlaybackImport {
                 article_id: 2,
                 position_ms: 2_000,
-                updated_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: Some("2026-01-01T00:00:00Z".into()),
             },
             LegacyPlaybackImport {
                 article_id: 3,
                 position_ms: 3_000,
-                updated_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: None,
             },
             LegacyPlaybackImport {
                 article_id: 4,
                 position_ms: 4_000,
-                updated_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: Some("2026-01-01T00:00:00Z".into()),
             },
             LegacyPlaybackImport {
                 article_id: 99,
                 position_ms: 3_000,
-                updated_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: Some("2026-01-01T00:00:00Z".into()),
             },
         ];
         store
@@ -6754,6 +6761,10 @@ mod tests {
         assert_eq!(
             store.playback_state(30).unwrap().unwrap().position_ms,
             3_000
+        );
+        assert_eq!(
+            store.playback_state(30).unwrap().unwrap().updated_at,
+            LEGACY_PLAYBACK_UPDATED_AT_UNKNOWN
         );
         assert_eq!(
             store.playback_state(40).unwrap().unwrap().position_ms,
@@ -6774,6 +6785,15 @@ mod tests {
                 .all(|mutation| mutation.enclosure_id != 10)
         );
         assert_eq!(
+            store
+                .continue_listening()
+                .unwrap()
+                .into_iter()
+                .map(|item| item.enclosure_id)
+                .collect::<Vec<_>>(),
+            vec![40, 30]
+        );
+        assert_eq!(
             store.import_legacy_playback(&records).unwrap(),
             LegacyPlaybackImportResult {
                 skipped_missing: 1,
@@ -6785,7 +6805,7 @@ mod tests {
         let later = [LegacyPlaybackImport {
             article_id: 5,
             position_ms: 5_000,
-            updated_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: Some("2026-01-01T00:00:00Z".into()),
         }];
         assert_eq!(store.import_legacy_playback(&later).unwrap().imported, 1);
         assert_eq!(

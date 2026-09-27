@@ -15,6 +15,13 @@ enum IOSLegacyMediaSettingsMigrationOutcome: Equatable {
     case retryableFailure
 }
 
+enum IOSLegacyPlaybackMigrationOutcome: Equatable {
+    case notEligible
+    case alreadyCompleted
+    case imported
+    case retryableFailure
+}
+
 struct IOSLegacyMediaSettingsImport: Equatable {
     let autoDownloadListeningList: Bool?
     let unmeteredOnly: Bool?
@@ -54,26 +61,29 @@ final class IOSLegacyMigrationCoordinator {
         static let accountMigrationCompleted = "FluxNews.iOS.legacyMigration.account.v1.completed"
         static let migratedAccountServer = "FluxNews.iOS.legacyMigration.account.v1.server"
         static let mediaSettingsMigrationCompleted = "FluxNews.iOS.legacyMigration.mediaSettings.v1.completed"
+        static let playbackMigrationCompleted = "FluxNews.iOS.legacyMigration.playback.v1.completed"
     }
 
     private let bootstrapper: CoreBootstrapper
     private let defaults: UserDefaults
     private let legacyAccountReader: () -> LegacyAccountImport?
     private let legacyMediaSettingsReader: () -> IOSLegacyMediaSettingsImport?
+    private let legacyPlaybackReader: () -> [LegacyPlaybackProgressImport]?
     private let logger = IOSAppLogger(category: "legacy_migration")
     private var inFlight = false
-    private var mediaSettingsInFlight = false
 
     init(
         bootstrapper: CoreBootstrapper,
         defaults: UserDefaults = .standard,
         legacyAccountReader: @escaping () -> LegacyAccountImport? = LegacyStateDiscovery.readAccountImport,
-        legacyMediaSettingsReader: @escaping () -> IOSLegacyMediaSettingsImport? = LegacyStateDiscovery.readMediaSettingsImport
+        legacyMediaSettingsReader: @escaping () -> IOSLegacyMediaSettingsImport? = LegacyStateDiscovery.readMediaSettingsImport,
+        legacyPlaybackReader: @escaping () -> [LegacyPlaybackProgressImport]? = LegacyStateDiscovery.readPlaybackProgressImports
     ) {
         self.bootstrapper = bootstrapper
         self.defaults = defaults
         self.legacyAccountReader = legacyAccountReader
         self.legacyMediaSettingsReader = legacyMediaSettingsReader
+        self.legacyPlaybackReader = legacyPlaybackReader
     }
 
     /// Imports only when native credentials are absent. The completion marker is
@@ -140,25 +150,17 @@ final class IOSLegacyMigrationCoordinator {
     /// by this coordinator. Native accounts without that provenance always win.
     @discardableResult
     func migrateMediaSettingsIfNeeded() async -> IOSLegacyMediaSettingsMigrationOutcome {
-        guard !mediaSettingsInFlight else { return .retryableFailure }
-        mediaSettingsInFlight = true
-        defer { mediaSettingsInFlight = false }
+        guard !inFlight else { return .retryableFailure }
+        inFlight = true
+        defer { inFlight = false }
 
-        let currentCredentials: IOSMinifluxCredentials
         do {
-            guard let stored = try bootstrapper.credentialStore.load() else {
-                return .notEligible
-            }
-            currentCredentials = stored
+            guard try isCurrentMigratedAccount() else { return .notEligible }
         } catch {
             logger.error("Legacy media settings migration could not inspect native credentials: \(String(reflecting: error))")
             return .retryableFailure
         }
 
-        guard let migratedServer = defaults.string(forKey: DefaultsKey.migratedAccountServer),
-              migratedServer == normalizedServerIdentifier(currentCredentials.server) else {
-            return .notEligible
-        }
         guard !defaults.bool(forKey: DefaultsKey.mediaSettingsMigrationCompleted) else {
             return .alreadyCompleted
         }
@@ -190,6 +192,43 @@ final class IOSLegacyMigrationCoordinator {
         return .imported
     }
 
+    /// Imports article-keyed Flutter progress through the authoritative Core
+    /// resolver. `updatedAt` remains nil because Flutter retained no timestamp.
+    @discardableResult
+    func migratePlaybackProgressIfNeeded() async -> IOSLegacyPlaybackMigrationOutcome {
+        guard !inFlight else { return .retryableFailure }
+        inFlight = true
+        defer { inFlight = false }
+
+        do {
+            guard try isCurrentMigratedAccount() else { return .notEligible }
+        } catch {
+            logger.error("Legacy playback migration could not inspect native credentials: \(String(reflecting: error))")
+            return .retryableFailure
+        }
+        guard !defaults.bool(forKey: DefaultsKey.playbackMigrationCompleted) else {
+            return .alreadyCompleted
+        }
+        guard let legacyRecords = legacyPlaybackReader() else {
+            return .retryableFailure
+        }
+        let records = legacyRecords.map {
+            LegacyPlaybackImport(articleId: $0.articleID, positionMs: $0.positionMs, updatedAt: nil)
+        }
+        let result = await bootstrapper.importLegacyPlayback(records)
+        switch result {
+        case let .success(importResult):
+            defaults.set(true, forKey: DefaultsKey.playbackMigrationCompleted)
+            logger.info(
+                "Legacy playback imported=\(importResult.imported) missing=\(importResult.skippedMissing) ambiguous=\(importResult.skippedAmbiguous) existing=\(importResult.alreadyPresent)."
+            )
+            return .imported
+        case let .failure(error):
+            logger.error("Legacy playback migration remains retryable: \(String(reflecting: error))")
+            return .retryableFailure
+        }
+    }
+
     private func mediaSettingsWriteFailed(_ error: Error) -> IOSLegacyMediaSettingsMigrationOutcome {
         logger.error("Legacy media settings migration remains retryable: \(String(reflecting: error))")
         return .retryableFailure
@@ -206,5 +245,13 @@ final class IOSLegacyMigrationCoordinator {
         components.query = nil
         components.fragment = nil
         return components.string?.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? trimmed.lowercased()
+    }
+
+    private func isCurrentMigratedAccount() throws -> Bool {
+        guard let stored = try bootstrapper.credentialStore.load(),
+              let migratedServer = defaults.string(forKey: DefaultsKey.migratedAccountServer) else {
+            return false
+        }
+        return migratedServer == normalizedServerIdentifier(stored.server)
     }
 }

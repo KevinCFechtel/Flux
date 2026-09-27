@@ -238,6 +238,21 @@ final class CoreBootstrapper: ObservableObject {
         return result
     }
 
+    func importLegacyPlayback(
+        _ records: [LegacyPlaybackImport]
+    ) async -> Result<LegacyPlaybackImportResult, Error> {
+        guard let activeCore = core else {
+            return .failure(SettingsAccessError.coreUnavailable)
+        }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            { try activeCore.importLegacyPlayback(records: records) }
+        ) else {
+            return .failure(SettingsAccessError.sessionUnavailable)
+        }
+        return result
+    }
+
     func setDownloadNetworkPolicyPreference(
         _ policy: DownloadNetworkPolicy
     ) async -> Result<Void, Error> {

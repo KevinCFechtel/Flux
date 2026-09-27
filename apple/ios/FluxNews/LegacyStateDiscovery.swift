@@ -33,6 +33,11 @@ struct LegacyAccountImport: Equatable {
     let customHeaders: [Header]
 }
 
+struct LegacyPlaybackProgressImport: Equatable {
+    let articleID: Int64
+    let positionMs: UInt64
+}
+
 enum LegacyStateDiscovery {
     static let productionBundleID = "dev.kevincfechtel.fluxNews"
     static let applicationGroup = "group.dev.kevincfechtel.fluxNews"
@@ -110,6 +115,14 @@ enum LegacyStateDiscovery {
         return IOSLegacyMediaSettingsImport.parse(mediaValues)
     }
 
+    /// Reads Flutter's article-keyed playback values without interpreting
+    /// enclosure identity or modifying the legacy Keychain namespace.
+    static func readPlaybackProgressImports() -> [LegacyPlaybackProgressImport]? {
+        guard Bundle.main.bundleIdentifier == productionBundleID,
+              let values = keychainValues() else { return nil }
+        return parsePlaybackProgressImports(values)
+    }
+
     /// Pure decoder kept separate from Keychain access so migration semantics can
     /// be regression-tested without creating or mutating legacy credentials.
     static func parseAccountImport(_ values: [String: String]) -> LegacyAccountImport? {
@@ -145,6 +158,21 @@ enum LegacyStateDiscovery {
             apiKey: rawAPIKey,
             customHeaders: headers
         )
+    }
+
+    static func parsePlaybackProgressImports(
+        _ values: [String: String]
+    ) -> [LegacyPlaybackProgressImport] {
+        values.compactMap { key, value in
+            guard key.hasPrefix(playbackPrefix),
+                  let articleID = Int64(key.dropFirst(playbackPrefix.count)),
+                  articleID > 0,
+                  let positionMs = UInt64(value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                return nil
+            }
+            return LegacyPlaybackProgressImport(articleID: articleID, positionMs: positionMs)
+        }
+        .sorted { $0.articleID < $1.articleID }
     }
 
     static func redactedSummary(_ result: LegacyDiscoveryResult) -> [String: String] {
