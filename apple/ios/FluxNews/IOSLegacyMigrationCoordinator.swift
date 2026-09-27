@@ -8,6 +8,39 @@ enum IOSLegacyAccountMigrationOutcome: Equatable {
     case retryableFailure
 }
 
+struct IOSLegacyMediaSettingsImport: Equatable {
+    let autoDownloadListeningList: Bool?
+    let unmeteredOnly: Bool?
+    let deleteAfterPlayback: Bool?
+    let retentionDays: UInt32?
+
+    var isEmpty: Bool {
+        autoDownloadListeningList == nil && unmeteredOnly == nil &&
+            deleteAfterPlayback == nil && retentionDays == nil
+    }
+
+    static func parse(_ values: [String: String]) -> Self {
+        func parseBool(_ key: String) -> Bool? {
+            switch values[key]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "true": return true
+            case "false": return false
+            default: return nil
+            }
+        }
+
+        let retentionDays = values["audioDownloadRetentionDays"]
+            .flatMap { UInt32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .flatMap { $0 > 0 ? $0 : nil }
+
+        return Self(
+            autoDownloadListeningList: parseBool("autoDownloadAudioAfterSync"),
+            unmeteredOnly: parseBool("downloadAudioOnlyOnWifi"),
+            deleteAfterPlayback: parseBool("deleteAudioAfterPlayback"),
+            retentionDays: retentionDays
+        )
+    }
+}
+
 @MainActor
 final class IOSLegacyMigrationCoordinator {
     private enum DefaultsKey {
