@@ -53,7 +53,8 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(await coordinator.migrateAccountIfNeeded(), .nativeAccountWins)
+        let result = await coordinator.migrateAccountIfNeeded()
+        XCTAssertEqual(result, .nativeAccountWins)
         XCTAssertFalse(legacyRead)
         XCTAssertEqual(try store.load(), native)
     }
@@ -73,8 +74,10 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(await coordinator.migrateAccountIfNeeded(), .noLegacyAccount)
-        XCTAssertEqual(await coordinator.migrateAccountIfNeeded(), .noLegacyAccount)
+        let firstResult = await coordinator.migrateAccountIfNeeded()
+        XCTAssertEqual(firstResult, .noLegacyAccount)
+        let secondResult = await coordinator.migrateAccountIfNeeded()
+        XCTAssertEqual(secondResult, .noLegacyAccount)
         XCTAssertEqual(reads, 2)
     }
 
@@ -96,7 +99,8 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             legacyAccountReader: { legacy }
         )
 
-        XCTAssertEqual(await coordinator.migrateAccountIfNeeded(), .imported)
+        let importResult = await coordinator.migrateAccountIfNeeded()
+        XCTAssertEqual(importResult, .imported)
         XCTAssertEqual(
             try store.load(),
             IOSMinifluxCredentials(
@@ -106,7 +110,8 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             )
         )
         XCTAssertNotNil(bootstrapper.core)
-        XCTAssertEqual(await coordinator.migrateAccountIfNeeded(), .nativeAccountWins)
+        let secondResult = await coordinator.migrateAccountIfNeeded()
+        XCTAssertEqual(secondResult, .nativeAccountWins)
     }
 
     @MainActor
@@ -114,11 +119,14 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         let (defaults, suite) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = IOSMemoryCredentialStore()
-        var shouldFail = true
+        final class FailureState: @unchecked Sendable {
+            var shouldFail = true
+        }
+        let failureState = FailureState()
         let bootstrapper = CoreBootstrapper(
             credentialStore: store,
-            coreFactory: { [weak self] credentials in
-                if shouldFail {
+            coreFactory: { [weak self, failureState] credentials in
+                if failureState.shouldFail {
                     throw NSError(domain: "FluxNewsTests.LegacyMigration", code: 1)
                 }
                 return try XCTUnwrap(self).makeCore(for: credentials)
@@ -131,12 +139,14 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             legacyAccountReader: { legacy }
         )
 
-        XCTAssertEqual(await coordinator.migrateAccountIfNeeded(), .retryableFailure)
+        let failedResult = await coordinator.migrateAccountIfNeeded()
+        XCTAssertEqual(failedResult, .retryableFailure)
         XCTAssertNil(try store.load())
         XCTAssertNil(bootstrapper.core)
 
-        shouldFail = false
-        XCTAssertEqual(await coordinator.migrateAccountIfNeeded(), .imported)
+        failureState.shouldFail = false
+        let retryResult = await coordinator.migrateAccountIfNeeded()
+        XCTAssertEqual(retryResult, .imported)
         XCTAssertNotNil(try store.load())
         XCTAssertNotNil(bootstrapper.core)
     }
@@ -157,7 +167,8 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(await coordinator.migrateAccountIfNeeded(), .alreadyCompleted)
+        let result = await coordinator.migrateAccountIfNeeded()
+        XCTAssertEqual(result, .alreadyCompleted)
         XCTAssertFalse(legacyRead)
     }
 }
