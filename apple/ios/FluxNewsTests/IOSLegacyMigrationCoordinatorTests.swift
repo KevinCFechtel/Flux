@@ -35,6 +35,14 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         )
     }
 
+    private static let successfulAccountValidator: @Sendable (IOSMinifluxCredentials) throws -> AccountValidationAttempt = { credentials in
+        AccountValidationAttempt(
+            result: AccountValidationResult(installationBase: credentials.server, version: "2.0"),
+            error: nil,
+            diagnostic: nil
+        )
+    }
+
     @MainActor
     func testNativeAccountWinsWithoutReadingLegacyState() async throws {
         let (defaults, suite) = makeDefaults()
@@ -90,7 +98,8 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             credentialStore: store,
             coreFactory: { [weak self] credentials in
                 try XCTUnwrap(self).makeCore(for: credentials)
-            }
+            },
+            accountValidator: Self.successfulAccountValidator
         )
         let legacy = legacyAccount
         let coordinator = IOSLegacyMigrationCoordinator(
@@ -130,7 +139,8 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
                     throw NSError(domain: "FluxNewsTests.LegacyMigration", code: 1)
                 }
                 return try XCTUnwrap(self).makeCore(for: credentials)
-            }
+            },
+            accountValidator: Self.successfulAccountValidator
         )
         let legacy = legacyAccount
         let coordinator = IOSLegacyMigrationCoordinator(
