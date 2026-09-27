@@ -71,6 +71,7 @@ final class IOSLegacyMigrationCoordinator {
     private let legacyAccountReader: () -> LegacyAccountImport?
     private let legacyMediaSettingsReader: () -> IOSLegacyMediaSettingsImport?
     private let legacyPlaybackReader: () -> [LegacyPlaybackProgressImport]?
+    private let legacyPlaybackImporter: (([LegacyPlaybackImport]) async -> Result<LegacyPlaybackImportResult, Error>)?
     private let legacyDownloadReader: () -> [LegacyDownloadImport]?
     private let logger = IOSAppLogger(category: "legacy_migration")
     private var inFlight = false
@@ -81,6 +82,7 @@ final class IOSLegacyMigrationCoordinator {
         legacyAccountReader: @escaping () -> LegacyAccountImport? = LegacyStateDiscovery.readAccountImport,
         legacyMediaSettingsReader: @escaping () -> IOSLegacyMediaSettingsImport? = LegacyStateDiscovery.readMediaSettingsImport,
         legacyPlaybackReader: @escaping () -> [LegacyPlaybackProgressImport]? = LegacyStateDiscovery.readPlaybackProgressImports,
+        legacyPlaybackImporter: (([LegacyPlaybackImport]) async -> Result<LegacyPlaybackImportResult, Error>)? = nil,
         legacyDownloadReader: @escaping () -> [LegacyDownloadImport]? = { LegacyStateDiscovery.readDownloadImports() }
     ) {
         self.bootstrapper = bootstrapper
@@ -88,6 +90,7 @@ final class IOSLegacyMigrationCoordinator {
         self.legacyAccountReader = legacyAccountReader
         self.legacyMediaSettingsReader = legacyMediaSettingsReader
         self.legacyPlaybackReader = legacyPlaybackReader
+        self.legacyPlaybackImporter = legacyPlaybackImporter
         self.legacyDownloadReader = legacyDownloadReader
     }
 
@@ -215,14 +218,22 @@ final class IOSLegacyMigrationCoordinator {
         let records = legacyRecords.map {
             LegacyPlaybackImport(articleId: $0.articleID, positionMs: $0.positionMs, updatedAt: nil)
         }
-        let result = await bootstrapper.importLegacyPlayback(records)
+        let result: Result<LegacyPlaybackImportResult, Error>
+        if let legacyPlaybackImporter {
+            result = await legacyPlaybackImporter(records)
+        } else {
+            result = await bootstrapper.importLegacyPlayback(records)
+        }
         switch result {
         case let .success(importResult):
-            defaults.set(true, forKey: DefaultsKey.playbackMigrationCompleted)
             logger.info(
                 "Legacy playback imported=\(importResult.imported) missing=\(importResult.skippedMissing) ambiguous=\(importResult.skippedAmbiguous) existing=\(importResult.alreadyPresent)."
             )
-            return .imported
+            let outcome = Self.playbackMigrationOutcome(for: importResult)
+            if outcome == .imported {
+                defaults.set(true, forKey: DefaultsKey.playbackMigrationCompleted)
+            }
+            return outcome
         case let .failure(error):
             logger.error("Legacy playback migration remains retryable: \(String(reflecting: error))")
             return .retryableFailure
@@ -269,6 +280,13 @@ final class IOSLegacyMigrationCoordinator {
     private func mediaSettingsWriteFailed(_ error: Error) -> IOSLegacyMediaSettingsMigrationOutcome {
         logger.error("Legacy media settings migration remains retryable: \(String(reflecting: error))")
         return .retryableFailure
+    }
+
+    static func playbackMigrationOutcome(
+        for importResult: LegacyPlaybackImportResult
+    ) -> IOSLegacyPlaybackMigrationOutcome {
+        // A later authoritative reconcile may make these article-keyed records resolvable.
+        importResult.skippedMissing > 0 ? .retryableFailure : .imported
     }
 
     private func normalizedServerIdentifier(_ server: String) -> String {
