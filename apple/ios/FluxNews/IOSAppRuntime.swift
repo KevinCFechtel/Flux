@@ -23,9 +23,7 @@ final class IOSMediaTransferReconciliationHandoff {
         await handler()
     }
 
-    func uninstall() {
-        handler = nil
-    }
+    func uninstall() { handler = nil }
 
     func requestReconciliation() async {
         guard let handler else {
@@ -43,7 +41,6 @@ enum IOSMediaCoreAccessState: Equatable {
     case suspendedForLocalStateRebuild
 }
 
-/// App-scoped owner for native media execution.
 @MainActor
 final class IOSMediaRuntime {
     private(set) var core: Flux?
@@ -61,19 +58,14 @@ final class IOSMediaRuntime {
     private lazy var playbackCoreAccess = IOSMediaPlaybackCoreAccess(
         coreSessionExecutionCoordinator: coreSessionExecutionCoordinator
     )
-
     lazy var playbackCoordinator = IOSMediaPlaybackCoordinator(
         coreAccess: playbackCoreAccess,
         presentationState: playbackPresentationState
     )
-
-    /// App-scoped system Now Playing projection. It observes the same D6
-    /// presentation state as the in-app player and never owns playback state.
     lazy var nowPlayingCoordinator = IOSNowPlayingCoordinator(
         playbackCoordinator: playbackCoordinator,
         presentationState: playbackPresentationState
     )
-
     lazy var transferCoordinator = IOSMediaTransferCoordinator(
         bootstrapper: bootstrapper,
         coreSessionExecutionCoordinator: coreSessionExecutionCoordinator,
@@ -89,45 +81,28 @@ final class IOSMediaRuntime {
         self.bootstrapper = bootstrapper
         self.coreSessionExecutionCoordinator = coreSessionExecutionCoordinator
         self.mediaTransferReconciliationHandoff = mediaTransferReconciliationHandoff
-
         transferCoordinator.setMediaInUseProvider { [weak self] enclosureID in
             self?.playbackCoordinator.blocksMediaDeletion(enclosureID: enclosureID) ?? false
         }
         playbackCoordinator.onPlaybackUseChanged = { [weak self] in
-            Task { @MainActor [weak self] in
-                await self?.transferCoordinator.reconcile()
-            }
+            Task { @MainActor [weak self] in await self?.transferCoordinator.reconcile() }
         }
-        // Instantiate the adapter with the app-scoped media runtime rather than
-        // tying system Now Playing lifetime to any SwiftUI presentation.
         _ = nowPlayingCoordinator
     }
 
     func attach(to core: Flux) {
         let replacingCore = self.core != nil && self.core !== core
-        if self.core !== core {
-            lifecycleGeneration &+= 1
-        }
+        if self.core !== core { lifecycleGeneration &+= 1 }
         self.core = core
         coreAccessState = .attached
         eventSubscription = nil
         do {
             eventSubscription = try core.subscribeEvents(
-                listener: IOSMediaRuntimeEventListener(
-                    runtime: self,
-                    core: core,
-                    generation: lifecycleGeneration
-                )
+                listener: IOSMediaRuntimeEventListener(runtime: self, core: core, generation: lifecycleGeneration)
             )
-        } catch {
-            // Media sync reconciliation is best-effort presentation refresh.
-            // Playback remains locally durable even if subscription setup fails.
-        }
-        if replacingCore {
-            playbackCoordinator.replaceCore(with: core)
-        } else {
-            playbackCoordinator.attach(to: core)
-        }
+        } catch {}
+        if replacingCore { playbackCoordinator.replaceCore(with: core) }
+        else { playbackCoordinator.attach(to: core) }
         transferCoordinator.attach(to: core, generation: lifecycleGeneration)
     }
 
@@ -156,9 +131,7 @@ final class IOSMediaRuntime {
         transferCoordinator.suspendForCoreLifecycle(generation: lifecycleGeneration)
     }
 
-    func localStateRebuildFinished(with core: Flux) {
-        attach(to: core)
-    }
+    func localStateRebuildFinished(with core: Flux) { attach(to: core) }
 
     func detach() {
         guard core != nil || coreAccessState != .detached else { return }
@@ -166,32 +139,18 @@ final class IOSMediaRuntime {
         eventSubscription = nil
         core = nil
         coreAccessState = .detached
-        transferCoordinator.detach(
-            generation: lifecycleGeneration,
-            clearingAccountIdentity: true
-        )
+        transferCoordinator.detach(generation: lifecycleGeneration, clearingAccountIdentity: true)
         playbackCoordinator.detach()
     }
 
     func handle(event: CoreEvent, core: Flux, generation: UInt64) {
-        guard generation == lifecycleGeneration,
-              self.core === core else {
-            return
-        }
+        guard generation == lifecycleGeneration, self.core === core else { return }
         guard case .syncCompleted = event else { return }
-        Task { @MainActor [weak self] in
-            await self?.playbackCoordinator.reconcileAfterSuccessfulSync()
-        }
+        Task { @MainActor [weak self] in await self?.playbackCoordinator.reconcileAfterSuccessfulSync() }
     }
 
-    func sceneWillResignActive() {
-        playbackCoordinator.sceneWillResignActive()
-    }
-
-    func sceneDidBecomeActive() {
-        playbackCoordinator.sceneDidBecomeActive()
-    }
-
+    func sceneWillResignActive() { playbackCoordinator.sceneWillResignActive() }
+    func sceneDidBecomeActive() { playbackCoordinator.sceneDidBecomeActive() }
     func applicationWillTerminate() {
         playbackCoordinator.applicationWillTerminate()
         nowPlayingCoordinator.cleanup()
@@ -211,9 +170,7 @@ private final class IOSMediaRuntimeEventListener: EventListener, @unchecked Send
 
     func onEvent(event: CoreEvent) {
         guard case .syncCompleted = event else { return }
-        Task { @MainActor [weak runtime] in
-            runtime?.handle(event: event, core: core, generation: generation)
-        }
+        Task { @MainActor [weak runtime] in runtime?.handle(event: event, core: core, generation: generation) }
     }
 }
 
@@ -222,6 +179,7 @@ final class IOSAppRuntime {
     static let shared = IOSAppRuntime()
 
     let bootstrapper: CoreBootstrapper
+    let legacyMigrationCoordinator: IOSLegacyMigrationCoordinator
     let backgroundSyncCoordinator: IOSBackgroundSyncCoordinator
     let systemNotificationManager: IOSSystemNotificationManager
     let widgetSnapshotCoordinator: IOSWidgetSnapshotCoordinator
@@ -235,10 +193,8 @@ final class IOSAppRuntime {
         mediaTransferReconciliationHandoff: IOSMediaTransferReconciliationHandoff? = nil
     ) {
         let bootstrapper = bootstrapper ?? CoreBootstrapper()
-        let backgroundSyncCoordinator = IOSBackgroundSyncCoordinator(
-            bootstrapper: bootstrapper,
-            scheduler: scheduler
-        )
+        let legacyMigrationCoordinator = IOSLegacyMigrationCoordinator(bootstrapper: bootstrapper)
+        let backgroundSyncCoordinator = IOSBackgroundSyncCoordinator(bootstrapper: bootstrapper, scheduler: scheduler)
         let systemNotificationManager = systemNotificationManager ?? IOSSystemNotificationManager.shared
         let widgetSnapshotCoordinator = IOSWidgetSnapshotCoordinator(bootstrapper: bootstrapper)
         let mediaTransferReconciliationHandoff = mediaTransferReconciliationHandoff ?? IOSMediaTransferReconciliationHandoff.shared
@@ -248,24 +204,17 @@ final class IOSAppRuntime {
             mediaTransferReconciliationHandoff: mediaTransferReconciliationHandoff
         )
         self.bootstrapper = bootstrapper
+        self.legacyMigrationCoordinator = legacyMigrationCoordinator
         self.backgroundSyncCoordinator = backgroundSyncCoordinator
         self.systemNotificationManager = systemNotificationManager
         self.widgetSnapshotCoordinator = widgetSnapshotCoordinator
         self.mediaTransferReconciliationHandoff = mediaTransferReconciliationHandoff
         self.mediaRuntime = mediaRuntime
 
-        bootstrapper.prepareForCoreReplacement = { [weak mediaRuntime] in
-            await mediaRuntime?.prepareForCoreReplacement()
-        }
-        bootstrapper.onCoreReplacementAborted = { [weak mediaRuntime] in
-            mediaRuntime?.resumeAfterAbortedCoreReplacement()
-        }
-        bootstrapper.prepareForLocalStateRebuild = { [weak mediaRuntime] in
-            mediaRuntime?.prepareForLocalStateRebuild()
-        }
-        bootstrapper.onLocalStateRebuildFinished = { [weak mediaRuntime] core in
-            mediaRuntime?.localStateRebuildFinished(with: core)
-        }
+        bootstrapper.prepareForCoreReplacement = { [weak mediaRuntime] in await mediaRuntime?.prepareForCoreReplacement() }
+        bootstrapper.onCoreReplacementAborted = { [weak mediaRuntime] in mediaRuntime?.resumeAfterAbortedCoreReplacement() }
+        bootstrapper.prepareForLocalStateRebuild = { [weak mediaRuntime] in mediaRuntime?.prepareForLocalStateRebuild() }
+        bootstrapper.onLocalStateRebuildFinished = { [weak mediaRuntime] core in mediaRuntime?.localStateRebuildFinished(with: core) }
         bootstrapper.onCoreChanged = { [weak mediaRuntime] core in
             if let core { mediaRuntime?.attach(to: core) }
             else { mediaRuntime?.detach() }
@@ -297,9 +246,7 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate {
         scheduler: IOSSystemBackgroundTaskScheduler.shared,
         identifier: IOSBackgroundRefreshConfiguration.taskIdentifier
     ) { context in
-        Task { @MainActor in
-            IOSAppRuntime.shared.backgroundSyncCoordinator.handle(context)
-        }
+        Task { @MainActor in IOSAppRuntime.shared.backgroundSyncCoordinator.handle(context) }
     }
 
     func application(
