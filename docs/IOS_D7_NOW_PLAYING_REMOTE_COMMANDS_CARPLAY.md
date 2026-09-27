@@ -1,9 +1,10 @@
 # iOS D7 — Now Playing, Remote Commands, and CarPlay
 
-> **Status: COMPLETE / ARCHITECTURE-FROZEN**
+> **Status: COMPLETE / REAL-DEVICE ACCEPTED / ARCHITECTURE-FROZEN**
 >
 > Repository-first audit baseline: `main` at `8931fb2fff8284ef82f38b53634f8d2e699fa7d7` (25 September 2026).
 > Completion state recorded against `main` at `a8a4bff4b0ff4df19cedd3bb55dad7a3b01453b7` (26 September 2026).
+> Final acceptance recorded on 27 September 2026 after merge commit `e0fb13fccd11bfcc0ae2b9ba1c7477a79781f8bd`.
 > `docs/PHASE_D_NATIVE_IOS_IPADOS.md` remains the authoritative Phase-D contract. D7 is implemented over the existing D6 runtime without changing the frozen Phase A/B/C, D5, or UIKit Timeline ownership boundaries.
 
 ## 1. Audit result
@@ -71,10 +72,16 @@ D7 is implemented in the native iOS target:
   the same playback coordinator rather than creating a queue or second player;
 - the native development signing/profile path includes the required CarPlay
   Audio capability;
-- canonical iOS and macOS test/build gates are green at completion.
+- canonical iOS and macOS test/build gates are green at completion; and
+- D7-A through D7-G are automated-test validated and real-device accepted,
+  including CarPlay Listening List/feed filtering/navigation/Now Playing and
+  system Now Playing, Dynamic Island, and Lock Screen behavior.
 
 The audit text below remains the architectural contract that constrained the
 implementation; it is no longer a list of missing productive features.
+
+The D7 architecture is frozen. Changes require a new concrete regression or
+product requirement.
 
 ## 4. Ownership and lifecycle decisions
 
@@ -104,7 +111,13 @@ Restart remains an explicit Flux completion action, not a generic remote command
 
 ### Publication lifecycle
 
-When no enclosure is loaded, clear Now Playing info and use unknown playback state. When media is loaded but paused/stopped, retain metadata and elapsed position so external surfaces can resume the same item. While playing, publish the configured playback rate; while not playing, effective rate is zero while the default/configured rate remains available.
+When no enclosure is loaded, clear Now Playing info and use unknown playback state.
+Pause retains Now Playing metadata and elapsed position so external surfaces can
+resume the same item. In-app Stop checkpoints playback, releases the
+AVAudioSession for deactivation, retains the prepared/loaded media state for
+resume, clears system Now Playing, and hides the Article List Now Playing action.
+While playing, publish the configured playback rate; while not playing,
+effective rate is zero while the default/configured rate remains available.
 
 Position ticks may update elapsed/rate without rebuilding artwork and all metadata. Metadata/artwork updates use generation/identity guards so an old artwork request cannot overwrite a newer enclosure.
 
@@ -113,6 +126,14 @@ Position ticks may update elapsed/rate without rebuilding artwork and all metada
 Add a CarPlay scene delegate/coordinator that owns only CarPlay presentation objects (`CPInterfaceController`, templates, short-lived browsing projection/tasks). It references the app-scoped media runtime and a narrow Core-backed browsing adapter. It never owns AVPlayer, AVAudioSession, playback checkpoints, download state, SQLite, or a second playback presentation state.
 
 Disconnecting CarPlay destroys CarPlay UI state only. Playback may continue through the app-scoped runtime according to existing D6 semantics.
+
+### Article List Now Playing access
+
+The Article List provides a configurable Action Bar access point while a player
+is actively running. It presents the existing player rather than creating a
+second player context, and reuses the Listening List context, including Show
+Notes whenever the current `ListeningListItem` is available. Stop hides this
+access point; Pause retains Now Playing presentation.
 
 ## 5. CarPlay API contract
 
@@ -233,6 +254,9 @@ D7 requires evidence for at least:
 - Control Center: play/pause/skip/seek update the in-app state correctly;
 - Bluetooth/headset route: remote play/pause and route-loss behavior preserve D6 semantics;
 - app Stop: audio session is released; later supported Play resumes the prepared item correctly;
+- app Stop: system Now Playing and the Article List Now Playing action are
+  cleared while prepared/loaded media state remains resumable; Pause retains
+  Now Playing;
 - natural completion and Restart remain correct after Now Playing integration;
 - local downloaded media and remote streaming both publish/control correctly;
 - sync reconciliation does not seek an actively playing item and can update paused/stopped progress as already specified by D6;
@@ -288,4 +312,4 @@ D7 is complete when:
 - D6 presentation can still evolve without changes to D7 architecture.
 
 Those gates are satisfied for the current implementation. D7 is therefore
-complete and architecture-frozen in the Phase-D contract.
+complete, real-device accepted, and architecture-frozen in the Phase-D contract.

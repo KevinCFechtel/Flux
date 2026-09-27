@@ -391,12 +391,14 @@ playback stack, not a second player or legacy download cache. Required CarPlay
 scope includes browsing playable/listening items, selecting an episode,
 starting playback, play/pause, skip and current playback presentation.
 
-D7-0 is complete. The implementation sequence is D7-A shared Apple Now Playing
-projection/policy, D7-B iOS Now Playing adapter, D7-C remote commands, D7-D
-system playback/real-device acceptance, D7-E CarPlay scene/browsing, D7-F
-CarPlay playback integration, and D7-G final integration/physical CarPlay
-acceptance. The detailed contract is
+D7-A through D7-G are complete, automated-test validated, and real-device
+accepted. This covers the shared Apple Now Playing projection, iOS Now Playing
+adapter, remote commands, system playback acceptance, CarPlay scene/browsing,
+CarPlay playback integration, and final physical-device CarPlay acceptance.
+The detailed contract is
 [IOS_D7_NOW_PLAYING_REMOTE_COMMANDS_CARPLAY.md](IOS_D7_NOW_PLAYING_REMOTE_COMMANDS_CARPLAY.md).
+The D7 architecture is frozen; changes require a new concrete regression or
+product requirement.
 
 D7 must not expose Stop, next/previous episode, autoplay, or queue semantics
 without an explicit product/domain contract. Stop remains an in-app D6 lifecycle
@@ -531,9 +533,10 @@ does not block D7.
 ### D7 — Now Playing, Remote Commands & CarPlay
 
 Complete and architecture-frozen. The native app uses the single D6 playback
-runtime for Now Playing, remote commands and CarPlay; the development entitlement
-and CarPlay scene are integrated and the canonical iOS/macOS test/build gates
-are green. See
+runtime for Now Playing, remote commands and CarPlay. D7-A through D7-G are
+automated-test validated and real-device accepted, including CarPlay Listening
+List/feed filtering/navigation/Now Playing and system Now Playing, Dynamic
+Island, and Lock Screen behavior. See
 [IOS_D7_NOW_PLAYING_REMOTE_COMMANDS_CARPLAY.md](IOS_D7_NOW_PLAYING_REMOTE_COMMANDS_CARPLAY.md).
 
 ### D8 — Live Activities & Dynamic Island
