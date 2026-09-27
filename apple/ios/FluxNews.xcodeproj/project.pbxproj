@@ -76,6 +76,7 @@
 		E17F744130471E2D00698DA5 /* FluxUniFFI.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		E182A752304B521300F49A9B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E182A751304B521300F49A9B /* Assets.xcassets */; };
 		E182A753304B521300F49A9B /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = E182A754304B521300F49A9B /* Localizable.xcstrings */; };
+		E1A215A63069648C00260DD1 /* IOSLegacyMigrationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A215A53069648C00260DD1 /* IOSLegacyMigrationCoordinator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -192,6 +193,7 @@
 		E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = FluxUniFFI.xcframework; path = ../Build/Products/FluxUniFFI/FluxUniFFI.xcframework; sourceTree = "<group>"; };
 		E182A751304B521300F49A9B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E182A754304B521300F49A9B /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		E1A215A53069648C00260DD1 /* IOSLegacyMigrationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = IOSLegacyMigrationCoordinator.swift; path = FluxNews/IOSLegacyMigrationCoordinator.swift; sourceTree = "<group>"; };
 		P1 /* FluxNews.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FluxNews.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -233,6 +235,7 @@
 		G1 = {
 			isa = PBXGroup;
 			children = (
+				E1A215A53069648C00260DD1 /* IOSLegacyMigrationCoordinator.swift */,
 				E1069887306786CC0009BBFC /* FallbackArtwork.png */,
 				G2 /* FluxNews */,
 				G3 /* FluxNews */,
@@ -514,6 +517,7 @@
 				A40 /* FluxNews/IOSAppRuntime.swift in Sources */,
 				D6A1 /* ../shared/FluxApple/MediaPresentation.swift in Sources */,
 				D6A3 /* ../shared/FluxApple/MediaTransferFileLayout.swift in Sources */,
+				E1A215A63069648C00260DD1 /* IOSLegacyMigrationCoordinator.swift in Sources */,
 				D6A2 /* FluxNews/IOSMediaPresentationState.swift in Sources */,
 				D6A4 /* FluxNews/IOSMediaTransferCoordinator.swift in Sources */,
 				D6A5 /* FluxNews/IOSMediaPlaybackCoordinator.swift in Sources */,
