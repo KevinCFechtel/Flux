@@ -1,4 +1,5 @@
 import AVFoundation
+import MediaPlayer
 import XCTest
 @testable import FluxNews
 
@@ -206,6 +207,11 @@ private final class FakeIOSAudioSession: IOSMediaAudioSessionManaging {
     }
 }
 
+private final class FakeIOSNowPlayingInfoCenter: IOSNowPlayingInfoPublishing {
+    var nowPlayingInfo: [String: Any]?
+    var playbackState: MPNowPlayingPlaybackState = .unknown
+}
+
 @MainActor
 final class IOSMediaPlaybackCoordinatorTests: XCTestCase {
     private func makeCoordinator(
@@ -346,6 +352,52 @@ final class IOSMediaPlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(core.checkpoints.last?.1, 33_000)
         XCTAssertEqual(audio.deactivateCount, 1)
         XCTAssertTrue(coordinator.isUsing(enclosureID: 7))
+    }
+
+    func testStopClearsSystemNowPlayingWithoutClearingLoadedMediaAndPlayRepublishes() async throws {
+        let core = FakeIOSPlaybackCoreAccess(status: .inProgress)
+        let engine = FakeIOSPlaybackEngine()
+        let audio = FakeIOSAudioSession()
+        let state = IOSMediaPlaybackPresentationState()
+        let coordinator = IOSMediaPlaybackCoordinator(
+            coreAccess: core,
+            presentationState: state,
+            engine: engine,
+            audioSession: audio
+        )
+        let nowPlaying = FakeIOSNowPlayingInfoCenter()
+        let nowPlayingCoordinator = IOSNowPlayingCoordinator(
+            playbackCoordinator: coordinator,
+            presentationState: state,
+            nowPlaying: nowPlaying
+        )
+        defer { nowPlayingCoordinator.cleanup() }
+
+        try await coordinator.play(enclosureID: 7)
+        XCTAssertNotNil(nowPlaying.nowPlayingInfo)
+        XCTAssertEqual(nowPlaying.playbackState, .playing)
+
+        coordinator.pause()
+        await Task.yield()
+        XCTAssertNotNil(nowPlaying.nowPlayingInfo)
+        XCTAssertEqual(nowPlaying.playbackState, .paused)
+
+        coordinator.stop()
+        await Task.yield()
+        XCTAssertNotNil(state.loadedEnclosure)
+        XCTAssertEqual(state.status, .stopped)
+        XCTAssertNil(nowPlaying.nowPlayingInfo)
+        XCTAssertEqual(nowPlaying.playbackState, .unknown)
+
+        state.setPosition(45_000)
+        state.setDuration(120_000)
+        await Task.yield()
+        XCTAssertNil(nowPlaying.nowPlayingInfo)
+
+        try await coordinator.play(enclosureID: 7)
+        await Task.yield()
+        XCTAssertNotNil(nowPlaying.nowPlayingInfo)
+        XCTAssertEqual(nowPlaying.playbackState, .playing)
     }
 
     func testSuccessfulSyncReconcilesStoppedRuntimeToNewerCorePlaybackPosition() async throws {

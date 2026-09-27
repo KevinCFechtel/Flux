@@ -17,17 +17,127 @@ private struct IOSSharePayload: Identifiable {
     let id = UUID()
 }
 
-enum IOSBottomAction: Equatable {
+enum IOSBottomAction: String, CaseIterable, Equatable, Hashable, Identifiable {
     case sync
     case filterAndSort
     case search
     case listeningList
+    case nowPlaying
     case markAllRead
     case markAllReadAndNext
     case settings
     case more
 
     static let defaultActions: [Self] = [.sync, .filterAndSort, .more]
+
+    static let configurableActions: [Self] = [
+        .sync,
+        .filterAndSort,
+        .search,
+        .listeningList,
+        .nowPlaying,
+    ]
+
+    var id: String { rawValue }
+
+    var settingsTitle: LocalizedStringKey {
+        switch self {
+        case .sync: "Sync"
+        case .filterAndSort: "Filter and Sort"
+        case .search: "Search"
+        case .listeningList: "Listening List"
+        case .nowPlaying: "Now Playing"
+        case .more: "More"
+        case .markAllRead, .markAllReadAndNext, .settings: ""
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .sync: "arrow.triangle.2.circlepath"
+        case .filterAndSort: "line.3.horizontal.decrease.circle"
+        case .search: "magnifyingglass"
+        case .listeningList: "headphones"
+        case .nowPlaying: "play.circle"
+        case .more: "ellipsis.circle"
+        case .markAllRead, .markAllReadAndNext, .settings: ""
+        }
+    }
+}
+
+enum IOSArticleListActionPolicy {
+    static func normalizedActions(from persistedIDs: [String]?) -> [IOSBottomAction] {
+        guard let persistedIDs, !persistedIDs.isEmpty else {
+            return IOSBottomAction.defaultActions
+        }
+
+        var seen = Set<IOSBottomAction>()
+        var actions: [IOSBottomAction] = []
+        for id in persistedIDs {
+            guard let action = IOSBottomAction(rawValue: id),
+                  (IOSBottomAction.configurableActions.contains(action) || action == .more),
+                  seen.insert(action).inserted
+            else { continue }
+            actions.append(action)
+        }
+
+        guard !actions.isEmpty else { return IOSBottomAction.defaultActions }
+        if !actions.contains(.more) { actions.append(.more) }
+        return actions
+    }
+
+    static func visibleActions(
+        configuredActions: [IOSBottomAction],
+        hasLoadedMedia: Bool,
+        playbackStatus: MediaPlaybackPresentationStatus
+    ) -> [IOSBottomAction] {
+        configuredActions.filter { action in
+            action != .nowPlaying
+                || (hasLoadedMedia && playbackStatus != .stopped)
+        }
+    }
+}
+
+enum IOSListeningListPlayerPresentation {
+    static func item(
+        for loadedEnclosure: Enclosure?,
+        in items: [ListeningListItem]
+    ) -> ListeningListItem? {
+        guard let loadedEnclosure else { return nil }
+        return items.first { item in
+            item.articleId == loadedEnclosure.articleId
+                && item.audioEnclosures.contains {
+                    $0.enclosure.id == loadedEnclosure.id
+                }
+        }
+    }
+}
+
+@MainActor
+final class IOSArticleListActionPreferences: ObservableObject {
+    private static let defaultsKey = "articleListActionIDs"
+
+    @Published private(set) var actions: [IOSBottomAction]
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        actions = IOSArticleListActionPolicy.normalizedActions(
+            from: defaults.stringArray(forKey: Self.defaultsKey)
+        )
+    }
+
+    func setActions(_ actions: [IOSBottomAction]) {
+        let normalized = IOSArticleListActionPolicy.normalizedActions(
+            from: actions.map(\.rawValue)
+        )
+        self.actions = normalized
+        defaults.set(normalized.map(\.rawValue), forKey: Self.defaultsKey)
+    }
+
+    func resetToDefault() {
+        setActions(IOSBottomAction.defaultActions)
+    }
 }
 
 enum IOSArticleListActionPlacement: Equatable {
@@ -421,6 +531,8 @@ struct ContentView: View {
     @State private var articleMediaPlayer: IOSArticleMediaPlayerPresentation?
     @State private var listeningListPlayerArticleID: Int64?
     @State private var articleMediaDownloadChoice: IOSArticleMediaDownloadChoice?
+    @State private var nowPlayingPresented = false
+    @StateObject private var articleListActionPreferences = IOSArticleListActionPreferences()
 
     /// The capsule already opens the scope chooser, so a second control for the
     /// same action would be pure redundancy.
@@ -471,6 +583,9 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: actionFeedback?.id)
         .sheet(isPresented: $diagnosticsPresented) { DeveloperDiagnosticsView(bootstrapper: bootstrapper) }
+        .sheet(isPresented: $nowPlayingPresented) {
+            nowPlayingPlayerView
+        }
         // A sheet rather than a pushed destination: the timeline is the detail
         // column of a split view that collapses on a phone, and a destination
         // registered there did not activate. A sheet behaves identically in both
@@ -591,7 +706,7 @@ struct ContentView: View {
             handleWidgetURL(url)
         }
         .task(id: bootstrapper.coreRevision) {
-            if let core = newsreaderStore.core {
+            if let core = bootstrapper.core {
                 searchStore.attach(
                     to: core,
                     coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator
@@ -656,6 +771,16 @@ struct ContentView: View {
             listeningListStore.items.first { $0.articleId == articleID }
         }
 
+        mediaPlayerView(item: item) {
+            listeningListPlayerArticleID = nil
+        }
+    }
+
+    @ViewBuilder
+    private func mediaPlayerView(
+        item: ListeningListItem?,
+        onDismiss: @escaping () -> Void
+    ) -> some View {
         IOSMediaPlayerView(
             playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
             transferState: IOSAppRuntime.shared.mediaRuntime.transferPresentationState,
@@ -692,7 +817,7 @@ struct ContentView: View {
             showNotesIsLoading: listeningListStore.showNotesIsLoading,
             showNotesErrorMessage: listeningListStore.showNotesErrorMessage,
             onSelectEnclosure: { enclosureID in
-                if let articleID = listeningListPlayerArticleID {
+                if let articleID = item?.articleId {
                     playListeningListEnclosure(
                         articleID: articleID,
                         enclosureID: enclosureID
@@ -700,14 +825,25 @@ struct ContentView: View {
                 }
             },
             onShowNotes: {
-                if let articleID = listeningListPlayerArticleID {
+                if let articleID = item?.articleId {
                     listeningListStore.loadShowNotes(articleID: articleID)
                 }
             },
-            onDismiss: {
-                listeningListPlayerArticleID = nil
-            }
+            onDismiss: onDismiss
         )
+    }
+
+    @ViewBuilder
+    private var nowPlayingPlayerView: some View {
+        let item = IOSListeningListPlayerPresentation.item(
+            for: IOSAppRuntime.shared.mediaRuntime
+                .playbackPresentationState.loadedEnclosure,
+            in: listeningListStore.items
+        )
+        mediaPlayerView(item: item) {
+            nowPlayingPresented = false
+            listeningListStore.clearShowNotes()
+        }
     }
 
     private func handleListeningListPlayerDownloadAction(
@@ -958,7 +1094,14 @@ struct ContentView: View {
                 }
             }
         }
-        .sheet(isPresented: $settingsPresented) { SettingsView(store: newsreaderStore, bootstrapper: bootstrapper, onDiagnostics: { diagnosticsPresented = true }) }
+        .sheet(isPresented: $settingsPresented) {
+            SettingsView(
+                store: newsreaderStore,
+                bootstrapper: bootstrapper,
+                articleListActionPreferences: articleListActionPreferences,
+                onDiagnostics: { diagnosticsPresented = true }
+            )
+        }
     }
 
     @ViewBuilder
@@ -1101,6 +1244,22 @@ struct ContentView: View {
 
     @ViewBuilder
     private var articleListActionButtons: some View {
+        let actions = IOSArticleListActionPolicy.visibleActions(
+            configuredActions: articleListActionPreferences.actions,
+            hasLoadedMedia: IOSAppRuntime.shared.mediaRuntime
+                .playbackPresentationState.loadedEnclosure != nil,
+            playbackStatus: IOSAppRuntime.shared.mediaRuntime
+                .playbackPresentationState.status
+        )
+        ForEach(actions) { action in
+            articleListActionButton(action)
+        }
+    }
+
+    @ViewBuilder
+    private func articleListActionButton(_ action: IOSBottomAction) -> some View {
+        switch action {
+        case .sync:
         let syncButtonPresentation = IOSSyncButtonPresentation.resolve(
             manualSyncState: newsreaderStore.manualSyncState,
             transientState: syncPresentation
@@ -1113,6 +1272,7 @@ struct ContentView: View {
         .accessibilityValue(IOSSyncButtonPresentation.accessibilityValue(for: syncButtonPresentation))
         .accessibilityIdentifier("articleList.sync")
 
+        case .filterAndSort:
         Menu {
             Section("Show") {
                 Button { newsreaderStore.setUnreadOnly(true) } label: {
@@ -1135,6 +1295,31 @@ struct ContentView: View {
         }
         .accessibilityIdentifier("articleList.filterSort")
 
+        case .search:
+            Button(action: openSearch) {
+                Image(systemName: action.symbolName)
+                    .frame(width: 24, height: 24)
+            }
+            .accessibilityLabel(action.settingsTitle)
+            .accessibilityIdentifier("articleList.search")
+
+        case .listeningList:
+            Button(action: openListeningList) {
+                Image(systemName: action.symbolName)
+                    .frame(width: 24, height: 24)
+            }
+            .accessibilityLabel(action.settingsTitle)
+            .accessibilityIdentifier("articleList.listeningList")
+
+        case .nowPlaying:
+            Button { nowPlayingPresented = true } label: {
+                Image(systemName: action.symbolName)
+                    .frame(width: 24, height: 24)
+            }
+            .accessibilityLabel("Now Playing")
+            .accessibilityIdentifier("articleList.nowPlaying")
+
+        case .more:
         Menu {
             ForEach(IOSMoreAction.actions(for: newsreaderStore.scope, hasNextScope: nextScope != nil), id: \.self) { action in
                 switch action {
@@ -1154,6 +1339,10 @@ struct ContentView: View {
         }
         .accessibilityLabel(String(localized: "More"))
         .accessibilityIdentifier("articleList.more")
+
+        case .markAllRead, .markAllReadAndNext, .settings:
+            EmptyView()
+        }
     }
 
     private func presentArticleListNavigation() {

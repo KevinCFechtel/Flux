@@ -4,6 +4,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     var store: NewsreaderStore
     @ObservedObject var bootstrapper: CoreBootstrapper
+    @ObservedObject var articleListActionPreferences: IOSArticleListActionPreferences
     let onDiagnostics: () -> Void
 
     var body: some View {
@@ -18,6 +19,13 @@ struct SettingsView: View {
                     ArticlesSettingsView(store: store, bootstrapper: bootstrapper)
                 } label: {
                     Label("Articles", systemImage: "doc.text")
+                }
+                NavigationLink {
+                    ArticleListActionsSettingsView(
+                        preferences: articleListActionPreferences
+                    )
+                } label: {
+                    Label("Action Bar", systemImage: "rectangle.bottomthird.inset.filled")
                 }
                 NavigationLink {
                     NavigationSettingsView(store: store)
