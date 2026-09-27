@@ -71,6 +71,7 @@
 		D6A9 /* FluxNews/IOSMediaSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B9 /* FluxNews/IOSMediaSettingsView.swift */; };
 		D6T1 /* FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6T2 /* FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift */; };
 		E1069888306786CC0009BBFC /* FallbackArtwork.png in Resources */ = {isa = PBXBuildFile; fileRef = E1069887306786CC0009BBFC /* FallbackArtwork.png */; };
+		E125D6A530696982002A2091 /* IOSLegacyMigrationCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E125D6A430696982002A2091 /* IOSLegacyMigrationCoordinatorTests.swift */; };
 		E17F743830471E2D00698DA5 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = E17F743730471E2D00698DA5 /* AppIcon.icon */; };
 		E17F744030471E2D00698DA5 /* FluxUniFFI.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */; };
 		E17F744130471E2D00698DA5 /* FluxUniFFI.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -188,6 +189,7 @@
 		D6B9 /* FluxNews/IOSMediaSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNews/IOSMediaSettingsView.swift; sourceTree = SOURCE_ROOT; };
 		D6T2 /* FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift; sourceTree = SOURCE_ROOT; };
 		E1069887306786CC0009BBFC /* FallbackArtwork.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = FallbackArtwork.png; sourceTree = "<group>"; };
+		E125D6A430696982002A2091 /* IOSLegacyMigrationCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = IOSLegacyMigrationCoordinatorTests.swift; path = FluxNewsTests/IOSLegacyMigrationCoordinatorTests.swift; sourceTree = "<group>"; };
 		E17F743330471C1900698DA5 /* FluxNewsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FluxNewsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E17F743730471E2D00698DA5 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		E17F743F30471E2D00698DA5 /* FluxUniFFI.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = FluxUniFFI.xcframework; path = ../Build/Products/FluxUniFFI/FluxUniFFI.xcframework; sourceTree = "<group>"; };
@@ -235,6 +237,7 @@
 		G1 = {
 			isa = PBXGroup;
 			children = (
+				E125D6A430696982002A2091 /* IOSLegacyMigrationCoordinatorTests.swift */,
 				E1A215A53069648C00260DD1 /* IOSLegacyMigrationCoordinator.swift */,
 				E1069887306786CC0009BBFC /* FallbackArtwork.png */,
 				G2 /* FluxNews */,
@@ -549,6 +552,7 @@
 				A24 /* FluxNewsTests/AccountLifecycleTests.swift in Sources */,
 				A33 /* FluxNewsTests/IOSErrorPresentationTests.swift in Sources */,
 				A36 /* FluxNewsTests/AppleCoreExecutionTests.swift in Sources */,
+				E125D6A530696982002A2091 /* IOSLegacyMigrationCoordinatorTests.swift in Sources */,
 				D6T1 /* FluxNewsTests/IOSMediaPlaybackCoordinatorTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
