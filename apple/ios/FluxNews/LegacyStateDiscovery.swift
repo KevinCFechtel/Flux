@@ -54,6 +54,7 @@ enum LegacyStateDiscovery {
     private static let customHeaderValuePrefix = "customHeadersValue_"
     private static let feedSettingsKey = "feedSettingsOverrides"
     private static let playbackPrefix = "audio_progress_"
+    private static let flutterPreferencesPrefix = "flutter."
     private static let downloadPathPrefix = "audio_download_path_"
     private static let downloadPathByURLPrefix = "audio_download_path_url_"
     private static let downloadTimestampPrefix = "audio_download_ts_"
@@ -61,13 +62,17 @@ enum LegacyStateDiscovery {
     private static let downloadFeedTitlePrefix = "flux_download_feed_title_"
     private static let audioFilePrefix = "audio_"
 
-    // This probe only reads Keychain attributes, directory entries, and file metadata.
+    // This probe only reads Keychain attributes, Flutter UserDefaults values,
+    // directory entries, and file metadata.
     static func probe(fileManager: FileManager = .default,
                      homeDirectory: URL? = nil) -> LegacyDiscoveryResult {
         let isProduction = Bundle.main.bundleIdentifier == productionBundleID
         let groupURL = fileManager.containerURL(forSecurityApplicationGroupIdentifier: applicationGroup)
         let keychainResult = keychainAccounts()
         let accounts = keychainResult.accounts
+        let sharedPlayback = parseFlutterSharedPreferencesPlaybackImports(
+            stringValues(UserDefaults.standard.dictionaryRepresentation())
+        )
         let library = homeDirectory ?? fileManager.urls(for: .libraryDirectory, in: .userDomainMask).first
         let applicationSupport = library?.appendingPathComponent("Application Support", isDirectory: true)
         let caches = library?.appendingPathComponent("Caches", isDirectory: true)
@@ -91,7 +96,9 @@ enum LegacyStateDiscovery {
             }).count,
             compatibleSettingCount: accounts.intersection(auditedSettings).count,
             feedPreferencePresent: accounts.contains(feedSettingsKey),
-            playbackProgressCount: accounts.filter { $0.hasPrefix(playbackPrefix) }.count,
+            playbackProgressCount: Set(sharedPlayback.map(\.articleID)).union(
+                accounts.compactMap(playbackArticleID)
+            ).count,
             downloadMetadataCount: accounts.filter { key in
                 downloadMetadataPrefixes.contains { key.hasPrefix($0) }
             }.count,
@@ -120,12 +127,21 @@ enum LegacyStateDiscovery {
         return IOSLegacyMediaSettingsImport.parse(mediaValues)
     }
 
-    /// Reads Flutter's article-keyed playback values without interpreting
-    /// enclosure identity or modifying the legacy Keychain namespace.
+    /// Reads Flutter's article-keyed playback values with the same source
+    /// priority as Flutter: SharedPreferences first, then Keychain per missing
+    /// article ID. It never modifies either legacy store.
     static func readPlaybackProgressImports() -> [LegacyPlaybackProgressImport]? {
-        guard Bundle.main.bundleIdentifier == productionBundleID,
-              let values = keychainValues() else { return nil }
-        return parsePlaybackProgressImports(values)
+        guard Bundle.main.bundleIdentifier == productionBundleID else { return nil }
+        let shared = parseFlutterSharedPreferencesPlaybackImports(
+            stringValues(UserDefaults.standard.dictionaryRepresentation())
+        )
+        guard let keychain = keychainValues() else {
+            return shared.isEmpty ? nil : shared
+        }
+        return mergePlaybackProgressImports(
+            sharedPreferences: shared,
+            keychain: parsePlaybackProgressImports(keychain)
+        )
     }
 
     /// Reads only primary attachment-ID download paths. URL-keyed values and
@@ -193,6 +209,35 @@ enum LegacyStateDiscovery {
             return LegacyPlaybackProgressImport(articleID: articleID, positionMs: positionMs)
         }
         .sorted { $0.articleID < $1.articleID }
+    }
+
+    static func parseFlutterSharedPreferencesPlaybackImports(
+        _ values: [String: String]
+    ) -> [LegacyPlaybackProgressImport] {
+        values.compactMap { key, value in
+            guard key.hasPrefix(flutterPreferencesPrefix + playbackPrefix),
+                  let articleID = Int64(key.dropFirst((flutterPreferencesPrefix + playbackPrefix).count)),
+                  articleID > 0,
+                  let positionMs = UInt64(value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                return nil
+            }
+            return LegacyPlaybackProgressImport(articleID: articleID, positionMs: positionMs)
+        }
+        .sorted { $0.articleID < $1.articleID }
+    }
+
+    static func mergePlaybackProgressImports(
+        sharedPreferences: [LegacyPlaybackProgressImport],
+        keychain: [LegacyPlaybackProgressImport]
+    ) -> [LegacyPlaybackProgressImport] {
+        var byArticleID = [Int64: LegacyPlaybackProgressImport]()
+        for progress in keychain {
+            byArticleID[progress.articleID] = progress
+        }
+        for progress in sharedPreferences {
+            byArticleID[progress.articleID] = progress
+        }
+        return byArticleID.values.sorted { $0.articleID < $1.articleID }
     }
 
     static func parseDownloadImports(
@@ -272,6 +317,22 @@ enum LegacyStateDiscovery {
         let items = (result as? [[CFString: Any]]) ?? []
         let accounts = Set(items.compactMap { $0[kSecAttrAccount] as? String })
         return (.accessible, accounts)
+    }
+
+    private static func playbackArticleID(_ key: String) -> Int64? {
+        guard key.hasPrefix(playbackPrefix),
+              let articleID = Int64(key.dropFirst(playbackPrefix.count)), articleID > 0 else {
+            return nil
+        }
+        return articleID
+    }
+
+    private static func stringValues(_ values: [String: Any]) -> [String: String] {
+        values.reduce(into: [:]) { result, entry in
+            if let value = entry.value as? String {
+                result[entry.key] = value
+            }
+        }
     }
 
     private static func keychainValues() -> [String: String]? {

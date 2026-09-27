@@ -57,4 +57,40 @@ final class LegacyStateDiscoveryTests: XCTestCase {
             "minifluxAPIKey": "secret-key"
         ]))
     }
+
+    func testFlutterSharedPreferencesPlaybackParsingAndKeychainFallbackMerge() {
+        let shared = LegacyStateDiscovery.parseFlutterSharedPreferencesPlaybackImports([
+            "flutter.audio_progress_10": "5000",
+            "flutter.audio_progress_20": "0",
+            "flutter.audio_progress_bad": "100",
+            "flutter.audio_progress_-1": "100",
+            "flutter.audio_progress_30": "invalid"
+        ])
+        let keychain = LegacyStateDiscovery.parsePlaybackProgressImports([
+            "audio_progress_10": "3000",
+            "audio_progress_30": "7000",
+            "audio_progress_40": "invalid",
+            "other": "9000"
+        ])
+
+        XCTAssertEqual(shared, [
+            .init(articleID: 10, positionMs: 5000),
+            .init(articleID: 20, positionMs: 0)
+        ])
+        XCTAssertEqual(keychain, [
+            .init(articleID: 10, positionMs: 3000),
+            .init(articleID: 30, positionMs: 7000)
+        ])
+        XCTAssertEqual(
+            LegacyStateDiscovery.mergePlaybackProgressImports(
+                sharedPreferences: shared,
+                keychain: keychain
+            ),
+            [
+                .init(articleID: 10, positionMs: 5000),
+                .init(articleID: 20, positionMs: 0),
+                .init(articleID: 30, positionMs: 7000)
+            ]
+        )
+    }
 }
