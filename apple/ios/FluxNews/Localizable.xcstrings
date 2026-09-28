@@ -7920,6 +7920,1697 @@
           }
         }
       }
+    },
+    "%lld article marked as read": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Artikel als gelesen markiert"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Artikel als gelesen markiert"
+                }
+              }
+            }
+          }
+        },
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld article marked as read"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld articles marked as read"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld lines": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Zeilen"
+          }
+        }
+      }
+    },
+    ", starred": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": ", markiert"
+          }
+        }
+      }
+    },
+    "API Key": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API-Schlüssel"
+          }
+        }
+      }
+    },
+    "API key": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API-Schlüssel"
+          }
+        }
+      }
+    },
+    "Account": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account"
+          }
+        }
+      }
+    },
+    "Account required": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account erforderlich"
+          }
+        }
+      }
+    },
+    "Action Failed": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktion fehlgeschlagen"
+          }
+        }
+      }
+    },
+    "Add": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hinzufügen"
+          }
+        }
+      }
+    },
+    "Add Category": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kategorie hinzufügen"
+          }
+        }
+      }
+    },
+    "Add Header": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Header hinzufügen"
+          }
+        }
+      }
+    },
+    "All Articles": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alle Artikel"
+          }
+        }
+      }
+    },
+    "App Group": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App-Gruppe"
+          }
+        }
+      }
+    },
+    "Article Action": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Artikelaktion"
+          }
+        }
+      }
+    },
+    "Articles": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Artikel"
+          }
+        }
+      }
+    },
+    "Articles could not be loaded. Please try again.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Artikel konnten nicht geladen werden. Bitte versuchen Sie es erneut."
+          }
+        }
+      }
+    },
+    "Base URL": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Basis-URL"
+          }
+        }
+      }
+    },
+    "Cancel": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abbrechen"
+          }
+        }
+      }
+    },
+    "Category name": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kategoriename"
+          }
+        }
+      }
+    },
+    "Choose a Feed": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feed auswählen"
+          }
+        }
+      }
+    },
+    "Choose news scope": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nachrichtenbereich auswählen"
+          }
+        }
+      }
+    },
+    "Clear": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Löschen"
+          }
+        }
+      }
+    },
+    "Comments available": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kommentare verfügbar"
+          }
+        }
+      }
+    },
+    "Compact": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kompakt"
+          }
+        }
+      }
+    },
+    "Compatible settings": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kompatible Einstellungen"
+          }
+        }
+      }
+    },
+    "Connection Diagnostics": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verbindungsdiagnose"
+          }
+        }
+      }
+    },
+    "Continue": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortfahren"
+          }
+        }
+      }
+    },
+    "Copy Link": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Link kopieren"
+          }
+        }
+      }
+    },
+    "Could not add category. Please try again.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Kategorie konnte nicht hinzugefügt werden. Bitte versuchen Sie es erneut."
+          }
+        }
+      }
+    },
+    "Could not add feed. Please try again.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Feed konnte nicht hinzugefügt werden. Bitte versuchen Sie es erneut."
+          }
+        }
+      }
+    },
+    "Could not discover feeds. Please try again.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feeds konnten nicht gefunden werden. Bitte versuchen Sie es erneut."
+          }
+        }
+      }
+    },
+    "Custom headers": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Benutzerdefinierte Header"
+          }
+        }
+      }
+    },
+    "Custom headers must have unique valid names and cannot replace FluxNews transport headers.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Benutzerdefinierte Header müssen eindeutige gültige Namen haben und dürfen keine FluxNews-Transport-Header ersetzen."
+          }
+        }
+      }
+    },
+    "Detail Rendering": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detaildarstellung"
+          }
+        }
+      }
+    },
+    "Developer Diagnostics": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Entwicklerdiagnose"
+          }
+        }
+      }
+    },
+    "Done": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fertig"
+          }
+        }
+      }
+    },
+    "Download metadata": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download-Metadaten"
+          }
+        }
+      }
+    },
+    "Enter a valid HTTP or HTTPS Miniflux server URL.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Geben Sie eine gültige HTTP- oder HTTPS-Miniflux-Server-URL ein."
+          }
+        }
+      }
+    },
+    "Enter both a Miniflux server URL and API key.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Geben Sie eine Miniflux-Server-URL und einen API-Schlüssel ein."
+          }
+        }
+      }
+    },
+    "Feed Settings": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feed-Einstellungen"
+          }
+        }
+      }
+    },
+    "Feed preferences": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feed-Einstellungen"
+          }
+        }
+      }
+    },
+    "Feed settings could not be loaded. Please try again.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feed-Einstellungen konnten nicht geladen werden. Bitte versuchen Sie es erneut."
+          }
+        }
+      }
+    },
+    "Feed settings could not be saved. Please try again.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feed-Einstellungen konnten nicht gespeichert werden. Bitte versuchen Sie es erneut."
+          }
+        }
+      }
+    },
+    "Feeds": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feeds"
+          }
+        }
+      }
+    },
+    "Filter and Sort": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filtern und sortieren"
+          }
+        }
+      }
+    },
+    "Flux could not resolve a valid Miniflux entry URL.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flux konnte keine gültige Miniflux-Eintrags-URL ermitteln."
+          }
+        }
+      }
+    },
+    "FluxNews": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FluxNews"
+          }
+        }
+      }
+    },
+    "FluxNews could not start": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FluxNews konnte nicht gestartet werden"
+          }
+        }
+      }
+    },
+    "FluxNews could not start. Check the account configuration and try again.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FluxNews konnte nicht gestartet werden. Überprüfen Sie die Account-Konfiguration und versuchen Sie es erneut."
+          }
+        }
+      }
+    },
+    "Header name": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Header-Name"
+          }
+        }
+      }
+    },
+    "Header value": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Header-Wert"
+          }
+        }
+      }
+    },
+    "Hide empty feeds": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leere Feeds ausblenden"
+          }
+        }
+      }
+    },
+    "Initialized": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Initialisiert"
+          }
+        }
+      }
+    },
+    "Keychain credentials": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schlüsselbund-Zugangsdaten"
+          }
+        }
+      }
+    },
+    "Legacy cache": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Legacy-Cache"
+          }
+        }
+      }
+    },
+    "Legacy database": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Legacy-Datenbank"
+          }
+        }
+      }
+    },
+    "Legacy downloads": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Legacy-Downloads"
+          }
+        }
+      }
+    },
+    "Legacy migration feasibility": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Migrationsprüfung für Legacy-Daten"
+          }
+        }
+      }
+    },
+    "Link copied": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Link kopiert"
+          }
+        }
+      }
+    },
+    "Listening List": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hörliste"
+          }
+        }
+      }
+    },
+    "Loading article...": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Artikel wird geladen..."
+          }
+        }
+      }
+    },
+    "Loading articles": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Artikel werden geladen"
+          }
+        }
+      }
+    },
+    "Mark All as Read": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alle als gelesen markieren"
+          }
+        }
+      }
+    },
+    "Mark All as Read and Continue": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alle als gelesen markieren und fortfahren"
+          }
+        }
+      }
+    },
+    "Mark as Read": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Als gelesen markieren"
+          }
+        }
+      }
+    },
+    "Mark as Unread": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Als ungelesen markieren"
+          }
+        }
+      }
+    },
+    "Mark read on scrollover": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beim Vorbeiscrollen als gelesen markieren"
+          }
+        }
+      }
+    },
+    "Miniflux Account": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Miniflux-Account"
+          }
+        }
+      }
+    },
+    "Miniflux did not find a subscription for this URL.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Miniflux hat für diese URL kein Abonnement gefunden."
+          }
+        }
+      }
+    },
+    "Miniflux rejected the API key.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Miniflux hat den API-Schlüssel abgelehnt."
+          }
+        }
+      }
+    },
+    "Miniflux server returned an unexpected response.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Miniflux-Server hat eine unerwartete Antwort zurückgegeben."
+          }
+        }
+      }
+    },
+    "More": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mehr"
+          }
+        }
+      }
+    },
+    "Navigation": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Navigation"
+          }
+        }
+      }
+    },
+    "New articles available": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neue Artikel verfügbar"
+          }
+        }
+      }
+    },
+    "Newest First": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neueste zuerst"
+          }
+        }
+      }
+    },
+    "News": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nachrichten"
+          }
+        }
+      }
+    },
+    "News could not be synced. Please try again.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nachrichten konnten nicht synchronisiert werden. Bitte versuchen Sie es erneut."
+          }
+        }
+      }
+    },
+    "News syncing…": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nachrichten werden synchronisiert…"
+          }
+        }
+      }
+    },
+    "No News": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Nachrichten"
+          }
+        }
+      }
+    },
+    "No article selected": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kein Artikel ausgewählt"
+          }
+        }
+      }
+    },
+    "No results": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Ergebnisse"
+          }
+        }
+      }
+    },
+    "No third-party integration is configured in Miniflux": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In Miniflux ist keine Drittanbieterintegration eingerichtet"
+          }
+        }
+      }
+    },
+    "No unread articles": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine ungelesenen Artikel"
+          }
+        }
+      }
+    },
+    "OK": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
+    "Oldest First": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Älteste zuerst"
+          }
+        }
+      }
+    },
+    "Open Comments": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kommentare öffnen"
+          }
+        }
+      }
+    },
+    "Open Original": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Original öffnen"
+          }
+        }
+      }
+    },
+    "Open article": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Artikel öffnen"
+          }
+        }
+      }
+    },
+    "Open in Miniflux": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In Miniflux öffnen"
+          }
+        }
+      }
+    },
+    "Open in Reader": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Im Reader öffnen"
+          }
+        }
+      }
+    },
+    "Opens the article": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öffnet den Artikel"
+          }
+        }
+      }
+    },
+    "Playback progress": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wiedergabefortschritt"
+          }
+        }
+      }
+    },
+    "Presentation": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Darstellung"
+          }
+        }
+      }
+    },
+    "Preview lines": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vorschauzeilen"
+          }
+        }
+      }
+    },
+    "Production identity": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Produktionsidentität"
+          }
+        }
+      }
+    },
+    "Read": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gelesen"
+          }
+        }
+      }
+    },
+    "Read, starred": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gelesen, markiert"
+          }
+        }
+      }
+    },
+    "Ready": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bereit"
+          }
+        }
+      }
+    },
+    "Recoverable startup error": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Behebbarer Startfehler"
+          }
+        }
+      }
+    },
+    "Remove Account": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account entfernen"
+          }
+        }
+      }
+    },
+    "Remove articles when read": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Artikel nach dem Lesen entfernen"
+          }
+        }
+      }
+    },
+    "Remove this account?": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diesen Account entfernen?"
+          }
+        }
+      }
+    },
+    "Retry": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erneut versuchen"
+          }
+        }
+      }
+    },
+    "Rust Core": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rust-Core"
+          }
+        }
+      }
+    },
+    "Sandbox paths": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sandbox-Pfade"
+          }
+        }
+      }
+    },
+    "Save to Third-Party Service": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In Drittanbieterdienst speichern"
+          }
+        }
+      }
+    },
+    "Saved to third-party service": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In Drittanbieterdienst gespeichert"
+          }
+        }
+      }
+    },
+    "Search Failed": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suche fehlgeschlagen"
+          }
+        }
+      }
+    },
+    "Search Miniflux": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Miniflux durchsuchen"
+          }
+        }
+      }
+    },
+    "Search Results": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suchergebnisse"
+          }
+        }
+      }
+    },
+    "Search could not be completed. Please try again.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Suche konnte nicht abgeschlossen werden. Bitte versuchen Sie es erneut."
+          }
+        }
+      }
+    },
+    "Searching": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suche läuft"
+          }
+        }
+      }
+    },
+    "Server URL": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server-URL"
+          }
+        }
+      }
+    },
+    "Set Up FluxNews": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FluxNews einrichten"
+          }
+        }
+      }
+    },
+    "Settings": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einstellungen"
+          }
+        }
+      }
+    },
+    "Share": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Teilen"
+          }
+        }
+      }
+    },
+    "Show": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anzeigen"
+          }
+        }
+      }
+    },
+    "Show article count": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Artikelanzahl anzeigen"
+          }
+        }
+      }
+    },
+    "Showing %lld of %lld": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld von %lld werden angezeigt"
+          }
+        }
+      }
+    },
+    "Smoke test": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Smoke-Test"
+          }
+        }
+      }
+    },
+    "Sort": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sortieren"
+          }
+        }
+      }
+    },
+    "Star": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Markieren"
+          }
+        }
+      }
+    },
+    "Starting": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wird gestartet"
+          }
+        }
+      }
+    },
+    "Starting FluxNews…": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FluxNews wird gestartet…"
+          }
+        }
+      }
+    },
+    "Startup category": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Startkategorie"
+          }
+        }
+      }
+    },
+    "Startup feed": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Startfeed"
+          }
+        }
+      }
+    },
+    "Startup scope": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Startbereich"
+          }
+        }
+      }
+    },
+    "Status": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Status"
+          }
+        }
+      }
+    },
+    "Sync complete": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synchronisierung abgeschlossen"
+          }
+        }
+      }
+    },
+    "Sync news": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nachrichten synchronisieren"
+          }
+        }
+      }
+    },
+    "Syncing": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synchronisierung läuft"
+          }
+        }
+      }
+    },
+    "The Miniflux server could not be reached. Check the server URL and network connection.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Miniflux-Server konnte nicht erreicht werden. Überprüfen Sie die Server-URL und die Netzwerkverbindung."
+          }
+        }
+      }
+    },
+    "The Miniflux server returned an unexpected response.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Miniflux-Server hat eine unerwartete Antwort zurückgegeben."
+          }
+        }
+      }
+    },
+    "The account could not be activated. Your previous account is still active.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Account konnte nicht aktiviert werden. Ihr bisheriger Account bleibt aktiv."
+          }
+        }
+      }
+    },
+    "The account could not be removed.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Account konnte nicht entfernt werden."
+          }
+        }
+      }
+    },
+    "The article could not be loaded in Reader.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Artikel konnte nicht im Reader geladen werden."
+          }
+        }
+      }
+    },
+    "The article could not be updated. Please try again.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Artikel konnte nicht aktualisiert werden. Bitte versuchen Sie es erneut."
+          }
+        }
+      }
+    },
+    "The article does not have a valid web URL.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Artikel hat keine gültige Web-URL."
+          }
+        }
+      }
+    },
+    "This server does not provide the required Miniflux endpoint.": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieser Server stellt den erforderlichen Miniflux-Endpunkt nicht bereit."
+          }
+        }
+      }
+    },
+    "Truncate Detail": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detailansicht kürzen"
+          }
+        }
+      }
+    },
+    "Unable to Load Articles": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Artikel können nicht geladen werden"
+          }
+        }
+      }
+    },
+    "Unable to Open Article": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Artikel kann nicht geöffnet werden"
+          }
+        }
+      }
+    },
+    "Unable to load article": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Artikel kann nicht geladen werden"
+          }
+        }
+      }
+    },
+    "Unavailable": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nicht verfügbar"
+          }
+        }
+      }
+    },
+    "Undo": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rückgängig"
+          }
+        }
+      }
+    },
+    "Unexpected": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unerwartet"
+          }
+        }
+      }
+    },
+    "Unread": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ungelesen"
+          }
+        }
+      }
+    },
+    "Unread Only": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nur ungelesene"
+          }
+        }
+      }
+    },
+    "Unread, starred": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ungelesen, markiert"
+          }
+        }
+      }
+    },
+    "Unstar": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Markierung entfernen"
+          }
+        }
+      }
+    },
+    "Visual": {
+      "extractionState": "stale",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visuell"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
