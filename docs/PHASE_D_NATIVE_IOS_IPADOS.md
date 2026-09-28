@@ -1,6 +1,6 @@
 # Phase D — Native iOS/iPadOS
 
-> **Status: D1-D5 COMPLETE / D6 IMPLEMENTATION STABLE & TESTVALIDATED — UX OBSERVATION WINDOW ACTIVE / D7 COMPLETE & ARCHITECTURE-FROZEN / D8 DEFERRED — NOT REQUIRED FOR REPLACEMENT / D9 IN PROGRESS — FINAL FLUTTER REPLACEMENT COMPLETION GATE / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
+> **Status: D1-D5 COMPLETE / D6 IMPLEMENTATION STABLE & TESTVALIDATED — UX OBSERVATION WINDOW ACTIVE / D7 COMPLETE & ARCHITECTURE-FROZEN / D8 DEFERRED — NOT REQUIRED FOR REPLACEMENT / D9 IMPLEMENTATION COMPLETE — FINAL ACCEPTANCE & PHYSICAL FLUTTER→NATIVE UPGRADE TEST PENDING / UIKIT TIMELINE U1-U5 COMPLETE / TIMELINE ARCHITECTURE FROZEN / AUTHORITATIVE PHASE-D CONTRACT**
 >
 > Phase A, Phase B, and Phase C are complete and architecture-frozen. Phase D
 > replaces the existing Flutter iOS/iPadOS client with a native Swift client:
@@ -554,14 +554,16 @@ reopened for a distinct future live-state product requirement. See
 
 ### D9 — Flutter Replacement Completion / Legacy-Parity Closure
 
-Planned final replacement-completion block. D9 closes the explicitly retained
-release gaps from the repository-first FluxNews audit: production migration,
-config backup/restore UI, configurable Bottom Action Bar, full retained language
-set, downloaded-data management, widget Unread/All plus Newest/Oldest
-configuration, final Settings account/about information, and production
-logging/support diagnostics with a native log viewer and export.
+Implementation complete; final acceptance pending. All planned D9 implementation
+blocks are complete and test-gated: production migration, config backup/restore,
+configurable Bottom Action Bar, retained localization set, downloaded-data
+management, widget Unread/All plus Newest/Oldest configuration, final Settings
+account/about information, and production logging/support diagnostics with a
+native log viewer and export.
 
-D9 also records the intentionally retired/replaced behaviors so they are not
+The remaining D9 work is acceptance-only: the canonical regression gate and the
+physical-device production-identity Flutter-to-native upgrade test. D9 also
+records the intentionally retired/replaced behaviors so they are not
 reintroduced later as accidental parity work. See
 [IOS_D9_FLUTTER_REPLACEMENT_COMPLETION.md](IOS_D9_FLUTTER_REPLACEMENT_COMPLETION.md).
 
