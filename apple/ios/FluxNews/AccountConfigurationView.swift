@@ -144,7 +144,7 @@ struct AccountConfigurationView: View {
                 server = activeServer
             }
         }
-        .navigationTitle(allowsRemoval ? "Account" : "Set Up FluxNews")
+        .navigationTitle(allowsRemoval ? String(localized: "Account") : String(localized: "Set Up FluxNews"))
         .navigationBarTitleDisplayMode(allowsRemoval ? .inline : .large)
         .confirmationDialog("Rebuild Local State?", isPresented: $rebuildConfirmation) {
             Button("Rebuild", role: .destructive) {
