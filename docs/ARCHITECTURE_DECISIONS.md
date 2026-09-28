@@ -12,10 +12,11 @@
 Flux uses one shared Rust core for business/background responsibilities
 and native clients for macOS, iOS, and Android.
 
-macOS is the current native reference client. The iOS/iPadOS client uses Swift,
-with a SwiftUI app shell and a UIKit Article Timeline as specified in section
-4.1. Future Android clients use Kotlin/Jetpack Compose. All consume the shared
-Rust Core through UniFFI; platform presentation follows the decisions below.
+macOS remains a native reference client. The completed iOS/iPadOS feature
+implementation uses Swift, with a SwiftUI app shell and a UIKit Article Timeline
+as specified in section 4.1. Phase E defines the native Android client in
+Kotlin/Jetpack Compose. All native clients consume the shared Rust Core through
+UniFFI; platform presentation follows the decisions below.
 
 The former Go core is retired. No new work should preserve Go
 compatibility or build transitional Go/Rust parity unless explicitly
@@ -25,9 +26,10 @@ UniFFI is the selected binding technology for Swift and Kotlin/native
 clients.
 
 The shared Rust implementation is organized as a workspace under
-`core/`, with platform-native clients alongside it (`apple/macos/`, and later
-`apple/ios/` and `android/`). The workspace manifest and lockfile belong to
-that shared-core workspace rather than the repository root.
+`core/`, with platform-native clients alongside it. Apple clients live under
+`apple/macos/` and `apple/ios/`; Phase E adds the native client under
+`android/`. The workspace manifest and lockfile belong to that shared-core
+workspace rather than the repository root.
 
 ### Phase status
 
@@ -53,8 +55,9 @@ networking; sync/reconciliation; durable offline mutations; article/feed/categor
 data; account/server configuration semantics; core settings; article/Reader
 content processing; feed-icon acquisition/cache; article-image discovery/cache;
 search requests; notification candidate/domain data; widget projection/domain
-data; queries; and structured errors/events. Phase B will add the shared media
-domain, persistence, download policies, progress, and media-retention integration.
+data; queries; structured errors/events; and the completed shared media domain,
+persistence, download policies, playback progress, and media-retention
+integration.
 
 ### Native clients
 
