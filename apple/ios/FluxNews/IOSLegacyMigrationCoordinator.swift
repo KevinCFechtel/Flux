@@ -280,6 +280,11 @@ final class IOSLegacyMigrationCoordinator {
         guard !inFlight else { return .retryableFailure }
         inFlight = true
         defer { inFlight = false }
+        guard !defaults.bool(forKey: DefaultsKey.settingsFollowupLocalCompleted)
+                || !defaults.bool(forKey: DefaultsKey.settingsFollowupCoreCompleted)
+                || !defaults.bool(forKey: DefaultsKey.settingsFollowupStartupCompleted) else {
+            return .alreadyCompleted
+        }
         do { guard try isCurrentMigratedAccount() else { return .notEligible } }
         catch { return .retryableFailure }
         guard !defaults.bool(forKey: DefaultsKey.downloadMigrationCompleted) else { return .alreadyCompleted }
@@ -419,6 +424,11 @@ final class IOSLegacyMigrationCoordinator {
     /// completion are separate so a missing catalog item cannot lose other work.
     @discardableResult
     func migrateSettingsFollowupIfNeeded() async -> IOSLegacySettingsFollowupMigrationOutcome {
+        if defaults.bool(forKey: DefaultsKey.settingsFollowupLocalCompleted),
+           defaults.bool(forKey: DefaultsKey.settingsFollowupCoreCompleted),
+           defaults.bool(forKey: DefaultsKey.settingsFollowupStartupCompleted) {
+            return .alreadyCompleted
+        }
         guard !inFlight else { return .retryableFailure }
         inFlight = true
         defer { inFlight = false }

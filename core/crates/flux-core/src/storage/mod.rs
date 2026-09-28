@@ -29,7 +29,7 @@ use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
 
-const SCHEMA_VERSION: i64 = 19;
+const SCHEMA_VERSION: i64 = 20;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingSavedMediaReplication {
@@ -3923,6 +3923,13 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
         tx.execute_batch("CREATE TABLE feed_open_in_miniflux_overrides (feed_id INTEGER PRIMARY KEY); INSERT INTO feed_open_in_miniflux_overrides(feed_id) SELECT feed_id FROM feed_preferences; PRAGMA user_version=19;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
+    if current < 20 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        // v19 stored these values but had no provenance. A saved historical
+        // value, including false, is conservatively native-owned.
+        tx.execute_batch("INSERT INTO core_settings(key,value) SELECT 'background_sync_enabled_explicit','1' WHERE EXISTS(SELECT 1 FROM core_settings WHERE key='background_sync_enabled') ON CONFLICT(key) DO UPDATE SET value='1'; INSERT INTO core_settings(key,value) SELECT 'auto_download_listening_list_explicit','1' WHERE EXISTS(SELECT 1 FROM core_settings WHERE key='auto_download_listening_list') ON CONFLICT(key) DO UPDATE SET value='1'; PRAGMA user_version=20;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
     Ok(())
 }
 fn initialize_core_settings(connection: &Connection) -> Result<(), CoreError> {
@@ -5181,7 +5188,7 @@ mod tests {
         let connection = store.connection.lock().unwrap();
         let row: (i64, String, Option<String>, String, bool, bool, i64, i64) = connection.query_row("SELECT content_processing_version,preview,image_url,raw_html_content,is_read,is_starred,feed_id,(SELECT COUNT(*) FROM pending_mutations) FROM articles WHERE id=3", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).unwrap();
         drop(connection);
-        assert_eq!(store.schema_version().unwrap(), 19);
+        assert_eq!(store.schema_version().unwrap(), 20);
         assert_eq!(row.0, crate::article::PROCESSING_VERSION);
         assert_eq!(row.1, "Hello world");
         assert_eq!(row.2.as_deref(), Some("https://example.test/cover.jpg"));
@@ -5205,7 +5212,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 19);
+        assert_eq!(store.schema_version().unwrap(), 20);
         assert_eq!(
             store.feed_preferences(2).unwrap(),
             FeedPreferences {
@@ -5360,12 +5367,103 @@ mod tests {
         drop(store);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 19);
+        assert_eq!(store.schema_version().unwrap(), 20);
         assert_eq!(
             store.import_legacy_feed_open_in_miniflux(2).unwrap(),
             LegacyFeedOpenInMinifluxImportOutcome::AlreadyPresent
         );
         assert!(!store.feed_preferences(2).unwrap().open_in_miniflux);
+    }
+
+    #[test]
+    fn v20_marks_historical_policy_settings_as_native_owned() {
+        for (background_sync_enabled, auto_download_listening_list) in
+            [(false, false), (false, true), (true, false), (true, true)]
+        {
+            let temp = TempDir::new().unwrap();
+            let (data, cache, media) = roots(&temp);
+            let store = Store::open(&data, &cache, &media).unwrap();
+            {
+                let connection = store.connection.lock().unwrap();
+                connection
+                    .execute(
+                        "UPDATE core_settings SET value = ?1 WHERE key = 'background_sync_enabled'",
+                        [if background_sync_enabled { "1" } else { "0" }],
+                    )
+                    .unwrap();
+                connection.execute(
+                    "UPDATE core_settings SET value = ?1 WHERE key = 'auto_download_listening_list'",
+                    [if auto_download_listening_list { "1" } else { "0" }],
+                ).unwrap();
+                connection.execute_batch("DELETE FROM core_settings WHERE key IN ('background_sync_enabled_explicit', 'auto_download_listening_list_explicit'); PRAGMA user_version=19;").unwrap();
+            }
+            drop(store);
+
+            let store = Store::open(&data, &cache, &media).unwrap();
+            assert_eq!(store.schema_version().unwrap(), 20);
+            {
+                let connection = store.connection.lock().unwrap();
+                for key in [
+                    "background_sync_enabled_explicit",
+                    "auto_download_listening_list_explicit",
+                ] {
+                    assert_eq!(
+                        connection
+                            .query_row(
+                                "SELECT value FROM core_settings WHERE key = ?1",
+                                [key],
+                                |row| row.get::<_, String>(0)
+                            )
+                            .unwrap(),
+                        "1"
+                    );
+                }
+            }
+            store
+                .import_legacy_policy_settings(
+                    Some(!background_sync_enabled),
+                    Some(!auto_download_listening_list),
+                )
+                .unwrap();
+            let settings = store.core_settings().unwrap();
+            assert_eq!(settings.background_sync_enabled, background_sync_enabled);
+            assert_eq!(
+                settings.auto_download_listening_list,
+                auto_download_listening_list
+            );
+        }
+    }
+
+    #[test]
+    fn fresh_v20_policy_defaults_are_not_owned_until_a_legacy_import() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        assert_eq!(store.schema_version().unwrap(), 20);
+        {
+            let connection = store.connection.lock().unwrap();
+            for key in [
+                "background_sync_enabled_explicit",
+                "auto_download_listening_list_explicit",
+            ] {
+                assert_eq!(
+                    connection
+                        .query_row(
+                            "SELECT value FROM core_settings WHERE key = ?1",
+                            [key],
+                            |row| row.get::<_, String>(0)
+                        )
+                        .unwrap(),
+                    "0"
+                );
+            }
+        }
+        store
+            .import_legacy_policy_settings(Some(false), Some(true))
+            .unwrap();
+        let settings = store.core_settings().unwrap();
+        assert!(!settings.background_sync_enabled);
+        assert!(settings.auto_download_listening_list);
     }
 
     #[test]
@@ -5445,7 +5543,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 19);
+        assert_eq!(store.schema_version().unwrap(), 20);
         assert_eq!(
             store.feed_preferences(123).unwrap(),
             FeedPreferences {
@@ -5496,7 +5594,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 19);
+        assert_eq!(store.schema_version().unwrap(), 20);
         let connection = store.connection.lock().unwrap();
         assert_eq!(
             connection
@@ -5764,7 +5862,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 19);
+        assert_eq!(store.schema_version().unwrap(), 20);
         assert!(!store.enclosure(10).unwrap().unwrap().remote_present);
         assert_eq!(
             store
@@ -5805,7 +5903,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 19);
+        assert_eq!(store.schema_version().unwrap(), 20);
         // existing B1/B2/B3 data survives
         assert!(store.saved_media(10).unwrap().is_some());
         assert_eq!(store.playback_state(10).unwrap().unwrap().position_ms, 5000);
@@ -5844,7 +5942,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 19);
+        assert_eq!(store.schema_version().unwrap(), 20);
         // Existing valid v13 rows survive intact.
         let requested = store.media_download(10).unwrap().unwrap();
         assert_eq!(requested.state, DownloadState::Requested);
@@ -6103,7 +6201,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 19);
+        assert_eq!(store.schema_version().unwrap(), 20);
         let connection = store.connection.lock().unwrap();
         let foreign_key_count: i64 = connection
             .query_row(

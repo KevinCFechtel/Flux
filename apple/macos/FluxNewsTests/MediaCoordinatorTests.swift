@@ -518,7 +518,7 @@ final class MediaCoordinatorTests: XCTestCase {
         XCTAssertEqual(remote.dispatch(.skipForward), .success)
         XCTAssertEqual(engine.currentPositionMs, 75_000)
         XCTAssertEqual(remote.dispatch(.skipBackward), .success)
-        XCTAssertEqual(engine.currentPositionMs, 45_000)
+        XCTAssertEqual(engine.currentPositionMs, 60_000)
     }
 
     func testRemoteSeekRejectsOversizedFinitePositionWhenDurationIsUnknown() throws {

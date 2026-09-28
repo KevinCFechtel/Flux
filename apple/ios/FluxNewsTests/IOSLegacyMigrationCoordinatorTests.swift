@@ -1216,4 +1216,30 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         XCTAssertEqual(outcome, .imported)
         XCTAssertTrue(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.downloads.v1.completed"))
     }
+
+    @MainActor
+    func testSettingsFollowupCompletionFastPathDoesNotReadLegacySettings() async {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        for key in [
+            "FluxNews.iOS.legacyMigration.settingsFollowup.v2.local.completed",
+            "FluxNews.iOS.legacyMigration.settingsFollowup.v2.core.completed",
+            "FluxNews.iOS.legacyMigration.settingsFollowup.v2.startup.completed",
+        ] {
+            defaults.set(true, forKey: key)
+        }
+        var reads = 0
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: CoreBootstrapper(credentialStore: IOSMemoryCredentialStore()),
+            defaults: defaults,
+            legacySettingsReader: {
+                reads += 1
+                return nil
+            }
+        )
+
+        let outcome = await coordinator.migrateSettingsFollowupIfNeeded()
+        XCTAssertEqual(outcome, .alreadyCompleted)
+        XCTAssertEqual(reads, 0)
+    }
 }
