@@ -1,6 +1,6 @@
 # Phase E — Native Android
 
-> **Status: AUTHORITATIVE CONTRACT DEFINED — E1-A, E1-B1, E1-B2a AND E1-B2 IMPLEMENTED / E1-B3 NEXT**
+> **Status: AUTHORITATIVE CONTRACT DEFINED — E1-A, E1-B1, E1-B2a, E1-B2 AND E1-B3 IMPLEMENTED / E1-B ABI RUNTIME ACCEPTANCE PENDING**
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
 >
@@ -327,7 +327,7 @@ Do not begin product UI beyond what is required to prove startup/runtime.
 
 ### E1-B — Rust/UniFFI build and smoke test
 
-E1-B1 is implemented: `android/Build/build-uniffi.sh` builds and verifies the existing `flux-uniffi` cdylib for `arm64-v8a` (`aarch64-linux-android`) and `x86_64` (`x86_64-linux-android`) in Debug and Release modes. E1-B2a resolves the minimal Kotlin-safe UniFFI surface naming while retaining UniFFI 0.29 and the unchanged Core domain. E1-B2 generates Kotlin bindings, compiles them with JNA 5.13.0 and packages variant-specific native libraries. Its crate-local `uniffi.toml` uses the official UniFFI 0.29 Android configuration with `disable_java_cleaner = true`, retaining minSdk 29 through the generated JNA Cleaner fallback without a Lint suppression. E1-B3 remains open for library loading and the Core smoke test; E1-B as a whole is not complete until those runtime gates pass.
+E1-B1 is implemented: `android/Build/build-uniffi.sh` builds and verifies the existing `flux-uniffi` cdylib for `arm64-v8a` (`aarch64-linux-android`) and `x86_64` (`x86_64-linux-android`) in Debug and Release modes. E1-B2a resolves the minimal Kotlin-safe UniFFI surface naming while retaining UniFFI 0.29 and the unchanged Core domain. E1-B2 generates Kotlin bindings, compiles them with JNA 5.13.0 and packages variant-specific native libraries. Its crate-local `uniffi.toml` uses the official UniFFI 0.29 Android configuration with `disable_java_cleaner = true`, retaining minSdk 29 through the generated JNA Cleaner fallback without a Lint suppression. E1-B3 adds a `developmentDebug`-only Android instrumentation smoke test for library loading, Flux/Core construction, a local query, typed error propagation, and event-subscription cleanup; `android/Build/test-uniffi-runtime.sh` selects one explicit device and runs only that test target. At the 28 September 2026 implementation checkpoint no usable Android device was connected, the available arm64 AVD definitions were invalid, and no x86_64 emulator image/AVD was available. E1-B remains open until that runtime smoke passes on an x86_64 emulator and physical arm64-v8a hardware.
 
 Prove:
 
