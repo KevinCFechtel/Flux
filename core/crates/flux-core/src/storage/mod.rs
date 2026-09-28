@@ -423,6 +423,7 @@ impl Store {
         tx.execute("INSERT INTO core_settings (key, value) VALUES ('read_article_retention', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [settings.retention.days().to_string()]).map_err(sql_error)?;
         tx.execute("INSERT INTO core_settings (key, value) VALUES ('delivery_mode', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [match settings.delivery_mode { DeliveryMode::Live => "live", DeliveryMode::Deferred => "deferred" }]).map_err(sql_error)?;
         tx.execute("INSERT INTO core_settings (key, value) VALUES ('background_sync_enabled', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [if settings.background_sync_enabled { "1" } else { "0" }]).map_err(sql_error)?;
+        tx.execute("INSERT INTO core_settings (key, value) VALUES ('background_sync_enabled_explicit', '1') ON CONFLICT(key) DO UPDATE SET value = '1'", []).map_err(sql_error)?;
         tx.execute("INSERT INTO core_settings (key, value) VALUES ('detail_character_limit', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [settings.detail_character_limit.to_string()]).map_err(sql_error)?;
         write_media_settings(&tx, settings)?;
         for preference in preferences {
@@ -498,10 +499,7 @@ impl Store {
         tx.commit().map_err(sql_error)
     }
     pub fn set_auto_download_listening_list(&self, enabled: bool) -> Result<(), CoreError> {
-        self.set_setting(
-            "auto_download_listening_list",
-            if enabled { "1" } else { "0" },
-        )
+        self.set_owned_bool_setting("auto_download_listening_list", enabled)
     }
     pub fn set_remove_completed_listening_list(&self, enabled: bool) -> Result<(), CoreError> {
         self.set_setting(
@@ -510,7 +508,48 @@ impl Store {
         )
     }
     pub fn set_background_sync_enabled(&self, enabled: bool) -> Result<(), CoreError> {
-        self.set_setting("background_sync_enabled", if enabled { "1" } else { "0" })
+        self.set_owned_bool_setting("background_sync_enabled", enabled)
+    }
+    pub fn import_legacy_policy_settings(
+        &self,
+        background_sync_enabled: Option<bool>,
+        auto_download_listening_list: Option<bool>,
+    ) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        for (key, value) in [
+            ("background_sync_enabled", background_sync_enabled),
+            ("auto_download_listening_list", auto_download_listening_list),
+        ] {
+            let ownership_key = format!("{key}_explicit");
+            let explicit: String = tx
+                .query_row(
+                    "SELECT value FROM core_settings WHERE key = ?1",
+                    [&ownership_key],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            if explicit == "0" {
+                if let Some(value) = value {
+                    tx.execute(
+                        "UPDATE core_settings SET value = ?1 WHERE key = ?2",
+                        params![if value { "1" } else { "0" }, key],
+                    )
+                    .map_err(sql_error)?;
+                    tx.execute(
+                        "UPDATE core_settings SET value = '1' WHERE key = ?1",
+                        [&ownership_key],
+                    )
+                    .map_err(sql_error)?;
+                }
+            } else if explicit != "1" {
+                return Err(CoreError::persistence("invalid core setting ownership"));
+            }
+        }
+        tx.commit().map_err(sql_error)
     }
     pub fn set_detail_character_limit(&self, limit: u32) -> Result<(), CoreError> {
         if !matches!(limit, 5_000 | 10_000 | 20_000) {
@@ -528,6 +567,24 @@ impl Store {
             )
             .map_err(sql_error)?;
         Ok(())
+    }
+    fn set_owned_bool_setting(&self, key: &str, enabled: bool) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        tx.execute(
+            "UPDATE core_settings SET value = ?1 WHERE key = ?2",
+            params![if enabled { "1" } else { "0" }, key],
+        )
+        .map_err(sql_error)?;
+        tx.execute(
+            "UPDATE core_settings SET value = '1' WHERE key = ?1",
+            [format!("{key}_explicit")],
+        )
+        .map_err(sql_error)?;
+        tx.commit().map_err(sql_error)
     }
     pub fn reconcile(
         &self,
@@ -3911,6 +3968,8 @@ fn core_setting_defaults() -> Vec<(&'static str, String)> {
             .to_string(),
         ),
         ("auto_download_listening_list", "0".to_string()),
+        ("background_sync_enabled_explicit", "0".to_string()),
+        ("auto_download_listening_list_explicit", "0".to_string()),
         ("remove_completed_listening_list", "0".to_string()),
     ]
 }
@@ -3948,6 +4007,7 @@ fn write_media_settings(tx: &Transaction<'_>, settings: &CoreSettings) -> Result
     tx.execute("INSERT INTO core_settings(key,value) VALUES('download_retention',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [download_retention_db(settings.download_retention)]).map_err(sql_error)?;
     tx.execute("INSERT INTO core_settings(key,value) VALUES('delete_after_playback',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [if settings.delete_after_playback { "1" } else { "0" }]).map_err(sql_error)?;
     tx.execute("INSERT INTO core_settings(key,value) VALUES('auto_download_listening_list',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [if settings.auto_download_listening_list { "1" } else { "0" }]).map_err(sql_error)?;
+    tx.execute("INSERT INTO core_settings(key,value) VALUES('auto_download_listening_list_explicit','1') ON CONFLICT(key) DO UPDATE SET value='1'", []).map_err(sql_error)?;
     tx.execute("INSERT INTO core_settings(key,value) VALUES('remove_completed_listening_list',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [if settings.remove_completed_listening_list { "1" } else { "0" }]).map_err(sql_error)?;
     Ok(())
 }
@@ -5326,6 +5386,29 @@ mod tests {
         drop(store);
         let store = Store::open(&data, &cache, &media).unwrap();
         assert_eq!(store.core_settings().unwrap(), settings);
+    }
+
+    #[test]
+    fn legacy_policy_import_uses_presence_not_default_values_and_is_atomic() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+
+        store
+            .import_legacy_policy_settings(Some(false), Some(true))
+            .unwrap();
+        let settings = store.core_settings().unwrap();
+        assert!(!settings.background_sync_enabled);
+        assert!(settings.auto_download_listening_list);
+
+        // Imported values now own their fields, including false, just like an
+        // explicit native Settings write does.
+        store
+            .import_legacy_policy_settings(Some(true), Some(false))
+            .unwrap();
+        let settings = store.core_settings().unwrap();
+        assert!(!settings.background_sync_enabled);
+        assert!(settings.auto_download_listening_list);
     }
 
     #[test]

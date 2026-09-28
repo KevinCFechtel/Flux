@@ -139,4 +139,53 @@ final class LegacyStateDiscoveryTests: XCTestCase {
             .init(markReadOnScrollover: nil, removeArticlesWhenMarkedRead: nil)
         )
     }
+
+    func testSettingsFollowupParserMapsOnlyExactCompatibleValues() {
+        let parsed = LegacyStateDiscovery.parseSettingsImport([
+            "multilineAppBarText": "true",
+            "showOnlyFeedCategoriesWithNewNews": "false",
+            "tabAction": "expand",
+            "rightSwipeAction": "bookmark",
+            "secondRightSwipeAction": "none",
+            "leftSwipeAction": "open",
+            "secondLeftSwipeAction": "openComments",
+            "startupCategorie": "3",
+            "startupFeedSelection": "42",
+            "backgroundSyncIntervalMinutes": "30",
+            "autoDownloadAudioAfterSync": "false",
+            "syncReadStatusImmediately": "true"
+        ])
+
+        XCTAssertEqual(parsed.showArticleCount, true)
+        XCTAssertEqual(parsed.hideEmptyNavigationEntries, false)
+        XCTAssertTrue(parsed.tabActionExpands)
+        XCTAssertEqual(parsed.leadingFull!, .starUnstar)
+        XCTAssertNil(parsed.leadingAdditional!)
+        XCTAssertEqual(parsed.trailingFull!, .openOriginal)
+        XCTAssertEqual(parsed.trailingAdditional!, .comments)
+        XCTAssertEqual(parsed.startupMode, 3)
+        XCTAssertEqual(parsed.startupFeedID, 42)
+        XCTAssertEqual(parsed.backgroundSyncEnabled, true)
+        XCTAssertEqual(parsed.autoDownloadListeningList, false)
+    }
+
+    func testSettingsFollowupParserRejectsMalformedBooleansAndNumbers() {
+        let parsed = LegacyStateDiscovery.parseSettingsImport([
+            "multilineAppBarText": " TRUE ",
+            "showOnlyFeedCategoriesWithNewNews": "1",
+            "tabAction": "open",
+            "rightSwipeAction": "unknown",
+            "startupCategorie": " 2",
+            "backgroundSyncIntervalMinutes": "-1",
+            "autoDownloadAudioAfterSync": "False"
+        ])
+
+        XCTAssertNil(parsed.showArticleCount)
+        XCTAssertNil(parsed.hideEmptyNavigationEntries)
+        XCTAssertFalse(parsed.tabActionExpands)
+        XCTAssertNil(parsed.leadingFull)
+        XCTAssertNil(parsed.startupMode)
+        XCTAssertNil(parsed.backgroundSyncEnabled)
+        XCTAssertNil(parsed.autoDownloadListeningList)
+    }
 }

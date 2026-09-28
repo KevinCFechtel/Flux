@@ -221,6 +221,7 @@ final class IOSAppRuntime {
                 _ = await legacyMigrationCoordinator?.migratePlaybackProgressIfNeeded()
                 _ = await legacyMigrationCoordinator?.migrateDownloadsIfNeeded()
                 _ = await legacyMigrationCoordinator?.migrateFeedPreferencesIfNeeded()
+                _ = await legacyMigrationCoordinator?.migrateSettingsFollowupIfNeeded()
             }
         )
         self.bootstrapper = bootstrapper

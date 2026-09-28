@@ -53,6 +53,21 @@ struct LegacyGlobalPreferencesImport: Equatable {
     let removeArticlesWhenMarkedRead: Bool?
 }
 
+struct LegacySettingsImport: Equatable {
+    let showArticleCount: Bool?
+    let hideEmptyNavigationEntries: Bool?
+    let tabActionExpands: Bool
+    let leadingFull: IOSArticleSwipeAction??
+    let leadingAdditional: IOSArticleSwipeAction??
+    let trailingFull: IOSArticleSwipeAction??
+    let trailingAdditional: IOSArticleSwipeAction??
+    let startupMode: Int64?
+    let startupCategoryID: Int64?
+    let startupFeedID: Int64?
+    let backgroundSyncEnabled: Bool?
+    let autoDownloadListeningList: Bool?
+}
+
 enum LegacyStateDiscovery {
     static let productionBundleID = "dev.kevincfechtel.fluxNews"
     static let applicationGroup = "group.dev.kevincfechtel.fluxNews"
@@ -155,6 +170,14 @@ enum LegacyStateDiscovery {
         guard Bundle.main.bundleIdentifier == productionBundleID,
               let values = keychainValues() else { return nil }
         return parseGlobalPreferencesImport(values)
+    }
+
+    /// Reads the D9-A follow-up settings as exact Flutter strings. The double
+    /// optional swipe fields distinguish an absent/malformed value from `none`.
+    static func readSettingsImport() -> LegacySettingsImport? {
+        guard Bundle.main.bundleIdentifier == productionBundleID,
+              let values = keychainValues() else { return nil }
+        return parseSettingsImport(values)
     }
 
     /// Reads Flutter's article-keyed playback values with the same source
@@ -331,6 +354,48 @@ enum LegacyStateDiscovery {
         )
     }
 
+    static func parseSettingsImport(_ values: [String: String]) -> LegacySettingsImport {
+        func bool(_ key: String) -> Bool? {
+            switch values[key] {
+            case "true": return true
+            case "false": return false
+            default: return nil
+            }
+        }
+        func integer(_ key: String) -> Int64? { values[key].flatMap(Int64.init) }
+        func swipe(_ key: String) -> IOSArticleSwipeAction?? {
+            guard let raw = values[key] else { return nil }
+            if raw == "none" { return .some(nil) }
+            guard let action: IOSArticleSwipeAction = switch raw {
+            case "readUnread": .readUnread
+            case "bookmark": .starUnstar
+            case "saveToThirdParty": .saveToService
+            case "openMiniflux": .openMiniflux
+            case "share": .share
+            case "open": .openOriginal
+            case "downloadAudio": .downloadAudio
+            case "openComments": .comments
+            default: nil
+            } else { return nil }
+            return .some(action)
+        }
+        let interval = integer("backgroundSyncIntervalMinutes")
+        return .init(
+            showArticleCount: bool("multilineAppBarText"),
+            hideEmptyNavigationEntries: bool("showOnlyFeedCategoriesWithNewNews"),
+            tabActionExpands: values["tabAction"] == "expand",
+            leadingFull: swipe("rightSwipeAction"),
+            leadingAdditional: swipe("secondRightSwipeAction"),
+            trailingFull: swipe("leftSwipeAction"),
+            trailingAdditional: swipe("secondLeftSwipeAction"),
+            startupMode: integer("startupCategorie"),
+            startupCategoryID: integer("startupCategorieSelection"),
+            startupFeedID: integer("startupFeedSelection"),
+            backgroundSyncEnabled: interval.flatMap { $0 == 0 ? false : ($0 > 0 ? true : nil) },
+            autoDownloadListeningList: bool("autoDownloadAudioAfterSync")
+        )
+    }
+
     static func redactedSummary(_ result: LegacyDiscoveryResult) -> [String: String] {
         [
             "Production identity": result.productionIdentity.rawValue,
@@ -353,7 +418,8 @@ enum LegacyStateDiscovery {
     // retired Flutter preferences such as useBlackMode and the replaced mobile
     // syncOnStart preference must not be counted as D9 migration candidates.
     // Includes recognized legacy values retained for the upgrade diagnostic.
-    // `autoDownloadAudioAfterSync` is not a compatible Core media policy.
+    // The D9-A follow-up semantically imports autoDownloadAudioAfterSync into
+    // the current Listening List policy, not Flutter's old sync trigger.
     private static let auditedSettings: Set<String> = [
         "brightnessMode", "activateTruncate", "charactersToTruncate",
         "autoDownloadAudioAfterSync", "downloadAudioOnlyOnWifi",
@@ -361,6 +427,10 @@ enum LegacyStateDiscovery {
     ]
 
     private static let compatibleMediaSettings: Set<String> = [
+        "multilineAppBarText", "showOnlyFeedCategoriesWithNewNews", "tabAction",
+        "leftSwipeAction", "rightSwipeAction", "secondLeftSwipeAction", "secondRightSwipeAction",
+        "startupCategorie", "startupCategorieSelection", "startupFeedSelection",
+        "backgroundSyncIntervalMinutes", "autoDownloadAudioAfterSync",
         "downloadAudioOnlyOnWifi",
         "deleteAudioAfterPlayback", "audioDownloadRetentionDays"
     ]

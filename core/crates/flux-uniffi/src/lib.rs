@@ -1331,6 +1331,15 @@ impl Flux {
             .set_auto_download_listening_list(enabled)
             .map_err(map_error)
     }
+    pub fn import_legacy_policy_settings(
+        &self,
+        background_sync_enabled: Option<bool>,
+        auto_download_listening_list: Option<bool>,
+    ) -> Result<(), FluxError> {
+        self.core
+            .import_legacy_policy_settings(background_sync_enabled, auto_download_listening_list)
+            .map_err(map_error)
+    }
     pub fn set_remove_completed_listening_list(&self, enabled: bool) -> Result<(), FluxError> {
         self.core
             .set_remove_completed_listening_list(enabled)

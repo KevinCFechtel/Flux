@@ -1126,6 +1126,14 @@ impl FluxCore {
     pub fn set_background_sync_enabled(&self, enabled: bool) -> Result<(), CoreError> {
         self.store.set_background_sync_enabled(enabled)
     }
+    pub fn import_legacy_policy_settings(
+        &self,
+        background_sync_enabled: Option<bool>,
+        auto_download_listening_list: Option<bool>,
+    ) -> Result<(), CoreError> {
+        self.store
+            .import_legacy_policy_settings(background_sync_enabled, auto_download_listening_list)
+    }
     pub fn set_detail_character_limit(&self, limit: u32) -> Result<(), CoreError> {
         self.store.set_detail_character_limit(limit)
     }

@@ -35,10 +35,10 @@ non-reconstructable state such as account association/credentials, custom HTTP
 headers, compatible Core/native settings, compatible feed preferences, media
 policies, playback progress, and valid downloaded-media association.
 
-`autoDownloadAudioAfterSync` is deliberately not migrated: Flutter used it to
-download audio for newly synchronized articles, while the Core auto-download
-policy applies when an article enters Listening List. These triggers differ, and
-D9 does not introduce a replacement sync-triggered download policy.
+Flutter's sync-triggered `autoDownloadAudioAfterSync` implementation is not
+ported. Its persisted user preference is semantically migrated to Core
+`autoDownloadListeningList`: native continues to download only when an article
+enters Listening List.
 
 The migration remains idempotent, restart-safe, and non-destructive to legacy
 storage. Existing valid native/Core state wins.
@@ -50,6 +50,27 @@ and `false` are stored choices. Native presence, including false, wins.
 `sortOrder` remains transient native article-list control state and is not
 migrated. `brightnessMode` is replaced by system-native Appearance and is not
 migrated.
+
+The versioned D9-A settings follow-up additionally imports exact valid Flutter
+values only when the corresponding native setting has no explicit presence:
+
+- `multilineAppBarText` -> Show Article Count;
+- `showOnlyFeedCategoriesWithNewNews` -> Hide Empty Navigation Entries;
+- `tabAction=expand` -> Reader/Open Detail View. `open` and `splitted` are not
+  written;
+- Flutter Slidable actions map right/second-right to Leading Full/Additional
+  and left/second-left to Trailing Full/Additional. Only equivalent actions are
+  imported and each native slot wins independently;
+- `startupCategorie` maps All, Bookmarks, Category and Feed by Miniflux ID.
+  Category/Feed imports wait for the authoritative catalog rather than using a
+  title or URL heuristic;
+- `backgroundSyncIntervalMinutes` maps only disabled/enabled, not Flutter's
+  interval policy; native D5 scheduling remains authoritative;
+- `autoDownloadAudioAfterSync` maps to `autoDownloadListeningList` as above.
+
+`syncReadStatusImmediately` is intentionally not migrated. Flutter's setting
+controls only read-status timing, while native `DeliveryMode` governs several
+article mutations and is not semantically equivalent.
 
 For the Flutter `feedSettingsOverrides` secure-storage JSON object, D9 migrates
 only a positive `openMinifluxEntry: 1` under its numeric Miniflux feed ID to the

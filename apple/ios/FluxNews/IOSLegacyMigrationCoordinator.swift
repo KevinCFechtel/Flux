@@ -40,6 +40,10 @@ enum IOSLegacyGlobalPreferencesMigrationOutcome: Equatable {
     case retryableFailure
 }
 
+enum IOSLegacySettingsFollowupMigrationOutcome: Equatable {
+    case notEligible, alreadyCompleted, imported, retryableFailure
+}
+
 struct IOSLegacyMediaSettingsImport: Equatable {
     let unmeteredOnly: Bool?
     let deleteAfterPlayback: Bool?
@@ -80,6 +84,9 @@ final class IOSLegacyMigrationCoordinator {
         static let downloadMigrationCompleted = "FluxNews.iOS.legacyMigration.downloads.v1.completed"
         static let feedPreferenceMigrationCompleted = "FluxNews.iOS.legacyMigration.feedPreferences.v1.completed"
         static let globalPreferencesMigrationCompleted = "FluxNews.iOS.legacyMigration.globalPreferences.v1.completed"
+        static let settingsFollowupLocalCompleted = "FluxNews.iOS.legacyMigration.settingsFollowup.v2.local.completed"
+        static let settingsFollowupCoreCompleted = "FluxNews.iOS.legacyMigration.settingsFollowup.v2.core.completed"
+        static let settingsFollowupStartupCompleted = "FluxNews.iOS.legacyMigration.settingsFollowup.v2.startup.completed"
         static let removeArticlesWhenMarkedRead = "FluxNews.iOS.removeArticlesWhenMarkedRead"
         static let markReadOnScrollover = "FluxNews.iOS.markReadOnScrollover"
     }
@@ -95,6 +102,7 @@ final class IOSLegacyMigrationCoordinator {
     private let legacyFeedOpenInMinifluxReader: () -> [LegacyFeedOpenInMinifluxImport]?
     private let legacyFeedOpenInMinifluxImporter: ((Int64) async -> Result<LegacyFeedOpenInMinifluxImportOutcome, Error>)?
     private let legacyGlobalPreferencesReader: () -> LegacyGlobalPreferencesImport?
+    private let legacySettingsReader: () -> LegacySettingsImport?
     private let mediaRootProvider: () -> URL?
     private let fileManager: FileManager
     private let logger = IOSAppLogger(category: "legacy_migration")
@@ -112,6 +120,7 @@ final class IOSLegacyMigrationCoordinator {
         legacyFeedOpenInMinifluxReader: @escaping () -> [LegacyFeedOpenInMinifluxImport]? = { LegacyStateDiscovery.readFeedOpenInMinifluxImports() },
         legacyFeedOpenInMinifluxImporter: ((Int64) async -> Result<LegacyFeedOpenInMinifluxImportOutcome, Error>)? = nil,
         legacyGlobalPreferencesReader: @escaping () -> LegacyGlobalPreferencesImport? = LegacyStateDiscovery.readGlobalPreferencesImport,
+        legacySettingsReader: @escaping () -> LegacySettingsImport? = LegacyStateDiscovery.readSettingsImport,
         mediaRootProvider: @escaping () -> URL? = { IOSMediaTransferPathConfiguration.mediaRootURL },
         fileManager: FileManager = .default
     ) {
@@ -126,6 +135,7 @@ final class IOSLegacyMigrationCoordinator {
         self.legacyFeedOpenInMinifluxReader = legacyFeedOpenInMinifluxReader
         self.legacyFeedOpenInMinifluxImporter = legacyFeedOpenInMinifluxImporter
         self.legacyGlobalPreferencesReader = legacyGlobalPreferencesReader
+        self.legacySettingsReader = legacySettingsReader
         self.mediaRootProvider = mediaRootProvider
         self.fileManager = fileManager
     }
@@ -403,6 +413,111 @@ final class IOSLegacyMigrationCoordinator {
         defaults.set(true, forKey: DefaultsKey.globalPreferencesMigrationCompleted)
         logger.info("Legacy global preferences copied where native values were absent.")
         return .imported
+    }
+
+    /// Versioned D9-A follow-up. Local, Core, and catalog-dependent Startup
+    /// completion are separate so a missing catalog item cannot lose other work.
+    @discardableResult
+    func migrateSettingsFollowupIfNeeded() async -> IOSLegacySettingsFollowupMigrationOutcome {
+        guard !inFlight else { return .retryableFailure }
+        inFlight = true
+        defer { inFlight = false }
+        do { guard try isCurrentMigratedAccount() else { return .notEligible } }
+        catch { return .retryableFailure }
+        guard let legacy = legacySettingsReader() else { return .retryableFailure }
+
+        var retryable = false
+        if !defaults.bool(forKey: DefaultsKey.settingsFollowupLocalCompleted) {
+            importLocalSettings(legacy)
+            defaults.set(true, forKey: DefaultsKey.settingsFollowupLocalCompleted)
+        }
+        if !defaults.bool(forKey: DefaultsKey.settingsFollowupCoreCompleted) {
+            switch await bootstrapper.importLegacyPolicySettings(
+                backgroundSyncEnabled: legacy.backgroundSyncEnabled,
+                autoDownloadListeningList: legacy.autoDownloadListeningList
+            ) {
+            case .success: defaults.set(true, forKey: DefaultsKey.settingsFollowupCoreCompleted)
+            case .failure: retryable = true
+            }
+        }
+        if !defaults.bool(forKey: DefaultsKey.settingsFollowupStartupCompleted) {
+            switch await importStartupScope(legacy) {
+            case .success: defaults.set(true, forKey: DefaultsKey.settingsFollowupStartupCompleted)
+            case .failure: retryable = true
+            }
+        }
+        if retryable { return .retryableFailure }
+        return .imported
+    }
+
+    private func importLocalSettings(_ legacy: LegacySettingsImport) {
+        func setBool(_ value: Bool?, key: String) {
+            if defaults.object(forKey: key) == nil, let value { defaults.set(value, forKey: key) }
+        }
+        setBool(legacy.showArticleCount, key: "FluxNews.iOS.showArticleCount")
+        setBool(legacy.hideEmptyNavigationEntries, key: "FluxNews.iOS.hideEmptyNavigationEntries")
+        if legacy.tabActionExpands, defaults.object(forKey: "FluxNews.clickOnNews") == nil {
+            defaults.set(ClickOnNews.openDetailView.rawValue, forKey: "FluxNews.clickOnNews")
+        }
+        importSwipeSide(
+            full: legacy.leadingFull, additional: legacy.leadingAdditional,
+            fullKey: "FluxNews.iOS.leadingSwipeFull", additionalKey: "FluxNews.iOS.leadingSwipeAdditional"
+        )
+        importSwipeSide(
+            full: legacy.trailingFull, additional: legacy.trailingAdditional,
+            fullKey: "FluxNews.iOS.trailingSwipeFull", additionalKey: "FluxNews.iOS.trailingSwipeAdditional"
+        )
+    }
+
+    private func importSwipeSide(
+        full legacyFull: IOSArticleSwipeAction??,
+        additional legacyAdditional: IOSArticleSwipeAction??,
+        fullKey: String,
+        additionalKey: String
+    ) {
+        let fullIsNative = defaults.object(forKey: fullKey) != nil
+        let additionalIsNative = defaults.object(forKey: additionalKey) != nil
+        guard !fullIsNative || !additionalIsNative else { return }
+        let currentFull = defaults.string(forKey: fullKey).flatMap(IOSArticleSwipeAction.init(rawValue:))
+        let currentAdditional = defaults.string(forKey: additionalKey).flatMap(IOSArticleSwipeAction.init(rawValue:))
+        let full = fullIsNative ? currentFull : legacyFull ?? currentFull
+        var additional = additionalIsNative ? currentAdditional : legacyAdditional ?? currentAdditional
+        if additional == full { additional = nil }
+        if !fullIsNative, legacyFull != nil { defaults.set(full?.rawValue ?? "", forKey: fullKey) }
+        if !additionalIsNative, legacyAdditional != nil { defaults.set(full == nil ? "" : (additional?.rawValue ?? ""), forKey: additionalKey) }
+    }
+
+    private func importStartupScope(_ legacy: LegacySettingsImport) async -> Result<Void, Error> {
+        guard defaults.object(forKey: "FluxNews.iOS.startupScope") == nil else { return .success(()) }
+        guard let mode = legacy.startupMode else { return .success(()) }
+        switch mode {
+        case 0:
+            defaults.set(StartupScopePreference.allNews.rawValue, forKey: "FluxNews.iOS.startupScope")
+        case 1:
+            defaults.set(StartupScopePreference.starred.rawValue, forKey: "FluxNews.iOS.startupScope")
+        case 2:
+            guard let id = legacy.startupCategoryID, id > 0 else { return .success(()) }
+            guard let core = bootstrapper.core,
+                  let catalogResult = await bootstrapper.coreSessionExecutionCoordinator.responsiveResult(for: core, { try core.navigationCatalog() }) else {
+                return .failure(CoreBootstrapper.SettingsAccessError.coreUnavailable)
+            }
+            guard case let .success(catalog) = catalogResult else { return .failure(CoreBootstrapper.SettingsAccessError.coreUnavailable) }
+            guard catalog.categories.contains(where: { $0.id == id }) else { return .failure(CoreBootstrapper.SettingsAccessError.coreUnavailable) }
+            defaults.set(StartupScopePreference.category.rawValue, forKey: "FluxNews.iOS.startupScope")
+            defaults.set(id, forKey: "FluxNews.iOS.startupCategoryID")
+        case 3:
+            guard let id = legacy.startupFeedID, id > 0 else { return .success(()) }
+            guard let core = bootstrapper.core,
+                  let catalogResult = await bootstrapper.coreSessionExecutionCoordinator.responsiveResult(for: core, { try core.navigationCatalog() }) else {
+                return .failure(CoreBootstrapper.SettingsAccessError.coreUnavailable)
+            }
+            guard case let .success(catalog) = catalogResult else { return .failure(CoreBootstrapper.SettingsAccessError.coreUnavailable) }
+            guard catalog.feeds.contains(where: { $0.id == id }) else { return .failure(CoreBootstrapper.SettingsAccessError.coreUnavailable) }
+            defaults.set(StartupScopePreference.feed.rawValue, forKey: "FluxNews.iOS.startupScope")
+            defaults.set(id, forKey: "FluxNews.iOS.startupFeedID")
+        default: break
+        }
+        return .success(())
     }
 
     private func mediaSettingsWriteFailed(_ error: Error) -> IOSLegacyMediaSettingsMigrationOutcome {

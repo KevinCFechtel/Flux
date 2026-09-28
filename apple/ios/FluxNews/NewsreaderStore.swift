@@ -1279,6 +1279,24 @@ struct IOSArticleAudioActionState {
         removeArticlesWhenMarkedRead = defaults.object(forKey: Key.removeWhenRead) as? Bool ?? false
         markReadOnScrolloverEnabled = defaults.object(forKey: Key.scrollover) as? Bool ?? true
     }
+    /// Applies local D9-A imports to an already initialized presentation store.
+    func reloadLegacyMigrationSettings() {
+        reloadGlobalPreferenceSettings()
+        startupScope = defaults.string(forKey: Key.startupScope).flatMap(StartupScopePreference.init(rawValue:)) ?? .allNews
+        startupCategoryID = defaults.object(forKey: Key.startupCategoryID) as? Int64
+        startupFeedID = defaults.object(forKey: Key.startupFeedID) as? Int64
+        hideEmptyNavigationEntries = defaults.object(forKey: Key.hideEmpty) as? Bool ?? false
+        showArticleCount = defaults.object(forKey: Key.showArticleCount) as? Bool ?? true
+        clickOnNews = defaults.string(forKey: Key.clickOnNews).flatMap(ClickOnNews.init(rawValue:)) ?? .openLink
+        articleSwipeConfiguration = Self.loadArticleSwipeConfiguration(defaults: defaults)
+        let categoryIDs = Set(catalog.categories.map(\.id))
+        let feedIDs = Set(catalog.feeds.map(\.id))
+        let resolved = StartupScopeResolver.resolve(startupScope, categoryID: startupCategoryID, feedID: startupFeedID, categoryIDs: categoryIDs, feedIDs: feedIDs)
+        if scope != resolved {
+            scope = resolved
+            loadVisibleArticles(resetSnapshot: true)
+        }
+    }
     func setArticlePresentationMode(_ value: ArticlePresentationMode) { articlePresentationMode = value; defaults.set(value.rawValue, forKey: Key.presentationMode); resetPresentationState() }
     func setArticlePreviewLines(_ value: ArticlePreviewLines) { articlePreviewLines = value; defaults.set(value.rawValue, forKey: Key.previewLines); resetPresentationState() }
     func setShowArticleCount(_ value: Bool) { showArticleCount = value; defaults.set(value, forKey: Key.showArticleCount) }

@@ -270,6 +270,18 @@ final class CoreBootstrapper: ObservableObject {
         return result
     }
 
+    func importLegacyPolicySettings(
+        backgroundSyncEnabled: Bool?,
+        autoDownloadListeningList: Bool?
+    ) async -> Result<Void, Error> {
+        guard let activeCore = core else { return .failure(SettingsAccessError.coreUnavailable) }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            { try activeCore.importLegacyPolicySettings(backgroundSyncEnabled: backgroundSyncEnabled, autoDownloadListeningList: autoDownloadListeningList) }
+        ) else { return .failure(SettingsAccessError.sessionUnavailable) }
+        return result
+    }
+
     func importLegacyDownload(
         enclosureID: Int64,
         localFile: String,
