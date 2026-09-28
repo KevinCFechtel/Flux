@@ -54,6 +54,8 @@ final class IOSMediaRuntime {
     let transferPresentationState = IOSMediaTransferPresentationState()
 
     private unowned let bootstrapper: CoreBootstrapper
+    private let onSuccessfulSync: (() async -> Void)?
+    private let reconcilePlaybackAfterSuccessfulSync: (() async -> Void)?
 
     private lazy var playbackCoreAccess = IOSMediaPlaybackCoreAccess(
         coreSessionExecutionCoordinator: coreSessionExecutionCoordinator
@@ -76,11 +78,15 @@ final class IOSMediaRuntime {
     init(
         bootstrapper: CoreBootstrapper,
         coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator,
-        mediaTransferReconciliationHandoff: IOSMediaTransferReconciliationHandoff
+        mediaTransferReconciliationHandoff: IOSMediaTransferReconciliationHandoff,
+        onSuccessfulSync: (() async -> Void)? = nil,
+        reconcilePlaybackAfterSuccessfulSync: (() async -> Void)? = nil
     ) {
         self.bootstrapper = bootstrapper
         self.coreSessionExecutionCoordinator = coreSessionExecutionCoordinator
         self.mediaTransferReconciliationHandoff = mediaTransferReconciliationHandoff
+        self.onSuccessfulSync = onSuccessfulSync
+        self.reconcilePlaybackAfterSuccessfulSync = reconcilePlaybackAfterSuccessfulSync
         transferCoordinator.setMediaInUseProvider { [weak self] enclosureID in
             self?.playbackCoordinator.blocksMediaDeletion(enclosureID: enclosureID) ?? false
         }
@@ -146,7 +152,16 @@ final class IOSMediaRuntime {
     func handle(event: CoreEvent, core: Flux, generation: UInt64) {
         guard generation == lifecycleGeneration, self.core === core else { return }
         guard case .syncCompleted = event else { return }
-        Task { @MainActor [weak self] in await self?.playbackCoordinator.reconcileAfterSuccessfulSync() }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard generation == lifecycleGeneration, self.core === core else { return }
+            if let reconcilePlaybackAfterSuccessfulSync {
+                await reconcilePlaybackAfterSuccessfulSync()
+            } else {
+                await playbackCoordinator.reconcileAfterSuccessfulSync()
+            }
+            await onSuccessfulSync?()
+        }
     }
 
     func sceneWillResignActive() { playbackCoordinator.sceneWillResignActive() }
@@ -201,7 +216,10 @@ final class IOSAppRuntime {
         let mediaRuntime = IOSMediaRuntime(
             bootstrapper: bootstrapper,
             coreSessionExecutionCoordinator: bootstrapper.coreSessionExecutionCoordinator,
-            mediaTransferReconciliationHandoff: mediaTransferReconciliationHandoff
+            mediaTransferReconciliationHandoff: mediaTransferReconciliationHandoff,
+            onSuccessfulSync: { [weak legacyMigrationCoordinator] in
+                _ = await legacyMigrationCoordinator?.migratePlaybackProgressIfNeeded()
+            }
         )
         self.bootstrapper = bootstrapper
         self.legacyMigrationCoordinator = legacyMigrationCoordinator
