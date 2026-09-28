@@ -1,6 +1,6 @@
 # iOS D9 — Flutter Replacement Completion / Legacy-Parity Closure
 
-> **Status: PLANNED — FINAL NATIVE REPLACEMENT COMPLETION GATE**
+> **Status: IN PROGRESS — FINAL NATIVE REPLACEMENT COMPLETION GATE**
 >
 > Decision date: 26 September 2026.
 >
@@ -22,6 +22,25 @@ D9 must preserve the frozen Rust/Core ownership, UIKit Timeline architecture,
 D5 background/notification ownership, D6 media runtime, and D7 system-media /
 CarPlay ownership. Additive settings or WidgetKit configuration must reuse those
 boundaries rather than create parallel state owners.
+
+## D9 implementation progress
+
+Current repository status:
+
+- **D9-A — Production Flutter-to-native migration:** COMPLETE / TEST-GATED
+- **D9-B — Config Backup and Restore:** OPEN
+- **D9-C — Configurable Bottom Action Bar:** COMPLETE / TEST-GATED
+- **D9-D — Localization parity:** OPEN
+- **D9-E — Downloaded Data:** COMPLETE / TEST-GATED
+- **D9-F — Miniflux account information / HTTP warning:** COMPLETE / TEST-GATED
+- **D9-G — Open Source and About:** OPEN
+- **D9-H — Logging & Support Diagnostics:** OPEN
+- **D9 Widget Configuration:** OPEN
+- **Final physical-device Flutter-to-native production-upgrade acceptance:** OPEN
+
+Completed blocks remain subject to the final D9 acceptance gate and regression
+suite; their implementation contracts are frozen unless a concrete regression
+or new product decision requires reopening them.
 
 ## 2. D9 release-critical replacement gates
 
