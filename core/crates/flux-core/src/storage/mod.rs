@@ -463,6 +463,40 @@ impl Store {
     pub fn set_delete_after_playback(&self, enabled: bool) -> Result<(), CoreError> {
         self.set_setting("delete_after_playback", if enabled { "1" } else { "0" })
     }
+    pub fn import_legacy_media_settings(
+        &self,
+        unmetered_only: Option<bool>,
+        retention: Option<DownloadRetention>,
+        delete_after_playback: Option<bool>,
+    ) -> Result<(), CoreError> {
+        if matches!(retention, Some(DownloadRetention::Days(0))) {
+            return Err(CoreError::data("download retention days must be positive"));
+        }
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        if let Some(unmetered_only) = unmetered_only {
+            tx.execute(
+                "INSERT INTO core_settings (key, value) VALUES ('download_network_policy', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [if unmetered_only { "unmetered_only" } else { "any_network" }],
+            ).map_err(sql_error)?;
+        }
+        if let Some(retention) = retention {
+            tx.execute(
+                "INSERT INTO core_settings (key, value) VALUES ('download_retention', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [download_retention_db(retention)],
+            ).map_err(sql_error)?;
+        }
+        if let Some(delete_after_playback) = delete_after_playback {
+            tx.execute(
+                "INSERT INTO core_settings (key, value) VALUES ('delete_after_playback', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [if delete_after_playback { "1" } else { "0" }],
+            ).map_err(sql_error)?;
+        }
+        tx.commit().map_err(sql_error)
+    }
     pub fn set_auto_download_listening_list(&self, enabled: bool) -> Result<(), CoreError> {
         self.set_setting(
             "auto_download_listening_list",
@@ -5240,6 +5274,41 @@ mod tests {
     }
 
     #[test]
+    fn v19_marks_historical_feed_preferences_as_native_owned() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 2,
+            category_id: 1,
+            title: "Historical native preference".into(),
+        }];
+        store.reconcile(&categories, &feeds, &[]).unwrap();
+        store.set_feed_open_in_miniflux(2, false).unwrap();
+        {
+            let connection = store.connection.lock().unwrap();
+            connection
+                .execute_batch(
+                    "DROP TABLE feed_open_in_miniflux_overrides; PRAGMA user_version=18;",
+                )
+                .unwrap();
+        }
+        drop(store);
+
+        let store = Store::open(&data, &cache, &media).unwrap();
+        assert_eq!(store.schema_version().unwrap(), 19);
+        assert_eq!(
+            store.import_legacy_feed_open_in_miniflux(2).unwrap(),
+            LegacyFeedOpenInMinifluxImportOutcome::AlreadyPresent
+        );
+        assert!(!store.feed_preferences(2).unwrap().open_in_miniflux);
+    }
+
+    #[test]
     fn media_policy_settings_persist_independently() {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
@@ -5257,6 +5326,30 @@ mod tests {
         drop(store);
         let store = Store::open(&data, &cache, &media).unwrap();
         assert_eq!(store.core_settings().unwrap(), settings);
+    }
+
+    #[test]
+    fn legacy_media_settings_import_is_atomic() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        {
+            let connection = store.connection.lock().unwrap();
+            connection
+                .execute_batch("CREATE TRIGGER reject_legacy_delete_after_playback BEFORE INSERT ON core_settings WHEN NEW.key = 'delete_after_playback' BEGIN SELECT RAISE(ABORT, 'test failure'); END;")
+                .unwrap();
+        }
+
+        assert!(
+            store
+                .import_legacy_media_settings(
+                    Some(true),
+                    Some(DownloadRetention::Days(14)),
+                    Some(true),
+                )
+                .is_err()
+        );
+        assert_eq!(store.core_settings().unwrap(), CoreSettings::default());
     }
 
     #[test]

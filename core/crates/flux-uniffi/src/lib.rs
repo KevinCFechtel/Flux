@@ -1312,6 +1312,20 @@ impl Flux {
             .set_delete_after_playback(enabled)
             .map_err(map_error)
     }
+    pub fn import_legacy_media_settings(
+        &self,
+        unmetered_only: Option<bool>,
+        retention: Option<DownloadRetention>,
+        delete_after_playback: Option<bool>,
+    ) -> Result<(), FluxError> {
+        self.core
+            .import_legacy_media_settings(
+                unmetered_only,
+                retention.map(Into::into),
+                delete_after_playback,
+            )
+            .map_err(map_error)
+    }
     pub fn set_auto_download_listening_list(&self, enabled: bool) -> Result<(), FluxError> {
         self.core
             .set_auto_download_listening_list(enabled)

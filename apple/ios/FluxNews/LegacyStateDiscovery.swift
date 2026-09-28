@@ -48,6 +48,11 @@ struct LegacyFeedOpenInMinifluxImport: Equatable {
     let openInMiniflux: Bool
 }
 
+struct LegacyGlobalPreferencesImport: Equatable {
+    let markReadOnScrollover: Bool?
+    let removeArticlesWhenMarkedRead: Bool?
+}
+
 enum LegacyStateDiscovery {
     static let productionBundleID = "dev.kevincfechtel.fluxNews"
     static let applicationGroup = "group.dev.kevincfechtel.fluxNews"
@@ -58,6 +63,8 @@ enum LegacyStateDiscovery {
     private static let customHeaderKeyPrefix = "customHeadersKey_"
     private static let customHeaderValuePrefix = "customHeadersValue_"
     private static let feedSettingsKey = "feedSettingsOverrides"
+    private static let markReadOnScrolloverKey = "markAsReadOnScrollOver"
+    private static let removeArticlesWhenMarkedReadKey = "removeNewsFromListWhenRead"
     private static let playbackPrefix = "audio_progress_"
     private static let flutterPreferencesPrefix = "flutter."
     private static let downloadPathPrefix = "audio_download_path_"
@@ -139,6 +146,15 @@ enum LegacyStateDiscovery {
         guard Bundle.main.bundleIdentifier == productionBundleID,
               let values = keychainValues() else { return nil }
         return parseFeedOpenInMinifluxImports(values[feedSettingsKey])
+    }
+
+    /// Reads only global Flutter preferences with direct native equivalents. It
+    /// is deliberately read-only and distinguishes an unavailable Keychain from
+    /// a readable store whose keys are absent or malformed.
+    static func readGlobalPreferencesImport() -> LegacyGlobalPreferencesImport? {
+        guard Bundle.main.bundleIdentifier == productionBundleID,
+              let values = keychainValues() else { return nil }
+        return parseGlobalPreferencesImport(values)
     }
 
     /// Reads Flutter's article-keyed playback values with the same source
@@ -296,6 +312,23 @@ enum LegacyStateDiscovery {
             return LegacyFeedOpenInMinifluxImport(feedID: feedID, openInMiniflux: true)
         }
         .sorted { $0.feedID < $1.feedID }
+    }
+
+    static func parseGlobalPreferencesImport(
+        _ values: [String: String]
+    ) -> LegacyGlobalPreferencesImport {
+        func parseBool(_ key: String) -> Bool? {
+            switch values[key] {
+            case "true": return true
+            case "false": return false
+            default: return nil
+            }
+        }
+
+        return LegacyGlobalPreferencesImport(
+            markReadOnScrollover: parseBool(markReadOnScrolloverKey),
+            removeArticlesWhenMarkedRead: parseBool(removeArticlesWhenMarkedReadKey)
+        )
     }
 
     static func redactedSummary(_ result: LegacyDiscoveryResult) -> [String: String] {

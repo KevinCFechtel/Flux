@@ -90,6 +90,8 @@ struct FluxNewsApp: App {
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
                         _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                     }
+                    _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateGlobalPreferencesIfNeeded()
+                    newsreaderStore.reloadGlobalPreferenceSettings()
                     await IOSAppRuntime.shared.backgroundSyncCoordinator.refreshScheduling()
                     IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
                 }
@@ -117,8 +119,10 @@ struct FluxNewsApp: App {
                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateAccountIfNeeded()
                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateMediaSettingsIfNeeded()
                                  _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migratePlaybackProgressIfNeeded()
-                                 _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
+                                  _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateDownloadsIfNeeded()
                             }
+                            _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateGlobalPreferencesIfNeeded()
+                            newsreaderStore.reloadGlobalPreferenceSettings()
                             IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
                         }
                     } else {

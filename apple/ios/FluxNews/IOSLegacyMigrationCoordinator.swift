@@ -33,6 +33,13 @@ enum IOSLegacyFeedPreferenceMigrationOutcome: Equatable {
     case retryableFailure
 }
 
+enum IOSLegacyGlobalPreferencesMigrationOutcome: Equatable {
+    case notEligible
+    case alreadyCompleted
+    case imported
+    case retryableFailure
+}
+
 struct IOSLegacyMediaSettingsImport: Equatable {
     let unmeteredOnly: Bool?
     let deleteAfterPlayback: Bool?
@@ -72,6 +79,9 @@ final class IOSLegacyMigrationCoordinator {
         static let playbackMigrationCompleted = "FluxNews.iOS.legacyMigration.playback.v1.completed"
         static let downloadMigrationCompleted = "FluxNews.iOS.legacyMigration.downloads.v1.completed"
         static let feedPreferenceMigrationCompleted = "FluxNews.iOS.legacyMigration.feedPreferences.v1.completed"
+        static let globalPreferencesMigrationCompleted = "FluxNews.iOS.legacyMigration.globalPreferences.v1.completed"
+        static let removeArticlesWhenMarkedRead = "FluxNews.iOS.removeArticlesWhenMarkedRead"
+        static let markReadOnScrollover = "FluxNews.iOS.markReadOnScrollover"
     }
 
     private let bootstrapper: CoreBootstrapper
@@ -84,6 +94,7 @@ final class IOSLegacyMigrationCoordinator {
     private let legacyDownloadImporter: ((Int64, String, UInt64) async -> Result<LegacyDownloadImportOutcome, Error>)?
     private let legacyFeedOpenInMinifluxReader: () -> [LegacyFeedOpenInMinifluxImport]?
     private let legacyFeedOpenInMinifluxImporter: ((Int64) async -> Result<LegacyFeedOpenInMinifluxImportOutcome, Error>)?
+    private let legacyGlobalPreferencesReader: () -> LegacyGlobalPreferencesImport?
     private let mediaRootProvider: () -> URL?
     private let fileManager: FileManager
     private let logger = IOSAppLogger(category: "legacy_migration")
@@ -100,6 +111,7 @@ final class IOSLegacyMigrationCoordinator {
         legacyDownloadImporter: ((Int64, String, UInt64) async -> Result<LegacyDownloadImportOutcome, Error>)? = nil,
         legacyFeedOpenInMinifluxReader: @escaping () -> [LegacyFeedOpenInMinifluxImport]? = { LegacyStateDiscovery.readFeedOpenInMinifluxImports() },
         legacyFeedOpenInMinifluxImporter: ((Int64) async -> Result<LegacyFeedOpenInMinifluxImportOutcome, Error>)? = nil,
+        legacyGlobalPreferencesReader: @escaping () -> LegacyGlobalPreferencesImport? = LegacyStateDiscovery.readGlobalPreferencesImport,
         mediaRootProvider: @escaping () -> URL? = { IOSMediaTransferPathConfiguration.mediaRootURL },
         fileManager: FileManager = .default
     ) {
@@ -113,6 +125,7 @@ final class IOSLegacyMigrationCoordinator {
         self.legacyDownloadImporter = legacyDownloadImporter
         self.legacyFeedOpenInMinifluxReader = legacyFeedOpenInMinifluxReader
         self.legacyFeedOpenInMinifluxImporter = legacyFeedOpenInMinifluxImporter
+        self.legacyGlobalPreferencesReader = legacyGlobalPreferencesReader
         self.mediaRootProvider = mediaRootProvider
         self.fileManager = fileManager
     }
@@ -199,18 +212,7 @@ final class IOSLegacyMigrationCoordinator {
             return .retryableFailure
         }
 
-        if let unmeteredOnly = legacySettings.unmeteredOnly,
-           case let .failure(error) = await bootstrapper.setDownloadNetworkPolicyPreference(
-               unmeteredOnly ? .unmeteredOnly : .anyNetwork
-           ) {
-            return mediaSettingsWriteFailed(error)
-        }
-        if let retentionDays = legacySettings.retentionDays,
-           case let .failure(error) = await bootstrapper.setDownloadRetentionPreference(.days(days: retentionDays)) {
-            return mediaSettingsWriteFailed(error)
-        }
-        if let deleteAfterPlayback = legacySettings.deleteAfterPlayback,
-           case let .failure(error) = await bootstrapper.setDeleteAfterPlaybackPreference(deleteAfterPlayback) {
+        if case let .failure(error) = await bootstrapper.importLegacyMediaSettings(legacySettings) {
             return mediaSettingsWriteFailed(error)
         }
         defaults.set(true, forKey: DefaultsKey.mediaSettingsMigrationCompleted)
@@ -372,6 +374,34 @@ final class IOSLegacyMigrationCoordinator {
         guard !hasRetryableRecord else { return .retryableFailure }
         defaults.set(true, forKey: DefaultsKey.feedPreferenceMigrationCompleted)
         logger.info("Legacy positive Open in Miniflux feed preferences copied into Core.")
+        return .imported
+    }
+
+    /// Imports each retained global preference only when the corresponding
+    /// native UserDefaults key has never been written. Defaults are not
+    /// presence, so explicit native false remains a native winner.
+    @discardableResult
+    func migrateGlobalPreferencesIfNeeded() async -> IOSLegacyGlobalPreferencesMigrationOutcome {
+        guard !inFlight else { return .retryableFailure }
+        inFlight = true
+        defer { inFlight = false }
+        do { guard try isCurrentMigratedAccount() else { return .notEligible } }
+        catch { return .retryableFailure }
+        guard !defaults.bool(forKey: DefaultsKey.globalPreferencesMigrationCompleted) else {
+            return .alreadyCompleted
+        }
+        guard let legacy = legacyGlobalPreferencesReader() else { return .retryableFailure }
+
+        if defaults.object(forKey: DefaultsKey.markReadOnScrollover) == nil,
+           let markReadOnScrollover = legacy.markReadOnScrollover {
+            defaults.set(markReadOnScrollover, forKey: DefaultsKey.markReadOnScrollover)
+        }
+        if defaults.object(forKey: DefaultsKey.removeArticlesWhenMarkedRead) == nil,
+           let removeArticlesWhenMarkedRead = legacy.removeArticlesWhenMarkedRead {
+            defaults.set(removeArticlesWhenMarkedRead, forKey: DefaultsKey.removeArticlesWhenMarkedRead)
+        }
+        defaults.set(true, forKey: DefaultsKey.globalPreferencesMigrationCompleted)
+        logger.info("Legacy global preferences copied where native values were absent.")
         return .imported
     }
 

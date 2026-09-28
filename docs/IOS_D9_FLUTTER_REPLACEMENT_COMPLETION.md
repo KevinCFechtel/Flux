@@ -43,6 +43,14 @@ D9 does not introduce a replacement sync-triggered download policy.
 The migration remains idempotent, restart-safe, and non-destructive to legacy
 storage. Existing valid native/Core state wins.
 
+The global Flutter secure-storage booleans `markAsReadOnScrollOver` and
+`removeNewsFromListWhenRead` migrate to the corresponding native UserDefaults
+keys only when those native keys are absent. Both exact Flutter strings `true`
+and `false` are stored choices. Native presence, including false, wins.
+`sortOrder` remains transient native article-list control state and is not
+migrated. `brightnessMode` is replaced by system-native Appearance and is not
+migrated.
+
 For the Flutter `feedSettingsOverrides` secure-storage JSON object, D9 migrates
 only a positive `openMinifluxEntry: 1` under its numeric Miniflux feed ID to the
 existing Core `open_in_miniflux` preference. Flutter serialized zero-valued

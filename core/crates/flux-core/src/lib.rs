@@ -1149,6 +1149,15 @@ impl FluxCore {
     pub fn set_delete_after_playback(&self, enabled: bool) -> Result<(), CoreError> {
         self.store.set_delete_after_playback(enabled)
     }
+    pub fn import_legacy_media_settings(
+        &self,
+        unmetered_only: Option<bool>,
+        retention: Option<DownloadRetention>,
+        delete_after_playback: Option<bool>,
+    ) -> Result<(), CoreError> {
+        self.store
+            .import_legacy_media_settings(unmetered_only, retention, delete_after_playback)
+    }
     pub fn set_auto_download_listening_list(&self, enabled: bool) -> Result<(), CoreError> {
         self.store.set_auto_download_listening_list(enabled)
     }

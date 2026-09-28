@@ -253,6 +253,23 @@ final class CoreBootstrapper: ObservableObject {
         return result
     }
 
+    func importLegacyMediaSettings(
+        _ settings: IOSLegacyMediaSettingsImport
+    ) async -> Result<Void, Error> {
+        guard let activeCore = core else { return .failure(SettingsAccessError.coreUnavailable) }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            {
+                try activeCore.importLegacyMediaSettings(
+                    unmeteredOnly: settings.unmeteredOnly,
+                    retention: settings.retentionDays.map { .days(days: $0) },
+                    deleteAfterPlayback: settings.deleteAfterPlayback
+                )
+            }
+        ) else { return .failure(SettingsAccessError.sessionUnavailable) }
+        return result
+    }
+
     func importLegacyDownload(
         enclosureID: Int64,
         localFile: String,

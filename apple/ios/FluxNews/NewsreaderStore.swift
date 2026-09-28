@@ -1273,6 +1273,12 @@ struct IOSArticleAudioActionState {
     func setHideEmptyNavigationEntries(_ value: Bool) { hideEmptyNavigationEntries = value; defaults.set(value, forKey: Key.hideEmpty) }
     func setRemoveArticlesWhenMarkedRead(_ value: Bool) { removeArticlesWhenMarkedRead = value; defaults.set(value, forKey: Key.removeWhenRead) }
     func setMarkReadOnScrolloverEnabled(_ value: Bool) { markReadOnScrolloverEnabled = value; defaults.set(value, forKey: Key.scrollover) }
+
+    /// Applies a just-completed legacy import to this already initialized store.
+    func reloadGlobalPreferenceSettings() {
+        removeArticlesWhenMarkedRead = defaults.object(forKey: Key.removeWhenRead) as? Bool ?? false
+        markReadOnScrolloverEnabled = defaults.object(forKey: Key.scrollover) as? Bool ?? true
+    }
     func setArticlePresentationMode(_ value: ArticlePresentationMode) { articlePresentationMode = value; defaults.set(value.rawValue, forKey: Key.presentationMode); resetPresentationState() }
     func setArticlePreviewLines(_ value: ArticlePreviewLines) { articlePreviewLines = value; defaults.set(value.rawValue, forKey: Key.previewLines); resetPresentationState() }
     func setShowArticleCount(_ value: Bool) { showArticleCount = value; defaults.set(value, forKey: Key.showArticleCount) }

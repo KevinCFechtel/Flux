@@ -781,6 +781,124 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testGlobalPreferencesMigrationImportsBothBooleanValuesWhenNativeKeysAreAbsent() async throws {
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        for (scrollover, removeWhenRead) in [(true, true), (false, false)] {
+            let (defaults, suite) = makeDefaults()
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+            markAccountAsMigrated(account, defaults: defaults)
+            let coordinator = IOSLegacyMigrationCoordinator(
+                bootstrapper: bootstrapper,
+                defaults: defaults,
+                legacyGlobalPreferencesReader: {
+                    .init(markReadOnScrollover: scrollover, removeArticlesWhenMarkedRead: removeWhenRead)
+                }
+            )
+
+            let outcome = await coordinator.migrateGlobalPreferencesIfNeeded()
+            XCTAssertEqual(outcome, .imported)
+            XCTAssertEqual(defaults.object(forKey: "FluxNews.iOS.markReadOnScrollover") as? Bool, scrollover)
+            XCTAssertEqual(defaults.object(forKey: "FluxNews.iOS.removeArticlesWhenMarkedRead") as? Bool, removeWhenRead)
+        }
+    }
+
+    @MainActor
+    func testGlobalPreferencesMigrationNativePresenceWinsForBothBooleanValues() async throws {
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        for (native, legacy) in [(true, false), (false, true)] {
+            let (defaults, suite) = makeDefaults()
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+            markAccountAsMigrated(account, defaults: defaults)
+            defaults.set(native, forKey: "FluxNews.iOS.markReadOnScrollover")
+            defaults.set(native, forKey: "FluxNews.iOS.removeArticlesWhenMarkedRead")
+            let coordinator = IOSLegacyMigrationCoordinator(
+                bootstrapper: bootstrapper,
+                defaults: defaults,
+                legacyGlobalPreferencesReader: {
+                    .init(markReadOnScrollover: legacy, removeArticlesWhenMarkedRead: legacy)
+                }
+            )
+
+            let outcome = await coordinator.migrateGlobalPreferencesIfNeeded()
+            XCTAssertEqual(outcome, .imported)
+            XCTAssertEqual(defaults.object(forKey: "FluxNews.iOS.markReadOnScrollover") as? Bool, native)
+            XCTAssertEqual(defaults.object(forKey: "FluxNews.iOS.removeArticlesWhenMarkedRead") as? Bool, native)
+        }
+    }
+
+    @MainActor
+    func testGlobalPreferencesMigrationCompletesReadableEmptyOrMalformedStoreWithoutWriting() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        markAccountAsMigrated(account, defaults: defaults)
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyGlobalPreferencesReader: { .init(markReadOnScrollover: nil, removeArticlesWhenMarkedRead: nil) }
+        )
+
+        let outcome = await coordinator.migrateGlobalPreferencesIfNeeded()
+        XCTAssertEqual(outcome, .imported)
+        XCTAssertNil(defaults.object(forKey: "FluxNews.iOS.markReadOnScrollover"))
+        XCTAssertNil(defaults.object(forKey: "FluxNews.iOS.removeArticlesWhenMarkedRead"))
+        XCTAssertTrue(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.globalPreferences.v1.completed"))
+    }
+
+    @MainActor
+    func testGlobalPreferencesMigrationRetriesUnavailableReaderAndFastPathsCompletion() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        markAccountAsMigrated(account, defaults: defaults)
+        var reads = 0
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyGlobalPreferencesReader: {
+                reads += 1
+                return nil
+            }
+        )
+
+        let unavailableOutcome = await coordinator.migrateGlobalPreferencesIfNeeded()
+        XCTAssertEqual(unavailableOutcome, .retryableFailure)
+        XCTAssertFalse(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.globalPreferences.v1.completed"))
+        defaults.set(true, forKey: "FluxNews.iOS.legacyMigration.globalPreferences.v1.completed")
+        let completedOutcome = await coordinator.migrateGlobalPreferencesIfNeeded()
+        XCTAssertEqual(completedOutcome, .alreadyCompleted)
+        XCTAssertEqual(reads, 1)
+    }
+
+    @MainActor
+    func testGlobalPreferencesMigrationImportsIndependentlyAndUpdatesExistingStore() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        markAccountAsMigrated(account, defaults: defaults)
+        defaults.set(false, forKey: "FluxNews.iOS.markReadOnScrollover")
+        let store = NewsreaderStore(defaults: defaults)
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyGlobalPreferencesReader: { .init(markReadOnScrollover: true, removeArticlesWhenMarkedRead: true) }
+        )
+
+        let outcome = await coordinator.migrateGlobalPreferencesIfNeeded()
+        XCTAssertEqual(outcome, .imported)
+        XCTAssertFalse(store.markReadOnScrolloverEnabled)
+        XCTAssertFalse(store.removeArticlesWhenMarkedRead)
+        store.reloadGlobalPreferenceSettings()
+        XCTAssertFalse(store.markReadOnScrolloverEnabled)
+        XCTAssertTrue(store.removeArticlesWhenMarkedRead)
+    }
+
+    @MainActor
     func testDownloadMigrationImportedRetainsCoreOwnedCopyAndCompletes() async throws {
         let (defaults, suite) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }

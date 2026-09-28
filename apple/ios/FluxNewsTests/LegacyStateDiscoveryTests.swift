@@ -122,4 +122,21 @@ final class LegacyStateDiscoveryTests: XCTestCase {
             []
         )
     }
+
+    func testGlobalPreferencesParserAcceptsOnlyExactFlutterBooleanStrings() {
+        XCTAssertEqual(
+            LegacyStateDiscovery.parseGlobalPreferencesImport([
+                "markAsReadOnScrollOver": "true",
+                "removeNewsFromListWhenRead": "false"
+            ]),
+            .init(markReadOnScrollover: true, removeArticlesWhenMarkedRead: false)
+        )
+        XCTAssertEqual(
+            LegacyStateDiscovery.parseGlobalPreferencesImport([
+                "markAsReadOnScrollOver": "TRUE",
+                "removeNewsFromListWhenRead": " false "
+            ]),
+            .init(markReadOnScrollover: nil, removeArticlesWhenMarkedRead: nil)
+        )
+    }
 }

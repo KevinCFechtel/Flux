@@ -25,20 +25,21 @@ verify_slice() {
   local sdk="$1"
   local target="$2"
   local library_identifier="$3"
-  local framework_dir="${XCFRAMEWORK}/${library_identifier}"
-  local library="${framework_dir}/libflux_uniffi.dylib"
+  local framework_dir="${XCFRAMEWORK}/${library_identifier}/FluxUniFFI.framework"
+  local library="${framework_dir}/FluxUniFFI"
   local headers="${framework_dir}/Headers"
   local output="${work_dir}/${library_identifier}.dylib"
 
-  [[ -f "${library}" ]] || { echo "Missing iOS UniFFI library: ${library}" >&2; exit 1; }
+  [[ -f "${library}" ]] || { echo "Missing iOS UniFFI framework binary: ${library}" >&2; exit 1; }
   [[ -f "${headers}/module.modulemap" ]] || { echo "Missing iOS UniFFI module map: ${headers}/module.modulemap" >&2; exit 1; }
 
   xcrun swiftc \
     -target "${target}" \
     -sdk "$(xcrun --sdk "${sdk}" --show-sdk-path)" \
+    -F "$(dirname -- "${framework_dir}")" \
     -I "${headers}" \
     "${SOURCES}" "${proof_source}" \
-    "${library}" \
+    -framework FluxUniFFI \
     -emit-library \
     -o "${output}"
 }
