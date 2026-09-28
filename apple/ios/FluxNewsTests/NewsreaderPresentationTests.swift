@@ -71,8 +71,19 @@ final class NewsreaderPresentationTests: XCTestCase {
             #"\bTextField\s*\(\s*"((?:\\.|[^"\\])*)""#,
             #"\bContentUnavailableView\s*\(\s*"((?:\\.|[^"\\])*)""#,
             #"\bProgressView\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bLabeledContent\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bDisclosureGroup\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bMenu\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bNavigationLink\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bLink\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bStepper\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bDatePicker\s*\(\s*"((?:\\.|[^"\\])*)""#,
             #"\.alert\s*\(\s*"((?:\\.|[^"\\])*)""#,
             #"\.confirmationDialog\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\.accessibilityLabel\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\.accessibilityHint\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\.accessibilityValue\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bprompt\s*:\s*"((?:\\.|[^"\\])*)""#,
         ].map { try! NSRegularExpression(pattern: $0) }
 
         var sourceKeys = Set<String>()
@@ -295,11 +306,11 @@ final class NewsreaderPresentationTests: XCTestCase {
         }
 
         func placeholders(_ value: String) -> [String] {
-            let pattern = #"%(?:\d+\$)?(?:lld|ld|d|f|@)"#
+            let pattern = #"%(?:\d+\$)?(lld|ld|d|f|@)"#
             let regex = try! NSRegularExpression(pattern: pattern)
             let range = NSRange(value.startIndex..., in: value)
             return regex.matches(in: value, range: range).compactMap {
-                Range($0.range, in: value).map { String(value[$0]) }
+                Range($0.range(at: 1), in: value).map { String(value[$0]) }
             }
         }
 
@@ -6168,9 +6179,18 @@ final class NewsreaderPresentationTests: XCTestCase {
 
     func testReaderDocumentNoticePreservesAllContentStates() {
         XCTAssertNil(ReaderDocumentNotice.text(simplified: false, truncated: false))
-        XCTAssertEqual(ReaderDocumentNotice.text(simplified: true, truncated: false), "Some content was simplified")
-        XCTAssertEqual(ReaderDocumentNotice.text(simplified: false, truncated: true), "Some content was truncated")
-        XCTAssertEqual(ReaderDocumentNotice.text(simplified: true, truncated: true), "Some content was simplified and truncated")
+        XCTAssertEqual(
+            ReaderDocumentNotice.text(simplified: true, truncated: false),
+            String(localized: "Some content was simplified", bundle: .main)
+        )
+        XCTAssertEqual(
+            ReaderDocumentNotice.text(simplified: false, truncated: true),
+            String(localized: "Some content was truncated", bundle: .main)
+        )
+        XCTAssertEqual(
+            ReaderDocumentNotice.text(simplified: true, truncated: true),
+            String(localized: "Some content was simplified and truncated", bundle: .main)
+        )
     }
 
     func testReaderDocumentVariantsAreRepresentedByCoreProjection() {

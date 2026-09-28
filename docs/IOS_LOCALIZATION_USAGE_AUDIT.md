@@ -1,6 +1,6 @@
 # iOS Localization Usage Audit
 
-> **Status: SOURCE-USAGE AUDIT IMPLEMENTED / TEST-GATE PENDING / GERMAN COMPLETE / ES-GL-NL-TA-TR REVIEW PENDING**
+> **Status: REOPENED / TECHNICAL TEST-GATE PASSED / GERMAN COMPLETE / ES-GL-NL-TA-TR REVIEW PENDING**
 >
 > This audit exists because Xcode String Catalog `extractionState` is not a
 > reliable runtime-usage authority for the native iOS app. Productive SwiftUI,
@@ -18,9 +18,13 @@ The production usage gate scans localization-aware source in:
 
 It covers direct literals used by `String(localized:)`,
 `LocalizedStringResource`, SwiftUI text/control initializers, navigation
-titles, alerts and progress views. Dynamic/interpolated keys that cannot be
-reliably reconstructed by static extraction are listed explicitly in the test
-contract and retained as `manual` catalog entries.
+titles, alerts, confirmation dialogs and progress views. The SwiftUI controls
+covered explicitly include `LabeledContent`, `DisclosureGroup`, `Menu`,
+`NavigationLink`, `Link`, `Stepper` and `DatePicker`; the scan also covers
+literal accessibility labels, hints and values plus search prompts. Dynamic or
+interpolated keys that cannot be reliably reconstructed by static extraction
+are listed explicitly in the test contract and retained as `manual` catalog
+entries.
 
 `DeveloperDiagnosticsView.swift` is excluded from the production scan because
 that surface is reachable only through DEBUG / performance-diagnostics builds.
@@ -38,27 +42,34 @@ D9-D cleanup:
    Catalog entirely, especially newer D9 Backup/Restore, Downloaded Data,
    About/Open Source and Support Diagnostics copy.
 
-The audit also found three concrete localization bypasses where ordinary
+The audit also found five concrete localization bypasses where ordinary
 `String` values were carried into user-facing presentation instead of being
 resolved through a localization-aware API:
 
 - the Search / Search Results dynamic navigation title;
 - the Account / Set Up FluxNews dynamic navigation title;
 - the no-subscription Feed Discovery error.
+- the Add Feed / Choose a Feed dynamic navigation title;
+- the Continue / Add dynamic toolbar button title.
 
 Those call sites now resolve their product text explicitly through
 `String(localized:)`.
 
+The expanded gate also restored the source-proven `Build`, `Version`,
+`Miniflux Version`, `Technical Details`, `Downloaded Files`, `Storage Used`,
+`Stored Records` and `Search category or message` catalog keys. `Continue` is
+source-proven by the Add Feed toolbar and is retained as a `manual` entry.
+
 ## Catalog classification
 
-After the usage pass the iOS catalog contains 457 keys:
+After the final measured usage pass the iOS catalog contains 465 keys:
 
-- 262 `manual`: source-proven or dynamic runtime keys that must not be removed
+- 271 `manual`: source-proven or dynamic runtime keys that must not be removed
   based on Xcode extraction state;
 - 169 normally extracted active keys;
-- 26 remaining `stale` keys.
+- 25 remaining `stale` keys.
 
-The remaining 26 stale keys are not treated as an automatic deletion list.
+The remaining 25 stale keys are not treated as an automatic deletion list.
 
 ### DEBUG / legacy-diagnostic only
 
@@ -91,7 +102,6 @@ Repository search found no current production iOS presentation use for:
 - Article Action
 - Comments available
 - Connection Diagnostics
-- Continue
 - Miniflux server returned an unexpected response.
 - No results
 - Showing %lld of %lld
@@ -105,7 +115,12 @@ not needed to establish production localization coverage.
 German is the preservation baseline because it was the mature native iOS
 translation before D9-D:
 
-- DE: 456 translated, 0 missing, 0 needs-review.
+- DE: 465 translated, 0 missing, 0 needs-review.
+- ES: 186 translated, 254 needs-review, 25 missing structures.
+- GL: 186 translated, 254 needs-review, 25 missing structures.
+- NL: 186 translated, 254 needs-review, 25 missing structures.
+- TA: 186 translated, 254 needs-review, 25 missing structures.
+- TR: 186 translated, 254 needs-review, 25 missing structures.
 
 The usage audit exposed that the previous seven-language completion count was
 incorrect: it counted only the reduced catalog after productive keys had been
@@ -135,3 +150,7 @@ The iOS XCTest gate now:
 Future catalog cleanup must use repository/source evidence. Xcode
 `extractionState == stale` alone is never sufficient evidence that a key is
 unused.
+
+`needs_review` values deliberately remain evidence of outstanding language
+review, not completed localization. D9-D is therefore not
+localization-complete despite the passing technical gate.

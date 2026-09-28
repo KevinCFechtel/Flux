@@ -30,7 +30,7 @@ Current repository status:
 - **D9-A — Production Flutter-to-native migration:** COMPLETE / TEST-GATED
 - **D9-B — Config Backup and Restore:** COMPLETE / TEST-GATED
 - **D9-C — Configurable Bottom Action Bar:** COMPLETE / TEST-GATED
-- **D9-D — Localization parity:** REOPENED — SOURCE-USAGE AUDIT TEST-GATE PENDING / ES-GL-NL-TA-TR REVIEW PENDING
+- **D9-D — Localization parity:** REOPENED — SOURCE-USAGE AUDIT TECHNICALLY TEST-GATED / ES-GL-NL-TA-TR REVIEW PENDING
 - **D9-E — Downloaded Data:** COMPLETE / TEST-GATED
 - **D9-F — Miniflux account information / HTTP warning:** COMPLETE / TEST-GATED
 - **D9-G — Open Source and About:** COMPLETE / TEST-GATED

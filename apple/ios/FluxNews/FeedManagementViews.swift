@@ -88,11 +88,19 @@ struct IOSAddFeedView: View {
             }
             if let error { Section { Text(error).foregroundStyle(.red) } }
         }
-        .navigationTitle(candidates.isEmpty ? "Add Feed" : "Choose a Feed")
+        .navigationTitle(
+            candidates.isEmpty
+                ? String(localized: "Add Feed")
+                : String(localized: "Choose a Feed")
+        )
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {
-                Button(candidates.isEmpty ? "Continue" : "Add") {
+                Button(
+                    candidates.isEmpty
+                        ? String(localized: "Continue")
+                        : String(localized: "Add")
+                ) {
                     candidates.isEmpty ? discover() : createSelectedCandidate()
                 }
                 .disabled(isWorking || (candidates.isEmpty ? normalizedURL == nil : selectedCandidateIndex == nil))
