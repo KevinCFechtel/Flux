@@ -1360,4 +1360,158 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         }
     }
 
+
+    func testLegacyWidgetDefaultsParserMapsCompatibleFlutterSettings() {
+        let parsed = LegacyStateDiscovery.parseWidgetDefaultsImport([
+            "widgetUnreadOnly": "false",
+            "widgetFilterType": "feed",
+            "widgetFilterId": "42",
+            "widgetSortOrder": "Oldest first",
+            "widgetOpenMiniflux": "true",
+            "widgetItemLimit": "99",
+        ])
+
+        XCTAssertEqual(
+            parsed?.selection,
+            WidgetContentSelection(
+                scope: .feed,
+                categoryID: nil,
+                feedID: 42,
+                readFilter: .all,
+                sortOrder: .oldestFirst
+            )
+        )
+    }
+
+    func testLegacyWidgetDefaultsParserUsesKnownFlutterDefaultsForMissingFields() {
+        XCTAssertEqual(
+            LegacyStateDiscovery.parseWidgetDefaultsImport([
+                "widgetFilterType": "category",
+                "widgetFilterId": "9",
+            ])?.selection,
+            WidgetContentSelection(
+                scope: .category,
+                categoryID: 9,
+                feedID: nil,
+                readFilter: .unread,
+                sortOrder: .newestFirst
+            )
+        )
+    }
+
+    func testLegacyWidgetDefaultsParserUsesLegacyNewsStatusFallback() {
+        XCTAssertEqual(
+            LegacyStateDiscovery.parseWidgetDefaultsImport([
+                "widgetNewsStatus": "bookmarked",
+            ])?.selection,
+            WidgetContentSelection(
+                scope: .bookmarks,
+                categoryID: nil,
+                feedID: nil,
+                readFilter: .all,
+                sortOrder: .newestFirst
+            )
+        )
+
+        XCTAssertNil(
+            LegacyStateDiscovery.parseWidgetDefaultsImport([
+                "widgetUnreadOnly": "true",
+                "widgetFilterType": "feed",
+                "widgetSortOrder": "Newest first",
+            ])
+        )
+    }
+
+    func testWidgetLegacyDefaultStoreRoundTripsSelection() {
+        let suite = "FluxNews.WidgetLegacyDefaultStore.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let selection = WidgetContentSelection(
+            scope: .category,
+            categoryID: 7,
+            feedID: nil,
+            readFilter: .unread,
+            sortOrder: .oldestFirst
+        )
+
+        XCTAssertFalse(WidgetLegacyDefaultStore.containsConfiguration(in: defaults))
+        XCTAssertTrue(WidgetLegacyDefaultStore.save(selection, to: defaults))
+        XCTAssertTrue(WidgetLegacyDefaultStore.containsConfiguration(in: defaults))
+        XCTAssertEqual(WidgetLegacyDefaultStore.load(from: defaults), selection)
+    }
+
+    @MainActor
+    func testWidgetDefaultsMigrationImportsOnceAndPreservesExistingNativeSeed() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(
+            server: "https://legacy.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let (bootstrapper, _) = try await makeReadyBootstrapper(
+            account: account,
+            defaults: defaults
+        )
+        markAccountAsMigrated(account, defaults: defaults)
+
+        let importedSelection = WidgetContentSelection(
+            scope: .feed,
+            categoryID: nil,
+            feedID: 42,
+            readFilter: .all,
+            sortOrder: .oldestFirst
+        )
+        var reads = 0
+        var written: WidgetContentSelection?
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyWidgetDefaultsReader: {
+                reads += 1
+                return LegacyWidgetDefaultsImport(selection: importedSelection)
+            },
+            legacyWidgetDefaultsStoreContainsConfiguration: { false },
+            legacyWidgetDefaultsWriter: {
+                written = $0
+                return true
+            }
+        )
+
+        let importedOutcome = await coordinator.migrateWidgetDefaultsIfNeeded()
+        XCTAssertEqual(importedOutcome, .imported)
+        XCTAssertEqual(written, importedSelection)
+        XCTAssertEqual(reads, 1)
+        let completedOutcome = await coordinator.migrateWidgetDefaultsIfNeeded()
+        XCTAssertEqual(completedOutcome, .alreadyCompleted)
+        XCTAssertEqual(reads, 1)
+
+        let (nativeDefaults, nativeSuite) = makeDefaults()
+        defer { nativeDefaults.removePersistentDomain(forName: nativeSuite) }
+        let (nativeBootstrapper, _) = try await makeReadyBootstrapper(
+            account: account,
+            defaults: nativeDefaults
+        )
+        markAccountAsMigrated(account, defaults: nativeDefaults)
+        var nativeRead = false
+        let nativeCoordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: nativeBootstrapper,
+            defaults: nativeDefaults,
+            legacyWidgetDefaultsReader: {
+                nativeRead = true
+                return LegacyWidgetDefaultsImport(selection: importedSelection)
+            },
+            legacyWidgetDefaultsStoreContainsConfiguration: { true },
+            legacyWidgetDefaultsWriter: { _ in
+                XCTFail("Existing native widget seed must win")
+                return false
+            }
+        )
+
+        let nativeOutcome = await nativeCoordinator.migrateWidgetDefaultsIfNeeded()
+        XCTAssertEqual(nativeOutcome, .nativeConfigurationWins)
+        XCTAssertFalse(nativeRead)
+    }
+
 }

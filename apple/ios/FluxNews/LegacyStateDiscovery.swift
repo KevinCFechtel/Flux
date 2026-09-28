@@ -72,6 +72,10 @@ struct LegacyToolbarImport: Equatable {
     let selectedActions: [IOSBottomAction]?
 }
 
+struct LegacyWidgetDefaultsImport: Equatable {
+    let selection: WidgetContentSelection
+}
+
 enum LegacyStateDiscovery {
     static let productionBundleID = "dev.kevincfechtel.fluxNews"
     static let applicationGroup = "group.dev.kevincfechtel.fluxNews"
@@ -84,6 +88,11 @@ enum LegacyStateDiscovery {
     private static let feedSettingsKey = "feedSettingsOverrides"
     private static let markReadOnScrolloverKey = "markAsReadOnScrollOver"
     private static let removeArticlesWhenMarkedReadKey = "removeNewsFromListWhenRead"
+    private static let widgetNewsStatusKey = "widgetNewsStatus"
+    private static let widgetUnreadOnlyKey = "widgetUnreadOnly"
+    private static let widgetFilterTypeKey = "widgetFilterType"
+    private static let widgetFilterIDKey = "widgetFilterId"
+    private static let widgetSortOrderKey = "widgetSortOrder"
     private static let playbackPrefix = "audio_progress_"
     private static let flutterPreferencesPrefix = "flutter."
     private static let downloadPathPrefix = "audio_download_path_"
@@ -190,6 +199,16 @@ enum LegacyStateDiscovery {
         guard Bundle.main.bundleIdentifier == productionBundleID,
               let values = keychainValues() else { return nil }
         return parseToolbarImport(values)
+    }
+
+    /// Reads only the Flutter widget settings that have a direct semantic
+    /// equivalent in the native per-instance WidgetKit configuration. The
+    /// legacy widget-specific Open in Miniflux flag, item limit and background
+    /// styling are intentionally excluded.
+    static func readWidgetDefaultsImport() -> LegacyWidgetDefaultsImport? {
+        guard Bundle.main.bundleIdentifier == productionBundleID,
+              let values = keychainValues() else { return nil }
+        return parseWidgetDefaultsImport(values)
     }
 
     /// Reads Flutter's article-keyed playback values with the same source
@@ -451,6 +470,96 @@ enum LegacyStateDiscovery {
         return LegacyToolbarImport(selectedActions: selected)
     }
 
+    static func parseWidgetDefaultsImport(
+        _ values: [String: String]
+    ) -> LegacyWidgetDefaultsImport? {
+        let relevantKeys = [
+            widgetNewsStatusKey,
+            widgetUnreadOnlyKey,
+            widgetFilterTypeKey,
+            widgetSortOrderKey,
+        ]
+        guard relevantKeys.contains(where: { values[$0] != nil }) else {
+            return nil
+        }
+
+        func exactBool(_ key: String) -> Bool? {
+            switch values[key] {
+            case "true": true
+            case "false": false
+            default: nil
+            }
+        }
+
+        let readFilter: WidgetReadFilter
+        if let rawUnreadOnly = values[widgetUnreadOnlyKey] {
+            guard let unreadOnly = exactBool(widgetUnreadOnlyKey) else { return nil }
+            readFilter = unreadOnly ? .unread : .all
+        } else {
+            switch values[widgetNewsStatusKey] {
+            case "unread": readFilter = .unread
+            case "all", "bookmarked": readFilter = .all
+            case nil: readFilter = .unread
+            default: return nil
+            }
+        }
+
+        let scope: WidgetContentScope
+        var categoryID: Int64?
+        var feedID: Int64?
+        if let rawScope = values[widgetFilterTypeKey] {
+            switch rawScope {
+            case "all":
+                scope = .allNews
+            case "bookmarked":
+                scope = .bookmarks
+            case "category":
+                guard let rawID = values[widgetFilterIDKey],
+                      let id = Int64(rawID), id > 0 else {
+                    return nil
+                }
+                scope = .category
+                categoryID = id
+            case "feed":
+                guard let rawID = values[widgetFilterIDKey],
+                      let id = Int64(rawID), id > 0 else {
+                    return nil
+                }
+                scope = .feed
+                feedID = id
+            default:
+                return nil
+            }
+        } else {
+            switch values[widgetNewsStatusKey] {
+            case "bookmarked": scope = .bookmarks
+            case "unread", "all", nil: scope = .allNews
+            default: return nil
+            }
+        }
+
+        let sortOrder: WidgetSortOrder
+        switch values[widgetSortOrderKey] {
+        case nil, "Newest first":
+            sortOrder = .newestFirst
+        case "Oldest first":
+            sortOrder = .oldestFirst
+        default:
+            return nil
+        }
+
+        return .init(
+            selection: .init(
+                scope: scope,
+                categoryID: categoryID,
+                feedID: feedID,
+                readFilter: readFilter,
+                sortOrder: sortOrder
+            )
+        )
+    }
+
+
     static func redactedSummary(_ result: LegacyDiscoveryResult) -> [String: String] {
         [
             "Production identity": result.productionIdentity.rawValue,
@@ -479,7 +588,9 @@ enum LegacyStateDiscovery {
         "brightnessMode", "activateTruncate", "charactersToTruncate",
         "autoDownloadAudioAfterSync", "downloadAudioOnlyOnWifi",
         "deleteAudioAfterPlayback", "audioDownloadRetentionDays",
-        "iosToolbarActions", "iosToolbarActionOrder"
+        "iosToolbarActions", "iosToolbarActionOrder",
+        widgetNewsStatusKey, widgetUnreadOnlyKey, widgetFilterTypeKey,
+        widgetFilterIDKey, widgetSortOrderKey
     ]
 
     private static let compatibleMediaSettings: Set<String> = [

@@ -93,6 +93,39 @@ struct FluxNewsWidgetConfigurationIntent: WidgetConfigurationIntent {
     @Parameter(title: LocalizedStringResource("Sort Order"), default: .newestFirst) var sortOrder: FluxNewsWidgetSortOrder
     @Parameter(title: LocalizedStringResource("Category")) var category: FluxNewsCategoryEntity?
     @Parameter(title: LocalizedStringResource("Feed")) var feed: FluxNewsFeedEntity?
+
+    init() {
+        guard let legacy = WidgetLegacyDefaultStore.load() else { return }
+
+        scope = FluxNewsWidgetScope(rawValue: legacy.scope.rawValue) ?? .allNews
+        readFilter = FluxNewsWidgetReadFilter(rawValue: legacy.readFilter.rawValue) ?? .unread
+        sortOrder = FluxNewsWidgetSortOrder(rawValue: legacy.sortOrder.rawValue) ?? .newestFirst
+
+        switch legacy.scope {
+        case .category:
+            if let categoryID = legacy.categoryID {
+                category = Self.categoryEntity(id: categoryID)
+            }
+        case .feed:
+            if let feedID = legacy.feedID {
+                feed = Self.feedEntity(id: feedID)
+            }
+        case .allNews, .bookmarks:
+            break
+        }
+    }
+
+    private static func categoryEntity(id: Int64) -> FluxNewsCategoryEntity {
+        let title = (try? WidgetSnapshotStore().read()?.categories.first(where: { $0.id == id })?.title)
+            ?? String(localized: "Category")
+        return .init(id: String(id), title: title)
+    }
+
+    private static func feedEntity(id: Int64) -> FluxNewsFeedEntity {
+        let title = (try? WidgetSnapshotStore().read()?.feeds.first(where: { $0.id == id })?.title)
+            ?? String(localized: "Feed")
+        return .init(id: String(id), title: title)
+    }
 }
 
 struct FluxNewsWidgetEntry: TimelineEntry {

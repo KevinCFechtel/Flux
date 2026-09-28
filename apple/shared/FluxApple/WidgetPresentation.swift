@@ -97,6 +97,86 @@ struct WidgetContentSelection: Equatable {
     }
 }
 
+
+enum WidgetLegacyDefaultStore {
+    static let applicationGroup = "group.dev.kevincfechtel.fluxNews"
+
+    private enum Key {
+        static let version = "FluxNews.Widget.legacyDefaults.version"
+        static let scope = "FluxNews.Widget.legacyDefaults.scope"
+        static let categoryID = "FluxNews.Widget.legacyDefaults.categoryID"
+        static let feedID = "FluxNews.Widget.legacyDefaults.feedID"
+        static let readFilter = "FluxNews.Widget.legacyDefaults.readFilter"
+        static let sortOrder = "FluxNews.Widget.legacyDefaults.sortOrder"
+    }
+
+    static func containsConfiguration(
+        in defaults: UserDefaults? = UserDefaults(suiteName: applicationGroup)
+    ) -> Bool {
+        defaults?.object(forKey: Key.version) != nil
+    }
+
+    static func load(
+        from defaults: UserDefaults? = UserDefaults(suiteName: applicationGroup)
+    ) -> WidgetContentSelection? {
+        guard let defaults,
+              defaults.integer(forKey: Key.version) == 1,
+              let scopeRaw = defaults.string(forKey: Key.scope),
+              let scope = WidgetContentScope(rawValue: scopeRaw),
+              let readFilterRaw = defaults.string(forKey: Key.readFilter),
+              let readFilter = WidgetReadFilter(rawValue: readFilterRaw),
+              let sortOrderRaw = defaults.string(forKey: Key.sortOrder),
+              let sortOrder = WidgetSortOrder(rawValue: sortOrderRaw) else {
+            return nil
+        }
+
+        let categoryID = defaults.object(forKey: Key.categoryID).flatMap {
+            ($0 as? NSNumber)?.int64Value
+        }
+        let feedID = defaults.object(forKey: Key.feedID).flatMap {
+            ($0 as? NSNumber)?.int64Value
+        }
+        if scope == .category, categoryID == nil { return nil }
+        if scope == .feed, feedID == nil { return nil }
+
+        return .init(
+            scope: scope,
+            categoryID: scope == .category ? categoryID : nil,
+            feedID: scope == .feed ? feedID : nil,
+            readFilter: readFilter,
+            sortOrder: sortOrder
+        )
+    }
+
+    @discardableResult
+    static func save(
+        _ selection: WidgetContentSelection,
+        to defaults: UserDefaults? = UserDefaults(suiteName: applicationGroup)
+    ) -> Bool {
+        guard let defaults else { return false }
+        if selection.scope == .category, selection.categoryID == nil { return false }
+        if selection.scope == .feed, selection.feedID == nil { return false }
+
+        defaults.set(selection.scope.rawValue, forKey: Key.scope)
+        defaults.set(selection.readFilter.rawValue, forKey: Key.readFilter)
+        defaults.set(selection.sortOrder.rawValue, forKey: Key.sortOrder)
+
+        if selection.scope == .category, let categoryID = selection.categoryID {
+            defaults.set(categoryID, forKey: Key.categoryID)
+        } else {
+            defaults.removeObject(forKey: Key.categoryID)
+        }
+        if selection.scope == .feed, let feedID = selection.feedID {
+            defaults.set(feedID, forKey: Key.feedID)
+        } else {
+            defaults.removeObject(forKey: Key.feedID)
+        }
+
+        defaults.set(1, forKey: Key.version)
+        return true
+    }
+}
+
 enum WidgetContentState: Equatable {
     case missingSnapshot
     case corruptSnapshot

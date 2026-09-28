@@ -48,6 +48,10 @@ enum IOSLegacyToolbarMigrationOutcome: Equatable {
     case notEligible, alreadyCompleted, nativeConfigurationWins, noLegacyConfiguration, imported, retryableFailure
 }
 
+enum IOSLegacyWidgetDefaultsMigrationOutcome: Equatable {
+    case notEligible, alreadyCompleted, nativeConfigurationWins, noLegacyConfiguration, imported, retryableFailure
+}
+
 struct IOSLegacyMediaSettingsImport: Equatable {
     let unmeteredOnly: Bool?
     let deleteAfterPlayback: Bool?
@@ -92,6 +96,7 @@ final class IOSLegacyMigrationCoordinator {
         static let settingsFollowupCoreCompleted = "FluxNews.iOS.legacyMigration.settingsFollowup.v2.core.completed"
         static let settingsFollowupStartupCompleted = "FluxNews.iOS.legacyMigration.settingsFollowup.v2.startup.completed"
         static let toolbarMigrationCompleted = "FluxNews.iOS.legacyMigration.toolbar.v1.completed"
+        static let widgetDefaultsMigrationCompleted = "FluxNews.iOS.legacyMigration.widgetDefaults.v1.completed"
         static let removeArticlesWhenMarkedRead = "FluxNews.iOS.removeArticlesWhenMarkedRead"
         static let markReadOnScrollover = "FluxNews.iOS.markReadOnScrollover"
     }
@@ -109,6 +114,9 @@ final class IOSLegacyMigrationCoordinator {
     private let legacyGlobalPreferencesReader: () -> LegacyGlobalPreferencesImport?
     private let legacySettingsReader: () -> LegacySettingsImport?
     private let legacyToolbarReader: () -> LegacyToolbarImport?
+    private let legacyWidgetDefaultsReader: () -> LegacyWidgetDefaultsImport?
+    private let legacyWidgetDefaultsStoreContainsConfiguration: () -> Bool
+    private let legacyWidgetDefaultsWriter: (WidgetContentSelection) -> Bool
     private let mediaRootProvider: () -> URL?
     private let fileManager: FileManager
     private let logger = IOSAppLogger(category: "legacy_migration")
@@ -128,6 +136,13 @@ final class IOSLegacyMigrationCoordinator {
         legacyGlobalPreferencesReader: @escaping () -> LegacyGlobalPreferencesImport? = LegacyStateDiscovery.readGlobalPreferencesImport,
         legacySettingsReader: @escaping () -> LegacySettingsImport? = LegacyStateDiscovery.readSettingsImport,
         legacyToolbarReader: @escaping () -> LegacyToolbarImport? = LegacyStateDiscovery.readToolbarImport,
+        legacyWidgetDefaultsReader: @escaping () -> LegacyWidgetDefaultsImport? = LegacyStateDiscovery.readWidgetDefaultsImport,
+        legacyWidgetDefaultsStoreContainsConfiguration: @escaping () -> Bool = {
+            WidgetLegacyDefaultStore.containsConfiguration()
+        },
+        legacyWidgetDefaultsWriter: @escaping (WidgetContentSelection) -> Bool = {
+            WidgetLegacyDefaultStore.save($0)
+        },
         mediaRootProvider: @escaping () -> URL? = { IOSMediaTransferPathConfiguration.mediaRootURL },
         fileManager: FileManager = .default
     ) {
@@ -144,6 +159,9 @@ final class IOSLegacyMigrationCoordinator {
         self.legacyGlobalPreferencesReader = legacyGlobalPreferencesReader
         self.legacySettingsReader = legacySettingsReader
         self.legacyToolbarReader = legacyToolbarReader
+        self.legacyWidgetDefaultsReader = legacyWidgetDefaultsReader
+        self.legacyWidgetDefaultsStoreContainsConfiguration = legacyWidgetDefaultsStoreContainsConfiguration
+        self.legacyWidgetDefaultsWriter = legacyWidgetDefaultsWriter
         self.mediaRootProvider = mediaRootProvider
         self.fileManager = fileManager
     }
@@ -500,6 +518,39 @@ final class IOSLegacyMigrationCoordinator {
         )
         defaults.set(true, forKey: DefaultsKey.toolbarMigrationCompleted)
         logger.info("Legacy iOS toolbar configuration copied into native action preferences.")
+        return .imported
+    }
+
+    /// D9-A follow-up for the old Flutter global widget settings. The values
+    /// seed only the initial AppIntent state for future native widget instances;
+    /// WidgetKit remains the owner of every configured per-instance intent.
+    @discardableResult
+    func migrateWidgetDefaultsIfNeeded() async -> IOSLegacyWidgetDefaultsMigrationOutcome {
+        if defaults.bool(forKey: DefaultsKey.widgetDefaultsMigrationCompleted) {
+            return .alreadyCompleted
+        }
+        guard !inFlight else { return .retryableFailure }
+        inFlight = true
+        defer { inFlight = false }
+
+        do { guard try isCurrentMigratedAccount() else { return .notEligible } }
+        catch { return .retryableFailure }
+
+        if legacyWidgetDefaultsStoreContainsConfiguration() {
+            defaults.set(true, forKey: DefaultsKey.widgetDefaultsMigrationCompleted)
+            return .nativeConfigurationWins
+        }
+
+        guard let legacy = legacyWidgetDefaultsReader() else {
+            defaults.set(true, forKey: DefaultsKey.widgetDefaultsMigrationCompleted)
+            return .noLegacyConfiguration
+        }
+        guard legacyWidgetDefaultsWriter(legacy.selection) else {
+            return .retryableFailure
+        }
+
+        defaults.set(true, forKey: DefaultsKey.widgetDefaultsMigrationCompleted)
+        logger.info("Legacy Flutter widget defaults copied into the native WidgetKit migration seed.")
         return .imported
     }
 

@@ -152,6 +152,25 @@ The Flutter production migration consumes `iosToolbarActions` together with
 Existing native `articleListActionIDs` presence wins, including an explicitly
 empty native selection.
 
+
+The post-widget-configuration D9-A follow-up additionally imports Flutter's
+global widget defaults when they have a direct semantic native equivalent:
+
+- `widgetUnreadOnly` (with legacy `widgetNewsStatus` fallback) -> Unread / All;
+- `widgetFilterType` + positive `widgetFilterId` -> All / Bookmarks /
+  Category / Feed;
+- `widgetSortOrder` -> Newest First / Oldest First.
+
+These values are written only as an App-Group **legacy widget default seed**.
+They initialize newly created native WidgetKit AppIntent configurations after
+the production upgrade; WidgetKit remains the owner of every persisted
+per-widget instance and an existing native seed wins. The legacy
+`widgetOpenMiniflux`, widget item limit and widget background styling are not
+migrated. Widget article taps continue to use the normal app/per-feed routing
+policy.
+
+This D9-A widget-default migration follow-up is COMPLETE / TEST-GATED.
+
 Configuration must preserve the existing adaptive placement rules for iPhone
 portrait, compact landscape, regular split presentation, and system
 vertical-toolbar environments.
