@@ -639,6 +639,146 @@ final class AccountLifecycleTests: XCTestCase {
         XCTAssertEqual(bootstrapper.credentials, previous)
     }
 
+    func testAccountInformationPresentationDetectsOnlyHTTP() {
+        XCTAssertTrue(
+            IOSAccountInformationPresentation.usesUnencryptedHTTP(
+                " http://miniflux.example/path "
+            )
+        )
+        XCTAssertFalse(
+            IOSAccountInformationPresentation.usesUnencryptedHTTP(
+                "https://miniflux.example"
+            )
+        )
+        XCTAssertFalse(
+            IOSAccountInformationPresentation.usesUnencryptedHTTP(
+                "miniflux.example"
+            )
+        )
+    }
+
+    func testAccountInformationPresentationNormalizesServerVersion() {
+        XCTAssertEqual(
+            IOSAccountInformationPresentation.normalizedServerVersion(" 2.2.12 "),
+            "2.2.12"
+        )
+        XCTAssertNil(
+            IOSAccountInformationPresentation.normalizedServerVersion("   ")
+        )
+        XCTAssertNil(
+            IOSAccountInformationPresentation.normalizedServerVersion(nil)
+        )
+    }
+
+    @MainActor
+    func testSuccessfulAccountEditPersistsDetectedServerVersionAcrossStartup() async throws {
+        let suiteName = "FluxNews.AccountInfo.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            true,
+            forKey: "FluxNews.iOS.mutationDeliveryDefaultApplied.v1"
+        )
+
+        let old = IOSMinifluxCredentials(
+            server: "https://old.example",
+            apiKey: "old-key",
+            customHeaders: []
+        )
+        let replacement = IOSMinifluxCredentials(
+            server: "https://new.example",
+            apiKey: "new-key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(old)
+        let oldCore = try makeCore(for: old)
+        let newCore = try makeCore(for: replacement)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { account in
+                account == old ? oldCore : newCore
+            },
+            accountValidator: { _ in
+                AccountValidationAttempt(
+                    result: AccountValidationResult(
+                        installationBase: replacement.server,
+                        version: " 2.2.12 "
+                    ),
+                    error: nil,
+                    diagnostic: nil
+                )
+            },
+            defaults: defaults
+        )
+        await bootstrapper.start()
+        await bootstrapper.configure(
+            server: replacement.server,
+            apiKey: replacement.apiKey,
+            headers: []
+        )
+
+        XCTAssertEqual(bootstrapper.serverVersion, "2.2.12")
+
+        let restarted = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in newCore },
+            defaults: defaults
+        )
+        await restarted.start()
+
+        XCTAssertEqual(restarted.credentials, replacement)
+        XCTAssertEqual(restarted.serverVersion, "2.2.12")
+    }
+
+    @MainActor
+    func testFailedAccountEditKeepsPreviousPersistedServerVersion() async throws {
+        let suiteName = "FluxNews.AccountInfoFailure.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            true,
+            forKey: "FluxNews.iOS.mutationDeliveryDefaultApplied.v1"
+        )
+        defaults.set(
+            "https://old.example",
+            forKey: "FluxNews.iOS.accountInfo.serverBase.v1"
+        )
+        defaults.set(
+            "2.1.0",
+            forKey: "FluxNews.iOS.accountInfo.serverVersion.v1"
+        )
+
+        let old = IOSMinifluxCredentials(
+            server: "https://old.example",
+            apiKey: "old-key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(old)
+        let core = try makeCore(for: old)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core },
+            accountValidator: { _ in
+                throw AccountValidationError.Unauthorized
+            },
+            defaults: defaults
+        )
+        await bootstrapper.start()
+
+        XCTAssertEqual(bootstrapper.serverVersion, "2.1.0")
+
+        await bootstrapper.configure(
+            server: "https://new.example",
+            apiKey: "new-key",
+            headers: []
+        )
+
+        XCTAssertEqual(bootstrapper.credentials, old)
+        XCTAssertEqual(bootstrapper.serverVersion, "2.1.0")
+    }
+
     @MainActor
     func testSuccessfulAccountEditReplacesCoreAndPersistsNormalizedHeaders() async throws {
         let old = IOSMinifluxCredentials(server: "https://old.example", apiKey: "old-key", customHeaders: [])

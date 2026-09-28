@@ -192,6 +192,18 @@ Account/Settings must additionally expose:
 HTTP remains supported where the existing account validation permits it; the
 warning informs the user rather than changing transport ownership.
 
+Implementation contract:
+
+- the successfully detected Miniflux version is retained as non-sensitive,
+  account-bound presentation metadata and restored for the same normalized
+  server after app restart;
+- failed replacement validation/activation does not overwrite the currently
+  active account's retained version;
+- the HTTP warning is presentation-only and is derived from the currently
+  configured/edited server URL;
+- failed validation technical information is exposed under **Connection
+  Details**, not Developer Diagnostics.
+
 ### D9-G — Open Source and About
 
 Settings must provide normal user-facing access to:

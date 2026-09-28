@@ -28,3 +28,17 @@ enum IOSAccountValidationPresentation {
         }
     }
 }
+
+
+enum IOSAccountInformationPresentation {
+    static func normalizedServerVersion(_ version: String?) -> String? {
+        guard let version else { return nil }
+        let trimmed = version.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    static func usesUnencryptedHTTP(_ server: String) -> Bool {
+        let trimmed = server.trimmingCharacters(in: .whitespacesAndNewlines)
+        return URLComponents(string: trimmed)?.scheme?.lowercased() == "http"
+    }
+}

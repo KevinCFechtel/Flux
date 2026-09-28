@@ -6,6 +6,10 @@ final class CoreBootstrapper: ObservableObject {
     private enum DefaultsKey {
         static let mutationDeliveryDefaultApplied =
             "FluxNews.iOS.mutationDeliveryDefaultApplied.v1"
+        static let accountInfoServerBase =
+            "FluxNews.iOS.accountInfo.serverBase.v1"
+        static let accountInfoServerVersion =
+            "FluxNews.iOS.accountInfo.serverVersion.v1"
     }
 
     enum SettingsAccessError: Error {
@@ -40,6 +44,7 @@ final class CoreBootstrapper: ObservableObject {
     @Published private(set) var credentials: IOSMinifluxCredentials?
     @Published private(set) var validationMessage: String?
     @Published private(set) var validationDiagnostic: AccountValidationDiagnostic?
+    @Published private(set) var serverVersion: String?
     @Published private(set) var isConfiguring = false
     @Published private(set) var localStateRebuildState: LocalStateRebuildState = .idle
     @Published private(set) var core: Flux?
@@ -121,6 +126,7 @@ final class CoreBootstrapper: ObservableObject {
                 return
             }
             credentials = stored
+            serverVersion = persistedServerVersion(for: stored)
             _ = try await activate(stored, persist: false, generation: generation)
         } catch IOSCredentialStoreError.temporarilyUnavailable {
             // Before the first unlock after reboot, Keychain access can be
@@ -424,6 +430,7 @@ final class CoreBootstrapper: ObservableObject {
                 try credentialStore.save(normalized)
                 do {
                     guard try await activate(normalized, persist: false, generation: generation) else { return }
+                    persistServerVersion(result.version, for: normalized)
                 } catch {
                     if let previous { try? credentialStore.save(previous) } else { try? credentialStore.remove() }
                     throw error
@@ -496,7 +503,9 @@ final class CoreBootstrapper: ObservableObject {
         let generation = nextBootstrapGeneration()
         guard let activeCore = core else {
             try? credentialStore.remove()
+            clearPersistedServerVersion()
             credentials = nil
+            serverVersion = nil
             state = .accountRequired
             return
         }
@@ -517,6 +526,7 @@ final class CoreBootstrapper: ObservableObject {
                 return
             }
             try credentialStore.remove()
+            clearPersistedServerVersion()
             deactivateAfterCoreQuiescence()
             localStateRebuildState = .idle
             state = .accountRequired
@@ -618,7 +628,39 @@ final class CoreBootstrapper: ObservableObject {
         core = nil
         coreRevision &+= 1
         credentials = nil
+        serverVersion = nil
         onCoreChanged?(nil)
+    }
+
+    private func persistedServerVersion(
+        for account: IOSMinifluxCredentials
+    ) -> String? {
+        guard defaults.string(forKey: DefaultsKey.accountInfoServerBase) == account.server else {
+            return nil
+        }
+        return IOSAccountInformationPresentation.normalizedServerVersion(
+            defaults.string(forKey: DefaultsKey.accountInfoServerVersion)
+        )
+    }
+
+    private func persistServerVersion(
+        _ version: String,
+        for account: IOSMinifluxCredentials
+    ) {
+        defaults.set(account.server, forKey: DefaultsKey.accountInfoServerBase)
+        if let normalized =
+            IOSAccountInformationPresentation.normalizedServerVersion(version) {
+            defaults.set(normalized, forKey: DefaultsKey.accountInfoServerVersion)
+            serverVersion = normalized
+        } else {
+            defaults.removeObject(forKey: DefaultsKey.accountInfoServerVersion)
+            serverVersion = nil
+        }
+    }
+
+    private func clearPersistedServerVersion() {
+        defaults.removeObject(forKey: DefaultsKey.accountInfoServerBase)
+        defaults.removeObject(forKey: DefaultsKey.accountInfoServerVersion)
     }
 
     private func nextBootstrapGeneration() -> UInt64 {

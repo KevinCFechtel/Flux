@@ -20,6 +20,14 @@ struct AccountConfigurationView: View {
         _headers = State(initialValue: account?.customHeaders ?? [])
     }
 
+    private var displayedServerVersion: String? {
+        guard let activeServer = bootstrapper.credentials?.server,
+              activeServer == server.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return nil
+        }
+        return bootstrapper.serverVersion
+    }
+
     var body: some View {
         Group {
             if embedded { formContent }
@@ -36,6 +44,24 @@ struct AccountConfigurationView: View {
                     .autocorrectionDisabled()
                 SecureField("API Key", text: $apiKey)
                     .textContentType(.password)
+            }
+            if displayedServerVersion != nil
+                || IOSAccountInformationPresentation.usesUnencryptedHTTP(server) {
+                Section("Server Information") {
+                    if let version = displayedServerVersion {
+                        LabeledContent("Miniflux Version", value: version)
+                    }
+                    if IOSAccountInformationPresentation.usesUnencryptedHTTP(server) {
+                        Label {
+                            Text(
+                                "This Miniflux server uses unencrypted HTTP. Account credentials and feed traffic are not protected by HTTPS."
+                            )
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
             }
             Section {
                 ForEach($headers) { $header in
@@ -54,8 +80,8 @@ struct AccountConfigurationView: View {
                 Section { Text(message).foregroundStyle(.red) }
             }
             if let diagnostic = bootstrapper.validationDiagnostic {
-                Section("Developer Diagnostics") {
-                    DisclosureGroup("Connection Diagnostics") {
+                Section("Connection Details") {
+                    DisclosureGroup("Technical Details") {
                         LabeledContent("Category", value: diagnostic.category)
                         Text(diagnostic.detail)
                             .font(.footnote.monospaced())
@@ -111,6 +137,11 @@ struct AccountConfigurationView: View {
                 } footer: {
                     Text("Rebuild discards synchronized local data and downloads it again from Miniflux while keeping this account and your settings. Remove Account also removes account-bound data and credentials.")
                 }
+            }
+        }
+        .onChange(of: bootstrapper.credentials?.server) {
+            if let activeServer = bootstrapper.credentials?.server {
+                server = activeServer
             }
         }
         .navigationTitle(allowsRemoval ? "Account" : "Set Up FluxNews")
