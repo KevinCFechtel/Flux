@@ -3671,43 +3671,61 @@ impl Store {
             .map_err(sql_error)
     }
     pub fn widget_data(&self) -> Result<WidgetData, CoreError> {
-        const UNREAD_PER_FEED: i64 = 12;
-        const BOOKMARKS: i64 = 48;
+        const CANDIDATES_PER_FEED_AND_DIRECTION: i64 = 12;
+        const BOOKMARK_CANDIDATES_PER_DIRECTION: i64 = 48;
         let connection = self
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let catalog = self.navigation_catalog_locked(&connection)?;
         let mut statement = connection.prepare(
-            "WITH unread AS (\
+            "WITH ranked AS (\
                 SELECT a.id,a.feed_id,f.category_id,f.title AS feed_title,a.title AS article_title,a.published_at,a.is_read,a.is_starred,\
-                    ROW_NUMBER() OVER (PARTITION BY a.feed_id ORDER BY a.published_at DESC,a.id DESC) AS position \
-                FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE a.is_read=0 \
-             ), selected_unread AS (SELECT * FROM unread WHERE position <= ?1), \
-             selected_bookmarks AS (\
-                SELECT a.id,a.feed_id,f.category_id,f.title AS feed_title,a.title AS article_title,a.published_at,a.is_read,a.is_starred \
+                    ROW_NUMBER() OVER (PARTITION BY a.feed_id ORDER BY a.published_at DESC,a.id DESC) AS newest_position,\
+                    ROW_NUMBER() OVER (PARTITION BY a.feed_id ORDER BY a.published_at ASC,a.id ASC) AS oldest_position,\
+                    ROW_NUMBER() OVER (PARTITION BY a.feed_id,a.is_read ORDER BY a.published_at DESC,a.id DESC) AS newest_read_position,\
+                    ROW_NUMBER() OVER (PARTITION BY a.feed_id,a.is_read ORDER BY a.published_at ASC,a.id ASC) AS oldest_read_position \
+                FROM articles a JOIN feeds f ON f.id=a.feed_id \
+             ), selected_feed_candidates AS (\
+                SELECT * FROM ranked WHERE \
+                    newest_position <= ?1 OR oldest_position <= ?1 OR \
+                    newest_read_position <= ?1 OR oldest_read_position <= ?1 \
+             ), bookmarked AS (\
+                SELECT a.id,a.feed_id,f.category_id,f.title AS feed_title,a.title AS article_title,a.published_at,a.is_read,a.is_starred,\
+                    ROW_NUMBER() OVER (ORDER BY a.published_at DESC,a.id DESC) AS newest_position,\
+                    ROW_NUMBER() OVER (ORDER BY a.published_at ASC,a.id ASC) AS oldest_position,\
+                    ROW_NUMBER() OVER (PARTITION BY a.is_read ORDER BY a.published_at DESC,a.id DESC) AS newest_read_position,\
+                    ROW_NUMBER() OVER (PARTITION BY a.is_read ORDER BY a.published_at ASC,a.id ASC) AS oldest_read_position \
                 FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE a.is_starred=1 \
-                ORDER BY a.published_at DESC,a.id DESC LIMIT ?2 \
+             ), selected_bookmarks AS (\
+                SELECT * FROM bookmarked WHERE \
+                    newest_position <= ?2 OR oldest_position <= ?2 OR \
+                    newest_read_position <= ?2 OR oldest_read_position <= ?2 \
              ) \
-             SELECT id,feed_id,category_id,feed_title,article_title,published_at,is_read,is_starred FROM selected_unread \
-             UNION ALL \
-             SELECT b.id,b.feed_id,b.category_id,b.feed_title,b.article_title,b.published_at,b.is_read,b.is_starred FROM selected_bookmarks b \
-             WHERE NOT EXISTS (SELECT 1 FROM selected_unread u WHERE u.id=b.id) \
+             SELECT id,feed_id,category_id,feed_title,article_title,published_at,is_read,is_starred FROM selected_feed_candidates \
+             UNION \
+             SELECT id,feed_id,category_id,feed_title,article_title,published_at,is_read,is_starred FROM selected_bookmarks \
              ORDER BY published_at DESC,id DESC",
         ).map_err(sql_error)?;
         let articles = statement
-            .query_map(params![UNREAD_PER_FEED, BOOKMARKS], |r| {
-                Ok(WidgetArticle {
-                    id: r.get(0)?,
-                    feed_id: r.get(1)?,
-                    category_id: r.get(2)?,
-                    feed_title: r.get(3)?,
-                    title: r.get(4)?,
-                    published_at: r.get(5)?,
-                    is_read: r.get(6)?,
-                    is_starred: r.get(7)?,
-                })
-            })
+            .query_map(
+                params![
+                    CANDIDATES_PER_FEED_AND_DIRECTION,
+                    BOOKMARK_CANDIDATES_PER_DIRECTION
+                ],
+                |r| {
+                    Ok(WidgetArticle {
+                        id: r.get(0)?,
+                        feed_id: r.get(1)?,
+                        category_id: r.get(2)?,
+                        feed_title: r.get(3)?,
+                        title: r.get(4)?,
+                        published_at: r.get(5)?,
+                        is_read: r.get(6)?,
+                        is_starred: r.get(7)?,
+                    })
+                },
+            )
             .map_err(sql_error)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(sql_error)?;
@@ -3716,9 +3734,19 @@ impl Store {
                 r.get(0)
             })
             .map_err(sql_error)?;
+        let all_articles = connection
+            .query_row("SELECT COUNT(*) FROM articles", [], |r| r.get(0))
+            .map_err(sql_error)?;
         let bookmarks = connection
             .query_row(
                 "SELECT COUNT(*) FROM articles WHERE is_starred=1",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(sql_error)?;
+        let bookmarks_unread = connection
+            .query_row(
+                "SELECT COUNT(*) FROM articles WHERE is_starred=1 AND is_read=0",
                 [],
                 |r| r.get(0),
             )
@@ -3727,9 +3755,17 @@ impl Store {
             &connection,
             "SELECT feed_id,COUNT(*) FROM articles WHERE is_read=0 GROUP BY feed_id ORDER BY feed_id",
         )?;
+        let feed_all = scoped_counts(
+            &connection,
+            "SELECT feed_id,COUNT(*) FROM articles GROUP BY feed_id ORDER BY feed_id",
+        )?;
         let category_unread = scoped_counts(
             &connection,
             "SELECT f.category_id,COUNT(*) FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE a.is_read=0 GROUP BY f.category_id ORDER BY f.category_id",
+        )?;
+        let category_all = scoped_counts(
+            &connection,
+            "SELECT f.category_id,COUNT(*) FROM articles a JOIN feeds f ON f.id=a.feed_id GROUP BY f.category_id ORDER BY f.category_id",
         )?;
         let last_successful_sync_at = connection
             .query_row(
@@ -3745,9 +3781,13 @@ impl Store {
             articles,
             counts: WidgetCounts {
                 all_unread,
+                all_articles,
                 bookmarks,
+                bookmarks_unread,
                 feed_unread,
+                feed_all,
                 category_unread,
+                category_all,
             },
             last_successful_sync_at,
         })

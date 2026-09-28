@@ -65,10 +65,36 @@ enum WidgetContentScope: String, CaseIterable {
     case feed
 }
 
+enum WidgetReadFilter: String, CaseIterable {
+    case unread
+    case all
+}
+
+enum WidgetSortOrder: String, CaseIterable {
+    case newestFirst
+    case oldestFirst
+}
+
 struct WidgetContentSelection: Equatable {
     let scope: WidgetContentScope
     let categoryID: Int64?
     let feedID: Int64?
+    let readFilter: WidgetReadFilter
+    let sortOrder: WidgetSortOrder
+
+    init(
+        scope: WidgetContentScope,
+        categoryID: Int64?,
+        feedID: Int64?,
+        readFilter: WidgetReadFilter? = nil,
+        sortOrder: WidgetSortOrder = .newestFirst
+    ) {
+        self.scope = scope
+        self.categoryID = categoryID
+        self.feedID = feedID
+        self.readFilter = readFilter ?? (scope == .bookmarks ? .all : .unread)
+        self.sortOrder = sortOrder
+    }
 }
 
 enum WidgetContentState: Equatable {
@@ -134,12 +160,9 @@ struct WidgetContentModel: Equatable {
         if selection.scope == .category,
            (selection.categoryID == nil
             || !snapshot.categories.contains(where: { $0.id == selection.categoryID })) {
-            return .init(
-                state: .unavailableSelection("Selected category unavailable"),
+            return unavailable(
                 title: "Category",
-                count: 0,
-                countLabel: "unread",
-                articles: [],
+                message: "Selected category unavailable",
                 lastSuccessfulSyncAt: snapshot.lastSuccessfulSyncAt
             )
         }
@@ -147,40 +170,28 @@ struct WidgetContentModel: Equatable {
         if selection.scope == .feed,
            (selection.feedID == nil
             || !snapshot.feeds.contains(where: { $0.id == selection.feedID })) {
-            return .init(
-                state: .unavailableSelection("Selected feed unavailable"),
+            return unavailable(
                 title: "Feed",
-                count: 0,
-                countLabel: "unread",
-                articles: [],
+                message: "Selected feed unavailable",
                 lastSuccessfulSyncAt: snapshot.lastSuccessfulSyncAt
             )
         }
 
-        let resolved: (title: String, count: UInt64, label: String)
-        switch selection.scope {
-        case .allNews:
-            resolved = ("All News", snapshot.counts.allUnread, "unread")
-        case .bookmarks:
-            resolved = ("Bookmarks", snapshot.counts.bookmarks, "bookmarked")
-        case .category:
-            let id = selection.categoryID!
-            let category = snapshot.categories.first(where: { $0.id == id })!
-            resolved = (
-                category.title,
-                snapshot.counts.categoryUnread.first(where: { $0.id == id })?.count ?? 0,
-                "unread"
-            )
-        case .feed:
-            let id = selection.feedID!
-            let feed = snapshot.feeds.first(where: { $0.id == id })!
-            resolved = (
-                feed.title,
-                snapshot.counts.feedUnread.first(where: { $0.id == id })?.count ?? 0,
-                "unread"
+        let requiresD9Projection =
+            selection.sortOrder == .oldestFirst
+                || (selection.scope == .bookmarks
+                    ? selection.readFilter == .unread
+                    : selection.readFilter == .all)
+        if requiresD9Projection,
+           snapshot.configuration?.version != WidgetSnapshotV1.ConfigurationProjectionV1.version {
+            return unavailable(
+                title: resolvedTitle(snapshot: snapshot, selection: selection),
+                message: "Open FluxNews to refresh widget data",
+                lastSuccessfulSyncAt: snapshot.lastSuccessfulSyncAt
             )
         }
 
+        let resolved = resolvedCount(snapshot: snapshot, selection: selection)
         let articles = filtered(snapshot: snapshot, selection: selection)
         return .init(
             state: articles.isEmpty ? .empty : .ready,
@@ -192,23 +203,131 @@ struct WidgetContentModel: Equatable {
         )
     }
 
+    private static func unavailable(
+        title: String,
+        message: String,
+        lastSuccessfulSyncAt: String?
+    ) -> Self {
+        .init(
+            state: .unavailableSelection(message),
+            title: title,
+            count: 0,
+            countLabel: "unread",
+            articles: [],
+            lastSuccessfulSyncAt: lastSuccessfulSyncAt
+        )
+    }
+
+    private static func resolvedTitle(
+        snapshot: WidgetSnapshotV1,
+        selection: WidgetContentSelection
+    ) -> String {
+        switch selection.scope {
+        case .allNews:
+            "All News"
+        case .bookmarks:
+            "Bookmarks"
+        case .category:
+            snapshot.categories.first(where: { $0.id == selection.categoryID })?.title
+                ?? "Category"
+        case .feed:
+            snapshot.feeds.first(where: { $0.id == selection.feedID })?.title
+                ?? "Feed"
+        }
+    }
+
+    private static func resolvedCount(
+        snapshot: WidgetSnapshotV1,
+        selection: WidgetContentSelection
+    ) -> (title: String, count: UInt64, label: String) {
+        let configuration = snapshot.configuration
+        switch selection.scope {
+        case .allNews:
+            if selection.readFilter == .all {
+                return (
+                    "All News",
+                    configuration?.allArticles ?? snapshot.counts.allUnread,
+                    "articles"
+                )
+            }
+            return ("All News", snapshot.counts.allUnread, "unread")
+        case .bookmarks:
+            if selection.readFilter == .unread {
+                return (
+                    "Bookmarks",
+                    configuration?.bookmarksUnread ?? 0,
+                    "unread"
+                )
+            }
+            return ("Bookmarks", snapshot.counts.bookmarks, "bookmarked")
+        case .category:
+            let id = selection.categoryID!
+            let title = snapshot.categories.first(where: { $0.id == id })!.title
+            if selection.readFilter == .all {
+                return (
+                    title,
+                    configuration?.categoryAll.first(where: { $0.id == id })?.count ?? 0,
+                    "articles"
+                )
+            }
+            return (
+                title,
+                snapshot.counts.categoryUnread.first(where: { $0.id == id })?.count ?? 0,
+                "unread"
+            )
+        case .feed:
+            let id = selection.feedID!
+            let title = snapshot.feeds.first(where: { $0.id == id })!.title
+            if selection.readFilter == .all {
+                return (
+                    title,
+                    configuration?.feedAll.first(where: { $0.id == id })?.count ?? 0,
+                    "articles"
+                )
+            }
+            return (
+                title,
+                snapshot.counts.feedUnread.first(where: { $0.id == id })?.count ?? 0,
+                "unread"
+            )
+        }
+    }
+
     private static func filtered(
         snapshot: WidgetSnapshotV1,
         selection: WidgetContentSelection
     ) -> [WidgetSnapshotV1.Article] {
         snapshot.articles.filter { article in
+            let scopeMatches: Bool
             switch selection.scope {
             case .allNews:
-                !article.isRead
+                scopeMatches = true
             case .bookmarks:
-                article.isStarred
+                scopeMatches = article.isStarred
             case .category:
-                !article.isRead && article.categoryID == selection.categoryID
+                scopeMatches = article.categoryID == selection.categoryID
             case .feed:
-                !article.isRead && article.feedID == selection.feedID
+                scopeMatches = article.feedID == selection.feedID
+            }
+            guard scopeMatches else { return false }
+
+            switch selection.readFilter {
+            case .unread:
+                return !article.isRead
+            case .all:
+                return true
             }
         }
-        .sorted { ($0.publishedAt, $0.id) > ($1.publishedAt, $1.id) }
+        .sorted { lhs, rhs in
+            let left = (lhs.publishedAt, lhs.id)
+            let right = (rhs.publishedAt, rhs.id)
+            switch selection.sortOrder {
+            case .newestFirst:
+                return left > right
+            case .oldestFirst:
+                return left < right
+            }
+        }
     }
 }
 

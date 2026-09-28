@@ -148,6 +148,135 @@ final class WidgetSnapshotTests: XCTestCase {
         XCTAssertEqual(model.count, 100)
     }
 
+    func testD9ConfigurationSupportsReadFilterAndBothSortDirections() {
+        let snapshot = WidgetSnapshotV1(
+            schemaVersion: 1,
+            state: .ready,
+            generatedAt: "2026-09-28T12:00:00Z",
+            lastSuccessfulSyncAt: "2026-09-28T11:59:00Z",
+            feeds: [
+                .init(id: 42, categoryID: 7, title: "Development", normalIconFile: nil, darkIconFile: nil),
+            ],
+            categories: [.init(id: 7, title: "Work")],
+            articles: [
+                .init(id: 4, feedID: 42, categoryID: 7, feedTitle: "Development", title: "Newest read", publishedAt: "2026-09-28T11:00:00Z", isRead: true, isStarred: false),
+                .init(id: 3, feedID: 42, categoryID: 7, feedTitle: "Development", title: "Newest unread bookmark", publishedAt: "2026-09-28T10:00:00Z", isRead: false, isStarred: true),
+                .init(id: 2, feedID: 42, categoryID: 7, feedTitle: "Development", title: "Older read bookmark", publishedAt: "2026-09-28T09:00:00Z", isRead: true, isStarred: true),
+                .init(id: 1, feedID: 42, categoryID: 7, feedTitle: "Development", title: "Oldest unread", publishedAt: "2026-09-28T08:00:00Z", isRead: false, isStarred: false),
+            ],
+            counts: .init(
+                allUnread: 2,
+                bookmarks: 2,
+                feedUnread: [.init(id: 42, count: 2)],
+                categoryUnread: [.init(id: 7, count: 2)]
+            ),
+            configuration: .init(
+                allArticles: 4,
+                bookmarksUnread: 1,
+                feedAll: [.init(id: 42, count: 4)],
+                categoryAll: [.init(id: 7, count: 4)]
+            )
+        )
+
+        let unreadNewest = WidgetContentModel.make(
+            snapshotResult: .success(snapshot),
+            selection: .init(
+                scope: .feed,
+                categoryID: nil,
+                feedID: 42,
+                readFilter: .unread,
+                sortOrder: .newestFirst
+            )
+        )
+        XCTAssertEqual(unreadNewest.count, 2)
+        XCTAssertEqual(unreadNewest.countLabel, "unread")
+        XCTAssertEqual(unreadNewest.articles.map(\.id), [3, 1])
+
+        let unreadOldest = WidgetContentModel.make(
+            snapshotResult: .success(snapshot),
+            selection: .init(
+                scope: .feed,
+                categoryID: nil,
+                feedID: 42,
+                readFilter: .unread,
+                sortOrder: .oldestFirst
+            )
+        )
+        XCTAssertEqual(unreadOldest.articles.map(\.id), [1, 3])
+
+        let allNewest = WidgetContentModel.make(
+            snapshotResult: .success(snapshot),
+            selection: .init(
+                scope: .feed,
+                categoryID: nil,
+                feedID: 42,
+                readFilter: .all,
+                sortOrder: .newestFirst
+            )
+        )
+        XCTAssertEqual(allNewest.count, 4)
+        XCTAssertEqual(allNewest.countLabel, "articles")
+        XCTAssertEqual(allNewest.articles.map(\.id), [4, 3, 2, 1])
+
+        let allOldest = WidgetContentModel.make(
+            snapshotResult: .success(snapshot),
+            selection: .init(
+                scope: .feed,
+                categoryID: nil,
+                feedID: 42,
+                readFilter: .all,
+                sortOrder: .oldestFirst
+            )
+        )
+        XCTAssertEqual(allOldest.articles.map(\.id), [1, 2, 3, 4])
+
+        let unreadBookmarks = WidgetContentModel.make(
+            snapshotResult: .success(snapshot),
+            selection: .init(
+                scope: .bookmarks,
+                categoryID: nil,
+                feedID: nil,
+                readFilter: .unread,
+                sortOrder: .newestFirst
+            )
+        )
+        XCTAssertEqual(unreadBookmarks.count, 1)
+        XCTAssertEqual(unreadBookmarks.articles.map(\.id), [3])
+    }
+
+    func testLegacyV1SnapshotKeepsExistingDefaultSemanticsAndRejectsNewProjectionNeeds() {
+        let legacy = sampleSnapshot
+
+        let allNews = WidgetContentModel.make(
+            snapshotResult: .success(legacy),
+            selection: .init(scope: .allNews, categoryID: nil, feedID: nil)
+        )
+        XCTAssertEqual(allNews.state, .ready)
+        XCTAssertEqual(allNews.articles.map(\.id), [1, 2])
+
+        let bookmarks = WidgetContentModel.make(
+            snapshotResult: .success(legacy),
+            selection: .init(scope: .bookmarks, categoryID: nil, feedID: nil)
+        )
+        XCTAssertEqual(bookmarks.state, .ready)
+        XCTAssertEqual(bookmarks.articles.map(\.id), [3, 1])
+
+        let allConfigured = WidgetContentModel.make(
+            snapshotResult: .success(legacy),
+            selection: .init(
+                scope: .allNews,
+                categoryID: nil,
+                feedID: nil,
+                readFilter: .all,
+                sortOrder: .newestFirst
+            )
+        )
+        XCTAssertEqual(
+            allConfigured.state,
+            .unavailableSelection("Open FluxNews to refresh widget data")
+        )
+    }
+
     private var sampleSnapshot: WidgetSnapshotV1 {
         .init(schemaVersion: 1, state: .ready, generatedAt: "2026-08-27T12:00:00Z", lastSuccessfulSyncAt: "2026-08-27T11:00:00Z", feeds: [.init(id: 42, categoryID: 7, title: "Development", normalIconFile: nil, darkIconFile: nil)], categories: [.init(id: 7, title: "Work")], articles: [.init(id: 1, feedID: 42, categoryID: 7, feedTitle: "Development", title: "Unread bookmark", publishedAt: "2026-08-27T10:00:00Z", isRead: false, isStarred: true), .init(id: 2, feedID: 42, categoryID: 7, feedTitle: "Development", title: "Unread article", publishedAt: "2026-08-27T09:00:00Z", isRead: false, isStarred: false), .init(id: 3, feedID: 42, categoryID: 7, feedTitle: "Development", title: "Read bookmark", publishedAt: "2026-08-27T11:00:00Z", isRead: true, isStarred: true)], counts: .init(allUnread: 10, bookmarks: 99, feedUnread: [.init(id: 42, count: 10)], categoryUnread: [.init(id: 7, count: 10)]))
     }

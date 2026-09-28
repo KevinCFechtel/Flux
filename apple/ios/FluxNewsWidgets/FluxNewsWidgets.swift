@@ -15,6 +15,32 @@ enum FluxNewsWidgetScope: String, AppEnum {
     ]
 }
 
+enum FluxNewsWidgetReadFilter: String, AppEnum {
+    case unread
+    case all
+
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(
+        name: LocalizedStringResource("Read Filter")
+    )
+    static var caseDisplayRepresentations: [Self: DisplayRepresentation] = [
+        .unread: .init(title: LocalizedStringResource("Unread")),
+        .all: .init(title: LocalizedStringResource("All")),
+    ]
+}
+
+enum FluxNewsWidgetSortOrder: String, AppEnum {
+    case newestFirst
+    case oldestFirst
+
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(
+        name: LocalizedStringResource("Sort Order")
+    )
+    static var caseDisplayRepresentations: [Self: DisplayRepresentation] = [
+        .newestFirst: .init(title: LocalizedStringResource("Newest First")),
+        .oldestFirst: .init(title: LocalizedStringResource("Oldest First")),
+    ]
+}
+
 struct FluxNewsFeedEntity: AppEntity, Hashable {
     static var typeDisplayRepresentation = TypeDisplayRepresentation(name: LocalizedStringResource("Feed"))
     static var defaultQuery = FluxNewsFeedQuery()
@@ -63,6 +89,8 @@ struct FluxNewsWidgetConfigurationIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource = "FluxNews Widget"
     static var description = IntentDescription(LocalizedStringResource("Choose the FluxNews content this widget shows."))
     @Parameter(title: LocalizedStringResource("Content"), default: .allNews) var scope: FluxNewsWidgetScope
+    @Parameter(title: LocalizedStringResource("Read Filter"), default: .unread) var readFilter: FluxNewsWidgetReadFilter
+    @Parameter(title: LocalizedStringResource("Sort Order"), default: .newestFirst) var sortOrder: FluxNewsWidgetSortOrder
     @Parameter(title: LocalizedStringResource("Category")) var category: FluxNewsCategoryEntity?
     @Parameter(title: LocalizedStringResource("Feed")) var feed: FluxNewsFeedEntity?
 }
@@ -94,7 +122,13 @@ struct FluxNewsWidgetProvider: AppIntentTimelineProvider {
             return try store.read(diagnostics: WidgetSnapshotDiagnostics.logger)
         }
         let scope = WidgetContentScope(rawValue: configuration.scope.rawValue) ?? .allNews
-        let selection = WidgetContentSelection(scope: scope, categoryID: configuration.category.flatMap { Int64($0.id) }, feedID: configuration.feed.flatMap { Int64($0.id) })
+        let selection = WidgetContentSelection(
+            scope: scope,
+            categoryID: configuration.category.flatMap { Int64($0.id) },
+            feedID: configuration.feed.flatMap { Int64($0.id) },
+            readFilter: WidgetReadFilter(rawValue: configuration.readFilter.rawValue) ?? .unread,
+            sortOrder: WidgetSortOrder(rawValue: configuration.sortOrder.rawValue) ?? .newestFirst
+        )
         return .init(date: .now, model: WidgetContentModel.make(snapshotResult: result, selection: selection), snapshot: try? result.get(), selection: selection)
     }
 }
@@ -140,7 +174,7 @@ private struct IOSFluxNewsHeadlinesView: View {
     @ViewBuilder private var content: some View {
         switch entry.model.state {
         case .ready, .empty:
-            if entry.model.articles.isEmpty { Text(entry.model.countLabel == "bookmarked" ? "No bookmarks" : "No unread news").foregroundStyle(.secondary) }
+            if entry.model.articles.isEmpty { Text(emptyStateText).foregroundStyle(.secondary) }
             else { articleColumn(entry.model.latestArticles(limit: HeadlinesPresentation.capacity(for: family))) }
         case .noAccount: fallback("Open FluxNews to configure")
         case .awaitingSuccessfulSync: fallback("Waiting for first successful sync")
@@ -164,6 +198,13 @@ private struct IOSFluxNewsHeadlinesView: View {
         }
     }
     private func fallback(_ text: String) -> some View { Text(LocalizedStringKey(text)).font(.subheadline).foregroundStyle(.secondary) }
+    private var emptyStateText: LocalizedStringKey {
+        switch entry.model.countLabel {
+        case "bookmarked": "No bookmarks"
+        case "articles": "No articles"
+        default: "No unread news"
+        }
+    }
     private var title: String {
         switch entry.selection.scope {
         case .allNews: String(localized: "All News")
@@ -233,7 +274,13 @@ private struct IOSFluxNewsStatusView: View {
         }.containerBackground(for: .widget) { Color.clear }
     }
     private var scopeURL: URL { WidgetAction.open(entry.selection).url() }
-    private var localizedCountLabel: String { entry.model.countLabel == "bookmarked" ? String(localized: "bookmarked") : String(localized: "unread") }
+    private var localizedCountLabel: String {
+        switch entry.model.countLabel {
+        case "bookmarked": String(localized: "bookmarked")
+        case "articles": String(localized: "articles")
+        default: String(localized: "unread")
+        }
+    }
     private var title: String {
         switch entry.selection.scope {
         case .allNews: String(localized: "All News")

@@ -302,9 +302,13 @@ pub struct WidgetArticle {
 #[derive(uniffi::Record)]
 pub struct WidgetCounts {
     pub all_unread: u64,
+    pub all_articles: u64,
     pub bookmarks: u64,
+    pub bookmarks_unread: u64,
     pub feed_unread: Vec<WidgetScopedCount>,
+    pub feed_all: Vec<WidgetScopedCount>,
     pub category_unread: Vec<WidgetScopedCount>,
+    pub category_all: Vec<WidgetScopedCount>,
 }
 #[derive(uniffi::Record)]
 pub struct WidgetScopedCount {
@@ -2276,9 +2280,13 @@ impl From<domain::WidgetCounts> for WidgetCounts {
     fn from(value: domain::WidgetCounts) -> Self {
         Self {
             all_unread: value.all_unread,
+            all_articles: value.all_articles,
             bookmarks: value.bookmarks,
+            bookmarks_unread: value.bookmarks_unread,
             feed_unread: value.feed_unread.into_iter().map(Into::into).collect(),
+            feed_all: value.feed_all.into_iter().map(Into::into).collect(),
             category_unread: value.category_unread.into_iter().map(Into::into).collect(),
+            category_all: value.category_all.into_iter().map(Into::into).collect(),
         }
     }
 }

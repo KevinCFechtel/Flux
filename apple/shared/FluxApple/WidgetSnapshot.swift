@@ -93,6 +93,29 @@ struct WidgetSnapshotV1: Codable, Equatable {
     let categories: [Category]
     let articles: [Article]
     let counts: Counts
+    let configuration: ConfigurationProjectionV1?
+
+    init(
+        schemaVersion: Int,
+        state: State,
+        generatedAt: String,
+        lastSuccessfulSyncAt: String?,
+        feeds: [Feed],
+        categories: [Category],
+        articles: [Article],
+        counts: Counts,
+        configuration: ConfigurationProjectionV1? = nil
+    ) {
+        self.schemaVersion = schemaVersion
+        self.state = state
+        self.generatedAt = generatedAt
+        self.lastSuccessfulSyncAt = lastSuccessfulSyncAt
+        self.feeds = feeds
+        self.categories = categories
+        self.articles = articles
+        self.counts = counts
+        self.configuration = configuration
+    }
 
     struct Feed: Codable, Equatable {
         let id: Int64
@@ -128,6 +151,32 @@ struct WidgetSnapshotV1: Codable, Equatable {
     struct ScopedCount: Codable, Equatable {
         let id: Int64
         let count: UInt64
+    }
+
+    /// Optional D9 extension. Its absence identifies an original D5 snapshot,
+    /// which remains readable with Unread/Newest semantics.
+    struct ConfigurationProjectionV1: Codable, Equatable {
+        static let version = 1
+
+        let version: Int
+        let allArticles: UInt64
+        let bookmarksUnread: UInt64
+        let feedAll: [ScopedCount]
+        let categoryAll: [ScopedCount]
+
+        init(
+            version: Int = Self.version,
+            allArticles: UInt64,
+            bookmarksUnread: UInt64,
+            feedAll: [ScopedCount],
+            categoryAll: [ScopedCount]
+        ) {
+            self.version = version
+            self.allArticles = allArticles
+            self.bookmarksUnread = bookmarksUnread
+            self.feedAll = feedAll
+            self.categoryAll = categoryAll
+        }
     }
 }
 

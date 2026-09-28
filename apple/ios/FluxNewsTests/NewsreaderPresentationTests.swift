@@ -5953,6 +5953,94 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertEqual(feed.title, "Feed")
     }
 
+    func testD9WidgetConfigurationFiltersAndSortsTheSharedSnapshot() {
+        let snapshot = WidgetSnapshotV1(
+            schemaVersion: WidgetSnapshotV1.schemaVersion,
+            state: .ready,
+            generatedAt: "2026-09-28T12:00:00Z",
+            lastSuccessfulSyncAt: "2026-09-28T11:59:00Z",
+            feeds: [
+                .init(id: 10, categoryID: 20, title: "Feed", normalIconFile: nil, darkIconFile: nil),
+            ],
+            categories: [.init(id: 20, title: "Category")],
+            articles: [
+                .init(id: 4, feedID: 10, categoryID: 20, feedTitle: "Feed", title: "Newest read", publishedAt: "2026-09-28T11:00:00Z", isRead: true, isStarred: false),
+                .init(id: 3, feedID: 10, categoryID: 20, feedTitle: "Feed", title: "Unread bookmark", publishedAt: "2026-09-28T10:00:00Z", isRead: false, isStarred: true),
+                .init(id: 2, feedID: 10, categoryID: 20, feedTitle: "Feed", title: "Read bookmark", publishedAt: "2026-09-28T09:00:00Z", isRead: true, isStarred: true),
+                .init(id: 1, feedID: 10, categoryID: 20, feedTitle: "Feed", title: "Oldest unread", publishedAt: "2026-09-28T08:00:00Z", isRead: false, isStarred: false),
+            ],
+            counts: .init(
+                allUnread: 2,
+                bookmarks: 2,
+                feedUnread: [.init(id: 10, count: 2)],
+                categoryUnread: [.init(id: 20, count: 2)]
+            ),
+            configuration: .init(
+                allArticles: 4,
+                bookmarksUnread: 1,
+                feedAll: [.init(id: 10, count: 4)],
+                categoryAll: [.init(id: 20, count: 4)]
+            )
+        )
+
+        let unreadNewest = WidgetContentModel.make(
+            snapshotResult: .success(snapshot),
+            selection: .init(
+                scope: .feed,
+                categoryID: nil,
+                feedID: 10,
+                readFilter: .unread,
+                sortOrder: .newestFirst
+            )
+        )
+        XCTAssertEqual(unreadNewest.articles.map(\.id), [3, 1])
+        XCTAssertEqual(unreadNewest.count, 2)
+
+        let allOldest = WidgetContentModel.make(
+            snapshotResult: .success(snapshot),
+            selection: .init(
+                scope: .feed,
+                categoryID: nil,
+                feedID: 10,
+                readFilter: .all,
+                sortOrder: .oldestFirst
+            )
+        )
+        XCTAssertEqual(allOldest.articles.map(\.id), [1, 2, 3, 4])
+        XCTAssertEqual(allOldest.count, 4)
+        XCTAssertEqual(allOldest.countLabel, "articles")
+
+        let unreadBookmarks = WidgetContentModel.make(
+            snapshotResult: .success(snapshot),
+            selection: .init(
+                scope: .bookmarks,
+                categoryID: nil,
+                feedID: nil,
+                readFilter: .unread,
+                sortOrder: .newestFirst
+            )
+        )
+        XCTAssertEqual(unreadBookmarks.articles.map(\.id), [3])
+        XCTAssertEqual(unreadBookmarks.count, 1)
+    }
+
+    func testD9WidgetConfigurationIntentExposesReadAndSortParameters() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let widgetSource = try String(
+            contentsOf: testsDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("FluxNewsWidgets/FluxNewsWidgets.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(widgetSource.contains("FluxNewsWidgetReadFilter"))
+        XCTAssertTrue(widgetSource.contains("FluxNewsWidgetSortOrder"))
+        XCTAssertTrue(widgetSource.contains("LocalizedStringResource(\"Read Filter\")"))
+        XCTAssertTrue(widgetSource.contains("LocalizedStringResource(\"Sort Order\")"))
+        XCTAssertTrue(widgetSource.contains("default: .unread"))
+        XCTAssertTrue(widgetSource.contains("default: .newestFirst"))
+    }
+
     func testWidgetActionsAndLockScreenFamiliesUseTheSharedContract() {
         let selection = WidgetContentSelection(scope: .feed, categoryID: nil, feedID: 10)
         let actions: [WidgetAction] = [

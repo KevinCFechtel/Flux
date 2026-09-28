@@ -8,6 +8,32 @@ enum FluxNewsWidgetScope: String, AppEnum {
     static var caseDisplayRepresentations: [Self: DisplayRepresentation] = [.allNews: DisplayRepresentation(title: LocalizedStringResource("All News")), .bookmarks: DisplayRepresentation(title: LocalizedStringResource("Bookmarks")), .category: DisplayRepresentation(title: LocalizedStringResource("Category")), .feed: DisplayRepresentation(title: LocalizedStringResource("Feed"))]
 }
 
+enum FluxNewsWidgetReadFilter: String, AppEnum {
+    case unread
+    case all
+
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(
+        name: LocalizedStringResource("Read Filter")
+    )
+    static var caseDisplayRepresentations: [Self: DisplayRepresentation] = [
+        .unread: .init(title: LocalizedStringResource("Unread")),
+        .all: .init(title: LocalizedStringResource("All")),
+    ]
+}
+
+enum FluxNewsWidgetSortOrder: String, AppEnum {
+    case newestFirst
+    case oldestFirst
+
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(
+        name: LocalizedStringResource("Sort Order")
+    )
+    static var caseDisplayRepresentations: [Self: DisplayRepresentation] = [
+        .newestFirst: .init(title: LocalizedStringResource("Newest First")),
+        .oldestFirst: .init(title: LocalizedStringResource("Oldest First")),
+    ]
+}
+
 struct FluxNewsFeedEntity: AppEntity, Hashable {
     static var typeDisplayRepresentation = TypeDisplayRepresentation(name: LocalizedStringResource("Feed"))
     static var defaultQuery = FluxNewsFeedQuery()
@@ -83,6 +109,8 @@ struct FluxNewsWidgetConfigurationIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource = "FluxNews Widget"
     static var description = IntentDescription(LocalizedStringResource("Choose the FluxNews content this widget shows."))
     @Parameter(title: LocalizedStringResource("Content"), default: .allNews) var scope: FluxNewsWidgetScope
+    @Parameter(title: LocalizedStringResource("Read Filter"), default: .unread) var readFilter: FluxNewsWidgetReadFilter
+    @Parameter(title: LocalizedStringResource("Sort Order"), default: .newestFirst) var sortOrder: FluxNewsWidgetSortOrder
     @Parameter(title: LocalizedStringResource("Category")) var category: FluxNewsCategoryEntity?
     @Parameter(title: LocalizedStringResource("Feed")) var feed: FluxNewsFeedEntity?
 }
@@ -99,7 +127,13 @@ struct FluxNewsWidgetProvider: AppIntentTimelineProvider {
             return try store.read(diagnostics: WidgetSnapshotDiagnostics.logger)
         }
         let scope = WidgetContentScope(rawValue: configuration.scope.rawValue) ?? .allNews
-        let selection = WidgetContentSelection(scope: scope, categoryID: configuration.category.flatMap { Int64($0.id) }, feedID: configuration.feed.flatMap { Int64($0.id) })
+        let selection = WidgetContentSelection(
+            scope: scope,
+            categoryID: configuration.category.flatMap { Int64($0.id) },
+            feedID: configuration.feed.flatMap { Int64($0.id) },
+            readFilter: WidgetReadFilter(rawValue: configuration.readFilter.rawValue) ?? .unread,
+            sortOrder: WidgetSortOrder(rawValue: configuration.sortOrder.rawValue) ?? .newestFirst
+        )
         let model = WidgetContentModel.make(snapshotResult: result, selection: selection)
         return .init(date: .now, model: model, snapshot: try? result.get(), selection: selection)
     }
@@ -125,11 +159,8 @@ struct HeadlinesView: View {
         switch entry.model.state {
         case .ready, .empty:
             if entry.model.articles.isEmpty {
-                Group {
-                    if entry.model.countLabel == "bookmarked" { Text("No bookmarks") }
-                    else { Text("No unread news") }
-                }
-                .foregroundStyle(.secondary)
+                Text(emptyStateText)
+                    .foregroundStyle(.secondary)
             }
             else if family == .systemExtraLarge { let articles = entry.model.latestArticles(limit: HeadlinesPresentation.capacity(for: family)); HStack(alignment: .top) { articleColumn(Array(articles.prefix(6))); articleColumn(Array(articles.dropFirst(6).prefix(6))) } }
             else { articleColumn(entry.model.latestArticles(limit: HeadlinesPresentation.capacity(for: family))) }
@@ -141,6 +172,13 @@ struct HeadlinesView: View {
     }
     private func articleColumn(_ articles: [WidgetSnapshotV1.Article]) -> some View { VStack(alignment: .leading, spacing: 7) { ForEach(articles, id: \.id) { article in Link(destination: WidgetAction.article(article.id).url()) { HStack(spacing: 6) { FeedIcon(snapshot: entry.snapshot, feedID: article.feedID, title: article.feedTitle, dark: colorScheme == .dark); VStack(alignment: .leading, spacing: 1) { Text(article.title).font(.subheadline.weight(.semibold)).lineLimit(1); Text(article.feedTitle).font(.caption).foregroundStyle(.secondary).lineLimit(1) } }.accessibilityLabel("Open \(article.title) in FluxNews") } } } }
     private func fallback(_ text: String) -> some View { Text(LocalizedStringKey(text)).font(.subheadline).foregroundStyle(.secondary) }
+    private var emptyStateText: LocalizedStringKey {
+        switch entry.model.countLabel {
+        case "bookmarked": "No bookmarks"
+        case "articles": "No articles"
+        default: "No unread news"
+        }
+    }
     private var title: String {
         switch entry.selection.scope {
         case .allNews: String(localized: "All News")

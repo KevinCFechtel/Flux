@@ -35,7 +35,7 @@ Current repository status:
 - **D9-F — Miniflux account information / HTTP warning:** COMPLETE / TEST-GATED
 - **D9-G — Open Source and About:** COMPLETE / TEST-GATED
 - **D9-H — Logging & Support Diagnostics:** COMPLETE / TEST-GATED
-- **D9 Widget Configuration:** OPEN
+- **D9 Widget Configuration:** COMPLETE / TEST-GATED
 - **Final physical-device Flutter-to-native production-upgrade acceptance:** OPEN
 
 Completed blocks remain subject to the final D9 acceptance gate and regression
@@ -361,6 +361,30 @@ There is intentionally **no widget-specific Open in Miniflux preference**.
 Article taps already enter the main app's normal article-open path, which applies
 the article/feed routing policy including the existing per-feed **Open in
 Miniflux** setting. D9 must preserve that single routing authority.
+
+Implementation contract:
+
+- the original top-level `WidgetSnapshotV1` schema remains readable and keeps
+  schema version 1; D9 adds an optional, independently versioned
+  `ConfigurationProjectionV1` payload so older extensions ignore the new
+  fields and newer extensions continue to decode old D5 snapshots;
+- Core's widget read model remains bounded and now retains up to 12 candidates
+  from both the newest and oldest end of each feed, with read-state-specific
+  candidates as needed for Unread/All, plus bounded newest/oldest bookmark
+  candidates;
+- Core additionally supplies authoritative All counts globally and per
+  feed/category plus unread-bookmark count; the existing unread/bookmark counts
+  remain intact;
+- the WidgetKit extension still reads only the App Group snapshot and icon files;
+  it never opens Core, SQLite, Miniflux, credentials or the network;
+- AppIntent configuration exposes Read Filter = Unread/All and Sort Order =
+  Newest First/Oldest First per widget instance;
+- legacy selections retain their prior defaults (Unread for normal scopes, All
+  for Bookmarks). New AppIntent instances use explicit Unread and Newest First
+  defaults;
+- if a newly configured All/Oldest combination encounters an old D5 snapshot,
+  the widget presents a bounded refresh-required state instead of pretending
+  that the incomplete candidate set is authoritative.
 
 ## 5. Explicitly retired/replaced FluxNews behaviors
 

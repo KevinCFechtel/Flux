@@ -684,9 +684,13 @@ pub struct WidgetArticle {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WidgetCounts {
     pub all_unread: u64,
+    pub all_articles: u64,
     pub bookmarks: u64,
+    pub bookmarks_unread: u64,
     pub feed_unread: Vec<WidgetScopedCount>,
+    pub feed_all: Vec<WidgetScopedCount>,
     pub category_unread: Vec<WidgetScopedCount>,
+    pub category_all: Vec<WidgetScopedCount>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -4208,12 +4208,21 @@ mod tests {
             [10, 20]
         );
         assert_eq!(widget.counts.all_unread, 21);
+        assert_eq!(widget.counts.all_articles, 23);
         assert_eq!(widget.counts.bookmarks, 2);
+        assert_eq!(widget.counts.bookmarks_unread, 1);
         assert_eq!(
             widget.counts.feed_unread,
             vec![
                 WidgetScopedCount { id: 10, count: 20 },
                 WidgetScopedCount { id: 20, count: 1 }
+            ]
+        );
+        assert_eq!(
+            widget.counts.feed_all,
+            vec![
+                WidgetScopedCount { id: 10, count: 20 },
+                WidgetScopedCount { id: 20, count: 3 }
             ]
         );
         assert_eq!(
@@ -4224,13 +4233,20 @@ mod tests {
             ]
         );
         assert_eq!(
-            widget
-                .articles
-                .iter()
-                .filter(|article| article.feed_id == 10 && !article.is_starred)
-                .count(),
-            12
+            widget.counts.category_all,
+            vec![
+                WidgetScopedCount { id: 1, count: 20 },
+                WidgetScopedCount { id: 2, count: 3 }
+            ]
         );
+        let feed_ten_candidates = widget
+            .articles
+            .iter()
+            .filter(|article| article.feed_id == 10)
+            .collect::<Vec<_>>();
+        assert!(feed_ten_candidates.len() <= 24);
+        assert!(feed_ten_candidates.iter().any(|article| article.id == 1));
+        assert!(feed_ten_candidates.iter().any(|article| article.id == 20));
         assert!(widget.articles.iter().any(|article| article.id == 100));
         assert!(
             widget
@@ -4238,7 +4254,12 @@ mod tests {
                 .iter()
                 .any(|article| article.id == 101 && article.is_read && article.is_starred)
         );
-        assert!(!widget.articles.iter().any(|article| article.id == 102));
+        assert!(
+            widget
+                .articles
+                .iter()
+                .any(|article| article.id == 102 && article.is_read && !article.is_starred)
+        );
         assert_eq!(
             widget
                 .articles

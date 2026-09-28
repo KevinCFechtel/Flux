@@ -58,6 +58,16 @@ enum WidgetSnapshotWriter {
                 categoryUnread: data.counts.categoryUnread.map {
                     .init(id: $0.id, count: $0.count)
                 }
+            ),
+            configuration: .init(
+                allArticles: data.counts.allArticles,
+                bookmarksUnread: data.counts.bookmarksUnread,
+                feedAll: data.counts.feedAll.map {
+                    .init(id: $0.id, count: $0.count)
+                },
+                categoryAll: data.counts.categoryAll.map {
+                    .init(id: $0.id, count: $0.count)
+                }
             )
         )
 
