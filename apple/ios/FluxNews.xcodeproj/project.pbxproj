@@ -433,6 +433,11 @@
 				en,
 				Base,
 				de,
+				es,
+				gl,
+				nl,
+				ta,
+				tr,
 			);
 			mainGroup = G1;
 			productRefGroup = G4 /* Products */;

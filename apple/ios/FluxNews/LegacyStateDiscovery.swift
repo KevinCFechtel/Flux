@@ -492,7 +492,7 @@ enum LegacyStateDiscovery {
         }
 
         let readFilter: WidgetReadFilter
-        if let rawUnreadOnly = values[widgetUnreadOnlyKey] {
+        if values[widgetUnreadOnlyKey] != nil {
             guard let unreadOnly = exactBool(widgetUnreadOnlyKey) else { return nil }
             readFilter = unreadOnly ? .unread : .all
         } else {

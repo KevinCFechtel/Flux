@@ -8,6 +8,181 @@ import CoreText
 
 final class NewsreaderPresentationTests: XCTestCase {
 
+    func testLocalizationCatalogKeepsRuntimeArticleCounterPluralKeysManual() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+        let catalogURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("FluxNews/Localizable.xcstrings")
+        let data = try Data(contentsOf: catalogURL)
+        let root = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let strings = try XCTUnwrap(
+            root["strings"] as? [String: Any]
+        )
+
+        for key in ["%lld article", "%lld unread article"] {
+            let entry = try XCTUnwrap(strings[key] as? [String: Any])
+            XCTAssertEqual(
+                entry["extractionState"] as? String,
+                "manual",
+                "Runtime-generated plural key must remain manual: \(key)"
+            )
+        }
+    }
+
+    func testLocalizationCatalogContainsNoStaleEntries() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+        let catalogURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("FluxNews/Localizable.xcstrings")
+        let data = try Data(contentsOf: catalogURL)
+        let root = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let strings = try XCTUnwrap(
+            root["strings"] as? [String: Any]
+        )
+
+        for (key, rawEntry) in strings {
+            let entry = try XCTUnwrap(rawEntry as? [String: Any])
+            XCTAssertNotEqual(
+                entry["extractionState"] as? String,
+                "stale",
+                "Stale localization key should not be shipped: \(key)"
+            )
+        }
+    }
+
+    func testXcodeProjectDeclaresFullProductionLocaleSet() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+        let projectURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("FluxNews.xcodeproj/project.pbxproj")
+        let project = try String(contentsOf: projectURL, encoding: .utf8)
+
+        for locale in ["en", "de", "es", "gl", "nl", "ta", "tr"] {
+            XCTAssertTrue(
+                project.contains("\n\t\t\t\t\(locale),"),
+                "Missing Xcode knownRegion for \(locale)"
+            )
+        }
+    }
+
+    func testLocalizationCatalogRestoresProductionLanguageSet() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+        let catalogURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("FluxNews/Localizable.xcstrings")
+        let data = try Data(contentsOf: catalogURL)
+        let root = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertEqual(root["sourceLanguage"] as? String, "en")
+
+        let strings = try XCTUnwrap(
+            root["strings"] as? [String: Any]
+        )
+        let requiredLocales = Set(["de", "es", "gl", "nl", "ta", "tr"])
+
+        for (key, rawEntry) in strings {
+            guard let entry = rawEntry as? [String: Any],
+                  entry["extractionState"] as? String != "stale" else {
+                continue
+            }
+            let localizations = try XCTUnwrap(
+                entry["localizations"] as? [String: Any],
+                "Missing localizations for active key: \(key)"
+            )
+            XCTAssertTrue(
+                requiredLocales.isSubset(of: Set(localizations.keys)),
+                "Active key is missing a production locale: \(key)"
+            )
+        }
+    }
+
+    func testLocalizationCatalogPreservesEnglishPlaceholderStructure() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+        let catalogURL = testsDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("FluxNews/Localizable.xcstrings")
+        let data = try Data(contentsOf: catalogURL)
+        let root = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let strings = try XCTUnwrap(
+            root["strings"] as? [String: Any]
+        )
+        let requiredLocales = ["de", "es", "gl", "nl", "ta", "tr"]
+
+        func stringUnits(
+            _ node: Any,
+            path: String = ""
+        ) -> [String: String] {
+            guard let dictionary = node as? [String: Any] else { return [:] }
+            var result: [String: String] = [:]
+            if let unit = dictionary["stringUnit"] as? [String: Any],
+               let value = unit["value"] as? String {
+                result[path] = value
+            }
+            for (key, value) in dictionary where key != "stringUnit" {
+                let nestedPath = path.isEmpty ? key : "\(path).\(key)"
+                result.merge(
+                    stringUnits(value, path: nestedPath),
+                    uniquingKeysWith: { first, _ in first }
+                )
+            }
+            return result
+        }
+
+        func placeholders(_ value: String) -> [String] {
+            let pattern = #"%(?:\d+\$)?(?:lld|ld|d|f|@)"#
+            let regex = try! NSRegularExpression(pattern: pattern)
+            let range = NSRange(value.startIndex..., in: value)
+            return regex.matches(in: value, range: range).compactMap {
+                Range($0.range, in: value).map { String(value[$0]) }
+            }
+        }
+
+        for (key, rawEntry) in strings {
+            guard let entry = rawEntry as? [String: Any],
+                  let localizations = entry["localizations"] as? [String: Any],
+                  let english = localizations["en"] else {
+                continue
+            }
+            let englishUnits = stringUnits(english)
+            guard !englishUnits.isEmpty else { continue }
+
+            for locale in requiredLocales {
+                guard let localization = localizations[locale] else {
+                    continue
+                }
+                let translatedUnits = stringUnits(localization)
+                XCTAssertEqual(
+                    Set(translatedUnits.keys),
+                    Set(englishUnits.keys),
+                    "Plural/variation structure differs for \(key) [\(locale)]"
+                )
+                for (path, englishValue) in englishUnits {
+                    guard let translatedValue = translatedUnits[path] else {
+                        continue
+                    }
+                    XCTAssertEqual(
+                        placeholders(translatedValue).sorted(),
+                        placeholders(englishValue).sorted(),
+                        "Placeholder mismatch for \(key) [\(locale)] at \(path)"
+                    )
+                }
+            }
+        }
+    }
+
+
     func testAboutInformationReadsVersionAndBuildFromBundleMetadata() {
         let metadata: [String: Any] = [
             "CFBundleShortVersionString": " 2.3.5 ",

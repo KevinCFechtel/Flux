@@ -30,7 +30,7 @@ Current repository status:
 - **D9-A — Production Flutter-to-native migration:** COMPLETE / TEST-GATED
 - **D9-B — Config Backup and Restore:** COMPLETE / TEST-GATED
 - **D9-C — Configurable Bottom Action Bar:** COMPLETE / TEST-GATED
-- **D9-D — Localization parity:** OPEN
+- **D9-D — Localization parity:** COMPLETE / TEST-GATED
 - **D9-E — Downloaded Data:** COMPLETE / TEST-GATED
 - **D9-F — Miniflux account information / HTTP warning:** COMPLETE / TEST-GATED
 - **D9-G — Open Source and About:** COMPLETE / TEST-GATED
@@ -220,6 +220,28 @@ The native iOS/iPadOS app must restore the production FluxNews language set:
 
 Localization remains native and Weblate-managed. This does not require carrying
 forward obsolete Flutter-only strings or settings.
+
+
+Implementation contract:
+
+- `apple/ios/FluxNews/Localizable.xcstrings` remains the single native iOS
+  String Catalog and English remains the source language;
+- the production locale set is declared explicitly in the Xcode project:
+  English, German, Spanish, Galician, Dutch, Tamil and Turkish;
+- the catalog contains only currently active/manual product strings; Xcode
+  `stale` entries are removed so obsolete diagnostics/legacy copy is not fed
+  into the long-term translation workflow;
+- semantically identical historical Flutter translations were reused only when
+  the English source match was unambiguous; native D5-D9 copy is translated as
+  native copy rather than being force-mapped to obsolete Flutter wording;
+- active product strings have complete translations for all six non-source
+  locales, including plural/variation entries and format placeholders;
+- regression tests require the full locale set, reject stale catalog entries,
+  require locale coverage for every active string, and verify that translated
+  variation paths/placeholders stay compatible with the English source;
+- future Weblate integration manages this same native catalog/workflow. D9 does
+  not introduce a second localization store or resurrect Flutter localization
+  files as runtime sources.
 
 ## 3. D9 Settings completion
 
