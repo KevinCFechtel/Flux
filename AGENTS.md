@@ -12,8 +12,9 @@ The human developer owns product and architecture decisions. Do not silently int
 For non-trivial work, use this order of authority:
 
 1. `docs/ARCHITECTURE_DECISIONS.md` — authoritative target architecture and explicitly agreed product/core boundaries.
-2. Current Rust implementation and tests — evidence of what is implemented today, not permission to override the target architecture.
-3. `docs/reference/` — historical product and feature evidence used to avoid losing valuable behavior.
+2. The active platform/phase contract for the requested work, including `docs/MOBILE_PRODUCT_SEMANTICS.md` for shared native-mobile behavior and `docs/PHASE_E_NATIVE_ANDROID.md` for Phase E Android sequencing/mechanics.
+3. Current Rust/native implementation and tests — evidence of what is implemented today, not permission to override the target architecture.
+4. `docs/reference/` — historical product and feature evidence used to avoid losing valuable behavior.
 
 If reference material conflicts with `ARCHITECTURE_DECISIONS.md`, the architecture decisions win.
 
@@ -36,7 +37,7 @@ A UI interaction may call a core domain operation, but the core API must not be 
 
 ## Repository and Build Layout
 
-The shared Rust workspace lives under `core/`. `core/Cargo.toml` is the authoritative workspace manifest and `core/Cargo.lock` is the single tracked lockfile for that workspace. Platform clients live alongside the shared core under `apple/macos/` and later native `apple/ios/` and `android/` clients. Do not move the Rust workspace back to the repository root or introduce duplicate workspace/lockfile layouts without a concrete requirement.
+The shared Rust workspace lives under `core/`. `core/Cargo.toml` is the authoritative workspace manifest and `core/Cargo.lock` is the single tracked lockfile for that workspace. Platform clients live alongside the shared core under `apple/macos/`, `apple/ios/`, and the Phase-E `android/` client when implementation creates it. Do not move the Rust workspace back to the repository root or introduce duplicate workspace/lockfile layouts without a concrete requirement.
 
 For Apple platforms, the canonical UniFFI packaging path is `apple/Build/build-uniffi.sh`; it produces the macOS and iOS XCFramework slices plus the generated Swift binding source. For macOS, `apple/macos/Build/build-uniffi.sh` consumes that package for the established `build-app.sh` and `release.sh` build/release path. Preserve this validated path unless a concrete implementation requirement makes a change necessary; do not replace it with parallel or temporary build/release mechanisms.
 
@@ -74,6 +75,21 @@ If the current implementation appears to contradict the Phase B contract, do not
 3. why both cannot be satisfied as written.
 
 Only escalate genuine contract contradictions. Normal implementation details explicitly left open by the contract should be resolved consistently with the existing Flux codebase.
+
+
+## Phase E — Native Android
+
+For native Android work, `docs/PHASE_E_NATIVE_ANDROID.md` is the authoritative Phase-E implementation/sequencing contract and `docs/MOBILE_PRODUCT_SEMANTICS.md` is the shared mobile product contract.
+
+Agents must:
+
+* keep Rust Core/UniFFI as the durable domain boundary; do not create a Kotlin Miniflux/domain/persistence duplicate;
+* begin Phase E with the E1 foundation/migration gates before productive feature UI;
+* treat Flutter FluxNews only as behavioral and production-migration evidence;
+* use Kotlin/Jetpack Compose as the initial native UI baseline and make Android renderer/performance changes from measurements rather than Apple implementation history;
+* keep Android lifecycle, credentials, background work, notifications, widgets, media execution and Android Auto platform-native while preserving Core ownership;
+* preserve the production application identity and copy/import-only migration contract for production-upgrade work;
+* not reopen UniFFI, frozen Phase A-D ownership, or shared product semantics without a concrete technical contradiction.
 
 
 ## Validation
