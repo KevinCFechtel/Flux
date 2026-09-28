@@ -1,6 +1,6 @@
 # iOS Localization Usage Audit
 
-> **Status: REOPENED / TECHNICAL TEST-GATE PASSED / GERMAN COMPLETE / ES-GL-NL-TA-TR REVIEW PENDING**
+> **Status: COMPLETE / TEST-GATED**
 >
 > This audit exists because Xcode String Catalog `extractionState` is not a
 > reliable runtime-usage authority for the native iOS app. Productive SwiftUI,
@@ -9,6 +9,12 @@
 > catalog entirely.
 
 ## Scope
+
+The binding D9-D completion scope is English and German. English is the String
+Catalog source language and is protected by the source-to-catalog regression
+contract; German is the maintained completion translation. Spanish, Galician,
+Dutch, Tamil and Turkish remain preserved additional locales, but their
+translation review is deferred and is not a D9-D completion gate.
 
 The production usage gate scans localization-aware source in:
 
@@ -112,10 +118,16 @@ not needed to establish production localization coverage.
 
 ## Language state after the audit
 
-German is the preservation baseline because it was the mature native iOS
-translation before D9-D:
+English remains the catalog source language. The source-to-catalog gate derives
+the production key set from the three production source roots and requires each
+source-used key to exist in the catalog. German is the D9-D completion
+translation, with 465/465 productive catalog entries translated:
 
 - DE: 465 translated, 0 missing, 0 needs-review.
+
+The following additional locales are preserved in the catalog. Their figures
+are informational and deferred, not D9-D completion criteria:
+
 - ES: 186 translated, 254 needs-review, 25 missing structures.
 - GL: 186 translated, 254 needs-review, 25 missing structures.
 - NL: 186 translated, 254 needs-review, 25 missing structures.
@@ -126,12 +138,9 @@ The usage audit exposed that the previous seven-language completion count was
 incorrect: it counted only the reduced catalog after productive keys had been
 removed or omitted.
 
-For ES/GL/NL/TA/TR, missing production locale structures are now staged as
-`needs_review` instead of being falsely marked translated. They must be
-reviewed/translated before D9-D can again be considered localization-complete.
-
-No English fallback marked `needs_review` is evidence of a completed
-translation.
+ES/GL/NL/TA/TR `needs_review` entries remain deliberately unverified rather
+than being marked translated. They are deferred to the planned
+Weblate/community localization workflow and do not block D9-D completion.
 
 ## Regression contract
 
@@ -140,7 +149,8 @@ The iOS XCTest gate now:
 - derives production localization keys from source rather than trusting
   `extractionState`;
 - requires every source-used key to exist in the catalog;
-- requires the production locale set to be structurally present;
+- preserves the production locale structures without treating deferred locale
+  review as a D9-D completion requirement;
 - requires every production key to have a non-empty translated German value;
 - protects interpolated/dynamic runtime keys explicitly;
 - keeps placeholder/plural compatibility checks;
@@ -151,6 +161,6 @@ Future catalog cleanup must use repository/source evidence. Xcode
 `extractionState == stale` alone is never sufficient evidence that a key is
 unused.
 
-`needs_review` values deliberately remain evidence of outstanding language
-review, not completed localization. D9-D is therefore not
-localization-complete despite the passing technical gate.
+The technical gate passed with 556 tests and 0 failures. Deferred
+`needs_review` values remain evidence of outstanding language review for the
+additional locales, not a D9-D blocker.

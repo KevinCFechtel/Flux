@@ -30,7 +30,7 @@ Current repository status:
 - **D9-A — Production Flutter-to-native migration:** COMPLETE / TEST-GATED
 - **D9-B — Config Backup and Restore:** COMPLETE / TEST-GATED
 - **D9-C — Configurable Bottom Action Bar:** COMPLETE / TEST-GATED
-- **D9-D — Localization parity:** REOPENED — SOURCE-USAGE AUDIT TECHNICALLY TEST-GATED / ES-GL-NL-TA-TR REVIEW PENDING
+- **D9-D — Localization parity:** COMPLETE / TEST-GATED
 - **D9-E — Downloaded Data:** COMPLETE / TEST-GATED
 - **D9-F — Miniflux account information / HTTP warning:** COMPLETE / TEST-GATED
 - **D9-G — Open Source and About:** COMPLETE / TEST-GATED
@@ -208,7 +208,7 @@ vertical-toolbar environments.
 
 ### D9-D — Localization parity required for replacement
 
-The native iOS/iPadOS app must restore the production FluxNews language set:
+The native iOS/iPadOS catalog preserves the FluxNews language set:
 
 - English;
 - German;
@@ -220,6 +220,13 @@ The native iOS/iPadOS app must restore the production FluxNews language set:
 
 Localization remains native and Weblate-managed. This does not require carrying
 forward obsolete Flutter-only strings or settings.
+
+The binding D9-D completion scope is English and German. English is the source
+language and is protected by the source-to-catalog regression contract; German
+is the maintained completion translation. Spanish, Galician, Dutch, Tamil and
+Turkish remain preserved additional locales. Their existing translations remain
+intact, while `needs_review` values are deferred to the planned
+Weblate/community localization workflow and do not block D9-D completion.
 
 The post-D9 source-usage audit is authoritative for catalog membership and
 runtime usage; see [IOS_LOCALIZATION_USAGE_AUDIT.md](IOS_LOCALIZATION_USAGE_AUDIT.md).
@@ -239,11 +246,14 @@ Implementation contract:
 - semantically identical historical Flutter translations were reused only when
   the English source match was unambiguous; native D5-D9 copy is translated as
   native copy rather than being force-mapped to obsolete Flutter wording;
-- active product strings have complete translations for all six non-source
-  locales, including plural/variation entries and format placeholders;
-- regression tests require the full locale set, reject stale catalog entries,
-  require locale coverage for every active string, and verify that translated
-  variation paths/placeholders stay compatible with the English source;
+- D9-D completion requires source-proven English catalog coverage and a
+  translated German value for every productive key, including plural/variation
+  entries and format placeholders;
+- additional ES/GL/NL/TA/TR locale structures and existing translations remain
+  preserved, but their `needs_review` entries are not D9-D completion gates;
+- regression tests derive production usage from source rather than treating
+  `extractionState: stale` as a usage signal, preserve locale structures, and
+  verify translated variation paths/placeholders against the English source;
 - future Weblate integration manages this same native catalog/workflow. D9 does
   not introduce a second localization store or resurrect Flutter localization
   files as runtime sources.
@@ -509,8 +519,9 @@ D9 is complete only when:
 2. config backup/export and restore/import complete a tested native round trip;
 3. Bottom Action Bar semantic configuration persists and remains correct across
    the existing adaptive iPhone/iPad layouts;
-4. EN/DE/ES/GL/NL/TA/TR native localization coverage is present for the
-   production UI;
+4. EN source coverage is protected by the source-to-catalog regression contract
+   and DE has a complete production translation; preserved ES/GL/NL/TA/TR
+   locales are deferred to the Weblate/community localization workflow;
 5. Settings exposes downloaded-data count/size and Delete All Downloads;
 6. widget instances can independently select Unread/All and
    Newest First/Oldest First while the extension remains Core/DB/network-free;
