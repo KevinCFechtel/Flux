@@ -83,6 +83,8 @@ final class NewsreaderPresentationTests: XCTestCase {
             #"\.accessibilityLabel\s*\(\s*"((?:\\.|[^"\\])*)""#,
             #"\.accessibilityHint\s*\(\s*"((?:\\.|[^"\\])*)""#,
             #"\.accessibilityValue\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\.configurationDisplayName\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\.description\s*\(\s*"((?:\\.|[^"\\])*)""#,
             #"\bprompt\s*:\s*"((?:\\.|[^"\\])*)""#,
         ].map { try! NSRegularExpression(pattern: $0) }
 
@@ -144,6 +146,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             "%lld items",
             "%lld visible records",
             "FluxNews · %lld %@",
+            "Open %@ in FluxNews",
             "Sync",
             "Filter and Sort",
             "All / Unread",

@@ -21,10 +21,10 @@ It covers direct literals used by `String(localized:)`,
 titles, alerts, confirmation dialogs and progress views. The SwiftUI controls
 covered explicitly include `LabeledContent`, `DisclosureGroup`, `Menu`,
 `NavigationLink`, `Link`, `Stepper` and `DatePicker`; the scan also covers
-literal accessibility labels, hints and values plus search prompts. Dynamic or
-interpolated keys that cannot be reliably reconstructed by static extraction
-are listed explicitly in the test contract and retained as `manual` catalog
-entries.
+literal accessibility labels, hints and values, WidgetKit configuration display
+names/descriptions, plus search prompts. Dynamic or interpolated keys that
+cannot be reliably reconstructed by static extraction are listed explicitly in
+the test contract and retained as `manual` catalog entries.
 
 `DeveloperDiagnosticsView.swift` is excluded from the production scan because
 that surface is reachable only through DEBUG / performance-diagnostics builds.
