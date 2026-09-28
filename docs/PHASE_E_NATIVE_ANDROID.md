@@ -1,6 +1,6 @@
 # Phase E — Native Android
 
-> **Status: AUTHORITATIVE CONTRACT DEFINED — E1-A AND E1-B COMPLETE / E1-C NEXT**
+> **Status: AUTHORITATIVE CONTRACT DEFINED — E1-A, E1-B AND E1-C COMPLETE / E1-D NEXT**
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
 >
@@ -347,7 +347,21 @@ Prove:
 
 ### E1-C — TLS/account transport proof
 
-Prove the pinned Rust transport on API 29 and a current supported Android release, including public CA, invalid CA, required user-CA behavior, HTTP, HTTPS and custom headers.
+E1-C is complete. The pinned `rustls-platform-verifier` 0.5.3 is now the Android TLS verifier for the Core transport. `flux-core` declares it for `cfg(target_os = "android")` next to the existing Apple target and applies it through one shared `platform_tls_config()`; Apple keeps its previous semantics unchanged and every other target keeps the `ureq` default. Without this the Android build fell back to `rustls-native-certs`, which probes Unix trust-store paths that do not exist on Android and therefore resolved an empty root store.
+
+The verifier needs JVM handles before the first Rust TLS handshake, so `flux-uniffi` exposes the narrow Android initialization hook this contract permits: a single JNI entry point that hands over the JVM, the application `Context` and the class loader and carries no domain, Miniflux or Core surface. Kotlin calls it once from `Application.onCreate` through `AndroidPlatformTrust`, which is idempotent for the process; the underlying crate initialization is idempotent as well. The Kotlin verifier component is resolved from the `rustls-platform-verifier-android` crate that `core/Cargo.lock` already selects — Gradle reads both the on-disk Maven repository and the component version from `cargo metadata`, so the AAR can never drift from the crate. R8 keep rules cover the JNI-reached verifier classes and the bootstrap entry point.
+
+Miniflux networking stays entirely in Rust/`ureq`; no Kotlin HTTP client exists. The app declares `INTERNET` and a network security configuration that preserves the legacy Android product policy of permitted cleartext HTTP plus system and user certificate anchors.
+
+Proven behavior over the production `validate_miniflux_account` path:
+
+- plain HTTP Miniflux installations remain supported;
+- custom HTTP headers reach the server on the real Rust request;
+- public/system trust anchors complete the handshake and reach the HTTP layer;
+- invalid and untrusted certificates are rejected as a transport failure and never validate as a Miniflux server;
+- user-installed CA anchors are trusted, matching the legacy Flutter client; the same server is rejected before the anchor is installed and accepted afterwards.
+
+Runtime acceptance on 28 September 2026 passed the full transport suite on an API 29 / Android 10 `arm64-v8a` emulator and on an API 37 `arm64-v8a` emulator with 16 KB pages. `android/Build/test-transport-runtime.sh` is the canonical entry point; it selects one explicit device, runs only the E1-C instrumentation tests and drives both user-CA phases. The public/system CA gate is a deliberate online integration test and is not part of the offline `android/Build/test.sh` gate.
 
 ### E1-D — Android Core runtime ownership
 
@@ -731,9 +745,9 @@ The production application ID and compatible signing key are mandatory for in-pl
 
 The native production build must be able to recover the retained Flutter secure-storage values using the installed app's existing Keystore-backed material. This cannot be assumed from source inspection; E1 requires a physical production-identity upgrade spike.
 
-### High — Rust Android TLS/platform verifier
+### Closed — Rust Android TLS/platform verifier
 
-The current pinned TLS verifier has not yet been proven in this repository on Android. E1 must validate initialization and required trust behavior before account/network UI depends on it.
+Closed by E1-C. The pinned verifier is integrated, its Android initialization runs before any Core network access, and the required trust behavior — system/public CA, invalid certificate rejection and user-installed CA — is proven on API 29 and on a current Android release.
 
 ### High — UniFFI Android ABI/packaging
 
