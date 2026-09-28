@@ -228,9 +228,10 @@ Implementation contract:
   String Catalog and English remains the source language;
 - the production locale set is declared explicitly in the Xcode project:
   English, German, Spanish, Galician, Dutch, Tamil and Turkish;
-- the catalog contains only currently active/manual product strings; Xcode
-  `stale` entries are removed so obsolete diagnostics/legacy copy is not fed
-  into the long-term translation workflow;
+- Xcode extraction state is not treated as a runtime-usage authority. Some
+  productive SwiftUI/localized-string call sites are reported as `stale` by
+  Xcode even though they remain reachable at runtime, so existing translated
+  entries are preserved unless repository evidence proves they are obsolete;
 - semantically identical historical Flutter translations were reused only when
   the English source match was unambiguous; native D5-D9 copy is translated as
   native copy rather than being force-mapped to obsolete Flutter wording;
