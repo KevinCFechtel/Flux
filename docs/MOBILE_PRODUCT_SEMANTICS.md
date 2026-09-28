@@ -63,7 +63,11 @@ Feed icons, including available normal/dark variants from Core, should be used b
 
 Article-row accessory order is semantic and stable. Measured from the visual outer edge inward in a horizontal group, or from the top downward in a vertical rail, the order is: **Unread → Star → Comments → Audio**. Optional audio duration belongs to the Audio accessory and must not become an independent slot. Platform/layout variants may change the axis but not this semantic ordering.
 
-On native iOS/iPadOS, standard Visual portrait uses the normal full-content-width 16:9 article image followed by metadata, title, an absolute publication date with optional inline reading time, and preview. There is no separate reduced-width image/info-rail presentation. Miniflux `reading_time` is persisted and projected through Core/UniFFI rather than calculated by the iOS cell. Visual landscape, Compact, and Visual compact use the same publication-row rule: when reading time is available, a centered dot separates it from the date and `doc.text` + duration follows immediately inline without adding vertical height. Visual compact must retain its article title between metadata and the date/image row; its title may never collapse merely because the date row also contains inline reading time. Audio is added only when the Timeline receives a batched article-level audio projection; list cells must not perform per-row enclosure/media fetches merely to populate the accessory.
+Native mobile clients provide the retained article presentation modes **Compact**, **Visual**, and **Visual Compact**. Across productive variants, feed/source metadata precedes the headline and the publication row follows the headline. The publication row uses either the localized absolute publication date/time or the configured localized relative age. When Miniflux reading time is available, it is shown inline with that publication value rather than becoming a separate row. Miniflux `reading_time` is persisted and projected through Core/UniFFI; native clients must not independently estimate it.
+
+Visual Compact must retain its article title; adding publication or reading-time metadata must never collapse the headline. Article audio availability is consumed from a batched/article-level Core projection. Productive list rows must not perform per-row enclosure/media queries merely to populate the Audio accessory.
+
+On native iOS/iPadOS, standard Visual portrait additionally uses the accepted full-content-width 16:9 image and the publication row uses the current Apple iconography/layout described by the frozen UIKit Timeline contract. The removed reduced-width image/info-rail experiment is an iOS implementation history, not an Android requirement. Android should express the same content semantics using its native layout and image pipeline.
 
 ## 5. Article routing and Reader
 
@@ -119,14 +123,17 @@ Interaction semantics:
 
 Current default actions are Read/Unread and Star/Unstar on their established sides. Future configuration must preserve the semantic action model rather than storing platform widget details.
 
-For native iOS Phase D, the currently implemented configurable semantic set is
-Read/Unread, Star/Unstar, Open Original, Open in Miniflux, Open Comments, Share,
-Save to Third-Party Service, Listening List, and Download Audio. Conditional
-actions are omitted for rows where their precondition is unavailable. The
+The retained configurable semantic action set is Read/Unread, Star/Unstar,
+Open Original, Open in Miniflux, Open Comments, Share, Save to Third-Party
+Service, Listening List, and Download Audio. A platform may expose a subset in
+a particular gesture location when the remaining actions stay reachable through
+native menus/overflow.
+
+Conditional actions are omitted where their precondition is unavailable. The
 Listening List action derives Add/Remove from the batched article-audio
-projection and appears only for News with audio; Download Audio appears only
-when that same projection exposes at least one downloadable enclosure. These D6
-media actions preserve the existing 0-2-per-side contract and must never add
+projection and appears only for articles with audio; Download Audio appears
+only when that same projection exposes at least one downloadable enclosure.
+These media actions preserve the 0-2-per-side swipe contract and must never add
 per-row Core media queries.
 
 ## 8. Scope-level Mark as Read
@@ -160,11 +167,58 @@ Mobile UI actions should have stable semantic identities independent of where a 
 
 The default iOS/iPadOS Article List actions are Sync, Filter/Sort, and More. iPhone portrait exposes them in the Bottom Action Bar using a structurally distinct bottom-toolbar branch; its scope capsule is centered in an independent top safe-area inset and the Timeline keeps the native `.automatic` top edge effect on iOS/iPadOS 26+. Compact iPhone landscape instead returns the scope capsule to the native leading navigation toolbar and Sync/Filter/More to the native trailing toolbar, while disabling the Timeline top edge effect for that mode. When persistent split navigation is visible, the detail normally keeps the detached action capsule because the sidebar already communicates the selected scope; if the system reports a non-`nil` `toolbarVerticalEdge`, Sync/Filter/More instead become native top-toolbar items so iPhone Duo can place them in its vertical system bar. If the sidebar is hidden, the wider scope capsule with chevron remains horizontal in the detached inset row. Regular split modes keep the native automatic top edge effect regardless of whether the system bar is horizontal or vertical; the vertical preference changes only action placement. In the sidebar, category selection and category expansion are separate interactions so expanding or collapsing a selected category does not depend on List-selection behavior. This Apple layout is not an Android requirement.
 
-Future toolbar/action configurability may promote supported semantic actions into direct slots. An always-available overflow path must preserve access to actions that are not shown directly. Do not persist concrete SwiftUI/Compose control identities as the configuration model.
+Supported semantic actions may be configured into direct Article List action slots and ordered by user preference. An always-available overflow path must preserve access to applicable actions that are not shown directly. Configuration stores semantic action identities/order, never concrete SwiftUI/Compose control identities. Platform layout may limit how many configured actions are directly visible without changing the configured meaning.
 
 Listening List functionality itself belongs to the media phase; representing its semantic action does not move media implementation into an earlier phase.
 
-## 10. Platform-native implementation rule
+## 10. Widget product semantics
+
+Each home-screen widget instance owns its own presentation configuration. The shared mobile configuration dimensions are:
+
+- scope: All News, Category, Feed, or Bookmarks;
+- read filter: Unread or All;
+- sort: Newest First or Oldest First.
+
+The read filter applies inside the selected scope; for Bookmarks, All means all retained starred articles and Unread means unread starred articles.
+
+Widgets consume a bounded, versioned, credential-free projection prepared by the main app. A widget extension/provider must not initialize Core, open the production Core SQLite database, access Miniflux credentials, or perform Miniflux networking. Platform-specific storage, configuration APIs, widget families/sizes, icon files and routing mechanisms remain native concerns.
+
+Article taps enter the normal FluxNews article-open path, including feed-specific routing. A widget does not own a separate Open in Miniflux preference.
+
+## 11. Configuration backup and restore
+
+Native mobile clients provide encrypted configuration export/import using the shared Core backup envelope plus a versioned platform-local settings payload.
+
+Backup/restore is configuration handoff, not article/database/media backup. Account credentials, Core settings and compatible feed preferences follow the Core backup contract; platform presentation settings are validated by the native client before replacement.
+
+Restore must be reachable both from normal Settings and from the account-required startup surface so a fresh installation can adopt a valid backup without creating a temporary account.
+
+A backup is not implicitly cross-platform between iOS/iPadOS and Android. Cross-platform portability requires an explicit future contract for compatible platform payloads.
+
+## 12. Localization baseline
+
+The retained native-mobile production language set is English, German, Spanish, Galician, Dutch, Tamil, and Turkish.
+
+Each native platform owns its localization resources and accessibility wording. Legacy Flutter ARB resources may be translation evidence during migration but are not runtime localization sources for a native client.
+
+## 13. Support diagnostics
+
+Native mobile Settings provide a user-facing Support Diagnostics destination with:
+
+- a Debug Logging preference;
+- retained-record count;
+- a structured log viewer with timestamp, level, category, and message;
+- newest-first display plus text search and level filtering;
+- refresh and per-record copy;
+- privacy-sanitized export through the platform-native share/file flow;
+- confirmed Clear Logs;
+- a concise privacy/retention explanation.
+
+Normal support-level Info/Warning/Error records remain available when Debug Logging is off; Debug/Trace retention is gated by the preference. Legacy Clear Logs on Start is not part of the native product.
+
+The exact platform log sink/view implementation remains native. Core diagnostics may be bridged into the support log, but platforms must not create a second authoritative durable application/domain log model.
+
+## 14. Platform-native implementation rule
 
 Shared semantics define **what the user-visible behavior means**. Platform implementations define **how that behavior is expressed natively**.
 
