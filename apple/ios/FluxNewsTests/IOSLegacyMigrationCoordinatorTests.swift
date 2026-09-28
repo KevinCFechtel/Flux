@@ -1,6 +1,12 @@
 import XCTest
 @testable import FluxNews
 
+private final class FailingCopyFileManager: FileManager {
+    override func copyItem(at srcURL: URL, to dstURL: URL) throws {
+        throw NSError(domain: "FluxNewsTests", code: 1)
+    }
+}
+
 final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
     private func makeDefaults() -> (UserDefaults, String) {
         let suite = "FluxNews.LegacyMigrationTests.\(UUID().uuidString)"
@@ -704,7 +710,11 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
             bootstrapper: bootstrapper,
             defaults: defaults,
             legacyDownloadReader: { [record] },
-            legacyDownloadImporter: { _, _, _ in .success(.imported) },
+            legacyDownloadImporter: { enclosureID, _, fileSizeBytes in
+                XCTAssertEqual(enclosureID, 11)
+                XCTAssertEqual(fileSizeBytes, UInt64("legacy-audio".utf8.count))
+                return .success(.imported)
+            },
             mediaRootProvider: { mediaRoot }
         )
 
@@ -712,7 +722,111 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         XCTAssertEqual(outcome, .imported)
         XCTAssertTrue(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.downloads.v1.completed"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: try legacyDownloadDestination(11, under: mediaRoot).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: try legacyDownloadDestination(11, under: mediaRoot).appendingPathExtension("partial").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: record.sourceFile.path))
+    }
+
+    @MainActor
+    func testDownloadMigrationImportsMatchingPreexistingDestination() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        markAccountAsMigrated(account, defaults: defaults)
+        let record = try makeLegacyDownload(enclosureID: 15, contents: "matching-copy")
+        let mediaRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let destination = try legacyDownloadDestination(15, under: mediaRoot)
+        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("matching-copy".utf8).write(to: destination)
+        var imported = false
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyDownloadReader: { [record] },
+            legacyDownloadImporter: { _, _, fileSizeBytes in
+                imported = true
+                XCTAssertEqual(fileSizeBytes, UInt64("matching-copy".utf8.count))
+                return .success(.imported)
+            },
+            mediaRootProvider: { mediaRoot }
+        )
+
+        let outcome = await coordinator.migrateDownloadsIfNeeded()
+
+        XCTAssertEqual(outcome, .imported)
+        XCTAssertTrue(imported)
+        XCTAssertTrue(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.downloads.v1.completed"))
+        XCTAssertEqual(try Data(contentsOf: destination), Data("matching-copy".utf8))
+    }
+
+    @MainActor
+    func testDownloadMigrationRejectsPreexistingDestinationsWithWrongOrZeroSize() async throws {
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        for (enclosureID, destinationContents) in [
+            (16, "small"),
+            (17, "larger-than-source"),
+            (18, "")
+        ] {
+            let (defaults, suite) = makeDefaults()
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+            markAccountAsMigrated(account, defaults: defaults)
+            let record = try makeLegacyDownload(enclosureID: Int64(enclosureID), contents: "source-size")
+            let mediaRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            let destination = try legacyDownloadDestination(Int64(enclosureID), under: mediaRoot)
+            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(destinationContents.utf8).write(to: destination)
+            var imported = false
+            let coordinator = IOSLegacyMigrationCoordinator(
+                bootstrapper: bootstrapper,
+                defaults: defaults,
+                legacyDownloadReader: { [record] },
+                legacyDownloadImporter: { _, _, _ in
+                    imported = true
+                    return .success(.imported)
+                },
+                mediaRootProvider: { mediaRoot }
+            )
+
+            let outcome = await coordinator.migrateDownloadsIfNeeded()
+
+            XCTAssertEqual(outcome, .retryableFailure, "enclosure \(enclosureID)")
+            XCTAssertFalse(imported, "enclosure \(enclosureID)")
+            XCTAssertFalse(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.downloads.v1.completed"))
+            XCTAssertEqual(try Data(contentsOf: destination), Data(destinationContents.utf8))
+        }
+    }
+
+    @MainActor
+    func testDownloadMigrationCopyFailureLeavesNoFinalOrStagingFile() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        markAccountAsMigrated(account, defaults: defaults)
+        let record = try makeLegacyDownload(enclosureID: 19)
+        let mediaRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        var imported = false
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyDownloadReader: { [record] },
+            legacyDownloadImporter: { _, _, _ in
+                imported = true
+                return .success(.imported)
+            },
+            mediaRootProvider: { mediaRoot },
+            fileManager: FailingCopyFileManager()
+        )
+
+        let outcome = await coordinator.migrateDownloadsIfNeeded()
+        let destination = try legacyDownloadDestination(19, under: mediaRoot)
+
+        XCTAssertEqual(outcome, .retryableFailure)
+        XCTAssertFalse(imported)
+        XCTAssertFalse(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.downloads.v1.completed"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.appendingPathExtension("partial").path))
     }
 
     @MainActor

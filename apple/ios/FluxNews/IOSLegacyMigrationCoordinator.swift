@@ -266,8 +266,7 @@ final class IOSLegacyMigrationCoordinator {
         var hasRetryableRecord = false
         for record in records {
             let reference = "downloads/legacy/enclosure-\(record.enclosureID).audio"
-            guard let size = try? record.sourceFile.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-                  size > 0 else {
+            guard let sourceSize = readableRegularFileSize(at: record.sourceFile) else {
                 hasRetryableRecord = true
                 continue
             }
@@ -277,7 +276,15 @@ final class IOSLegacyMigrationCoordinator {
                 destination = try MediaTransferFileLayout.destination(reference: reference, under: mediaRoot)
                 try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
                 if !fileManager.fileExists(atPath: destination.path) {
-                    try fileManager.copyItem(at: record.sourceFile, to: destination)
+                    let stagingDestination = destination.appendingPathExtension("partial")
+                    try? fileManager.removeItem(at: stagingDestination)
+                    do {
+                        try fileManager.copyItem(at: record.sourceFile, to: stagingDestination)
+                        try fileManager.moveItem(at: stagingDestination, to: destination)
+                    } catch {
+                        try? fileManager.removeItem(at: stagingDestination)
+                        throw error
+                    }
                     createdDestination = true
                 } else {
                     createdDestination = false
@@ -286,14 +293,19 @@ final class IOSLegacyMigrationCoordinator {
                 hasRetryableRecord = true
                 continue
             }
+            guard let destinationSize = readableRegularFileSize(at: destination),
+                  destinationSize == sourceSize else {
+                hasRetryableRecord = true
+                continue
+            }
             let result: Result<LegacyDownloadImportOutcome, Error>
             if let legacyDownloadImporter {
-                result = await legacyDownloadImporter(record.enclosureID, reference, UInt64(size))
+                result = await legacyDownloadImporter(record.enclosureID, reference, destinationSize)
             } else {
                 result = await bootstrapper.importLegacyDownload(
                     enclosureID: record.enclosureID,
                     localFile: reference,
-                    fileSizeBytes: UInt64(size)
+                    fileSizeBytes: destinationSize
                 )
             }
             switch result {
@@ -321,6 +333,17 @@ final class IOSLegacyMigrationCoordinator {
     private func mediaSettingsWriteFailed(_ error: Error) -> IOSLegacyMediaSettingsMigrationOutcome {
         logger.error("Legacy media settings migration remains retryable: \(String(reflecting: error))")
         return .retryableFailure
+    }
+
+    private func readableRegularFileSize(at url: URL) -> UInt64? {
+        guard fileManager.isReadableFile(atPath: url.path),
+              let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+              values.isRegularFile == true,
+              let size = values.fileSize,
+              size > 0 else {
+            return nil
+        }
+        return UInt64(size)
     }
 
     static func playbackMigrationOutcome(
