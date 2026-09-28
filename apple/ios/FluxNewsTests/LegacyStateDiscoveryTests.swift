@@ -93,4 +93,33 @@ final class LegacyStateDiscoveryTests: XCTestCase {
             ]
         )
     }
+
+    func testFeedOpenInMinifluxParserRetainsOnlyPositiveValidOverridesInOrder() {
+        let parsed = LegacyStateDiscovery.parseFeedOpenInMinifluxImports("""
+        {
+          "20": {"openMinifluxEntry": 1, "manualTruncate": 0},
+          "10": {"openMinifluxEntry": 0},
+          "30": {"manualTruncate": 1},
+          "40": {"openMinifluxEntry": "1"},
+          "0": {"openMinifluxEntry": 1},
+          "-2": {"openMinifluxEntry": 1},
+          "50": {"openMinifluxEntry": 1, "preferParagraph": 1}
+        }
+        """)
+
+        XCTAssertEqual(parsed, [
+            .init(feedID: 20, openInMiniflux: true),
+            .init(feedID: 50, openInMiniflux: true)
+        ])
+    }
+
+    func testFeedOpenInMinifluxParserRejectsMalformedAndUnexpectedValues() {
+        XCTAssertEqual(LegacyStateDiscovery.parseFeedOpenInMinifluxImports(nil), [])
+        XCTAssertEqual(LegacyStateDiscovery.parseFeedOpenInMinifluxImports("not json"), [])
+        XCTAssertEqual(LegacyStateDiscovery.parseFeedOpenInMinifluxImports("[]"), [])
+        XCTAssertEqual(
+            LegacyStateDiscovery.parseFeedOpenInMinifluxImports("{\"1\": {\"openMinifluxEntry\": true}}"),
+            []
+        )
+    }
 }

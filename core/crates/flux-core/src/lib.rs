@@ -33,14 +33,15 @@ use domain::{
     CreateFeedRequest, CreateFeedResult, DeliveryDisposition, DeliveryMode, DetailRenderingMode,
     DiscoverSubscriptionsRequest, DiscoveredSubscription, DownloadFailureKind,
     DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, DownloadState, Enclosure, FeedIcon,
-    FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, LegacyPlaybackImport,
-    LegacyDownloadImportOutcome, LegacyPlaybackImportResult, ListeningListFeed, ListeningListItem, ListeningListSort,
-    MediaChapter, MediaDownload, MediaMetadata, MediaTransferWork, MutationField, MutationResult,
-    NavigationCatalog, NavigationCountMode, NavigationProjection, PlaybackPreparation,
-    PlaybackState, ReadArticleRetention, ReaderDocument, RuntimeHealth, RuntimeHealthStatus,
-    SaveToServiceResult, SavedMediaSyncConfiguration, SavedMediaSyncSetupInfo,
-    SavedPlayableMediaItem, SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition,
-    SyncCompleted, SyncFailure, SyncReason, WidgetData,
+    FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, LegacyDownloadImportOutcome,
+    LegacyFeedOpenInMinifluxImportOutcome, LegacyPlaybackImport, LegacyPlaybackImportResult,
+    ListeningListFeed, ListeningListItem, ListeningListSort, MediaChapter, MediaDownload,
+    MediaMetadata, MediaTransferWork, MutationField, MutationResult, NavigationCatalog,
+    NavigationCountMode, NavigationProjection, PlaybackPreparation, PlaybackState,
+    ReadArticleRetention, ReaderDocument, RuntimeHealth, RuntimeHealthStatus, SaveToServiceResult,
+    SavedMediaSyncConfiguration, SavedMediaSyncSetupInfo, SavedPlayableMediaItem,
+    SearchArticlesRequest, SearchArticlesResult, SearchMutationDisposition, SyncCompleted,
+    SyncFailure, SyncReason, WidgetData,
 };
 use miniflux::{
     AccountValidationAttempt, AccountValidationError, AccountValidationResult, HttpHeader,
@@ -1072,6 +1073,12 @@ impl FluxCore {
     }
     pub fn set_feed_open_in_miniflux(&self, feed_id: i64, enabled: bool) -> Result<(), CoreError> {
         self.store.set_feed_open_in_miniflux(feed_id, enabled)
+    }
+    pub fn import_legacy_feed_open_in_miniflux(
+        &self,
+        feed_id: i64,
+    ) -> Result<LegacyFeedOpenInMinifluxImportOutcome, CoreError> {
+        self.store.import_legacy_feed_open_in_miniflux(feed_id)
     }
     pub fn set_feed_auto_download_audio(
         &self,
@@ -2172,7 +2179,7 @@ mod tests {
         assert_eq!(
             conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            18
+            19
         );
         let bytes = std::fs::read(core.database_path()).unwrap();
         assert!(

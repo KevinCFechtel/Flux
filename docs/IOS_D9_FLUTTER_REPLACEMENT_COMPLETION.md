@@ -43,6 +43,15 @@ D9 does not introduce a replacement sync-triggered download policy.
 The migration remains idempotent, restart-safe, and non-destructive to legacy
 storage. Existing valid native/Core state wins.
 
+For the Flutter `feedSettingsOverrides` secure-storage JSON object, D9 migrates
+only a positive `openMinifluxEntry: 1` under its numeric Miniflux feed ID to the
+existing Core `open_in_miniflux` preference. Flutter serialized zero-valued
+defaults for every override field, so `0`, missing, or malformed values are not
+evidence of an explicit false choice and are not migrated. The Core retains
+field-level native preference presence; an existing native decision, including
+explicit false, wins. A positive record for a feed not yet present after account
+migration remains retryable until a later successful reconciliation.
+
 ### D9-B — Config Backup and Restore on iOS/iPadOS
 
 Expose the existing Flux Config Backup contract through native iOS Settings:

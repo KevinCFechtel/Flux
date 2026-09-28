@@ -43,6 +43,11 @@ struct LegacyDownloadImport: Equatable {
     let sourceFile: URL
 }
 
+struct LegacyFeedOpenInMinifluxImport: Equatable {
+    let feedID: Int64
+    let openInMiniflux: Bool
+}
+
 enum LegacyStateDiscovery {
     static let productionBundleID = "dev.kevincfechtel.fluxNews"
     static let applicationGroup = "group.dev.kevincfechtel.fluxNews"
@@ -125,6 +130,15 @@ enum LegacyStateDiscovery {
               let values = keychainValues() else { return nil }
         let mediaValues = values.filter { compatibleMediaSettings.contains($0.key) }
         return IOSLegacyMediaSettingsImport.parse(mediaValues)
+    }
+
+    /// Reads only positive per-feed Open in Miniflux overrides from Flutter's
+    /// secure storage. Flutter persisted default zero values for every field,
+    /// so zero is not evidence of an explicit user choice.
+    static func readFeedOpenInMinifluxImports() -> [LegacyFeedOpenInMinifluxImport]? {
+        guard Bundle.main.bundleIdentifier == productionBundleID,
+              let values = keychainValues() else { return nil }
+        return parseFeedOpenInMinifluxImports(values[feedSettingsKey])
     }
 
     /// Reads Flutter's article-keyed playback values with the same source
@@ -260,6 +274,28 @@ enum LegacyStateDiscovery {
             return LegacyDownloadImport(enclosureID: enclosureID, sourceFile: source)
         }
         .sorted { $0.enclosureID < $1.enclosureID }
+    }
+
+    static func parseFeedOpenInMinifluxImports(
+        _ rawValue: String?
+    ) -> [LegacyFeedOpenInMinifluxImport] {
+        guard let rawValue,
+              let data = rawValue.data(using: .utf8),
+              let overrides = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return []
+        }
+        return overrides.compactMap { feedIDValue, overrideValue in
+            guard let feedID = Int64(feedIDValue),
+                  feedID > 0,
+                  let override = overrideValue as? [String: Any],
+                  let value = override["openMinifluxEntry"] as? NSNumber,
+                  CFGetTypeID(value) != CFBooleanGetTypeID(),
+                  value.stringValue == "1" else {
+                return nil
+            }
+            return LegacyFeedOpenInMinifluxImport(feedID: feedID, openInMiniflux: true)
+        }
+        .sorted { $0.feedID < $1.feedID }
     }
 
     static func redactedSummary(_ result: LegacyDiscoveryResult) -> [String: String] {

@@ -220,6 +220,7 @@ final class IOSAppRuntime {
             onSuccessfulSync: { [weak legacyMigrationCoordinator] in
                 _ = await legacyMigrationCoordinator?.migratePlaybackProgressIfNeeded()
                 _ = await legacyMigrationCoordinator?.migrateDownloadsIfNeeded()
+                _ = await legacyMigrationCoordinator?.migrateFeedPreferencesIfNeeded()
             }
         )
         self.bootstrapper = bootstrapper

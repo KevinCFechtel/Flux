@@ -354,6 +354,12 @@ pub enum DetailRenderingMode {
     Rendered,
     TextOnly,
 }
+#[derive(uniffi::Enum)]
+pub enum LegacyFeedOpenInMinifluxImportOutcome {
+    Imported,
+    AlreadyPresent,
+    MissingFeed,
+}
 #[derive(uniffi::Record)]
 pub struct FeedPreferences {
     pub feed_id: i64,
@@ -1411,6 +1417,15 @@ impl Flux {
             .set_feed_open_in_miniflux(feed_id, enabled)
             .map_err(map_error)
     }
+    pub fn import_legacy_feed_open_in_miniflux(
+        &self,
+        feed_id: i64,
+    ) -> Result<LegacyFeedOpenInMinifluxImportOutcome, FluxError> {
+        self.core
+            .import_legacy_feed_open_in_miniflux(feed_id)
+            .map(Into::into)
+            .map_err(map_error)
+    }
     pub fn acknowledge_system_notification(&self, candidate_id: i64) -> Result<(), FluxError> {
         self.core
             .acknowledge_system_notification(candidate_id)
@@ -2444,6 +2459,16 @@ impl From<domain::LegacyDownloadImportOutcome> for LegacyDownloadImportOutcome {
             domain::LegacyDownloadImportOutcome::Imported => Self::Imported,
             domain::LegacyDownloadImportOutcome::AlreadyPresent => Self::AlreadyPresent,
             domain::LegacyDownloadImportOutcome::MissingEnclosure => Self::MissingEnclosure,
+        }
+    }
+}
+
+impl From<domain::LegacyFeedOpenInMinifluxImportOutcome> for LegacyFeedOpenInMinifluxImportOutcome {
+    fn from(value: domain::LegacyFeedOpenInMinifluxImportOutcome) -> Self {
+        match value {
+            domain::LegacyFeedOpenInMinifluxImportOutcome::Imported => Self::Imported,
+            domain::LegacyFeedOpenInMinifluxImportOutcome::AlreadyPresent => Self::AlreadyPresent,
+            domain::LegacyFeedOpenInMinifluxImportOutcome::MissingFeed => Self::MissingFeed,
         }
     }
 }

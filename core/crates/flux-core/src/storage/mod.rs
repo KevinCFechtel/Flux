@@ -11,7 +11,8 @@ use crate::domain::{
     ArticleSummary, Category, ContinueListeningItem, CoreError, CoreSettings, DeliveryMode,
     DetailRenderingMode, DiscoveryMode, DownloadFailureKind, DownloadNetworkPolicy, DownloadOrigin,
     DownloadRetention, DownloadState, Enclosure, Feed, FeedPreferences,
-    FeedSystemNotificationSetting, LegacyDownloadImportOutcome, LegacyPlaybackImport, LegacyPlaybackImportResult,
+    FeedSystemNotificationSetting, LegacyDownloadImportOutcome,
+    LegacyFeedOpenInMinifluxImportOutcome, LegacyPlaybackImport, LegacyPlaybackImportResult,
     ListeningListEnclosure, ListeningListFeed, ListeningListItem, ListeningListSort,
     MediaArtworkSource, MediaChapter, MediaChapterSource, MediaDownload, MediaMetadata,
     MediaTransferWork, MutationField, NavigationCatalog, NavigationCountMode, NavigationProjection,
@@ -28,7 +29,7 @@ use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
 
-const SCHEMA_VERSION: i64 = 18;
+const SCHEMA_VERSION: i64 = 19;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingSavedMediaReplication {
@@ -610,6 +611,11 @@ impl Store {
         for feed_id in removed_preference_ids {
             tx.execute("DELETE FROM feed_preferences WHERE feed_id=?1", [feed_id])
                 .map_err(sql_error)?;
+            tx.execute(
+                "DELETE FROM feed_open_in_miniflux_overrides WHERE feed_id=?1",
+                [feed_id],
+            )
+            .map_err(sql_error)?;
         }
         stats.navigation_changed |= !stale_feed_ids.is_empty();
         let remote_article_ids: HashSet<i64> = articles.iter().map(|article| article.id).collect();
@@ -1935,14 +1941,18 @@ impl Store {
         file_size_bytes: u64,
     ) -> Result<LegacyDownloadImportOutcome, CoreError> {
         if local_file.trim().is_empty() {
-            return Err(CoreError::data("legacy download requires a non-empty local file reference"));
+            return Err(CoreError::data(
+                "legacy download requires a non-empty local file reference",
+            ));
         }
         let size = i64::try_from(file_size_bytes)
             .map_err(|_| CoreError::data("legacy download file size exceeds SQLite range"))?;
         let analyzed = resolve_media_reference(&self.media_root, local_file)
             .map(|path| analyze_file(&path))
             .unwrap_or_default();
-        let mut connection = self.connection.lock()
+        let mut connection = self
+            .connection
+            .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
         let tx = connection.transaction().map_err(sql_error)?;
         let article_html: Option<String> = tx.query_row(
@@ -1956,9 +1966,13 @@ impl Store {
             return Ok(LegacyDownloadImportOutcome::AlreadyPresent);
         }
         if is_audio_enclosure(&tx, enclosure_id)? {
-            let article_id: i64 = tx.query_row(
-                "SELECT article_id FROM enclosures WHERE id=?1", [enclosure_id], |row| row.get(0),
-            ).map_err(sql_error)?;
+            let article_id: i64 = tx
+                .query_row(
+                    "SELECT article_id FROM enclosures WHERE id=?1",
+                    [enclosure_id],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
             ensure_listening_membership(&tx, article_id, &Utc::now().to_rfc3339())?;
         }
         tx.execute(
@@ -1966,7 +1980,13 @@ impl Store {
             params![enclosure_id, local_file, size, Utc::now().to_rfc3339()],
         ).map_err(sql_error)?;
         let artwork_reference = self.persist_artwork(&analyzed.artwork)?;
-        persist_media_metadata(&tx, enclosure_id, &article_html, &analyzed, artwork_reference.as_deref())?;
+        persist_media_metadata(
+            &tx,
+            enclosure_id,
+            &article_html,
+            &analyzed,
+            artwork_reference.as_deref(),
+        )?;
         tx.commit().map_err(sql_error)?;
         Ok(LegacyDownloadImportOutcome::Imported)
     }
@@ -2562,7 +2582,61 @@ impl Store {
         self.set_feed_preference(feed_id, "truncate_detail", if enabled { "1" } else { "0" })
     }
     pub fn set_feed_open_in_miniflux(&self, feed_id: i64, enabled: bool) -> Result<(), CoreError> {
-        self.set_feed_preference(feed_id, "open_in_miniflux", if enabled { "1" } else { "0" })
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        let exists = tx
+            .query_row("SELECT 1 FROM feeds WHERE id=?1", [feed_id], |_| Ok(()))
+            .optional()
+            .map_err(sql_error)?
+            .is_some();
+        if !exists {
+            return Err(CoreError::data(format!("feed {feed_id} does not exist")));
+        }
+        tx.execute("INSERT INTO feed_preferences(feed_id,open_in_miniflux) VALUES(?1,?2) ON CONFLICT(feed_id) DO UPDATE SET open_in_miniflux=excluded.open_in_miniflux", params![feed_id, enabled]).map_err(sql_error)?;
+        tx.execute("INSERT INTO feed_open_in_miniflux_overrides(feed_id) VALUES(?1) ON CONFLICT(feed_id) DO NOTHING", [feed_id]).map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+        Ok(())
+    }
+    pub fn import_legacy_feed_open_in_miniflux(
+        &self,
+        feed_id: i64,
+    ) -> Result<LegacyFeedOpenInMinifluxImportOutcome, CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+        let exists = tx
+            .query_row("SELECT 1 FROM feeds WHERE id=?1", [feed_id], |_| Ok(()))
+            .optional()
+            .map_err(sql_error)?
+            .is_some();
+        if !exists {
+            return Ok(LegacyFeedOpenInMinifluxImportOutcome::MissingFeed);
+        }
+        let native_override_exists = tx
+            .query_row(
+                "SELECT 1 FROM feed_open_in_miniflux_overrides WHERE feed_id=?1",
+                [feed_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(sql_error)?
+            .is_some();
+        if native_override_exists {
+            return Ok(LegacyFeedOpenInMinifluxImportOutcome::AlreadyPresent);
+        }
+        tx.execute("INSERT INTO feed_preferences(feed_id,open_in_miniflux) VALUES(?1,1) ON CONFLICT(feed_id) DO UPDATE SET open_in_miniflux=1", [feed_id]).map_err(sql_error)?;
+        tx.execute(
+            "INSERT INTO feed_open_in_miniflux_overrides(feed_id) VALUES(?1)",
+            [feed_id],
+        )
+        .map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+        Ok(LegacyFeedOpenInMinifluxImportOutcome::Imported)
     }
     pub fn set_feed_auto_download_audio(
         &self,
@@ -3751,6 +3825,13 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
         tx.execute_batch("ALTER TABLE articles ADD COLUMN reading_time_minutes INTEGER NOT NULL DEFAULT 0 CHECK(reading_time_minutes >= 0); PRAGMA user_version=18;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
+    if current < 19 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        // Older databases did not retain per-field provenance. Treat any saved
+        // preference row as native-owned rather than risk replacing a user's choice.
+        tx.execute_batch("CREATE TABLE feed_open_in_miniflux_overrides (feed_id INTEGER PRIMARY KEY); INSERT INTO feed_open_in_miniflux_overrides(feed_id) SELECT feed_id FROM feed_preferences; PRAGMA user_version=19;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
     Ok(())
 }
 fn initialize_core_settings(connection: &Connection) -> Result<(), CoreError> {
@@ -3843,6 +3924,8 @@ fn clear_synchronized_state(
     tx.execute_batch("DELETE FROM notification_candidate_articles; DELETE FROM system_notification_candidates; DELETE FROM pending_system_notifications; DELETE FROM system_notified_articles; DELETE FROM pending_mutations; DELETE FROM articles;").map_err(sql_error)?;
     if remove_feed_preferences {
         tx.execute("DELETE FROM feed_preferences", [])
+            .map_err(sql_error)?;
+        tx.execute("DELETE FROM feed_open_in_miniflux_overrides", [])
             .map_err(sql_error)?;
         // Technical feed IDs and remote baselines are scoped to the previous account.
         tx.execute_batch("DELETE FROM pending_saved_media_replication; DELETE FROM saved_media_remote_state; UPDATE saved_media_sync_config SET enabled=0,sync_feed_id=NULL,requires_repair=0 WHERE id=1;").map_err(sql_error)?;
@@ -5004,7 +5087,7 @@ mod tests {
         let connection = store.connection.lock().unwrap();
         let row: (i64, String, Option<String>, String, bool, bool, i64, i64) = connection.query_row("SELECT content_processing_version,preview,image_url,raw_html_content,is_read,is_starred,feed_id,(SELECT COUNT(*) FROM pending_mutations) FROM articles WHERE id=3", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).unwrap();
         drop(connection);
-        assert_eq!(store.schema_version().unwrap(), 18);
+        assert_eq!(store.schema_version().unwrap(), 19);
         assert_eq!(row.0, crate::article::PROCESSING_VERSION);
         assert_eq!(row.1, "Hello world");
         assert_eq!(row.2.as_deref(), Some("https://example.test/cover.jpg"));
@@ -5028,7 +5111,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 18);
+        assert_eq!(store.schema_version().unwrap(), 19);
         assert_eq!(
             store.feed_preferences(2).unwrap(),
             FeedPreferences {
@@ -5112,6 +5195,51 @@ mod tests {
     }
 
     #[test]
+    fn legacy_open_in_miniflux_import_respects_native_presence_and_missing_feeds() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [
+            Feed {
+                id: 2,
+                category_id: 1,
+                title: "Legacy".into(),
+            },
+            Feed {
+                id: 3,
+                category_id: 1,
+                title: "Native".into(),
+            },
+        ];
+        store.reconcile(&categories, &feeds, &[]).unwrap();
+
+        assert_eq!(
+            store.import_legacy_feed_open_in_miniflux(2).unwrap(),
+            LegacyFeedOpenInMinifluxImportOutcome::Imported
+        );
+        assert!(store.feed_preferences(2).unwrap().open_in_miniflux);
+        assert_eq!(
+            store.import_legacy_feed_open_in_miniflux(2).unwrap(),
+            LegacyFeedOpenInMinifluxImportOutcome::AlreadyPresent
+        );
+
+        store.set_feed_open_in_miniflux(3, false).unwrap();
+        assert_eq!(
+            store.import_legacy_feed_open_in_miniflux(3).unwrap(),
+            LegacyFeedOpenInMinifluxImportOutcome::AlreadyPresent
+        );
+        assert!(!store.feed_preferences(3).unwrap().open_in_miniflux);
+        assert_eq!(
+            store.import_legacy_feed_open_in_miniflux(4).unwrap(),
+            LegacyFeedOpenInMinifluxImportOutcome::MissingFeed
+        );
+    }
+
+    #[test]
     fn media_policy_settings_persist_independently() {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
@@ -5141,7 +5269,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 18);
+        assert_eq!(store.schema_version().unwrap(), 19);
         assert_eq!(
             store.feed_preferences(123).unwrap(),
             FeedPreferences {
@@ -5192,7 +5320,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 18);
+        assert_eq!(store.schema_version().unwrap(), 19);
         let connection = store.connection.lock().unwrap();
         assert_eq!(
             connection
@@ -5460,7 +5588,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 18);
+        assert_eq!(store.schema_version().unwrap(), 19);
         assert!(!store.enclosure(10).unwrap().unwrap().remote_present);
         assert_eq!(
             store
@@ -5501,7 +5629,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 18);
+        assert_eq!(store.schema_version().unwrap(), 19);
         // existing B1/B2/B3 data survives
         assert!(store.saved_media(10).unwrap().is_some());
         assert_eq!(store.playback_state(10).unwrap().unwrap().position_ms, 5000);
@@ -5540,7 +5668,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 18);
+        assert_eq!(store.schema_version().unwrap(), 19);
         // Existing valid v13 rows survive intact.
         let requested = store.media_download(10).unwrap().unwrap();
         assert_eq!(requested.state, DownloadState::Requested);
@@ -5799,7 +5927,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 18);
+        assert_eq!(store.schema_version().unwrap(), 19);
         let connection = store.connection.lock().unwrap();
         let foreign_key_count: i64 = connection
             .query_row(
@@ -7080,13 +7208,24 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        let category = [Category { id: 1, title: "Category".into() }];
-        let feeds = [Feed { id: 10, category_id: 1, title: "Feed".into() }];
+        let category = [Category {
+            id: 1,
+            title: "Category".into(),
+        }];
+        let feeds = [Feed {
+            id: 10,
+            category_id: 1,
+            title: "Feed".into(),
+        }];
         let (article, enclosure) = media_article_enclosure_pair();
-        store.reconcile_with_enclosures(&category, &feeds, &[article], &[enclosure]).unwrap();
+        store
+            .reconcile_with_enclosures(&category, &feeds, &[article], &[enclosure])
+            .unwrap();
 
         assert_eq!(
-            store.import_legacy_download(1000, "downloads/legacy/enclosure-1000.mp3", 4096).unwrap(),
+            store
+                .import_legacy_download(1000, "downloads/legacy/enclosure-1000.mp3", 4096)
+                .unwrap(),
             LegacyDownloadImportOutcome::Imported
         );
         let imported = store.media_download(1000).unwrap().unwrap();
@@ -7094,11 +7233,15 @@ mod tests {
         assert_eq!(imported.origin, Some(DownloadOrigin::Manual));
         assert!(store.is_in_listening_list(100).unwrap());
         assert_eq!(
-            store.import_legacy_download(1000, "downloads/legacy/enclosure-1000.mp3", 4096).unwrap(),
+            store
+                .import_legacy_download(1000, "downloads/legacy/enclosure-1000.mp3", 4096)
+                .unwrap(),
             LegacyDownloadImportOutcome::AlreadyPresent
         );
         assert_eq!(
-            store.import_legacy_download(9999, "downloads/legacy/enclosure-9999.mp3", 4096).unwrap(),
+            store
+                .import_legacy_download(9999, "downloads/legacy/enclosure-9999.mp3", 4096)
+                .unwrap(),
             LegacyDownloadImportOutcome::MissingEnclosure
         );
     }

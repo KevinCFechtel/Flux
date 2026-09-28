@@ -731,6 +731,13 @@ impl FeedPreferences {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LegacyFeedOpenInMinifluxImportOutcome {
+    Imported,
+    AlreadyPresent,
+    MissingFeed,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SystemNotificationCandidate {
     pub candidate_id: i64,

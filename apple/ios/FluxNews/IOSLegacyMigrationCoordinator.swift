@@ -26,6 +26,13 @@ enum IOSLegacyDownloadMigrationOutcome: Equatable {
     case notEligible, alreadyCompleted, imported, retryableFailure
 }
 
+enum IOSLegacyFeedPreferenceMigrationOutcome: Equatable {
+    case imported
+    case alreadyCompleted
+    case notEligible
+    case retryableFailure
+}
+
 struct IOSLegacyMediaSettingsImport: Equatable {
     let unmeteredOnly: Bool?
     let deleteAfterPlayback: Bool?
@@ -64,6 +71,7 @@ final class IOSLegacyMigrationCoordinator {
         static let mediaSettingsMigrationCompleted = "FluxNews.iOS.legacyMigration.mediaSettings.v1.completed"
         static let playbackMigrationCompleted = "FluxNews.iOS.legacyMigration.playback.v1.completed"
         static let downloadMigrationCompleted = "FluxNews.iOS.legacyMigration.downloads.v1.completed"
+        static let feedPreferenceMigrationCompleted = "FluxNews.iOS.legacyMigration.feedPreferences.v1.completed"
     }
 
     private let bootstrapper: CoreBootstrapper
@@ -74,6 +82,8 @@ final class IOSLegacyMigrationCoordinator {
     private let legacyPlaybackImporter: (([LegacyPlaybackImport]) async -> Result<LegacyPlaybackImportResult, Error>)?
     private let legacyDownloadReader: () -> [LegacyDownloadImport]?
     private let legacyDownloadImporter: ((Int64, String, UInt64) async -> Result<LegacyDownloadImportOutcome, Error>)?
+    private let legacyFeedOpenInMinifluxReader: () -> [LegacyFeedOpenInMinifluxImport]?
+    private let legacyFeedOpenInMinifluxImporter: ((Int64) async -> Result<LegacyFeedOpenInMinifluxImportOutcome, Error>)?
     private let mediaRootProvider: () -> URL?
     private let fileManager: FileManager
     private let logger = IOSAppLogger(category: "legacy_migration")
@@ -88,6 +98,8 @@ final class IOSLegacyMigrationCoordinator {
         legacyPlaybackImporter: (([LegacyPlaybackImport]) async -> Result<LegacyPlaybackImportResult, Error>)? = nil,
         legacyDownloadReader: @escaping () -> [LegacyDownloadImport]? = { LegacyStateDiscovery.readDownloadImports() },
         legacyDownloadImporter: ((Int64, String, UInt64) async -> Result<LegacyDownloadImportOutcome, Error>)? = nil,
+        legacyFeedOpenInMinifluxReader: @escaping () -> [LegacyFeedOpenInMinifluxImport]? = { LegacyStateDiscovery.readFeedOpenInMinifluxImports() },
+        legacyFeedOpenInMinifluxImporter: ((Int64) async -> Result<LegacyFeedOpenInMinifluxImportOutcome, Error>)? = nil,
         mediaRootProvider: @escaping () -> URL? = { IOSMediaTransferPathConfiguration.mediaRootURL },
         fileManager: FileManager = .default
     ) {
@@ -99,6 +111,8 @@ final class IOSLegacyMigrationCoordinator {
         self.legacyPlaybackImporter = legacyPlaybackImporter
         self.legacyDownloadReader = legacyDownloadReader
         self.legacyDownloadImporter = legacyDownloadImporter
+        self.legacyFeedOpenInMinifluxReader = legacyFeedOpenInMinifluxReader
+        self.legacyFeedOpenInMinifluxImporter = legacyFeedOpenInMinifluxImporter
         self.mediaRootProvider = mediaRootProvider
         self.fileManager = fileManager
     }
@@ -327,6 +341,37 @@ final class IOSLegacyMigrationCoordinator {
         guard !hasRetryableRecord else { return .retryableFailure }
         defaults.set(true, forKey: DefaultsKey.downloadMigrationCompleted)
         logger.info("Legacy downloads copied into Core media storage.")
+        return .imported
+    }
+
+    @discardableResult
+    func migrateFeedPreferencesIfNeeded() async -> IOSLegacyFeedPreferenceMigrationOutcome {
+        guard !inFlight else { return .retryableFailure }
+        inFlight = true
+        defer { inFlight = false }
+        do { guard try isCurrentMigratedAccount() else { return .notEligible } }
+        catch { return .retryableFailure }
+        guard !defaults.bool(forKey: DefaultsKey.feedPreferenceMigrationCompleted) else {
+            return .alreadyCompleted
+        }
+        guard let records = legacyFeedOpenInMinifluxReader() else { return .retryableFailure }
+        var hasRetryableRecord = false
+        for record in records {
+            guard record.openInMiniflux else { continue }
+            let result: Result<LegacyFeedOpenInMinifluxImportOutcome, Error>
+            if let legacyFeedOpenInMinifluxImporter {
+                result = await legacyFeedOpenInMinifluxImporter(record.feedID)
+            } else {
+                result = await bootstrapper.importLegacyFeedOpenInMiniflux(feedID: record.feedID)
+            }
+            switch result {
+            case .success(.imported), .success(.alreadyPresent): break
+            case .success(.missingFeed), .failure: hasRetryableRecord = true
+            }
+        }
+        guard !hasRetryableRecord else { return .retryableFailure }
+        defaults.set(true, forKey: DefaultsKey.feedPreferenceMigrationCompleted)
+        logger.info("Legacy positive Open in Miniflux feed preferences copied into Core.")
         return .imported
     }
 

@@ -698,6 +698,89 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testFeedPreferenceMigrationImportsPositiveLegacyOverrideAndCompletes() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        markAccountAsMigrated(account, defaults: defaults)
+        var importedFeedIDs: [Int64] = []
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyFeedOpenInMinifluxReader: { [.init(feedID: 41, openInMiniflux: true)] },
+            legacyFeedOpenInMinifluxImporter: { feedID in
+                importedFeedIDs.append(feedID)
+                return .success(.imported)
+            }
+        )
+
+        let outcome = await coordinator.migrateFeedPreferencesIfNeeded()
+        XCTAssertEqual(outcome, .imported)
+        XCTAssertEqual(importedFeedIDs, [41])
+        XCTAssertTrue(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.feedPreferences.v1.completed"))
+    }
+
+    @MainActor
+    func testFeedPreferenceMigrationCompletesWithoutPositiveLegacyCandidatesAndFastPaths() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        markAccountAsMigrated(account, defaults: defaults)
+        var imports = 0
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyFeedOpenInMinifluxReader: { [.init(feedID: 42, openInMiniflux: false)] },
+            legacyFeedOpenInMinifluxImporter: { _ in
+                imports += 1
+                return .success(.imported)
+            }
+        )
+
+        let firstOutcome = await coordinator.migrateFeedPreferencesIfNeeded()
+        let secondOutcome = await coordinator.migrateFeedPreferencesIfNeeded()
+        XCTAssertEqual(firstOutcome, .imported)
+        XCTAssertEqual(secondOutcome, .alreadyCompleted)
+        XCTAssertEqual(imports, 0)
+    }
+
+    @MainActor
+    func testFeedPreferenceMigrationRetriesMissingFeedThenRespectsNativeWins() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(server: "https://legacy.example", apiKey: "key", customHeaders: [])
+        let (bootstrapper, _) = try await makeReadyBootstrapper(account: account, defaults: defaults)
+        markAccountAsMigrated(account, defaults: defaults)
+        let records: [LegacyFeedOpenInMinifluxImport] = [
+            .init(feedID: 51, openInMiniflux: true),
+            .init(feedID: 52, openInMiniflux: true),
+            .init(feedID: 53, openInMiniflux: true),
+        ]
+        var outcomes: [Int64: [LegacyFeedOpenInMinifluxImportOutcome]] = [
+            51: [.imported, .alreadyPresent],
+            52: [.alreadyPresent, .alreadyPresent],
+            53: [.missingFeed, .alreadyPresent],
+        ]
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyFeedOpenInMinifluxReader: { records },
+            legacyFeedOpenInMinifluxImporter: { feedID in
+                .success(outcomes[feedID]!.removeFirst())
+            }
+        )
+
+        let firstOutcome = await coordinator.migrateFeedPreferencesIfNeeded()
+        XCTAssertEqual(firstOutcome, .retryableFailure)
+        XCTAssertFalse(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.feedPreferences.v1.completed"))
+        let secondOutcome = await coordinator.migrateFeedPreferencesIfNeeded()
+        XCTAssertEqual(secondOutcome, .imported)
+        XCTAssertTrue(defaults.bool(forKey: "FluxNews.iOS.legacyMigration.feedPreferences.v1.completed"))
+    }
+
+    @MainActor
     func testDownloadMigrationImportedRetainsCoreOwnedCopyAndCompletes() async throws {
         let (defaults, suite) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
