@@ -141,7 +141,7 @@ pub enum ReaderBlock {
         alt: Option<String>,
         link: Option<String>,
     },
-    List {
+    ListBlock {
         ordered: bool,
         items: Vec<ReaderListItem>,
     },
@@ -713,10 +713,10 @@ pub enum CoreEvent {
         field: MutationField,
         error_kind: ErrorKind,
     },
-    SyncCompleted {
+    SyncDidComplete {
         metadata: SyncCompleted,
     },
-    SyncFailed {
+    SyncDidFail {
         metadata: SyncFailed,
     },
 }
@@ -755,13 +755,13 @@ pub trait DiagnosticListener: Send + Sync {
 
 #[derive(Debug, uniffi::Error)]
 pub enum FluxError {
-    Connectivity { message: String },
-    Authentication { message: String },
-    InvalidConfiguration { message: String },
-    ServerTransient { message: String },
-    Persistence { message: String },
-    Data { message: String },
-    Internal { message: String },
+    Connectivity { detail: String },
+    Authentication { detail: String },
+    InvalidConfiguration { detail: String },
+    ServerTransient { detail: String },
+    Persistence { detail: String },
+    Data { detail: String },
+    Internal { detail: String },
 }
 
 #[derive(Debug, uniffi::Error)]
@@ -2016,10 +2016,10 @@ impl From<domain::CoreEvent> for CoreEvent {
                 field: field.into(),
                 error_kind: error_kind.into(),
             },
-            domain::CoreEvent::SyncCompleted(metadata) => Self::SyncCompleted {
+            domain::CoreEvent::SyncCompleted(metadata) => Self::SyncDidComplete {
                 metadata: metadata.into(),
             },
-            domain::CoreEvent::SyncFailed(metadata) => Self::SyncFailed {
+            domain::CoreEvent::SyncFailed(metadata) => Self::SyncDidFail {
                 metadata: metadata.into(),
             },
         }
@@ -2126,7 +2126,7 @@ impl From<domain::ReaderBlock> for ReaderBlock {
                 inlines: inlines.into_iter().map(Into::into).collect(),
             },
             domain::ReaderBlock::Image { url, alt, link } => Self::Image { url, alt, link },
-            domain::ReaderBlock::List { ordered, items } => Self::List {
+            domain::ReaderBlock::List { ordered, items } => Self::ListBlock {
                 ordered,
                 items: items.into_iter().map(Into::into).collect(),
             },
@@ -2773,15 +2773,15 @@ impl From<domain::SyncFailure> for SyncFailed {
     }
 }
 fn map_error(error: domain::CoreError) -> FluxError {
-    let message = error.message;
+    let detail = error.message;
     match error.kind {
-        domain::CoreErrorKind::Connectivity => FluxError::Connectivity { message },
-        domain::CoreErrorKind::Authentication => FluxError::Authentication { message },
-        domain::CoreErrorKind::InvalidConfiguration => FluxError::InvalidConfiguration { message },
-        domain::CoreErrorKind::ServerTransient => FluxError::ServerTransient { message },
-        domain::CoreErrorKind::Persistence => FluxError::Persistence { message },
-        domain::CoreErrorKind::Data => FluxError::Data { message },
-        domain::CoreErrorKind::Internal => FluxError::Internal { message },
+        domain::CoreErrorKind::Connectivity => FluxError::Connectivity { detail },
+        domain::CoreErrorKind::Authentication => FluxError::Authentication { detail },
+        domain::CoreErrorKind::InvalidConfiguration => FluxError::InvalidConfiguration { detail },
+        domain::CoreErrorKind::ServerTransient => FluxError::ServerTransient { detail },
+        domain::CoreErrorKind::Persistence => FluxError::Persistence { detail },
+        domain::CoreErrorKind::Data => FluxError::Data { detail },
+        domain::CoreErrorKind::Internal => FluxError::Internal { detail },
     }
 }
 fn map_account_validation_error(

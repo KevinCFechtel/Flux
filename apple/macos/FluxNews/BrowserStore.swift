@@ -740,7 +740,7 @@ final class BrowserStore: ObservableObject {
         case .articleReadStateChanged, .articleStarredStateChanged:
             refreshWidgetSnapshot()
             return
-        case let .syncCompleted(metadata):
+        case let .syncDidComplete(metadata):
             refreshWidgetSnapshot()
             handleSyncCompleted(metadata)
         default:

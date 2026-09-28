@@ -6208,7 +6208,7 @@ final class NewsreaderPresentationTests: XCTestCase {
             .paragraph(inlines: inline),
             .heading(level: 2, inlines: inline),
             .image(url: "https://example.com/image.png", alt: "image", link: nil),
-            .list(ordered: false, items: [.init(blocks: [.paragraph(inlines: inline)])]),
+            .listBlock(ordered: false, items: [.init(blocks: [.paragraph(inlines: inline)])]),
             .quote(blocks: [.paragraph(inlines: inline)]),
             .codeBlock(text: "code"),
             .horizontalRule,

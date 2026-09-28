@@ -2670,7 +2670,7 @@ private final class IOSNewsreaderEventListener: EventListener, @unchecked Sendab
     }
 
     func onEvent(event: CoreEvent) {
-        guard case let .syncCompleted(metadata) = event,
+        guard case let .syncDidComplete(metadata) = event,
               IOSNewsreaderEventRoutingPolicy.shouldDispatchSyncCompleted(reason: metadata.reason) else { return }
         let session = session
         Task { @MainActor [weak store] in

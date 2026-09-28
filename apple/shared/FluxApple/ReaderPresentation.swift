@@ -138,7 +138,7 @@ private struct ReaderBlocksView: View {
             Text(readerText(inlines)).font(level <= 1 ? .title2.bold() : level == 2 ? .title3.bold() : .headline).fixedSize(horizontal: false, vertical: true)
         case let .image(url, alt, link):
             ReaderImage(url: url, alt: alt, link: link)
-        case let .list(ordered, items):
+        case let .listBlock(ordered, items):
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                     HStack(alignment: .top, spacing: 8) {

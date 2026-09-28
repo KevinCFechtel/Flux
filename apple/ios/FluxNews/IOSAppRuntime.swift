@@ -151,7 +151,7 @@ final class IOSMediaRuntime {
 
     func handle(event: CoreEvent, core: Flux, generation: UInt64) {
         guard generation == lifecycleGeneration, self.core === core else { return }
-        guard case .syncCompleted = event else { return }
+        guard case .syncDidComplete = event else { return }
         Task { @MainActor [weak self] in
             guard let self else { return }
             guard generation == lifecycleGeneration, self.core === core else { return }
@@ -184,7 +184,7 @@ private final class IOSMediaRuntimeEventListener: EventListener, @unchecked Send
     }
 
     func onEvent(event: CoreEvent) {
-        guard case .syncCompleted = event else { return }
+        guard case .syncDidComplete = event else { return }
         Task { @MainActor [weak runtime] in runtime?.handle(event: event, core: core, generation: generation) }
     }
 }

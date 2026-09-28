@@ -36,7 +36,7 @@ final class IOSMediaRuntimeTests: XCTestCase {
     }
 
     private func syncCompletedEvent() -> CoreEvent {
-        .syncCompleted(metadata: SyncCompleted(
+        .syncDidComplete(metadata: SyncCompleted(
             reason: .manual,
             newArticles: 0,
             updatedArticles: 0,
