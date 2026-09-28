@@ -68,6 +68,10 @@ struct LegacySettingsImport: Equatable {
     let autoDownloadListeningList: Bool?
 }
 
+struct LegacyToolbarImport: Equatable {
+    let selectedActions: [IOSBottomAction]?
+}
+
 enum LegacyStateDiscovery {
     static let productionBundleID = "dev.kevincfechtel.fluxNews"
     static let applicationGroup = "group.dev.kevincfechtel.fluxNews"
@@ -178,6 +182,14 @@ enum LegacyStateDiscovery {
         guard Bundle.main.bundleIdentifier == productionBundleID,
               let values = keychainValues() else { return nil }
         return parseSettingsImport(values)
+    }
+
+    /// Reads the final Flutter iOS toolbar configuration for D9-C. Selection and
+    /// full action order are combined into one native priority list.
+    static func readToolbarImport() -> LegacyToolbarImport? {
+        guard Bundle.main.bundleIdentifier == productionBundleID,
+              let values = keychainValues() else { return nil }
+        return parseToolbarImport(values)
     }
 
     /// Reads Flutter's article-keyed playback values with the same source
@@ -396,6 +408,49 @@ enum LegacyStateDiscovery {
         )
     }
 
+    static func parseToolbarImport(_ values: [String: String]) -> LegacyToolbarImport {
+        func decode(_ key: String) -> [String]? {
+            guard let raw = values[key],
+                  let data = raw.data(using: .utf8),
+                  let array = try? JSONSerialization.jsonObject(with: data) as? [Any] else {
+                return nil
+            }
+            let strings = array.compactMap { $0 as? String }
+            return strings.count == array.count ? strings : nil
+        }
+
+        func map(_ raw: String) -> IOSBottomAction? {
+            switch raw {
+            case "search": .search
+            case "newsStatus": .toggleReadFilter
+            case "sortOrder": .toggleSortOrder
+            case "markAsRead": .markAllRead
+            case "markAsReadAndNext": .markAllReadAndNext
+            case "podcasts": .listeningList
+            case "settings": .settings
+            default: nil
+            }
+        }
+
+        guard let selectedRaw = decode("iosToolbarActions") else {
+            return LegacyToolbarImport(selectedActions: nil)
+        }
+        let selectedSet = Set(selectedRaw)
+        let orderRaw = decode("iosToolbarActionOrder") ?? selectedRaw
+
+        var seen = Set<IOSBottomAction>()
+        var selected: [IOSBottomAction] = []
+        for raw in orderRaw where selectedSet.contains(raw) {
+            guard let action = map(raw), seen.insert(action).inserted else { continue }
+            selected.append(action)
+        }
+        for raw in selectedRaw {
+            guard let action = map(raw), seen.insert(action).inserted else { continue }
+            selected.append(action)
+        }
+        return LegacyToolbarImport(selectedActions: selected)
+    }
+
     static func redactedSummary(_ result: LegacyDiscoveryResult) -> [String: String] {
         [
             "Production identity": result.productionIdentity.rawValue,
@@ -423,7 +478,8 @@ enum LegacyStateDiscovery {
     private static let auditedSettings: Set<String> = [
         "brightnessMode", "activateTruncate", "charactersToTruncate",
         "autoDownloadAudioAfterSync", "downloadAudioOnlyOnWifi",
-        "deleteAudioAfterPlayback", "audioDownloadRetentionDays"
+        "deleteAudioAfterPlayback", "audioDownloadRetentionDays",
+        "iosToolbarActions", "iosToolbarActionOrder"
     ]
 
     private static let compatibleMediaSettings: Set<String> = [

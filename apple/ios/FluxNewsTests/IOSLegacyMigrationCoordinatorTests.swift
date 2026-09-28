@@ -1242,4 +1242,122 @@ final class IOSLegacyMigrationCoordinatorTests: XCTestCase {
         XCTAssertEqual(outcome, .alreadyCompleted)
         XCTAssertEqual(reads, 0)
     }
+
+    func testLegacyToolbarParserMapsSelectionUsingFlutterOrder() {
+        let parsed = LegacyStateDiscovery.parseToolbarImport([
+            "iosToolbarActions": #"["settings","search","newsStatus","sortOrder","markAsRead","markAsReadAndNext","podcasts"]"#,
+            "iosToolbarActionOrder": #"["podcasts","search","settings","newsStatus","sortOrder","markAsReadAndNext","markAsRead"]"#
+        ])
+
+        XCTAssertEqual(
+            parsed.selectedActions,
+            [
+                .listeningList,
+                .search,
+                .settings,
+                .toggleReadFilter,
+                .toggleSortOrder,
+                .markAllReadAndNext,
+                .markAllRead,
+            ]
+        )
+    }
+
+    func testLegacyToolbarParserIgnoresUnknownAndUnselectedActions() {
+        let parsed = LegacyStateDiscovery.parseToolbarImport([
+            "iosToolbarActions": #"["search","unsupported","settings"]"#,
+            "iosToolbarActionOrder": #"["settings","sortOrder","search","unsupported"]"#
+        ])
+
+        XCTAssertEqual(parsed.selectedActions, [.settings, .search])
+    }
+
+    @MainActor
+    func testToolbarMigrationImportsSemanticSelectionAndThenUsesCompletionFastPath() async throws {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = IOSMinifluxCredentials(
+            server: "https://legacy.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let (bootstrapper, _) = try await makeReadyBootstrapper(
+            account: account,
+            defaults: defaults
+        )
+        markAccountAsMigrated(account, defaults: defaults)
+
+        var reads = 0
+        let coordinator = IOSLegacyMigrationCoordinator(
+            bootstrapper: bootstrapper,
+            defaults: defaults,
+            legacyToolbarReader: {
+                reads += 1
+                return LegacyToolbarImport(
+                    selectedActions: [
+                        .toggleReadFilter,
+                        .search,
+                        .markAllReadAndNext,
+                    ]
+                )
+            }
+        )
+
+        let importedOutcome = await coordinator.migrateToolbarIfNeeded()
+        XCTAssertEqual(importedOutcome, .imported)
+        XCTAssertEqual(
+            defaults.stringArray(
+                forKey: IOSArticleListActionPreferences.defaultsKey
+            ),
+            ["toggleReadFilter", "search", "markAllReadAndNext"]
+        )
+        XCTAssertEqual(reads, 1)
+
+        let completedOutcome = await coordinator.migrateToolbarIfNeeded()
+        XCTAssertEqual(completedOutcome, .alreadyCompleted)
+        XCTAssertEqual(reads, 1)
+    }
+
+    @MainActor
+    func testToolbarMigrationPreservesExistingNativeConfigurationIncludingEmpty() async throws {
+        for native in [["settings"], []] {
+            let (defaults, suite) = makeDefaults()
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let account = IOSMinifluxCredentials(
+                server: "https://legacy.example",
+                apiKey: "key",
+                customHeaders: []
+            )
+            let (bootstrapper, _) = try await makeReadyBootstrapper(
+                account: account,
+                defaults: defaults
+            )
+            markAccountAsMigrated(account, defaults: defaults)
+            defaults.set(
+                native,
+                forKey: IOSArticleListActionPreferences.defaultsKey
+            )
+
+            var legacyRead = false
+            let coordinator = IOSLegacyMigrationCoordinator(
+                bootstrapper: bootstrapper,
+                defaults: defaults,
+                legacyToolbarReader: {
+                    legacyRead = true
+                    return LegacyToolbarImport(selectedActions: [.search])
+                }
+            )
+
+            let nativeWinsOutcome = await coordinator.migrateToolbarIfNeeded()
+            XCTAssertEqual(nativeWinsOutcome, .nativeConfigurationWins)
+            XCTAssertEqual(
+                defaults.stringArray(
+                    forKey: IOSArticleListActionPreferences.defaultsKey
+                ),
+                native
+            )
+            XCTAssertFalse(legacyRead)
+        }
+    }
+
 }

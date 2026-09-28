@@ -16,10 +16,15 @@ struct FluxNewsApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var bootstrapper = IOSAppRuntime.shared.bootstrapper
     @State private var newsreaderStore = NewsreaderStore()
+    @StateObject private var articleListActionPreferences = IOSArticleListActionPreferences()
 
     var body: some Scene {
         WindowGroup {
-            ContentView(bootstrapper: bootstrapper, newsreaderStore: newsreaderStore)
+            ContentView(
+                bootstrapper: bootstrapper,
+                newsreaderStore: newsreaderStore,
+                articleListActionPreferences: articleListActionPreferences
+            )
                 .tint(Color("FluxAccent"))
                 .task {
                     guard !IOSRuntimeLaunchEnvironment.isUnitTestHost else { return }
@@ -92,7 +97,9 @@ struct FluxNewsApp: App {
                     }
                     _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateGlobalPreferencesIfNeeded()
                     _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateSettingsFollowupIfNeeded()
+                    _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateToolbarIfNeeded()
                     newsreaderStore.reloadLegacyMigrationSettings()
+                    articleListActionPreferences.reloadFromDefaults()
                     await IOSAppRuntime.shared.backgroundSyncCoordinator.refreshScheduling()
                     IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
                 }
@@ -125,6 +132,7 @@ struct FluxNewsApp: App {
                             _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateGlobalPreferencesIfNeeded()
                             _ = await IOSAppRuntime.shared.legacyMigrationCoordinator.migrateSettingsFollowupIfNeeded()
                             newsreaderStore.reloadLegacyMigrationSettings()
+                    articleListActionPreferences.reloadFromDefaults()
                             await IOSAppRuntime.shared.backgroundSyncCoordinator.refreshScheduling()
                             IOSAppRuntime.shared.backgroundSyncCoordinator.resumeIfNeeded()
                         }

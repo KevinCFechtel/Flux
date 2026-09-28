@@ -20,22 +20,30 @@ private struct IOSSharePayload: Identifiable {
 enum IOSBottomAction: String, CaseIterable, Equatable, Hashable, Identifiable {
     case sync
     case filterAndSort
+    case toggleReadFilter
+    case toggleSortOrder
     case search
-    case listeningList
-    case nowPlaying
     case markAllRead
     case markAllReadAndNext
+    case listeningList
+    case nowPlaying
     case settings
     case more
 
-    static let defaultActions: [Self] = [.sync, .filterAndSort, .more]
+    static let fixedLeadingAction: Self = .sync
+    static let fixedTrailingAction: Self = .more
+    static let defaultConfiguredActions: [Self] = [.filterAndSort]
 
     static let configurableActions: [Self] = [
-        .sync,
         .filterAndSort,
+        .toggleReadFilter,
+        .toggleSortOrder,
         .search,
+        .markAllRead,
+        .markAllReadAndNext,
         .listeningList,
         .nowPlaying,
+        .settings,
     ]
 
     var id: String { rawValue }
@@ -44,11 +52,15 @@ enum IOSBottomAction: String, CaseIterable, Equatable, Hashable, Identifiable {
         switch self {
         case .sync: "Sync"
         case .filterAndSort: "Filter and Sort"
+        case .toggleReadFilter: "All / Unread"
+        case .toggleSortOrder: "Sort Order"
         case .search: "Search"
+        case .markAllRead: "Mark All as Read"
+        case .markAllReadAndNext: "Mark All as Read and Continue"
         case .listeningList: "Listening List"
         case .nowPlaying: "Now Playing"
+        case .settings: "Settings"
         case .more: "More"
-        case .markAllRead, .markAllReadAndNext, .settings: ""
         }
     }
 
@@ -56,45 +68,112 @@ enum IOSBottomAction: String, CaseIterable, Equatable, Hashable, Identifiable {
         switch self {
         case .sync: "arrow.triangle.2.circlepath"
         case .filterAndSort: "line.3.horizontal.decrease.circle"
+        case .toggleReadFilter: "line.3.horizontal.decrease"
+        case .toggleSortOrder: "arrow.up.arrow.down.circle"
         case .search: "magnifyingglass"
+        case .markAllRead: "checkmark.circle"
+        case .markAllReadAndNext: "forward.end.circle"
         case .listeningList: "headphones"
         case .nowPlaying: "play.circle"
+        case .settings: "gearshape"
         case .more: "ellipsis.circle"
-        case .markAllRead, .markAllReadAndNext, .settings: ""
         }
     }
 }
 
+struct IOSArticleListResolvedActions: Equatable {
+    let direct: [IOSBottomAction]
+    let overflow: [IOSBottomAction]
+}
+
 enum IOSArticleListActionPolicy {
-    static func normalizedActions(from persistedIDs: [String]?) -> [IOSBottomAction] {
-        guard let persistedIDs, !persistedIDs.isEmpty else {
-            return IOSBottomAction.defaultActions
+    static func normalizedConfiguredActions(from persistedIDs: [String]?) -> [IOSBottomAction] {
+        guard let persistedIDs else {
+            return IOSBottomAction.defaultConfiguredActions
         }
 
         var seen = Set<IOSBottomAction>()
-        var actions: [IOSBottomAction] = []
-        for id in persistedIDs {
+        return persistedIDs.compactMap { id in
             guard let action = IOSBottomAction(rawValue: id),
-                  (IOSBottomAction.configurableActions.contains(action) || action == .more),
+                  IOSBottomAction.configurableActions.contains(action),
                   seen.insert(action).inserted
-            else { continue }
-            actions.append(action)
+            else { return nil }
+            return action
         }
-
-        guard !actions.isEmpty else { return IOSBottomAction.defaultActions }
-        if !actions.contains(.more) { actions.append(.more) }
-        return actions
     }
 
-    static func visibleActions(
-        configuredActions: [IOSBottomAction],
+    static func isAvailable(
+        _ action: IOSBottomAction,
+        scope: BrowserScope,
+        hasNextScope: Bool,
         hasLoadedMedia: Bool,
         playbackStatus: MediaPlaybackPresentationStatus
-    ) -> [IOSBottomAction] {
-        configuredActions.filter { action in
-            action != .nowPlaying
-                || (hasLoadedMedia && playbackStatus != .stopped)
+    ) -> Bool {
+        switch action {
+        case .filterAndSort, .toggleReadFilter, .toggleSortOrder, .search,
+             .listeningList, .settings:
+            true
+        case .markAllRead:
+            switch scope {
+            case .all, .category, .feed: true
+            case .starred, .search, .listeningList: false
+            }
+        case .markAllReadAndNext:
+            hasNextScope && {
+                switch scope {
+                case .category, .feed: true
+                case .all, .starred, .search, .listeningList: false
+                }
+            }()
+        case .nowPlaying:
+            hasLoadedMedia && playbackStatus != .stopped
+        case .sync, .more:
+            false
         }
+    }
+
+    static func resolvedActions(
+        configuredActions: [IOSBottomAction],
+        directCapacity: Int,
+        scope: BrowserScope,
+        hasNextScope: Bool,
+        hasLoadedMedia: Bool,
+        playbackStatus: MediaPlaybackPresentationStatus
+    ) -> IOSArticleListResolvedActions {
+        let configured = normalizedConfiguredActions(
+            from: configuredActions.map(\.rawValue)
+        )
+        let availableConfigured = configured.filter {
+            isAvailable(
+                $0,
+                scope: scope,
+                hasNextScope: hasNextScope,
+                hasLoadedMedia: hasLoadedMedia,
+                playbackStatus: playbackStatus
+            )
+        }
+        let direct = Array(availableConfigured.prefix(max(0, directCapacity)))
+        let directSet = Set(direct)
+        let configuredSet = Set(configured)
+
+        let overflowSelected = availableConfigured.filter {
+            !directSet.contains($0)
+        }
+        let overflowUnselected = IOSBottomAction.configurableActions.filter {
+            !configuredSet.contains($0)
+                && isAvailable(
+                    $0,
+                    scope: scope,
+                    hasNextScope: hasNextScope,
+                    hasLoadedMedia: hasLoadedMedia,
+                    playbackStatus: playbackStatus
+                )
+        }
+
+        return .init(
+            direct: direct,
+            overflow: overflowSelected + overflowUnselected
+        )
     }
 }
 
@@ -115,28 +194,34 @@ enum IOSListeningListPlayerPresentation {
 
 @MainActor
 final class IOSArticleListActionPreferences: ObservableObject {
-    private static let defaultsKey = "articleListActionIDs"
+    static let defaultsKey = "articleListActionIDs"
 
     @Published private(set) var actions: [IOSBottomAction]
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        actions = IOSArticleListActionPolicy.normalizedActions(
+        actions = IOSArticleListActionPolicy.normalizedConfiguredActions(
             from: defaults.stringArray(forKey: Self.defaultsKey)
         )
     }
 
     func setActions(_ actions: [IOSBottomAction]) {
-        let normalized = IOSArticleListActionPolicy.normalizedActions(
+        let normalized = IOSArticleListActionPolicy.normalizedConfiguredActions(
             from: actions.map(\.rawValue)
         )
         self.actions = normalized
         defaults.set(normalized.map(\.rawValue), forKey: Self.defaultsKey)
     }
 
+    func reloadFromDefaults() {
+        actions = IOSArticleListActionPolicy.normalizedConfiguredActions(
+            from: defaults.stringArray(forKey: Self.defaultsKey)
+        )
+    }
+
     func resetToDefault() {
-        setActions(IOSBottomAction.defaultActions)
+        setActions(IOSBottomAction.defaultConfiguredActions)
     }
 }
 
@@ -189,6 +274,22 @@ enum IOSArticleListChromePresentation {
             .topBarTrailing
         case .persistentSplit, .persistentSplitCollapsed:
             systemPrefersVerticalToolbar ? .topBarTrailing : .floatingTopTrailing
+        }
+    }
+
+    static func configurableDirectActionCapacity(
+        for mode: IOSArticleListChromeMode,
+        systemPrefersVerticalToolbar: Bool = false
+    ) -> Int {
+        switch mode {
+        case .compactPortrait:
+            3
+        case .compactLandscape:
+            2
+        case .persistentSplit:
+            systemPrefersVerticalToolbar ? 3 : 5
+        case .persistentSplitCollapsed:
+            3
         }
     }
 
@@ -275,27 +376,6 @@ enum IOSArticleListTitleCapsuleMetrics {
     /// detail width.
     static let compactStackedMinimumContentWidth: CGFloat = 190
     static let compactStackedTitlePriority: Double = 3
-}
-
-enum IOSMoreAction: Equatable {
-    case markAllRead
-    case markAllReadAndNext
-    case settings
-
-    static func actions(for scope: BrowserScope, hasNextScope: Bool) -> [Self] {
-        let supportsMarkRead: Bool = switch scope {
-        case .all, .category, .feed: true
-        case .starred, .search, .listeningList: false
-        }
-        guard supportsMarkRead else { return [.settings] }
-        let canAdvance = hasNextScope && {
-            switch scope {
-            case .category, .feed: true
-            case .all, .starred, .search, .listeningList: false
-            }
-        }()
-        return canAdvance ? [.markAllRead, .markAllReadAndNext, .settings] : [.markAllRead, .settings]
-    }
 }
 
 enum IOSScopeNavigation {
@@ -532,7 +612,7 @@ struct ContentView: View {
     @State private var listeningListPlayerArticleID: Int64?
     @State private var articleMediaDownloadChoice: IOSArticleMediaDownloadChoice?
     @State private var nowPlayingPresented = false
-    @StateObject private var articleListActionPreferences = IOSArticleListActionPreferences()
+    @ObservedObject var articleListActionPreferences: IOSArticleListActionPreferences
 
     /// The capsule already opens the scope chooser, so a second control for the
     /// same action would be pure redundancy.
@@ -1185,6 +1265,10 @@ struct ContentView: View {
             for: articleListChromeMode,
             systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
         )
+        let directActionCapacity = IOSArticleListChromePresentation.configurableDirectActionCapacity(
+            for: articleListChromeMode,
+            systemPrefersVerticalToolbar: systemPrefersVerticalToolbar
+        )
 
         return ArticleListNavigationChrome(
             store: newsreaderStore,
@@ -1192,7 +1276,7 @@ struct ContentView: View {
             chromeMode: articleListChromeMode,
             actionPlacement: actionPlacement,
             topActions: {
-                articleListActionButtons
+                articleListActionButtons(directCapacity: directActionCapacity)
             },
             content: { naturalTopContentInset in
                 ArticleListView(
@@ -1220,18 +1304,18 @@ struct ContentView: View {
             .toolbar {
                 if actionPlacement == .bottomBar {
                     ToolbarItemGroup(placement: .bottomBar) {
-                        articleListActionButtons
+                        articleListActionButtons(directCapacity: directActionCapacity)
                     }
                 }
                 if actionPlacement == .topBarTrailing {
                     if #available(iOS 26.0, *) {
                         ToolbarItemGroup(placement: .topBarTrailing) {
-                            articleListActionButtons
+                            articleListActionButtons(directCapacity: directActionCapacity)
                         }
                     } else {
                         ToolbarItem(placement: .topBarTrailing) {
                             HStack(spacing: IOSArticleListActionChromeMetrics.floatingSpacing) {
-                                articleListActionButtons
+                                articleListActionButtons(directCapacity: directActionCapacity)
                             }
                             .padding(.horizontal, IOSArticleListActionChromeMetrics.floatingHorizontalPadding)
                             .padding(.vertical, IOSArticleListActionChromeMetrics.floatingVerticalPadding)
@@ -1243,57 +1327,75 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private var articleListActionButtons: some View {
-        let actions = IOSArticleListActionPolicy.visibleActions(
+    private func articleListActionButtons(directCapacity: Int) -> some View {
+        let playbackState = IOSAppRuntime.shared.mediaRuntime.playbackPresentationState
+        let resolved = IOSArticleListActionPolicy.resolvedActions(
             configuredActions: articleListActionPreferences.actions,
-            hasLoadedMedia: IOSAppRuntime.shared.mediaRuntime
-                .playbackPresentationState.loadedEnclosure != nil,
-            playbackStatus: IOSAppRuntime.shared.mediaRuntime
-                .playbackPresentationState.status
+            directCapacity: directCapacity,
+            scope: newsreaderStore.scope,
+            hasNextScope: nextScope != nil,
+            hasLoadedMedia: playbackState.loadedEnclosure != nil,
+            playbackStatus: playbackState.status
         )
-        ForEach(actions) { action in
+
+        articleListActionButton(.sync)
+        ForEach(resolved.direct) { action in
             articleListActionButton(action)
         }
+        articleListMoreMenu(overflowActions: resolved.overflow)
     }
 
     @ViewBuilder
     private func articleListActionButton(_ action: IOSBottomAction) -> some View {
         switch action {
         case .sync:
-        let syncButtonPresentation = IOSSyncButtonPresentation.resolve(
-            manualSyncState: newsreaderStore.manualSyncState,
-            transientState: syncPresentation
-        )
-        Button { performManualSyncControlAction() } label: {
-            Image(systemName: IOSSyncButtonPresentation.symbolName(for: syncButtonPresentation))
-                .frame(width: 24, height: 24)
-        }
-        .accessibilityLabel(IOSSyncButtonPresentation.accessibilityLabel(for: syncButtonPresentation))
-        .accessibilityValue(IOSSyncButtonPresentation.accessibilityValue(for: syncButtonPresentation))
-        .accessibilityIdentifier("articleList.sync")
+            let syncButtonPresentation = IOSSyncButtonPresentation.resolve(
+                manualSyncState: newsreaderStore.manualSyncState,
+                transientState: syncPresentation
+            )
+            Button { performManualSyncControlAction() } label: {
+                Image(systemName: IOSSyncButtonPresentation.symbolName(for: syncButtonPresentation))
+                    .frame(width: 24, height: 24)
+            }
+            .accessibilityLabel(IOSSyncButtonPresentation.accessibilityLabel(for: syncButtonPresentation))
+            .accessibilityValue(IOSSyncButtonPresentation.accessibilityValue(for: syncButtonPresentation))
+            .accessibilityIdentifier("articleList.sync")
 
         case .filterAndSort:
-        Menu {
-            Section("Show") {
-                Button { newsreaderStore.setUnreadOnly(true) } label: {
-                    filterMenuLabel(String(localized: "Unread Only"), selected: newsreaderStore.unreadOnly)
-                }
-                Button { newsreaderStore.setUnreadOnly(false) } label: {
-                    filterMenuLabel(String(localized: "All Articles"), selected: !newsreaderStore.unreadOnly)
-                }
+            Menu {
+                filterAndSortMenuContent
+            } label: {
+                Label("Filter and Sort", systemImage: action.symbolName)
             }
-            Section("Sort") {
-                Button { newsreaderStore.setNewestFirst(true) } label: {
-                    filterMenuLabel(String(localized: "Newest First"), selected: newsreaderStore.newestFirst)
-                }
-                Button { newsreaderStore.setNewestFirst(false) } label: {
-                    filterMenuLabel(String(localized: "Oldest First"), selected: !newsreaderStore.newestFirst)
-                }
+            .accessibilityIdentifier("articleList.filterSort")
+
+        case .toggleReadFilter:
+            Button {
+                newsreaderStore.setUnreadOnly(!newsreaderStore.unreadOnly)
+            } label: {
+                Image(systemName: action.symbolName)
+                    .frame(width: 24, height: 24)
             }
-        } label: {
-            Label("Filter and Sort", systemImage: "line.3.horizontal.decrease.circle")
-        }
-        .accessibilityIdentifier("articleList.filterSort")
+            .accessibilityLabel(
+                newsreaderStore.unreadOnly
+                    ? String(localized: "Show All Articles")
+                    : String(localized: "Show Unread Only")
+            )
+            .accessibilityIdentifier("articleList.toggleReadFilter")
+
+        case .toggleSortOrder:
+            Button {
+                newsreaderStore.setNewestFirst(!newsreaderStore.newestFirst)
+            } label: {
+                Image(systemName: action.symbolName)
+                    .frame(width: 24, height: 24)
+            }
+            .accessibilityLabel(
+                newsreaderStore.newestFirst
+                    ? String(localized: "Show Oldest First")
+                    : String(localized: "Show Newest First")
+            )
+            .accessibilityIdentifier("articleList.toggleSortOrder")
 
         case .search:
             Button(action: openSearch) {
@@ -1302,6 +1404,22 @@ struct ContentView: View {
             }
             .accessibilityLabel(action.settingsTitle)
             .accessibilityIdentifier("articleList.search")
+
+        case .markAllRead:
+            Button { presentMarkReadConfirmation(.read) } label: {
+                Image(systemName: action.symbolName)
+                    .frame(width: 24, height: 24)
+            }
+            .accessibilityLabel(action.settingsTitle)
+            .accessibilityIdentifier("articleList.markAllRead")
+
+        case .markAllReadAndNext:
+            Button { presentMarkReadConfirmation(.readAndNext) } label: {
+                Image(systemName: action.symbolName)
+                    .frame(width: 24, height: 24)
+            }
+            .accessibilityLabel(action.settingsTitle)
+            .accessibilityIdentifier("articleList.markAllReadAndNext")
 
         case .listeningList:
             Button(action: openListeningList) {
@@ -1319,28 +1437,121 @@ struct ContentView: View {
             .accessibilityLabel("Now Playing")
             .accessibilityIdentifier("articleList.nowPlaying")
 
+        case .settings:
+            Button { settingsPresented = true } label: {
+                Image(systemName: action.symbolName)
+                    .frame(width: 24, height: 24)
+            }
+            .accessibilityLabel(action.settingsTitle)
+            .accessibilityIdentifier("articleList.settings")
+
         case .more:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var filterAndSortMenuContent: some View {
+        Section("Show") {
+            Button { newsreaderStore.setUnreadOnly(true) } label: {
+                filterMenuLabel(String(localized: "Unread Only"), selected: newsreaderStore.unreadOnly)
+            }
+            Button { newsreaderStore.setUnreadOnly(false) } label: {
+                filterMenuLabel(String(localized: "All Articles"), selected: !newsreaderStore.unreadOnly)
+            }
+        }
+        Section("Sort") {
+            Button { newsreaderStore.setNewestFirst(true) } label: {
+                filterMenuLabel(String(localized: "Newest First"), selected: newsreaderStore.newestFirst)
+            }
+            Button { newsreaderStore.setNewestFirst(false) } label: {
+                filterMenuLabel(String(localized: "Oldest First"), selected: !newsreaderStore.newestFirst)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func articleListMoreMenu(overflowActions: [IOSBottomAction]) -> some View {
         Menu {
-            ForEach(IOSMoreAction.actions(for: newsreaderStore.scope, hasNextScope: nextScope != nil), id: \.self) { action in
-                switch action {
-                case .markAllRead:
-                    Button("Mark All as Read", role: .destructive) { presentMarkReadConfirmation(.read) }
-                case .markAllReadAndNext:
-                    Button("Mark All as Read and Continue", role: .destructive) { presentMarkReadConfirmation(.readAndNext) }
-                case .settings:
-                    Divider()
-                    Button { settingsPresented = true } label: {
-                        Label("Settings", systemImage: "gearshape")
-                    }
-                }
+            ForEach(overflowActions) { action in
+                overflowMenuItem(action)
             }
         } label: {
-            Label("More", systemImage: "ellipsis.circle")
+            Label("More", systemImage: IOSBottomAction.more.symbolName)
         }
         .accessibilityLabel(String(localized: "More"))
         .accessibilityIdentifier("articleList.more")
+    }
 
-        case .markAllRead, .markAllReadAndNext, .settings:
+    @ViewBuilder
+    private func overflowMenuItem(_ action: IOSBottomAction) -> some View {
+        switch action {
+        case .filterAndSort:
+            Menu {
+                filterAndSortMenuContent
+            } label: {
+                Label(action.settingsTitle, systemImage: action.symbolName)
+            }
+
+        case .toggleReadFilter:
+            Button {
+                newsreaderStore.setUnreadOnly(!newsreaderStore.unreadOnly)
+            } label: {
+                Label(
+                    newsreaderStore.unreadOnly
+                        ? String(localized: "Show All Articles")
+                        : String(localized: "Show Unread Only"),
+                    systemImage: action.symbolName
+                )
+            }
+
+        case .toggleSortOrder:
+            Button {
+                newsreaderStore.setNewestFirst(!newsreaderStore.newestFirst)
+            } label: {
+                Label(
+                    newsreaderStore.newestFirst
+                        ? String(localized: "Show Oldest First")
+                        : String(localized: "Show Newest First"),
+                    systemImage: action.symbolName
+                )
+            }
+
+        case .search:
+            Button(action: openSearch) {
+                Label(action.settingsTitle, systemImage: action.symbolName)
+            }
+
+        case .markAllRead:
+            Button(role: .destructive) {
+                presentMarkReadConfirmation(.read)
+            } label: {
+                Label(action.settingsTitle, systemImage: action.symbolName)
+            }
+
+        case .markAllReadAndNext:
+            Button(role: .destructive) {
+                presentMarkReadConfirmation(.readAndNext)
+            } label: {
+                Label(action.settingsTitle, systemImage: action.symbolName)
+            }
+
+        case .listeningList:
+            Button(action: openListeningList) {
+                Label(action.settingsTitle, systemImage: action.symbolName)
+            }
+
+        case .nowPlaying:
+            Button { nowPlayingPresented = true } label: {
+                Label(action.settingsTitle, systemImage: action.symbolName)
+            }
+
+        case .settings:
+            Button { settingsPresented = true } label: {
+                Label(action.settingsTitle, systemImage: action.symbolName)
+            }
+
+        case .sync, .more:
             EmptyView()
         }
     }

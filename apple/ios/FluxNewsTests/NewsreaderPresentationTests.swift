@@ -52,17 +52,21 @@ final class NewsreaderPresentationTests: XCTestCase {
         XCTAssertFalse(lifecycle.isCurrent(second))
     }
 
-    func testDefaultArticleListActionsAreSyncFilterAndMore() {
-        XCTAssertEqual(IOSBottomAction.defaultActions, [.sync, .filterAndSort, .more])
-        XCTAssertFalse(IOSBottomAction.defaultActions.contains(.settings))
+    func testDefaultConfiguredArticleListActionsAreFilterAndSortOnly() {
+        XCTAssertEqual(
+            IOSBottomAction.defaultConfiguredActions,
+            [.filterAndSort]
+        )
+        XCTAssertEqual(IOSBottomAction.fixedLeadingAction, .sync)
+        XCTAssertEqual(IOSBottomAction.fixedTrailingAction, .more)
     }
 
-    func testArticleListActionPolicyPreservesPersistedOrder() {
+    func testArticleListActionPolicyPersistsOnlyConfigurableActionsInOrder() {
         XCTAssertEqual(
-            IOSArticleListActionPolicy.normalizedActions(
-                from: ["search", "sync", "more", "filterAndSort"]
+            IOSArticleListActionPolicy.normalizedConfiguredActions(
+                from: ["search", "sync", "more", "filterAndSort", "search"]
             ),
-            [.search, .sync, .more, .filterAndSort]
+            [.search, .filterAndSort]
         )
     }
 
@@ -73,50 +77,124 @@ final class NewsreaderPresentationTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
 
         let preferences = IOSArticleListActionPreferences(defaults: defaults)
-        preferences.setActions([.listeningList, .sync, .more, .search])
+        preferences.setActions([
+            .listeningList,
+            .sync,
+            .more,
+            .search,
+            .toggleReadFilter,
+        ])
 
         XCTAssertEqual(
             IOSArticleListActionPreferences(defaults: defaults).actions,
-            [.listeningList, .sync, .more, .search]
+            [.listeningList, .search, .toggleReadFilter]
+        )
+        XCTAssertEqual(
+            defaults.stringArray(forKey: IOSArticleListActionPreferences.defaultsKey),
+            ["listeningList", "search", "toggleReadFilter"]
         )
     }
 
-    func testArticleListActionPolicyIgnoresUnknownIDsAndDuplicates() {
+    func testArticleListActionPolicyAllowsExplicitEmptyConfiguration() {
         XCTAssertEqual(
-            IOSArticleListActionPolicy.normalizedActions(
-                from: ["sync", "futureAction", "sync", "search", "search"]
-            ),
-            [.sync, .search, .more]
+            IOSArticleListActionPolicy.normalizedConfiguredActions(from: []),
+            []
+        )
+        XCTAssertEqual(
+            IOSArticleListActionPolicy.normalizedConfiguredActions(from: nil),
+            IOSBottomAction.defaultConfiguredActions
         )
     }
 
-    func testArticleListActionPolicyGuaranteesMoreAndDefaultsInvalidConfigurations() {
-        XCTAssertEqual(
-            IOSArticleListActionPolicy.normalizedActions(from: ["listeningList"]),
-            [.listeningList, .more]
+    func testArticleListOverflowContainsSelectedOverflowThenUnselectedActions() {
+        let resolved = IOSArticleListActionPolicy.resolvedActions(
+            configuredActions: [.search, .toggleReadFilter, .listeningList],
+            directCapacity: 2,
+            scope: .all,
+            hasNextScope: false,
+            hasLoadedMedia: false,
+            playbackStatus: .stopped
         )
-        XCTAssertEqual(
-            IOSArticleListActionPolicy.normalizedActions(from: []),
-            IOSBottomAction.defaultActions
+
+        XCTAssertEqual(resolved.direct, [.search, .toggleReadFilter])
+        XCTAssertEqual(resolved.overflow.first, .listeningList)
+        XCTAssertFalse(resolved.overflow.contains(.search))
+        XCTAssertFalse(resolved.overflow.contains(.toggleReadFilter))
+        XCTAssertTrue(resolved.overflow.contains(.filterAndSort))
+        XCTAssertTrue(resolved.overflow.contains(.toggleSortOrder))
+        XCTAssertTrue(resolved.overflow.contains(.settings))
+        XCTAssertFalse(resolved.overflow.contains(.nowPlaying))
+    }
+
+    func testArticleListOverflowKeepsAllUnselectedRelevantActionsReachable() {
+        let resolved = IOSArticleListActionPolicy.resolvedActions(
+            configuredActions: [],
+            directCapacity: 3,
+            scope: .feed(1),
+            hasNextScope: true,
+            hasLoadedMedia: true,
+            playbackStatus: .paused
         )
+
+        XCTAssertTrue(resolved.direct.isEmpty)
         XCTAssertEqual(
-            IOSArticleListActionPolicy.normalizedActions(from: ["futureAction"]),
-            IOSBottomAction.defaultActions
+            Set(resolved.overflow),
+            Set(IOSBottomAction.configurableActions)
+        )
+    }
+
+    func testMarkReadActionsFollowCurrentScopeAvailability() {
+        XCTAssertTrue(
+            IOSArticleListActionPolicy.isAvailable(
+                .markAllRead,
+                scope: .all,
+                hasNextScope: false,
+                hasLoadedMedia: false,
+                playbackStatus: .stopped
+            )
+        )
+        XCTAssertFalse(
+            IOSArticleListActionPolicy.isAvailable(
+                .markAllRead,
+                scope: .starred,
+                hasNextScope: false,
+                hasLoadedMedia: false,
+                playbackStatus: .stopped
+            )
+        )
+        XCTAssertTrue(
+            IOSArticleListActionPolicy.isAvailable(
+                .markAllReadAndNext,
+                scope: .feed(1),
+                hasNextScope: true,
+                hasLoadedMedia: false,
+                playbackStatus: .stopped
+            )
+        )
+        XCTAssertFalse(
+            IOSArticleListActionPolicy.isAvailable(
+                .markAllReadAndNext,
+                scope: .feed(1),
+                hasNextScope: false,
+                hasLoadedMedia: false,
+                playbackStatus: .stopped
+            )
         )
     }
 
     @MainActor
-    func testNowPlayingVisibilityTracksPlayableLoadedMediaWithoutChangingConfiguration() {
-        let configured = [IOSBottomAction.sync, .nowPlaying, .more]
+    func testNowPlayingAvailabilityTracksLoadedPlaybackWithoutChangingConfiguration() {
+        let configured = [IOSBottomAction.nowPlaying, .search]
         let state = IOSMediaPlaybackPresentationState()
 
-        XCTAssertEqual(
-            IOSArticleListActionPolicy.visibleActions(
-                configuredActions: configured,
+        XCTAssertFalse(
+            IOSArticleListActionPolicy.isAvailable(
+                .nowPlaying,
+                scope: .all,
+                hasNextScope: false,
                 hasLoadedMedia: state.loadedEnclosure != nil,
                 playbackStatus: state.status
-            ),
-            [.sync, .more]
+            )
         )
 
         state.setLoadedMedia(
@@ -137,35 +215,27 @@ final class NewsreaderPresentationTests: XCTestCase {
             durationMs: nil
         )
         state.setStatus(.playing)
-        XCTAssertEqual(
-            IOSArticleListActionPolicy.visibleActions(
-                configuredActions: configured,
+        XCTAssertTrue(
+            IOSArticleListActionPolicy.isAvailable(
+                .nowPlaying,
+                scope: .all,
+                hasNextScope: false,
                 hasLoadedMedia: state.loadedEnclosure != nil,
                 playbackStatus: state.status
-            ),
-            configured
-        )
-
-        state.setStatus(.paused)
-        XCTAssertEqual(
-            IOSArticleListActionPolicy.visibleActions(
-                configuredActions: configured,
-                hasLoadedMedia: state.loadedEnclosure != nil,
-                playbackStatus: state.status
-            ),
-            configured
+            )
         )
 
         state.setStatus(.stopped)
-        XCTAssertEqual(
-            IOSArticleListActionPolicy.visibleActions(
-                configuredActions: configured,
+        XCTAssertFalse(
+            IOSArticleListActionPolicy.isAvailable(
+                .nowPlaying,
+                scope: .all,
+                hasNextScope: false,
                 hasLoadedMedia: state.loadedEnclosure != nil,
                 playbackStatus: state.status
-            ),
-            [.sync, .more]
+            )
         )
-        XCTAssertEqual(configured, [.sync, .nowPlaying, .more])
+        XCTAssertEqual(configured, [.nowPlaying, .search])
     }
 
     func testNowPlayingPlayerPresentationFindsLoadedListeningListItem() {
@@ -310,6 +380,34 @@ final class NewsreaderPresentationTests: XCTestCase {
                 locale: german
             ),
             "79 Artikel"
+        )
+    }
+
+    func testArticleListActionCapacityAdaptsToChromeMode() {
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.configurableDirectActionCapacity(
+                for: .compactPortrait
+            ),
+            3
+        )
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.configurableDirectActionCapacity(
+                for: .compactLandscape
+            ),
+            2
+        )
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.configurableDirectActionCapacity(
+                for: .persistentSplit
+            ),
+            5
+        )
+        XCTAssertEqual(
+            IOSArticleListChromePresentation.configurableDirectActionCapacity(
+                for: .persistentSplit,
+                systemPrefersVerticalToolbar: true
+            ),
+            3
         )
     }
 
@@ -522,14 +620,6 @@ final class NewsreaderPresentationTests: XCTestCase {
             IOSActionFeedbackKind.downloadRequested.symbolName,
             "arrow.down.circle"
         )
-    }
-
-    func testMoreActionsKeepSettingsAndOnlyOfferNextForSupportedScopes() {
-        XCTAssertEqual(IOSMoreAction.actions(for: .feed(1), hasNextScope: true), [.markAllRead, .markAllReadAndNext, .settings])
-        XCTAssertEqual(IOSMoreAction.actions(for: .feed(1), hasNextScope: false), [.markAllRead, .settings])
-        XCTAssertEqual(IOSMoreAction.actions(for: .all, hasNextScope: true), [.markAllRead, .settings])
-        XCTAssertEqual(IOSMoreAction.actions(for: .starred, hasNextScope: true), [.settings])
-        XCTAssertEqual(IOSMoreAction.actions(for: .listeningList, hasNextScope: true), [.settings])
     }
 
     func testNextFeedUsesNavigationOrderAndDoesNotWrap() {

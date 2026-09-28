@@ -98,14 +98,44 @@ This is configuration backup, not article/media backup.
 Restore the useful iOS toolbar configurability from FluxNews using semantic
 native actions rather than persisted SwiftUI control identities.
 
-Sync remains a stable direct action. The supported configurable action pool is
-the native semantic set already owned by the app, including Search,
-All/Unread/filtering, sort/filter access, Mark as Read, Mark as Read and Next,
-Listening List, Settings, and More/overflow as appropriate.
+**Sync** is fixed as the leading direct action and is not part of the persisted
+user selection. **More** is fixed as the trailing fallback and is always
+available.
 
-Configuration must preserve an always-available overflow route and must continue
-to obey the existing adaptive placement rules for iPhone portrait, compact
-landscape, regular split presentation, and system vertical-toolbar environments.
+The configurable priority list contains:
+
+- Filter and Sort;
+- direct All/Unread toggle;
+- direct sort-order toggle;
+- Search;
+- Mark All as Read;
+- Mark All as Read and Continue;
+- Listening List;
+- Now Playing;
+- Settings.
+
+The persisted order is the priority for direct presentation. Each adaptive
+chrome mode exposes a bounded number of configurable direct actions; selected
+actions that do not fit move into **More**. Relevant configurable actions that
+the user did not select for direct presentation also remain available under
+**More**. Contextually invalid actions are omitted rather than shown disabled:
+Now Playing requires active loaded media, Mark All as Read is limited to article
+scopes that support it, and Mark All as Read and Continue additionally requires
+a following visible feed/category scope.
+
+Action Bar Settings use an explicit Edit mode: selected actions may only be
+removed or reordered while Edit is active. Adding an available action remains a
+normal non-editing operation. Sync and More are shown as fixed explanatory
+rows, not removable/reorderable selections.
+
+The Flutter production migration consumes `iosToolbarActions` together with
+`iosToolbarActionOrder` and maps semantic actions to the native priority list.
+Existing native `articleListActionIDs` presence wins, including an explicitly
+empty native selection.
+
+Configuration must preserve the existing adaptive placement rules for iPhone
+portrait, compact landscape, regular split presentation, and system
+vertical-toolbar environments.
 
 ### D9-D — Localization parity required for replacement
 

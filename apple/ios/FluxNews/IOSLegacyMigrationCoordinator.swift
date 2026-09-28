@@ -44,6 +44,10 @@ enum IOSLegacySettingsFollowupMigrationOutcome: Equatable {
     case notEligible, alreadyCompleted, imported, retryableFailure
 }
 
+enum IOSLegacyToolbarMigrationOutcome: Equatable {
+    case notEligible, alreadyCompleted, nativeConfigurationWins, noLegacyConfiguration, imported, retryableFailure
+}
+
 struct IOSLegacyMediaSettingsImport: Equatable {
     let unmeteredOnly: Bool?
     let deleteAfterPlayback: Bool?
@@ -87,6 +91,7 @@ final class IOSLegacyMigrationCoordinator {
         static let settingsFollowupLocalCompleted = "FluxNews.iOS.legacyMigration.settingsFollowup.v2.local.completed"
         static let settingsFollowupCoreCompleted = "FluxNews.iOS.legacyMigration.settingsFollowup.v2.core.completed"
         static let settingsFollowupStartupCompleted = "FluxNews.iOS.legacyMigration.settingsFollowup.v2.startup.completed"
+        static let toolbarMigrationCompleted = "FluxNews.iOS.legacyMigration.toolbar.v1.completed"
         static let removeArticlesWhenMarkedRead = "FluxNews.iOS.removeArticlesWhenMarkedRead"
         static let markReadOnScrollover = "FluxNews.iOS.markReadOnScrollover"
     }
@@ -103,6 +108,7 @@ final class IOSLegacyMigrationCoordinator {
     private let legacyFeedOpenInMinifluxImporter: ((Int64) async -> Result<LegacyFeedOpenInMinifluxImportOutcome, Error>)?
     private let legacyGlobalPreferencesReader: () -> LegacyGlobalPreferencesImport?
     private let legacySettingsReader: () -> LegacySettingsImport?
+    private let legacyToolbarReader: () -> LegacyToolbarImport?
     private let mediaRootProvider: () -> URL?
     private let fileManager: FileManager
     private let logger = IOSAppLogger(category: "legacy_migration")
@@ -121,6 +127,7 @@ final class IOSLegacyMigrationCoordinator {
         legacyFeedOpenInMinifluxImporter: ((Int64) async -> Result<LegacyFeedOpenInMinifluxImportOutcome, Error>)? = nil,
         legacyGlobalPreferencesReader: @escaping () -> LegacyGlobalPreferencesImport? = LegacyStateDiscovery.readGlobalPreferencesImport,
         legacySettingsReader: @escaping () -> LegacySettingsImport? = LegacyStateDiscovery.readSettingsImport,
+        legacyToolbarReader: @escaping () -> LegacyToolbarImport? = LegacyStateDiscovery.readToolbarImport,
         mediaRootProvider: @escaping () -> URL? = { IOSMediaTransferPathConfiguration.mediaRootURL },
         fileManager: FileManager = .default
     ) {
@@ -136,6 +143,7 @@ final class IOSLegacyMigrationCoordinator {
         self.legacyFeedOpenInMinifluxImporter = legacyFeedOpenInMinifluxImporter
         self.legacyGlobalPreferencesReader = legacyGlobalPreferencesReader
         self.legacySettingsReader = legacySettingsReader
+        self.legacyToolbarReader = legacyToolbarReader
         self.mediaRootProvider = mediaRootProvider
         self.fileManager = fileManager
     }
@@ -457,6 +465,41 @@ final class IOSLegacyMigrationCoordinator {
             }
         }
         if retryable { return .retryableFailure }
+        return .imported
+    }
+
+    /// D9-C migration of Flutter's semantic iOS toolbar selection/order.
+    /// Presence of the native array is authoritative, including an explicit
+    /// empty selection. Sync and More are fixed native chrome and are never
+    /// imported from Flutter.
+    @discardableResult
+    func migrateToolbarIfNeeded() async -> IOSLegacyToolbarMigrationOutcome {
+        if defaults.bool(forKey: DefaultsKey.toolbarMigrationCompleted) {
+            return .alreadyCompleted
+        }
+        guard !inFlight else { return .retryableFailure }
+        inFlight = true
+        defer { inFlight = false }
+
+        do { guard try isCurrentMigratedAccount() else { return .notEligible } }
+        catch { return .retryableFailure }
+
+        if defaults.object(forKey: IOSArticleListActionPreferences.defaultsKey) != nil {
+            defaults.set(true, forKey: DefaultsKey.toolbarMigrationCompleted)
+            return .nativeConfigurationWins
+        }
+
+        guard let legacy = legacyToolbarReader() else { return .retryableFailure }
+        guard let selectedActions = legacy.selectedActions else {
+            defaults.set(true, forKey: DefaultsKey.toolbarMigrationCompleted)
+            return .noLegacyConfiguration
+        }
+        defaults.set(
+            selectedActions.map(\.rawValue),
+            forKey: IOSArticleListActionPreferences.defaultsKey
+        )
+        defaults.set(true, forKey: DefaultsKey.toolbarMigrationCompleted)
+        logger.info("Legacy iOS toolbar configuration copied into native action preferences.")
         return .imported
     }
 
