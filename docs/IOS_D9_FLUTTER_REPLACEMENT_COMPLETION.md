@@ -30,7 +30,7 @@ Current repository status:
 - **D9-A — Production Flutter-to-native migration:** COMPLETE / TEST-GATED
 - **D9-B — Config Backup and Restore:** COMPLETE / TEST-GATED
 - **D9-C — Configurable Bottom Action Bar:** COMPLETE / TEST-GATED
-- **D9-D — Localization parity:** COMPLETE / TEST-GATED
+- **D9-D — Localization parity:** REOPENED — SOURCE-USAGE AUDIT TEST-GATE PENDING / ES-GL-NL-TA-TR REVIEW PENDING
 - **D9-E — Downloaded Data:** COMPLETE / TEST-GATED
 - **D9-F — Miniflux account information / HTTP warning:** COMPLETE / TEST-GATED
 - **D9-G — Open Source and About:** COMPLETE / TEST-GATED
@@ -220,6 +220,10 @@ The native iOS/iPadOS app must restore the production FluxNews language set:
 
 Localization remains native and Weblate-managed. This does not require carrying
 forward obsolete Flutter-only strings or settings.
+
+The post-D9 source-usage audit is authoritative for catalog membership and
+runtime usage; see [IOS_LOCALIZATION_USAGE_AUDIT.md](IOS_LOCALIZATION_USAGE_AUDIT.md).
+Xcode `extractionState` must not be used as a standalone deletion signal.
 
 
 Implementation contract:

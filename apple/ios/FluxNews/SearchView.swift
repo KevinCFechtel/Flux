@@ -20,7 +20,7 @@ struct SearchView: View {
             onSetRead: onSetRead,
             onSetStarred: onSetStarred
         )
-        .navigationTitle(store.hasSearched ? "Search Results" : "Search")
+        .navigationTitle(store.hasSearched ? String(localized: "Search Results") : String(localized: "Search"))
         .navigationBarTitleDisplayMode(.large)
         .searchable(
             text: $store.query,

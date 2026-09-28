@@ -32,11 +32,13 @@ final class NewsreaderPresentationTests: XCTestCase {
         }
     }
 
-    func testLocalizationCatalogKeepsKnownRuntimeFalseStaleKeys() throws {
+    func testProductionLocalizationSourceKeysExistAndHaveGermanTranslation() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
-        let catalogURL = testsDirectory
-            .deletingLastPathComponent()
+        let iosDirectory = testsDirectory.deletingLastPathComponent()
+        let repositoryAppleDirectory = iosDirectory.deletingLastPathComponent()
+
+        let catalogURL = iosDirectory
             .appendingPathComponent("FluxNews/Localizable.xcstrings")
         let data = try Data(contentsOf: catalogURL)
         let root = try XCTUnwrap(
@@ -46,37 +48,164 @@ final class NewsreaderPresentationTests: XCTestCase {
             root["strings"] as? [String: Any]
         )
 
-        let expectedGerman: [String: String] = [
-            "Settings": "Einstellungen",
-            "Search Results": "Suchergebnisse",
-            "Feed Settings": "Feed-Einstellungen",
-            "Mark All as Read": "Alle als gelesen markieren",
-            "Listening List": "Hörliste",
-            "Remove Account": "Account entfernen",
-            "Show article count": "Artikelanzahl anzeigen",
-            "Newest First": "Neueste zuerst",
-            "Oldest First": "Älteste zuerst",
-            "Unread": "Ungelesen",
+        let sourceRoots = [
+            iosDirectory.appendingPathComponent("FluxNews"),
+            iosDirectory.appendingPathComponent("FluxNewsWidgets"),
+            repositoryAppleDirectory.appendingPathComponent("shared/FluxApple"),
+        ]
+        let excludedFiles: Set<String> = [
+            "DeveloperDiagnosticsView.swift",
         ]
 
-        for (key, expected) in expectedGerman {
+        let patterns = [
+            #"String\s*\(\s*localized:\s*"((?:\\.|[^"\\])*)""#,
+            #"LocalizedStringResource\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bText\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bButton\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bLabel\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\.navigationTitle\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bToggle\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bPicker\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bSection\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bSecureField\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bTextField\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bContentUnavailableView\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\bProgressView\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\.alert\s*\(\s*"((?:\\.|[^"\\])*)""#,
+            #"\.confirmationDialog\s*\(\s*"((?:\\.|[^"\\])*)""#,
+        ].map { try! NSRegularExpression(pattern: $0) }
+
+        var sourceKeys = Set<String>()
+        let fileManager = FileManager.default
+        for root in sourceRoots {
+            guard let enumerator = fileManager.enumerator(
+                at: root,
+                includingPropertiesForKeys: nil
+            ) else {
+                XCTFail("Could not enumerate localization source root: \(root.path)")
+                continue
+            }
+            for case let fileURL as URL in enumerator {
+                guard fileURL.pathExtension == "swift",
+                      !excludedFiles.contains(fileURL.lastPathComponent)
+                else {
+                    continue
+                }
+                let source = try String(contentsOf: fileURL, encoding: .utf8)
+                let sourceRange = NSRange(source.startIndex..., in: source)
+                for regex in patterns {
+                    for match in regex.matches(in: source, range: sourceRange) {
+                        guard match.numberOfRanges > 1,
+                              let range = Range(match.range(at: 1), in: source)
+                        else {
+                            continue
+                        }
+                        let key = String(source[range])
+                        guard !key.isEmpty,
+                              !key.contains(#"\("#)
+                        else {
+                            continue
+                        }
+                        sourceKeys.insert(key)
+                    }
+                }
+            }
+        }
+
+        // These are real runtime localization keys whose source form is
+        // interpolated or carried by a typed LocalizedStringKey/Resource value,
+        // so Xcode/static regex extraction is not reliable enough to discover
+        // them from the call site alone.
+        sourceKeys.formUnion([
+            "%lld article",
+            "%lld unread article",
+            "%lld article marked as read",
+            "%lld unread",
+            "%lld audio",
+            "%lld downloaded",
+            "%lld pending",
+            "%lld min",
+            "%lld%% downloaded",
+            "Audio %lld",
+            "Audio %lld of %lld",
+            "Chapter %lld",
+            "Chapter %lld of %lld",
+            "%lld items",
+            "%lld visible records",
+            "FluxNews · %lld %@",
+            "Sync",
+            "Filter and Sort",
+            "All / Unread",
+            "Sort Order",
+            "Search",
+            "Mark All as Read",
+            "Mark All as Read and Continue",
+            "Listening List",
+            "Now Playing",
+            "Settings",
+            "More",
+            "Forever",
+            "7 days",
+            "30 days",
+            "90 days",
+            "No bookmarks",
+            "No articles",
+            "No unread news",
+            "Open FluxNews to refresh widget data",
+            "Selected category unavailable",
+            "Selected feed unavailable",
+            "Open FluxNews to configure",
+            "Waiting for first successful sync",
+            "No widget data available",
+            "Search Miniflux",
+            "Search Results",
+            "Set Up FluxNews",
+            "Compact",
+            "Visual",
+        ])
+
+        let ignoredLiteralKeys: Set<String> = [
+            "https://example.com",
+        ]
+        sourceKeys.subtract(ignoredLiteralKeys)
+
+        let requiredLocales = Set(["de", "es", "gl", "nl", "ta", "tr"])
+        for key in sourceKeys.sorted() {
             let entry = try XCTUnwrap(
                 strings[key] as? [String: Any],
-                "Runtime localization key is missing: \(key)"
+                "Production localization source key is missing from the catalog: \(key)"
             )
             let localizations = try XCTUnwrap(
-                entry["localizations"] as? [String: Any]
+                entry["localizations"] as? [String: Any],
+                "Production localization key has no localizations: \(key)"
+            )
+            XCTAssertTrue(
+                requiredLocales.isSubset(of: Set(localizations.keys)),
+                "Production localization key is missing a required locale: \(key)"
             )
             let german = try XCTUnwrap(
-                localizations["de"] as? [String: Any]
+                localizations["de"] as? [String: Any],
+                "Production localization key has no German localization: \(key)"
             )
-            let unit = try XCTUnwrap(
-                german["stringUnit"] as? [String: Any]
-            )
-            XCTAssertEqual(
-                unit["value"] as? String,
-                expected,
-                "German runtime localization regressed for: \(key)"
+
+            func containsTranslatedStringUnit(_ node: Any) -> Bool {
+                guard let dictionary = node as? [String: Any] else {
+                    return false
+                }
+                if let unit = dictionary["stringUnit"] as? [String: Any],
+                   unit["state"] as? String == "translated",
+                   let value = unit["value"] as? String,
+                   !value.isEmpty {
+                    return true
+                }
+                return dictionary.values.contains {
+                    containsTranslatedStringUnit($0)
+                }
+            }
+
+            XCTAssertTrue(
+                containsTranslatedStringUnit(german),
+                "Production localization key has no translated German value: \(key)"
             )
         }
     }

@@ -112,7 +112,7 @@ struct IOSAddFeedView: View {
             switch result {
             case let .success(subscriptions):
                 switch IOSAddFeedDiscoveryOutcome.from(subscriptions) {
-                case .none: error = "Miniflux did not find a subscription for this URL."
+                case .none: error = String(localized: "Miniflux did not find a subscription for this URL.")
                 case let .automatic(subscription): create(feedURL: subscription.url)
                 case .choose: candidates = subscriptions
                 }
