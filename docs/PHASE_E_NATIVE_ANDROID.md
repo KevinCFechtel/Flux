@@ -1,6 +1,6 @@
 # Phase E — Native Android
 
-> **Status: AUTHORITATIVE CONTRACT DEFINED — E1-A, E1-B1 AND E1-B2a IMPLEMENTED / E1-B2 BLOCKED**
+> **Status: AUTHORITATIVE CONTRACT DEFINED — E1-A, E1-B1, E1-B2a AND E1-B2 IMPLEMENTED / E1-B3 NEXT**
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
 >
@@ -327,7 +327,7 @@ Do not begin product UI beyond what is required to prove startup/runtime.
 
 ### E1-B — Rust/UniFFI build and smoke test
 
-E1-B1 is implemented: `android/Build/build-uniffi.sh` builds and verifies the existing `flux-uniffi` cdylib for `arm64-v8a` (`aarch64-linux-android`) and `x86_64` (`x86_64-linux-android`) in Debug and Release modes. E1-B2a resolves the minimal Kotlin-safe UniFFI surface naming while retaining UniFFI 0.29 and the unchanged Core domain. E1-B2 packaging remains blocked because the generated Kotlin uses `java.lang.ref.Cleaner`, which requires API 33 while Android retains minSdk 29. Library loading and the Core smoke test remain open for E1-B3.
+E1-B1 is implemented: `android/Build/build-uniffi.sh` builds and verifies the existing `flux-uniffi` cdylib for `arm64-v8a` (`aarch64-linux-android`) and `x86_64` (`x86_64-linux-android`) in Debug and Release modes. E1-B2a resolves the minimal Kotlin-safe UniFFI surface naming while retaining UniFFI 0.29 and the unchanged Core domain. E1-B2 generates Kotlin bindings, compiles them with JNA 5.13.0 and packages variant-specific native libraries. Its crate-local `uniffi.toml` uses the official UniFFI 0.29 Android configuration with `disable_java_cleaner = true`, retaining minSdk 29 through the generated JNA Cleaner fallback without a Lint suppression. E1-B3 remains open for library loading and the Core smoke test; E1-B as a whole is not complete until those runtime gates pass.
 
 Prove:
 

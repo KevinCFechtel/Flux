@@ -7,6 +7,7 @@ REPOSITORY_DIR="$(cd -- "${ANDROID_DIR}/.." && pwd)"
 CORE_DIR="${REPOSITORY_DIR}/core"
 WORKSPACE="${CORE_DIR}/Cargo.toml"
 CRATE="flux-uniffi"
+UNIFFI_CONFIG="${CORE_DIR}/crates/flux-uniffi/uniffi.toml"
 API_LEVEL=29
 MODE="${1:-debug}"
 
@@ -27,7 +28,7 @@ case "${MODE}" in
     ;;
 esac
 
-for command_name in cargo rustup cp mkdir rm; do
+for command_name in cargo rustup cp mkdir rm grep; do
   command -v "${command_name}" >/dev/null 2>&1 || {
     echo "Required command missing: ${command_name}" >&2
     exit 1
@@ -36,6 +37,10 @@ done
 
 [[ -f "${WORKSPACE}" ]] || {
   echo "Rust workspace manifest is missing: ${WORKSPACE}" >&2
+  exit 1
+}
+[[ -f "${UNIFFI_CONFIG}" ]] || {
+  echo "UniFFI configuration is missing: ${UNIFFI_CONFIG}" >&2
   exit 1
 }
 
@@ -122,6 +127,7 @@ done
 
 PROFILE="${MODE}"
 OUTPUT_DIR="${SCRIPT_DIR}/Products/${MODE}"
+BINDINGS_DIR="${SCRIPT_DIR}/Products/Bindings/${MODE}/kotlin"
 rm -rf -- "${OUTPUT_DIR}"
 
 verify_library() {
@@ -187,5 +193,28 @@ for index in "${!targets[@]}"; do
   cp "${source_library}" "${output_library}"
   verify_library "${output_library}" "${abi}"
 done
+
+rm -rf -- "${BINDINGS_DIR}"
+mkdir -p "${BINDINGS_DIR}"
+(
+  cd "${CORE_DIR}"
+  cargo run --manifest-path "${WORKSPACE}" --package "${CRATE}" --bin uniffi-bindgen -- \
+    generate "${OUTPUT_DIR}/arm64-v8a/libflux_uniffi.so" \
+    --library --crate flux_uniffi --language kotlin --config "${UNIFFI_CONFIG}" --out-dir "${BINDINGS_DIR}"
+)
+
+BINDING_FILE="${BINDINGS_DIR}/uniffi/flux_uniffi/flux_uniffi.kt"
+[[ -s "${BINDING_FILE}" ]] || {
+  echo "UniFFI Kotlin binding generation did not produce flux_uniffi.kt." >&2
+  exit 1
+}
+if grep -R -F -- "java.lang.ref.Cleaner" "${BINDINGS_DIR}" >/dev/null; then
+  echo "Generated Kotlin bindings still use java.lang.ref.Cleaner." >&2
+  exit 1
+fi
+grep -R -F -- "com.sun.jna.internal.Cleaner" "${BINDINGS_DIR}" >/dev/null || {
+  echo "Generated Kotlin bindings do not use the JNA Cleaner fallback." >&2
+  exit 1
+}
 
 echo "Android UniFFI ${MODE} artifacts: ${OUTPUT_DIR}"

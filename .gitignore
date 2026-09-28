@@ -59,3 +59,4 @@ android/**/*.aab
 !android/Build/
 !android/Build/*.sh
 android/Build/Products/
+android/Build/reports/
