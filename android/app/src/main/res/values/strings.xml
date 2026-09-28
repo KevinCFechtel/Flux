@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">FluxNews</string>
+    <string name="native_android">Native Android</string>
+    <string name="phase_e1a">Phase E1-A</string>
+    <string name="application_id">Application ID: %1$s</string>
+</resources>

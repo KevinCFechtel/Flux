@@ -44,3 +44,17 @@ apple/macos/Build/ExplicitPrecompiledModules
 apple/macos/Build/FluxNews.build
 apple/Build/Products/
 apple/ios/FluxNews.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Android build and local environment files
+android/.gradle/
+android/.idea/
+android/build/
+android/app/build/
+android/local.properties
+android/captures/
+android/**/*.apk
+android/**/*.aab
+
+# Keep canonical Android workflows despite case-insensitive filesystems.
+!android/Build/
+!android/Build/*.sh

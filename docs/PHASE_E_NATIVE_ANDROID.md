@@ -1,6 +1,6 @@
 # Phase E — Native Android
 
-> **Status: AUTHORITATIVE CONTRACT DEFINED — IMPLEMENTATION NOT STARTED / E1 NEXT**
+> **Status: AUTHORITATIVE CONTRACT DEFINED — E1-A IMPLEMENTED / E1-B NEXT**
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
 >
@@ -320,6 +320,8 @@ E1 is the next implementation step.
 ### E1-A — Project skeleton
 
 Create android/ with the minimum native application structure, Kotlin and Compose baseline, Gradle wrapper/build, development identity and a production-identity configuration path.
+
+Implemented on 28 September 2026 with Android SDK API 36, AGP 8.9.2, Kotlin/Compose compiler 2.0.21, and a Compose Material 3 baseline. `android/Build/build-app.sh` and `android/Build/test.sh` are the canonical Android build and validation entry points.
 
 Do not begin product UI beyond what is required to prove startup/runtime.
 
