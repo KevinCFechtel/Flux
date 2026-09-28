@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ANDROID_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 GRADLEW="${ANDROID_DIR}/gradlew"
+TEST_CLASS="de.circledev.fluxnews.nativeapp.UniFFIRuntimeSmokeTest"
 ARGUMENT_SERIAL="${1:-}"
 
 usage() {
@@ -71,4 +72,6 @@ echo "ABIs: ${ABI_LIST}"
 echo "Emulator: ${EMULATOR}"
 echo "Running developmentDebug UniFFI runtime smoke only."
 
-ANDROID_SERIAL="${SERIAL}" exec "${GRADLEW}" --project-dir "${ANDROID_DIR}" connectedDevelopmentDebugAndroidTest
+ANDROID_SERIAL="${SERIAL}" exec "${GRADLEW}" --project-dir "${ANDROID_DIR}" \
+  connectedDevelopmentDebugAndroidTest \
+  "-Pandroid.testInstrumentationRunnerArguments.class=${TEST_CLASS}"

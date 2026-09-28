@@ -10,6 +10,9 @@ use flux_core::config_backup;
 
 uniffi::setup_scaffolding!();
 
+#[cfg(target_os = "android")]
+mod android_tls;
+
 #[derive(uniffi::Record)]
 pub struct InitializationConfig {
     pub persistent_data: String,

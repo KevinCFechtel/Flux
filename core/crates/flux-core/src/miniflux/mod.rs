@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::io::Read;
-#[cfg(target_vendor = "apple")]
+#[cfg(any(target_vendor = "apple", target_os = "android"))]
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Instant;
@@ -475,9 +475,9 @@ impl MinifluxClient {
         let mut agent_builder = ureq::AgentBuilder::new()
             .timeout(std::time::Duration::from_secs(80))
             .redirects(10);
-        #[cfg(target_vendor = "apple")]
+        #[cfg(any(target_vendor = "apple", target_os = "android"))]
         {
-            agent_builder = agent_builder.tls_config(apple_tls_config());
+            agent_builder = agent_builder.tls_config(platform_tls_config());
         }
         Ok(Self {
             agent: agent_builder.build(),
@@ -1255,8 +1255,16 @@ impl MinifluxClient {
     }
 }
 
-#[cfg(target_vendor = "apple")]
-fn apple_tls_config() -> Arc<rustls::ClientConfig> {
+/// Platform-trust TLS configuration for targets whose operating system owns the
+/// certificate store Flux must honour.
+///
+/// Apple platforms verify against the system roots plus the keychain. Android verifies
+/// against the Android trust infrastructure, which covers system and user-installed
+/// anchors; that path requires [`crate::miniflux`] consumers to have completed the
+/// Android verifier bootstrap before the first request. Every other target keeps the
+/// `ureq` default TLS configuration.
+#[cfg(any(target_vendor = "apple", target_os = "android"))]
+fn platform_tls_config() -> Arc<rustls::ClientConfig> {
     use rustls_platform_verifier::ConfigVerifierExt;
 
     Arc::new(rustls::ClientConfig::with_platform_verifier())

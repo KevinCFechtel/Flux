@@ -563,6 +563,8 @@ name = "flux-uniffi"
 version = "0.1.0"
 dependencies = [
  "flux-core",
+ "jni",
+ "rustls-platform-verifier",
  "serde_json",
  "uniffi",
 ]

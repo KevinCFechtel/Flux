@@ -122,6 +122,12 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("com.google.android.material:material:1.12.0")
     implementation("net.java.dev.jna:jna:5.13.0@aar")
+    // Kotlin side of the pinned rustls-platform-verifier crate. The version and the Maven
+    // repository both come from Cargo metadata (see settings.gradle.kts), so the component can
+    // never drift away from the crate that core/Cargo.lock selected.
+    implementation(
+        "rustls:rustls-platform-verifier:${rootProject.extra["rustlsPlatformVerifierVersion"]}@aar",
+    )
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

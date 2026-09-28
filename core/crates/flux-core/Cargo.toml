@@ -33,3 +33,7 @@ tempfile.workspace = true
 [target.'cfg(target_vendor = "apple")'.dependencies]
 rustls.workspace = true
 rustls-platform-verifier.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+rustls.workspace = true
+rustls-platform-verifier.workspace = true

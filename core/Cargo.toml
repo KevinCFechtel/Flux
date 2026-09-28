@@ -13,6 +13,7 @@ argon2 = "0.5"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 base64 = "0.22"
 html5ever = "0.39"
+jni = { version = "0.21", default-features = false }
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "ico", "jpeg", "png", "webp"] }
 lofty = "0.22"
 markup5ever_rcdom = "0.39"
