@@ -7,6 +7,55 @@ import CoreText
 @testable import FluxNews
 
 final class NewsreaderPresentationTests: XCTestCase {
+
+    func testAboutInformationReadsVersionAndBuildFromBundleMetadata() {
+        let metadata: [String: Any] = [
+            "CFBundleShortVersionString": " 2.3.5 ",
+            "CFBundleVersion": " 2026092601 ",
+        ]
+
+        XCTAssertEqual(
+            IOSAboutInformation.version(from: metadata),
+            "2.3.5"
+        )
+        XCTAssertEqual(
+            IOSAboutInformation.build(from: metadata),
+            "2026092601"
+        )
+    }
+
+    func testAboutInformationFallsBackForMissingBundleMetadata() {
+        XCTAssertEqual(
+            IOSAboutInformation.version(from: [:]),
+            String(localized: "Unknown")
+        )
+        XCTAssertEqual(
+            IOSAboutInformation.build(
+                from: ["CFBundleVersion": "   "]
+            ),
+            String(localized: "Unknown")
+        )
+    }
+
+    func testAboutInformationUsesExpectedProjectDestinations() {
+        XCTAssertEqual(
+            IOSAboutInformation.fluxNewsRepositoryURL.absoluteString,
+            "https://github.com/KevinCFechtel/FluxNews"
+        )
+        XCTAssertEqual(
+            IOSAboutInformation.fluxRepositoryURL.absoluteString,
+            "https://github.com/KevinCFechtel/Flux"
+        )
+        XCTAssertEqual(
+            IOSAboutInformation.minifluxProjectURL.absoluteString,
+            "https://miniflux.app"
+        )
+        XCTAssertEqual(
+            IOSAboutInformation.licenseURL.absoluteString,
+            "https://github.com/KevinCFechtel/FluxNews/blob/main/LICENSE"
+        )
+    }
+
     @MainActor
     private final class ObservationFlag {
         var value = false

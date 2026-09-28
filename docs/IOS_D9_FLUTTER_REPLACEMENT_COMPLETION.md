@@ -33,7 +33,7 @@ Current repository status:
 - **D9-D — Localization parity:** OPEN
 - **D9-E — Downloaded Data:** COMPLETE / TEST-GATED
 - **D9-F — Miniflux account information / HTTP warning:** COMPLETE / TEST-GATED
-- **D9-G — Open Source and About:** OPEN
+- **D9-G — Open Source and About:** COMPLETE / TEST-GATED
 - **D9-H — Logging & Support Diagnostics:** OPEN
 - **D9 Widget Configuration:** OPEN
 - **Final physical-device Flutter-to-native production-upgrade acceptance:** OPEN
@@ -234,6 +234,20 @@ Settings must provide normal user-facing access to:
 
 Developer Diagnostics is not a substitute for this normal user-facing
 information.
+
+Implementation contract:
+
+- version and build are read from the shipped application bundle rather than a
+  second settings-owned version constant;
+- the original **FluxNews** repository is linked as the application project's
+  long-term repository, because the native project is intended to move there;
+- the current **Flux** repository remains linked for the existing native/shared
+  Core development history;
+- the BSD 3-Clause license and Miniflux project are directly reachable from the
+  About surface;
+- the retained project identity follows the original FluxNews values where
+  still applicable: **Flux News**, Kevin Fechtel attribution, Miniflux project
+  attribution and BSD 3-Clause licensing.
 
 ### D9-H — Logging & Support Diagnostics
 
