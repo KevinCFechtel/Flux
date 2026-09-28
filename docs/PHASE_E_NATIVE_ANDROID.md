@@ -1,0 +1,847 @@
+# Phase E — Native Android
+
+> **Status: AUTHORITATIVE CONTRACT DEFINED — IMPLEMENTATION NOT STARTED / E1 NEXT**
+>
+> Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
+>
+> Phase A, Phase B and Phase C are complete and architecture-frozen. Phase D feature implementation is complete; its final canonical acceptance gate and physical Flutter-to-native iOS upgrade test remain pending and do not block Phase E.
+>
+> This document is the authoritative implementation contract for the native Android replacement. ARCHITECTURE_DECISIONS.md remains the primary architecture authority and MOBILE_PRODUCT_SEMANTICS.md remains the shared native-mobile product contract. Where this document describes Android mechanisms, those mechanisms implement the shared contracts rather than redefining the product domain.
+
+## 1. Goal and non-goals
+
+Phase E replaces the existing Flutter Android client with a first-class native Kotlin Android client over the existing Rust Core and UniFFI boundary.
+
+The target is not a Kotlin rewrite of Flux domain logic and not a visual copy of the iOS application.
+
+Phase E must:
+
+- preserve the existing production Android product identity and provide a safe Flutter-to-native upgrade;
+- use the current Rust Core as the durable authority for all already Core-owned state and rules;
+- use Kotlin and native Android APIs for presentation, lifecycle and OS integration;
+- preserve the completed native-mobile product semantics from Phase D where they are platform-independent;
+- adapt navigation, layout, gestures, widgets, background work, media and automotive integration to Android conventions;
+- measure Android performance on real Android hardware before introducing renderer-specific complexity.
+
+Phase E must not:
+
+- create a second domain, Miniflux, persistence, sync, search or media-policy layer in Kotlin;
+- copy SwiftUI, UIKit, BGTaskScheduler, WidgetKit, AVFoundation, CarPlay or Apple scene/lifecycle mechanics;
+- make the legacy Flutter database, secure-storage schema, widget snapshot or media cache a permanent runtime API;
+- reintroduce Flutter behavior that Phase D deliberately retired or replaced;
+- reopen architecture-frozen Phase A-D decisions without a concrete technical contradiction;
+- introduce a custom JNI/C/JSON bridge around Core. UniFFI is the selected native binding technology.
+
+## 2. Repository audit result
+
+At the audit baseline there is no native Android client directory in Flux. The repository contains:
+
+- core/ — the shared Rust workspace;
+- core/crates/flux-core — durable domain, storage, networking, sync, article, widget, notification and media implementation;
+- core/crates/flux-uniffi — the typed UniFFI surface;
+- apple/macos, apple/ios and apple/shared — completed native Apple clients/integration;
+- docs — the frozen architecture and phase contracts.
+
+Android preparation therefore exists primarily in the shared architecture and Core, not in a partially implemented Kotlin application.
+
+The current Core/UniFFI surface already covers the feature-domain baseline required by Android, including article queries/counts/catalog, search, Reader/article processing, read/star mutations, cooperative sync cancellation, feed preferences, notification candidates, widget projections, configuration snapshot/backup, Listening List, playback preparation/progress, media downloads/policies/retention and legacy playback import.
+
+The current configuration-backup model already includes Android as a platform value.
+
+The current Rust workspace builds flux-uniffi as a cdylib/lib and includes the UniFFI binding generator, but the repository does not yet contain:
+
+- Android Rust target build tasks;
+- generated Kotlin binding integration;
+- Gradle/AGP packaging of libflux_uniffi for Android ABIs;
+- Android runtime initialization for the current Rust TLS platform-verifier integration;
+- Android Core lifecycle/execution adapters;
+- an Android test/build/release pipeline.
+
+Those are E1 integration responsibilities, not evidence that the Core domain should be rewritten.
+
+### 2.1 Core/UniFFI readiness assessment
+
+**Domain readiness: high.** No release-baseline Android product-domain gap was found in the repository-first audit.
+
+**Binding/API readiness: high, subject to an Android compile/runtime proof.** The existing typed UniFFI API is deliberately platform-neutral, but it has so far been exercised by Apple clients.
+
+**Android build/runtime readiness: not yet proven.** E1 must validate the current pinned UniFFI version, Android ABI packaging, Kotlin bindings, synchronous-call execution policy and TLS verifier initialization before product implementation proceeds.
+
+A concrete Android blocker may justify a narrow shared Core/UniFFI fix. It does not justify a Kotlin domain duplicate.
+
+## 3. Authority and ownership
+
+### Rust Core owns
+
+The existing architecture remains authoritative for:
+
+- domain models and stable identities;
+- Miniflux networking and custom-header application;
+- SQLite persistence and migrations;
+- sync, reconciliation, freshness and cooperative cancellation;
+- offline read/unread/star and other durable mutations;
+- article/Reader processing and search;
+- navigation catalog/count projections;
+- feed preferences;
+- notification candidates and acknowledgement semantics;
+- widget projection/domain data;
+- configuration snapshot and encrypted backup format;
+- media/enclosure/Saved Media/Listening List domain;
+- playback progress and reconciliation;
+- download intent/state, policies, retention and downloaded-data summary;
+- all other existing platform-independent rules.
+
+### Native Android owns
+
+Kotlin/native Android owns:
+
+- Compose/UI presentation and navigation;
+- adaptive phone/tablet/foldable layout;
+- visible list snapshots, scroll state and gestures;
+- lifecycle and process integration;
+- credentials and platform-local presentation preferences;
+- browser/share integration;
+- WorkManager/background execution;
+- NotificationManager delivery and runtime permission UX;
+- home-screen widget presentation/configuration;
+- runtime media playback, audio focus and foreground media service;
+- physical transfer execution and transfer registry;
+- MediaSession/system controls/Android Auto;
+- OS file/share pickers and support-log presentation;
+- release identity/signing and Android packaging.
+
+Native Android may maintain bounded presentation/runtime state. It may not become a second durable domain authority.
+
+## 4. Kotlin, Compose and adaptive UI baseline
+
+Kotlin is the native Android language baseline.
+
+Jetpack Compose is the default UI toolkit. The Article Timeline starts with Compose, using a lazy native list and stable Article IDs. Do not introduce RecyclerView pre-emptively because iOS eventually required UIKit.
+
+Material 3 adaptive/window-size/posture APIs should be used where they provide the appropriate native behavior for phones, tablets and foldables. Layout decisions are based on available window environment, not device model names.
+
+The initial shell should be one adaptive app rather than separate phone/tablet/foldable implementations. Compact environments may use native transient navigation; wider environments may keep navigation and the Article List visible concurrently. Exact Android presentation is selected during E2 from current platform APIs and device testing.
+
+Compose ViewModels/state holders own presentation state only. They do not own a second Core, a second sync state machine or durable article/media state.
+
+## 5. Android Core runtime and synchronous execution
+
+There is exactly one active Core/account session per app process.
+
+A process/app-scoped Android runtime owns the active Flux UniFFI object, Core event subscription, synchronization coordination and media runtime attachment. Activities, Composables, Navigation destinations, widgets and services attach to that runtime according to lifecycle; they do not independently create Core instances against the same storage.
+
+The Rust/UniFFI API is synchronous. Potentially blocking Core calls must never execute on the Android main thread.
+
+Android must provide a small bounded execution policy for synchronous Core work. It should distinguish responsive/local work from potentially blocking remote/network work sufficiently to prevent remote work from head-of-line blocking presentation-critical local reads, while respecting Core's own storage/sync serialization. Kotlin coroutine cancellation alone is not proof that a synchronous Rust call was cancelled; cancellable Sync must use the existing Core SyncCancellation contract.
+
+Process death is normal on Android. Durable intent belongs in Core; native runtime state must be reconstructable on app/service restart.
+
+## 6. Rust/UniFFI Android build contract
+
+E1 must produce a deterministic Gradle-integrated build for the existing flux-uniffi crate and generated Kotlin bindings.
+
+Required properties:
+
+- generated bindings are build products and are not manually edited;
+- Android shared libraries are built from the existing Rust workspace;
+- Gradle packages the correct library per supported ABI;
+- Debug and Release paths are reproducible from repository scripts/tasks;
+- Kotlin calls only the generated UniFFI API, with no handwritten parallel JNI API;
+- symbol/library loading is deterministic and tested before first Core call;
+- Core Rust tests remain platform-neutral and unchanged unless a concrete Android gap requires an additive fix.
+
+Minimum E1 ABI validation:
+
+- arm64-v8a on physical hardware;
+- x86_64 on the emulator/test path.
+
+The legacy production app also advertises armeabi-v7a. Whether Phase E continues 32-bit ARM support is an explicit E1 distribution compatibility decision. If it is retained, the current pinned UniFFI/JNA path must pass real ARM32 validation before release. Do not upgrade UniFFI or another shared dependency solely speculatively; a concrete Android blocker must be demonstrated and all affected Rust/Apple gates must remain green after any shared upgrade.
+
+## 7. Android TLS and Miniflux transport
+
+Miniflux networking remains in Rust. Android must not introduce a Kotlin HTTP client for Miniflux.
+
+The current Core uses rustls with the platform-verifier integration. E1 must prove the Android initialization and trust behavior of the pinned repository version before account UI work proceeds.
+
+The transport gate must cover at least:
+
+- normal public/system CA trust;
+- rejection of invalid certificates;
+- the production-required behavior for user-installed CA trust, because the legacy Android client explicitly trusted both system and user anchors;
+- custom HTTP headers;
+- HTTP and HTTPS account URLs.
+
+Plain HTTP remains supported where the existing account validation permits it. Android presents the same visible insecure-HTTP warning as the native iOS product; the warning does not create a second transport policy.
+
+If the existing platform verifier requires a narrow Android initialization hook through the UniFFI/native integration, adding that hook is permitted. Replacing Core networking with Kotlin networking is not.
+
+## 8. Android identities, signing and migration safety
+
+### 8.1 Production identity
+
+The current Flutter Android production application ID is:
+
+    de.circle_dev.flux_news
+
+The native production replacement must retain that application ID and must be signed with the signing identity required for an in-place update of the installed production application.
+
+Changing Kotlin namespace/source package is a separate implementation choice, but it must not accidentally change the production application ID or break durable Android component identity that must survive the upgrade.
+
+The current Flutter production minimum SDK is 29. Phase E keeps API 29 as the initial compatibility floor unless E1 discovers a concrete native dependency that cannot support it and a deliberate release decision changes the floor. Raising it casually would strand existing installed users.
+
+### 8.2 Development identity
+
+Normal native development uses a separate application ID and sandbox so the Flutter production app and native development app can coexist on one device.
+
+The development identity must never be treated as proof that production legacy data is accessible. Migration acceptance requires a production-identity build signed for the real update path.
+
+### 8.3 Migration contract
+
+Android legacy migration is copy/import-only, idempotent, restart-safe and non-destructive.
+
+The native app may read compatible legacy state, then writes imported state into the new native/Core-owned stores. It must not:
+
+- operate directly on the Flutter SQLite database as its Core database;
+- continue using Flutter secure storage as the normal credential/preferences store;
+- keep the Flutter widget snapshot as the native widget domain;
+- use legacy media filenames/cache metadata as the new durable media identity;
+- delete legacy data merely because an import completed.
+
+Existing valid native/Core state wins over legacy state.
+
+Migration completion belongs to the native Android migration coordinator because only that coordinator can know whether all Android-owned legacy sources were evaluated successfully.
+
+## 9. Proven legacy Android sources
+
+The current FluxNews Flutter repository is evidence for migration and Android-specific historical behavior only.
+
+At the audit baseline its production Android state includes:
+
+- application ID de.circle_dev.flux_news;
+- minimum SDK 29;
+- SQLite database news_database.db, schema version 12;
+- flutter_secure_storage backed by Android Keystore configuration;
+- SharedPreferences playback progress using audio_progress_<newsID>;
+- app-support files under the application private files area;
+- downloaded audio under audio_cache;
+- widget projection in HomeWidgetPreferences SharedPreferences;
+- WorkManager-based background sync;
+- an Android media browser/audio service for Android Auto;
+- cleartext HTTP allowed and system plus user certificate anchors trusted.
+
+The established media migration contract in PHASE_B9_AUTOMOTIVE_AND_MIGRATION.md remains authoritative:
+
+- article/enclosure identity comes from the legacy database;
+- article-keyed playback progress imports only when exactly one audio enclosure resolves;
+- ambiguity is skipped and reported, never guessed;
+- explicit legacy zero does not become Completed or resumable InProgress;
+- positive progress may import through import_legacy_playback;
+- existing Core playback wins;
+- downloaded files are verified by the native adapter, resolved to the canonical enclosure and finalized through the Core download operation;
+- migration never deletes legacy state.
+
+D9 iOS migration decisions that express product semantics also apply to Android where the same legacy value exists, including:
+
+- native presence wins;
+- background-sync interval values migrate only to the native mobile on/off semantic, not to a user-controlled scheduler interval;
+- autoDownloadAudioAfterSync maps to the Core Listening List auto-download preference rather than restoring the old sync-triggered implementation;
+- syncReadStatusImmediately is not mapped to the broader Core DeliveryMode;
+- legacy feed overrides import only when they have a current semantic equivalent;
+- serialized zero defaults are not evidence of an explicit false decision when the Flutter storage format cannot distinguish them;
+- obsolete Flutter-only appearance/layout/cache options are dropped.
+
+Exact extraction from flutter_secure_storage is an E1 migration-feasibility gate. The new runtime must not take a long-term dependency on the Flutter plugin.
+
+## 10. Credentials, preferences and Android backup
+
+### Credentials
+
+Account URL, API key and sensitive custom configuration use an Android Keystore-backed native credential design.
+
+Do not introduce deprecated AndroidX encrypted-preferences APIs as the new long-term store merely to resemble the Flutter implementation. E1 must select and test a small app-private encrypted credential envelope whose encryption key is protected by Android Keystore, or another current Android-native equivalent with the same security properties.
+
+The legacy flutter_secure_storage reader is a one-time compatibility adapter only.
+
+### Non-secret presentation preferences
+
+Platform-local non-secret Android preferences should use the current Android native preference/data-store approach and remain separate from Core-owned settings.
+
+### Android system backup
+
+OS backup/device-transfer must be explicit and conservative.
+
+Do not automatically back up:
+
+- the Core database;
+- raw API credentials;
+- downloaded media;
+- runtime transfer state;
+- support logs;
+- widget projection/cache state.
+
+If Android automatic backup is retained, only deliberately selected non-sensitive or already encrypted configuration artifacts may participate. Config Backup/Restore remains the product's explicit encrypted configuration handoff and is not an article/media backup.
+
+## 11. Shared mobile product baseline
+
+MOBILE_PRODUCT_SEMANTICS.md is the source of truth for behavior shared by iOS/iPadOS and Android.
+
+Android must preserve at least:
+
+- All News / Starred / Category / Feed scope semantics;
+- transient Unread/All and sort direction;
+- Compact / Visual / Visual Compact article presentation semantics;
+- Miniflux reading time projected from Core;
+- absolute/relative publication-time preference;
+- feed metadata above the headline and publication/reading-time row behavior;
+- Reader/original-link/feed-specific routing semantics;
+- Mark as Read on Scrollover behavioral contract;
+- read/unread and star/unstar optimistic Core mutations;
+- configurable semantic swipe actions with zero, one or two actions per side;
+- scope-level Mark All as Read and Mark All as Read & Next;
+- semantic Article List actions and overflow access;
+- Search;
+- Manual Sync and cooperative cancellation;
+- Background Sync on/off semantics;
+- feed preferences;
+- Listening List and shared media-domain semantics;
+- per-feed System Notifications;
+- per-widget scope/read-filter/sort semantics;
+- configuration backup/restore capability;
+- localization baseline;
+- account/version/HTTP-warning/About surfaces;
+- support diagnostics/logging behavior.
+
+Android may express each behavior with different native chrome, navigation or gestures.
+
+## 12. E1 — Android Foundation & Production Migration Spike
+
+E1 is the next implementation step.
+
+### E1-A — Project skeleton
+
+Create android/ with the minimum native application structure, Kotlin and Compose baseline, Gradle wrapper/build, development identity and a production-identity configuration path.
+
+Do not begin product UI beyond what is required to prove startup/runtime.
+
+### E1-B — Rust/UniFFI build and smoke test
+
+Prove:
+
+- Rust Android targets;
+- Kotlin binding generation;
+- native library packaging/loading;
+- Flux/Core construction;
+- a minimal local Core query;
+- typed error propagation;
+- Core event subscription/cleanup;
+- Debug and Release build paths.
+
+### E1-C — TLS/account transport proof
+
+Prove the pinned Rust transport on API 29 and a current supported Android release, including public CA, invalid CA, required user-CA behavior, HTTP, HTTPS and custom headers.
+
+### E1-D — Android Core runtime ownership
+
+Create the process/app-scoped runtime and bounded off-main execution adapter. Prove lifecycle/recreation does not create concurrent Core owners for the same storage.
+
+No feature-domain duplication is allowed in this layer.
+
+### E1-E — Credential and preference storage proof
+
+Implement the native credential primitive and non-secret preference primitive, without yet migrating the complete settings surface.
+
+Prove locked/unlocked/relaunch access required by normal app and scheduled background work.
+
+### E1-F — Production-upgrade migration feasibility
+
+On a production-identity test build installed over the current Flutter app, prove read-only access to:
+
+- legacy account URL/API key;
+- custom headers and selected compatible settings;
+- news_database.db;
+- SharedPreferences playback progress;
+- legacy downloaded media and metadata;
+- widget SharedPreferences/configuration evidence;
+- any legacy auto-backup artifact that is intentionally retained.
+
+The test build must not delete or convert those sources in place.
+
+### E1-G — Durable native paths and backup exclusions
+
+Choose Core database/media/log/widget-projection paths under Android app-private storage and define explicit backup exclusions. New native Core data must not collide with news_database.db or the legacy audio_cache.
+
+### E1-H — CI and test gate
+
+Add deterministic Android unit/build smoke gates. Emulator/instrumentation coverage is added where a platform API cannot be proven on the JVM.
+
+### E1 exit conditions
+
+E2 may begin only when:
+
+1. native Android Debug builds through the repository;
+2. Kotlin successfully calls the current UniFFI Core;
+3. Core calls are off-main and one process-scoped Core owner is proven;
+4. TLS/platform trust is characterized and acceptable or a narrow corrective plan is committed;
+5. development and production identities are explicitly separated;
+6. a production-identity upgrade spike can read the required legacy Android sources without mutating them;
+7. Core/new-native paths are isolated from legacy paths;
+8. production signing/update prerequisites are known;
+9. no unresolved E1 issue requires replacing UniFFI or the shared Core architecture.
+
+## 13. E2 — Adaptive App Shell, Account and Settings Foundation
+
+E2 implements the native Android shell and normal Settings hierarchy.
+
+Required scope:
+
+- adaptive phone/tablet/foldable navigation;
+- account creation/replacement/removal;
+- Miniflux validation and custom headers;
+- server-version presentation;
+- HTTP warning;
+- Rebuild Local State and Remove Account semantics;
+- native appearance/accessibility behavior;
+- Navigation Settings and Startup Scope;
+- Article presentation/settings;
+- feed preference UI;
+- Background Sync preference surface;
+- Config Backup/Restore entry points and startup restore path;
+- Open Source/About/version/legal;
+- Support Diagnostics shell where settings dependencies are needed.
+
+Use Material/Android conventions. Do not imitate the iOS split-view or navigation capsule.
+
+Config Backup remains platform-specific. Android uses BackupPlatform.Android and an Android platform-settings payload. A backup is not promised to be portable to or from iOS unless a future explicit cross-platform backup contract is created.
+
+## 14. E3 — Native Article Timeline / Article Presentation
+
+E3 implements the native Android Article List over Core query/page APIs.
+
+### Baseline renderer
+
+Start with Compose LazyColumn or the current idiomatic Compose lazy-list equivalent.
+
+Use:
+
+- stable Article IDs;
+- bounded Core pages/read models;
+- image loading sized for presentation;
+- one native image pipeline/cache;
+- no synchronous Core/network/image decode on the main thread;
+- batched article-level media projection where already provided by Core;
+- status-only presentation updates without reconstructing unrelated row content when practical.
+
+Do not introduce RecyclerView as a precautionary workaround.
+
+### Required presentations
+
+Support the shared mobile modes:
+
+- Compact;
+- Visual;
+- Visual Compact.
+
+Preserve shared semantic ordering and the date/reading-time/accessory contracts in MOBILE_PRODUCT_SEMANTICS.md while using Android-native typography, spacing and surfaces.
+
+### Scrollover
+
+Implement the shared Scrollover behavioral contract using Android/Compose list geometry and interaction state. Do not port the UIKit tracker line-for-line.
+
+Programmatic movement, layout changes, snapshot resets and unseen skipped rows must not manufacture read candidates.
+
+### Performance acceptance
+
+Performance is measured on physical Android devices including the API-29 compatibility floor and a contemporary device. Test with realistic large article sets and real article images.
+
+Use Android tracing/benchmark tools to identify actual bottlenecks. Only replace or specialize the renderer when reproducible evidence shows the default Compose path cannot meet the product requirement.
+
+E3 closes only after normal reading-speed scrolling, image loading, mutations and Scrollover are accepted without systematic jank on the agreed device matrix.
+
+## 15. E4 — Actions, Search, Sync and Mutations
+
+E4 completes interactive Newsreader behavior:
+
+- semantic swipe actions;
+- context/overflow article actions as appropriate on Android;
+- configurable semantic Article List actions;
+- All/Unread and sort controls;
+- Search using the normal article presentation renderer with Search-specific pagination;
+- pull/manual refresh;
+- cooperative Manual Sync cancellation;
+- read/unread;
+- star/unstar;
+- third-party save where configured;
+- Mark All as Read;
+- Mark All as Read & Next;
+- Reader/browser/share/comments/Miniflux routing;
+- optimistic mutation feedback and stale-generation suppression;
+- lifecycle-safe sync coordination.
+
+The Android action configuration stores semantic action IDs/priorities, never Compose control identities.
+
+Contextually invalid actions are omitted rather than represented as durable disabled state.
+
+## 16. E5 — Background Sync, System Notifications and Widgets
+
+### Background Sync
+
+Use WorkManager or the current platform-supported equivalent for deferrable periodic synchronization.
+
+The user setting is only on/off. Android scheduling cadence is an implementation policy, not a user-facing interval. WorkManager timing is inexact and may be deferred by the OS.
+
+Background work:
+
+- reuses the app/Core sync contract;
+- uses unique work to avoid duplicate schedules;
+- does not create a second domain sync state machine;
+- uses Core Delta/background semantics and freshness rules;
+- uses SyncCancellation when the Worker is stopped after Core execution begins;
+- reports completion/failure according to retry policy without publishing stale UI state.
+
+Foreground/resume freshness fallback follows MOBILE_PRODUCT_SEMANTICS.md.
+
+### System Notifications
+
+Use Android's native notification APIs and runtime permission model.
+
+Preserve the shared contract:
+
+- off by default;
+- configured per feed;
+- at most one aggregated notification per enabled feed/candidate batch;
+- Core candidate is acknowledged only after successful OS handoff;
+- notification delivery acknowledgement is independent of in-app snapshot adoption.
+
+Notification channels are Android presentation policy and must not become Core domain.
+
+### Home-screen widgets
+
+Prefer the current native Android widget stack when it meets the required layouts/configuration. The Android implementation may use Glance/RemoteViews mechanics; it must preserve the common data boundary.
+
+Each widget instance owns its own platform configuration:
+
+- scope: All News / Category / Feed / Bookmarks;
+- read filter: Unread / All;
+- sort: Newest First / Oldest First.
+
+The widget process/component must not:
+
+- initialize Core;
+- open Core SQLite;
+- access API credentials;
+- call Miniflux;
+- become a durable article-domain owner.
+
+The main app writes a bounded versioned credential-free widget projection plus bounded icon assets into Android app-private widget-readable storage. This is the Android equivalent of the shared widget projection principle; it is not an App Group/WidgetKit copy.
+
+Article taps route into the normal app article-open path. Widgets do not own a separate Open in Miniflux preference.
+
+Widget Sync, if exposed, schedules/requests normal app background sync rather than running a parallel widget Core.
+
+### Existing production widget component
+
+The Flutter production app already has FluxNewsWidgetProvider and installed widget instances may survive an application update only if their Android component/configuration path remains valid.
+
+E1/E5 must characterize the real production-upgrade behavior. Preserve the existing provider component identity where practical so users do not needlessly lose placed widgets. This compatibility requirement does not preserve the legacy widget data model.
+
+## 17. E6 — Native Media, Listening List and Background Transfers
+
+E6 consumes the frozen Phase B media domain.
+
+Android owns one app-scoped media runtime over the same Core account/session.
+
+Required product scope:
+
+- Listening List and feed filtering;
+- playback preparation;
+- local or remote source chosen by Core;
+- Play/Pause/Stop;
+- seek and ±30-second skip;
+- playback rate;
+- sleep timer;
+- chapters/show notes/artwork;
+- playback checkpoints and completion/restart;
+- audio focus/noisy-route handling;
+- background playback;
+- media downloads;
+- process-death/relaunch reconciliation;
+- Wi-Fi/network policy;
+- retention/delete-after-playback;
+- Downloaded Data count/size/Delete All Downloads.
+
+Media3/ExoPlayer is the preferred native playback baseline unless E6 uncovers a concrete incompatibility.
+
+### Transfer execution
+
+Core remains authoritative for Requested/Downloaded/Failed/DeleteRequested and policies. Android owns physical transfer execution and its platform task registry.
+
+Do not choose a transfer backend solely by analogy to iOS. E6 must evaluate the current Android options against:
+
+- long-running media transfer behavior;
+- network constraints;
+- foreground execution requirements;
+- cancellation;
+- process death/recovery;
+- duplicate suppression;
+- reliable file finalization;
+- Android version behavior from API 29 onward.
+
+Media3 download execution and/or WorkManager/system-native transfer mechanisms are implementation candidates. The chosen backend must report through the existing Core download lifecycle and must not persist a second domain download state machine.
+
+## 18. E7 — MediaSession, System Media and Android Auto
+
+E7 is the Android counterpart to the product purpose of iOS D7, not a port of CarPlay code.
+
+Use one Android media service/session over the E6 playback runtime. MediaSession, system media controls, playback notification and Android Auto are projections/command adapters over that same player and Core-backed media state.
+
+A MediaLibrary-style service/session should expose browse content required by Android Auto without creating an automotive database/cache.
+
+Android Auto browsing uses the current Core-backed Listening List/media read models, not a filesystem scan of downloaded Flutter files.
+
+Remote and downloaded media are both valid when Core prepare_playback resolves them.
+
+Initial remote command vocabulary follows the existing media product contract:
+
+- Play;
+- Pause;
+- Toggle where the Android system maps it;
+- skip backward/forward;
+- absolute seek where supported.
+
+Do not invent next/previous episode, autoplay or a durable queue merely because Media3 supports them. Those require an explicit product/domain contract.
+
+There remains exactly one native Android player/media runtime per app process.
+
+E7 requires real-device or Android Auto-capable acceptance in addition to automated tests.
+
+## 19. E8 — Reserved / no artificial iOS counterpart
+
+E8 has no planned implementation.
+
+Do not create an Android feature merely to mirror the Phase-D numbering or the deferred iOS ActivityKit block.
+
+A future Android-specific capability may occupy E8 only after a distinct product requirement and architecture decision. No current Phase-E release gate depends on E8.
+
+## 20. E9 — Flutter Replacement Completion and Production Acceptance
+
+E9 is a closure phase, not a dumping ground for features that belong in E2-E7.
+
+By the start of E9, the productive native Android feature set must already include Settings, backup/restore, localization, logging/support diagnostics, widget configuration, media/downloads and system integrations.
+
+E9 performs:
+
+- full current-Flutter behavioral/migration gap audit;
+- verification that deliberately retired/replaced Flutter behavior remains retired;
+- completion of the production Flutter-to-native migration coordinator using the E1-proven readers;
+- Android-specific legacy settings mapping not already consumed earlier;
+- legacy widget/default/component migration closure;
+- legacy playback/download migration closure;
+- production signing/package/manifest validation;
+- upgrade installation over the latest production Flutter build;
+- first launch and migration interruption/retry tests;
+- post-upgrade sync and offline tests;
+- final feature/accessibility/localization audit;
+- canonical Rust + Android + affected Apple regression gate;
+- physical production-upgrade acceptance.
+
+Flutter is not a parity checklist. E9 imports only retained semantic state and validates only retained/current product capabilities.
+
+## 21. Localization and user-facing baseline
+
+Native Android ships the same retained production language set as Phase D:
+
+- English;
+- German;
+- Spanish;
+- Galician;
+- Dutch;
+- Tamil;
+- Turkish.
+
+Use Android-native resources/tooling. Flutter ARB files may be translation/reference evidence during migration but are not runtime localization sources.
+
+Active strings must have complete coverage, including plural/format compatibility tests appropriate to Android resources.
+
+## 22. Support diagnostics baseline
+
+Android must provide a normal user-facing Support Diagnostics destination equivalent in product purpose to completed D9-H:
+
+- Debug Logging toggle;
+- retained record count;
+- structured Log Viewer;
+- newest-first entries with timestamp/level/category/message;
+- text search and level filtering;
+- refresh;
+- per-record copy;
+- privacy-sanitized export through native sharing/file flow;
+- confirmed Clear Logs;
+- concise privacy/retention explanation.
+
+Normal Info/Warning/Error support records remain available without Debug Logging; Debug/Trace retention is gated by the preference.
+
+Do not restore legacy Clear Logs on Start.
+
+Android logging may use platform logging as an additional sink, but there must be one app support-log model rather than parallel authoritative log databases. Core diagnostics are bridged/redacted through the native support path.
+
+## 23. Testing and acceptance strategy
+
+Every phase uses the smallest relevant test surface plus regression gates for touched shared code.
+
+### Shared/Core gate
+
+When Core/UniFFI is unchanged, run the canonical Rust workspace tests at meaningful integration checkpoints.
+
+When Core/UniFFI changes, all Rust workspace tests and affected native Apple gates must remain green before accepting the shared change.
+
+### Android gates
+
+Build a repository-owned Android test path that can cover:
+
+- JVM unit tests for presentation/policy adapters;
+- instrumented/emulator tests for Android APIs and lifecycle where needed;
+- physical-device tests for performance, Keystore/migration, notifications/background work and media;
+- Android Auto acceptance for E7;
+- signed production-identity upgrade tests for E1/E9.
+
+Do not claim a migration, production upgrade, ABI, TLS behavior, background behavior or real-device media behavior from a unit test alone.
+
+### Accessibility
+
+Phase acceptance includes Android accessibility semantics, Dynamic Type equivalent/font scaling, touch targets, TalkBack behavior and reduced-motion/system preferences where applicable.
+
+## 24. Risk register and mandatory early proofs
+
+### Critical — Production signing/update identity
+
+The production application ID and compatible signing key are mandatory for in-place replacement. E1 must prove the release path before deep implementation.
+
+### Critical — Legacy secure-storage extraction
+
+The native production build must be able to recover the retained Flutter secure-storage values using the installed app's existing Keystore-backed material. This cannot be assumed from source inspection; E1 requires a physical production-identity upgrade spike.
+
+### High — Rust Android TLS/platform verifier
+
+The current pinned TLS verifier has not yet been proven in this repository on Android. E1 must validate initialization and required trust behavior before account/network UI depends on it.
+
+### High — UniFFI Android ABI/packaging
+
+The shared API is mature, but Gradle/ABI packaging is not yet implemented. E1 closes this gap before product work.
+
+### High — Legacy media files and download finalization
+
+Migration must resolve canonical enclosure identity and move/copy verified files into the new native/Core media root without destructive legacy conversion.
+
+### High — Compose Timeline performance
+
+The iOS UIKit history is not evidence that Android Compose will fail. E3 requires real measurements before renderer changes.
+
+### High — Background execution and credentials
+
+WorkManager may run after process death and under device restrictions. Credential/Core bootstrap must remain safe and bounded without requiring a foreground Activity.
+
+### High — Single media runtime across UI/service/Android Auto
+
+E6/E7 must avoid duplicate player/Core ownership when the media service outlives or starts without the Activity.
+
+### Medium — Existing widget instances
+
+Production widgets may depend on the legacy provider component identity. Preserve or deliberately migrate that component path rather than silently orphaning installed widgets.
+
+### Medium — OS backup interaction
+
+Native data, legacy data, Android Auto Backup and explicit Config Backup have different semantics. E1 defines exclusions before production data exists in new paths.
+
+## 25. Real Core gaps versus platform integration gaps
+
+The repository-first audit found no known release-baseline product-domain gap that requires a new Kotlin domain or a Phase-A/B rewrite.
+
+Known work is primarily platform integration:
+
+- Android UniFFI build/package/load path;
+- TLS platform-verifier initialization/proof;
+- Android process/Core execution ownership;
+- credential/preference adapters;
+- WorkManager/Notification/widget adapters;
+- Media3/transfer/Android Auto execution;
+- legacy Android extraction/migration.
+
+Potential narrow shared changes are allowed only when implementation proves them necessary. Examples include:
+
+- an additive UniFFI/native initialization entry point required by the Android TLS verifier;
+- a genuinely missing typed projection needed by both native clients;
+- a binding compatibility fix required for a retained Android ABI.
+
+Use the escalation format from the frozen architecture:
+
+    Contract requires X.
+    Existing API/implementation guarantees Y.
+    X and Y conflict because Z.
+
+Do not label an Android framework adapter as a Core gap.
+
+## 26. Intentionally open implementation details
+
+The following remain implementation choices inside the frozen boundaries:
+
+- exact development application ID;
+- final Kotlin package/namespace;
+- exact Gradle plugin versions at implementation time;
+- exact Gradle task layout for Rust cross-compilation and binding generation;
+- whether armeabi-v7a remains a shipped ABI;
+- exact Android Keystore-backed credential envelope format;
+- exact app-private Core/media/log/widget-projection directory names;
+- exact adaptive navigation components used by the current Material library;
+- exact Compose image-loading implementation;
+- exact E6 physical transfer backend;
+- exact notification channel grouping/names;
+- exact Glance/RemoteViews layout implementation;
+- exact physical device matrix beyond the required API-29 floor plus a contemporary Android device.
+
+These decisions must not change Core/domain ownership.
+
+## 27. Frozen Phase-E decisions
+
+The following are decided unless implementation finds a concrete contradiction:
+
+- Kotlin + native Android;
+- Jetpack Compose as the initial productive UI baseline;
+- adaptive phone/tablet/foldable design from window environment;
+- UniFFI as the only app/Core binding;
+- no second Kotlin domain or Miniflux layer;
+- one process-scoped Core/account session;
+- synchronous Core work off the Android main thread;
+- production application ID de.circle_dev.flux_news retained;
+- separate native development identity;
+- API 29 initial compatibility floor;
+- legacy migration is copy/import-only;
+- existing native/Core state wins over legacy;
+- Flutter is behavioral/migration evidence, not architecture or parity checklist;
+- WorkManager/native background execution over the Core sync contract;
+- native per-feed system notifications over Core candidates;
+- credential-free bounded widget projection, no Core/DB/network in the widget;
+- Media3 as the preferred playback baseline;
+- one Android media runtime/player owner;
+- Android Auto as a native projection over Core media read models;
+- E8 has no artificial implementation;
+- E9 is replacement/acceptance closure rather than deferred feature implementation;
+- Phase A-D remain frozen unless a concrete cross-platform contradiction requires an additive fix.
+
+## 28. Implementation order
+
+Begin with E1-A and proceed through the E1 gates before implementing user-facing Phase-E features.
+
+The first productive Android code must prove the binding/runtime/migration foundation, not recreate screens from Flutter.
+
+After E1 acceptance:
+
+    E2 Adaptive Shell / Account / Settings
+      -> E3 Article Timeline
+      -> E4 Actions / Search / Sync
+      -> E5 Background / Notifications / Widgets
+      -> E6 Media / Downloads
+      -> E7 System Media / Android Auto
+      -> E9 Replacement / Production Acceptance
+
+E8 remains unused unless a future explicit Android-specific requirement is approved.
+
+Phase E is successful when Android is a native client of the same durable Flux architecture, not a second implementation of the Flux domain.
