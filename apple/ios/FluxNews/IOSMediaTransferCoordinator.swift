@@ -1,3 +1,4 @@
+import Combine
 import CryptoKit
 import Foundation
 
@@ -117,7 +118,7 @@ enum IOSMediaTransferPathConfiguration {
 }
 
 @MainActor
-final class IOSMediaTransferCoordinator: NSObject {
+final class IOSMediaTransferCoordinator: NSObject, ObservableObject {
     private let bootstrapper: CoreBootstrapper
     private let coreSessionExecutionCoordinator: IOSCoreSessionExecutionCoordinator
     private let presentationState: IOSMediaTransferPresentationState
@@ -129,6 +130,7 @@ final class IOSMediaTransferCoordinator: NSObject {
     private let logger = IOSAppLogger(category: "media-transfer")
 
     var onWorkChanged: (() -> Void)?
+    @Published private(set) var workRevision: UInt64 = 0
 
     private var core: Flux?
     private var lifecycleGeneration: UInt64 = 0
@@ -465,6 +467,7 @@ final class IOSMediaTransferCoordinator: NSObject {
                 "media completion callback rejected enclosure=\(enclosureID): \(String(reflecting: error))"
             )
         } else {
+            workRevision &+= 1
             onWorkChanged?()
         }
         presentationState.remove(enclosureID: enclosureID)
@@ -486,6 +489,7 @@ final class IOSMediaTransferCoordinator: NSObject {
                 "media failure callback rejected enclosure=\(enclosureID): \(String(reflecting: error))"
             )
         } else {
+            workRevision &+= 1
             onWorkChanged?()
         }
         presentationState.remove(enclosureID: enclosureID)
@@ -503,6 +507,7 @@ final class IOSMediaTransferCoordinator: NSObject {
                 "media deletion callback rejected enclosure=\(enclosureID): \(String(reflecting: error))"
             )
         } else {
+            workRevision &+= 1
             onWorkChanged?()
         }
         presentationState.remove(enclosureID: enclosureID)

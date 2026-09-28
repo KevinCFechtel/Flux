@@ -230,3 +230,126 @@ struct IOSMediaSettingsView: View {
         }
     }
 }
+
+
+struct DownloadedDataSettingsView: View {
+    @ObservedObject var bootstrapper: CoreBootstrapper
+    @ObservedObject var transferCoordinator: IOSMediaTransferCoordinator
+    let onDeletionRequested: () async -> Void
+
+    @State private var summary = DownloadedMediaSummary(
+        fileCount: 0,
+        totalSizeBytes: 0
+    )
+    @State private var loaded = false
+    @State private var deleting = false
+    @State private var confirmationPresented = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        List {
+            Section {
+                LabeledContent("Downloaded Files") {
+                    Text(summary.fileCount, format: .number)
+                }
+                LabeledContent("Storage Used") {
+                    Text(Self.formatBytes(summary.totalSizeBytes))
+                }
+            } footer: {
+                Text(
+                    "This includes local audio files that are still waiting for physical deletion. Listening List items and playback progress are stored separately."
+                )
+            }
+
+            Section {
+                Button("Delete All Downloads", role: .destructive) {
+                    confirmationPresented = true
+                }
+                .disabled(!loaded || deleting || summary.fileCount == 0)
+
+                if deleting {
+                    HStack {
+                        ProgressView()
+                        Text("Deleting Downloads…")
+                    }
+                }
+            } footer: {
+                Text(
+                    "Deleting downloads removes only local media files. Listening List items and playback progress are kept."
+                )
+            }
+
+            if let errorMessage {
+                Section {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+        .navigationTitle("Downloaded Data")
+        .overlay {
+            if !loaded {
+                ProgressView()
+            }
+        }
+        .refreshable {
+            await load()
+        }
+        .task {
+            await load()
+        }
+        .onChange(of: transferCoordinator.workRevision) {
+            Task { await load() }
+        }
+        .alert("Delete All Downloads?", isPresented: $confirmationPresented) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                Task { await deleteAll() }
+            }
+        } message: {
+            Text(
+                "All locally downloaded audio files will be removed. Listening List items and playback progress will not be deleted."
+            )
+        }
+    }
+
+    private func load() async {
+        let result = await bootstrapper.downloadedMediaSummary()
+        switch result {
+        case let .success(summary):
+            self.summary = summary
+            errorMessage = nil
+            loaded = true
+        case .failure:
+            errorMessage = String(
+                localized: "Downloaded data could not be loaded. Please try again."
+            )
+            loaded = true
+        }
+    }
+
+    private func deleteAll() async {
+        guard !deleting else { return }
+        deleting = true
+        errorMessage = nil
+
+        let result = await bootstrapper.requestAllDownloadDeletions()
+        switch result {
+        case .success:
+            await onDeletionRequested()
+            await load()
+        case .failure:
+            errorMessage = String(
+                localized: "Downloads could not be deleted. Please try again."
+            )
+        }
+        deleting = false
+    }
+
+    private static func formatBytes(_ bytes: UInt64) -> String {
+        ByteCountFormatter.string(
+            fromByteCount: Int64(clamping: bytes),
+            countStyle: .file
+        )
+    }
+}

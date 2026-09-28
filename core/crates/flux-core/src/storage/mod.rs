@@ -10,7 +10,7 @@ use crate::domain::{
     Article, ArticleAudioActionProjection, ArticlePage, ArticleQuery, ArticleScope, ArticleSort,
     ArticleSummary, Category, ContinueListeningItem, CoreError, CoreSettings, DeliveryMode,
     DetailRenderingMode, DiscoveryMode, DownloadFailureKind, DownloadNetworkPolicy, DownloadOrigin,
-    DownloadRetention, DownloadState, Enclosure, Feed, FeedPreferences,
+    DownloadRetention, DownloadState, DownloadedMediaSummary, Enclosure, Feed, FeedPreferences,
     FeedSystemNotificationSetting, LegacyDownloadImportOutcome,
     LegacyFeedOpenInMinifluxImportOutcome, LegacyPlaybackImport, LegacyPlaybackImportResult,
     ListeningListEnclosure, ListeningListFeed, ListeningListItem, ListeningListSort,
@@ -1635,6 +1635,29 @@ impl Store {
             .map_err(sql_error)
     }
 
+    pub fn downloaded_media_summary(&self) -> Result<DownloadedMediaSummary, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        connection
+            .query_row(
+                "SELECT COUNT(*), COALESCE(SUM(file_size_bytes), 0) FROM media_downloads WHERE state IN ('downloaded','delete_requested') AND local_file IS NOT NULL",
+                [],
+                |row| {
+                    let count = row.get::<_, i64>(0)?;
+                    let total = row.get::<_, i64>(1)?;
+                    Ok(DownloadedMediaSummary {
+                        file_count: u64::try_from(count)
+                            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                        total_size_bytes: u64::try_from(total)
+                            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    })
+                },
+            )
+            .map_err(sql_error)
+    }
+
     pub fn media_metadata(&self, enclosure_id: i64) -> Result<Option<MediaMetadata>, CoreError> {
         self.connection.lock().map_err(|_| CoreError::internal("database lock poisoned"))?.query_row("SELECT enclosure_id,duration_ms,embedded_artwork_reference FROM media_metadata WHERE enclosure_id=?1", [enclosure_id], |row| Ok(MediaMetadata { enclosure_id: row.get(0)?, duration_ms: row.get::<_, Option<i64>>(1)?.map(|value| u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery)).transpose()?, embedded_artwork_reference: row.get(2)? })).optional().map_err(sql_error)
     }
@@ -2138,6 +2161,35 @@ impl Store {
             None => return Err(CoreError::data("cannot delete a non-downloaded enclosure")),
         }
         tx.commit().map_err(sql_error)
+    }
+
+    pub fn request_all_download_deletions(&self) -> Result<u64, CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+
+        tx.execute(
+            "INSERT OR IGNORE INTO auto_download_suppressions(enclosure_id)
+             SELECT d.enclosure_id
+             FROM media_downloads d
+             JOIN enclosures e ON e.id=d.enclosure_id
+             JOIN articles a ON a.id=e.article_id
+             JOIN feed_preferences p ON p.feed_id=a.feed_id
+             WHERE d.state='downloaded' AND p.auto_download_audio=1",
+            [],
+        )
+        .map_err(sql_error)?;
+
+        let changed = tx
+            .execute(
+                "UPDATE media_downloads SET state='delete_requested' WHERE state='downloaded'",
+                [],
+            )
+            .map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+        u64::try_from(changed).map_err(|_| CoreError::internal("download deletion count overflow"))
     }
 
     pub fn download_deleted(&self, enclosure_id: i64) -> Result<(), CoreError> {

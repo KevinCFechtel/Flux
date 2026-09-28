@@ -301,6 +301,12 @@ pub struct MediaDownload {
     pub failure_kind: Option<DownloadFailureKind>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DownloadedMediaSummary {
+    pub file_count: u64,
+    pub total_size_bytes: u64,
+}
+
 /// Outcome of importing a legacy file that has already been copied into the
 /// Core-owned media root. Existing Core download state always wins.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -32,8 +32,9 @@ use domain::{
     ContinueListeningItem, CoreError, CoreErrorKind, CoreEvent, CoreSettings, CreateCategoryResult,
     CreateFeedRequest, CreateFeedResult, DeliveryDisposition, DeliveryMode, DetailRenderingMode,
     DiscoverSubscriptionsRequest, DiscoveredSubscription, DownloadFailureKind,
-    DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, DownloadState, Enclosure, FeedIcon,
-    FeedIconVariant, FeedPreferences, FeedSystemNotificationSetting, LegacyDownloadImportOutcome,
+    DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, DownloadState,
+    DownloadedMediaSummary, Enclosure, FeedIcon, FeedIconVariant, FeedPreferences,
+    FeedSystemNotificationSetting, LegacyDownloadImportOutcome,
     LegacyFeedOpenInMinifluxImportOutcome, LegacyPlaybackImport, LegacyPlaybackImportResult,
     ListeningListFeed, ListeningListItem, ListeningListSort, MediaChapter, MediaDownload,
     MediaMetadata, MediaTransferWork, MutationField, MutationResult, NavigationCatalog,
@@ -874,6 +875,9 @@ impl FluxCore {
     pub fn media_download(&self, enclosure_id: i64) -> Result<Option<MediaDownload>, CoreError> {
         self.store.media_download(enclosure_id)
     }
+    pub fn downloaded_media_summary(&self) -> Result<DownloadedMediaSummary, CoreError> {
+        self.store.downloaded_media_summary()
+    }
     pub fn media_metadata(&self, enclosure_id: i64) -> Result<Option<MediaMetadata>, CoreError> {
         self.store.media_metadata(enclosure_id)
     }
@@ -982,6 +986,13 @@ impl FluxCore {
     }
     pub fn evaluate_media_cleanup_now(&self) -> Result<Vec<i64>, CoreError> {
         self.evaluate_media_cleanup(Utc::now())
+    }
+    pub fn request_all_download_deletions(&self) -> Result<u64, CoreError> {
+        let _sync = self
+            .sync_gate
+            .lock()
+            .map_err(|_| CoreError::internal("sync gate poisoned"))?;
+        self.store.request_all_download_deletions()
     }
     pub fn download_deleted(&self, enclosure_id: i64) -> Result<(), CoreError> {
         let _sync = self

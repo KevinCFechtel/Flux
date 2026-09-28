@@ -45,6 +45,19 @@ struct SettingsView: View {
                     Label("Media", systemImage: "headphones")
                 }
                 NavigationLink {
+                    DownloadedDataSettingsView(
+                        bootstrapper: bootstrapper,
+                        transferCoordinator: IOSAppRuntime.shared.mediaRuntime.transferCoordinator,
+                        onDeletionRequested: {
+                            await IOSAppRuntime.shared
+                                .mediaTransferReconciliationHandoff
+                                .requestReconciliation()
+                        }
+                    )
+                } label: {
+                    Label("Downloaded Data", systemImage: "internaldrive")
+                }
+                NavigationLink {
                     BackgroundSyncSettingsView(
                         coordinator: IOSAppRuntime.shared.backgroundSyncCoordinator
                     )

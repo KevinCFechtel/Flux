@@ -554,6 +554,49 @@ final class AccountLifecycleTests: XCTestCase {
     }
 
     @MainActor
+    func testDownloadedMediaStorageAPIsUseActiveCore() async throws {
+        let suiteName = "FluxNews.DownloadedData.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            true,
+            forKey: "FluxNews.iOS.mutationDeliveryDefaultApplied.v1"
+        )
+
+        let account = IOSMinifluxCredentials(
+            server: "https://miniflux.example",
+            apiKey: "key",
+            customHeaders: []
+        )
+        let store = IOSMemoryCredentialStore()
+        try store.save(account)
+        let core = try makeCore(for: account)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: store,
+            coreFactory: { _ in core },
+            defaults: defaults
+        )
+        await bootstrapper.start()
+
+        let summaryResult = await bootstrapper.downloadedMediaSummary()
+        switch summaryResult {
+        case let .success(summary):
+            XCTAssertEqual(summary.fileCount, 0)
+            XCTAssertEqual(summary.totalSizeBytes, 0)
+        case let .failure(error):
+            XCTFail("Unexpected downloaded-media summary failure: \(error)")
+        }
+
+        let deletionResult = await bootstrapper.requestAllDownloadDeletions()
+        switch deletionResult {
+        case let .success(count):
+            XCTAssertEqual(count, 0)
+        case let .failure(error):
+            XCTFail("Unexpected bulk download deletion failure: \(error)")
+        }
+    }
+
+    @MainActor
     func testStoredCredentialsActivateWithHeaders() async throws {
         let credentials = IOSMinifluxCredentials(
             server: "https://miniflux.example",

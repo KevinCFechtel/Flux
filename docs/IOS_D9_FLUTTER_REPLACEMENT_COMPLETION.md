@@ -168,6 +168,19 @@ Required information/actions:
 This is a storage-management surface over the existing D6/Core download model.
 It must not create a second downloads library or duplicate Listening List state.
 
+Implementation contract:
+
+- Core owns the aggregate downloaded-media summary and bulk transition to
+  `DeleteRequested`;
+- `Downloaded` and `DeleteRequested` rows with a local file remain part of
+  the storage summary until native deletion is acknowledged;
+- iOS never deletes these files directly from Settings and instead reuses the
+  D6 transfer/deletion reconciliation path;
+- media currently protected by active playback remains deferred by the existing
+  D6 deletion guard;
+- Listening List membership and playback progress are not cleared by this
+  action.
+
 ### D9-F — Miniflux account information and transport warning
 
 Account/Settings must additionally expose:

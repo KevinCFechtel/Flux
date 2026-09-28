@@ -238,6 +238,32 @@ final class CoreBootstrapper: ObservableObject {
         return result
     }
 
+    func downloadedMediaSummary() async -> Result<DownloadedMediaSummary, Error> {
+        guard let activeCore = core else {
+            return .failure(SettingsAccessError.coreUnavailable)
+        }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            { try activeCore.downloadedMediaSummary() }
+        ) else {
+            return .failure(SettingsAccessError.sessionUnavailable)
+        }
+        return result
+    }
+
+    func requestAllDownloadDeletions() async -> Result<UInt64, Error> {
+        guard let activeCore = core else {
+            return .failure(SettingsAccessError.coreUnavailable)
+        }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            { try activeCore.requestAllDownloadDeletions() }
+        ) else {
+            return .failure(SettingsAccessError.sessionUnavailable)
+        }
+        return result
+    }
+
     func importLegacyPlayback(
         _ records: [LegacyPlaybackImport]
     ) async -> Result<LegacyPlaybackImportResult, Error> {

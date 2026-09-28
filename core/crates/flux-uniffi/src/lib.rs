@@ -559,6 +559,11 @@ pub struct MediaDownload {
     pub failure_kind: Option<DownloadFailureKind>,
 }
 #[derive(uniffi::Record)]
+pub struct DownloadedMediaSummary {
+    pub file_count: u64,
+    pub total_size_bytes: u64,
+}
+#[derive(uniffi::Record)]
 pub struct MediaTransferWork {
     pub enclosure_id: i64,
     pub url: String,
@@ -1202,6 +1207,12 @@ impl Flux {
             })
             .map_err(map_error)
     }
+    pub fn downloaded_media_summary(&self) -> Result<DownloadedMediaSummary, FluxError> {
+        self.core
+            .downloaded_media_summary()
+            .map(Into::into)
+            .map_err(map_error)
+    }
     pub fn request_download(
         &self,
         enclosure_id: i64,
@@ -1250,6 +1261,11 @@ impl Flux {
     pub fn request_download_deletion(&self, enclosure_id: i64) -> Result<(), FluxError> {
         self.core
             .request_download_deletion(enclosure_id)
+            .map_err(map_error)
+    }
+    pub fn request_all_download_deletions(&self) -> Result<u64, FluxError> {
+        self.core
+            .request_all_download_deletions()
             .map_err(map_error)
     }
     pub fn download_deleted(&self, enclosure_id: i64) -> Result<(), FluxError> {
@@ -2600,6 +2616,14 @@ impl From<domain::MediaDownload> for MediaDownload {
             file_size_bytes: value.file_size_bytes,
             downloaded_at: value.downloaded_at,
             failure_kind: value.failure_kind.map(Into::into),
+        }
+    }
+}
+impl From<domain::DownloadedMediaSummary> for DownloadedMediaSummary {
+    fn from(value: domain::DownloadedMediaSummary) -> Self {
+        Self {
+            file_count: value.file_count,
+            total_size_bytes: value.total_size_bytes,
         }
     }
 }

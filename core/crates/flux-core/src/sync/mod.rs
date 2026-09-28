@@ -695,6 +695,40 @@ mod tests {
     }
 
     #[test]
+    fn downloaded_media_summary_tracks_physical_storage_until_deletion_confirmation() {
+        let temp = TempDir::new().unwrap();
+        let store = protected_store(&temp, false, true);
+
+        assert_eq!(
+            store.downloaded_media_summary().unwrap(),
+            crate::domain::DownloadedMediaSummary {
+                file_count: 1,
+                total_size_bytes: 1024,
+            }
+        );
+
+        assert_eq!(store.request_all_download_deletions().unwrap(), 1);
+        assert_eq!(
+            store.media_download(90).unwrap().unwrap().state,
+            crate::domain::DownloadState::DeleteRequested
+        );
+        assert_eq!(
+            store.downloaded_media_summary().unwrap(),
+            crate::domain::DownloadedMediaSummary {
+                file_count: 1,
+                total_size_bytes: 1024,
+            }
+        );
+
+        store.download_deleted(90).unwrap();
+        assert_eq!(
+            store.downloaded_media_summary().unwrap(),
+            crate::domain::DownloadedMediaSummary::default()
+        );
+        assert_eq!(store.request_all_download_deletions().unwrap(), 0);
+    }
+
+    #[test]
     fn required_protected_fetch_failure_aborts_sync() {
         let temp = TempDir::new().unwrap();
         let data = temp.path().join("data");
