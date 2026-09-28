@@ -58,3 +58,4 @@ android/**/*.aab
 # Keep canonical Android workflows despite case-insensitive filesystems.
 !android/Build/
 !android/Build/*.sh
+android/Build/Products/

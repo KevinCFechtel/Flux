@@ -1,6 +1,6 @@
 # Phase E — Native Android
 
-> **Status: AUTHORITATIVE CONTRACT DEFINED — E1-A IMPLEMENTED / E1-B NEXT**
+> **Status: AUTHORITATIVE CONTRACT DEFINED — E1-A AND E1-B1 IMPLEMENTED / E1-B2 NEXT**
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
 >
@@ -326,6 +326,8 @@ Implemented on 28 September 2026 with Android SDK API 36, AGP 8.9.2, Kotlin/Comp
 Do not begin product UI beyond what is required to prove startup/runtime.
 
 ### E1-B — Rust/UniFFI build and smoke test
+
+E1-B1 is implemented: `android/Build/build-uniffi.sh` builds and verifies the existing `flux-uniffi` cdylib for `arm64-v8a` (`aarch64-linux-android`) and `x86_64` (`x86_64-linux-android`) in Debug and Release modes. Kotlin binding generation, Gradle packaging, library loading and the Core smoke test remain open for E1-B2/B3.
 
 Prove:
 

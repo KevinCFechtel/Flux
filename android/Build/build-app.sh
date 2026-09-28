@@ -25,4 +25,4 @@ esac
   exit 1
 }
 
-exec "${GRADLEW}" "${TASK}"
+exec "${GRADLEW}" --project-dir "${ANDROID_DIR}" "${TASK}"

@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ANDROID_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+REPOSITORY_DIR="$(cd -- "${ANDROID_DIR}/.." && pwd)"
+CORE_DIR="${REPOSITORY_DIR}/core"
+WORKSPACE="${CORE_DIR}/Cargo.toml"
+CRATE="flux-uniffi"
+API_LEVEL=29
+MODE="${1:-debug}"
+
+usage() {
+  echo "Usage: build-uniffi.sh [debug|release]"
+}
+
+case "${MODE}" in
+  debug|release) ;;
+  --help|-h)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "Unsupported build mode: ${MODE}" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+for command_name in cargo rustup cp mkdir rm; do
+  command -v "${command_name}" >/dev/null 2>&1 || {
+    echo "Required command missing: ${command_name}" >&2
+    exit 1
+  }
+done
+
+[[ -f "${WORKSPACE}" ]] || {
+  echo "Rust workspace manifest is missing: ${WORKSPACE}" >&2
+  exit 1
+}
+
+resolve_ndk() {
+  if [[ -n "${ANDROID_NDK_HOME:-}" ]]; then
+    printf '%s\n' "${ANDROID_NDK_HOME}"
+    return
+  fi
+
+  if [[ -n "${ANDROID_NDK_ROOT:-}" ]]; then
+    printf '%s\n' "${ANDROID_NDK_ROOT}"
+    return
+  fi
+
+  local sdk_root candidate selected_ndk="" selected_version=""
+  local -a sdk_roots=()
+  [[ -n "${ANDROID_HOME:-}" ]] && sdk_roots+=("${ANDROID_HOME}")
+  [[ -n "${ANDROID_SDK_ROOT:-}" ]] && sdk_roots+=("${ANDROID_SDK_ROOT}")
+
+  for sdk_root in "${sdk_roots[@]}"; do
+    [[ -d "${sdk_root}/ndk" ]] || continue
+    for candidate in "${sdk_root}/ndk/"*; do
+      [[ -d "${candidate}" ]] || continue
+      local candidate_version="${candidate##*/}"
+      if [[ -z "${selected_ndk}" || "${candidate_version}" > "${selected_version}" ]]; then
+        selected_ndk="${candidate}"
+        selected_version="${candidate_version}"
+      fi
+    done
+  done
+
+  [[ -n "${selected_ndk}" ]] || {
+    echo "Android NDK not found. Set ANDROID_NDK_HOME, ANDROID_NDK_ROOT, or ANDROID_HOME/ANDROID_SDK_ROOT." >&2
+    exit 1
+  }
+  printf '%s\n' "${selected_ndk}"
+}
+
+NDK_DIR="$(resolve_ndk)"
+NDK_DIR="${NDK_DIR%/}"
+[[ -d "${NDK_DIR}/toolchains/llvm/prebuilt" ]] || {
+  echo "Android NDK is incomplete or invalid: ${NDK_DIR}" >&2
+  exit 1
+}
+
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64) HOST_TAGS=(darwin-arm64 darwin-x86_64) ;;
+  Darwin-x86_64) HOST_TAGS=(darwin-x86_64 darwin-arm64) ;;
+  Linux-x86_64) HOST_TAGS=(linux-x86_64) ;;
+  Linux-aarch64) HOST_TAGS=(linux-aarch64) ;;
+  *)
+    echo "Unsupported host for Android NDK toolchain discovery: $(uname -s)-$(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
+TOOLCHAIN_DIR=""
+for host_tag in "${HOST_TAGS[@]}"; do
+  candidate="${NDK_DIR}/toolchains/llvm/prebuilt/${host_tag}"
+  if [[ -d "${candidate}" ]]; then
+    TOOLCHAIN_DIR="${candidate}"
+    break
+  fi
+done
+[[ -n "${TOOLCHAIN_DIR}" ]] || {
+  echo "No compatible Android NDK host toolchain found in: ${NDK_DIR}/toolchains/llvm/prebuilt" >&2
+  exit 1
+}
+
+NDK_VERSION="${NDK_DIR##*/}"
+echo "Using Android NDK ${NDK_VERSION} (${TOOLCHAIN_DIR##*/}) with API ${API_LEVEL}."
+
+abis=(arm64-v8a x86_64)
+targets=(aarch64-linux-android x86_64-linux-android)
+target_envs=(aarch64_linux_android x86_64_linux_android)
+target_uppers=(AARCH64_LINUX_ANDROID X86_64_LINUX_ANDROID)
+for target in "${targets[@]}"; do
+  rustup target list --installed | grep -Fxq "${target}" || {
+    echo "Required Rust target is not installed: ${target}" >&2
+    echo "Install it with: rustup target add ${target}" >&2
+    exit 1
+  }
+done
+
+PROFILE="${MODE}"
+OUTPUT_DIR="${SCRIPT_DIR}/Products/${MODE}"
+rm -rf -- "${OUTPUT_DIR}"
+
+verify_library() {
+  local library="$1"
+  local abi="$2"
+
+  [[ -s "${library}" ]] || {
+    echo "Missing or empty UniFFI library: ${library}" >&2
+    exit 1
+  }
+
+  if command -v file >/dev/null 2>&1; then
+    local description
+    description="$(file -b "${library}")"
+    [[ "${description}" == *"ELF 64-bit"* && "${description}" == *"shared object"* ]] || {
+      echo "Expected an ELF shared library, found: ${description}" >&2
+      exit 1
+    }
+    case "${abi}" in
+      arm64-v8a) [[ "${description}" == *"ARM aarch64"* ]] ;;
+      x86_64) [[ "${description}" == *"x86-64"* ]] ;;
+    esac || {
+      echo "Unexpected ELF architecture for ${abi}: ${description}" >&2
+      exit 1
+    }
+    echo "Verified ${abi}: ${description}"
+  fi
+}
+
+for index in "${!targets[@]}"; do
+  target="${targets[${index}]}"
+  abi="${abis[${index}]}"
+  target_env="${target_envs[${index}]}"
+  target_upper="${target_uppers[${index}]}"
+  clang="${TOOLCHAIN_DIR}/bin/${target}${API_LEVEL}-clang"
+  clangxx="${TOOLCHAIN_DIR}/bin/${target}${API_LEVEL}-clang++"
+  llvm_ar="${TOOLCHAIN_DIR}/bin/llvm-ar"
+  source_library="${CORE_DIR}/target/${target}/${PROFILE}/libflux_uniffi.so"
+  output_library="${OUTPUT_DIR}/${abi}/libflux_uniffi.so"
+
+  [[ -x "${clang}" && -x "${clangxx}" && -x "${llvm_ar}" ]] || {
+    echo "Android NDK toolchain is missing a compiler or archiver for ${target} at API ${API_LEVEL}." >&2
+    exit 1
+  }
+
+  echo "Building ${CRATE} for ${abi} (${target}, ${MODE})."
+  cargo_args=(build --manifest-path "${WORKSPACE}" --package "${CRATE}" --target "${target}")
+  [[ "${MODE}" == "release" ]] && cargo_args+=(--release)
+  env \
+    "CARGO_TARGET_DIR=${CORE_DIR}/target" \
+    "CARGO_TARGET_${target_upper}_LINKER=${clang}" \
+    "CARGO_TARGET_${target_upper}_AR=${llvm_ar}" \
+    "CC_${target_env}=${clang}" \
+    "CXX_${target_env}=${clangxx}" \
+    "AR_${target_env}=${llvm_ar}" \
+    cargo "${cargo_args[@]}"
+
+  [[ -s "${source_library}" ]] || {
+    echo "Cargo completed but did not produce the expected ${MODE} library: ${source_library}" >&2
+    exit 1
+  }
+  mkdir -p "$(dirname -- "${output_library}")"
+  cp "${source_library}" "${output_library}"
+  verify_library "${output_library}" "${abi}"
+done
+
+echo "Android UniFFI ${MODE} artifacts: ${OUTPUT_DIR}"

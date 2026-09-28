@@ -10,4 +10,4 @@ GRADLEW="${ANDROID_DIR}/gradlew"
   exit 1
 }
 
-exec "${GRADLEW}" testDevelopmentDebugUnitTest lintDevelopmentDebug assembleDevelopmentDebug
+exec "${GRADLEW}" --project-dir "${ANDROID_DIR}" testDevelopmentDebugUnitTest lintDevelopmentDebug assembleDevelopmentDebug
