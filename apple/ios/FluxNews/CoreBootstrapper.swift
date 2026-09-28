@@ -17,6 +17,14 @@ final class CoreBootstrapper: ObservableObject {
         case sessionUnavailable
     }
 
+    enum ConfigurationBackupRestoreError: Error {
+        case busy
+        case noConfiguredAccount
+        case sessionUnavailable
+        case activationFailed
+        case rollbackFailed
+    }
+
     enum LocalStateRebuildState: Equatable {
         case idle
         case rebuilding
@@ -391,6 +399,229 @@ final class CoreBootstrapper: ObservableObject {
             return .failure(SettingsAccessError.sessionUnavailable)
         }
         return result
+    }
+
+    func configurationSnapshotForBackup() async throws -> ConfigurationSnapshot {
+        guard let activeCore = core else {
+            throw ConfigurationBackupRestoreError.noConfiguredAccount
+        }
+        guard let result = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            { try activeCore.configurationSnapshot() }
+        ) else {
+            throw ConfigurationBackupRestoreError.sessionUnavailable
+        }
+        return try result.get()
+    }
+
+    /// Applies a Core-parsed iOS configuration backup without contacting
+    /// Miniflux. Existing-session replacement is transactional through the
+    /// authoritative Core replace operation plus credential rollback. A fresh
+    /// install can also adopt a backup without first configuring an account.
+    func restoreConfigurationBackup(
+        _ restored: ConfigBackupRestoreModel,
+        customHeaders: [IOSCustomHTTPHeader]
+    ) async throws {
+        guard !isConfiguring, localStateRebuildState != .rebuilding else {
+            throw ConfigurationBackupRestoreError.busy
+        }
+
+        let replacementCredentials = IOSMinifluxCredentials(
+            server: restored.account.installationBase,
+            apiKey: restored.account.apiKey,
+            customHeaders: customHeaders
+        )
+        let generation = nextBootstrapGeneration()
+        isConfiguring = true
+        defer { isConfiguring = false }
+        validationMessage = nil
+        validationDiagnostic = nil
+
+        guard let activeCore = core else {
+            try await restoreConfigurationBackupIntoFreshSession(
+                restored,
+                credentials: replacementCredentials,
+                generation: generation
+            )
+            return
+        }
+
+        let previousCredentials = try credentialStore.load()
+        guard let previousCredentials else {
+            throw ConfigurationBackupRestoreError.noConfiguredAccount
+        }
+
+        guard let snapshotResult = await coreSessionExecutionCoordinator.responsiveResult(
+            for: activeCore,
+            { try activeCore.configurationSnapshot() }
+        ) else {
+            throw ConfigurationBackupRestoreError.sessionUnavailable
+        }
+        let previousSnapshot = try snapshotResult.get()
+
+        await prepareForCoreReplacement?()
+        await coreSessionExecutionCoordinator.quiesce()
+        guard generation == bootstrapGeneration else {
+            coreSessionExecutionCoordinator.resume(activeCore)
+            onCoreReplacementAborted?()
+            throw ConfigurationBackupRestoreError.busy
+        }
+
+        guard let replaceResult = await coreSessionExecutionCoordinator.exclusiveBlockingResult(
+            for: activeCore,
+            {
+                try activeCore.replaceConfiguration(
+                    installationBase: restored.account.installationBase,
+                    coreSettings: restored.coreSettings,
+                    feedPreferences: restored.feedPreferences
+                )
+            }
+        ) else {
+            coreSessionExecutionCoordinator.resume(activeCore)
+            onCoreReplacementAborted?()
+            throw ConfigurationBackupRestoreError.sessionUnavailable
+        }
+
+        do {
+            try replaceResult.get()
+            try credentialStore.save(replacementCredentials)
+
+            let factory = coreFactory
+            let created = await AppleCoreExecution.shared.responsiveResult {
+                try factory(replacementCredentials)
+            }
+            guard generation == bootstrapGeneration else {
+                throw ConfigurationBackupRestoreError.busy
+            }
+            let configuredCore = try created.get()
+
+            defaults.set(true, forKey: DefaultsKey.mutationDeliveryDefaultApplied)
+            clearPersistedServerVersion()
+            IOSAppDiagnostics.shared.setSensitiveValues(
+                [replacementCredentials.apiKey]
+                    + replacementCredentials.customHeaders.map(\.value)
+            )
+
+            coreSessionExecutionCoordinator.deactivate()
+            coreSessionExecutionCoordinator.activate(configuredCore)
+            core = configuredCore
+            credentials = replacementCredentials
+            serverVersion = nil
+            localStateRebuildState = .idle
+            coreRevision &+= 1
+            state = .ready(String(localized: "Initialized"))
+            onCoreChanged?(configuredCore)
+        } catch {
+            let rolledBack = await rollbackConfigurationBackupRestore(
+                activeCore: activeCore,
+                snapshot: previousSnapshot,
+                credentials: previousCredentials
+            )
+            guard rolledBack else {
+                coreSessionExecutionCoordinator.deactivate()
+                core = nil
+                credentials = nil
+                serverVersion = nil
+                coreRevision &+= 1
+                state = .recoverableError(
+                    String(localized: "Configuration restore rollback failed.")
+                )
+                onCoreChanged?(nil)
+                throw ConfigurationBackupRestoreError.rollbackFailed
+            }
+            throw error
+        }
+    }
+
+    func syncAfterConfigurationRestore() async -> Bool {
+        guard let activeCore = core else { return false }
+        guard let result = await coreSessionExecutionCoordinator.blockingResult(
+            for: activeCore,
+            { try activeCore.sync(reason: .manual) }
+        ) else {
+            return false
+        }
+        if case .success = result { return true }
+        return false
+    }
+
+    private func restoreConfigurationBackupIntoFreshSession(
+        _ restored: ConfigBackupRestoreModel,
+        credentials replacementCredentials: IOSMinifluxCredentials,
+        generation: UInt64
+    ) async throws {
+        let factory = coreFactory
+        let created = await AppleCoreExecution.shared.responsiveResult {
+            try factory(replacementCredentials)
+        }
+        guard generation == bootstrapGeneration else {
+            throw ConfigurationBackupRestoreError.busy
+        }
+        let configuredCore = try created.get()
+
+        let replacement = await AppleCoreExecution.shared.blockingResult {
+            try configuredCore.replaceConfiguration(
+                installationBase: restored.account.installationBase,
+                coreSettings: restored.coreSettings,
+                feedPreferences: restored.feedPreferences
+            )
+        }
+        do {
+            try replacement.get()
+            try credentialStore.save(replacementCredentials)
+        } catch {
+            _ = try? await AppleCoreExecution.shared.blocking {
+                try configuredCore.resetCoreState()
+            }
+            throw error
+        }
+
+        defaults.set(true, forKey: DefaultsKey.mutationDeliveryDefaultApplied)
+        clearPersistedServerVersion()
+        IOSAppDiagnostics.shared.setSensitiveValues(
+            [replacementCredentials.apiKey]
+                + replacementCredentials.customHeaders.map(\.value)
+        )
+        coreSessionExecutionCoordinator.activate(configuredCore)
+        core = configuredCore
+        credentials = replacementCredentials
+        serverVersion = nil
+        localStateRebuildState = .idle
+        coreRevision &+= 1
+        state = .ready(String(localized: "Initialized"))
+        onCoreChanged?(configuredCore)
+    }
+
+    private func rollbackConfigurationBackupRestore(
+        activeCore: Flux,
+        snapshot: ConfigurationSnapshot,
+        credentials previousCredentials: IOSMinifluxCredentials
+    ) async -> Bool {
+        guard let rollback = await coreSessionExecutionCoordinator.exclusiveBlockingResult(
+            for: activeCore,
+            {
+                try activeCore.replaceConfiguration(
+                    installationBase: snapshot.installationBase,
+                    coreSettings: snapshot.coreSettings,
+                    feedPreferences: snapshot.feedPreferences
+                )
+            }
+        ), case .success = rollback else {
+            return false
+        }
+
+        do {
+            try credentialStore.save(previousCredentials)
+        } catch {
+            return false
+        }
+
+        IOSAppDiagnostics.shared.setSensitiveValues(
+            [previousCredentials.apiKey] + previousCredentials.customHeaders.map(\.value)
+        )
+        coreSessionExecutionCoordinator.resume(activeCore)
+        onCoreReplacementAborted?()
+        return true
     }
 
     func configure(server: String, apiKey: String, headers: [IOSCustomHTTPHeader]) async {

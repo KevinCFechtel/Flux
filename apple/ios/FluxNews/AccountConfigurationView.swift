@@ -163,6 +163,9 @@ struct AccountConfigurationView: View {
 
 struct StartupView: View {
     @ObservedObject var bootstrapper: CoreBootstrapper
+    var store: NewsreaderStore
+    @ObservedObject var articleListActionPreferences: IOSArticleListActionPreferences
+    @State private var backupPresented = false
 
     var body: some View {
         Group {
@@ -170,17 +173,56 @@ struct StartupView: View {
             case .starting:
                 ProgressView("Starting FluxNews…")
             case .accountRequired:
-                AccountConfigurationView(bootstrapper: bootstrapper, allowsRemoval: false)
+                VStack(spacing: 18) {
+                    AccountConfigurationView(
+                        bootstrapper: bootstrapper,
+                        allowsRemoval: false
+                    )
+                    restoreButton
+                }
             case let .recoverableError(message):
                 VStack(spacing: 16) {
-                    ContentUnavailableView("FluxNews could not start", systemImage: "exclamationmark.triangle", description: Text(message))
+                    ContentUnavailableView(
+                        "FluxNews could not start",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(message)
+                    )
                     Button("Retry") { Task { await bootstrapper.retry() } }
-                    AccountConfigurationView(bootstrapper: bootstrapper, allowsRemoval: false)
-                        .frame(maxHeight: 420)
+                    AccountConfigurationView(
+                        bootstrapper: bootstrapper,
+                        allowsRemoval: false
+                    )
+                    .frame(maxHeight: 420)
+                    restoreButton
                 }
             case .ready:
                 EmptyView()
             }
+        }
+        .sheet(isPresented: $backupPresented) {
+            NavigationStack {
+                ConfigurationBackupSettingsView(
+                    store: store,
+                    bootstrapper: bootstrapper,
+                    articleListActionPreferences: articleListActionPreferences
+                )
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { backupPresented = false }
+                    }
+                }
+            }
+        }
+    }
+
+    private var restoreButton: some View {
+        Button {
+            backupPresented = true
+        } label: {
+            Label(
+                "Restore Configuration Backup",
+                systemImage: "square.and.arrow.down"
+            )
         }
     }
 }

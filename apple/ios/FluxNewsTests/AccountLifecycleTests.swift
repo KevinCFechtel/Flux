@@ -2163,4 +2163,384 @@ final class AccountLifecycleTests: XCTestCase {
     }
 
 
+
+    @MainActor
+    func testConfigurationBackupRestoreReplacesCredentialsAndCoreWithoutNetworkValidation() async throws {
+        let suiteName = "FluxNews.ConfigRestore.Success.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            true,
+            forKey: "FluxNews.iOS.mutationDeliveryDefaultApplied.v1"
+        )
+
+        let previous = IOSMinifluxCredentials(
+            server: "https://old.example",
+            apiKey: "old-key",
+            customHeaders: []
+        )
+        let replacement = IOSMinifluxCredentials(
+            server: "https://new.example",
+            apiKey: "new-key",
+            customHeaders: [
+                IOSCustomHTTPHeader(name: "X-Tenant", value: "tenant")
+            ]
+        )
+        let credentialStore = IOSMemoryCredentialStore()
+        try credentialStore.save(previous)
+        let previousCore = try makeCore(for: previous)
+        let replacementCore = try makeCore(for: replacement)
+        let validationCalls = LockedBox(0)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: credentialStore,
+            coreFactory: { account in
+                account.server == replacement.server
+                    ? replacementCore
+                    : previousCore
+            },
+            accountValidator: { _ in
+                validationCalls.withValue { $0 += 1 }
+                return AccountValidationAttempt(
+                    result: nil,
+                    error: AccountValidationError.Network,
+                    diagnostic: nil
+                )
+            },
+            defaults: defaults
+        )
+        await bootstrapper.start()
+
+        let snapshot = try previousCore.configurationSnapshot()
+        let restored = ConfigBackupRestoreModel(
+            platform: .ios,
+            account: BackupAccount(
+                installationBase: replacement.server,
+                apiKey: replacement.apiKey
+            ),
+            coreSettings: snapshot.coreSettings,
+            feedPreferences: snapshot.feedPreferences,
+            platformSettings: PlatformSettingsPayload(
+                schemaVersion: IOSBackupSettingsV1.version,
+                dataJson: "{}"
+            )
+        )
+
+        var prepareCount = 0
+        var abortCount = 0
+        bootstrapper.prepareForCoreReplacement = { prepareCount += 1 }
+        bootstrapper.onCoreReplacementAborted = { abortCount += 1 }
+
+        try await bootstrapper.restoreConfigurationBackup(
+            restored,
+            customHeaders: replacement.customHeaders
+        )
+
+        XCTAssertEqual(validationCalls.value(), 0)
+        XCTAssertEqual(prepareCount, 1)
+        XCTAssertEqual(abortCount, 0)
+        XCTAssertEqual(try credentialStore.load(), replacement)
+        XCTAssertEqual(bootstrapper.credentials, replacement)
+        XCTAssertIdentical(bootstrapper.core, replacementCore)
+        XCTAssertEqual(bootstrapper.coreRevision, 2)
+        XCTAssertFalse(
+            bootstrapper.coreSessionExecutionCoordinator.isQuiescing
+        )
+    }
+
+    @MainActor
+    func testConfigurationBackupRestoreCanAdoptBackupWithoutExistingAccount() async throws {
+        let suiteName = "FluxNews.ConfigRestore.Fresh.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let replacement = IOSMinifluxCredentials(
+            server: "https://new.example",
+            apiKey: "new-key",
+            customHeaders: [
+                IOSCustomHTTPHeader(name: "X-Tenant", value: "tenant")
+            ]
+        )
+        let credentialStore = IOSMemoryCredentialStore()
+        let replacementCore = try makeCore(for: replacement)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: credentialStore,
+            coreFactory: { _ in replacementCore },
+            defaults: defaults
+        )
+        await bootstrapper.start()
+        XCTAssertEqual(bootstrapper.state, .accountRequired)
+
+        let snapshot = try replacementCore.configurationSnapshot()
+        let restored = ConfigBackupRestoreModel(
+            platform: .ios,
+            account: BackupAccount(
+                installationBase: replacement.server,
+                apiKey: replacement.apiKey
+            ),
+            coreSettings: snapshot.coreSettings,
+            feedPreferences: snapshot.feedPreferences,
+            platformSettings: PlatformSettingsPayload(
+                schemaVersion: IOSBackupSettingsV1.version,
+                dataJson: "{}"
+            )
+        )
+
+        try await bootstrapper.restoreConfigurationBackup(
+            restored,
+            customHeaders: replacement.customHeaders
+        )
+
+        XCTAssertEqual(try credentialStore.load(), replacement)
+        XCTAssertEqual(bootstrapper.credentials, replacement)
+        XCTAssertIdentical(bootstrapper.core, replacementCore)
+        XCTAssertEqual(bootstrapper.coreRevision, 1)
+        XCTAssertEqual(bootstrapper.state, .ready(String(localized: "Initialized")))
+        XCTAssertFalse(
+            bootstrapper.coreSessionExecutionCoordinator.isQuiescing
+        )
+    }
+
+    @MainActor
+    func testConfigurationBackupRestoreRollsBackCoreAndCredentialsWhenReplacementActivationFails() async throws {
+        let suiteName = "FluxNews.ConfigRestore.Rollback.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            true,
+            forKey: "FluxNews.iOS.mutationDeliveryDefaultApplied.v1"
+        )
+
+        let previous = IOSMinifluxCredentials(
+            server: "https://old.example",
+            apiKey: "old-key",
+            customHeaders: [
+                IOSCustomHTTPHeader(name: "X-Old", value: "old-secret")
+            ]
+        )
+        let replacement = IOSMinifluxCredentials(
+            server: "https://new.example",
+            apiKey: "new-key",
+            customHeaders: []
+        )
+        let credentialStore = IOSMemoryCredentialStore()
+        try credentialStore.save(previous)
+        let previousCore = try makeCore(for: previous)
+        let bootstrapper = CoreBootstrapper(
+            credentialStore: credentialStore,
+            coreFactory: { account in
+                if account.server == previous.server { return previousCore }
+                throw NSError(
+                    domain: "FluxNewsTests.ConfigRestore",
+                    code: 1,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "replacement activation failed"
+                    ]
+                )
+            },
+            defaults: defaults
+        )
+        await bootstrapper.start()
+
+        let previousSnapshot = try previousCore.configurationSnapshot()
+        let restored = ConfigBackupRestoreModel(
+            platform: .ios,
+            account: BackupAccount(
+                installationBase: replacement.server,
+                apiKey: replacement.apiKey
+            ),
+            coreSettings: previousSnapshot.coreSettings,
+            feedPreferences: previousSnapshot.feedPreferences,
+            platformSettings: PlatformSettingsPayload(
+                schemaVersion: IOSBackupSettingsV1.version,
+                dataJson: "{}"
+            )
+        )
+
+        var abortCount = 0
+        bootstrapper.onCoreReplacementAborted = { abortCount += 1 }
+
+        do {
+            try await bootstrapper.restoreConfigurationBackup(
+                restored,
+                customHeaders: replacement.customHeaders
+            )
+            XCTFail("Expected replacement activation to fail")
+        } catch {
+            // Expected. The original Core and credentials must be authoritative.
+        }
+
+        XCTAssertEqual(abortCount, 1)
+        XCTAssertEqual(try credentialStore.load(), previous)
+        XCTAssertEqual(bootstrapper.credentials, previous)
+        XCTAssertIdentical(bootstrapper.core, previousCore)
+        XCTAssertEqual(
+            try previousCore.configurationSnapshot().installationBase,
+            previousSnapshot.installationBase
+        )
+        XCTAssertFalse(
+            bootstrapper.coreSessionExecutionCoordinator.isQuiescing
+        )
+    }
+
+    func testIOSBackupSettingsV1ValidatesCompleteNativePayload() throws {
+        let header = IOSCustomHTTPHeader(
+            name: "X-Tenant",
+            value: "secret"
+        )
+        let payload = IOSBackupSettingsV1(
+            version: IOSBackupSettingsV1.version,
+            startupScope: StartupScopePreference.feed.rawValue,
+            startupCategoryID: nil,
+            startupFeedID: 42,
+            hideEmptyNavigationEntries: true,
+            removeArticlesWhenMarkedRead: true,
+            markReadOnScrollover: false,
+            articlePresentationMode: ArticlePresentationMode.compact.rawValue,
+            articlePreviewLines: ArticlePreviewLines.extended.rawValue,
+            showArticleCount: false,
+            showRelativePublicationTime: true,
+            clickOnNews: ClickOnNews.openDetailView.rawValue,
+            leadingSwipeFull: IOSArticleSwipeAction.readUnread.rawValue,
+            leadingSwipeAdditional: IOSArticleSwipeAction.share.rawValue,
+            trailingSwipeFull: IOSArticleSwipeAction.starUnstar.rawValue,
+            trailingSwipeAdditional: nil,
+            articleListActionIDs: [
+                IOSBottomAction.search.rawValue,
+                IOSBottomAction.listeningList.rawValue,
+            ],
+            debugLogging: true,
+            customHeaders: [header]
+        )
+
+        let validated = try payload.validated()
+
+        XCTAssertEqual(validated.startupScope, .feed)
+        XCTAssertEqual(validated.startupFeedID, 42)
+        XCTAssertTrue(validated.hideEmptyNavigationEntries)
+        XCTAssertTrue(validated.removeArticlesWhenMarkedRead)
+        XCTAssertFalse(validated.markReadOnScrollover)
+        XCTAssertEqual(validated.articlePresentationMode, .compact)
+        XCTAssertEqual(validated.articlePreviewLines, .extended)
+        XCTAssertFalse(validated.showArticleCount)
+        XCTAssertTrue(validated.showRelativePublicationTime)
+        XCTAssertEqual(validated.clickOnNews, .openDetailView)
+        XCTAssertEqual(validated.leadingFull, .readUnread)
+        XCTAssertEqual(validated.leadingAdditional, .share)
+        XCTAssertEqual(validated.actionBar, [.search, .listeningList])
+        XCTAssertTrue(validated.debugLogging)
+        XCTAssertEqual(validated.customHeaders, [header])
+    }
+
+    @MainActor
+    func testIOSBackupSettingsV1JSONRoundTripRestoresNativePreferences() throws {
+        let sourceSuite = "FluxNews.ConfigBackup.Native.Source.\(UUID().uuidString)"
+        let targetSuite = "FluxNews.ConfigBackup.Native.Target.\(UUID().uuidString)"
+        let sourceDefaults = UserDefaults(suiteName: sourceSuite)!
+        let targetDefaults = UserDefaults(suiteName: targetSuite)!
+        defer {
+            sourceDefaults.removePersistentDomain(forName: sourceSuite)
+            targetDefaults.removePersistentDomain(forName: targetSuite)
+        }
+
+        let sourceStore = NewsreaderStore(defaults: sourceDefaults)
+        let sourceActions = IOSArticleListActionPreferences(defaults: sourceDefaults)
+        let sourceDiagnostics = IOSAppDiagnostics(
+            defaults: sourceDefaults,
+            rootDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+        )
+        sourceStore.setStartupScope(.feed)
+        sourceStore.setStartupFeedID(77)
+        sourceStore.setHideEmptyNavigationEntries(true)
+        sourceStore.setRemoveArticlesWhenMarkedRead(true)
+        sourceStore.setMarkReadOnScrolloverEnabled(false)
+        sourceStore.setArticlePresentationMode(.compact)
+        sourceStore.setArticlePreviewLines(.extended)
+        sourceStore.setShowArticleCount(false)
+        sourceStore.setShowRelativePublicationTime(true)
+        sourceStore.setClickOnNews(.openDetailView)
+        sourceStore.setArticleSwipeAction(
+            .readUnread,
+            side: .leading,
+            slot: .fullSwipe
+        )
+        sourceStore.setArticleSwipeAction(
+            .share,
+            side: .leading,
+            slot: .additional
+        )
+        sourceActions.setActions([.search, .listeningList])
+        sourceDiagnostics.setDebugLoggingEnabled(true)
+
+        let header = IOSCustomHTTPHeader(name: "X-Tenant", value: "secret")
+        let captured = IOSBackupSettingsV1.capture(
+            store: sourceStore,
+            articleListActionPreferences: sourceActions,
+            customHeaders: [header],
+            diagnostics: sourceDiagnostics
+        )
+        let decoded = try JSONDecoder().decode(
+            IOSBackupSettingsV1.self,
+            from: JSONEncoder().encode(captured)
+        )
+        let validated = try decoded.validated()
+
+        let targetStore = NewsreaderStore(defaults: targetDefaults)
+        let targetActions = IOSArticleListActionPreferences(defaults: targetDefaults)
+        let targetDiagnostics = IOSAppDiagnostics(
+            defaults: targetDefaults,
+            rootDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+        )
+        validated.apply(
+            store: targetStore,
+            articleListActionPreferences: targetActions,
+            diagnostics: targetDiagnostics
+        )
+
+        XCTAssertEqual(targetStore.startupScope, .feed)
+        XCTAssertEqual(targetStore.startupFeedID, 77)
+        XCTAssertTrue(targetStore.hideEmptyNavigationEntries)
+        XCTAssertTrue(targetStore.removeArticlesWhenMarkedRead)
+        XCTAssertFalse(targetStore.markReadOnScrolloverEnabled)
+        XCTAssertEqual(targetStore.articlePresentationMode, .compact)
+        XCTAssertEqual(targetStore.articlePreviewLines, .extended)
+        XCTAssertFalse(targetStore.showArticleCount)
+        XCTAssertTrue(targetStore.showRelativePublicationTime)
+        XCTAssertEqual(targetStore.clickOnNews, .openDetailView)
+        XCTAssertEqual(
+            targetStore.articleSwipeConfiguration.leading,
+            [.share, .readUnread]
+        )
+        XCTAssertEqual(targetActions.actions, [.search, .listeningList])
+        XCTAssertTrue(targetDiagnostics.isDebugLoggingEnabled)
+        XCTAssertEqual(validated.customHeaders, [header])
+    }
+
+    func testIOSBackupSettingsV1RejectsInvalidNativePayload() {
+        let payload = IOSBackupSettingsV1(
+            version: IOSBackupSettingsV1.version,
+            startupScope: StartupScopePreference.category.rawValue,
+            startupCategoryID: nil,
+            startupFeedID: nil,
+            hideEmptyNavigationEntries: false,
+            removeArticlesWhenMarkedRead: false,
+            markReadOnScrollover: true,
+            articlePresentationMode: ArticlePresentationMode.visual.rawValue,
+            articlePreviewLines: ArticlePreviewLines.standard.rawValue,
+            showArticleCount: true,
+            showRelativePublicationTime: false,
+            clickOnNews: ClickOnNews.openLink.rawValue,
+            leadingSwipeFull: nil,
+            leadingSwipeAdditional: nil,
+            trailingSwipeFull: nil,
+            trailingSwipeAdditional: nil,
+            articleListActionIDs: [],
+            debugLogging: false,
+            customHeaders: []
+        )
+
+        XCTAssertThrowsError(try payload.validated())
+    }
+
 }

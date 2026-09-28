@@ -652,7 +652,11 @@ struct ContentView: View {
             if case .ready = bootstrapper.state, newsreaderStore.core != nil {
                 newsreader
             } else {
-                StartupView(bootstrapper: bootstrapper)
+                StartupView(
+                    bootstrapper: bootstrapper,
+                    store: newsreaderStore,
+                    articleListActionPreferences: articleListActionPreferences
+                )
             }
         }
         .overlay(alignment: .bottom) {

@@ -28,7 +28,7 @@ boundaries rather than create parallel state owners.
 Current repository status:
 
 - **D9-A — Production Flutter-to-native migration:** COMPLETE / TEST-GATED
-- **D9-B — Config Backup and Restore:** OPEN
+- **D9-B — Config Backup and Restore:** COMPLETE / TEST-GATED
 - **D9-C — Configurable Bottom Action Bar:** COMPLETE / TEST-GATED
 - **D9-D — Localization parity:** OPEN
 - **D9-E — Downloaded Data:** COMPLETE / TEST-GATED
@@ -111,6 +111,37 @@ Expose the existing Flux Config Backup contract through native iOS Settings:
   existing architecture contract.
 
 This is configuration backup, not article/media backup.
+
+Implementation contract:
+
+- iOS reuses the existing shared Core `ConfigBackupInput` /
+  `parseConfigBackup` contract and `.fluxbackup` format; no second backup
+  format or iOS-side cryptography implementation is introduced;
+- export uses the authoritative Core `ConfigurationSnapshot` for
+  `CoreSettings` and `FeedPreferences`, the native Keychain account/API key,
+  and a versioned `IOSBackupSettingsV1` platform payload;
+- the iOS payload contains current app-owned user configuration: startup scope,
+  navigation visibility, read-on-scroll/remove-on-read behavior, article
+  presentation/preview/date/count/click behavior, swipe actions, Bottom Action
+  Bar priority, Debug Logging state, and custom HTTP headers;
+- synchronized articles, downloaded media, Listening List/playback progress,
+  pending mutations, support logs, caches, server-version presentation
+  metadata, migration markers, transient list filters/sort, and per-instance
+  WidgetKit AppIntent state are excluded;
+- restore parses and authenticates the backup before any mutation, requires the
+  iOS platform/schema, validates the complete native settings payload, and does
+  not call Miniflux account validation or `/v1/version`;
+- native iOS settings, Core configuration and Keychain credentials form one
+  restore transaction. Failure during Core/account replacement restores the
+  previous native settings, Core configuration and credentials;
+- replacement quiesces the app-wide Core session and reuses the existing media,
+  Newsreader and Core-replacement lifecycle hooks. Widget snapshot state is
+  invalidated before replacement and rebuilt from the restored Core;
+- a successfully applied restore is not rolled back if the subsequent normal
+  sync fails; the UI reports that synchronization will be retried later;
+- restore is reachable both from normal Settings and from the account-required
+  startup surface so a fresh installation can adopt a backup without first
+  creating a temporary account.
 
 ### D9-C — Configurable Bottom Action Bar
 

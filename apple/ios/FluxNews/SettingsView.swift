@@ -66,6 +66,15 @@ struct SettingsView: View {
                     Label("Background Sync", systemImage: "arrow.triangle.2.circlepath")
                 }
                 NavigationLink {
+                    ConfigurationBackupSettingsView(
+                        store: store,
+                        bootstrapper: bootstrapper,
+                        articleListActionPreferences: articleListActionPreferences
+                    )
+                } label: {
+                    Label("Configuration Backup", systemImage: "externaldrive.badge.timemachine")
+                }
+                NavigationLink {
                     SupportDiagnosticsSettingsView()
                 } label: {
                     Label("Support Diagnostics", systemImage: "waveform.path.ecg")
