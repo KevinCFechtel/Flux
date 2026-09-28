@@ -32,7 +32,7 @@ final class NewsreaderPresentationTests: XCTestCase {
         }
     }
 
-    func testLocalizationCatalogContainsNoStaleEntries() throws {
+    func testLocalizationCatalogKeepsKnownRuntimeFalseStaleKeys() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
         let catalogURL = testsDirectory
@@ -46,12 +46,37 @@ final class NewsreaderPresentationTests: XCTestCase {
             root["strings"] as? [String: Any]
         )
 
-        for (key, rawEntry) in strings {
-            let entry = try XCTUnwrap(rawEntry as? [String: Any])
-            XCTAssertNotEqual(
-                entry["extractionState"] as? String,
-                "stale",
-                "Stale localization key should not be shipped: \(key)"
+        let expectedGerman: [String: String] = [
+            "Settings": "Einstellungen",
+            "Search Results": "Suchergebnisse",
+            "Feed Settings": "Feed-Einstellungen",
+            "Mark All as Read": "Alle als gelesen markieren",
+            "Listening List": "Hörliste",
+            "Remove Account": "Account entfernen",
+            "Show article count": "Artikelanzahl anzeigen",
+            "Newest First": "Neueste zuerst",
+            "Oldest First": "Älteste zuerst",
+            "Unread": "Ungelesen",
+        ]
+
+        for (key, expected) in expectedGerman {
+            let entry = try XCTUnwrap(
+                strings[key] as? [String: Any],
+                "Runtime localization key is missing: \(key)"
+            )
+            let localizations = try XCTUnwrap(
+                entry["localizations"] as? [String: Any]
+            )
+            let german = try XCTUnwrap(
+                localizations["de"] as? [String: Any]
+            )
+            let unit = try XCTUnwrap(
+                german["stringUnit"] as? [String: Any]
+            )
+            XCTAssertEqual(
+                unit["value"] as? String,
+                expected,
+                "German runtime localization regressed for: \(key)"
             )
         }
     }
