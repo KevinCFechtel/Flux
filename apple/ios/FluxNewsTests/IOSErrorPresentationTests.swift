@@ -148,6 +148,97 @@ final class IOSAppDiagnosticsTests: XCTestCase {
         XCTAssertTrue(export.contains("FluxNews Diagnostics"))
         XCTAssertTrue(export.contains("App version:"))
         XCTAssertTrue(export.contains("OS:"))
+        XCTAssertTrue(export.contains("Device class:"))
+        XCTAssertTrue(export.contains("Debug logging:"))
+        XCTAssertTrue(export.contains("Records:"))
         XCTAssertTrue(export.contains("[WARNING] [media-playback] device playback warning"))
+    }
+
+    func testClearRemovesRetainedRecords() {
+        let diagnostics = IOSAppDiagnostics(
+            defaults: makeDefaults(),
+            rootDirectory: makeRoot()
+        )
+        diagnostics.record(
+            level: .info,
+            category: "test",
+            message: "retained"
+        )
+
+        XCTAssertEqual(diagnostics.count, 1)
+        diagnostics.clear()
+        XCTAssertEqual(diagnostics.count, 0)
+        XCTAssertTrue(diagnostics.snapshot().isEmpty)
+    }
+
+    func testLogViewerProjectionFiltersSearchesAndSortsNewestFirst() {
+        let old = IOSAppLogEntry(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            timestamp: Date(timeIntervalSince1970: 100),
+            level: .info,
+            category: "sync",
+            message: "sync completed"
+        )
+        let newest = IOSAppLogEntry(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+            timestamp: Date(timeIntervalSince1970: 300),
+            level: .error,
+            category: "media-playback",
+            message: "Playback failed"
+        )
+        let middle = IOSAppLogEntry(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
+            timestamp: Date(timeIntervalSince1970: 200),
+            level: .warning,
+            category: "sync",
+            message: "Network delayed"
+        )
+
+        XCTAssertEqual(
+            IOSAppLogViewerProjection.visibleEntries(
+                from: [old, newest, middle],
+                levelFilter: .all,
+                searchText: ""
+            ).map(\.id),
+            [newest.id, middle.id, old.id]
+        )
+        XCTAssertEqual(
+            IOSAppLogViewerProjection.visibleEntries(
+                from: [old, newest, middle],
+                levelFilter: .warning,
+                searchText: ""
+            ).map(\.id),
+            [middle.id]
+        )
+        XCTAssertEqual(
+            IOSAppLogViewerProjection.visibleEntries(
+                from: [old, newest, middle],
+                levelFilter: .all,
+                searchText: "PLAYBACK"
+            ).map(\.id),
+            [newest.id]
+        )
+        XCTAssertEqual(
+            IOSAppLogViewerProjection.visibleEntries(
+                from: [old, newest, middle],
+                levelFilter: .all,
+                searchText: "sync"
+            ).map(\.id),
+            [middle.id, old.id]
+        )
+    }
+
+    func testLogViewerRecordTextContainsVisibleFields() {
+        let entry = IOSAppLogEntry(
+            timestamp: Date(timeIntervalSince1970: 100),
+            level: .error,
+            category: "core.sync",
+            message: "request failed"
+        )
+
+        let text = IOSAppLogViewerProjection.recordText(entry)
+        XCTAssertTrue(text.contains("[ERROR]"))
+        XCTAssertTrue(text.contains("[core.sync]"))
+        XCTAssertTrue(text.contains("request failed"))
     }
 }

@@ -34,7 +34,7 @@ Current repository status:
 - **D9-E — Downloaded Data:** COMPLETE / TEST-GATED
 - **D9-F — Miniflux account information / HTTP warning:** COMPLETE / TEST-GATED
 - **D9-G — Open Source and About:** COMPLETE / TEST-GATED
-- **D9-H — Logging & Support Diagnostics:** OPEN
+- **D9-H — Logging & Support Diagnostics:** COMPLETE / TEST-GATED
 - **D9 Widget Configuration:** OPEN
 - **Final physical-device Flutter-to-native production-upgrade acceptance:** OPEN
 
@@ -288,6 +288,22 @@ class, Debug Logging state and record count. Export must remain privacy-sanitize
 
 A legacy **Clear Logs on Start** preference is not restored. The bounded native
 support log and explicit Clear Logs action replace that Flutter-era behavior.
+
+Implementation status:
+
+- normal Settings now exposes **Support Diagnostics** backed directly by
+  `IOSAppDiagnostics`;
+- Debug Logging uses the existing persisted preference and retained record count
+  is read from the same bounded store;
+- the structured Log Viewer reads `IOSAppLogEntry` records directly, presents
+  them newest-first, supports level filtering and Category/Message search,
+  reloads on demand, and supports per-record copy;
+- diagnostics export continues to use the existing privacy-sanitized support
+  handoff and native Share presentation;
+- **Clear Logs** requires destructive confirmation and clears only the retained
+  support log;
+- `DeveloperDiagnosticsView` no longer owns support logging/export controls and
+  is reachable from Settings only in DEBUG/performance-diagnostics builds.
 
 ### Developer Diagnostics retirement
 
