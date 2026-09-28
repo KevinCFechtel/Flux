@@ -219,6 +219,7 @@ final class IOSAppRuntime {
             mediaTransferReconciliationHandoff: mediaTransferReconciliationHandoff,
             onSuccessfulSync: { [weak legacyMigrationCoordinator] in
                 _ = await legacyMigrationCoordinator?.migratePlaybackProgressIfNeeded()
+                _ = await legacyMigrationCoordinator?.migrateDownloadsIfNeeded()
             }
         )
         self.bootstrapper = bootstrapper

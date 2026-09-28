@@ -48,14 +48,15 @@ final class IOSMediaRuntimeTests: XCTestCase {
         ))
     }
 
-    func testSyncCompletedReconcilesPlaybackThenRetriesLegacyPlaybackMigration() async throws {
+    func testSyncCompletedReconcilesPlaybackThenRetriesLegacyMigrationsSequentially() async throws {
         let core = try makeCore()
         let reconciled = expectation(description: "playback reconciled")
-        let migrated = expectation(description: "legacy playback migration retried")
+        let migrated = expectation(description: "legacy migrations retried")
         var calls: [String] = []
         let runtime = makeRuntime(
             onSuccessfulSync: {
-                calls.append("migration")
+                calls.append("playback migration")
+                calls.append("download migration")
                 migrated.fulfill()
             },
             reconcilePlaybackAfterSuccessfulSync: {
@@ -68,7 +69,7 @@ final class IOSMediaRuntimeTests: XCTestCase {
         runtime.handle(event: syncCompletedEvent(), core: core, generation: runtime.lifecycleGeneration)
 
         await fulfillment(of: [reconciled, migrated], timeout: 1)
-        XCTAssertEqual(calls, ["reconcile", "migration"])
+        XCTAssertEqual(calls, ["reconcile", "playback migration", "download migration"])
     }
 
     func testNonSyncCompletedEventDoesNotRetryLegacyPlaybackMigration() async throws {

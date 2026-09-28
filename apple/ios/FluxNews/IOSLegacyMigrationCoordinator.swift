@@ -73,6 +73,9 @@ final class IOSLegacyMigrationCoordinator {
     private let legacyPlaybackReader: () -> [LegacyPlaybackProgressImport]?
     private let legacyPlaybackImporter: (([LegacyPlaybackImport]) async -> Result<LegacyPlaybackImportResult, Error>)?
     private let legacyDownloadReader: () -> [LegacyDownloadImport]?
+    private let legacyDownloadImporter: ((Int64, String, UInt64) async -> Result<LegacyDownloadImportOutcome, Error>)?
+    private let mediaRootProvider: () -> URL?
+    private let fileManager: FileManager
     private let logger = IOSAppLogger(category: "legacy_migration")
     private var inFlight = false
 
@@ -83,7 +86,10 @@ final class IOSLegacyMigrationCoordinator {
         legacyMediaSettingsReader: @escaping () -> IOSLegacyMediaSettingsImport? = LegacyStateDiscovery.readMediaSettingsImport,
         legacyPlaybackReader: @escaping () -> [LegacyPlaybackProgressImport]? = LegacyStateDiscovery.readPlaybackProgressImports,
         legacyPlaybackImporter: (([LegacyPlaybackImport]) async -> Result<LegacyPlaybackImportResult, Error>)? = nil,
-        legacyDownloadReader: @escaping () -> [LegacyDownloadImport]? = { LegacyStateDiscovery.readDownloadImports() }
+        legacyDownloadReader: @escaping () -> [LegacyDownloadImport]? = { LegacyStateDiscovery.readDownloadImports() },
+        legacyDownloadImporter: ((Int64, String, UInt64) async -> Result<LegacyDownloadImportOutcome, Error>)? = nil,
+        mediaRootProvider: @escaping () -> URL? = { IOSMediaTransferPathConfiguration.mediaRootURL },
+        fileManager: FileManager = .default
     ) {
         self.bootstrapper = bootstrapper
         self.defaults = defaults
@@ -92,6 +98,9 @@ final class IOSLegacyMigrationCoordinator {
         self.legacyPlaybackReader = legacyPlaybackReader
         self.legacyPlaybackImporter = legacyPlaybackImporter
         self.legacyDownloadReader = legacyDownloadReader
+        self.legacyDownloadImporter = legacyDownloadImporter
+        self.mediaRootProvider = mediaRootProvider
+        self.fileManager = fileManager
     }
 
     /// Imports only when native credentials are absent. The completion marker is
@@ -248,30 +257,62 @@ final class IOSLegacyMigrationCoordinator {
         do { guard try isCurrentMigratedAccount() else { return .notEligible } }
         catch { return .retryableFailure }
         guard !defaults.bool(forKey: DefaultsKey.downloadMigrationCompleted) else { return .alreadyCompleted }
-        guard let records = legacyDownloadReader(), let mediaRoot = IOSMediaTransferPathConfiguration.mediaRootURL else {
-            return .retryableFailure
+        guard let records = legacyDownloadReader() else { return .retryableFailure }
+        guard !records.isEmpty else {
+            defaults.set(true, forKey: DefaultsKey.downloadMigrationCompleted)
+            return .imported
         }
-        let fileManager = FileManager.default
+        guard let mediaRoot = mediaRootProvider() else { return .retryableFailure }
+        var hasRetryableRecord = false
         for record in records {
             let reference = "downloads/legacy/enclosure-\(record.enclosureID).audio"
             guard let size = try? record.sourceFile.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-                  size > 0 else { continue }
+                  size > 0 else {
+                hasRetryableRecord = true
+                continue
+            }
             let destination: URL
+            let createdDestination: Bool
             do {
                 destination = try MediaTransferFileLayout.destination(reference: reference, under: mediaRoot)
                 try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
                 if !fileManager.fileExists(atPath: destination.path) {
                     try fileManager.copyItem(at: record.sourceFile, to: destination)
+                    createdDestination = true
+                } else {
+                    createdDestination = false
                 }
-            } catch { return .retryableFailure }
-            switch await bootstrapper.importLegacyDownload(enclosureID: record.enclosureID, localFile: reference, fileSizeBytes: UInt64(size)) {
+            } catch {
+                hasRetryableRecord = true
+                continue
+            }
+            let result: Result<LegacyDownloadImportOutcome, Error>
+            if let legacyDownloadImporter {
+                result = await legacyDownloadImporter(record.enclosureID, reference, UInt64(size))
+            } else {
+                result = await bootstrapper.importLegacyDownload(
+                    enclosureID: record.enclosureID,
+                    localFile: reference,
+                    fileSizeBytes: UInt64(size)
+                )
+            }
+            switch result {
             case .success(.imported): break
-            case .success(.alreadyPresent), .success(.missingEnclosure):
-                // This destination is unique to this migration and was never Core state.
-                try? fileManager.removeItem(at: destination)
-            case .failure: return .retryableFailure
+            case .success(.alreadyPresent):
+                // Only this run can prove that it created a file Core did not adopt.
+                if createdDestination { try? fileManager.removeItem(at: destination) }
+            case .success(.missingEnclosure):
+                // The source remains untouched, so an unadopted copy made by this
+                // run can be recreated after a later authoritative sync.
+                if createdDestination { try? fileManager.removeItem(at: destination) }
+                hasRetryableRecord = true
+            case .failure:
+                // Retain a pre-existing or just-created copy: the operation may be
+                // retried safely without changing the Flutter source.
+                hasRetryableRecord = true
             }
         }
+        guard !hasRetryableRecord else { return .retryableFailure }
         defaults.set(true, forKey: DefaultsKey.downloadMigrationCompleted)
         logger.info("Legacy downloads copied into Core media storage.")
         return .imported
