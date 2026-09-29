@@ -42,7 +42,6 @@ enum IOSBottomAction: String, CaseIterable, Equatable, Hashable, Identifiable {
         .markAllRead,
         .markAllReadAndNext,
         .listeningList,
-        .nowPlaying,
         .settings,
     ]
 
@@ -1146,6 +1145,9 @@ struct ContentView: View {
                 onListeningList: openListeningList,
                 onSearch: openSearch
             )
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                sidebarMiniPlayer
+            }
             .toolbar(removing: .sidebarToggle)
         } detail: {
             adaptiveDetail
@@ -1282,6 +1284,11 @@ struct ContentView: View {
             topActions: {
                 articleListActionButtons(directCapacity: directActionCapacity)
             },
+            topAccessory: {
+                if articleListChromeMode == .persistentSplitCollapsed {
+                    compactMiniPlayer
+                }
+            },
             content: { naturalTopContentInset in
                 ArticleListView(
                     store: newsreaderStore,
@@ -1305,12 +1312,25 @@ struct ContentView: View {
             // The Timeline is the root of this app's navigation: the branded
             // button opens the scope chooser, there is nothing to go back to.
             .navigationBarBackButtonHidden(true)
-            .toolbar {
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 if actionPlacement == .bottomBar {
-                    ToolbarItemGroup(placement: .bottomBar) {
+                    IOSArticleListBottomDock(
+                        playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+                        playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
+                        onOpenPlayer: presentNowPlayingPlayer
+                    ) {
                         articleListActionButtons(directCapacity: directActionCapacity)
                     }
                 }
+            }
+            .toolbar {
+                if articleListChromeMode == .compactLandscape,
+                   miniPlayerIsVisible {
+                    ToolbarItem(placement: .principal) {
+                        compactMiniPlayer
+                    }
+                }
+
                 if actionPlacement == .topBarTrailing {
                     if #available(iOS 26.0, *) {
                         ToolbarItemGroup(placement: .topBarTrailing) {
@@ -1328,6 +1348,44 @@ struct ContentView: View {
                     }
                 }
             }
+    }
+
+    private var miniPlayerIsVisible: Bool {
+        let playbackState = IOSAppRuntime.shared.mediaRuntime.playbackPresentationState
+        return IOSMiniPlayerPresentation.isVisible(
+            loadedEnclosureID: playbackState.loadedEnclosure?.id,
+            status: playbackState.status
+        )
+    }
+
+    @ViewBuilder
+    private var compactMiniPlayer: some View {
+        if miniPlayerIsVisible {
+            IOSMiniPlayerView(
+                playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+                playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
+                style: .compactTopBar,
+                onOpen: presentNowPlayingPlayer
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var sidebarMiniPlayer: some View {
+        if miniPlayerIsVisible {
+            IOSMiniPlayerView(
+                playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+                playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
+                style: .sidebarFooter,
+                onOpen: presentNowPlayingPlayer
+            )
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    private func presentNowPlayingPlayer() {
+        guard miniPlayerIsVisible else { return }
+        nowPlayingPresented = true
     }
 
     @ViewBuilder
@@ -2608,13 +2666,14 @@ private struct ArticleListDetachedTopChromeHeightPreferenceKey: PreferenceKey {
     }
 }
 
-private struct ArticleListNavigationChrome<Content: View, TopActions: View>: View {
+private struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory: View>: View {
     var store: NewsreaderStore
     /// Absent when a persistent sidebar already offers scope selection.
     var onSelectScope: (() -> Void)?
     var chromeMode: IOSArticleListChromeMode
     var actionPlacement: IOSArticleListActionPlacement
     @ViewBuilder let topActions: () -> TopActions
+    @ViewBuilder let topAccessory: () -> TopAccessory
     @ViewBuilder let content: (CGFloat) -> Content
     @State private var detachedTopChromeHeight: CGFloat = 0
 
@@ -2696,6 +2755,8 @@ private struct ArticleListNavigationChrome<Content: View, TopActions: View>: Vie
                             action: onSelectScope
                         )
                         Spacer(minLength: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing)
+                        topAccessory()
+                        Spacer(minLength: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing)
                         ArticleListFloatingActionGroup(actions: topActions)
                     }
                     .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
@@ -2730,6 +2791,13 @@ private struct ArticleListNavigationChrome<Content: View, TopActions: View>: Vie
                             action: onSelectScope,
                             usesSystemToolbarGlass: true
                         )
+                    }
+                }
+
+                if chromeMode == .persistentSplitCollapsed,
+                   actionPlacement == .topBarTrailing {
+                    ToolbarItem(placement: .principal) {
+                        topAccessory()
                     }
                 }
             }
