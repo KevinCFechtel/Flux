@@ -1031,6 +1031,13 @@ final class NewsreaderPresentationTests: XCTestCase {
             ),
             72
         )
+        XCTAssertEqual(
+            IOSActionFeedbackPresentation.bottomPadding(
+                hasBottomActionBar: true,
+                hasMiniPlayer: true
+            ),
+            130
+        )
     }
 
     func testPassiveActionFeedbackUsesBoundedTransientPresentation() {
