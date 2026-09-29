@@ -525,10 +525,15 @@ enum IOSActionFeedbackPresentation {
     static let autoDismissDelay: Duration = .seconds(3)
     static let baseBottomPadding: CGFloat = 18
     static let bottomActionBarClearance: CGFloat = 54
+    static let miniPlayerClearance: CGFloat = 58
 
-    static func bottomPadding(hasBottomActionBar: Bool) -> CGFloat {
+    static func bottomPadding(
+        hasBottomActionBar: Bool,
+        hasMiniPlayer: Bool = false
+    ) -> CGFloat {
         baseBottomPadding
             + (hasBottomActionBar ? bottomActionBarClearance : 0)
+            + (hasMiniPlayer ? miniPlayerClearance : 0)
     }
 
     static func shouldDismiss(
@@ -669,7 +674,9 @@ struct ContentView: View {
         .overlay(alignment: .bottom) {
             actionFeedbackOverlay(
                 active: !searchPresented && !listeningListPresented,
-                hasBottomActionBar: articleListChromeMode == .compactPortrait
+                hasBottomActionBar: articleListChromeMode == .compactPortrait,
+                hasMiniPlayer: miniPlayerPlacement == .portraitBottomDock
+                    && miniPlayerIsVisible
             )
         }
         .animation(.easeInOut(duration: 0.2), value: actionFeedback?.id)
@@ -693,7 +700,8 @@ struct ContentView: View {
             .overlay(alignment: .bottom) {
                 actionFeedbackOverlay(
                     active: true,
-                    hasBottomActionBar: false
+                    hasBottomActionBar: false,
+                    hasMiniPlayer: false
                 )
             }
             .animation(.easeInOut(duration: 0.2), value: actionFeedback?.id)
@@ -1725,7 +1733,8 @@ struct ContentView: View {
     @ViewBuilder
     private func actionFeedbackOverlay(
         active: Bool,
-        hasBottomActionBar: Bool
+        hasBottomActionBar: Bool,
+        hasMiniPlayer: Bool
     ) -> some View {
         if active, let feedback = actionFeedback {
             IOSActionFeedbackBanner(item: feedback)
@@ -1733,7 +1742,8 @@ struct ContentView: View {
                 .safeAreaPadding(
                     .bottom,
                     IOSActionFeedbackPresentation.bottomPadding(
-                        hasBottomActionBar: hasBottomActionBar
+                        hasBottomActionBar: hasBottomActionBar,
+                        hasMiniPlayer: hasMiniPlayer
                     )
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
