@@ -634,6 +634,12 @@ struct ContentView: View {
         )
     }
 
+    private var miniPlayerPlacement: IOSMiniPlayerPlacement {
+        IOSMiniPlayerPlacementPolicy.placement(
+            for: articleListChromeMode
+        )
+    }
+
     private var adaptiveSplitColumnVisibility: Binding<NavigationSplitViewVisibility> {
         Binding(
             get: { splitColumnVisibility },
@@ -1285,7 +1291,8 @@ struct ContentView: View {
                 articleListActionButtons(directCapacity: directActionCapacity)
             },
             topAccessory: {
-                if articleListChromeMode == .persistentSplitCollapsed {
+                if miniPlayerPlacement == .compactTopBar,
+                   articleListChromeMode == .persistentSplitCollapsed {
                     compactMiniPlayer
                 }
             },
@@ -1324,7 +1331,8 @@ struct ContentView: View {
                 }
             }
             .toolbar {
-                if articleListChromeMode == .compactLandscape,
+                if miniPlayerPlacement == .compactTopBar,
+                   articleListChromeMode == .compactLandscape,
                    miniPlayerIsVisible {
                     ToolbarItem(placement: .principal) {
                         compactMiniPlayer
@@ -1372,7 +1380,8 @@ struct ContentView: View {
 
     @ViewBuilder
     private var sidebarMiniPlayer: some View {
-        if miniPlayerIsVisible {
+        if miniPlayerPlacement == .sidebarFooter,
+           miniPlayerIsVisible {
             IOSMiniPlayerView(
                 playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
                 playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
