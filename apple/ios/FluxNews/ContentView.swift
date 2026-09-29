@@ -1326,7 +1326,10 @@ struct ContentView: View {
                         playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
                         onOpenPlayer: presentNowPlayingPlayer
                     ) {
-                        articleListActionButtons(directCapacity: directActionCapacity)
+                        articleListActionButtons(
+                            directCapacity: directActionCapacity,
+                            minimumHitTarget: 44
+                        )
                     }
                 }
             }
@@ -1398,7 +1401,10 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func articleListActionButtons(directCapacity: Int) -> some View {
+    private func articleListActionButtons(
+        directCapacity: Int,
+        minimumHitTarget: CGFloat? = nil
+    ) -> some View {
         let playbackState = IOSAppRuntime.shared.mediaRuntime.playbackPresentationState
         let resolved = IOSArticleListActionPolicy.resolvedActions(
             configuredActions: articleListActionPreferences.actions,
@@ -1409,16 +1415,26 @@ struct ContentView: View {
             playbackStatus: playbackState.status
         )
 
-        articleListActionButton(.sync)
+        articleListActionButton(.sync, minimumHitTarget: minimumHitTarget)
         ForEach(resolved.direct) { action in
-            articleListActionButton(action)
+            articleListActionButton(
+                action,
+                minimumHitTarget: minimumHitTarget
+            )
         }
-        articleListMoreMenu(overflowActions: resolved.overflow)
+        articleListMoreMenu(
+            overflowActions: resolved.overflow,
+            minimumHitTarget: minimumHitTarget
+        )
     }
 
     @ViewBuilder
-    private func articleListActionButton(_ action: IOSBottomAction) -> some View {
-        switch action {
+    private func articleListActionButton(
+        _ action: IOSBottomAction,
+        minimumHitTarget: CGFloat? = nil
+    ) -> some View {
+        Group {
+            switch action {
         case .sync:
             let syncButtonPresentation = IOSSyncButtonPresentation.resolve(
                 manualSyncState: newsreaderStore.manualSyncState,
@@ -1516,9 +1532,15 @@ struct ContentView: View {
             .accessibilityLabel(action.settingsTitle)
             .accessibilityIdentifier("articleList.settings")
 
-        case .more:
-            EmptyView()
+            case .more:
+                EmptyView()
+            }
         }
+        .frame(
+            minWidth: minimumHitTarget,
+            minHeight: minimumHitTarget
+        )
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder
@@ -1542,7 +1564,10 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func articleListMoreMenu(overflowActions: [IOSBottomAction]) -> some View {
+    private func articleListMoreMenu(
+        overflowActions: [IOSBottomAction],
+        minimumHitTarget: CGFloat? = nil
+    ) -> some View {
         Menu {
             ForEach(overflowActions) { action in
                 overflowMenuItem(action)
@@ -1552,6 +1577,11 @@ struct ContentView: View {
         }
         .accessibilityLabel(String(localized: "More"))
         .accessibilityIdentifier("articleList.more")
+        .frame(
+            minWidth: minimumHitTarget,
+            minHeight: minimumHitTarget
+        )
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder
