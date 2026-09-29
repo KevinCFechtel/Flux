@@ -927,8 +927,7 @@ struct ContentView: View {
     @ViewBuilder
     private var nowPlayingPlayerView: some View {
         let item = IOSListeningListPlayerPresentation.item(
-            for: IOSAppRuntime.shared.mediaRuntime
-                .playbackPresentationState.loadedEnclosure,
+            for: playbackState.loadedEnclosure,
             in: listeningListStore.items
         )
         mediaPlayerView(item: item) {
@@ -1364,8 +1363,7 @@ struct ContentView: View {
     }
 
     private var miniPlayerIsVisible: Bool {
-        let playbackState = playbackState
-        return IOSMiniPlayerPresentation.isVisible(
+        IOSMiniPlayerPresentation.isVisible(
             loadedEnclosureID: playbackState.loadedEnclosure?.id,
             status: playbackState.status
         )
@@ -1407,7 +1405,6 @@ struct ContentView: View {
         directCapacity: Int,
         minimumHitTarget: CGFloat? = nil
     ) -> some View {
-        let playbackState = playbackState
         let resolved = IOSArticleListActionPolicy.resolvedActions(
             configuredActions: articleListActionPreferences.actions,
             directCapacity: directCapacity,
