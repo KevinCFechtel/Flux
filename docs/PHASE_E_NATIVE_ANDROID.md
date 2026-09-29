@@ -1,6 +1,6 @@
 # Phase E — Native Android
 
-> **Status: AUTHORITATIVE CONTRACT DEFINED — E1-A, E1-B AND E1-C COMPLETE / E1-D NEXT**
+> **Status: AUTHORITATIVE CONTRACT DEFINED — E1-A, E1-B, E1-C AND E1-D COMPLETE / E1-E NEXT**
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
 >
@@ -365,7 +365,7 @@ Runtime acceptance on 28 September 2026 passed the full transport suite on an AP
 
 ### E1-D — Android Core runtime ownership
 
-Create the process/app-scoped runtime and bounded off-main execution adapter. Prove lifecycle/recreation does not create concurrent Core owners for the same storage.
+E1-D is complete. `FluxApplication` owns one process-scoped `AndroidCoreRuntime`, which owns zero or one active Core session including its `Flux` object and event subscription. It uses bounded local and remote execution lanes so synchronous Core work stays off-main and slow remote work cannot head-of-line-block local reads. Activity recreation does not create a Core session; process death recreates an empty runtime that later account state bootstraps. Close and replacement stop new work and wait for active calls before closing the subscription and Core. One-emulator acceptance covers owner recreation, off-main local/remote calls, lane isolation, clean close and replacement.
 
 No feature-domain duplication is allowed in this layer.
 
