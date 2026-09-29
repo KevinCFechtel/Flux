@@ -456,7 +456,7 @@ final class NewsreaderPresentationTests: XCTestCase {
     func testArticleListActionPolicyPersistsOnlyConfigurableActionsInOrder() {
         XCTAssertEqual(
             IOSArticleListActionPolicy.normalizedConfiguredActions(
-                from: ["search", "sync", "more", "filterAndSort", "search"]
+                from: ["search", "sync", "more", "nowPlaying", "filterAndSort", "search"]
             ),
             [.search, .filterAndSort]
         )
@@ -628,6 +628,62 @@ final class NewsreaderPresentationTests: XCTestCase {
             )
         )
         XCTAssertEqual(configured, [.nowPlaying, .search])
+    }
+
+    func testMiniPlayerPlacementAdaptsToArticleListChrome() {
+        XCTAssertEqual(
+            IOSMiniPlayerPlacementPolicy.placement(for: .compactPortrait),
+            .portraitBottomDock
+        )
+        XCTAssertEqual(
+            IOSMiniPlayerPlacementPolicy.placement(for: .compactLandscape),
+            .compactTopBar
+        )
+        XCTAssertEqual(
+            IOSMiniPlayerPlacementPolicy.placement(for: .persistentSplit),
+            .sidebarFooter
+        )
+        XCTAssertEqual(
+            IOSMiniPlayerPlacementPolicy.placement(for: .persistentSplitCollapsed),
+            .compactTopBar
+        )
+    }
+
+    func testMiniPlayerVisibilityRequiresLoadedNonStoppedPlayback() {
+        XCTAssertFalse(
+            IOSMiniPlayerPresentation.isVisible(
+                loadedEnclosureID: nil,
+                status: .paused
+            )
+        )
+        XCTAssertFalse(
+            IOSMiniPlayerPresentation.isVisible(
+                loadedEnclosureID: 1,
+                status: .stopped
+            )
+        )
+        XCTAssertTrue(
+            IOSMiniPlayerPresentation.isVisible(
+                loadedEnclosureID: 1,
+                status: .paused
+            )
+        )
+        XCTAssertTrue(
+            IOSMiniPlayerPresentation.isVisible(
+                loadedEnclosureID: 1,
+                status: .playing
+            )
+        )
+    }
+
+    func testNowPlayingIsNoLongerAConfigurableArticleListAction() {
+        XCTAssertFalse(IOSBottomAction.configurableActions.contains(.nowPlaying))
+        XCTAssertEqual(
+            IOSArticleListActionPolicy.normalizedConfiguredActions(
+                from: ["nowPlaying", "search"]
+            ),
+            [.search]
+        )
     }
 
     func testNowPlayingPlayerPresentationFindsLoadedListeningListItem() {
