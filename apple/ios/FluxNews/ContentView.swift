@@ -579,6 +579,8 @@ struct ContentView: View {
     var newsreaderStore: NewsreaderStore
     @StateObject private var searchStore = IOSSearchStore()
     @StateObject private var listeningListStore = IOSListeningListStore()
+    @ObservedObject private var playbackState =
+        IOSAppRuntime.shared.mediaRuntime.playbackPresentationState
     @State private var navigationPresented = false
     @State private var searchPresented = false
     @State private var listeningListPresented = false
@@ -871,7 +873,7 @@ struct ContentView: View {
         onDismiss: @escaping () -> Void
     ) -> some View {
         IOSMediaPlayerView(
-            playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+            playbackState: playbackState,
             transferState: IOSAppRuntime.shared.mediaRuntime.transferPresentationState,
             sleepTimer: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator.sleepTimer,
             playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
@@ -982,7 +984,7 @@ struct ContentView: View {
             } catch {
                 let coordinator = IOSAppRuntime.shared.mediaRuntime
                     .playbackCoordinator
-                IOSAppRuntime.shared.mediaRuntime.playbackPresentationState
+                playbackState
                     .setErrorMessage(
                         coordinator.lastStartFailureDescription
                             ?? error.localizedDescription
@@ -1003,7 +1005,7 @@ struct ContentView: View {
         }
 
         IOSMediaPlayerView(
-            playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+            playbackState: playbackState,
             transferState: IOSAppRuntime.shared.mediaRuntime.transferPresentationState,
             sleepTimer: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator.sleepTimer,
             playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
@@ -1233,7 +1235,7 @@ struct ContentView: View {
     private var listeningListView: some View {
         IOSListeningListView(
             store: listeningListStore,
-            playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+            playbackState: playbackState,
             transferState: IOSAppRuntime.shared.mediaRuntime.transferPresentationState,
             playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
             onOpenPlayer: openListeningListPlayer,
@@ -1322,7 +1324,7 @@ struct ContentView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if actionPlacement == .bottomBar {
                     IOSArticleListBottomDock(
-                        playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+                        playbackState: playbackState,
                         playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
                         onOpenPlayer: presentNowPlayingPlayer
                     ) {
@@ -1362,7 +1364,7 @@ struct ContentView: View {
     }
 
     private var miniPlayerIsVisible: Bool {
-        let playbackState = IOSAppRuntime.shared.mediaRuntime.playbackPresentationState
+        let playbackState = playbackState
         return IOSMiniPlayerPresentation.isVisible(
             loadedEnclosureID: playbackState.loadedEnclosure?.id,
             status: playbackState.status
@@ -1373,7 +1375,7 @@ struct ContentView: View {
     private var compactMiniPlayer: some View {
         if miniPlayerIsVisible {
             IOSMiniPlayerView(
-                playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+                playbackState: playbackState,
                 playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
                 style: .compactTopBar,
                 onOpen: presentNowPlayingPlayer
@@ -1386,7 +1388,7 @@ struct ContentView: View {
         if miniPlayerPlacement == .sidebarFooter,
            miniPlayerIsVisible {
             IOSMiniPlayerView(
-                playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+                playbackState: playbackState,
                 playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
                 style: .sidebarFooter,
                 onOpen: presentNowPlayingPlayer
@@ -1405,7 +1407,7 @@ struct ContentView: View {
         directCapacity: Int,
         minimumHitTarget: CGFloat? = nil
     ) -> some View {
-        let playbackState = IOSAppRuntime.shared.mediaRuntime.playbackPresentationState
+        let playbackState = playbackState
         let resolved = IOSArticleListActionPolicy.resolvedActions(
             configuredActions: articleListActionPreferences.actions,
             directCapacity: directCapacity,
