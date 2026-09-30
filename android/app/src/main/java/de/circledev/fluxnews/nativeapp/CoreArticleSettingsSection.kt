@@ -1,13 +1,18 @@
 package de.circledev.fluxnews.nativeapp
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -15,15 +20,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.ReadArticleRetention
 
 @Composable
-internal fun CoreArticleSettingsSection(
-    settings: AndroidCoreArticleSettings,
-) {
+internal fun CoreArticleSettingsSection(settings: AndroidCoreArticleSettings) {
     var state by remember { mutableStateOf<AndroidCoreArticleSettings.State?>(null) }
     var loading by remember { mutableStateOf(true) }
     var saving by remember { mutableStateOf(false) }
@@ -57,7 +61,7 @@ internal fun CoreArticleSettingsSection(
         loading -> CircularProgressIndicator()
         state != null -> {
             val current = state!!
-            SettingsChoiceGroup("Keep read articles") {
+            CoreChoiceGroup("Keep read articles") {
                 listOf(
                     ReadArticleRetention.DAYS30,
                     ReadArticleRetention.DAYS60,
@@ -65,11 +69,7 @@ internal fun CoreArticleSettingsSection(
                     ReadArticleRetention.DAYS180,
                     ReadArticleRetention.DAYS365,
                 ).forEach { option ->
-                    SettingsRadioRow(
-                        title = option.androidDisplayName(),
-                        selected = current.retention == option,
-                        enabled = !saving,
-                    ) {
+                    CoreRadioRow(option.androidDisplayName(), current.retention == option, !saving) {
                         val previous = current
                         state = current.copy(retention = option)
                         saving = true
@@ -85,12 +85,12 @@ internal fun CoreArticleSettingsSection(
                 }
             }
 
-            SettingsChoiceGroup("Reader detail limit") {
+            CoreChoiceGroup("Reader detail limit") {
                 listOf(5_000u, 10_000u, 20_000u).forEach { option ->
-                    SettingsRadioRow(
-                        title = "${option.toInt().formattedWithGrouping()} characters",
-                        selected = current.detailCharacterLimit == option,
-                        enabled = !saving,
+                    CoreRadioRow(
+                        "${option.toInt().formattedWithGrouping()} characters",
+                        current.detailCharacterLimit == option,
+                        !saving,
                     ) {
                         val previous = current
                         state = current.copy(detailCharacterLimit = option)
@@ -114,11 +114,7 @@ internal fun CoreArticleSettingsSection(
             )
 
             HorizontalDivider()
-            SettingsSwitchRow(
-                title = "Sync article changes immediately",
-                checked = current.liveMutationDelivery,
-                enabled = !saving,
-            ) { enabled ->
+            CoreSwitchRow("Sync article changes immediately", current.liveMutationDelivery, !saving) { enabled ->
                 val previous = current
                 state = current.copy(liveMutationDelivery = enabled)
                 saving = true
@@ -140,9 +136,10 @@ internal fun CoreArticleSettingsSection(
     }
 
     if (saving) {
-        Column(
+        Row(
             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             CircularProgressIndicator()
             Text("Saving…", style = MaterialTheme.typography.bodySmall)
@@ -151,9 +148,46 @@ internal fun CoreArticleSettingsSection(
 
     error?.let {
         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-        if (state == null) {
-            androidx.compose.material3.TextButton(onClick = ::reload) { Text("Retry") }
-        }
+        if (state == null) TextButton(onClick = ::reload) { Text("Retry") }
+    }
+}
+
+@Composable
+private fun CoreChoiceGroup(title: String, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        content()
+    }
+}
+
+@Composable
+private fun CoreRadioRow(title: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onClick, enabled = enabled)
+        Text(
+            title,
+            modifier = Modifier.padding(start = 8.dp),
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+        )
+    }
+}
+
+@Composable
+private fun CoreSwitchRow(title: String, checked: Boolean, enabled: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .then(if (enabled) Modifier.clickable { onCheckedChange(!checked) } else Modifier)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }
 
