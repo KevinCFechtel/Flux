@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -65,10 +64,11 @@ private fun FluxNewsApp(bootstrap: AndroidAccountBootstrap) {
                 },
                 onAccountActivated = { bootstrapState = it },
             )
-            is AndroidAccountBootstrap.State.Ready -> ReadyPlaceholder(
-                state = state,
+            is AndroidAccountBootstrap.State.Ready -> AdaptiveAppShell(
                 bootstrap = bootstrap,
+                state = state,
                 onAccountChanged = { bootstrapState = it },
+                modifier = Modifier.fillMaxSize(),
             )
         }
     }
@@ -77,7 +77,10 @@ private fun FluxNewsApp(bootstrap: AndroidAccountBootstrap) {
 @Composable
 private fun StartupProgress() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             CircularProgressIndicator()
             Text("Starting FluxNews…", style = MaterialTheme.typography.bodyLarge)
         }
@@ -107,42 +110,5 @@ private fun RecoverableStartup(
             onAccountRemoved = {},
             modifier = Modifier.weight(1f),
         )
-    }
-}
-
-/** Temporary E2 shell destination. E3 replaces the content with the native article timeline. */
-@Composable
-private fun ReadyPlaceholder(
-    state: AndroidAccountBootstrap.State.Ready,
-    bootstrap: AndroidAccountBootstrap,
-    onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
-) {
-    var accountOpen by remember { mutableStateOf(false) }
-    if (accountOpen) {
-        AccountConfigurationScreen(
-            bootstrap = bootstrap,
-            allowsRemoval = true,
-            onAccountActivated = { onAccountChanged(it) },
-            onAccountRemoved = {
-                accountOpen = false
-                onAccountChanged(AndroidAccountBootstrap.State.AccountRequired)
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
-        return
-    }
-
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(
-            modifier = Modifier.widthIn(max = 680.dp).padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text("FluxNews", style = MaterialTheme.typography.headlineLarge)
-            Text("Account session ready", style = MaterialTheme.typography.titleMedium)
-            Text(state.serverUrl, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            state.serverVersion?.let { Text("Miniflux $it", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            Button(onClick = { accountOpen = true }) { Text("Account") }
-        }
     }
 }
