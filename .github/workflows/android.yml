@@ -1,0 +1,45 @@
+name: Android
+
+on:
+  pull_request:
+    paths:
+      - "android/**"
+      - "core/**"
+      - ".github/workflows/android.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "android/**"
+      - "core/**"
+      - ".github/workflows/android.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Unit and build gate
+    runs-on: ubuntu-24.04
+    env:
+      ANDROID_NDK_VERSION: "27.0.12077973"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK and NDK
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;${ANDROID_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "${GITHUB_ENV}"
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - name: Run Android CI gate
+        run: |
+          ./android/Build/test.sh
+          ./android/Build/build-app.sh productionRelease
+          bash -n android/Build/*.sh

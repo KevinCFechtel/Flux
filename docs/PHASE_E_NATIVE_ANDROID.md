@@ -407,7 +407,17 @@ remains deferred to the E9 replacement gate.
 
 ### E1-H — CI and test gate
 
-Add deterministic Android unit/build smoke gates. Emulator/instrumentation coverage is added where a platform API cannot be proven on the JVM.
+E1-H COMPLETE. The canonical local gate is `android/Build/test.sh`; GitHub Actions runs
+it together with `android/Build/build-app.sh productionRelease` and shell syntax validation
+on Linux. The baseline pins JDK 17, Android SDK platform 36, Build Tools 36.0.0, NDK
+27.0.12077973, Rust 1.98.0 and the `aarch64-linux-android`/`x86_64-linux-android` targets.
+It does not start an emulator or run targeted E1-B through E1-F platform acceptance suites.
+Those remain targeted proofs; the physical E1-F production upgrade remains a mandatory E9
+gate.
+
+Phase E1 COMPLETE. All nine E1 exit conditions are met: the production-identity emulator
+proof satisfies the read-only migration-spike condition, while its physical-device repetition
+remains deferred to E9. E2 NEXT.
 
 ### E1 exit conditions
 
