@@ -6,12 +6,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -23,8 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 class MainActivity : ComponentActivity() {
@@ -43,51 +41,108 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun FluxNewsApp(bootstrap: AndroidAccountBootstrap) {
     var bootstrapState by remember { mutableStateOf(bootstrap.state) }
-    LaunchedEffect(bootstrap) {
+    var retryGeneration by remember { mutableStateOf(0) }
+    LaunchedEffect(bootstrap, retryGeneration) {
         bootstrapState = bootstrap.restoreStoredAccount()
     }
 
     Surface(modifier = Modifier.fillMaxSize()) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val horizontalPadding = if (maxWidth < 600.dp) 24.dp else 48.dp
-            Box(
+        when (val state = bootstrapState) {
+            AndroidAccountBootstrap.State.Starting -> StartupProgress()
+            AndroidAccountBootstrap.State.AccountRequired -> AccountConfigurationScreen(
+                bootstrap = bootstrap,
+                allowsRemoval = false,
+                onAccountActivated = { bootstrapState = it },
+                onAccountRemoved = { bootstrapState = AndroidAccountBootstrap.State.AccountRequired },
                 modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(
-                    modifier = Modifier
-                        .widthIn(max = 680.dp)
-                        .fillMaxWidth()
-                        .padding(horizontal = horizontalPadding, vertical = 32.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.app_name),
-                        style = MaterialTheme.typography.headlineLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = stringResource(R.string.native_android),
-                        style = MaterialTheme.typography.titleLarge,
-                    )
-                    Text(
-                        text = bootstrapState.presentationText(),
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    Text(
-                        text = stringResource(R.string.application_id, BuildConfig.APPLICATION_ID),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            )
+            is AndroidAccountBootstrap.State.RecoverableError -> RecoverableStartup(
+                message = state.message,
+                bootstrap = bootstrap,
+                onRetry = {
+                    bootstrapState = AndroidAccountBootstrap.State.Starting
+                    retryGeneration += 1
+                },
+                onAccountActivated = { bootstrapState = it },
+            )
+            is AndroidAccountBootstrap.State.Ready -> ReadyPlaceholder(
+                state = state,
+                bootstrap = bootstrap,
+                onAccountChanged = { bootstrapState = it },
+            )
         }
     }
 }
 
-private fun AndroidAccountBootstrap.State.presentationText(): String = when (this) {
-    AndroidAccountBootstrap.State.Starting -> "Starting account session…"
-    AndroidAccountBootstrap.State.AccountRequired -> "Miniflux account required"
-    is AndroidAccountBootstrap.State.Ready -> "Account session ready"
-    is AndroidAccountBootstrap.State.RecoverableError -> message
+@Composable
+private fun StartupProgress() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            CircularProgressIndicator()
+            Text("Starting FluxNews…", style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+}
+
+@Composable
+private fun RecoverableStartup(
+    message: String,
+    bootstrap: AndroidAccountBootstrap,
+    onRetry: () -> Unit,
+    onAccountActivated: (AndroidAccountBootstrap.State.Ready) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("FluxNews could not start", style = MaterialTheme.typography.headlineSmall)
+            Text(message, color = MaterialTheme.colorScheme.error)
+            Button(onClick = onRetry) { Text("Retry") }
+        }
+        AccountConfigurationScreen(
+            bootstrap = bootstrap,
+            allowsRemoval = false,
+            onAccountActivated = onAccountActivated,
+            onAccountRemoved = {},
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/** Temporary E2 shell destination. E3 replaces the content with the native article timeline. */
+@Composable
+private fun ReadyPlaceholder(
+    state: AndroidAccountBootstrap.State.Ready,
+    bootstrap: AndroidAccountBootstrap,
+    onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
+) {
+    var accountOpen by remember { mutableStateOf(false) }
+    if (accountOpen) {
+        AccountConfigurationScreen(
+            bootstrap = bootstrap,
+            allowsRemoval = true,
+            onAccountActivated = { onAccountChanged(it) },
+            onAccountRemoved = {
+                accountOpen = false
+                onAccountChanged(AndroidAccountBootstrap.State.AccountRequired)
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+        return
+    }
+
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            modifier = Modifier.widthIn(max = 680.dp).padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("FluxNews", style = MaterialTheme.typography.headlineLarge)
+            Text("Account session ready", style = MaterialTheme.typography.titleMedium)
+            Text(state.serverUrl, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            state.serverVersion?.let { Text("Miniflux $it", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            Button(onClick = { accountOpen = true }) { Text("Account") }
+        }
+    }
 }
