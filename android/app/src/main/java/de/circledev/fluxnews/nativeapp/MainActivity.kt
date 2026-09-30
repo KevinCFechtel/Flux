@@ -16,26 +16,37 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.res.stringResource
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val bootstrap = (application as FluxApplication).accountBootstrap
         setContent {
             FluxNewsTheme {
-                FluxNewsApp()
+                FluxNewsApp(bootstrap)
             }
         }
     }
 }
 
 @Composable
-private fun FluxNewsApp() {
+private fun FluxNewsApp(bootstrap: AndroidAccountBootstrap) {
+    var bootstrapState by remember { mutableStateOf(bootstrap.state) }
+    LaunchedEffect(bootstrap) {
+        bootstrapState = bootstrap.restoreStoredAccount()
+    }
+
     Surface(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val horizontalPadding = if (maxWidth < 600.dp) 24.dp else 48.dp
@@ -60,7 +71,7 @@ private fun FluxNewsApp() {
                         style = MaterialTheme.typography.titleLarge,
                     )
                     Text(
-                        text = stringResource(R.string.phase_e1a),
+                        text = bootstrapState.presentationText(),
                         style = MaterialTheme.typography.bodyLarge,
                     )
                     Text(
@@ -72,4 +83,11 @@ private fun FluxNewsApp() {
             }
         }
     }
+}
+
+private fun AndroidAccountBootstrap.State.presentationText(): String = when (this) {
+    AndroidAccountBootstrap.State.Starting -> "Starting account session…"
+    AndroidAccountBootstrap.State.AccountRequired -> "Miniflux account required"
+    is AndroidAccountBootstrap.State.Ready -> "Account session ready"
+    is AndroidAccountBootstrap.State.RecoverableError -> message
 }
