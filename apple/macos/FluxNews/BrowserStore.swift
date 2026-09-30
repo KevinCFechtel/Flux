@@ -404,16 +404,31 @@ final class BrowserStore: ObservableObject {
                 resetPresentation()
                 snapshotResetRevision &+= 1
             }
-        } catch { errorMessage = NativeErrorPresentation.message(for: error) }
+        } catch {
+            NativeLog.app.error("article reload failed: \(String(describing: error), privacy: .public)")
+            errorMessage = NativeErrorPresentation.message(for: error)
+        }
     }
-    func reloadSelectionTotal() { guard let core else { return }; do { selectionTotal = try core.countArticles(query: query()); errorMessage = nil } catch { errorMessage = NativeErrorPresentation.message(for: error) } }
+    func reloadSelectionTotal() {
+        guard let core else { return }
+        do {
+            selectionTotal = try core.countArticles(query: query())
+            errorMessage = nil
+        } catch {
+            NativeLog.app.error("selection count reload failed: \(String(describing: error), privacy: .public)")
+            errorMessage = NativeErrorPresentation.message(for: error)
+        }
+    }
     func reloadNavigation() {
         guard let core else { return }
         do {
             catalog = try core.navigationCatalog()
             pendingNewData.removeAbsentFeeds(Set(catalog.feeds.map(\.id)))
             publishPendingNewData()
-        } catch { errorMessage = NativeErrorPresentation.message(for: error) }
+        } catch {
+            NativeLog.app.error("navigation reload failed: \(String(describing: error), privacy: .public)")
+            errorMessage = NativeErrorPresentation.message(for: error)
+        }
     }
     func reloadCounts() {
         guard let core else { return }
@@ -426,7 +441,10 @@ final class BrowserStore: ObservableObject {
             for feed in catalog.feeds { feedCounts[feed.id] = try core.countArticles(query: query(scope: .feed(feed.id))) }
             categorySidebarCounts = categoryCounts
             feedSidebarCounts = feedCounts
-        } catch { errorMessage = NativeErrorPresentation.message(for: error) }
+        } catch {
+            NativeLog.app.error("sidebar count reload failed: \(String(describing: error), privacy: .public)")
+            errorMessage = NativeErrorPresentation.message(for: error)
+        }
     }
     func reloadNavigationAndCounts() { reloadNavigation(); reloadCounts() }
     func requestFeedIcon(_ feedID: Int64, darkAppearance: Bool) {
@@ -643,7 +661,13 @@ final class BrowserStore: ObservableObject {
                 }
                 await SystemNotificationManager.shared.deliver(result.systemNotificationCandidates, core: core)
             }
-            catch { await MainActor.run { store.value?.isLoading = false; store.value?.errorMessage = NativeErrorPresentation.message(for: error) } }
+            catch {
+                NativeLog.sync.error("sync failed reason=\(String(describing: reason), privacy: .public) error=\(String(describing: error), privacy: .public)")
+                await MainActor.run {
+                    store.value?.isLoading = false
+                    store.value?.errorMessage = NativeErrorPresentation.message(for: error)
+                }
+            }
         }
     }
     func syncIfStale(reason: SyncReason = .periodic) {
