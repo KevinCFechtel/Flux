@@ -34,9 +34,10 @@ class MainActivity : ComponentActivity() {
         val coreRuntime = application.coreRuntime
         val syncCoordinator = application.syncCoordinator
         val navigationPreferences = application.navigationPreferences
+        val articlePreferences = application.articlePreferences
         setContent {
             FluxNewsTheme {
-                FluxNewsApp(bootstrap, coreRuntime, syncCoordinator, navigationPreferences)
+                FluxNewsApp(bootstrap, coreRuntime, syncCoordinator, navigationPreferences, articlePreferences)
             }
         }
     }
@@ -48,6 +49,7 @@ private fun FluxNewsApp(
     coreRuntime: AndroidCoreRuntime,
     syncCoordinator: AndroidSyncCoordinator,
     navigationPreferences: AndroidNavigationPreferences,
+    articlePreferences: AndroidArticlePreferences,
 ) {
     var bootstrapState by remember { mutableStateOf(bootstrap.state) }
     var retryGeneration by remember { mutableStateOf(0) }
@@ -91,6 +93,7 @@ private fun FluxNewsApp(
                 bootstrap = bootstrap,
                 coreRuntime = coreRuntime,
                 navigationPreferences = navigationPreferences,
+                articlePreferences = articlePreferences,
                 state = state,
                 onAccountChanged = { changedState ->
                     bootstrapState = changedState
