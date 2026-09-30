@@ -61,13 +61,20 @@ private fun FluxNewsApp(
         }
     }
 
+    fun acceptActivatedAccount(ready: AndroidAccountBootstrap.State.Ready) {
+        bootstrapState = ready
+        // Explicitly request a fresh run even when replacement kept the same canonical server URL.
+        // The coordinator deduplicates this with the readiness effect for first-time activation.
+        syncCoordinator.requestSync(SyncReason.APP_START)
+    }
+
     Surface(modifier = Modifier.fillMaxSize()) {
         when (val state = bootstrapState) {
             AndroidAccountBootstrap.State.Starting -> StartupProgress()
             AndroidAccountBootstrap.State.AccountRequired -> AccountConfigurationScreen(
                 bootstrap = bootstrap,
                 allowsRemoval = false,
-                onAccountActivated = { bootstrapState = it },
+                onAccountActivated = ::acceptActivatedAccount,
                 onAccountRemoved = { bootstrapState = AndroidAccountBootstrap.State.AccountRequired },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -78,14 +85,19 @@ private fun FluxNewsApp(
                     bootstrapState = AndroidAccountBootstrap.State.Starting
                     retryGeneration += 1
                 },
-                onAccountActivated = { bootstrapState = it },
+                onAccountActivated = ::acceptActivatedAccount,
             )
             is AndroidAccountBootstrap.State.Ready -> AdaptiveAppShell(
                 bootstrap = bootstrap,
                 coreRuntime = coreRuntime,
                 navigationPreferences = navigationPreferences,
                 state = state,
-                onAccountChanged = { bootstrapState = it },
+                onAccountChanged = { changedState ->
+                    bootstrapState = changedState
+                    if (changedState is AndroidAccountBootstrap.State.Ready) {
+                        syncCoordinator.requestSync(SyncReason.APP_START)
+                    }
+                },
                 modifier = Modifier.fillMaxSize(),
             )
         }
