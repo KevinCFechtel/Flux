@@ -12,12 +12,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,7 +46,12 @@ private enum class SettingsDestination(val title: String, val subtitle: String) 
     About("About", "Version, open source and legal information"),
 }
 
-/** Settings content below the single app-level Settings app bar. */
+/**
+ * Settings owns its single context-sensitive app bar. On compact layouts, Back from a detail first
+ * returns to the Settings list; only Back from the Settings root leaves Settings for News. Wide
+ * list/detail layouts keep the Settings list visible and Back leaves Settings directly.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SettingsShell(
     bootstrap: AndroidAccountBootstrap,
@@ -51,6 +60,7 @@ internal fun SettingsShell(
     navigationCategories: List<AndroidNavigationCategoryRef>,
     navigationFeeds: List<AndroidNavigationFeedRef>,
     onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
+    onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxSize()) {
@@ -62,43 +72,61 @@ internal fun SettingsShell(
 
         BackHandler(enabled = showingCompactDetail) { selected = null }
 
-        if (listDetail) {
-            Row(Modifier.fillMaxSize()) {
-                SettingsList(
-                    selected = selected,
-                    onSelected = { selected = it },
-                    modifier = Modifier.width(340.dp).fillMaxHeight(),
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text(if (showingCompactDetail) selected!!.title else "Settings") },
+                    navigationIcon = {
+                        TextButton(
+                            onClick = {
+                                if (showingCompactDetail) selected = null else onBack()
+                            },
+                        ) {
+                            Text(if (showingCompactDetail) "‹ Settings" else "‹ News")
+                        }
+                    },
                 )
-                HorizontalDivider(modifier = Modifier.width(1.dp).fillMaxHeight())
-                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
-                    SettingsDetail(
-                        destination = selected ?: SettingsDestination.Account,
-                        bootstrap = bootstrap,
-                        navigationPreferences = navigationPreferences,
-                        navigationPreferenceState = navigationPreferenceState,
-                        navigationCategories = navigationCategories,
-                        navigationFeeds = navigationFeeds,
-                        onAccountChanged = onAccountChanged,
+            },
+        ) { padding ->
+            val contentModifier = Modifier.fillMaxSize().padding(padding)
+            if (listDetail) {
+                Row(contentModifier) {
+                    SettingsList(
+                        selected = selected,
+                        onSelected = { selected = it },
+                        modifier = Modifier.width(340.dp).fillMaxHeight(),
                     )
+                    HorizontalDivider(modifier = Modifier.width(1.dp).fillMaxHeight())
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+                        SettingsDetail(
+                            destination = selected ?: SettingsDestination.Account,
+                            bootstrap = bootstrap,
+                            navigationPreferences = navigationPreferences,
+                            navigationPreferenceState = navigationPreferenceState,
+                            navigationCategories = navigationCategories,
+                            navigationFeeds = navigationFeeds,
+                            onAccountChanged = onAccountChanged,
+                        )
+                    }
                 }
+            } else if (selected == null) {
+                SettingsList(
+                    selected = null,
+                    onSelected = { selected = it },
+                    modifier = contentModifier,
+                )
+            } else {
+                SettingsDetail(
+                    destination = selected!!,
+                    bootstrap = bootstrap,
+                    navigationPreferences = navigationPreferences,
+                    navigationPreferenceState = navigationPreferenceState,
+                    navigationCategories = navigationCategories,
+                    navigationFeeds = navigationFeeds,
+                    onAccountChanged = onAccountChanged,
+                    modifier = contentModifier,
+                )
             }
-        } else if (selected == null) {
-            SettingsList(
-                selected = null,
-                onSelected = { selected = it },
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            SettingsDetail(
-                destination = selected!!,
-                bootstrap = bootstrap,
-                navigationPreferences = navigationPreferences,
-                navigationPreferenceState = navigationPreferenceState,
-                navigationCategories = navigationCategories,
-                navigationFeeds = navigationFeeds,
-                onAccountChanged = onAccountChanged,
-                modifier = Modifier.fillMaxSize(),
-            )
         }
     }
 }
