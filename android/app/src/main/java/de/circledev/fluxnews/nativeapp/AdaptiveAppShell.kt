@@ -291,13 +291,13 @@ private fun NewsNavigationContent(
             color = MaterialTheme.colorScheme.primary,
         )
         NavigationDrawerItem(
-            label = { DrawerLabel("All News", projection?.unreadTotal ?: 0) },
+            label = { DrawerLabel("All News", projection?.unreadTotal ?: 0uL) },
             selected = selectedScope == AndroidNewsScope.All,
             onClick = { onScopeSelected(AndroidNewsScope.All) },
             icon = { DrawerIcon(R.drawable.ic_news, "All News") },
         )
         NavigationDrawerItem(
-            label = { DrawerLabel("Starred", projection?.starredTotal ?: 0) },
+            label = { DrawerLabel("Starred", projection?.starredTotal ?: 0uL) },
             selected = selectedScope == AndroidNewsScope.Starred,
             onClick = { onScopeSelected(AndroidNewsScope.Starred) },
             icon = { DrawerIcon(R.drawable.ic_star, "Starred") },
@@ -336,7 +336,7 @@ private fun NewsNavigationContent(
                 val expanded = category.id in expandedCategories
                 CategoryNavigationRow(
                     title = category.title,
-                    count = categoryCounts[category.id] ?: 0,
+                    count = categoryCounts[category.id] ?: 0uL,
                     selected = selectedScope == categoryScope,
                     containsSelectedFeed = selectedScope is AndroidNewsScope.Feed &&
                         selectedScope.categoryId == category.id,
@@ -361,7 +361,7 @@ private fun NewsNavigationContent(
                             )
                             FeedNavigationRow(
                                 title = feed.title,
-                                count = feedCounts[feed.id] ?: 0,
+                                count = feedCounts[feed.id] ?: 0uL,
                                 selected = selectedScope == feedScope,
                                 onClick = { onScopeSelected(feedScope) },
                             )
@@ -376,7 +376,7 @@ private fun NewsNavigationContent(
                     val feedScope = AndroidNewsScope.Feed(feed.id, feed.categoryId, feed.title)
                     FeedNavigationRow(
                         title = feed.title,
-                        count = feedCounts[feed.id] ?: 0,
+                        count = feedCounts[feed.id] ?: 0uL,
                         selected = selectedScope == feedScope,
                         onClick = { onScopeSelected(feedScope) },
                     )
