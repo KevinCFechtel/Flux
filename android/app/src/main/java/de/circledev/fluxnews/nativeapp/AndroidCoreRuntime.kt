@@ -4,18 +4,21 @@ import android.os.Looper
 import java.util.concurrent.Executors
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.channels.BufferOverflow
+import uniffi.flux_uniffi.AccountValidationResult
 import uniffi.flux_uniffi.CoreEvent
 import uniffi.flux_uniffi.EventListener
 import uniffi.flux_uniffi.EventSubscription
 import uniffi.flux_uniffi.Flux
+import uniffi.flux_uniffi.HttpHeader
 import uniffi.flux_uniffi.InitializationConfig
+import uniffi.flux_uniffi.validateMinifluxAccount
 
 /**
  * Process-scoped owner for the one active UniFFI Core session.
@@ -56,6 +59,15 @@ class AndroidCoreRuntime {
         }
     }
 
+    suspend fun validateAccount(
+        serverUrl: String,
+        apiKey: String,
+        customHeaders: List<HttpHeader>,
+    ): AccountValidationResult = withContext(remoteDispatcher) {
+        requireOffMainThread()
+        validateMinifluxAccount(serverUrl, apiKey, customHeaders)
+    }
+
     suspend fun openSession(config: InitializationConfig): Long = lifecycleMutex.withLock {
         withContext(remoteDispatcher) {
             requireOffMainThread()
@@ -63,7 +75,10 @@ class AndroidCoreRuntime {
                 lock()
                 try {
                     check(activeSession == null) { "A Core session is already active." }
-                    installSession(config)
+                    val session = createSession(config)
+                    activeSession = session
+                    acceptingWork = true
+                    session.generation
                 } finally {
                     unlock()
                 }
@@ -71,14 +86,29 @@ class AndroidCoreRuntime {
         }
     }
 
+    /**
+     * Builds the candidate before retiring the current session. If candidate initialization fails,
+     * the current session remains active and callers can continue using the previous account.
+     */
     suspend fun replaceSession(config: InitializationConfig): Long = lifecycleMutex.withLock {
         withContext(remoteDispatcher) {
             requireOffMainThread()
             sessionLock.writeLock().run {
                 lock()
                 try {
-                    closeActiveSessionLocked()
-                    installSession(config)
+                    val candidate = createSession(config)
+                    val previous = activeSession
+                    acceptingWork = false
+                    try {
+                        previous?.close()
+                    } catch (error: Throwable) {
+                        candidate.close()
+                        acceptingWork = previous != null
+                        throw error
+                    }
+                    activeSession = candidate
+                    acceptingWork = true
+                    candidate.generation
                 } finally {
                     unlock()
                 }
@@ -121,14 +151,11 @@ class AndroidCoreRuntime {
         }
     }
 
-    private fun installSession(config: InitializationConfig): Long {
+    private fun createSession(config: InitializationConfig): CoreSession {
         val flux = Flux.initialize(config)
         try {
             val subscription = flux.subscribeEvents(RuntimeEventListener(_events))
-            val generation = ++nextGeneration
-            activeSession = CoreSession(generation, config, flux, subscription)
-            acceptingWork = true
-            return generation
+            return CoreSession(++nextGeneration, config, flux, subscription)
         } catch (error: Throwable) {
             flux.close()
             throw error
@@ -136,21 +163,12 @@ class AndroidCoreRuntime {
     }
 
     private fun closeActiveSessionLocked() {
-        // The write lock excludes calls that already captured the Flux object and blocks new ones.
         acceptingWork = false
         val session = activeSession ?: return
         try {
-            session.subscription.unsubscribe()
+            session.close()
         } finally {
-            try {
-                session.subscription.close()
-            } finally {
-                try {
-                    session.flux.close()
-                } finally {
-                    activeSession = null
-                }
-            }
+            activeSession = null
         }
     }
 
@@ -165,7 +183,19 @@ class AndroidCoreRuntime {
         val initializationConfig: InitializationConfig,
         val flux: Flux,
         val subscription: EventSubscription,
-    )
+    ) {
+        fun close() {
+            try {
+                subscription.unsubscribe()
+            } finally {
+                try {
+                    subscription.close()
+                } finally {
+                    flux.close()
+                }
+            }
+        }
+    }
 
     private class RuntimeEventListener(
         private val events: MutableSharedFlow<CoreEvent>,
