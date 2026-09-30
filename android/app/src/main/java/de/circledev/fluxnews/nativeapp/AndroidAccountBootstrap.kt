@@ -10,6 +10,7 @@ import uniffi.flux_uniffi.InitializationConfig
 class AndroidAccountBootstrap private constructor(
     private val credentialReader: () -> StoredAccountCredentials?,
     private val credentialWriter: (StoredAccountCredentials) -> Unit,
+    private val credentialClearer: () -> Unit,
     private val hasActiveSession: () -> Boolean,
     private val sessionOpener: suspend (InitializationConfig) -> Unit,
     private val sessionReplacer: suspend (InitializationConfig) -> Unit,
@@ -23,6 +24,7 @@ class AndroidAccountBootstrap private constructor(
     ) : this(
         credentialReader = credentialStore::read,
         credentialWriter = credentialStore::write,
+        credentialClearer = credentialStore::clear,
         hasActiveSession = coreRuntime::hasActiveSession,
         sessionOpener = { config -> coreRuntime.openSession(config) },
         sessionReplacer = { config -> coreRuntime.replaceSession(config) },
@@ -33,6 +35,7 @@ class AndroidAccountBootstrap private constructor(
     internal constructor(
         credentialReader: () -> StoredAccountCredentials?,
         credentialWriter: (StoredAccountCredentials) -> Unit = {},
+        credentialClearer: () -> Unit = {},
         hasActiveSession: () -> Boolean,
         sessionOpener: suspend (InitializationConfig) -> Unit,
         sessionReplacer: suspend (InitializationConfig) -> Unit = {},
@@ -43,6 +46,7 @@ class AndroidAccountBootstrap private constructor(
     ) : this(
         credentialReader,
         credentialWriter,
+        credentialClearer,
         hasActiveSession,
         sessionOpener,
         sessionReplacer,
@@ -69,14 +73,8 @@ class AndroidAccountBootstrap private constructor(
     var state: State = State.Starting
         private set
 
-    /**
-     * Restores the one stored account after process start. Concurrent lifecycle callers serialize
-     * here so Activity recreation, future Workers, and services cannot create competing sessions.
-     */
     suspend fun restoreStoredAccount(): State = lifecycleMutex.withLock {
-        if (hasActiveSession()) {
-            return@withLock state
-        }
+        if (hasActiveSession()) return@withLock state
 
         state = State.Starting
         try {
@@ -93,11 +91,7 @@ class AndroidAccountBootstrap private constructor(
         state
     }
 
-    /**
-     * Validates candidates before persistence, stores the canonical installation base returned by
-     * Core, then activates it. Failed activation restores the previous credential envelope and the
-     * rollback-safe runtime keeps the previous session active.
-     */
+    /** Validates before persistence and stores Core's canonical installation base on success. */
     suspend fun activateAccount(
         serverUrl: String,
         apiKey: String,
@@ -109,13 +103,15 @@ class AndroidAccountBootstrap private constructor(
             return@withLock ActivationResult.Rejected("Enter both a Miniflux server URL and API key.")
         }
 
-        val headers = customHeaders.map { HttpHeader(name = it.name, value = it.value) }
         val validation = try {
-            accountValidator(proposedServer, proposedApiKey, headers)
+            accountValidator(
+                proposedServer,
+                proposedApiKey,
+                customHeaders.map { HttpHeader(name = it.name, value = it.value) },
+            )
         } catch (_: Exception) {
             return@withLock ActivationResult.Rejected("The Miniflux account could not be validated.")
         }
-
         val normalized = StoredAccountCredentials(
             serverUrl = validation.installationBase,
             apiKey = proposedApiKey,
@@ -133,7 +129,7 @@ class AndroidAccountBootstrap private constructor(
                 val config = configFactory.create(normalized)
                 if (hasActiveSession()) sessionReplacer(config) else sessionOpener(config)
             } catch (error: Exception) {
-                previous?.let(credentialWriter)
+                if (previous != null) credentialWriter(previous) else credentialClearer()
                 throw error
             }
         } catch (_: Exception) {
