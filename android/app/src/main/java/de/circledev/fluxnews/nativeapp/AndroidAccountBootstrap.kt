@@ -2,13 +2,34 @@ package de.circledev.fluxnews.nativeapp
 
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import uniffi.flux_uniffi.InitializationConfig
 
 /** Process-scoped account/session restoration for normal and headless Android startup paths. */
-class AndroidAccountBootstrap internal constructor(
-    private val credentialStore: AndroidCredentialStore,
-    private val coreRuntime: AndroidCoreRuntime,
+class AndroidAccountBootstrap private constructor(
+    private val credentialReader: () -> StoredAccountCredentials?,
+    private val hasActiveSession: () -> Boolean,
+    private val sessionOpener: (InitializationConfig) -> Unit,
     storagePaths: AndroidStoragePaths,
 ) {
+    internal constructor(
+        credentialStore: AndroidCredentialStore,
+        coreRuntime: AndroidCoreRuntime,
+        storagePaths: AndroidStoragePaths,
+    ) : this(
+        credentialReader = credentialStore::read,
+        hasActiveSession = coreRuntime::hasActiveSession,
+        sessionOpener = { config -> coreRuntime.openSession(config) },
+        storagePaths = storagePaths,
+    )
+
+    internal constructor(
+        credentialReader: () -> StoredAccountCredentials?,
+        hasActiveSession: () -> Boolean,
+        sessionOpener: (InitializationConfig) -> Unit,
+        storagePaths: AndroidStoragePaths,
+        @Suppress("UNUSED_PARAMETER") testOnly: Unit,
+    ) : this(credentialReader, hasActiveSession, sessionOpener, storagePaths)
+
     sealed interface State {
         data object Starting : State
         data object AccountRequired : State
@@ -28,17 +49,17 @@ class AndroidAccountBootstrap internal constructor(
      * Activity recreation, future Workers, and services cannot create competing Core sessions.
      */
     suspend fun restoreStoredAccount(): State = bootstrapMutex.withLock {
-        if (coreRuntime.hasActiveSession()) {
+        if (hasActiveSession()) {
             return@withLock state
         }
 
         state = State.Starting
         try {
-            val credentials = credentialStore.read()
+            val credentials = credentialReader()
             if (credentials == null) {
                 state = State.AccountRequired
             } else {
-                coreRuntime.openSession(configFactory.create(credentials))
+                sessionOpener(configFactory.create(credentials))
                 state = State.Ready(credentials.serverUrl)
             }
         } catch (error: Exception) {
