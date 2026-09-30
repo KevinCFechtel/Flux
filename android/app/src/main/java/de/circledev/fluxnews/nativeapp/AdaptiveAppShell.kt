@@ -1,5 +1,12 @@
 package de.circledev.fluxnews.nativeapp
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,6 +51,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.NavigationCountMode
 import uniffi.flux_uniffi.NavigationProjection
@@ -56,11 +67,11 @@ internal sealed interface AndroidNewsScope {
     data class Feed(val id: Long, val categoryId: Long, val title: String) : AndroidNewsScope
 }
 
-private sealed interface ShellScreen {
-    data object Timeline : ShellScreen
-    data object Search : ShellScreen
-    data object ListeningList : ShellScreen
-    data object Settings : ShellScreen
+private object ShellRoute {
+    const val Timeline = "timeline"
+    const val Search = "search"
+    const val ListeningList = "listening-list"
+    const val Settings = "settings"
 }
 
 private data class NewsNavigationModel(
@@ -69,11 +80,9 @@ private data class NewsNavigationModel(
 )
 
 /**
- * The timeline is the app root. News scope navigation is transient on phone-sized canvases and
- * persistent when both dimensions provide tablet/foldable room. Settings, Search and Listening
- * List are secondary surfaces rather than top-level tabs.
+ * The timeline is the app root. Scope selection stays inside its transient/permanent news drawer;
+ * Search, Listening List and Settings are real secondary Navigation Compose destinations.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AdaptiveAppShell(
     bootstrap: AndroidAccountBootstrap,
@@ -82,7 +91,7 @@ internal fun AdaptiveAppShell(
     onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var screen by remember { mutableStateOf<ShellScreen>(ShellScreen.Timeline) }
+    val navController = rememberNavController()
     var selectedScope by remember { mutableStateOf<AndroidNewsScope>(AndroidNewsScope.All) }
     var navigation by remember { mutableStateOf(NewsNavigationModel()) }
 
@@ -103,19 +112,77 @@ internal fun AdaptiveAppShell(
         coreRuntime.events.collect { reloadNavigation() }
     }
 
-    androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxSize()) {
+    NavHost(
+        navController = navController,
+        startDestination = ShellRoute.Timeline,
+        modifier = modifier,
+        enterTransition = { forwardEnterTransition() },
+        exitTransition = { forwardExitTransition() },
+        popEnterTransition = { backEnterTransition() },
+        popExitTransition = { backExitTransition() },
+    ) {
+        composable(ShellRoute.Timeline) {
+            TimelineDestination(
+                scope = selectedScope,
+                navigation = navigation,
+                state = state,
+                navController = navController,
+                onScopeSelected = { selectedScope = it },
+            )
+        }
+        composable(ShellRoute.Search) {
+            SecondaryDestination(
+                title = "Search",
+                message = "Native article search is connected to this destination in E3.",
+                onBack = navController::popBackStack,
+            )
+        }
+        composable(ShellRoute.ListeningList) {
+            SecondaryDestination(
+                title = "Listening List",
+                message = "Native media presentation is connected to this destination in the media phase.",
+                onBack = navController::popBackStack,
+            )
+        }
+        composable(ShellRoute.Settings) {
+            SettingsDestination(
+                bootstrap = bootstrap,
+                onAccountChanged = onAccountChanged,
+                onBack = navController::popBackStack,
+            )
+        }
+    }
+}
+
+private fun forwardEnterTransition(): EnterTransition =
+    slideInHorizontally(animationSpec = tween(260), initialOffsetX = { it / 5 }) +
+        fadeIn(animationSpec = tween(220))
+
+private fun forwardExitTransition(): ExitTransition =
+    slideOutHorizontally(animationSpec = tween(260), targetOffsetX = { -it / 12 }) +
+        fadeOut(animationSpec = tween(180))
+
+private fun backEnterTransition(): EnterTransition =
+    slideInHorizontally(animationSpec = tween(240), initialOffsetX = { -it / 12 }) +
+        fadeIn(animationSpec = tween(200))
+
+private fun backExitTransition(): ExitTransition =
+    slideOutHorizontally(animationSpec = tween(240), targetOffsetX = { it / 5 }) +
+        fadeOut(animationSpec = tween(180))
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimelineDestination(
+    scope: AndroidNewsScope,
+    navigation: NewsNavigationModel,
+    state: AndroidAccountBootstrap.State.Ready,
+    navController: NavHostController,
+    onScopeSelected: (AndroidNewsScope) -> Unit,
+) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
         // A wide phone in landscape must remain transient. Requiring useful height as well as
         // width mirrors the iOS size-class contract without naming device models.
         val persistentNewsNavigation = maxWidth >= 600.dp && maxHeight >= 600.dp
-
-        if (screen == ShellScreen.Settings) {
-            SettingsScreen(
-                bootstrap = bootstrap,
-                onAccountChanged = onAccountChanged,
-                onBack = { screen = ShellScreen.Timeline },
-            )
-            return@BoxWithConstraints
-        }
 
         if (persistentNewsNavigation) {
             PermanentNavigationDrawer(
@@ -123,21 +190,17 @@ internal fun AdaptiveAppShell(
                     PermanentDrawerSheet(modifier = Modifier.width(320.dp)) {
                         NewsNavigationContent(
                             navigation = navigation,
-                            selectedScope = selectedScope,
-                            onScopeSelected = {
-                                selectedScope = it
-                                screen = ShellScreen.Timeline
-                            },
-                            onSearch = { screen = ShellScreen.Search },
-                            onListeningList = { screen = ShellScreen.ListeningList },
-                            onSettings = { screen = ShellScreen.Settings },
+                            selectedScope = scope,
+                            onScopeSelected = onScopeSelected,
+                            onSearch = { navController.navigate(ShellRoute.Search) },
+                            onListeningList = { navController.navigate(ShellRoute.ListeningList) },
+                            onSettings = { navController.navigate(ShellRoute.Settings) },
                         )
                     }
                 },
             ) {
                 NewsRootContent(
-                    screen = screen,
-                    scope = selectedScope,
+                    scope = scope,
                     navigation = navigation,
                     state = state,
                     persistentNavigation = true,
@@ -147,37 +210,34 @@ internal fun AdaptiveAppShell(
         } else {
             val drawerState = rememberDrawerState(DrawerValue.Closed)
             val coroutineScope = rememberCoroutineScope()
+
+            fun navigateAfterDrawerCloses(route: String) {
+                coroutineScope.launch {
+                    drawerState.close()
+                    navController.navigate(route)
+                }
+            }
+
             ModalNavigationDrawer(
                 drawerState = drawerState,
                 drawerContent = {
                     ModalDrawerSheet(modifier = Modifier.widthIn(max = 360.dp)) {
                         NewsNavigationContent(
                             navigation = navigation,
-                            selectedScope = selectedScope,
+                            selectedScope = scope,
                             onScopeSelected = {
-                                selectedScope = it
-                                screen = ShellScreen.Timeline
+                                onScopeSelected(it)
                                 coroutineScope.launch { drawerState.close() }
                             },
-                            onSearch = {
-                                screen = ShellScreen.Search
-                                coroutineScope.launch { drawerState.close() }
-                            },
-                            onListeningList = {
-                                screen = ShellScreen.ListeningList
-                                coroutineScope.launch { drawerState.close() }
-                            },
-                            onSettings = {
-                                screen = ShellScreen.Settings
-                                coroutineScope.launch { drawerState.close() }
-                            },
+                            onSearch = { navigateAfterDrawerCloses(ShellRoute.Search) },
+                            onListeningList = { navigateAfterDrawerCloses(ShellRoute.ListeningList) },
+                            onSettings = { navigateAfterDrawerCloses(ShellRoute.Settings) },
                         )
                     }
                 },
             ) {
                 NewsRootContent(
-                    screen = screen,
-                    scope = selectedScope,
+                    scope = scope,
                     navigation = navigation,
                     state = state,
                     persistentNavigation = false,
@@ -191,7 +251,6 @@ internal fun AdaptiveAppShell(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NewsRootContent(
-    screen: ShellScreen,
     scope: AndroidNewsScope,
     navigation: NewsNavigationModel,
     state: AndroidAccountBootstrap.State.Ready,
@@ -212,42 +271,24 @@ private fun NewsRootContent(
                     }
                 },
                 title = {
-                    when (screen) {
-                        ShellScreen.Timeline -> {
-                            if (persistentNavigation) {
-                                ScopeTitle(scope, navigation)
-                            } else {
-                                TextButton(onClick = onOpenNavigation) {
-                                    ScopeTitle(scope, navigation)
-                                    Icon(
-                                        painter = painterResource(R.drawable.ic_expand_more),
-                                        contentDescription = "Choose news scope",
-                                        modifier = Modifier.padding(start = 4.dp),
-                                    )
-                                }
-                            }
+                    if (persistentNavigation) {
+                        ScopeTitle(scope, navigation)
+                    } else {
+                        TextButton(onClick = onOpenNavigation) {
+                            ScopeTitle(scope, navigation)
+                            Icon(
+                                painter = painterResource(R.drawable.ic_expand_more),
+                                contentDescription = "Choose news scope",
+                                modifier = Modifier.padding(start = 4.dp),
+                            )
                         }
-                        ShellScreen.Search -> Text("Search")
-                        ShellScreen.ListeningList -> Text("Listening List")
-                        ShellScreen.Settings -> Unit
                     }
                 },
             )
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            when (screen) {
-                ShellScreen.Timeline -> NewsTimelinePlaceholder(scope, navigation, state)
-                ShellScreen.Search -> SecondaryPlaceholder(
-                    title = "Search",
-                    message = "Native article search is connected to this destination in E3.",
-                )
-                ShellScreen.ListeningList -> SecondaryPlaceholder(
-                    title = "Listening List",
-                    message = "Native media presentation is connected to this destination in the media phase.",
-                )
-                ShellScreen.Settings -> Unit
-            }
+            NewsTimelinePlaceholder(scope, navigation, state)
         }
     }
 }
@@ -530,25 +571,36 @@ private fun NewsTimelinePlaceholder(
         ) {
             Text(scopeTitle(scope), style = MaterialTheme.typography.headlineLarge)
             Text("Native article timeline arrives in E3", style = MaterialTheme.typography.titleMedium)
-            navigation.error?.let {
-                Text(it, color = MaterialTheme.colorScheme.error)
-            }
+            navigation.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Text(state.serverUrl, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SecondaryPlaceholder(title: String, message: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(
-            modifier = Modifier.padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+private fun SecondaryDestination(
+    title: String,
+    message: String,
+    onBack: () -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(title) },
+                navigationIcon = {
+                    TextButton(onClick = onBack) { Text("‹ News") }
+                },
+            )
+        },
+    ) { padding ->
+        Box(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentAlignment = Alignment.Center,
         ) {
-            Text(title, style = MaterialTheme.typography.headlineMedium)
             Text(
                 message,
+                modifier = Modifier.padding(24.dp),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -558,7 +610,7 @@ private fun SecondaryPlaceholder(title: String, message: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SettingsScreen(
+private fun SettingsDestination(
     bootstrap: AndroidAccountBootstrap,
     onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
     onBack: () -> Unit,
