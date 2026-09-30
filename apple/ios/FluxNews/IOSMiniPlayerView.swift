@@ -29,6 +29,15 @@ enum IOSMiniPlayerPresentation {
     ) -> Bool {
         loadedEnclosureID != nil && status != .stopped
     }
+
+    static func elapsedDurationLabel(
+        positionMs: UInt64,
+        durationMs: UInt64?
+    ) -> String? {
+        guard let durationMs, durationMs > 0 else { return nil }
+        let positionMs = min(positionMs, durationMs)
+        return "\(IOSMediaTimePresentation.label(positionMs)) / \(IOSMediaTimePresentation.label(durationMs))"
+    }
 }
 
 enum IOSMiniPlayerStyle: Equatable {
@@ -139,7 +148,7 @@ struct IOSMiniPlayerView: View {
                 playPauseButton(diameter: 34)
             }
 
-            progressView
+            progressWithTime
         }
     }
 
@@ -195,7 +204,7 @@ struct IOSMiniPlayerView: View {
                 playPauseButton(diameter: 32)
             }
 
-            progressView
+            progressWithTime
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -297,12 +306,28 @@ struct IOSMiniPlayerView: View {
     }
 
     @ViewBuilder
-    private var progressView: some View {
-        if let progressFraction {
-            ProgressView(value: progressFraction)
-                .progressViewStyle(.linear)
-                .tint(Color.accentColor)
-                .accessibilityHidden(true)
+    private var progressWithTime: some View {
+        if let progressFraction,
+           let timeLabel = IOSMiniPlayerPresentation.elapsedDurationLabel(
+               positionMs: playbackState.positionMs,
+               durationMs: playbackState.durationMs
+           ) {
+            HStack(spacing: 8) {
+                ProgressView(value: progressFraction)
+                    .progressViewStyle(.linear)
+                    .tint(Color.accentColor)
+                    .frame(maxWidth: .infinity)
+
+                Text(timeLabel)
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(String(localized: "Playback progress"))
+            .accessibilityValue(timeLabel)
         }
     }
 
