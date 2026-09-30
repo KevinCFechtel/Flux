@@ -59,14 +59,6 @@ import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.NavigationCountMode
 import uniffi.flux_uniffi.NavigationProjection
 
-/** Product-level news scopes shared by the Android navigation shell and the E3 timeline. */
-internal sealed interface AndroidNewsScope {
-    data object All : AndroidNewsScope
-    data object Starred : AndroidNewsScope
-    data class Category(val id: Long, val title: String) : AndroidNewsScope
-    data class Feed(val id: Long, val categoryId: Long, val title: String) : AndroidNewsScope
-}
-
 private object ShellRoute {
     const val Timeline = "timeline"
     const val Search = "search"
@@ -87,6 +79,7 @@ private data class NewsNavigationModel(
 internal fun AdaptiveAppShell(
     bootstrap: AndroidAccountBootstrap,
     coreRuntime: AndroidCoreRuntime,
+    navigationPreferences: AndroidNavigationPreferences,
     state: AndroidAccountBootstrap.State.Ready,
     onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
     modifier: Modifier = Modifier,
@@ -94,13 +87,13 @@ internal fun AdaptiveAppShell(
     val navController = rememberNavController()
     var selectedScope by remember { mutableStateOf<AndroidNewsScope>(AndroidNewsScope.All) }
     var navigation by remember { mutableStateOf(NewsNavigationModel()) }
+    var preferenceState by remember { mutableStateOf<AndroidNavigationPreferenceState?>(null) }
+    var startupScopeApplied by remember { mutableStateOf(false) }
 
     suspend fun reloadNavigation() {
         navigation = try {
             NewsNavigationModel(
-                projection = coreRuntime.local { core ->
-                    core.navigationProjection(NavigationCountMode.UNREAD)
-                },
+                projection = coreRuntime.local { core -> core.navigationProjection(NavigationCountMode.UNREAD) },
             )
         } catch (_: Exception) {
             NewsNavigationModel(error = "Navigation data could not be loaded.")
@@ -111,6 +104,35 @@ internal fun AdaptiveAppShell(
         reloadNavigation()
         coreRuntime.events.collect { reloadNavigation() }
     }
+    LaunchedEffect(navigationPreferences) {
+        navigationPreferences.state.collect { preferenceState = it }
+    }
+    LaunchedEffect(preferenceState, navigation.projection) {
+        if (!startupScopeApplied) {
+            val preferences = preferenceState
+            val projection = navigation.projection
+            if (preferences != null && projection != null) {
+                selectedScope = AndroidNavigationPolicy.resolveStartupScope(
+                    preferences = preferences,
+                    categories = projection.catalog.categories.map {
+                        AndroidNavigationCategoryRef(it.id, it.title)
+                    },
+                    feeds = projection.catalog.feeds.map {
+                        AndroidNavigationFeedRef(it.id, it.categoryId, it.title)
+                    },
+                )
+                startupScopeApplied = true
+            }
+        }
+    }
+
+    val currentPreferences = preferenceState ?: AndroidNavigationPreferenceState()
+    val categories = navigation.projection?.catalog?.categories?.map {
+        AndroidNavigationCategoryRef(it.id, it.title)
+    }.orEmpty()
+    val feeds = navigation.projection?.catalog?.feeds?.map {
+        AndroidNavigationFeedRef(it.id, it.categoryId, it.title)
+    }.orEmpty()
 
     NavHost(
         navController = navController,
@@ -125,6 +147,7 @@ internal fun AdaptiveAppShell(
             TimelineDestination(
                 scope = selectedScope,
                 navigation = navigation,
+                preferences = currentPreferences,
                 state = state,
                 navController = navController,
                 onScopeSelected = { selectedScope = it },
@@ -147,6 +170,10 @@ internal fun AdaptiveAppShell(
         composable(ShellRoute.Settings) {
             SettingsDestination(
                 bootstrap = bootstrap,
+                navigationPreferences = navigationPreferences,
+                navigationPreferenceState = currentPreferences,
+                navigationCategories = categories,
+                navigationFeeds = feeds,
                 onAccountChanged = onAccountChanged,
                 onBack = navController::popBackStack,
             )
@@ -155,33 +182,28 @@ internal fun AdaptiveAppShell(
 }
 
 private fun forwardEnterTransition(): EnterTransition =
-    slideInHorizontally(animationSpec = tween(260), initialOffsetX = { it / 5 }) +
-        fadeIn(animationSpec = tween(220))
+    slideInHorizontally(animationSpec = tween(260), initialOffsetX = { it / 5 }) + fadeIn(animationSpec = tween(220))
 
 private fun forwardExitTransition(): ExitTransition =
-    slideOutHorizontally(animationSpec = tween(260), targetOffsetX = { -it / 12 }) +
-        fadeOut(animationSpec = tween(180))
+    slideOutHorizontally(animationSpec = tween(260), targetOffsetX = { -it / 12 }) + fadeOut(animationSpec = tween(180))
 
 private fun backEnterTransition(): EnterTransition =
-    slideInHorizontally(animationSpec = tween(240), initialOffsetX = { -it / 12 }) +
-        fadeIn(animationSpec = tween(200))
+    slideInHorizontally(animationSpec = tween(240), initialOffsetX = { -it / 12 }) + fadeIn(animationSpec = tween(200))
 
 private fun backExitTransition(): ExitTransition =
-    slideOutHorizontally(animationSpec = tween(240), targetOffsetX = { it / 5 }) +
-        fadeOut(animationSpec = tween(180))
+    slideOutHorizontally(animationSpec = tween(240), targetOffsetX = { it / 5 }) + fadeOut(animationSpec = tween(180))
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TimelineDestination(
     scope: AndroidNewsScope,
     navigation: NewsNavigationModel,
+    preferences: AndroidNavigationPreferenceState,
     state: AndroidAccountBootstrap.State.Ready,
     navController: NavHostController,
     onScopeSelected: (AndroidNewsScope) -> Unit,
 ) {
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
-        // A wide phone in landscape must remain transient. Requiring useful height as well as
-        // width mirrors the iOS size-class contract without naming device models.
         val persistentNewsNavigation = maxWidth >= 600.dp && maxHeight >= 600.dp
 
         if (persistentNewsNavigation) {
@@ -190,6 +212,7 @@ private fun TimelineDestination(
                     PermanentDrawerSheet(modifier = Modifier.width(320.dp)) {
                         NewsNavigationContent(
                             navigation = navigation,
+                            preferences = preferences,
                             selectedScope = scope,
                             onScopeSelected = onScopeSelected,
                             onSearch = { navController.navigate(ShellRoute.Search) },
@@ -199,31 +222,24 @@ private fun TimelineDestination(
                     }
                 },
             ) {
-                NewsRootContent(
-                    scope = scope,
-                    navigation = navigation,
-                    state = state,
-                    persistentNavigation = true,
-                    onOpenNavigation = {},
-                )
+                NewsRootContent(scope, navigation, state, true) {}
             }
         } else {
             val drawerState = rememberDrawerState(DrawerValue.Closed)
             val coroutineScope = rememberCoroutineScope()
-
             fun navigateAfterDrawerCloses(route: String) {
                 coroutineScope.launch {
                     drawerState.close()
                     navController.navigate(route)
                 }
             }
-
             ModalNavigationDrawer(
                 drawerState = drawerState,
                 drawerContent = {
                     ModalDrawerSheet(modifier = Modifier.widthIn(max = 360.dp)) {
                         NewsNavigationContent(
                             navigation = navigation,
+                            preferences = preferences,
                             selectedScope = scope,
                             onScopeSelected = {
                                 onScopeSelected(it)
@@ -263,10 +279,7 @@ private fun NewsRootContent(
                 navigationIcon = {
                     if (!persistentNavigation) {
                         IconButton(onClick = onOpenNavigation) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_menu),
-                                contentDescription = "Open navigation",
-                            )
+                            Icon(painterResource(R.drawable.ic_menu), "Open navigation")
                         }
                     }
                 },
@@ -277,9 +290,9 @@ private fun NewsRootContent(
                         TextButton(onClick = onOpenNavigation) {
                             ScopeTitle(scope, navigation)
                             Icon(
-                                painter = painterResource(R.drawable.ic_expand_more),
-                                contentDescription = "Choose news scope",
-                                modifier = Modifier.padding(start = 4.dp),
+                                painterResource(R.drawable.ic_expand_more),
+                                "Choose news scope",
+                                Modifier.padding(start = 4.dp),
                             )
                         }
                     }
@@ -296,6 +309,7 @@ private fun NewsRootContent(
 @Composable
 private fun NewsNavigationContent(
     navigation: NewsNavigationModel,
+    preferences: AndroidNavigationPreferenceState,
     selectedScope: AndroidNewsScope,
     onScopeSelected: (AndroidNewsScope) -> Unit,
     onSearch: () -> Unit,
@@ -305,6 +319,18 @@ private fun NewsNavigationContent(
     val projection = navigation.projection
     val feedCounts = projection?.feedCounts?.associate { it.id to it.count }.orEmpty()
     val categoryCounts = projection?.categoryCounts?.associate { it.id to it.count }.orEmpty()
+    val categoryRefs = projection?.catalog?.categories?.map { AndroidNavigationCategoryRef(it.id, it.title) }.orEmpty()
+    val feedRefs = projection?.catalog?.feeds?.map { AndroidNavigationFeedRef(it.id, it.categoryId, it.title) }.orEmpty()
+    val visibleFeedIds = AndroidNavigationPolicy.visibleFeedIds(
+        preferences.hideEmptyNavigationEntries,
+        feedRefs,
+        feedCounts,
+    )
+    val visibleCategoryIds = if (preferences.hideEmptyNavigationEntries) {
+        AndroidNavigationPolicy.visibleCategoryIds(categoryRefs, feedRefs, visibleFeedIds)
+    } else {
+        categoryRefs.mapTo(mutableSetOf()) { it.id }
+    }
     var expandedCategories by remember { mutableStateOf(setOf<Long>()) }
 
     LaunchedEffect(selectedScope, projection) {
@@ -314,10 +340,7 @@ private fun NewsNavigationContent(
     }
 
     Column(
-        modifier = Modifier
-            .fillMaxHeight()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp),
+        modifier = Modifier.fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp),
     ) {
         Text(
             "FluxNews",
@@ -368,51 +391,43 @@ private fun NewsNavigationContent(
             Text(
                 navigation.error ?: "Loading feeds…",
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            projection.catalog.categories.forEach { category ->
-                val categoryScope = AndroidNewsScope.Category(category.id, category.title)
-                val expanded = category.id in expandedCategories
-                CategoryNavigationRow(
-                    title = category.title,
-                    count = categoryCounts[category.id] ?: 0uL,
-                    selected = selectedScope == categoryScope,
-                    containsSelectedFeed = selectedScope is AndroidNewsScope.Feed &&
-                        selectedScope.categoryId == category.id,
-                    expanded = expanded,
-                    onToggleExpanded = {
-                        expandedCategories = if (expanded) {
-                            expandedCategories - category.id
-                        } else {
-                            expandedCategories + category.id
-                        }
-                    },
-                    onSelected = { onScopeSelected(categoryScope) },
-                )
-                if (expanded) {
-                    projection.catalog.feeds
-                        .filter { it.categoryId == category.id }
-                        .forEach { feed ->
-                            val feedScope = AndroidNewsScope.Feed(
-                                id = feed.id,
-                                categoryId = feed.categoryId,
-                                title = feed.title,
-                            )
-                            FeedNavigationRow(
-                                title = feed.title,
-                                count = feedCounts[feed.id] ?: 0uL,
-                                selected = selectedScope == feedScope,
-                                onClick = { onScopeSelected(feedScope) },
-                            )
-                        }
+            projection.catalog.categories
+                .filter { it.id in visibleCategoryIds }
+                .forEach { category ->
+                    val categoryScope = AndroidNewsScope.Category(category.id, category.title)
+                    val expanded = category.id in expandedCategories
+                    CategoryNavigationRow(
+                        title = category.title,
+                        count = categoryCounts[category.id] ?: 0uL,
+                        selected = selectedScope == categoryScope,
+                        containsSelectedFeed = selectedScope is AndroidNewsScope.Feed && selectedScope.categoryId == category.id,
+                        expanded = expanded,
+                        onToggleExpanded = {
+                            expandedCategories = if (expanded) expandedCategories - category.id else expandedCategories + category.id
+                        },
+                        onSelected = { onScopeSelected(categoryScope) },
+                    )
+                    if (expanded) {
+                        projection.catalog.feeds
+                            .filter { it.categoryId == category.id && it.id in visibleFeedIds }
+                            .forEach { feed ->
+                                val feedScope = AndroidNewsScope.Feed(feed.id, feed.categoryId, feed.title)
+                                FeedNavigationRow(
+                                    title = feed.title,
+                                    count = feedCounts[feed.id] ?: 0uL,
+                                    selected = selectedScope == feedScope,
+                                    onClick = { onScopeSelected(feedScope) },
+                                )
+                            }
+                    }
                 }
-            }
 
             val knownCategoryIds = projection.catalog.categories.mapTo(mutableSetOf()) { it.id }
             projection.catalog.feeds
-                .filter { it.categoryId !in knownCategoryIds }
+                .filter { it.categoryId !in knownCategoryIds && it.id in visibleFeedIds }
                 .forEach { feed ->
                     val feedScope = AndroidNewsScope.Feed(feed.id, feed.categoryId, feed.title)
                     FeedNavigationRow(
@@ -454,22 +469,17 @@ private fun CategoryNavigationRow(
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onToggleExpanded) {
                 Icon(
-                    painter = painterResource(
-                        if (expanded) R.drawable.ic_expand_more else R.drawable.ic_chevron_right,
-                    ),
-                    contentDescription = if (expanded) "Collapse $title" else "Expand $title",
+                    painterResource(if (expanded) R.drawable.ic_expand_more else R.drawable.ic_chevron_right),
+                    if (expanded) "Collapse $title" else "Expand $title",
                 )
             }
             Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable(onClick = onSelected)
-                    .padding(end = 16.dp, top = 14.dp, bottom = 14.dp),
+                modifier = Modifier.weight(1f).clickable(onClick = onSelected).padding(end = 16.dp, top = 14.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    painter = painterResource(R.drawable.ic_folder),
-                    contentDescription = null,
+                    painterResource(R.drawable.ic_folder),
+                    null,
                     tint = if (containsSelectedFeed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
@@ -484,23 +494,12 @@ private fun CategoryNavigationRow(
 }
 
 @Composable
-private fun FeedNavigationRow(
-    title: String,
-    count: ULong,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
+private fun FeedNavigationRow(title: String, count: ULong, selected: Boolean, onClick: () -> Unit) {
     NavigationDrawerItem(
         label = { DrawerLabel(title, count) },
         selected = selected,
         onClick = onClick,
-        icon = {
-            Text(
-                "•",
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        },
+        icon = { Text("•", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary) },
         modifier = Modifier.padding(start = 32.dp),
     )
 }
@@ -526,7 +525,7 @@ private fun CountText(count: ULong) {
 
 @Composable
 private fun DrawerIcon(drawable: Int, description: String) {
-    Icon(painter = painterResource(drawable), contentDescription = description)
+    Icon(painterResource(drawable), description)
 }
 
 @Composable
@@ -557,7 +556,6 @@ private fun scopeTitle(scope: AndroidNewsScope): String = when (scope) {
     is AndroidNewsScope.Feed -> scope.title
 }
 
-/** E3 replaces this content while retaining the finalized E2 navigation shell and scope model. */
 @Composable
 private fun NewsTimelinePlaceholder(
     scope: AndroidNewsScope,
@@ -579,25 +577,16 @@ private fun NewsTimelinePlaceholder(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SecondaryDestination(
-    title: String,
-    message: String,
-    onBack: () -> Unit,
-) {
+private fun SecondaryDestination(title: String, message: String, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(title) },
-                navigationIcon = {
-                    TextButton(onClick = onBack) { Text("‹ News") }
-                },
+                navigationIcon = { TextButton(onClick = onBack) { Text("‹ News") } },
             )
         },
     ) { padding ->
-        Box(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentAlignment = Alignment.Center,
-        ) {
+        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
             Text(
                 message,
                 modifier = Modifier.padding(24.dp),
@@ -612,6 +601,10 @@ private fun SecondaryDestination(
 @Composable
 private fun SettingsDestination(
     bootstrap: AndroidAccountBootstrap,
+    navigationPreferences: AndroidNavigationPreferences,
+    navigationPreferenceState: AndroidNavigationPreferenceState,
+    navigationCategories: List<AndroidNavigationCategoryRef>,
+    navigationFeeds: List<AndroidNavigationFeedRef>,
     onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -619,14 +612,16 @@ private fun SettingsDestination(
         topBar = {
             TopAppBar(
                 title = { Text("Settings") },
-                navigationIcon = {
-                    TextButton(onClick = onBack) { Text("‹ News") }
-                },
+                navigationIcon = { TextButton(onClick = onBack) { Text("‹ News") } },
             )
         },
     ) { padding ->
         SettingsShell(
             bootstrap = bootstrap,
+            navigationPreferences = navigationPreferences,
+            navigationPreferenceState = navigationPreferenceState,
+            navigationCategories = navigationCategories,
+            navigationFeeds = navigationFeeds,
             onAccountChanged = onAccountChanged,
             modifier = Modifier.fillMaxSize().padding(padding),
         )
