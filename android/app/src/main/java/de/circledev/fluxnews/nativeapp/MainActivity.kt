@@ -38,7 +38,13 @@ class MainActivity : ComponentActivity() {
         val articlePreferences = application.articlePreferences
         setContent {
             FluxNewsTheme {
-                CompositionLocalProvider(LocalAndroidArticlePreferences provides articlePreferences) {
+                val coreArticleSettings = remember(coreRuntime) {
+                    AndroidCoreArticleSettings(coreRuntime)
+                }
+                CompositionLocalProvider(
+                    LocalAndroidArticlePreferences provides articlePreferences,
+                    LocalAndroidCoreArticleSettings provides coreArticleSettings,
+                ) {
                     FluxNewsApp(bootstrap, coreRuntime, syncCoordinator, navigationPreferences)
                 }
             }
