@@ -25,6 +25,7 @@ class FluxApplication : Application() {
     val accountBootstrap: AndroidAccountBootstrap by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidAccountBootstrap(
             credentialStore = credentialStore,
+            preferenceStore = preferenceStore,
             coreRuntime = coreRuntime,
             storagePaths = storagePaths,
         )
