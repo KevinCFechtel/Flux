@@ -8,7 +8,7 @@ import uniffi.flux_uniffi.InitializationConfig
 class AndroidAccountBootstrap private constructor(
     private val credentialReader: () -> StoredAccountCredentials?,
     private val hasActiveSession: () -> Boolean,
-    private val sessionOpener: (InitializationConfig) -> Unit,
+    private val sessionOpener: suspend (InitializationConfig) -> Unit,
     storagePaths: AndroidStoragePaths,
 ) {
     internal constructor(
@@ -25,7 +25,7 @@ class AndroidAccountBootstrap private constructor(
     internal constructor(
         credentialReader: () -> StoredAccountCredentials?,
         hasActiveSession: () -> Boolean,
-        sessionOpener: (InitializationConfig) -> Unit,
+        sessionOpener: suspend (InitializationConfig) -> Unit,
         storagePaths: AndroidStoragePaths,
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
     ) : this(credentialReader, hasActiveSession, sessionOpener, storagePaths)
