@@ -502,6 +502,18 @@ chapter/show-notes/download presentation and related SwiftUI surfaces. D7 must
 not depend on those views' geometry, action placement, buffering-ring design, or
 presentation hierarchy.
 
+The accepted in-app mini-player presentation is adaptive and remains a native
+iOS presentation concern over the single D6 playback runtime: compact iPhone
+portrait integrates Now Playing into the Article List bottom dock, compact
+landscape presents a reduced Now Playing control in the top navigation chrome,
+persistent iPad split navigation presents it as a sidebar footer, and a
+collapsed persistent split uses the compact top control. The mini player is
+visible for loaded paused/playing media, disappears for stopped playback, opens
+the existing full player, and replaces the former configurable Article List
+`Now Playing` action. iOS 26+ may use system glass presentation while older
+supported releases retain a material fallback; this does not introduce a
+TabView/UITabBarController dependency.
+
 D6 runtime semantics remain authoritative: Play/resume, Pause checkpointing,
 Stop checkpoint/retain/release-audio-session, seek/skip, natural completion,
 restart, local/remote source resolution, playback rate, sleep timer, chapters,

@@ -42,7 +42,6 @@ enum IOSBottomAction: String, CaseIterable, Equatable, Hashable, Identifiable {
         .markAllRead,
         .markAllReadAndNext,
         .listeningList,
-        .nowPlaying,
         .settings,
     ]
 
@@ -526,10 +525,15 @@ enum IOSActionFeedbackPresentation {
     static let autoDismissDelay: Duration = .seconds(3)
     static let baseBottomPadding: CGFloat = 18
     static let bottomActionBarClearance: CGFloat = 54
+    static let miniPlayerClearance: CGFloat = 58
 
-    static func bottomPadding(hasBottomActionBar: Bool) -> CGFloat {
+    static func bottomPadding(
+        hasBottomActionBar: Bool,
+        hasMiniPlayer: Bool = false
+    ) -> CGFloat {
         baseBottomPadding
             + (hasBottomActionBar ? bottomActionBarClearance : 0)
+            + (hasMiniPlayer ? miniPlayerClearance : 0)
     }
 
     static func shouldDismiss(
@@ -580,6 +584,8 @@ struct ContentView: View {
     var newsreaderStore: NewsreaderStore
     @StateObject private var searchStore = IOSSearchStore()
     @StateObject private var listeningListStore = IOSListeningListStore()
+    @ObservedObject private var playbackState =
+        IOSAppRuntime.shared.mediaRuntime.playbackPresentationState
     @State private var navigationPresented = false
     @State private var searchPresented = false
     @State private var listeningListPresented = false
@@ -635,6 +641,12 @@ struct ContentView: View {
         )
     }
 
+    private var miniPlayerPlacement: IOSMiniPlayerPlacement {
+        IOSMiniPlayerPlacementPolicy.placement(
+            for: articleListChromeMode
+        )
+    }
+
     private var adaptiveSplitColumnVisibility: Binding<NavigationSplitViewVisibility> {
         Binding(
             get: { splitColumnVisibility },
@@ -662,7 +674,9 @@ struct ContentView: View {
         .overlay(alignment: .bottom) {
             actionFeedbackOverlay(
                 active: !searchPresented && !listeningListPresented,
-                hasBottomActionBar: articleListChromeMode == .compactPortrait
+                hasBottomActionBar: articleListChromeMode == .compactPortrait,
+                hasMiniPlayer: miniPlayerPlacement == .portraitBottomDock
+                    && miniPlayerIsVisible
             )
         }
         .animation(.easeInOut(duration: 0.2), value: actionFeedback?.id)
@@ -686,7 +700,8 @@ struct ContentView: View {
             .overlay(alignment: .bottom) {
                 actionFeedbackOverlay(
                     active: true,
-                    hasBottomActionBar: false
+                    hasBottomActionBar: false,
+                    hasMiniPlayer: false
                 )
             }
             .animation(.easeInOut(duration: 0.2), value: actionFeedback?.id)
@@ -866,7 +881,7 @@ struct ContentView: View {
         onDismiss: @escaping () -> Void
     ) -> some View {
         IOSMediaPlayerView(
-            playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+            playbackState: playbackState,
             transferState: IOSAppRuntime.shared.mediaRuntime.transferPresentationState,
             sleepTimer: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator.sleepTimer,
             playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
@@ -920,8 +935,7 @@ struct ContentView: View {
     @ViewBuilder
     private var nowPlayingPlayerView: some View {
         let item = IOSListeningListPlayerPresentation.item(
-            for: IOSAppRuntime.shared.mediaRuntime
-                .playbackPresentationState.loadedEnclosure,
+            for: playbackState.loadedEnclosure,
             in: listeningListStore.items
         )
         mediaPlayerView(item: item) {
@@ -977,7 +991,7 @@ struct ContentView: View {
             } catch {
                 let coordinator = IOSAppRuntime.shared.mediaRuntime
                     .playbackCoordinator
-                IOSAppRuntime.shared.mediaRuntime.playbackPresentationState
+                playbackState
                     .setErrorMessage(
                         coordinator.lastStartFailureDescription
                             ?? error.localizedDescription
@@ -998,7 +1012,7 @@ struct ContentView: View {
         }
 
         IOSMediaPlayerView(
-            playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+            playbackState: playbackState,
             transferState: IOSAppRuntime.shared.mediaRuntime.transferPresentationState,
             sleepTimer: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator.sleepTimer,
             playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
@@ -1146,6 +1160,9 @@ struct ContentView: View {
                 onListeningList: openListeningList,
                 onSearch: openSearch
             )
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                sidebarMiniPlayer
+            }
             .toolbar(removing: .sidebarToggle)
         } detail: {
             adaptiveDetail
@@ -1225,7 +1242,7 @@ struct ContentView: View {
     private var listeningListView: some View {
         IOSListeningListView(
             store: listeningListStore,
-            playbackState: IOSAppRuntime.shared.mediaRuntime.playbackPresentationState,
+            playbackState: playbackState,
             transferState: IOSAppRuntime.shared.mediaRuntime.transferPresentationState,
             playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
             onOpenPlayer: openListeningListPlayer,
@@ -1282,6 +1299,12 @@ struct ContentView: View {
             topActions: {
                 articleListActionButtons(directCapacity: directActionCapacity)
             },
+            topAccessory: {
+                if miniPlayerPlacement == .compactTopBar,
+                   articleListChromeMode == .persistentSplitCollapsed {
+                    compactMiniPlayer
+                }
+            },
             content: { naturalTopContentInset in
                 ArticleListView(
                     store: newsreaderStore,
@@ -1305,12 +1328,38 @@ struct ContentView: View {
             // The Timeline is the root of this app's navigation: the branded
             // button opens the scope chooser, there is nothing to go back to.
             .navigationBarBackButtonHidden(true)
-            .toolbar {
-                if actionPlacement == .bottomBar {
-                    ToolbarItemGroup(placement: .bottomBar) {
-                        articleListActionButtons(directCapacity: directActionCapacity)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if actionPlacement == .bottomBar,
+                   miniPlayerIsVisible {
+                    IOSArticleListBottomDock(
+                        playbackState: playbackState,
+                        playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
+                        onOpenPlayer: presentNowPlayingPlayer
+                    ) {
+                        articleListActionButtons(
+                            directCapacity: directActionCapacity,
+                            minimumHitTarget: 44
+                        )
                     }
                 }
+            }
+            .toolbar {
+                if actionPlacement == .bottomBar,
+                   !miniPlayerIsVisible {
+                    ToolbarItemGroup(placement: .bottomBar) {
+                        articleListActionButtons(
+                            directCapacity: directActionCapacity
+                        )
+                    }
+                }
+                if miniPlayerPlacement == .compactTopBar,
+                   articleListChromeMode == .compactLandscape,
+                   miniPlayerIsVisible {
+                    ToolbarItem(placement: .principal) {
+                        compactMiniPlayer
+                    }
+                }
+
                 if actionPlacement == .topBarTrailing {
                     if #available(iOS 26.0, *) {
                         ToolbarItemGroup(placement: .topBarTrailing) {
@@ -1330,9 +1379,49 @@ struct ContentView: View {
             }
     }
 
+    private var miniPlayerIsVisible: Bool {
+        IOSMiniPlayerPresentation.isVisible(
+            loadedEnclosureID: playbackState.loadedEnclosure?.id,
+            status: playbackState.status
+        )
+    }
+
     @ViewBuilder
-    private func articleListActionButtons(directCapacity: Int) -> some View {
-        let playbackState = IOSAppRuntime.shared.mediaRuntime.playbackPresentationState
+    private var compactMiniPlayer: some View {
+        if miniPlayerIsVisible {
+            IOSMiniPlayerView(
+                playbackState: playbackState,
+                playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
+                style: .compactTopBar,
+                onOpen: presentNowPlayingPlayer
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var sidebarMiniPlayer: some View {
+        if miniPlayerPlacement == .sidebarFooter,
+           miniPlayerIsVisible {
+            IOSMiniPlayerView(
+                playbackState: playbackState,
+                playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
+                style: .sidebarFooter,
+                onOpen: presentNowPlayingPlayer
+            )
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    private func presentNowPlayingPlayer() {
+        guard miniPlayerIsVisible else { return }
+        nowPlayingPresented = true
+    }
+
+    @ViewBuilder
+    private func articleListActionButtons(
+        directCapacity: Int,
+        minimumHitTarget: CGFloat? = nil
+    ) -> some View {
         let resolved = IOSArticleListActionPolicy.resolvedActions(
             configuredActions: articleListActionPreferences.actions,
             directCapacity: directCapacity,
@@ -1342,16 +1431,26 @@ struct ContentView: View {
             playbackStatus: playbackState.status
         )
 
-        articleListActionButton(.sync)
+        articleListActionButton(.sync, minimumHitTarget: minimumHitTarget)
         ForEach(resolved.direct) { action in
-            articleListActionButton(action)
+            articleListActionButton(
+                action,
+                minimumHitTarget: minimumHitTarget
+            )
         }
-        articleListMoreMenu(overflowActions: resolved.overflow)
+        articleListMoreMenu(
+            overflowActions: resolved.overflow,
+            minimumHitTarget: minimumHitTarget
+        )
     }
 
     @ViewBuilder
-    private func articleListActionButton(_ action: IOSBottomAction) -> some View {
-        switch action {
+    private func articleListActionButton(
+        _ action: IOSBottomAction,
+        minimumHitTarget: CGFloat? = nil
+    ) -> some View {
+        Group {
+            switch action {
         case .sync:
             let syncButtonPresentation = IOSSyncButtonPresentation.resolve(
                 manualSyncState: newsreaderStore.manualSyncState,
@@ -1449,9 +1548,15 @@ struct ContentView: View {
             .accessibilityLabel(action.settingsTitle)
             .accessibilityIdentifier("articleList.settings")
 
-        case .more:
-            EmptyView()
+            case .more:
+                EmptyView()
+            }
         }
+        .frame(
+            minWidth: minimumHitTarget,
+            minHeight: minimumHitTarget
+        )
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder
@@ -1475,7 +1580,10 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func articleListMoreMenu(overflowActions: [IOSBottomAction]) -> some View {
+    private func articleListMoreMenu(
+        overflowActions: [IOSBottomAction],
+        minimumHitTarget: CGFloat? = nil
+    ) -> some View {
         Menu {
             ForEach(overflowActions) { action in
                 overflowMenuItem(action)
@@ -1485,6 +1593,11 @@ struct ContentView: View {
         }
         .accessibilityLabel(String(localized: "More"))
         .accessibilityIdentifier("articleList.more")
+        .frame(
+            minWidth: minimumHitTarget,
+            minHeight: minimumHitTarget
+        )
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder
@@ -1629,7 +1742,8 @@ struct ContentView: View {
     @ViewBuilder
     private func actionFeedbackOverlay(
         active: Bool,
-        hasBottomActionBar: Bool
+        hasBottomActionBar: Bool,
+        hasMiniPlayer: Bool
     ) -> some View {
         if active, let feedback = actionFeedback {
             IOSActionFeedbackBanner(item: feedback)
@@ -1637,7 +1751,8 @@ struct ContentView: View {
                 .safeAreaPadding(
                     .bottom,
                     IOSActionFeedbackPresentation.bottomPadding(
-                        hasBottomActionBar: hasBottomActionBar
+                        hasBottomActionBar: hasBottomActionBar,
+                        hasMiniPlayer: hasMiniPlayer
                     )
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -2608,13 +2723,14 @@ private struct ArticleListDetachedTopChromeHeightPreferenceKey: PreferenceKey {
     }
 }
 
-private struct ArticleListNavigationChrome<Content: View, TopActions: View>: View {
+private struct ArticleListNavigationChrome<Content: View, TopActions: View, TopAccessory: View>: View {
     var store: NewsreaderStore
     /// Absent when a persistent sidebar already offers scope selection.
     var onSelectScope: (() -> Void)?
     var chromeMode: IOSArticleListChromeMode
     var actionPlacement: IOSArticleListActionPlacement
     @ViewBuilder let topActions: () -> TopActions
+    @ViewBuilder let topAccessory: () -> TopAccessory
     @ViewBuilder let content: (CGFloat) -> Content
     @State private var detachedTopChromeHeight: CGFloat = 0
 
@@ -2696,6 +2812,8 @@ private struct ArticleListNavigationChrome<Content: View, TopActions: View>: Vie
                             action: onSelectScope
                         )
                         Spacer(minLength: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing)
+                        topAccessory()
+                        Spacer(minLength: IOSArticleListTitleCapsuleMetrics.floatingRowSpacing)
                         ArticleListFloatingActionGroup(actions: topActions)
                     }
                     .padding(.horizontal, IOSArticleListTitleCapsuleMetrics.floatingHorizontalInset)
@@ -2730,6 +2848,13 @@ private struct ArticleListNavigationChrome<Content: View, TopActions: View>: Vie
                             action: onSelectScope,
                             usesSystemToolbarGlass: true
                         )
+                    }
+                }
+
+                if chromeMode == .persistentSplitCollapsed,
+                   actionPlacement == .topBarTrailing {
+                    ToolbarItem(placement: .principal) {
+                        topAccessory()
                     }
                 }
             }
