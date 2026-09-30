@@ -1329,7 +1329,8 @@ struct ContentView: View {
             // button opens the scope chooser, there is nothing to go back to.
             .navigationBarBackButtonHidden(true)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if actionPlacement == .bottomBar {
+                if actionPlacement == .bottomBar,
+                   miniPlayerIsVisible {
                     IOSArticleListBottomDock(
                         playbackState: playbackState,
                         playbackCoordinator: IOSAppRuntime.shared.mediaRuntime.playbackCoordinator,
@@ -1343,6 +1344,14 @@ struct ContentView: View {
                 }
             }
             .toolbar {
+                if actionPlacement == .bottomBar,
+                   !miniPlayerIsVisible {
+                    ToolbarItemGroup(placement: .bottomBar) {
+                        articleListActionButtons(
+                            directCapacity: directActionCapacity
+                        )
+                    }
+                }
                 if miniPlayerPlacement == .compactTopBar,
                    articleListChromeMode == .compactLandscape,
                    miniPlayerIsVisible {
