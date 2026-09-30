@@ -1,5 +1,6 @@
 package de.circledev.fluxnews.nativeapp
 
+import androidx.compose.runtime.staticCompositionLocalOf
 import uniffi.flux_uniffi.DeliveryMode
 import uniffi.flux_uniffi.ReadArticleRetention
 
@@ -42,6 +43,10 @@ internal class AndroidCoreArticleSettings(
             core.setDeliveryMode(if (enabled) DeliveryMode.LIVE else DeliveryMode.DEFERRED)
         }
     }
+}
+
+internal val LocalAndroidCoreArticleSettings = staticCompositionLocalOf<AndroidCoreArticleSettings> {
+    error("AndroidCoreArticleSettings was not provided.")
 }
 
 internal fun ReadArticleRetention.androidDisplayName(): String = when (this) {
