@@ -1,6 +1,6 @@
 # Phase E — Native Android
 
-> **Status: AUTHORITATIVE CONTRACT DEFINED — E1-A, E1-B, E1-C AND E1-D COMPLETE / E1-E NEXT**
+> **Status: AUTHORITATIVE CONTRACT DEFINED — E1-A, E1-B, E1-C, E1-D AND E1-E COMPLETE / E1-F NEXT**
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
 >
@@ -371,9 +371,9 @@ No feature-domain duplication is allowed in this layer.
 
 ### E1-E — Credential and preference storage proof
 
-Implement the native credential primitive and non-secret preference primitive, without yet migrating the complete settings surface.
+E1-E is complete. `FluxApplication` process-owns the separate credential and preference stores. Credentials use a versioned AES-256-GCM envelope with context AAD, atomically stored in app-private `noBackupFilesDir`; the AES key is an `AndroidKeyStore` key authorized only for GCM encrypt/decrypt and never requires per-use user authentication. API keys and custom headers never enter DataStore, and clearing credentials removes both envelope and key alias. This supports normal locked-screen/background access after first unlock, but declares no Direct-Boot secret storage.
 
-Prove locked/unlocked/relaunch access required by normal app and scheduled background work.
+Non-secret native preferences use one process-scoped Preferences DataStore (1.2.1) with typed asynchronous access. API-29 runtime acceptance proves encrypted relaunch access, tamper/corruption failure, no plaintext in the envelope, Keystore metadata, preference persistence and background access without an Activity.
 
 ### E1-F — Production-upgrade migration feasibility
 

@@ -12,6 +12,12 @@ class FluxApplication : Application() {
     val coreRuntime: AndroidCoreRuntime by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidCoreRuntime()
     }
+    val credentialStore: AndroidCredentialStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidCredentialStore(applicationContext)
+    }
+    val preferenceStore: AndroidPreferenceStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidPreferenceStore.create(applicationContext)
+    }
 
     override fun onCreate() {
         super.onCreate()
