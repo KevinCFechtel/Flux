@@ -1,5 +1,6 @@
 @preconcurrency import CoreSpotlight
 import Foundation
+import OSLog
 import UniformTypeIdentifiers
 
 enum NavigationRoute: Hashable {
@@ -106,10 +107,15 @@ final class AppRouter {
 
 @MainActor
 final class SpotlightIndexer {
-    private let index = CSSearchableIndex.default()
+    private static let migrationKey = "FluxNews.spotlight.namedIndexMigration.v1"
+    private static let indexName = "FluxNewsNavigation"
+    private let logger = Logger(subsystem: "dev.kevincfechtel.fluxNews", category: "spotlight")
+    private let index = CSSearchableIndex(name: SpotlightIndexer.indexName)
     private let domainIdentifier = "dev.kevincfechtel.fluxNews.navigation"
     private var pendingItems: [CSSearchableItem]?
     private var isUpdating = false
+    private var legacyMigrationInFlight = false
+    private var legacyMigrationFinished = UserDefaults.standard.bool(forKey: SpotlightIndexer.migrationKey)
 
     func update(_ catalog: NavigationCatalog) {
         let routingCatalog = RoutingCatalog(catalog)
@@ -130,16 +136,60 @@ final class SpotlightIndexer {
 
     private func processNextUpdate() {
         guard !isUpdating, let items = pendingItems else { return }
+        guard legacyMigrationFinished else {
+            migrateLegacyDefaultIndex()
+            return
+        }
+
         pendingItems = nil
         isUpdating = true
-        index.deleteSearchableItems(withDomainIdentifiers: [domainIdentifier]) { [weak self] _ in
+        index.deleteSearchableItems(withDomainIdentifiers: [domainIdentifier]) { [weak self] error in
             DispatchQueue.main.async {
                 guard let self else { return }
-                guard !items.isEmpty else { self.finishUpdate(); return }
-                self.index.indexSearchableItems(items) { _ in DispatchQueue.main.async { [weak self = self] in self?.finishUpdate() } }
+                if let error {
+                    self.logger.error("named Spotlight index cleanup failed: \(String(describing: error), privacy: .public)")
+                }
+                guard !items.isEmpty else {
+                    self.finishUpdate()
+                    return
+                }
+                self.index.indexSearchableItems(items) { error in
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        if let error {
+                            self.logger.error("named Spotlight indexing failed: \(String(describing: error), privacy: .public)")
+                        } else {
+                            self.logger.debug("named Spotlight indexing completed item_count=\(items.count, privacy: .public)")
+                        }
+                        self.finishUpdate()
+                    }
+                }
             }
         }
     }
 
-    private func finishUpdate() { isUpdating = false; processNextUpdate() }
+    private func migrateLegacyDefaultIndex() {
+        guard !legacyMigrationInFlight else { return }
+        legacyMigrationInFlight = true
+        CSSearchableIndex.default().deleteSearchableItems(withDomainIdentifiers: [domainIdentifier]) { [weak self] error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.legacyMigrationInFlight = false
+                self.legacyMigrationFinished = true
+                if let error {
+                    self.logger.error("legacy default Spotlight index cleanup failed: \(String(describing: error), privacy: .public)")
+                } else {
+                    UserDefaults.standard.set(true, forKey: Self.migrationKey)
+                    self.logger.notice("migrated Spotlight navigation content to named index")
+                }
+                self.processNextUpdate()
+            }
+        }
+    }
+
+    private func finishUpdate() {
+        isUpdating = false
+        processNextUpdate()
+    }
 }
+
