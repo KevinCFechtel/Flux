@@ -25,6 +25,9 @@ class FluxApplication : Application() {
     internal val navigationPreferences: AndroidNavigationPreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidNavigationPreferences(preferenceStore)
     }
+    internal val articlePreferences: AndroidArticlePreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidArticlePreferences(preferenceStore)
+    }
     val storagePaths: AndroidStoragePaths by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidStoragePaths.create(applicationContext)
     }
