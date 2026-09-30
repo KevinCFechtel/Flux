@@ -393,7 +393,17 @@ The test build must not delete or convert those sources in place.
 
 ### E1-G — Durable native paths and backup exclusions
 
-Choose Core database/media/log/widget-projection paths under Android app-private storage and define explicit backup exclusions. New native Core data must not collide with news_database.db or the legacy audio_cache.
+E1-G is complete. `AndroidStoragePaths` is the canonical native path layout: Core data,
+media, logs and widget projection use separate `noBackupFilesDir/flux-native/` children;
+regenerable Core cache uses `cacheDir/flux-native/core-cache`. This is disjoint from
+`news_database.db`, `audio_cache`, legacy SharedPreferences/DataStore and legacy backup
+artifacts. Android automatic cloud backup and device transfer explicitly exclude every
+database, file, shared-preference, external and root sandbox domain; `noBackupFilesDir`
+also excludes the native roots by platform contract. Configuration backup/restore remains
+the only intended portable configuration handoff.
+
+E1-A through E1-G are complete. E1-H is next. E1-F physical production-upgrade acceptance
+remains deferred to the E9 replacement gate.
 
 ### E1-H — CI and test gate
 

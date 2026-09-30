@@ -18,6 +18,9 @@ class FluxApplication : Application() {
     val preferenceStore: AndroidPreferenceStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidPreferenceStore.create(applicationContext)
     }
+    val storagePaths: AndroidStoragePaths by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidStoragePaths.create(applicationContext)
+    }
 
     override fun onCreate() {
         super.onCreate()
