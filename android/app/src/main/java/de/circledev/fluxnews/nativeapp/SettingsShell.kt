@@ -1,5 +1,6 @@
 package de.circledev.fluxnews.nativeapp
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,13 +12,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,7 +49,11 @@ private enum class SettingsDestination(val title: String, val subtitle: String) 
 /**
  * Android settings information architecture mirrors the completed iOS product surface, while the
  * navigation itself follows Android responsive-list/detail conventions.
+ *
+ * Compact settings own one app bar: Settings root goes back to News, while a detail goes back to
+ * the Settings list. Wide list/detail settings keep one Settings app bar and both panes visible.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SettingsShell(
     bootstrap: AndroidAccountBootstrap,
@@ -54,46 +62,64 @@ internal fun SettingsShell(
     navigationCategories: List<AndroidNavigationCategoryRef>,
     navigationFeeds: List<AndroidNavigationFeedRef>,
     onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
+    onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxSize()) {
         val listDetail = maxWidth >= 840.dp
-        var selected by remember { mutableStateOf<SettingsDestination?>(if (listDetail) SettingsDestination.Account else null) }
+        var selected by remember {
+            mutableStateOf<SettingsDestination?>(if (listDetail) SettingsDestination.Account else null)
+        }
+        val showingCompactDetail = !listDetail && selected != null
 
-        if (listDetail) {
-            Row(Modifier.fillMaxSize()) {
-                SettingsList(
-                    selected = selected,
-                    onSelected = { selected = it },
-                    modifier = Modifier.width(340.dp).fillMaxHeight(),
+        BackHandler(enabled = showingCompactDetail) {
+            selected = null
+        }
+
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text("Settings") },
+                    navigationIcon = {
+                        TextButton(
+                            onClick = {
+                                if (showingCompactDetail) selected = null else onBack()
+                            },
+                        ) {
+                            Text(if (showingCompactDetail) "‹ Settings" else "‹ News")
+                        }
+                    },
                 )
-                HorizontalDivider(modifier = Modifier.width(1.dp).fillMaxHeight())
-                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
-                    SettingsDetail(
-                        destination = selected ?: SettingsDestination.Account,
-                        bootstrap = bootstrap,
-                        navigationPreferences = navigationPreferences,
-                        navigationPreferenceState = navigationPreferenceState,
-                        navigationCategories = navigationCategories,
-                        navigationFeeds = navigationFeeds,
-                        onAccountChanged = onAccountChanged,
+            },
+        ) { padding ->
+            val contentModifier = Modifier.fillMaxSize().padding(padding)
+            if (listDetail) {
+                Row(contentModifier) {
+                    SettingsList(
+                        selected = selected,
+                        onSelected = { selected = it },
+                        modifier = Modifier.width(340.dp).fillMaxHeight(),
                     )
+                    HorizontalDivider(modifier = Modifier.width(1.dp).fillMaxHeight())
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+                        SettingsDetail(
+                            destination = selected ?: SettingsDestination.Account,
+                            bootstrap = bootstrap,
+                            navigationPreferences = navigationPreferences,
+                            navigationPreferenceState = navigationPreferenceState,
+                            navigationCategories = navigationCategories,
+                            navigationFeeds = navigationFeeds,
+                            onAccountChanged = onAccountChanged,
+                        )
+                    }
                 }
-            }
-        } else if (selected == null) {
-            SettingsList(
-                selected = null,
-                onSelected = { selected = it },
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            Column(Modifier.fillMaxSize()) {
-                TextButton(
-                    onClick = { selected = null },
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                ) {
-                    Text("‹ Settings")
-                }
+            } else if (selected == null) {
+                SettingsList(
+                    selected = null,
+                    onSelected = { selected = it },
+                    modifier = contentModifier,
+                )
+            } else {
                 SettingsDetail(
                     destination = selected!!,
                     bootstrap = bootstrap,
@@ -102,7 +128,7 @@ internal fun SettingsShell(
                     navigationCategories = navigationCategories,
                     navigationFeeds = navigationFeeds,
                     onAccountChanged = onAccountChanged,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = contentModifier,
                 )
             }
         }
@@ -115,12 +141,7 @@ private fun SettingsList(
     onSelected: (SettingsDestination) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier.verticalScroll(rememberScrollState())) {
-        Text(
-            "Settings",
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
-            style = MaterialTheme.typography.headlineMedium,
-        )
+    Column(modifier = modifier.verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
         SettingsDestination.entries.forEach { destination ->
             Surface(
                 color = if (selected == destination) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
@@ -204,42 +225,58 @@ private fun NavigationSettingsScreen(
         HorizontalDivider()
         Text("Startup scope", style = MaterialTheme.typography.titleMedium)
         AndroidStartupScopePreference.entries.forEach { option ->
+            val enabled = when (option) {
+                AndroidStartupScopePreference.Category -> categories.isNotEmpty()
+                AndroidStartupScopePreference.Feed -> feeds.isNotEmpty()
+                else -> true
+            }
             SettingsRadioRow(
                 title = option.displayName,
                 selected = state.startupScope == option,
-                onClick = { scope.launch { preferences.setStartupScope(option) } },
+                enabled = enabled,
+                onClick = {
+                    scope.launch {
+                        preferences.setStartupScope(option)
+                        if (option == AndroidStartupScopePreference.Category && state.startupCategoryId == null) {
+                            categories.firstOrNull()?.let { preferences.setStartupCategoryId(it.id) }
+                        }
+                        if (option == AndroidStartupScopePreference.Feed && state.startupFeedId == null) {
+                            feeds.firstOrNull()?.let { preferences.setStartupFeedId(it.id) }
+                        }
+                    }
+                },
             )
         }
 
-        if (state.startupScope == AndroidStartupScopePreference.Category) {
+        if (categories.isEmpty() || feeds.isEmpty()) {
+            Text(
+                "Category and Feed startup scopes become available after the first successful sync.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        if (state.startupScope == AndroidStartupScopePreference.Category && categories.isNotEmpty()) {
             HorizontalDivider()
             Text("Startup category", style = MaterialTheme.typography.titleMedium)
-            if (categories.isEmpty()) {
-                Text("No categories available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                categories.forEach { category ->
-                    SettingsRadioRow(
-                        title = category.title,
-                        selected = state.startupCategoryId == category.id,
-                        onClick = { scope.launch { preferences.setStartupCategoryId(category.id) } },
-                    )
-                }
+            categories.forEach { category ->
+                SettingsRadioRow(
+                    title = category.title,
+                    selected = state.startupCategoryId == category.id,
+                    onClick = { scope.launch { preferences.setStartupCategoryId(category.id) } },
+                )
             }
         }
 
-        if (state.startupScope == AndroidStartupScopePreference.Feed) {
+        if (state.startupScope == AndroidStartupScopePreference.Feed && feeds.isNotEmpty()) {
             HorizontalDivider()
             Text("Startup feed", style = MaterialTheme.typography.titleMedium)
-            if (feeds.isEmpty()) {
-                Text("No feeds available.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                feeds.forEach { feed ->
-                    SettingsRadioRow(
-                        title = feed.title,
-                        selected = state.startupFeedId == feed.id,
-                        onClick = { scope.launch { preferences.setStartupFeedId(feed.id) } },
-                    )
-                }
+            feeds.forEach { feed ->
+                SettingsRadioRow(
+                    title = feed.title,
+                    selected = state.startupFeedId == feed.id,
+                    onClick = { scope.launch { preferences.setStartupFeedId(feed.id) } },
+                )
             }
         }
     }
@@ -264,14 +301,23 @@ private fun SettingsSwitchRow(
 private fun SettingsRadioRow(
     title: String,
     selected: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = selected, onClick = onClick)
-        Text(title, modifier = Modifier.padding(start = 8.dp), style = MaterialTheme.typography.bodyLarge)
+        RadioButton(selected = selected, onClick = onClick, enabled = enabled)
+        Text(
+            title,
+            modifier = Modifier.padding(start = 8.dp),
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+        )
     }
 }
 
