@@ -8,10 +8,10 @@
         android:fillColor="@color/flux_launcher_background"
         android:pathData="M0,0H108V108H0Z" />
     <group
-        android:translateX="21"
-        android:translateY="28.59"
-        android:scaleX="0.1145833333"
-        android:scaleY="0.1145833333">
+        android:translateX="28.08"
+        android:translateY="34.22"
+        android:scaleX="0.09"
+        android:scaleY="0.09">
         <group android:translateY="-32">
             <path
                 android:fillColor="#FFFFFFFF"
