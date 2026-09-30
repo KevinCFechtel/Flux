@@ -74,10 +74,6 @@ emulator_serials() {
   adb devices | awk 'NR > 1 && $1 ~ /^emulator-/ && $2 != "" { print $1 }'
 }
 
-ready_emulator_serials() {
-  adb devices | awk 'NR > 1 && $1 ~ /^emulator-/ && $2 == "device" { print $1 }'
-}
-
 wait_for_boot() {
   local serial="$1"
   local deadline=$((SECONDS + BOOT_TIMEOUT_SECONDS))
@@ -101,17 +97,13 @@ wait_for_boot() {
   return 1
 }
 
-mapfile_compat() {
-  local -n target="$1"
-  target=()
-  while IFS= read -r line; do
-    [[ -n "${line}" ]] && target+=("${line}")
-  done
-}
+# macOS still ships Bash 3.2, so deliberately avoid mapfile/readarray and namerefs (local -n).
+running_emulators=()
+while IFS= read -r line; do
+  [[ -n "${line}" ]] && running_emulators+=("${line}")
+done < <(emulator_serials)
 
 SERIAL=""
-mapfile_compat running_emulators < <(emulator_serials)
-
 case "${#running_emulators[@]}" in
   0)
     EMULATOR_BIN="$(find_emulator_binary || true)"
@@ -120,7 +112,11 @@ case "${#running_emulators[@]}" in
       exit 1
     }
 
-    mapfile_compat configured_avds < <("${EMULATOR_BIN}" -list-avds)
+    configured_avds=()
+    while IFS= read -r line; do
+      [[ -n "${line}" ]] && configured_avds+=("${line}")
+    done < <("${EMULATOR_BIN}" -list-avds)
+
     [[ "${#configured_avds[@]}" -gt 0 ]] || {
       echo "No Android Virtual Device is configured. Create an AVD in Android Studio Device Manager first." >&2
       exit 1
@@ -156,7 +152,11 @@ case "${#running_emulators[@]}" in
 
     deadline=$((SECONDS + BOOT_TIMEOUT_SECONDS))
     while (( SECONDS < deadline )); do
-      mapfile_compat detected_emulators < <(emulator_serials)
+      detected_emulators=()
+      while IFS= read -r line; do
+        [[ -n "${line}" ]] && detected_emulators+=("${line}")
+      done < <(emulator_serials)
+
       if [[ "${#detected_emulators[@]}" -eq 1 ]]; then
         SERIAL="${detected_emulators[0]}"
         break
