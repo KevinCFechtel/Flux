@@ -676,6 +676,35 @@ final class NewsreaderPresentationTests: XCTestCase {
         )
     }
 
+    func testMiniPlayerElapsedDurationLabelUsesBoundedPlaybackTime() {
+        XCTAssertEqual(
+            IOSMiniPlayerPresentation.elapsedDurationLabel(
+                positionMs: 754_000,
+                durationMs: 2_890_000
+            ),
+            "12:34 / 48:10"
+        )
+        XCTAssertEqual(
+            IOSMiniPlayerPresentation.elapsedDurationLabel(
+                positionMs: 4_000_000,
+                durationMs: 3_700_000
+            ),
+            "1:01:40 / 1:01:40"
+        )
+        XCTAssertNil(
+            IOSMiniPlayerPresentation.elapsedDurationLabel(
+                positionMs: 0,
+                durationMs: nil
+            )
+        )
+        XCTAssertNil(
+            IOSMiniPlayerPresentation.elapsedDurationLabel(
+                positionMs: 0,
+                durationMs: 0
+            )
+        )
+    }
+
     func testNowPlayingIsNoLongerAConfigurableArticleListAction() {
         XCTAssertFalse(IOSBottomAction.configurableActions.contains(.nowPlaying))
         XCTAssertEqual(
