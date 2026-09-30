@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import uniffi.flux_uniffi.SyncReason
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,6 +54,12 @@ private fun FluxNewsApp(
     LaunchedEffect(bootstrap, retryGeneration) {
         bootstrapState = bootstrap.restoreStoredAccount()
     }
+    val readyState = bootstrapState as? AndroidAccountBootstrap.State.Ready
+    LaunchedEffect(readyState?.serverUrl) {
+        if (readyState != null) {
+            syncCoordinator.requestSync(SyncReason.APP_START)
+        }
+    }
 
     Surface(modifier = Modifier.fillMaxSize()) {
         when (val state = bootstrapState) {
@@ -76,7 +83,6 @@ private fun FluxNewsApp(
             is AndroidAccountBootstrap.State.Ready -> AdaptiveAppShell(
                 bootstrap = bootstrap,
                 coreRuntime = coreRuntime,
-                syncCoordinator = syncCoordinator,
                 navigationPreferences = navigationPreferences,
                 state = state,
                 onAccountChanged = { bootstrapState = it },
