@@ -28,17 +28,22 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val bootstrap = (application as FluxApplication).accountBootstrap
+        val application = application as FluxApplication
+        val bootstrap = application.accountBootstrap
+        val coreRuntime = application.coreRuntime
         setContent {
             FluxNewsTheme {
-                FluxNewsApp(bootstrap)
+                FluxNewsApp(bootstrap, coreRuntime)
             }
         }
     }
 }
 
 @Composable
-private fun FluxNewsApp(bootstrap: AndroidAccountBootstrap) {
+private fun FluxNewsApp(
+    bootstrap: AndroidAccountBootstrap,
+    coreRuntime: AndroidCoreRuntime,
+) {
     var bootstrapState by remember { mutableStateOf(bootstrap.state) }
     var retryGeneration by remember { mutableStateOf(0) }
     LaunchedEffect(bootstrap, retryGeneration) {
@@ -66,6 +71,7 @@ private fun FluxNewsApp(bootstrap: AndroidAccountBootstrap) {
             )
             is AndroidAccountBootstrap.State.Ready -> AdaptiveAppShell(
                 bootstrap = bootstrap,
+                coreRuntime = coreRuntime,
                 state = state,
                 onAccountChanged = { bootstrapState = it },
                 modifier = Modifier.fillMaxSize(),
