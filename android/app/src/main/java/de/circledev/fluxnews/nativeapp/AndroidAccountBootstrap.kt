@@ -14,11 +14,18 @@ class AndroidAccountBootstrap private constructor(
     private val hasActiveSession: () -> Boolean,
     private val sessionOpener: suspend (InitializationConfig) -> Unit,
     private val sessionReplacer: suspend (InitializationConfig) -> Unit,
+    private val sessionCloser: suspend () -> Unit,
     private val accountValidator: suspend (String, String, List<HttpHeader>) -> AccountValidationResult,
+    private val localStateRebuilder: suspend () -> Unit,
+    private val accountStateRemover: suspend () -> Unit,
+    private val serverVersionReader: suspend (String) -> String?,
+    private val serverVersionWriter: suspend (String, String) -> Unit,
+    private val serverVersionClearer: suspend () -> Unit,
     storagePaths: AndroidStoragePaths,
 ) {
     internal constructor(
         credentialStore: AndroidCredentialStore,
+        preferenceStore: AndroidPreferenceStore,
         coreRuntime: AndroidCoreRuntime,
         storagePaths: AndroidStoragePaths,
     ) : this(
@@ -28,7 +35,28 @@ class AndroidAccountBootstrap private constructor(
         hasActiveSession = coreRuntime::hasActiveSession,
         sessionOpener = { config -> coreRuntime.openSession(config) },
         sessionReplacer = { config -> coreRuntime.replaceSession(config) },
+        sessionCloser = coreRuntime::closeSession,
         accountValidator = coreRuntime::validateAccount,
+        localStateRebuilder = { coreRuntime.remote { core -> core.rebuildLocalState() } },
+        accountStateRemover = { coreRuntime.remote { core -> core.removeAccountState() } },
+        serverVersionReader = { server ->
+            val storedServer = preferenceStore.read(SERVER_INFO_BASE, "")
+            if (storedServer == server) {
+                AndroidAccountPresentation.normalizedServerVersion(
+                    preferenceStore.read(SERVER_INFO_VERSION, ""),
+                )
+            } else {
+                null
+            }
+        },
+        serverVersionWriter = { server, version ->
+            preferenceStore.write(SERVER_INFO_BASE, server)
+            preferenceStore.write(SERVER_INFO_VERSION, version)
+        },
+        serverVersionClearer = {
+            preferenceStore.remove(SERVER_INFO_BASE)
+            preferenceStore.remove(SERVER_INFO_VERSION)
+        },
         storagePaths = storagePaths,
     )
 
@@ -39,8 +67,14 @@ class AndroidAccountBootstrap private constructor(
         hasActiveSession: () -> Boolean,
         sessionOpener: suspend (InitializationConfig) -> Unit,
         sessionReplacer: suspend (InitializationConfig) -> Unit = {},
+        sessionCloser: suspend () -> Unit = {},
         accountValidator: suspend (String, String, List<HttpHeader>) -> AccountValidationResult =
             { _, _, _ -> error("Account validation was not configured for this test.") },
+        localStateRebuilder: suspend () -> Unit = {},
+        accountStateRemover: suspend () -> Unit = {},
+        serverVersionReader: suspend (String) -> String? = { null },
+        serverVersionWriter: suspend (String, String) -> Unit = { _, _ -> },
+        serverVersionClearer: suspend () -> Unit = {},
         storagePaths: AndroidStoragePaths,
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
     ) : this(
@@ -50,7 +84,13 @@ class AndroidAccountBootstrap private constructor(
         hasActiveSession,
         sessionOpener,
         sessionReplacer,
+        sessionCloser,
         accountValidator,
+        localStateRebuilder,
+        accountStateRemover,
+        serverVersionReader,
+        serverVersionWriter,
+        serverVersionClearer,
         storagePaths,
     )
 
@@ -66,11 +106,22 @@ class AndroidAccountBootstrap private constructor(
         data class Rejected(val message: String) : ActivationResult
     }
 
+    enum class LocalStateRebuildState { Idle, Rebuilding, Succeeded, Failed }
+
+    sealed interface RemovalResult {
+        data object Removed : RemovalResult
+        data class Rejected(val message: String) : RemovalResult
+    }
+
     private val configFactory = AndroidInitializationConfigFactory(storagePaths)
     private val lifecycleMutex = Mutex()
 
     @Volatile
     var state: State = State.Starting
+        private set
+
+    @Volatile
+    var localStateRebuildState: LocalStateRebuildState = LocalStateRebuildState.Idle
         private set
 
     suspend fun restoreStoredAccount(): State = lifecycleMutex.withLock {
@@ -83,12 +134,24 @@ class AndroidAccountBootstrap private constructor(
                 state = State.AccountRequired
             } else {
                 sessionOpener(configFactory.create(credentials))
-                state = State.Ready(credentials.serverUrl)
+                val version = try {
+                    serverVersionReader(credentials.serverUrl)
+                } catch (_: Exception) {
+                    null
+                }
+                state = State.Ready(credentials.serverUrl, version)
             }
         } catch (error: Exception) {
             state = State.RecoverableError(safeStartupMessage(error))
         }
         state
+    }
+
+    /** Returns the encrypted account material only for the account editor in this process. */
+    fun credentialsForEditing(): StoredAccountCredentials? = try {
+        credentialReader()
+    } catch (_: Exception) {
+        null
     }
 
     /** Validates before persistence and stores Core's canonical installation base on success. */
@@ -97,6 +160,10 @@ class AndroidAccountBootstrap private constructor(
         apiKey: String,
         customHeaders: List<StoredCredentialHeader>,
     ): ActivationResult = lifecycleMutex.withLock {
+        if (localStateRebuildState == LocalStateRebuildState.Rebuilding) {
+            return@withLock ActivationResult.Rejected("Wait for the local state rebuild to finish.")
+        }
+        localStateRebuildState = LocalStateRebuildState.Idle
         val proposedServer = serverUrl.trim()
         val proposedApiKey = apiKey.trim()
         if (proposedServer.isEmpty() || proposedApiKey.isEmpty()) {
@@ -109,8 +176,10 @@ class AndroidAccountBootstrap private constructor(
                 proposedApiKey,
                 customHeaders.map { HttpHeader(name = it.name, value = it.value) },
             )
-        } catch (_: Exception) {
-            return@withLock ActivationResult.Rejected("The Miniflux account could not be validated.")
+        } catch (error: Exception) {
+            return@withLock ActivationResult.Rejected(
+                AndroidAccountPresentation.validationMessage(error),
+            )
         }
         val normalized = StoredAccountCredentials(
             serverUrl = validation.installationBase,
@@ -138,12 +207,70 @@ class AndroidAccountBootstrap private constructor(
             )
         }
 
+        try {
+            serverVersionWriter(normalized.serverUrl, validation.version)
+        } catch (_: Exception) {
+            // Account activation is authoritative; informational version persistence is best effort.
+        }
         state = State.Ready(normalized.serverUrl, validation.version)
         ActivationResult.Activated(normalized.serverUrl, validation.version)
+    }
+
+    suspend fun rebuildLocalState(): LocalStateRebuildState = lifecycleMutex.withLock {
+        if (localStateRebuildState == LocalStateRebuildState.Rebuilding) {
+            return@withLock localStateRebuildState
+        }
+        if (!hasActiveSession()) {
+            localStateRebuildState = LocalStateRebuildState.Failed
+            return@withLock localStateRebuildState
+        }
+
+        localStateRebuildState = LocalStateRebuildState.Rebuilding
+        localStateRebuildState = try {
+            localStateRebuilder()
+            LocalStateRebuildState.Succeeded
+        } catch (_: Exception) {
+            // Core's rebuild is destructive before the remote synchronization attempt; failure is
+            // therefore surfaced exactly as on iOS rather than pretending the old state survived.
+            LocalStateRebuildState.Failed
+        }
+        localStateRebuildState
+    }
+
+    suspend fun removeAccount(): RemovalResult = lifecycleMutex.withLock {
+        if (localStateRebuildState == LocalStateRebuildState.Rebuilding) {
+            return@withLock RemovalResult.Rejected("Wait for the local state rebuild to finish.")
+        }
+
+        try {
+            if (hasActiveSession()) {
+                accountStateRemover()
+            }
+            credentialClearer()
+            try {
+                serverVersionClearer()
+            } catch (_: Exception) {
+                // Version metadata is non-sensitive and must not block removal of the account.
+            }
+            if (hasActiveSession()) {
+                sessionCloser()
+            }
+        } catch (_: Exception) {
+            return@withLock RemovalResult.Rejected("The account could not be removed.")
+        }
+
+        localStateRebuildState = LocalStateRebuildState.Idle
+        state = State.AccountRequired
+        RemovalResult.Removed
     }
 
     private fun safeStartupMessage(error: Exception): String = when (error) {
         is CredentialStorageException -> "Stored account credentials could not be read."
         else -> "The stored account could not be started."
+    }
+
+    private companion object {
+        val SERVER_INFO_BASE = AndroidPreferenceKey.string("account_info_server_base")
+        val SERVER_INFO_VERSION = AndroidPreferenceKey.string("account_info_server_version")
     }
 }
