@@ -1,6 +1,7 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.TaskProvider
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -33,6 +34,12 @@ android {
                 "proguard-rules.pro",
             )
         }
+        create("migrationProbe") {
+            initWith(getByName("debug"))
+            isDebuggable = true
+            isMinifyEnabled = false
+            applicationIdSuffix = ""
+        }
     }
 
     flavorDimensions += "distribution"
@@ -52,6 +59,9 @@ android {
         getByName("debug").jniLibs.srcDir("../Build/Products/debug")
         getByName("release").java.srcDir("../Build/Products/Bindings/release/kotlin")
         getByName("release").jniLibs.srcDir("../Build/Products/release")
+        getByName("migrationProbe").java.srcDir("src/migrationProbe/java")
+        getByName("migrationProbe").java.srcDir("../Build/Products/Bindings/debug/kotlin")
+        getByName("migrationProbe").jniLibs.srcDir("../Build/Products/debug")
     }
 
     buildFeatures {
@@ -103,6 +113,40 @@ wireUniffiPreparation(
     "developmentDebug",
     registerUniffiPreparation("developmentDebug", "debug"),
 )
+wireUniffiPreparation(
+    "productionMigrationProbe",
+    registerUniffiPreparation("productionMigrationProbe", "debug"),
+)
+
+val migrationSigningProperties = Properties().apply {
+    val file = rootProject.file("migration-signing.properties")
+    if (file.exists()) {
+        file.inputStream().use(::load)
+    }
+}
+
+android.buildTypes.named("migrationProbe") {
+    if (migrationSigningProperties.isNotEmpty()) {
+        signingConfig = android.signingConfigs.maybeCreate("migrationProbe").apply {
+            keyAlias = migrationSigningProperties.getProperty("keyAlias")
+            keyPassword = migrationSigningProperties.getProperty("keyPassword")
+            storeFile = migrationSigningProperties.getProperty("storeFile")?.let(::file)
+            storePassword = migrationSigningProperties.getProperty("storePassword")
+        }
+    }
+}
+
+val migrationVersionCode = providers.gradleProperty("fluxMigrationVersionCode")
+    .map(String::toInt)
+    .orElse(1)
+
+androidComponents.onVariants(androidComponents.selector().withBuildType("migrationProbe")) { variant ->
+    variant.outputs.forEach { output -> output.versionCode.set(migrationVersionCode) }
+}
+
+tasks.matching { it.name == "testProductionMigrationProbeUnitTest" }.configureEach {
+    (this as org.gradle.api.tasks.testing.Test).exclude("**/DevelopmentIdentityTest.class")
+}
 wireUniffiPreparation(
     "productionRelease",
     registerUniffiPreparation("productionRelease", "release"),

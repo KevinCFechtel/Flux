@@ -1,6 +1,6 @@
 # Phase E — Native Android
 
-> **Status: AUTHORITATIVE CONTRACT DEFINED — E1-A, E1-B, E1-C, E1-D AND E1-E COMPLETE / E1-F NEXT**
+> **Status: AUTHORITATIVE CONTRACT DEFINED — E1-A, E1-B, E1-C, E1-D AND E1-E COMPLETE / E1-F IMPLEMENTED, PRODUCTION-UPGRADE ACCEPTANCE PENDING**
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
 >
@@ -376,6 +376,8 @@ E1-E is complete. `FluxApplication` process-owns the separate credential and pre
 Non-secret native preferences use one process-scoped Preferences DataStore (1.2.1) with typed asynchronous access. API-29 runtime acceptance proves encrypted relaunch access, tamper/corruption failure, no plaintext in the envelope, Keystore metadata, preference persistence and background access without an Activity.
 
 ### E1-F — Production-upgrade migration feasibility
+
+E1-F is implemented; physical production-upgrade acceptance remains pending. The isolated production-identity Migration Probe has a read-only native reader for the exact Flutter secure-storage format and for legacy database, playback, media, widget, and auto-backup discovery. It writes only a redacted cache report, compares legacy-source fingerprints and relevant Keystore aliases before/after, and has a signer/version-guarded in-place upgrade script. It performs no migration or new-Core/store write.
 
 On a production-identity test build installed over the current Flutter app, prove read-only access to:
 
