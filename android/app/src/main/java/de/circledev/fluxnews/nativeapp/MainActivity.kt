@@ -15,6 +15,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,7 +38,9 @@ class MainActivity : ComponentActivity() {
         val articlePreferences = application.articlePreferences
         setContent {
             FluxNewsTheme {
-                FluxNewsApp(bootstrap, coreRuntime, syncCoordinator, navigationPreferences, articlePreferences)
+                CompositionLocalProvider(LocalAndroidArticlePreferences provides articlePreferences) {
+                    FluxNewsApp(bootstrap, coreRuntime, syncCoordinator, navigationPreferences)
+                }
             }
         }
     }
@@ -49,7 +52,6 @@ private fun FluxNewsApp(
     coreRuntime: AndroidCoreRuntime,
     syncCoordinator: AndroidSyncCoordinator,
     navigationPreferences: AndroidNavigationPreferences,
-    articlePreferences: AndroidArticlePreferences,
 ) {
     var bootstrapState by remember { mutableStateOf(bootstrap.state) }
     var retryGeneration by remember { mutableStateOf(0) }
@@ -93,7 +95,6 @@ private fun FluxNewsApp(
                 bootstrap = bootstrap,
                 coreRuntime = coreRuntime,
                 navigationPreferences = navigationPreferences,
-                articlePreferences = articlePreferences,
                 state = state,
                 onAccountChanged = { changedState ->
                     bootstrapState = changedState
