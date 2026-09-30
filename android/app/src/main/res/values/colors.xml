@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- sRGB equivalent of the Display-P3 blue used by the Apple FluxNews app icon. -->
+    <color name="flux_launcher_background">#26ADD9</color>
+</resources>
