@@ -597,7 +597,6 @@ private fun SecondaryDestination(title: String, message: String, onBack: () -> U
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsDestination(
     bootstrap: AndroidAccountBootstrap,
@@ -608,22 +607,14 @@ private fun SettingsDestination(
     onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
     onBack: () -> Unit,
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Settings") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("‹ News") } },
-            )
-        },
-    ) { padding ->
-        SettingsShell(
-            bootstrap = bootstrap,
-            navigationPreferences = navigationPreferences,
-            navigationPreferenceState = navigationPreferenceState,
-            navigationCategories = navigationCategories,
-            navigationFeeds = navigationFeeds,
-            onAccountChanged = onAccountChanged,
-            modifier = Modifier.fillMaxSize().padding(padding),
-        )
-    }
+    SettingsShell(
+        bootstrap = bootstrap,
+        navigationPreferences = navigationPreferences,
+        navigationPreferenceState = navigationPreferenceState,
+        navigationCategories = navigationCategories,
+        navigationFeeds = navigationFeeds,
+        onAccountChanged = onAccountChanged,
+        onBack = onBack,
+        modifier = Modifier.fillMaxSize(),
+    )
 }
