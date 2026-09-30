@@ -12,16 +12,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,14 +42,7 @@ private enum class SettingsDestination(val title: String, val subtitle: String) 
     About("About", "Version, open source and legal information"),
 }
 
-/**
- * Android settings information architecture mirrors the completed iOS product surface, while the
- * navigation itself follows Android responsive-list/detail conventions.
- *
- * Compact settings own one app bar: Settings root goes back to News, while a detail goes back to
- * the Settings list. Wide list/detail settings keep one Settings app bar and both panes visible.
- */
-@OptIn(ExperimentalMaterial3Api::class)
+/** Settings content below the single app-level Settings app bar. */
 @Composable
 internal fun SettingsShell(
     bootstrap: AndroidAccountBootstrap,
@@ -62,7 +51,6 @@ internal fun SettingsShell(
     navigationCategories: List<AndroidNavigationCategoryRef>,
     navigationFeeds: List<AndroidNavigationFeedRef>,
     onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
-    onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxSize()) {
@@ -72,65 +60,45 @@ internal fun SettingsShell(
         }
         val showingCompactDetail = !listDetail && selected != null
 
-        BackHandler(enabled = showingCompactDetail) {
-            selected = null
-        }
+        BackHandler(enabled = showingCompactDetail) { selected = null }
 
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("Settings") },
-                    navigationIcon = {
-                        TextButton(
-                            onClick = {
-                                if (showingCompactDetail) selected = null else onBack()
-                            },
-                        ) {
-                            Text(if (showingCompactDetail) "‹ Settings" else "‹ News")
-                        }
-                    },
-                )
-            },
-        ) { padding ->
-            val contentModifier = Modifier.fillMaxSize().padding(padding)
-            if (listDetail) {
-                Row(contentModifier) {
-                    SettingsList(
-                        selected = selected,
-                        onSelected = { selected = it },
-                        modifier = Modifier.width(340.dp).fillMaxHeight(),
-                    )
-                    HorizontalDivider(modifier = Modifier.width(1.dp).fillMaxHeight())
-                    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
-                        SettingsDetail(
-                            destination = selected ?: SettingsDestination.Account,
-                            bootstrap = bootstrap,
-                            navigationPreferences = navigationPreferences,
-                            navigationPreferenceState = navigationPreferenceState,
-                            navigationCategories = navigationCategories,
-                            navigationFeeds = navigationFeeds,
-                            onAccountChanged = onAccountChanged,
-                        )
-                    }
-                }
-            } else if (selected == null) {
+        if (listDetail) {
+            Row(Modifier.fillMaxSize()) {
                 SettingsList(
-                    selected = null,
+                    selected = selected,
                     onSelected = { selected = it },
-                    modifier = contentModifier,
+                    modifier = Modifier.width(340.dp).fillMaxHeight(),
                 )
-            } else {
-                SettingsDetail(
-                    destination = selected!!,
-                    bootstrap = bootstrap,
-                    navigationPreferences = navigationPreferences,
-                    navigationPreferenceState = navigationPreferenceState,
-                    navigationCategories = navigationCategories,
-                    navigationFeeds = navigationFeeds,
-                    onAccountChanged = onAccountChanged,
-                    modifier = contentModifier,
-                )
+                HorizontalDivider(modifier = Modifier.width(1.dp).fillMaxHeight())
+                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+                    SettingsDetail(
+                        destination = selected ?: SettingsDestination.Account,
+                        bootstrap = bootstrap,
+                        navigationPreferences = navigationPreferences,
+                        navigationPreferenceState = navigationPreferenceState,
+                        navigationCategories = navigationCategories,
+                        navigationFeeds = navigationFeeds,
+                        onAccountChanged = onAccountChanged,
+                    )
+                }
             }
+        } else if (selected == null) {
+            SettingsList(
+                selected = null,
+                onSelected = { selected = it },
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            SettingsDetail(
+                destination = selected!!,
+                bootstrap = bootstrap,
+                navigationPreferences = navigationPreferences,
+                navigationPreferenceState = navigationPreferenceState,
+                navigationCategories = navigationCategories,
+                navigationFeeds = navigationFeeds,
+                onAccountChanged = onAccountChanged,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
