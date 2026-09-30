@@ -6,7 +6,8 @@ import android.app.Application
  * Process bootstrap.
  *
  * Platform trust must complete before any session can make a Core network request. The runtime is
- * intentionally empty after process death; a later account bootstrap reconstructs its session.
+ * intentionally empty after process death; AndroidAccountBootstrap reconstructs its session from
+ * the native credential store when an app or future headless entry point requests readiness.
  */
 class FluxApplication : Application() {
     val coreRuntime: AndroidCoreRuntime by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
@@ -20,6 +21,13 @@ class FluxApplication : Application() {
     }
     val storagePaths: AndroidStoragePaths by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidStoragePaths.create(applicationContext)
+    }
+    val accountBootstrap: AndroidAccountBootstrap by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidAccountBootstrap(
+            credentialStore = credentialStore,
+            coreRuntime = coreRuntime,
+            storagePaths = storagePaths,
+        )
     }
 
     override fun onCreate() {
