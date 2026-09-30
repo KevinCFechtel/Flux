@@ -13,6 +13,9 @@ class FluxApplication : Application() {
     val coreRuntime: AndroidCoreRuntime by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidCoreRuntime()
     }
+    val syncCoordinator: AndroidSyncCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidSyncCoordinator(coreRuntime)
+    }
     val credentialStore: AndroidCredentialStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidCredentialStore(applicationContext)
     }
