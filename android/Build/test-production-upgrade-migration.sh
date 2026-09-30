@@ -20,17 +20,27 @@ fi
 command -v adb >/dev/null || { echo "Required command missing: adb" >&2; exit 1; }
 command -v apksigner >/dev/null || { echo "Required command missing: apksigner" >&2; exit 1; }
 [[ "$(adb -s "${SERIAL}" get-state)" == "device" ]] || { echo "Android device is not usable: ${SERIAL}" >&2; exit 1; }
-[[ "$(adb -s "${SERIAL}" shell getprop ro.kernel.qemu | tr -d '\r')" != "1" ]] || { echo "E1-F requires a physical device, not an emulator." >&2; exit 1; }
+IS_EMULATOR="$(adb -s "${SERIAL}" shell getprop ro.kernel.qemu | tr -d '\r')"
+
+if [[ "${IS_EMULATOR}" == "1" && "${FLUX_ALLOW_MIGRATION_EMULATOR:-0}" != "1" ]]; then
+  echo "E1-F production acceptance requires a physical device." >&2
+  echo "For a non-final emulator proof, rerun with FLUX_ALLOW_MIGRATION_EMULATOR=1." >&2
+  exit 1
+fi
+
+if [[ "${IS_EMULATOR}" == "1" ]]; then
+  echo "WARNING: Running E1-F on an emulator. This validates migration mechanics but is not final physical-device acceptance."
+fi
 adb -s "${SERIAL}" shell pm path "${PACKAGE}" >/dev/null || { echo "${PACKAGE} is not installed." >&2; exit 1; }
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 INSTALLED_APK_PATH="$(adb -s "${SERIAL}" shell pm path "${PACKAGE}" | tr -d '\r' | awk -F: 'NR==1 { print $2 }')"
 adb -s "${SERIAL}" pull "${INSTALLED_APK_PATH}" "${TMP_DIR}/installed.apk" >/dev/null
-unzip -l "${TMP_DIR}/installed.apk" | grep -q 'libflutter.so' || {
+if ! unzip -l "${TMP_DIR}/installed.apk" | grep -F 'libflutter.so' >/dev/null; then
   echo "Installed package is not the expected Flutter legacy APK; refusing to replace it." >&2
   exit 1
-}
+fi
 
 INSTALLED_VERSION="$(adb -s "${SERIAL}" shell dumpsys package "${PACKAGE}" | tr -d '\r' | awk -F= '/versionCode=/ { print $2; exit }' | awk '{ print $1 }')"
 [[ "${INSTALLED_VERSION}" =~ ^[0-9]+$ ]] || { echo "Could not read installed versionCode." >&2; exit 1; }
