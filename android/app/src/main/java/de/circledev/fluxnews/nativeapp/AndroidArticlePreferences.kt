@@ -1,8 +1,13 @@
 package de.circledev.fluxnews.nativeapp
 
+import androidx.compose.runtime.staticCompositionLocalOf
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+
+internal val LocalAndroidArticlePreferences = staticCompositionLocalOf<AndroidArticlePreferences> {
+    error("AndroidArticlePreferences was not provided")
+}
 
 internal enum class AndroidArticleOpenPreference(
     val storedValue: String,
