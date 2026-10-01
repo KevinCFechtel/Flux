@@ -149,7 +149,7 @@ class AndroidArticleTimelineTest {
     }
 
     @Test
-    fun pageCompletionFromRetiredCoreSessionIsDiscarded() = runBlocking {
+    fun pageCompletionFromRetiredCoreSessionCannotOverwriteNewSessionSnapshot() = runBlocking {
         var sessionGeneration: Long? = 3
         val pageStarted = CompletableDeferred<Unit>()
         val releasePage = CompletableDeferred<Unit>()
@@ -161,18 +161,25 @@ class AndroidArticleTimelineTest {
         val store = AndroidArticleTimelineStore(
             pageLoader = { _, includeTotal ->
                 call += 1
-                if (includeTotal) {
-                    ArticlePage(
+                when (call) {
+                    1 -> ArticlePage(
                         articles = listOf(article(1)),
                         total = 2uL,
                         nextCursor = cursor,
                     )
-                } else {
-                    pageStarted.complete(Unit)
-                    releasePage.await()
-                    ArticlePage(
-                        articles = listOf(article(2)),
-                        total = null,
+                    2 -> {
+                        assertFalse(includeTotal)
+                        pageStarted.complete(Unit)
+                        releasePage.await()
+                        ArticlePage(
+                            articles = listOf(article(2)),
+                            total = null,
+                            nextCursor = null,
+                        )
+                    }
+                    else -> ArticlePage(
+                        articles = listOf(article(9)),
+                        total = 1uL,
                         nextCursor = null,
                     )
                 }
@@ -180,19 +187,23 @@ class AndroidArticleTimelineTest {
             activeSessionGeneration = { sessionGeneration },
             testOnly = Unit,
         )
+        val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
 
-        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
-        val append = async { store.loadNextPage() }
+        store.reset(selection)
+        val staleAppend = async { store.loadNextPage() }
         pageStarted.await()
 
         sessionGeneration = 4
+        store.reset(selection)
         releasePage.complete(Unit)
-        append.await()
+        staleAppend.await()
 
-        assertEquals(2, call)
-        assertEquals(listOf(1L), store.state.value.articles.map { it.id })
-        assertEquals(cursor, store.state.value.nextCursor)
+        assertEquals(3, call)
+        assertEquals(listOf(9L), store.state.value.articles.map { it.id })
+        assertEquals(1uL, store.state.value.total)
+        assertNull(store.state.value.nextCursor)
         assertFalse(store.state.value.loadingNextPage)
+        assertEquals(2L, store.state.value.queryGeneration)
     }
 
     @Test
