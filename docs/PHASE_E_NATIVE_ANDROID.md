@@ -1,6 +1,6 @@
 # Phase E — Native Android
 
-> **Status: PHASE E1 AND E2 COMPLETE — E3 NEXT / PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
+> **Status: PHASE E1 AND E2 COMPLETE — E3 IN PROGRESS (E3-A COMPLETE / E3-B NEXT) / PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
 >
@@ -603,6 +603,33 @@ The larger `AndroidStoragePaths` ownership/lifecycle review remains deferred to 
 
 E3 implements the native Android Article List over Core query/page APIs.
 
+### E3-A — Timeline paging foundation
+
+Status: **COMPLETE**
+
+Implemented on 1 October 2026:
+
+- the E2 Timeline placeholder is replaced by a Compose `LazyColumn` backed by Core `article_page`;
+- Article IDs are the stable lazy-list keys;
+- local Timeline queries use bounded 64-row Core keyset pages and retain the authoritative first-page total;
+- All News / Starred / Category / Feed map directly to the existing Core scope/starred filters;
+- transient Unread/All and sort values are represented only as Timeline presentation selection, not persisted Settings;
+- first-page replacement and later-page append are generation-owned and discard stale completions;
+- the Android Core runtime publishes a monotonic read-only session generation so account/session replacement invalidates old Timeline requests;
+- duplicate rows are rejected by stable Article ID and duplicate-only/repeated-cursor pages terminate pagination rather than looping;
+- loading, empty, initial-error and append-error states are native Compose presentation states;
+- synchronous Core paging remains on the existing bounded local Core execution lane, never the main thread;
+- focused JVM tests cover scope/query mapping, first-page total ownership, append/deduplication, query replacement, Core-session replacement and pagination termination.
+
+Validation:
+
+- Android pull-request CI gate — PASS
+- canonical gate included unit tests, lint, development assembly and production release build
+- no Core/UniFFI API change was required
+
+E3-B is next: productive Compact / Visual / Visual Compact row presentation and the single Android-native article image pipeline.
+
+
 ### Baseline renderer
 
 Start with Compose LazyColumn or the current idiomatic Compose lazy-list equivalent.
@@ -998,39 +1025,3 @@ The following are decided unless implementation finds a concrete contradiction:
 - UniFFI as the only app/Core binding;
 - no second Kotlin domain or Miniflux layer;
 - one process-scoped Core/account session;
-- synchronous Core work off the Android main thread;
-- production application ID de.circle_dev.flux_news retained;
-- separate native development identity;
-- API 29 initial compatibility floor;
-- legacy migration is copy/import-only;
-- existing native/Core state wins over legacy;
-- Flutter is behavioral/migration evidence, not architecture or parity checklist;
-- WorkManager/native background execution over the Core sync contract;
-- native per-feed system notifications over Core candidates;
-- credential-free bounded widget projection, no Core/DB/network in the widget;
-- Media3 as the preferred playback baseline;
-- one Android media runtime/player owner;
-- Android Auto as a native projection over Core media read models;
-- E8 has no artificial implementation;
-- E9 is replacement/acceptance closure rather than deferred feature implementation;
-- Phase A-D remain frozen unless a concrete cross-platform contradiction requires an additive fix.
-
-## 28. Implementation order
-
-Begin with E1-A and proceed through the E1 gates before implementing user-facing Phase-E features.
-
-The first productive Android code must prove the binding/runtime/migration foundation, not recreate screens from Flutter.
-
-After E1 acceptance:
-
-    E2 Adaptive Shell / Account / Settings
-      -> E3 Article Timeline
-      -> E4 Actions / Search / Sync
-      -> E5 Background / Notifications / Widgets
-      -> E6 Media / Downloads
-      -> E7 System Media / Android Auto
-      -> E9 Replacement / Production Acceptance
-
-E8 remains unused unless a future explicit Android-specific requirement is approved.
-
-Phase E is successful when Android is a native client of the same durable Flux architecture, not a second implementation of the Flux domain.
