@@ -40,6 +40,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -85,6 +86,8 @@ internal fun AdaptiveAppShell(
     modifier: Modifier = Modifier,
 ) {
     val navController = rememberNavController()
+    val timelineStore = remember(coreRuntime) { AndroidArticleTimelineStore(coreRuntime) }
+    val sessionGeneration by coreRuntime.sessionGeneration.collectAsState()
     var selectedScope by remember { mutableStateOf<AndroidNewsScope>(AndroidNewsScope.All) }
     var navigation by remember { mutableStateOf(NewsNavigationModel()) }
     var preferenceState by remember { mutableStateOf<AndroidNavigationPreferenceState?>(null) }
@@ -149,6 +152,8 @@ internal fun AdaptiveAppShell(
                 navigation = navigation,
                 preferences = currentPreferences,
                 state = state,
+                timelineStore = timelineStore,
+                sessionGeneration = sessionGeneration,
                 navController = navController,
                 onScopeSelected = { selectedScope = it },
             )
@@ -156,7 +161,7 @@ internal fun AdaptiveAppShell(
         composable(ShellRoute.Search) {
             SecondaryDestination(
                 title = "Search",
-                message = "Native article search is connected to this destination in E3.",
+                message = "Native article search is connected to this destination in E4.",
                 onBack = navController::popBackStack,
             )
         }
@@ -200,6 +205,8 @@ private fun TimelineDestination(
     navigation: NewsNavigationModel,
     preferences: AndroidNavigationPreferenceState,
     state: AndroidAccountBootstrap.State.Ready,
+    timelineStore: AndroidArticleTimelineStore,
+    sessionGeneration: Long?,
     navController: NavHostController,
     onScopeSelected: (AndroidNewsScope) -> Unit,
 ) {
@@ -222,7 +229,7 @@ private fun TimelineDestination(
                     }
                 },
             ) {
-                NewsRootContent(scope, navigation, state, true) {}
+                NewsRootContent(scope, navigation, state, timelineStore, sessionGeneration, true) {}
             }
         } else {
             val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -256,6 +263,8 @@ private fun TimelineDestination(
                     scope = scope,
                     navigation = navigation,
                     state = state,
+                    timelineStore = timelineStore,
+                    sessionGeneration = sessionGeneration,
                     persistentNavigation = false,
                     onOpenNavigation = { coroutineScope.launch { drawerState.open() } },
                 )
@@ -270,6 +279,8 @@ private fun NewsRootContent(
     scope: AndroidNewsScope,
     navigation: NewsNavigationModel,
     state: AndroidAccountBootstrap.State.Ready,
+    timelineStore: AndroidArticleTimelineStore,
+    sessionGeneration: Long?,
     persistentNavigation: Boolean,
     onOpenNavigation: () -> Unit,
 ) {
@@ -300,9 +311,13 @@ private fun NewsRootContent(
             )
         },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            NewsTimelinePlaceholder(scope, navigation, state)
-        }
+        AndroidArticleTimeline(
+            store = timelineStore,
+            selection = AndroidArticleTimelineSelection(scope = scope),
+            sessionGeneration = sessionGeneration,
+            accountKey = state.serverUrl,
+            modifier = Modifier.fillMaxSize().padding(padding),
+        )
     }
 }
 
@@ -554,25 +569,6 @@ private fun scopeTitle(scope: AndroidNewsScope): String = when (scope) {
     AndroidNewsScope.Starred -> "Starred"
     is AndroidNewsScope.Category -> scope.title
     is AndroidNewsScope.Feed -> scope.title
-}
-
-@Composable
-private fun NewsTimelinePlaceholder(
-    scope: AndroidNewsScope,
-    navigation: NewsNavigationModel,
-    state: AndroidAccountBootstrap.State.Ready,
-) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(scopeTitle(scope), style = MaterialTheme.typography.headlineLarge)
-            Text("Native article timeline arrives in E3", style = MaterialTheme.typography.titleMedium)
-            navigation.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            Text(state.serverUrl, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
