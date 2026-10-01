@@ -46,6 +46,7 @@ internal fun SettingsShell(
     val mediaSettings = LocalAndroidMediaSettings.current
     val downloadedData = LocalAndroidDownloadedData.current
     val backgroundSync = LocalAndroidBackgroundSync.current
+    val configurationBackup = LocalAndroidConfigurationBackup.current
     var articleState by remember { mutableStateOf(AndroidArticlePreferenceState()) }
     var actionBarState by remember { mutableStateOf(AndroidActionBarPreferenceState()) }
 
@@ -74,12 +75,12 @@ internal fun SettingsShell(
                 Row(contentModifier) {
                     SettingsList(selected, { selected = it }, Modifier.width(340.dp).fillMaxHeight())
                     HorizontalDivider(Modifier.width(1.dp).fillMaxHeight())
-                    SettingsDetail(selected ?: SettingsDestination.Account, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, onAccountChanged, Modifier.fillMaxSize())
+                    SettingsDetail(selected ?: SettingsDestination.Account, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, configurationBackup, onAccountChanged, Modifier.fillMaxSize())
                 }
             } else if (selected == null) {
                 SettingsList(null, { selected = it }, contentModifier)
             } else {
-                SettingsDetail(selected!!, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, onAccountChanged, contentModifier)
+                SettingsDetail(selected!!, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, configurationBackup, onAccountChanged, contentModifier)
             }
         }
     }
@@ -121,17 +122,19 @@ private fun SettingsDetail(
     mediaSettings: AndroidMediaSettings,
     downloadedData: AndroidDownloadedData,
     backgroundSync: AndroidBackgroundSync,
+    configurationBackup: AndroidConfigurationBackupController,
     onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
     modifier: Modifier,
 ) {
     when (destination) {
-        SettingsDestination.Account -> AccountConfigurationScreen(bootstrap, true, onAccountChanged, { onAccountChanged(AndroidAccountBootstrap.State.AccountRequired) }, modifier)
+        SettingsDestination.Account -> AccountConfigurationScreen(bootstrap, true, onAccountChanged, { onAccountChanged(AndroidAccountBootstrap.State.AccountRequired) }, modifier = modifier)
         SettingsDestination.Articles -> ArticleSettingsScreen(articlePreferences, articleState, coreArticleSettings, modifier)
         SettingsDestination.ActionBar -> ActionBarSettingsScreen(actionBarPreferences, actionBarState, modifier)
         SettingsDestination.Navigation -> NavigationSettingsScreen(navigationPreferences, navigationState, categories, feeds, modifier)
         SettingsDestination.Media -> MediaSettingsScreen(mediaSettings, modifier)
         SettingsDestination.DownloadedData -> DownloadedDataSettingsScreen(downloadedData, modifier)
         SettingsDestination.BackgroundSync -> BackgroundSyncSettingsScreen(backgroundSync, modifier)
+        SettingsDestination.ConfigurationBackup -> ConfigurationBackupScreen(configurationBackup, { (bootstrap.state as? AndroidAccountBootstrap.State.Ready)?.let(onAccountChanged) }, modifier)
         else -> PendingSettingsDestination(destination, modifier)
     }
 }

@@ -41,6 +41,7 @@ internal fun AccountConfigurationScreen(
     allowsRemoval: Boolean,
     onAccountActivated: (AndroidAccountBootstrap.State.Ready) -> Unit,
     onAccountRemoved: () -> Unit,
+    onRestoreRequested: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val stored = remember(bootstrap) { bootstrap.credentialsForEditing() }
@@ -209,6 +210,13 @@ internal fun AccountConfigurationScreen(
                 enabled = rebuildState != AndroidAccountBootstrap.LocalStateRebuildState.Rebuilding,
             ) {
                 Text("Remove Account", color = MaterialTheme.colorScheme.error)
+            }
+        }
+        if (!allowsRemoval) {
+            HorizontalDivider()
+            Text("Already have a backup?", style = MaterialTheme.typography.titleMedium)
+            OutlinedButton(onClick = { onRestoreRequested?.invoke() }, modifier = Modifier.fillMaxWidth()) {
+                Text("Restore Configuration Backup")
             }
         }
     }

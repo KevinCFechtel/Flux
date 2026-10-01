@@ -154,6 +154,30 @@ class AndroidAccountBootstrap private constructor(
         null
     }
 
+    /** Internal lifecycle boundary used by the configuration-backup controller. */
+    internal suspend fun <T> withConfigurationBackupLock(block: suspend () -> T): T = lifecycleMutex.withLock {
+        check(localStateRebuildState != LocalStateRebuildState.Rebuilding) { "Local state rebuild is active." }
+        block()
+    }
+
+    internal fun credentialsForConfigurationBackup(): StoredAccountCredentials? = credentialReader()
+
+    internal fun writeCredentialsForConfigurationBackup(credentials: StoredAccountCredentials) = credentialWriter(credentials)
+
+    internal fun clearCredentialsForConfigurationBackup() = credentialClearer()
+
+    internal fun initializationConfigFor(credentials: StoredAccountCredentials): InitializationConfig =
+        configFactory.create(credentials)
+
+    internal fun publishRestoredAccount(credentials: StoredAccountCredentials) {
+        localStateRebuildState = LocalStateRebuildState.Idle
+        state = State.Ready(credentials.serverUrl)
+    }
+
+    internal fun publishConfigurationRecoveryError() {
+        state = State.RecoverableError("Configuration restore could not be recovered. Restart FluxNews before making further changes.")
+    }
+
     /** Validates before persistence and stores Core's canonical installation base on success. */
     suspend fun activateAccount(
         serverUrl: String,
