@@ -40,10 +40,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             FluxNewsTheme {
                 val coreArticleSettings = remember(coreRuntime) { AndroidCoreArticleSettings(coreRuntime) }
+                val mediaSettings = remember(coreRuntime) { AndroidMediaSettings(coreRuntime) }
                 CompositionLocalProvider(
                     LocalAndroidArticlePreferences provides articlePreferences,
                     LocalAndroidActionBarPreferences provides actionBarPreferences,
                     LocalAndroidCoreArticleSettings provides coreArticleSettings,
+                    LocalAndroidMediaSettings provides mediaSettings,
                 ) {
                     FluxNewsApp(bootstrap, coreRuntime, syncCoordinator, navigationPreferences)
                 }
