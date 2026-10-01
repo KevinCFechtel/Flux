@@ -183,7 +183,7 @@ class AndroidConfigurationBackupTest {
     private fun assertOrder(calls: List<String>, vararg expected: String) {
         var position = -1
         expected.forEach { call ->
-            val next = calls.indexOf(call, position + 1)
+            val next = calls.indices.firstOrNull { it > position && calls[it] == call } ?: -1
             assertTrue("Missing/out-of-order call $call in $calls", next > position)
             position = next
         }
@@ -255,7 +255,7 @@ class AndroidConfigurationBackupTest {
             coreBase = snapshot.installationBase
         }
 
-        override suspend fun openFresh(credentials: StoredAccountCredentials) { mutation("openFresh"); runtimeCredentials = credentials; coreBase = credentials.installationBase }
+        override suspend fun openFresh(credentials: StoredAccountCredentials) { mutation("openFresh"); runtimeCredentials = credentials; coreBase = credentials.serverUrl }
         override suspend fun resetFreshCore() { mutation("resetFreshCore"); coreBase = null }
         override suspend fun replaceRuntime(credentials: StoredAccountCredentials) { mutation("replaceRuntime"); failPrimary(FailurePoint.ReplaceRuntime); runtimeCredentials = credentials }
         override suspend fun closeRuntime() { mutation("closeRuntime"); runtimeCredentials = null }
