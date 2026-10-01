@@ -12,151 +12,47 @@ plugins {
 android {
     namespace = "de.circledev.fluxnews.nativeapp"
     compileSdk = 36
-
-    defaultConfig {
-        applicationId = "de.circle_dev.flux_news"
-        minSdk = 29
-        targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
-
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    }
-
+    defaultConfig { applicationId = "de.circle_dev.flux_news"; minSdk = 29; targetSdk = 36; versionCode = 1; versionName = "0.1.0"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
     buildTypes {
-        debug {
-            isMinifyEnabled = false
-        }
-        release {
-            isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro",
-            )
-        }
-        create("migrationProbe") {
-            initWith(getByName("debug"))
-            isDebuggable = true
-            isMinifyEnabled = false
-            applicationIdSuffix = ""
-        }
+        debug { isMinifyEnabled = false }
+        release { isMinifyEnabled = false; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") }
+        create("migrationProbe") { initWith(getByName("debug")); isDebuggable = true; isMinifyEnabled = false; applicationIdSuffix = "" }
     }
-
     flavorDimensions += "distribution"
     productFlavors {
-        create("development") {
-            dimension = "distribution"
-            applicationIdSuffix = ".native.dev"
-            versionNameSuffix = "-native-dev"
-        }
-        create("production") {
-            dimension = "distribution"
-        }
+        create("development") { dimension = "distribution"; applicationIdSuffix = ".native.dev"; versionNameSuffix = "-native-dev" }
+        create("production") { dimension = "distribution" }
     }
-
     sourceSets {
-        getByName("debug").java.srcDir("../Build/Products/Bindings/debug/kotlin")
-        getByName("debug").jniLibs.srcDir("../Build/Products/debug")
-        getByName("release").java.srcDir("../Build/Products/Bindings/release/kotlin")
-        getByName("release").jniLibs.srcDir("../Build/Products/release")
-        getByName("migrationProbe").java.srcDir("src/migrationProbe/java")
-        getByName("migrationProbe").java.srcDir("../Build/Products/Bindings/debug/kotlin")
-        getByName("migrationProbe").jniLibs.srcDir("../Build/Products/debug")
+        getByName("debug").java.srcDir("../Build/Products/Bindings/debug/kotlin"); getByName("debug").jniLibs.srcDir("../Build/Products/debug")
+        getByName("release").java.srcDir("../Build/Products/Bindings/release/kotlin"); getByName("release").jniLibs.srcDir("../Build/Products/release")
+        getByName("migrationProbe").java.srcDir("src/migrationProbe/java"); getByName("migrationProbe").java.srcDir("../Build/Products/Bindings/debug/kotlin"); getByName("migrationProbe").jniLibs.srcDir("../Build/Products/debug")
     }
-
-    buildFeatures {
-        buildConfig = true
-        compose = true
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
+    buildFeatures { buildConfig = true; compose = true }
+    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
 }
 
 androidComponents {
     beforeVariants { variantBuilder ->
-        val flavor = variantBuilder.productFlavors
-            .singleOrNull { it.first == "distribution" }
-            ?.second
-        if ((flavor == "production" && variantBuilder.buildType == "debug") ||
-            (flavor == "development" && variantBuilder.buildType == "release")) {
-            variantBuilder.enable = false
-        }
+        val flavor = variantBuilder.productFlavors.singleOrNull { it.first == "distribution" }?.second
+        if ((flavor == "production" && variantBuilder.buildType == "debug") || (flavor == "development" && variantBuilder.buildType == "release")) variantBuilder.enable = false
     }
 }
 
 val uniffiBuildScript = file("../Build/build-uniffi.sh")
+fun registerUniffiPreparation(variantName: String, mode: String): TaskProvider<Exec> = tasks.register<Exec>("prepare${variantName.replaceFirstChar { it.uppercase() }}Uniffi") { inputs.file(uniffiBuildScript); inputs.file(file("../../core/crates/flux-uniffi/uniffi.toml")); outputs.dir(file("../Build/Products/$mode")); outputs.dir(file("../Build/Products/Bindings/$mode/kotlin")); commandLine(uniffiBuildScript.absolutePath, mode) }
+fun wireUniffiPreparation(variantName: String, preparation: TaskProvider<Exec>) { val capitalized = variantName.replaceFirstChar { it.uppercase() }; tasks.matching { it.name == "compile${capitalized}Kotlin" || it.name == "merge${capitalized}JniLibFolders" || it.name == "merge${capitalized}NativeLibs" }.configureEach { dependsOn(preparation) } }
+wireUniffiPreparation("developmentDebug", registerUniffiPreparation("developmentDebug", "debug"))
+wireUniffiPreparation("productionMigrationProbe", registerUniffiPreparation("productionMigrationProbe", "debug"))
 
-fun registerUniffiPreparation(variantName: String, mode: String): TaskProvider<Exec> =
-    tasks.register<Exec>("prepare${variantName.replaceFirstChar { it.uppercase() }}Uniffi") {
-        inputs.file(uniffiBuildScript)
-        inputs.file(file("../../core/crates/flux-uniffi/uniffi.toml"))
-        outputs.dir(file("../Build/Products/$mode"))
-        outputs.dir(file("../Build/Products/Bindings/$mode/kotlin"))
-        commandLine(uniffiBuildScript.absolutePath, mode)
-    }
+val migrationSigningProperties = Properties().apply { val file = rootProject.file("migration-signing.properties"); if (file.exists()) file.inputStream().use(::load) }
+android.buildTypes.named("migrationProbe") { if (migrationSigningProperties.isNotEmpty()) signingConfig = android.signingConfigs.maybeCreate("migrationProbe").apply { keyAlias = migrationSigningProperties.getProperty("keyAlias"); keyPassword = migrationSigningProperties.getProperty("keyPassword"); storeFile = migrationSigningProperties.getProperty("storeFile")?.let(::file); storePassword = migrationSigningProperties.getProperty("storePassword") } }
+val migrationVersionCode = providers.gradleProperty("fluxMigrationVersionCode").map(String::toInt).orElse(1)
+androidComponents.onVariants(androidComponents.selector().withBuildType("migrationProbe")) { variant -> variant.outputs.forEach { output -> output.versionCode.set(migrationVersionCode) } }
+tasks.matching { it.name == "testProductionMigrationProbeUnitTest" }.configureEach { (this as org.gradle.api.tasks.testing.Test).exclude("**/DevelopmentIdentityTest.class") }
+wireUniffiPreparation("productionRelease", registerUniffiPreparation("productionRelease", "release"))
 
-fun wireUniffiPreparation(variantName: String, preparation: TaskProvider<Exec>) {
-    val capitalized = variantName.replaceFirstChar { it.uppercase() }
-    tasks.matching {
-        it.name == "compile${capitalized}Kotlin" ||
-            it.name == "merge${capitalized}JniLibFolders" ||
-            it.name == "merge${capitalized}NativeLibs"
-    }.configureEach {
-        dependsOn(preparation)
-    }
-}
-
-wireUniffiPreparation(
-    "developmentDebug",
-    registerUniffiPreparation("developmentDebug", "debug"),
-)
-wireUniffiPreparation(
-    "productionMigrationProbe",
-    registerUniffiPreparation("productionMigrationProbe", "debug"),
-)
-
-val migrationSigningProperties = Properties().apply {
-    val file = rootProject.file("migration-signing.properties")
-    if (file.exists()) {
-        file.inputStream().use(::load)
-    }
-}
-
-android.buildTypes.named("migrationProbe") {
-    if (migrationSigningProperties.isNotEmpty()) {
-        signingConfig = android.signingConfigs.maybeCreate("migrationProbe").apply {
-            keyAlias = migrationSigningProperties.getProperty("keyAlias")
-            keyPassword = migrationSigningProperties.getProperty("keyPassword")
-            storeFile = migrationSigningProperties.getProperty("storeFile")?.let(::file)
-            storePassword = migrationSigningProperties.getProperty("storePassword")
-        }
-    }
-}
-
-val migrationVersionCode = providers.gradleProperty("fluxMigrationVersionCode")
-    .map(String::toInt)
-    .orElse(1)
-
-androidComponents.onVariants(androidComponents.selector().withBuildType("migrationProbe")) { variant ->
-    variant.outputs.forEach { output -> output.versionCode.set(migrationVersionCode) }
-}
-
-tasks.matching { it.name == "testProductionMigrationProbeUnitTest" }.configureEach {
-    (this as org.gradle.api.tasks.testing.Test).exclude("**/DevelopmentIdentityTest.class")
-}
-wireUniffiPreparation(
-    "productionRelease",
-    registerUniffiPreparation("productionRelease", "release"),
-)
-
-kotlin {
-    compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_17)
-    }
-}
+kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
 
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2025.02.00"))
@@ -165,16 +61,11 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.navigation:navigation-compose:2.8.9")
     implementation("androidx.datastore:datastore-preferences:1.2.1")
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
     implementation("androidx.compose.material3:material3")
     implementation("com.google.android.material:material:1.12.0")
     implementation("net.java.dev.jna:jna:5.19.1@aar")
-    // Kotlin side of the pinned rustls-platform-verifier crate. The version and the Maven
-    // repository both come from Cargo metadata (see settings.gradle.kts), so the component can
-    // never drift away from the crate that core/Cargo.lock selected.
-    implementation(
-        "rustls:rustls-platform-verifier:${rootProject.extra["rustlsPlatformVerifierVersion"]}@aar",
-    )
-
+    implementation("rustls:rustls-platform-verifier:${rootProject.extra["rustlsPlatformVerifierVersion"]}@aar")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:core-ktx:1.6.1")

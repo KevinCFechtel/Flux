@@ -2,375 +2,94 @@ package de.circledev.fluxnews.nativeapp
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import uniffi.flux_uniffi.DownloadNetworkPolicy
+import java.text.NumberFormat
 
-private enum class SettingsDestination(val title: String, val subtitle: String) {
-    Account("Account", "Miniflux server, credentials and local account data"),
-    Articles("Articles", "Article presentation and reading behavior"),
-    ActionBar("Action Bar", "Article list actions"),
-    Navigation("Navigation", "Startup scope and navigation behavior"),
-    Media("Media", "Playback and Listening List preferences"),
-    DownloadedData("Downloaded Data", "Downloaded media storage"),
-    BackgroundSync("Background Sync", "Background refresh preference"),
-    ConfigurationBackup("Configuration Backup", "Encrypted configuration export and restore"),
-    SupportDiagnostics("Support Diagnostics", "Logging, viewer and support export"),
-    About("About", "Version, open source and legal information"),
-}
+private enum class SettingsDestination(val title: String, val subtitle: String) { Account("Account", "Miniflux server, credentials and local account data"), Articles("Articles", "Article presentation and reading behavior"), ActionBar("Action Bar", "Article list actions"), Navigation("Navigation", "Startup scope and navigation behavior"), Media("Media", "Playback and Listening List preferences"), DownloadedData("Downloaded Data", "Downloaded media storage"), BackgroundSync("Background Sync", "Background refresh preference"), ConfigurationBackup("Configuration Backup", "Encrypted configuration export and restore"), SupportDiagnostics("Support Diagnostics", "Logging, viewer and support export"), About("About", "Version, open source and legal information") }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SettingsShell(
-    bootstrap: AndroidAccountBootstrap,
-    navigationPreferences: AndroidNavigationPreferences,
-    navigationPreferenceState: AndroidNavigationPreferenceState,
-    navigationCategories: List<AndroidNavigationCategoryRef>,
-    navigationFeeds: List<AndroidNavigationFeedRef>,
-    onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val articlePreferences = LocalAndroidArticlePreferences.current
-    var articlePreferenceState by remember { mutableStateOf(AndroidArticlePreferenceState()) }
-    LaunchedEffect(articlePreferences) {
-        articlePreferences.state.collect { articlePreferenceState = it }
-    }
-
-    androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxSize()) {
-        val listDetail = maxWidth >= 840.dp
-        var selected by remember {
-            mutableStateOf<SettingsDestination?>(if (listDetail) SettingsDestination.Account else null)
-        }
-        val showingCompactDetail = !listDetail && selected != null
-
-        BackHandler(enabled = showingCompactDetail) { selected = null }
-
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text(if (showingCompactDetail) selected!!.title else "Settings") },
-                    navigationIcon = {
-                        TextButton(onClick = { if (showingCompactDetail) selected = null else onBack() }) {
-                            Text(if (showingCompactDetail) "‹ Settings" else "‹ News")
-                        }
-                    },
-                )
-            },
-        ) { padding ->
-            val contentModifier = Modifier.fillMaxSize().padding(padding)
-            if (listDetail) {
-                Row(contentModifier) {
-                    SettingsList(
-                        selected = selected,
-                        onSelected = { selected = it },
-                        modifier = Modifier.width(340.dp).fillMaxHeight(),
-                    )
-                    HorizontalDivider(modifier = Modifier.width(1.dp).fillMaxHeight())
-                    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
-                        SettingsDetail(
-                            destination = selected ?: SettingsDestination.Account,
-                            bootstrap = bootstrap,
-                            navigationPreferences = navigationPreferences,
-                            navigationPreferenceState = navigationPreferenceState,
-                            navigationCategories = navigationCategories,
-                            navigationFeeds = navigationFeeds,
-                            articlePreferences = articlePreferences,
-                            articlePreferenceState = articlePreferenceState,
-                            onAccountChanged = onAccountChanged,
-                        )
-                    }
-                }
-            } else if (selected == null) {
-                SettingsList(null, { selected = it }, contentModifier)
-            } else {
-                SettingsDetail(
-                    destination = selected!!,
-                    bootstrap = bootstrap,
-                    navigationPreferences = navigationPreferences,
-                    navigationPreferenceState = navigationPreferenceState,
-                    navigationCategories = navigationCategories,
-                    navigationFeeds = navigationFeeds,
-                    articlePreferences = articlePreferences,
-                    articlePreferenceState = articlePreferenceState,
-                    onAccountChanged = onAccountChanged,
-                    modifier = contentModifier,
-                )
-            }
+internal fun SettingsShell(bootstrap: AndroidAccountBootstrap, navigationPreferences: AndroidNavigationPreferences, navigationPreferenceState: AndroidNavigationPreferenceState, navigationCategories: List<AndroidNavigationCategoryRef>, navigationFeeds: List<AndroidNavigationFeedRef>, onAccountChanged: (AndroidAccountBootstrap.State) -> Unit, onBack: () -> Unit, modifier: Modifier = Modifier) {
+    val articlePreferences = LocalAndroidArticlePreferences.current; val actionBarPreferences = LocalAndroidActionBarPreferences.current; val coreArticleSettings = LocalAndroidCoreArticleSettings.current; val mediaSettings = LocalAndroidMediaSettings.current; val downloadedData = LocalAndroidDownloadedData.current; val backgroundSync = LocalAndroidBackgroundSync.current
+    var articleState by remember { mutableStateOf(AndroidArticlePreferenceState()) }; var actionBarState by remember { mutableStateOf(AndroidActionBarPreferenceState()) }
+    LaunchedEffect(articlePreferences) { articlePreferences.state.collect { articleState = it } }; LaunchedEffect(actionBarPreferences) { actionBarPreferences.state.collect { actionBarState = it } }
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val listDetail = maxWidth >= 840.dp; var selected by remember { mutableStateOf<SettingsDestination?>(if (listDetail) SettingsDestination.Account else null) }; val compactDetail = !listDetail && selected != null
+        BackHandler(enabled = compactDetail) { selected = null }
+        Scaffold(topBar = { TopAppBar(title = { Text(if (compactDetail) selected!!.title else "Settings") }, navigationIcon = { TextButton(onClick = { if (compactDetail) selected = null else onBack() }) { Text(if (compactDetail) "‹ Settings" else "‹ News") } }) }) { padding ->
+            val m = Modifier.fillMaxSize().padding(padding)
+            if (listDetail) Row(m) { SettingsList(selected, { selected = it }, Modifier.width(340.dp).fillMaxHeight()); HorizontalDivider(Modifier.width(1.dp).fillMaxHeight()); SettingsDetail(selected ?: SettingsDestination.Account, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, onAccountChanged, Modifier.fillMaxSize()) }
+            else if (selected == null) SettingsList(null, { selected = it }, m)
+            else SettingsDetail(selected!!, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, onAccountChanged, m)
         }
     }
 }
 
-@Composable
-private fun SettingsList(
-    selected: SettingsDestination?,
-    onSelected: (SettingsDestination) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier = modifier.verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
-        SettingsDestination.entries.forEach { destination ->
-            Surface(
-                color = if (selected == destination) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
-                modifier = Modifier.fillMaxWidth().clickable { onSelected(destination) },
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(destination.title, style = MaterialTheme.typography.titleMedium)
-                        Text(destination.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Text("›", style = MaterialTheme.typography.titleLarge)
-                }
-            }
-        }
-    }
-}
+@Composable private fun SettingsList(selected: SettingsDestination?, onSelected: (SettingsDestination) -> Unit, modifier: Modifier) { Column(modifier.verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) { SettingsDestination.entries.forEach { d -> Surface(color = if (selected == d) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth().clickable { onSelected(d) }) { Row(Modifier.padding(horizontal = 24.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(d.title, style = MaterialTheme.typography.titleMedium); Text(d.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Text("›", style = MaterialTheme.typography.titleLarge) } } } } }
 
-@Composable
-private fun SettingsDetail(
-    destination: SettingsDestination,
-    bootstrap: AndroidAccountBootstrap,
-    navigationPreferences: AndroidNavigationPreferences,
-    navigationPreferenceState: AndroidNavigationPreferenceState,
-    navigationCategories: List<AndroidNavigationCategoryRef>,
-    navigationFeeds: List<AndroidNavigationFeedRef>,
-    articlePreferences: AndroidArticlePreferences,
-    articlePreferenceState: AndroidArticlePreferenceState,
-    onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    when (destination) {
-        SettingsDestination.Account -> AccountConfigurationScreen(
-            bootstrap = bootstrap,
-            allowsRemoval = true,
-            onAccountActivated = onAccountChanged,
-            onAccountRemoved = { onAccountChanged(AndroidAccountBootstrap.State.AccountRequired) },
-            modifier = modifier,
-        )
-        SettingsDestination.Articles -> ArticleSettingsScreen(articlePreferences, articlePreferenceState, modifier)
-        SettingsDestination.Navigation -> NavigationSettingsScreen(
-            navigationPreferences,
-            navigationPreferenceState,
-            navigationCategories,
-            navigationFeeds,
-            modifier,
-        )
-        else -> PendingSettingsDestination(destination, modifier)
-    }
-}
+@Composable private fun SettingsDetail(d: SettingsDestination, bootstrap: AndroidAccountBootstrap, navPrefs: AndroidNavigationPreferences, navState: AndroidNavigationPreferenceState, categories: List<AndroidNavigationCategoryRef>, feeds: List<AndroidNavigationFeedRef>, articlePrefs: AndroidArticlePreferences, articleState: AndroidArticlePreferenceState, actionPrefs: AndroidActionBarPreferences, actionState: AndroidActionBarPreferenceState, core: AndroidCoreArticleSettings, media: AndroidMediaSettings, downloadedData: AndroidDownloadedData, backgroundSync: AndroidBackgroundSync, onAccountChanged: (AndroidAccountBootstrap.State) -> Unit, modifier: Modifier) { when (d) {
+    SettingsDestination.Account -> AccountConfigurationScreen(bootstrap, true, onAccountChanged, { onAccountChanged(AndroidAccountBootstrap.State.AccountRequired) }, modifier)
+    SettingsDestination.Articles -> ArticleSettingsScreen(articlePrefs, articleState, core, modifier)
+    SettingsDestination.ActionBar -> ActionBarSettingsScreen(actionPrefs, actionState, modifier)
+    SettingsDestination.Navigation -> NavigationSettingsScreen(navPrefs, navState, categories, feeds, modifier)
+    SettingsDestination.Media -> MediaSettingsScreen(media, modifier)
+    SettingsDestination.DownloadedData -> DownloadedDataSettingsScreen(downloadedData, modifier)
+    SettingsDestination.BackgroundSync -> BackgroundSyncSettingsScreen(backgroundSync, modifier)
+    else -> PendingSettingsDestination(d, modifier)
+} }
 
-@Composable
-private fun ArticleSettingsScreen(
-    preferences: AndroidArticlePreferences,
-    state: AndroidArticlePreferenceState,
-    modifier: Modifier = Modifier,
-) {
-    val scope = rememberCoroutineScope()
-    Column(
-        modifier = modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text("Articles", style = MaterialTheme.typography.headlineMedium)
-        Text(
-            "Choose how articles are presented and how reading interactions behave.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        SettingsChoiceGroup("Open article") {
-            AndroidArticleOpenPreference.entries.forEach { option ->
-                SettingsRadioRow(option.displayName, state.openArticle == option) {
-                    scope.launch { preferences.setOpenArticle(option) }
-                }
-            }
-        }
-        SettingsChoiceGroup("Presentation") {
-            AndroidArticlePresentationMode.entries.forEach { option ->
-                SettingsRadioRow(option.displayName, state.presentationMode == option) {
-                    scope.launch { preferences.setPresentationMode(option) }
-                }
-            }
-        }
-        SettingsChoiceGroup("Preview lines") {
-            AndroidArticlePreviewLines.entries.forEach { option ->
-                SettingsRadioRow(option.displayName, state.previewLines == option) {
-                    scope.launch { preferences.setPreviewLines(option) }
-                }
-            }
-        }
-
-        HorizontalDivider()
-        SettingsSwitchRow("Show article count", state.showArticleCount) {
-            scope.launch { preferences.setShowArticleCount(it) }
-        }
-        SettingsSwitchRow("Show relative publication time", state.showRelativePublicationTime) {
-            scope.launch { preferences.setShowRelativePublicationTime(it) }
-        }
-        SettingsSwitchRow("Remove articles when read", state.removeArticlesWhenRead) {
-            scope.launch { preferences.setRemoveArticlesWhenRead(it) }
-        }
-        SettingsSwitchRow("Mark read on scrollover", state.markReadOnScrollover) {
-            scope.launch { preferences.setMarkReadOnScrollover(it) }
-        }
-        Text(
-            "Storage, Reader limits, immediate mutation delivery and swipe actions remain Core/action settings and are added separately rather than duplicated here.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun SettingsChoiceGroup(title: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        content()
-    }
-}
-
-@Composable
-private fun NavigationSettingsScreen(
-    preferences: AndroidNavigationPreferences,
-    state: AndroidNavigationPreferenceState,
-    categories: List<AndroidNavigationCategoryRef>,
-    feeds: List<AndroidNavigationFeedRef>,
-    modifier: Modifier = Modifier,
-) {
-    val scope = rememberCoroutineScope()
-    Column(
-        modifier = modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text("Navigation", style = MaterialTheme.typography.headlineMedium)
-        Text(
-            "Choose which news scope FluxNews opens with and whether empty feeds are shown.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        SettingsSwitchRow("Hide empty feeds", state.hideEmptyNavigationEntries) {
-            scope.launch { preferences.setHideEmptyNavigationEntries(it) }
-        }
-        HorizontalDivider()
-        Text("Startup scope", style = MaterialTheme.typography.titleMedium)
-        AndroidStartupScopePreference.entries.forEach { option ->
-            val enabled = when (option) {
-                AndroidStartupScopePreference.Category -> categories.isNotEmpty()
-                AndroidStartupScopePreference.Feed -> feeds.isNotEmpty()
-                else -> true
-            }
-            SettingsRadioRow(option.displayName, state.startupScope == option, enabled) {
-                scope.launch {
-                    preferences.setStartupScope(option)
-                    if (option == AndroidStartupScopePreference.Category && state.startupCategoryId == null) {
-                        categories.firstOrNull()?.let { preferences.setStartupCategoryId(it.id) }
-                    }
-                    if (option == AndroidStartupScopePreference.Feed && state.startupFeedId == null) {
-                        feeds.firstOrNull()?.let { preferences.setStartupFeedId(it.id) }
-                    }
-                }
-            }
-        }
-        if (categories.isEmpty() || feeds.isEmpty()) {
-            Text(
-                "Category and Feed startup scopes become available after the first successful sync.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (state.startupScope == AndroidStartupScopePreference.Category && categories.isNotEmpty()) {
+@Composable private fun DownloadedDataSettingsScreen(data: AndroidDownloadedData, modifier: Modifier) {
+    var summary by remember { mutableStateOf<AndroidDownloadedData.Summary?>(null) }; var loading by remember { mutableStateOf(true) }; var deleting by remember { mutableStateOf(false) }; var confirmDelete by remember { mutableStateOf(false) }; var error by remember { mutableStateOf<String?>(null) }; val scope = rememberCoroutineScope()
+    suspend fun reload() { loading = true; data.summary().fold({ summary = it; error = null }, { error = "Downloaded data could not be loaded. Please try again." }); loading = false }
+    LaunchedEffect(data) { reload() }
+    if (confirmDelete) AlertDialog(onDismissRequest = { if (!deleting) confirmDelete = false }, title = { Text("Delete All Downloads?") }, text = { Text("All locally downloaded audio files will be removed. Listening List items and playback progress will not be deleted.") }, dismissButton = { TextButton(enabled = !deleting, onClick = { confirmDelete = false }) { Text("Cancel") } }, confirmButton = { TextButton(enabled = !deleting, onClick = { confirmDelete = false; scope.launch { deleting = true; data.requestDeleteAll().fold({ reload() }, { error = "Downloads could not be deleted. Please try again." }); deleting = false } }) { Text("Delete", color = MaterialTheme.colorScheme.error) } })
+    Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text("Downloaded Data", style = MaterialTheme.typography.headlineMedium)
+        if (loading && summary == null) CircularProgressIndicator() else summary?.let { current ->
+            DownloadedDataValueRow("Downloaded Files", NumberFormat.getIntegerInstance().format(current.fileCount.toLong()))
+            DownloadedDataValueRow("Storage Used", formatBytes(current.totalSizeBytes))
+            Text("This includes local audio files that are still waiting for physical deletion. Listening List items and playback progress are stored separately.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             HorizontalDivider()
-            Text("Startup category", style = MaterialTheme.typography.titleMedium)
-            categories.forEach { category ->
-                SettingsRadioRow(category.title, state.startupCategoryId == category.id) {
-                    scope.launch { preferences.setStartupCategoryId(category.id) }
-                }
-            }
+            Button(enabled = !deleting && current.fileCount > 0uL, onClick = { confirmDelete = true }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)) { Text("Delete All Downloads") }
+            Text("Deleting downloads removes only local media files. Listening List items and playback progress are kept.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (state.startupScope == AndroidStartupScopePreference.Feed && feeds.isNotEmpty()) {
-            HorizontalDivider()
-            Text("Startup feed", style = MaterialTheme.typography.titleMedium)
-            feeds.forEach { feed ->
-                SettingsRadioRow(feed.title, state.startupFeedId == feed.id) {
-                    scope.launch { preferences.setStartupFeedId(feed.id) }
-                }
-            }
-        }
+        if (deleting) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) { CircularProgressIndicator(Modifier.size(20.dp)); Text("Deleting Downloads…") }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        TextButton(enabled = !loading && !deleting, onClick = { scope.launch { reload() } }) { Text("Refresh") }
     }
 }
 
-@Composable
-private fun SettingsSwitchRow(title: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable { onCheckedChange(!checked) }.padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+@Composable private fun DownloadedDataValueRow(label: String, value: String) { Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) { Text(label, Modifier.weight(1f)); Text(value, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+private fun formatBytes(bytes: ULong): String { val value = bytes.toDouble(); val units = arrayOf("B", "KB", "MB", "GB", "TB"); var amount = value; var index = 0; while (amount >= 1000.0 && index < units.lastIndex) { amount /= 1000.0; index++ }; return if (index == 0) "${bytes} B" else String.format(java.util.Locale.getDefault(), "%.1f %s", amount, units[index]) }
+
+@Composable private fun MediaSettingsScreen(settings: AndroidMediaSettings, modifier: Modifier) {
+    var state by remember { mutableStateOf<AndroidMediaSettings.State?>(null) }; var saving by remember { mutableStateOf(false) }; var error by remember { mutableStateOf<String?>(null) }; val scope = rememberCoroutineScope()
+    suspend fun reload() { settings.load().fold(onSuccess = { state = it; error = null }, onFailure = { error = "Media settings could not be loaded. Please try again." }) }
+    LaunchedEffect(settings) { reload() }
+    Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text("Media", style = MaterialTheme.typography.headlineMedium); val current = state
+        if (current == null) CircularProgressIndicator() else { Text("Downloads", style = MaterialTheme.typography.titleMedium); SettingsRadioRow("Any Network", current.downloadNetworkPolicy == DownloadNetworkPolicy.ANY_NETWORK, !saving) { scope.launch { saving = true; settings.setDownloadNetworkPolicy(DownloadNetworkPolicy.ANY_NETWORK).fold({ reload() }, { error = "Media setting could not be saved. Please try again." }); saving = false } }; SettingsRadioRow("Unmetered Networks Only", current.downloadNetworkPolicy == DownloadNetworkPolicy.UNMETERED_ONLY, !saving) { scope.launch { saving = true; settings.setDownloadNetworkPolicy(DownloadNetworkPolicy.UNMETERED_ONLY).fold({ reload() }, { error = "Media setting could not be saved. Please try again." }); saving = false } }; Text("Keep Downloads", style = MaterialTheme.typography.titleSmall); AndroidDownloadRetentionChoice.entries.forEach { choice -> SettingsRadioRow(choice.displayName, current.downloadRetention == choice, !saving) { scope.launch { saving = true; settings.setDownloadRetention(choice).fold({ reload() }, { error = "Media setting could not be saved. Please try again." }); saving = false } } }; Text("Automatic and manual downloads use the same network policy. Retention cleanup applies to downloaded media that is no longer protected by active playback or other Core media state.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant); HorizontalDivider(); Text("Listening List", style = MaterialTheme.typography.titleMedium); SettingsSwitchRow("Automatically download Listening List audio", current.autoDownloadListeningList, !saving) { value -> scope.launch { saving = true; settings.setAutoDownloadListeningList(value).fold({ reload() }, { error = "Media setting could not be saved. Please try again." }); saving = false } }; SettingsSwitchRow("Delete download after playback completes", current.deleteAfterPlayback, !saving) { value -> scope.launch { saving = true; settings.setDeleteAfterPlayback(value).fold({ reload() }, { error = "Media setting could not be saved. Please try again." }); saving = false } }; SettingsSwitchRow("Remove completed items from Listening List", current.removeCompletedListeningList, !saving) { value -> scope.launch { saving = true; settings.setRemoveCompletedListeningList(value).fold({ reload() }, { error = "Media setting could not be saved. Please try again." }); saving = false } } }
+        if (saving) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) { CircularProgressIndicator(Modifier.size(20.dp)); Text("Saving…") }; error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
 }
 
-@Composable
-private fun SettingsRadioRow(
-    title: String,
-    selected: Boolean,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier).padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = selected, onClick = onClick, enabled = enabled)
-        Text(
-            title,
-            modifier = Modifier.padding(start = 8.dp),
-            style = MaterialTheme.typography.bodyLarge,
-            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-        )
-    }
-}
-
-@Composable
-private fun PendingSettingsDestination(destination: SettingsDestination, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(destination.title, style = MaterialTheme.typography.headlineMedium)
-        Text(destination.subtitle, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(
-            "This E2 settings destination is reserved by the native shell. Its product controls are added in the corresponding E2 settings slice rather than being duplicated in the shell.",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-    }
-}
+@Composable private fun ActionBarSettingsScreen(preferences: AndroidActionBarPreferences, state: AndroidActionBarPreferenceState, modifier: Modifier) { val scope = rememberCoroutineScope(); val available = AndroidActionBarAction.entries.filterNot(state.actions::contains); Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Text("Action Bar", style = MaterialTheme.typography.headlineMedium); Text("Choose the article-list actions and their display priority.", color = MaterialTheme.colorScheme.onSurfaceVariant); Text("Article List Actions", style = MaterialTheme.typography.titleMedium); ActionBarFixedRow("Sync", "Always shown"); state.actions.forEachIndexed { index, action -> Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) { Text(action.displayName, Modifier.weight(1f)); TextButton(enabled = index > 0, onClick = { scope.launch { preferences.moveUp(action, state.actions) } }) { Text("↑") }; TextButton(enabled = index < state.actions.lastIndex, onClick = { scope.launch { preferences.moveDown(action, state.actions) } }) { Text("↓") }; TextButton(onClick = { scope.launch { preferences.remove(action, state.actions) } }) { Text("Remove") } } }; ActionBarFixedRow("More", "Always available"); Text("Sync stays fixed at the beginning and More stays available as the fallback. The order of selected actions sets their display priority.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant); if (available.isNotEmpty()) { HorizontalDivider(); Text("Available Actions", style = MaterialTheme.typography.titleMedium); available.forEach { action -> TextButton(onClick = { scope.launch { preferences.add(action, state.actions) } }, modifier = Modifier.fillMaxWidth()) { Text("+ ${action.displayName}", modifier = Modifier.fillMaxWidth()) } } }; HorizontalDivider(); TextButton(onClick = { scope.launch { preferences.resetToDefault() } }) { Text("Reset to Default") } } }
+@Composable private fun ActionBarFixedRow(title: String, status: String) { Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Text(title, Modifier.weight(1f)); Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+@Composable private fun ArticleSettingsScreen(p: AndroidArticlePreferences, s: AndroidArticlePreferenceState, core: AndroidCoreArticleSettings, modifier: Modifier) { val scope = rememberCoroutineScope(); Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) { Text("Articles", style = MaterialTheme.typography.headlineMedium); Text("Choose how articles are presented and how reading interactions behave.", color = MaterialTheme.colorScheme.onSurfaceVariant); SettingsChoiceGroup("Open article") { AndroidArticleOpenPreference.entries.forEach { o -> SettingsRadioRow(o.displayName, s.openArticle == o) { scope.launch { p.setOpenArticle(o) } } }; SettingsChoiceGroup("Presentation") { AndroidArticlePresentationMode.entries.forEach { o -> SettingsRadioRow(o.displayName, s.presentationMode == o) { scope.launch { p.setPresentationMode(o) } } }; SettingsChoiceGroup("Preview lines") { AndroidArticlePreviewLines.entries.forEach { o -> SettingsRadioRow(o.displayName, s.previewLines == o) { scope.launch { p.setPreviewLines(o) } } }; HorizontalDivider(); SettingsSwitchRow("Show article count", s.showArticleCount) { scope.launch { p.setShowArticleCount(it) } }; SettingsSwitchRow("Show relative publication time", s.showRelativePublicationTime) { scope.launch { p.setShowRelativePublicationTime(it) } }; SettingsSwitchRow("Remove articles when read", s.removeArticlesWhenRead) { scope.launch { p.setRemoveArticlesWhenRead(it) } }; SettingsSwitchRow("Mark read on scrollover", s.markReadOnScrollover) { scope.launch { p.setMarkReadOnScrollover(it) } }; CoreArticleSettingsSection(core); ArticleSwipeSettingsSection(p, s.swipeConfiguration) } }
+@Composable private fun ArticleSwipeSettingsSection(p: AndroidArticlePreferences, c: AndroidArticleSwipeConfiguration) { val scope = rememberCoroutineScope(); HorizontalDivider(); Text("Swipe actions", style = MaterialTheme.typography.titleMedium); Text("Choose up to two actions on each side. The Full Swipe action is the outer action and is triggered when the row is swiped all the way.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant); SwipeSideSettings("Swipe right", AndroidArticleSwipeSide.Leading, c, p, scope); SwipeSideSettings("Swipe left", AndroidArticleSwipeSide.Trailing, c, p, scope) }
+@Composable private fun SwipeSideSettings(title: String, side: AndroidArticleSwipeSide, c: AndroidArticleSwipeConfiguration, p: AndroidArticlePreferences, scope: kotlinx.coroutines.CoroutineScope) { Column { Text(title, style = MaterialTheme.typography.titleSmall); SwipeSlotSettings("Full Swipe", side, AndroidArticleSwipeSlot.FullSwipe, c.fullSwipeAction(side), c, p, scope, true); SwipeSlotSettings("Additional Action", side, AndroidArticleSwipeSlot.Additional, c.additionalAction(side), c, p, scope, true, c.fullSwipeAction(side) != null) } }
+@Composable private fun SwipeSlotSettings(label: String, side: AndroidArticleSwipeSide, slot: AndroidArticleSwipeSlot, selected: AndroidArticleSwipeAction?, c: AndroidArticleSwipeConfiguration, p: AndroidArticlePreferences, scope: kotlinx.coroutines.CoroutineScope, allowNone: Boolean, enabled: Boolean = true) { Column { Text(label, style = MaterialTheme.typography.labelLarge); if (allowNone) SettingsRadioRow("None", selected == null, enabled) { scope.launch { p.setSwipeAction(c, null, side, slot) } }; AndroidArticleSwipeAction.entries.forEach { a -> SettingsRadioRow(a.displayName, selected == a, enabled) { scope.launch { p.setSwipeAction(c, a, side, slot) } } } } }
+@Composable internal fun SettingsChoiceGroup(title: String, content: @Composable () -> Unit) { Column { Text(title, style = MaterialTheme.typography.titleMedium); content() } }
+@Composable private fun NavigationSettingsScreen(p: AndroidNavigationPreferences, s: AndroidNavigationPreferenceState, categories: List<AndroidNavigationCategoryRef>, feeds: List<AndroidNavigationFeedRef>, modifier: Modifier) { val scope = rememberCoroutineScope(); Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) { Text("Navigation", style = MaterialTheme.typography.headlineMedium); Text("Choose which news scope FluxNews opens with and whether empty feeds are shown.", color = MaterialTheme.colorScheme.onSurfaceVariant); SettingsSwitchRow("Hide empty feeds", s.hideEmptyNavigationEntries) { scope.launch { p.setHideEmptyNavigationEntries(it) } }; HorizontalDivider(); Text("Startup scope", style = MaterialTheme.typography.titleMedium); AndroidStartupScopePreference.entries.forEach { o -> val enabled = when(o) { AndroidStartupScopePreference.Category -> categories.isNotEmpty(); AndroidStartupScopePreference.Feed -> feeds.isNotEmpty(); else -> true }; SettingsRadioRow(o.displayName, s.startupScope == o, enabled) { scope.launch { p.setStartupScope(o); if (o == AndroidStartupScopePreference.Category && s.startupCategoryId == null) categories.firstOrNull()?.let { p.setStartupCategoryId(it.id) }; if (o == AndroidStartupScopePreference.Feed && s.startupFeedId == null) feeds.firstOrNull()?.let { p.setStartupFeedId(it.id) } } } }; if (categories.isEmpty() || feeds.isEmpty()) Text("Category and Feed startup scopes become available after the first successful sync.", style = MaterialTheme.typography.bodySmall); if (s.startupScope == AndroidStartupScopePreference.Category) categories.forEach { c -> SettingsRadioRow(c.title, s.startupCategoryId == c.id) { scope.launch { p.setStartupCategoryId(c.id) } } }; if (s.startupScope == AndroidStartupScopePreference.Feed) feeds.forEach { f -> SettingsRadioRow(f.title, s.startupFeedId == f.id) { scope.launch { p.setStartupFeedId(f.id) } } } } }
+@Composable internal fun SettingsSwitchRow(title: String, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) { Row(Modifier.fillMaxWidth().then(if (enabled) Modifier.clickable { onCheckedChange(!checked) } else Modifier).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Text(title, Modifier.weight(1f)); Switch(checked, onCheckedChange, enabled = enabled) } }
+@Composable internal fun SettingsRadioRow(title: String, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) { Row(Modifier.fillMaxWidth().then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) { RadioButton(selected, onClick, enabled = enabled); Text(title, Modifier.padding(start = 8.dp), color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha=.38f)) } }
+@Composable private fun PendingSettingsDestination(d: SettingsDestination, modifier: Modifier) { Column(modifier.verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Text(d.title, style = MaterialTheme.typography.headlineMedium); Text(d.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant); Text("This E2 settings destination is reserved by the native shell. Its product controls are added in the corresponding E2 settings slice rather than being duplicated in the shell.") } }
