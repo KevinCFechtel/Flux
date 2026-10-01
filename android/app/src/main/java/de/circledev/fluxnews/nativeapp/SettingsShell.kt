@@ -19,7 +19,7 @@ private enum class SettingsDestination(val title: String, val subtitle: String) 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SettingsShell(bootstrap: AndroidAccountBootstrap, navigationPreferences: AndroidNavigationPreferences, navigationPreferenceState: AndroidNavigationPreferenceState, navigationCategories: List<AndroidNavigationCategoryRef>, navigationFeeds: List<AndroidNavigationFeedRef>, onAccountChanged: (AndroidAccountBootstrap.State) -> Unit, onBack: () -> Unit, modifier: Modifier = Modifier) {
-    val articlePreferences = LocalAndroidArticlePreferences.current; val actionBarPreferences = LocalAndroidActionBarPreferences.current; val coreArticleSettings = LocalAndroidCoreArticleSettings.current; val mediaSettings = LocalAndroidMediaSettings.current; val downloadedData = LocalAndroidDownloadedData.current
+    val articlePreferences = LocalAndroidArticlePreferences.current; val actionBarPreferences = LocalAndroidActionBarPreferences.current; val coreArticleSettings = LocalAndroidCoreArticleSettings.current; val mediaSettings = LocalAndroidMediaSettings.current; val downloadedData = LocalAndroidDownloadedData.current; val backgroundSync = LocalAndroidBackgroundSync.current
     var articleState by remember { mutableStateOf(AndroidArticlePreferenceState()) }; var actionBarState by remember { mutableStateOf(AndroidActionBarPreferenceState()) }
     LaunchedEffect(articlePreferences) { articlePreferences.state.collect { articleState = it } }; LaunchedEffect(actionBarPreferences) { actionBarPreferences.state.collect { actionBarState = it } }
     BoxWithConstraints(modifier.fillMaxSize()) {
@@ -27,22 +27,23 @@ internal fun SettingsShell(bootstrap: AndroidAccountBootstrap, navigationPrefere
         BackHandler(enabled = compactDetail) { selected = null }
         Scaffold(topBar = { TopAppBar(title = { Text(if (compactDetail) selected!!.title else "Settings") }, navigationIcon = { TextButton(onClick = { if (compactDetail) selected = null else onBack() }) { Text(if (compactDetail) "‹ Settings" else "‹ News") } }) }) { padding ->
             val m = Modifier.fillMaxSize().padding(padding)
-            if (listDetail) Row(m) { SettingsList(selected, { selected = it }, Modifier.width(340.dp).fillMaxHeight()); HorizontalDivider(Modifier.width(1.dp).fillMaxHeight()); SettingsDetail(selected ?: SettingsDestination.Account, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, onAccountChanged, Modifier.fillMaxSize()) }
+            if (listDetail) Row(m) { SettingsList(selected, { selected = it }, Modifier.width(340.dp).fillMaxHeight()); HorizontalDivider(Modifier.width(1.dp).fillMaxHeight()); SettingsDetail(selected ?: SettingsDestination.Account, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, onAccountChanged, Modifier.fillMaxSize()) }
             else if (selected == null) SettingsList(null, { selected = it }, m)
-            else SettingsDetail(selected!!, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, onAccountChanged, m)
+            else SettingsDetail(selected!!, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, onAccountChanged, m)
         }
     }
 }
 
 @Composable private fun SettingsList(selected: SettingsDestination?, onSelected: (SettingsDestination) -> Unit, modifier: Modifier) { Column(modifier.verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) { SettingsDestination.entries.forEach { d -> Surface(color = if (selected == d) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth().clickable { onSelected(d) }) { Row(Modifier.padding(horizontal = 24.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(d.title, style = MaterialTheme.typography.titleMedium); Text(d.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Text("›", style = MaterialTheme.typography.titleLarge) } } } } }
 
-@Composable private fun SettingsDetail(d: SettingsDestination, bootstrap: AndroidAccountBootstrap, navPrefs: AndroidNavigationPreferences, navState: AndroidNavigationPreferenceState, categories: List<AndroidNavigationCategoryRef>, feeds: List<AndroidNavigationFeedRef>, articlePrefs: AndroidArticlePreferences, articleState: AndroidArticlePreferenceState, actionPrefs: AndroidActionBarPreferences, actionState: AndroidActionBarPreferenceState, core: AndroidCoreArticleSettings, media: AndroidMediaSettings, downloadedData: AndroidDownloadedData, onAccountChanged: (AndroidAccountBootstrap.State) -> Unit, modifier: Modifier) { when (d) {
+@Composable private fun SettingsDetail(d: SettingsDestination, bootstrap: AndroidAccountBootstrap, navPrefs: AndroidNavigationPreferences, navState: AndroidNavigationPreferenceState, categories: List<AndroidNavigationCategoryRef>, feeds: List<AndroidNavigationFeedRef>, articlePrefs: AndroidArticlePreferences, articleState: AndroidArticlePreferenceState, actionPrefs: AndroidActionBarPreferences, actionState: AndroidActionBarPreferenceState, core: AndroidCoreArticleSettings, media: AndroidMediaSettings, downloadedData: AndroidDownloadedData, backgroundSync: AndroidBackgroundSync, onAccountChanged: (AndroidAccountBootstrap.State) -> Unit, modifier: Modifier) { when (d) {
     SettingsDestination.Account -> AccountConfigurationScreen(bootstrap, true, onAccountChanged, { onAccountChanged(AndroidAccountBootstrap.State.AccountRequired) }, modifier)
     SettingsDestination.Articles -> ArticleSettingsScreen(articlePrefs, articleState, core, modifier)
     SettingsDestination.ActionBar -> ActionBarSettingsScreen(actionPrefs, actionState, modifier)
     SettingsDestination.Navigation -> NavigationSettingsScreen(navPrefs, navState, categories, feeds, modifier)
     SettingsDestination.Media -> MediaSettingsScreen(media, modifier)
     SettingsDestination.DownloadedData -> DownloadedDataSettingsScreen(downloadedData, modifier)
+    SettingsDestination.BackgroundSync -> BackgroundSyncSettingsScreen(backgroundSync, modifier)
     else -> PendingSettingsDestination(d, modifier)
 } }
 
