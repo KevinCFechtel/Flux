@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
@@ -257,10 +258,10 @@ internal fun AndroidArticleTimeline(
     val listState = rememberLazyListState()
 
     LaunchedEffect(selection, sessionGeneration, accountKey) {
-        store.reset(selection)
-        if (state.articles.isNotEmpty()) {
+        if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
             listState.scrollToItem(0)
         }
+        store.reset(selection)
     }
 
     LaunchedEffect(
