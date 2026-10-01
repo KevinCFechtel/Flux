@@ -597,7 +597,7 @@ The larger `AndroidStoragePaths` ownership/lifecycle review remains deferred to 
 
 **Phase E2 is COMPLETE.**
 
-**E3 is NEXT.**
+**E3 is IN PROGRESS. E3-A is COMPLETE; E3-B is NEXT.**
 
 ## 14. E3 — Native Article Timeline / Article Presentation
 
