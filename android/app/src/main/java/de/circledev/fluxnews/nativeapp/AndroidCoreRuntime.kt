@@ -6,8 +6,11 @@ import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -43,8 +46,10 @@ class AndroidCoreRuntime(
     private var acceptingWork = false
     private var activeSession: CoreSession? = null
     private var nextGeneration = 0L
+    private val mutableSessionGeneration = MutableStateFlow<Long?>(null)
 
     val events: SharedFlow<CoreEvent> = _events.asSharedFlow()
+    val sessionGeneration: StateFlow<Long?> = mutableSessionGeneration.asStateFlow()
 
     fun hasActiveSession(): Boolean = sessionLock.readLock().run {
         lock()
@@ -144,6 +149,7 @@ class AndroidCoreRuntime(
             val generation = ++nextGeneration
             activeSession = CoreSession(generation, config, flux, subscription)
             acceptingWork = true
+            mutableSessionGeneration.value = generation
             return generation
         } catch (error: Throwable) {
             flux.close()
@@ -153,6 +159,7 @@ class AndroidCoreRuntime(
 
     private fun closeActiveSessionLocked() {
         acceptingWork = false
+        mutableSessionGeneration.value = null
         val session = activeSession ?: return
         try {
             session.subscription.unsubscribe()
