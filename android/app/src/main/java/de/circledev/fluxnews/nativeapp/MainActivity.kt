@@ -41,11 +41,13 @@ class MainActivity : ComponentActivity() {
             FluxNewsTheme {
                 val coreArticleSettings = remember(coreRuntime) { AndroidCoreArticleSettings(coreRuntime) }
                 val mediaSettings = remember(coreRuntime) { AndroidMediaSettings(coreRuntime) }
+                val downloadedData = remember(coreRuntime) { AndroidDownloadedData(coreRuntime) }
                 CompositionLocalProvider(
                     LocalAndroidArticlePreferences provides articlePreferences,
                     LocalAndroidActionBarPreferences provides actionBarPreferences,
                     LocalAndroidCoreArticleSettings provides coreArticleSettings,
                     LocalAndroidMediaSettings provides mediaSettings,
+                    LocalAndroidDownloadedData provides downloadedData,
                 ) {
                     FluxNewsApp(bootstrap, coreRuntime, syncCoordinator, navigationPreferences)
                 }
