@@ -460,40 +460,144 @@ Config Backup remains platform-specific. Android uses BackupPlatform.Android and
 
 ### E2-F — Configuration Backup / Restore
 
-E2-F is implemented and test-gated. Android uses the existing encrypted Core `.fluxbackup` contract through
-UniFFI (`exportConfigBackup`, `parseConfigBackup`, `ConfigurationSnapshot`, and
-`replaceConfiguration`); it neither defines a second format nor performs backup
-cryptography. Export and import use Android's Storage Access Framework (`CreateDocument` and
-`OpenDocument`) and do not request broad storage permissions or retain backup files under
-`AndroidStoragePaths`.
+Status: **COMPLETE**
 
-The platform payload is versioned `AndroidBackupSettingsV1`. It contains only Android-owned
-state: navigation visibility/startup target, article opening/presentation/preview/count/time and
-read behavior, both swipe slots, configured action-bar actions in priority order, and custom HTTP
-headers. Core settings, media settings, background-sync preference, and feed preferences remain
-Core-owned and travel only in the Core snapshot contract. API keys and custom headers are carried
-inside the Core-encrypted backup; after restore they are written only to `AndroidCredentialStore`'s
-Keystore-backed envelope, never DataStore or logs.
+Android configuration backup and restore is complete and test-gated.
 
-The shared backup controller validates the complete Core restore model and Android payload before
-mutating state. It serializes replacement with the account lifecycle; an existing account captures
-the Core snapshot, credentials, and Android payload, replaces Core configuration, credentials,
-platform state, and the runtime session, then rolls all three back on a later failure. A rollback
-failure publishes the bootstrap recoverable-error state rather than continuing with an apparently
-ready but inconsistent account. A fresh install opens a temporary Core session, applies the parsed
-configuration, and is available from the account-required setup screen through the same controller.
-Successful restores reconcile WorkManager scheduling and request a normal manual sync.
+Implemented:
 
-Focused JVM coverage validates Android payload encode/decode, schema and stored-value rejection,
-startup-target normalization, swipe consistency, and action-bar ordering. Existing Rust Core tests
-cover encrypted export/parse round trips, wrong passwords, platform mismatch, damaged content and
-input-size limits. The remaining E2-F gate is injectable-controller coverage for existing-account
-and fresh-install restore, Core/credential/platform rollback, and runtime recovery. `AndroidStoragePaths`
-was reviewed only to confirm SAF backups are not placed there; the larger path-layout review remains
-deferred to its designated Phase-E slice.
+- uses the existing encrypted Core `.fluxbackup` format
+- Android Storage Access Framework is used for backup export and restore import
+- no backup files are stored in app-private runtime storage
+- Android platform settings are carried in the versioned `AndroidBackupSettingsV1` payload
+- Android backup payload includes:
+  - navigation preferences
+  - startup scope
+  - article presentation/settings
+  - swipe actions
+  - action-bar ordering
+  - custom headers
+- Core-owned settings remain exclusively in the Core backup payload
+- media/feed settings owned by Core are not duplicated in the Android platform payload
+- credentials remain in the Android Keystore-backed credential store
+- no plaintext credential preference storage was introduced
+- no Android-specific backup cryptography was introduced
+- restore validates the backup before mutation
+- existing-account restore replaces Core configuration, credentials, Android platform settings and runtime state transactionally
+- fresh-install restore supports restoring before a normal account bootstrap has completed
+- failed existing-account restores restore the previous:
+  - Core configuration snapshot
+  - credentials
+  - Android platform settings
+  - runtime session
+- failed fresh-install restores:
+  - reset the temporary persisted Core state
+  - restore the previous Android preference state
+  - close the temporary runtime session
+  - clear restored credentials
+- rollback failures publish a recoverable bootstrap state rather than exposing an inconsistent account as ready
+- restore runs inside the existing configuration/account lifecycle lock
+- successful restore publishes the restored account only after Core, credentials, platform settings and runtime replacement have completed
 
-Complete the E2-F controller rollback test gate before beginning E2-G (Open Source/About/version/legal
-and Support Diagnostics settings).
+Test coverage includes:
+
+- Android backup payload round-trip
+- schema-version validation
+- stored-enum validation
+- startup-target normalization
+- swipe-action consistency validation
+- action-bar ordering validation
+- existing-account successful restore
+- fresh-install successful restore
+- rollback after Core mutation
+- rollback after credential mutation
+- rollback after platform-settings mutation
+- partial platform-preference mutation rollback
+- rollback after runtime replacement failure
+- fresh-install Core reset
+- fresh-install preference restoration
+- runtime cleanup
+- credential cleanup
+- rollback-failure / recoverable-error publication
+- failure before mutation leaves existing state unchanged
+- transaction mutations execute inside the configuration lock
+
+The previously outstanding injectable-controller / transaction rollback test gate is complete.
+
+No Core or UniFFI contract changes were required for the Android restore transaction work.
+
+`AndroidStoragePaths` was reviewed only as required for E2-F to ensure SAF configuration backups are not stored there. The broader `AndroidStoragePaths` ownership/lifecycle review remains intentionally deferred to its later Phase-E work and is not an E2 completion blocker.
+
+### E2-G — About, Legal and Support Diagnostics
+
+Status: **COMPLETE**
+
+The native Android settings shell now includes the E2-G support and informational surfaces.
+
+Implemented:
+
+- About screen
+- application version information
+- Open Source information
+- legal information
+- Support Diagnostics settings destination
+- persistent bounded support log
+- optional persisted debug logging
+- structured diagnostic records
+- native Android diagnostics and shared-Core diagnostics use the same Android support-diagnostics model
+- Core sessions are initialized with the Android diagnostic listener
+- diagnostic log viewer
+- log search
+- log-level filtering
+- newest-first presentation
+- per-entry copy support
+- clear-logs flow with confirmation
+- diagnostics export through the Android sharing flow
+- diagnostics export is exposed through a scoped `FileProvider`
+- known credential values are redacted from diagnostic output
+- common authorization/API-key patterns are redacted
+- diagnostic retention is bounded to avoid unbounded app-private storage growth
+
+The support-diagnostics implementation has focused JVM coverage and is included in the canonical Android test gate.
+
+No Core/UniFFI contract change was required for E2-G.
+
+### E2 completion
+
+Status: **COMPLETE**
+
+Phase E2 — Adaptive App Shell, Account and Settings Foundation — is complete.
+
+The completed E2 scope includes:
+
+- adaptive native Android app shell and navigation
+- account bootstrap and account management
+- custom headers and account/server handling
+- navigation preferences
+- article settings
+- swipe-action settings
+- action-bar configuration
+- feed preferences
+- background-sync settings and scheduling integration
+- downloaded-data settings
+- configuration backup and restore
+- fresh-install configuration restore
+- transactional restore and rollback coverage
+- About / Open Source / Legal surfaces
+- Support Diagnostics
+
+Validation:
+
+- `./android/Build/test.sh` — PASS
+- Android CI gate — PASS
+- production Android build gate is part of the canonical CI workflow
+- shell-script syntax validation is part of the canonical CI workflow
+
+The larger `AndroidStoragePaths` ownership/lifecycle review remains deferred to the later Phase-E slice where it is already planned. It does not block E2 completion.
+
+**Phase E2 is COMPLETE.**
+
+**E3 is NEXT.**
 
 ## 14. E3 — Native Article Timeline / Article Presentation
 
