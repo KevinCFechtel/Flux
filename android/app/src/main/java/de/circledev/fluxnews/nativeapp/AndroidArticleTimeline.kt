@@ -255,6 +255,7 @@ internal fun AndroidArticleTimeline(
     modifier: Modifier = Modifier,
 ) {
     val state by store.state.collectAsState()
+    val errorMessage = state.errorMessage
     val listState = rememberLazyListState()
 
     LaunchedEffect(selection, sessionGeneration, accountKey) {
@@ -288,9 +289,9 @@ internal fun AndroidArticleTimeline(
                 CircularProgressIndicator()
             }
         }
-        state.errorMessage != null && state.articles.isEmpty() -> {
+        errorMessage != null && state.articles.isEmpty() -> {
             TimelineMessage(
-                message = state.errorMessage,
+                message = errorMessage,
                 actionLabel = "Retry",
                 onAction = { store.reset(selection) },
                 modifier = modifier,
@@ -323,10 +324,10 @@ internal fun AndroidArticleTimeline(
                             CircularProgressIndicator()
                         }
                     }
-                } else if (state.errorMessage != null) {
+                } else if (errorMessage != null) {
                     item(key = "timeline-page-error") {
                         TimelineMessage(
-                            message = state.errorMessage,
+                            message = errorMessage,
                             actionLabel = "Retry",
                             onAction = store::loadNextPage,
                             modifier = Modifier.fillMaxWidth(),
