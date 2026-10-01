@@ -458,6 +458,43 @@ Use Material/Android conventions. Do not imitate the iOS split-view or navigatio
 
 Config Backup remains platform-specific. Android uses BackupPlatform.Android and an Android platform-settings payload. A backup is not promised to be portable to or from iOS unless a future explicit cross-platform backup contract is created.
 
+### E2-F — Configuration Backup / Restore
+
+E2-F is implemented and test-gated. Android uses the existing encrypted Core `.fluxbackup` contract through
+UniFFI (`exportConfigBackup`, `parseConfigBackup`, `ConfigurationSnapshot`, and
+`replaceConfiguration`); it neither defines a second format nor performs backup
+cryptography. Export and import use Android's Storage Access Framework (`CreateDocument` and
+`OpenDocument`) and do not request broad storage permissions or retain backup files under
+`AndroidStoragePaths`.
+
+The platform payload is versioned `AndroidBackupSettingsV1`. It contains only Android-owned
+state: navigation visibility/startup target, article opening/presentation/preview/count/time and
+read behavior, both swipe slots, configured action-bar actions in priority order, and custom HTTP
+headers. Core settings, media settings, background-sync preference, and feed preferences remain
+Core-owned and travel only in the Core snapshot contract. API keys and custom headers are carried
+inside the Core-encrypted backup; after restore they are written only to `AndroidCredentialStore`'s
+Keystore-backed envelope, never DataStore or logs.
+
+The shared backup controller validates the complete Core restore model and Android payload before
+mutating state. It serializes replacement with the account lifecycle; an existing account captures
+the Core snapshot, credentials, and Android payload, replaces Core configuration, credentials,
+platform state, and the runtime session, then rolls all three back on a later failure. A rollback
+failure publishes the bootstrap recoverable-error state rather than continuing with an apparently
+ready but inconsistent account. A fresh install opens a temporary Core session, applies the parsed
+configuration, and is available from the account-required setup screen through the same controller.
+Successful restores reconcile WorkManager scheduling and request a normal manual sync.
+
+Focused JVM coverage validates Android payload encode/decode, schema and stored-value rejection,
+startup-target normalization, swipe consistency, and action-bar ordering. Existing Rust Core tests
+cover encrypted export/parse round trips, wrong passwords, platform mismatch, damaged content and
+input-size limits. The remaining E2-F gate is injectable-controller coverage for existing-account
+and fresh-install restore, Core/credential/platform rollback, and runtime recovery. `AndroidStoragePaths`
+was reviewed only to confirm SAF backups are not placed there; the larger path-layout review remains
+deferred to its designated Phase-E slice.
+
+Complete the E2-F controller rollback test gate before beginning E2-G (Open Source/About/version/legal
+and Support Diagnostics settings).
+
 ## 14. E3 — Native Article Timeline / Article Presentation
 
 E3 implements the native Android Article List over Core query/page APIs.

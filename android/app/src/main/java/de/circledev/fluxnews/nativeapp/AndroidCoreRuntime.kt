@@ -4,27 +4,27 @@ import android.os.Looper
 import java.util.concurrent.Executors
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.channels.BufferOverflow
+import uniffi.flux_uniffi.AccountValidationResult
 import uniffi.flux_uniffi.CoreEvent
+import uniffi.flux_uniffi.DiagnosticListener
 import uniffi.flux_uniffi.EventListener
 import uniffi.flux_uniffi.EventSubscription
 import uniffi.flux_uniffi.Flux
+import uniffi.flux_uniffi.HttpHeader
 import uniffi.flux_uniffi.InitializationConfig
+import uniffi.flux_uniffi.validateMinifluxAccount
 
-/**
- * Process-scoped owner for the one active UniFFI Core session.
- *
- * Local work has two fixed workers for short SQLite-bound calls. Remote work has one fixed worker
- * so a slow network operation cannot occupy either local worker. Core retains its own storage and
- * sync serialization; this runtime only protects session lifetime.
- */
-class AndroidCoreRuntime {
+/** Process-scoped owner for the one active UniFFI Core session. */
+class AndroidCoreRuntime(
+    private val diagnosticListener: DiagnosticListener? = null,
+) {
     private val localDispatcher = Executors.newFixedThreadPool(
         CoreRuntimeExecutionPolicy.LOCAL_WORKERS,
     ) { runnable -> Thread(runnable, "FluxCore-local").apply { isDaemon = true } }
@@ -40,7 +40,6 @@ class AndroidCoreRuntime {
         extraBufferCapacity = CoreRuntimeExecutionPolicy.EVENT_BUFFER_CAPACITY,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
-
     private var acceptingWork = false
     private var activeSession: CoreSession? = null
     private var nextGeneration = 0L
@@ -49,11 +48,16 @@ class AndroidCoreRuntime {
 
     fun hasActiveSession(): Boolean = sessionLock.readLock().run {
         lock()
-        try {
-            activeSession != null && acceptingWork
-        } finally {
-            unlock()
-        }
+        try { activeSession != null && acceptingWork } finally { unlock() }
+    }
+
+    suspend fun validateAccount(
+        serverUrl: String,
+        apiKey: String,
+        customHeaders: List<HttpHeader>,
+    ): AccountValidationResult = withContext(remoteDispatcher) {
+        requireOffMainThread()
+        validateMinifluxAccount(serverUrl, apiKey, customHeaders)
     }
 
     suspend fun openSession(config: InitializationConfig): Long = lifecycleMutex.withLock {
@@ -64,24 +68,37 @@ class AndroidCoreRuntime {
                 try {
                     check(activeSession == null) { "A Core session is already active." }
                     installSession(config)
-                } finally {
-                    unlock()
-                }
+                } finally { unlock() }
             }
         }
     }
 
+    /**
+     * Never opens two Core instances on the same persistent store. Replacement first retires the
+     * old instance, then opens the candidate. If candidate initialization fails, the previous
+     * InitializationConfig is reopened before the failure is returned to the account lifecycle.
+     */
     suspend fun replaceSession(config: InitializationConfig): Long = lifecycleMutex.withLock {
         withContext(remoteDispatcher) {
             requireOffMainThread()
             sessionLock.writeLock().run {
                 lock()
                 try {
+                    val previousConfig = activeSession?.initializationConfig
                     closeActiveSessionLocked()
-                    installSession(config)
-                } finally {
-                    unlock()
-                }
+                    try {
+                        installSession(config)
+                    } catch (replacementError: Throwable) {
+                        if (previousConfig != null) {
+                            try {
+                                installSession(previousConfig)
+                            } catch (rollbackError: Throwable) {
+                                replacementError.addSuppressed(rollbackError)
+                            }
+                        }
+                        throw replacementError
+                    }
+                } finally { unlock() }
             }
         }
     }
@@ -91,17 +108,12 @@ class AndroidCoreRuntime {
             requireOffMainThread()
             sessionLock.writeLock().run {
                 lock()
-                try {
-                    closeActiveSessionLocked()
-                } finally {
-                    unlock()
-                }
+                try { closeActiveSessionLocked() } finally { unlock() }
             }
         }
     }
 
     suspend fun <T> local(block: (Flux) -> T): T = execute(localDispatcher, block)
-
     suspend fun <T> remote(block: (Flux) -> T): T = execute(remoteDispatcher, block)
 
     private suspend fun <T> execute(
@@ -115,14 +127,12 @@ class AndroidCoreRuntime {
                 val session = activeSession
                 check(acceptingWork && session != null) { "No active Core session." }
                 block(session.flux)
-            } finally {
-                unlock()
-            }
+            } finally { unlock() }
         }
     }
 
     private fun installSession(config: InitializationConfig): Long {
-        val flux = Flux.initialize(config)
+        val flux = diagnosticListener?.let { Flux.initializeWithDiagnostics(config, it) } ?: Flux.initialize(config)
         try {
             val subscription = flux.subscribeEvents(RuntimeEventListener(_events))
             val generation = ++nextGeneration
@@ -136,7 +146,6 @@ class AndroidCoreRuntime {
     }
 
     private fun closeActiveSessionLocked() {
-        // The write lock excludes calls that already captured the Flux object and blocks new ones.
         acceptingWork = false
         val session = activeSession ?: return
         try {
@@ -170,9 +179,7 @@ class AndroidCoreRuntime {
     private class RuntimeEventListener(
         private val events: MutableSharedFlow<CoreEvent>,
     ) : EventListener {
-        override fun onEvent(event: CoreEvent) {
-            events.tryEmit(event)
-        }
+        override fun onEvent(event: CoreEvent) { events.tryEmit(event) }
     }
 }
 
