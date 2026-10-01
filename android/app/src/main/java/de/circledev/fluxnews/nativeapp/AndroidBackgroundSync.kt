@@ -10,6 +10,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
 import uniffi.flux_uniffi.SyncCancellation
 import uniffi.flux_uniffi.SyncReason
 
@@ -29,7 +30,10 @@ internal class AndroidBackgroundSync(private val context: Context, private val c
 
     private fun reconcile(enabled: Boolean) {
         val manager = WorkManager.getInstance(context)
-        if (!enabled) { manager.cancelUniqueWork(WORK_NAME); return }
+        if (!enabled) {
+            manager.cancelUniqueWork(WORK_NAME)
+            return
+        }
         val request = PeriodicWorkRequestBuilder<AndroidBackgroundSyncWorker>(30, TimeUnit.MINUTES)
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
@@ -40,33 +44,32 @@ internal class AndroidBackgroundSync(private val context: Context, private val c
 }
 
 internal class AndroidBackgroundSyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
-    @Volatile private var activeCancellation: SyncCancellation? = null
-
     override suspend fun doWork(): Result {
         val app = applicationContext as FluxApplication
         val state = app.accountBootstrap.restoreStoredAccount()
         if (state !is AndroidAccountBootstrap.State.Ready) return Result.success()
 
-        val enabled = runCatching { app.coreRuntime.local { it.coreSettings().backgroundSyncEnabled } }.getOrElse { return Result.retry() }
+        val enabled = runCatching {
+            app.coreRuntime.local { it.coreSettings().backgroundSyncEnabled }
+        }.getOrElse { return Result.retry() }
         if (!enabled) {
             WorkManager.getInstance(applicationContext).cancelUniqueWork(AndroidBackgroundSync.WORK_NAME)
             return Result.success()
         }
 
         val cancellation = SyncCancellation()
-        activeCancellation = cancellation
         return try {
             app.coreRuntime.remote { it.syncCancellable(SyncReason.BACKGROUND, cancellation) }
-            if (isStopped || cancellation.isCancelled()) Result.failure() else Result.success()
+            Result.success()
+        } catch (cancelled: CancellationException) {
+            cancellation.cancel()
+            throw cancelled
         } catch (_: Exception) {
-            if (isStopped || cancellation.isCancelled()) Result.failure() else Result.retry()
+            Result.retry()
         } finally {
-            if (activeCancellation === cancellation) activeCancellation = null
+            // WorkManager cancels CoroutineWorker by cancelling its coroutine. Mirror that cancellation
+            // into the Core handle before leaving the worker so native sync can stop promptly as well.
+            if (isStopped) cancellation.cancel()
         }
-    }
-
-    override fun onStopped() {
-        activeCancellation?.cancel()
-        super.onStopped()
     }
 }
