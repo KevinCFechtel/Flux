@@ -460,7 +460,7 @@ Config Backup remains platform-specific. Android uses BackupPlatform.Android and
 
 ### E2-F — Configuration Backup / Restore
 
-E2-F COMPLETE. Android uses the existing encrypted Core `.fluxbackup` contract through
+E2-F is implemented and test-gated. Android uses the existing encrypted Core `.fluxbackup` contract through
 UniFFI (`exportConfigBackup`, `parseConfigBackup`, `ConfigurationSnapshot`, and
 `replaceConfiguration`); it neither defines a second format nor performs backup
 cryptography. Export and import use Android's Storage Access Framework (`CreateDocument` and
@@ -487,10 +487,13 @@ Successful restores reconcile WorkManager scheduling and request a normal manual
 Focused JVM coverage validates Android payload encode/decode, schema and stored-value rejection,
 startup-target normalization, swipe consistency, and action-bar ordering. Existing Rust Core tests
 cover encrypted export/parse round trips, wrong passwords, platform mismatch, damaged content and
-input-size limits. `AndroidStoragePaths` was reviewed only to confirm SAF backups are not placed
-there; the larger path-layout review remains deferred to its designated Phase-E slice.
+input-size limits. The remaining E2-F gate is injectable-controller coverage for existing-account
+and fresh-install restore, Core/credential/platform rollback, and runtime recovery. `AndroidStoragePaths`
+was reviewed only to confirm SAF backups are not placed there; the larger path-layout review remains
+deferred to its designated Phase-E slice.
 
-E2-G (Open Source/About/version/legal and Support Diagnostics settings) is NEXT.
+Complete the E2-F controller rollback test gate before beginning E2-G (Open Source/About/version/legal
+and Support Diagnostics settings).
 
 ## 14. E3 — Native Article Timeline / Article Presentation
 
