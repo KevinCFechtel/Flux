@@ -15,11 +15,10 @@ import androidx.compose.ui.unit.dp
 internal fun AboutSettingsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-    val versionCode = if (android.os.Build.VERSION.SDK_INT >= 28) packageInfo.longVersionCode else @Suppress("DEPRECATION") packageInfo.versionCode.toLong()
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("About", style = MaterialTheme.typography.headlineMedium)
         Text("FluxNews", style = MaterialTheme.typography.titleLarge)
-        Text("Version ${packageInfo.versionName ?: "unknown"} ($versionCode)", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Version ${packageInfo.versionName ?: "unknown"} (${packageInfo.longVersionCode})", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("A native Miniflux client with a shared Rust core.")
         HorizontalDivider()
         Text("Open Source", style = MaterialTheme.typography.titleMedium)
