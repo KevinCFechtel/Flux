@@ -14,7 +14,6 @@ import java.text.NumberFormat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.DownloadNetworkPolicy
-import uniffi.flux_uniffi.ReadArticleRetention
 
 private enum class SettingsDestination(val title: String, val subtitle: String) {
     Account("Account", "Miniflux server, credentials and local account data"),
@@ -160,40 +159,6 @@ private fun ArticleSettingsScreen(preferences: AndroidArticlePreferences, state:
         CoreArticleSettingsSection(core)
         ArticleSwipeSettingsSection(preferences, state.swipeConfiguration)
     }
-}
-
-@Composable
-private fun CoreArticleSettingsSection(settings: AndroidCoreArticleSettings) {
-    var state by remember { mutableStateOf<AndroidCoreArticleSettings.State?>(null) }
-    var saving by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
-    suspend fun reload() { settings.load().fold({ state = it; error = null }, { error = "Article settings could not be loaded. Please try again." }) }
-    LaunchedEffect(settings) { reload() }
-    HorizontalDivider()
-    Text("Core article settings", style = MaterialTheme.typography.titleMedium)
-    val current = state
-    if (current == null) {
-        CircularProgressIndicator()
-    } else {
-        Text("Keep read articles", style = MaterialTheme.typography.titleSmall)
-        ReadArticleRetention.entries.forEach { retention ->
-            SettingsRadioRow(retention.androidDisplayName(), current.retention == retention, !saving) {
-                scope.launch { saving = true; settings.setRetention(retention).fold({ reload() }, { error = "Article setting could not be saved. Please try again." }); saving = false }
-            }
-        }
-        Text("Reader detail limit", style = MaterialTheme.typography.titleSmall)
-        listOf(5_000u, 10_000u, 20_000u).forEach { limit ->
-            SettingsRadioRow(NumberFormat.getIntegerInstance().format(limit.toLong()), current.detailCharacterLimit == limit, !saving) {
-                scope.launch { saving = true; settings.setDetailCharacterLimit(limit).fold({ reload() }, { error = "Article setting could not be saved. Please try again." }); saving = false }
-            }
-        }
-        SettingsSwitchRow("Sync article changes immediately", current.liveMutationDelivery, !saving) { enabled ->
-            scope.launch { saving = true; settings.setLiveMutationDelivery(enabled).fold({ reload() }, { error = "Article setting could not be saved. Please try again." }); saving = false }
-        }
-    }
-    if (saving) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) { CircularProgressIndicator(Modifier.size(20.dp)); Text("Saving…") }
-    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 }
 
 @Composable
