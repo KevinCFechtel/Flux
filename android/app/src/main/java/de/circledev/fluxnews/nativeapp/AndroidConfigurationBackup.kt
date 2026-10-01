@@ -157,6 +157,74 @@ internal sealed class AndroidConfigurationBackupException(message: String) : Exc
     data object RollbackFailed : AndroidConfigurationBackupException("Configuration restore rollback failed.")
 }
 
+/** Narrow transaction boundary; production delegates to Bootstrap, Runtime, and preference wrappers. */
+internal interface AndroidConfigurationRestoreBoundary {
+    suspend fun <T> withLock(block: suspend () -> T): T
+    fun credentials(): StoredAccountCredentials?
+    suspend fun snapshot(): uniffi.flux_uniffi.ConfigurationSnapshot?
+    suspend fun replaceCore(model: ConfigBackupRestoreModel)
+    suspend fun restoreCore(snapshot: uniffi.flux_uniffi.ConfigurationSnapshot)
+    suspend fun openFresh(credentials: StoredAccountCredentials)
+    suspend fun resetFreshCore()
+    suspend fun replaceRuntime(credentials: StoredAccountCredentials)
+    suspend fun closeRuntime()
+    fun writeCredentials(credentials: StoredAccountCredentials)
+    fun clearCredentials()
+    suspend fun capturePlatform(headers: List<StoredCredentialHeader>): AndroidBackupSettingsV1
+    suspend fun applyPlatform(settings: AndroidBackupSettingsV1)
+    fun publishReady(credentials: StoredAccountCredentials)
+    fun publishRecoveryError()
+}
+
+internal class AndroidConfigurationRestoreTransaction(
+    private val boundary: AndroidConfigurationRestoreBoundary,
+) {
+    suspend fun restore(restored: ConfigBackupRestoreModel, native: AndroidBackupSettingsV1) = boundary.withLock {
+        val replacement = StoredAccountCredentials(restored.account.installationBase, restored.account.apiKey, native.customHeaders)
+        val previousCredentials = boundary.credentials()
+        // Preferences exist independently from account material and must always be reversible.
+        val previousNative = boundary.capturePlatform(previousCredentials?.customHeaders ?: emptyList()).validated()
+        val previousSnapshot = boundary.snapshot()
+        try {
+            if (previousSnapshot != null) boundary.replaceCore(restored) else {
+                boundary.openFresh(replacement)
+                boundary.replaceCore(restored)
+            }
+            boundary.writeCredentials(replacement)
+            boundary.applyPlatform(native)
+            boundary.replaceRuntime(replacement)
+            boundary.publishReady(replacement)
+        } catch (failure: Exception) {
+            if (!rollback(previousSnapshot, previousCredentials, previousNative)) {
+                boundary.publishRecoveryError()
+                throw AndroidConfigurationBackupException.RollbackFailed
+            }
+            throw failure
+        }
+    }
+
+    private suspend fun rollback(
+        snapshot: uniffi.flux_uniffi.ConfigurationSnapshot?,
+        credentials: StoredAccountCredentials?,
+        native: AndroidBackupSettingsV1,
+    ): Boolean = try {
+        if (snapshot != null) {
+            boundary.restoreCore(snapshot)
+            if (credentials == null) error("Existing Core session has no credentials.")
+            boundary.writeCredentials(credentials)
+            boundary.applyPlatform(native)
+            boundary.replaceRuntime(credentials)
+            boundary.publishReady(credentials)
+        } else {
+            boundary.resetFreshCore()
+            boundary.applyPlatform(native)
+            boundary.closeRuntime()
+            boundary.clearCredentials()
+        }
+        true
+    } catch (_: Exception) { false }
+}
+
 /** Shared service for Settings and the fresh-install account flow. It never persists backup bytes. */
 internal class AndroidConfigurationBackupController(
     private val bootstrap: AndroidAccountBootstrap,
@@ -165,6 +233,23 @@ internal class AndroidConfigurationBackupController(
     private val articles: AndroidArticlePreferences,
     private val actionBar: AndroidActionBarPreferences,
 ) {
+    private val restoreTransaction = AndroidConfigurationRestoreTransaction(object : AndroidConfigurationRestoreBoundary {
+        override suspend fun <T> withLock(block: suspend () -> T): T = bootstrap.withConfigurationBackupLock(block)
+        override fun credentials() = bootstrap.credentialsForConfigurationBackup()
+        override suspend fun snapshot() = if (runtime.hasActiveSession()) runtime.local { it.configurationSnapshot() } else null
+        override suspend fun replaceCore(model: ConfigBackupRestoreModel) { runtime.local { it.replaceConfiguration(model.account.installationBase, model.coreSettings, model.feedPreferences) } }
+        override suspend fun restoreCore(snapshot: uniffi.flux_uniffi.ConfigurationSnapshot) { runtime.local { it.replaceConfiguration(snapshot.installationBase, snapshot.coreSettings, snapshot.feedPreferences) } }
+        override suspend fun openFresh(credentials: StoredAccountCredentials) { runtime.openSession(bootstrap.initializationConfigFor(credentials)) }
+        override suspend fun resetFreshCore() { runtime.local { it.resetCoreState() } }
+        override suspend fun replaceRuntime(credentials: StoredAccountCredentials) { runtime.replaceSession(bootstrap.initializationConfigFor(credentials)) }
+        override suspend fun closeRuntime() { runtime.closeSession() }
+        override fun writeCredentials(credentials: StoredAccountCredentials) = bootstrap.writeCredentialsForConfigurationBackup(credentials)
+        override fun clearCredentials() = bootstrap.clearCredentialsForConfigurationBackup()
+        override suspend fun capturePlatform(headers: List<StoredCredentialHeader>) = AndroidBackupSettingsV1.capture(navigation, articles, actionBar, headers)
+        override suspend fun applyPlatform(settings: AndroidBackupSettingsV1) = apply(settings)
+        override fun publishReady(credentials: StoredAccountCredentials) = bootstrap.publishRestoredAccount(credentials)
+        override fun publishRecoveryError() = bootstrap.publishConfigurationRecoveryError()
+    })
     suspend fun export(password: String): ByteArray {
         if (password.isEmpty()) throw ConfigBackupException.EmptyPassword()
         val credentials = bootstrap.credentialsForConfigurationBackup() ?: throw AndroidConfigurationBackupException.NoConfiguredAccount
@@ -182,50 +267,8 @@ internal class AndroidConfigurationBackupController(
         val restored = parseConfigBackup(bytes, password, BackupPlatform.ANDROID)
         if (restored.platformSettings.schemaVersion != AndroidBackupSettingsV1.VERSION) throw AndroidConfigurationBackupException.InvalidPlatformSettings
         val native = AndroidBackupSettingsV1.decode(restored.platformSettings.dataJson)
-        bootstrap.withConfigurationBackupLock { restoreValidated(restored, native) }
+        restoreTransaction.restore(restored, native)
     }
-
-    private suspend fun restoreValidated(restored: ConfigBackupRestoreModel, native: AndroidBackupSettingsV1) {
-        val replacementCredentials = StoredAccountCredentials(restored.account.installationBase, restored.account.apiKey, native.customHeaders)
-        val previousCredentials = bootstrap.credentialsForConfigurationBackup()
-        val previousNative = previousCredentials?.let { AndroidBackupSettingsV1.capture(navigation, articles, actionBar, it.customHeaders).validated() }
-        val previousSnapshot = if (runtime.hasActiveSession()) runtime.local { it.configurationSnapshot() } else null
-        try {
-            if (previousSnapshot != null) runtime.local { it.replaceConfiguration(restored.account.installationBase, restored.coreSettings, restored.feedPreferences) }
-            else {
-                runtime.openSession(bootstrap.initializationConfigFor(replacementCredentials))
-                runtime.local { it.replaceConfiguration(restored.account.installationBase, restored.coreSettings, restored.feedPreferences) }
-            }
-            bootstrap.writeCredentialsForConfigurationBackup(replacementCredentials)
-            apply(native)
-            runtime.replaceSession(bootstrap.initializationConfigFor(replacementCredentials))
-            bootstrap.publishRestoredAccount(replacementCredentials)
-        } catch (failure: Exception) {
-            val rolledBack = rollback(previousSnapshot, previousCredentials, previousNative)
-            if (!rolledBack) {
-                bootstrap.publishConfigurationRecoveryError()
-                throw AndroidConfigurationBackupException.RollbackFailed
-            }
-            throw failure
-        }
-    }
-
-    private suspend fun rollback(snapshot: uniffi.flux_uniffi.ConfigurationSnapshot?, credentials: StoredAccountCredentials?, native: AndroidBackupSettingsV1?): Boolean = try {
-        if (snapshot != null && runtime.hasActiveSession()) runtime.local { it.replaceConfiguration(snapshot.installationBase, snapshot.coreSettings, snapshot.feedPreferences) }
-        if (credentials != null) {
-            bootstrap.writeCredentialsForConfigurationBackup(credentials)
-            if (native != null) apply(native)
-            runtime.replaceSession(bootstrap.initializationConfigFor(credentials))
-            bootstrap.publishRestoredAccount(credentials)
-        } else {
-            // A fresh-session replacement has already committed into the Core store. Reset it
-            // before retiring the temporary session so no restored configuration survives a failed import.
-            if (runtime.hasActiveSession()) runtime.local { it.resetCoreState() }
-            runtime.closeSession()
-            bootstrap.clearCredentialsForConfigurationBackup()
-        }
-        true
-    } catch (_: Exception) { false }
 
     private suspend fun apply(settings: AndroidBackupSettingsV1) {
         navigation.setHideEmptyNavigationEntries(settings.hideEmptyNavigationEntries)
