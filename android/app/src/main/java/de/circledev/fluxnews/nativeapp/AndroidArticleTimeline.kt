@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -257,6 +258,7 @@ internal fun AndroidArticleTimeline(
     val state by store.state.collectAsState()
     val errorMessage = state.errorMessage
     val listState = rememberLazyListState()
+    val actionScope = rememberCoroutineScope()
 
     LaunchedEffect(selection, sessionGeneration, accountKey) {
         if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
@@ -293,7 +295,7 @@ internal fun AndroidArticleTimeline(
             TimelineMessage(
                 message = errorMessage,
                 actionLabel = "Retry",
-                onAction = { store.reset(selection) },
+                onAction = { actionScope.launch { store.reset(selection) } },
                 modifier = modifier,
             )
         }
@@ -329,7 +331,7 @@ internal fun AndroidArticleTimeline(
                         TimelineMessage(
                             message = errorMessage,
                             actionLabel = "Retry",
-                            onAction = store::loadNextPage,
+                            onAction = { actionScope.launch { store.loadNextPage() } },
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
@@ -364,7 +366,7 @@ private fun TimelineMessage(
     message: String,
     modifier: Modifier = Modifier,
     actionLabel: String? = null,
-    onAction: (suspend () -> Unit)? = null,
+    onAction: (() -> Unit)? = null,
 ) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
@@ -378,8 +380,7 @@ private fun TimelineMessage(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (actionLabel != null && onAction != null) {
-                val scope = androidx.compose.runtime.rememberCoroutineScope()
-                Button(onClick = { scope.launch { onAction() } }) {
+                Button(onClick = onAction) {
                     Text(actionLabel)
                 }
             }
