@@ -13,6 +13,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import uniffi.flux_uniffi.AccountValidationResult
 import uniffi.flux_uniffi.CoreEvent
+import uniffi.flux_uniffi.DiagnosticListener
 import uniffi.flux_uniffi.EventListener
 import uniffi.flux_uniffi.EventSubscription
 import uniffi.flux_uniffi.Flux
@@ -21,7 +22,9 @@ import uniffi.flux_uniffi.InitializationConfig
 import uniffi.flux_uniffi.validateMinifluxAccount
 
 /** Process-scoped owner for the one active UniFFI Core session. */
-class AndroidCoreRuntime {
+class AndroidCoreRuntime(
+    private val diagnosticListener: DiagnosticListener? = null,
+) {
     private val localDispatcher = Executors.newFixedThreadPool(
         CoreRuntimeExecutionPolicy.LOCAL_WORKERS,
     ) { runnable -> Thread(runnable, "FluxCore-local").apply { isDaemon = true } }
@@ -129,7 +132,7 @@ class AndroidCoreRuntime {
     }
 
     private fun installSession(config: InitializationConfig): Long {
-        val flux = Flux.initialize(config)
+        val flux = diagnosticListener?.let { Flux.initializeWithDiagnostics(config, it) } ?: Flux.initialize(config)
         try {
             val subscription = flux.subscribeEvents(RuntimeEventListener(_events))
             val generation = ++nextGeneration
