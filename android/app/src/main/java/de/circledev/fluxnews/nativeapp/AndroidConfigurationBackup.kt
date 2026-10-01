@@ -218,6 +218,9 @@ internal class AndroidConfigurationBackupController(
             runtime.replaceSession(bootstrap.initializationConfigFor(credentials))
             bootstrap.publishRestoredAccount(credentials)
         } else {
+            // A fresh-session replacement has already committed into the Core store. Reset it
+            // before retiring the temporary session so no restored configuration survives a failed import.
+            if (runtime.hasActiveSession()) runtime.local { it.resetCoreState() }
             runtime.closeSession()
             bootstrap.clearCredentialsForConfigurationBackup()
         }
