@@ -51,6 +51,12 @@ class AndroidCoreRuntime(
         try { activeSession != null && acceptingWork } finally { unlock() }
     }
 
+    /** Monotonic identity for the currently installed Core session, or null when no session is active. */
+    fun activeSessionGeneration(): Long? = sessionLock.readLock().run {
+        lock()
+        try { activeSession?.generation?.takeIf { acceptingWork } } finally { unlock() }
+    }
+
     suspend fun validateAccount(
         serverUrl: String,
         apiKey: String,
