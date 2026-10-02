@@ -5,6 +5,7 @@ import android.text.format.DateUtils.FORMAT_ABBREV_RELATIVE
 import android.text.format.DateUtils.MINUTE_IN_MILLIS
 import android.text.format.DateFormat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +49,7 @@ import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.Date
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
@@ -535,8 +537,53 @@ internal fun AndroidArticleTimeline(
     )
     val errorMessage = state.errorMessage
     val listState = rememberLazyListState()
+    val scrolloverTracker = remember { AndroidScrolloverTracker() }
     val actionScope = rememberCoroutineScope()
     val publicationReferenceMillis = remember(state.queryGeneration) { System.currentTimeMillis() }
+
+    LaunchedEffect(state.articles.map { it.id }) {
+        scrolloverTracker.updateSnapshot(state.articles.map { it.id })
+    }
+
+    LaunchedEffect(listState, scrolloverTracker, articlePreferences.markReadOnScrollover) {
+        listState.interactionSource.interactions
+            .filterIsInstance<DragInteraction>()
+            .collect { interaction ->
+                when (interaction) {
+                    is DragInteraction.Start -> {
+                        scrolloverTracker.beginUserScroll(
+                            sample = listState.scrolloverGeometrySample(),
+                            enabled = articlePreferences.markReadOnScrollover,
+                        )
+                    }
+                    is DragInteraction.Stop,
+                    is DragInteraction.Cancel,
+                    -> Unit
+                }
+            }
+    }
+
+    LaunchedEffect(
+        listState,
+        scrolloverTracker,
+        articlePreferences.markReadOnScrollover,
+        state.queryGeneration,
+    ) {
+        snapshotFlow {
+            listState.scrolloverGeometrySample() to listState.isScrollInProgress
+        }
+            .collect { (sample, scrolling) ->
+                val candidates = scrolloverTracker.receive(
+                    sample = sample,
+                    enabled = articlePreferences.markReadOnScrollover,
+                )
+                if (candidates.isNotEmpty()) {
+                    val failed = store.markReadFromScrollover(candidates)
+                    if (failed.isNotEmpty()) scrolloverTracker.rearm(failed)
+                }
+                if (!scrolling) scrolloverTracker.endUserScroll()
+            }
+    }
 
     LaunchedEffect(selection, sessionGeneration, accountKey) {
         if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
@@ -622,6 +669,25 @@ internal fun AndroidArticleTimeline(
             }
         }
     }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListState.scrolloverGeometrySample(): AndroidScrolloverGeometrySample {
+    val layout = layoutInfo
+    return AndroidScrolloverGeometrySample(
+        firstVisibleIndex = firstVisibleItemIndex,
+        firstVisibleScrollOffset = firstVisibleItemScrollOffset,
+        viewportStartOffset = layout.viewportStartOffset,
+        viewportEndOffset = layout.viewportEndOffset,
+        visibleRows = layout.visibleItemsInfo.mapNotNull { item ->
+            val articleId = item.key as? Long ?: return@mapNotNull null
+            AndroidScrolloverVisibleRow(
+                articleId = articleId,
+                index = item.index,
+                offset = item.offset,
+                size = item.size,
+            )
+        },
+    )
 }
 
 @Composable
