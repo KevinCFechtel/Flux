@@ -527,6 +527,111 @@ class AndroidArticleTimelineTest {
     }
 
     @Test
+    fun scrolloverUndoAppearsAfterQualifiedBurstAndRestoresUnreadState() = runBlocking {
+        var now = 1_000L
+        val unreadWrites = mutableListOf<Pair<Long, List<Long>>>()
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1), article(2), article(3)),
+                    total = 3uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 31L },
+            selectionCountLoader = { 3uL },
+            scrolloverReadWriter = { _, _ -> },
+            scrolloverUnreadWriter = { generation, ids -> unreadWrites += generation to ids },
+            monotonicMillis = { now },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+
+        assertTrue(store.markReadFromScrollover(listOf(1L, 2L, 3L)).isEmpty())
+        store.completeScrolloverInteraction()
+
+        assertTrue(store.undoState.value.visible)
+        assertEquals(listOf(1L, 2L, 3L), store.undoState.value.articleIds)
+        assertEquals(0uL, store.state.value.total)
+
+        val feedback = async { store.feedback.first() }
+        val restored = store.undoScrollover()
+
+        assertEquals(listOf(1L, 2L, 3L), restored)
+        assertEquals(listOf(31L to listOf(1L, 2L, 3L)), unreadWrites)
+        assertTrue(store.state.value.articles.none { it.isRead })
+        assertEquals(3uL, store.state.value.total)
+        assertFalse(store.undoState.value.visible)
+        assertEquals(AndroidTimelineHaptic.Selection, feedback.await())
+    }
+
+    @Test
+    fun scrolloverUndoDoesNotAppearForSmallBurstAndExpiresAfterInactivity() = runBlocking {
+        var now = 2_000L
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1), article(2), article(3)),
+                    total = 3uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 32L },
+            scrolloverReadWriter = { _, _ -> },
+            monotonicMillis = { now },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+
+        store.markReadFromScrollover(listOf(1L, 2L))
+        store.completeScrolloverInteraction()
+        assertFalse(store.undoState.value.visible)
+
+        now += 500L
+        store.markReadFromScrollover(listOf(3L))
+        store.completeScrolloverInteraction()
+        assertTrue(store.undoState.value.visible)
+        val revision = store.undoState.value.revision
+
+        now = store.undoState.value.expiresAtUptimeMillis!! + 1L
+        store.expireScrolloverUndo(revision)
+
+        assertFalse(store.undoState.value.visible)
+        assertTrue(store.undoState.value.articleIds.isEmpty())
+    }
+
+    @Test
+    fun scrolloverUndoIsRejectedAfterSessionReplacement() = runBlocking {
+        var generation: Long? = 41L
+        var unreadWrites = 0
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1), article(2), article(3)),
+                    total = 3uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { generation },
+            scrolloverReadWriter = { _, _ -> },
+            scrolloverUnreadWriter = { _, _ -> unreadWrites += 1 },
+            monotonicMillis = { 3_000L },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+        store.markReadFromScrollover(listOf(1L, 2L, 3L))
+        store.completeScrolloverInteraction()
+        assertTrue(store.undoState.value.visible)
+
+        generation = 42L
+        val restored = store.undoScrollover()
+
+        assertTrue(restored.isEmpty())
+        assertEquals(0, unreadWrites)
+        assertFalse(store.undoState.value.visible)
+    }
+
+    @Test
     fun scrolloverWriteFailureRollsBackOptimisticReadStateAndCount() = runBlocking {
         val store = AndroidArticleTimelineStore(
             pageLoader = { _, _ ->
