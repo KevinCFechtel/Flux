@@ -33,7 +33,6 @@ internal fun SupportDiagnosticsScreen(diagnostics: AndroidAppDiagnostics, modifi
     val context = LocalContext.current
     if (viewerOpen) { AndroidLogViewer(diagnostics, { viewerOpen = false }, modifier); return }
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("Support Diagnostics", style = MaterialTheme.typography.headlineMedium)
         SettingsSectionTitle("Logging")
         SettingsSwitchRow("Debug Logging", debugEnabled) { enabled -> scope.launch { diagnostics.setDebugLoggingEnabled(enabled); debugEnabled = enabled } }
         ValueRow("Stored Records", records.size.toString())
