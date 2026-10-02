@@ -35,7 +35,11 @@ jobs:
           packages: platform-tools
       - name: Install Android SDK and NDK
         run: |
-          sdkmanager --channel=3 "platforms;android-37" "build-tools;36.0.0" "ndk;${ANDROID_NDK_VERSION}"
+          ANDROID_CLI="${ANDROID_HOME}/cmdline-tools/22.0/bin/android"
+          test -x "${ANDROID_CLI}"
+          "${ANDROID_CLI}" --sdk="${ANDROID_HOME}" sdk install "platforms/android-37.0"
+          "${ANDROID_CLI}" --sdk="${ANDROID_HOME}" sdk install "build-tools/37.0.0"
+          "${ANDROID_CLI}" --sdk="${ANDROID_HOME}" sdk install "ndk/${ANDROID_NDK_VERSION}"
           echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "${GITHUB_ENV}"
       - uses: dtolnay/rust-toolchain@1.98.0
         with:
