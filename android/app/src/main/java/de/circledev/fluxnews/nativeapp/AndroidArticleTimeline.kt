@@ -1033,8 +1033,7 @@ internal fun AndroidArticleTimeline(
         val current = store.state.value
         val sameContext =
             current.selection == selection &&
-                current.sessionGeneration == sessionGeneration &&
-                current.selection != null
+                current.sessionGeneration == sessionGeneration
         if (sameContext) return@LaunchedEffect
 
         if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
