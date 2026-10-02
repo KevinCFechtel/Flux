@@ -597,7 +597,7 @@ The larger `AndroidStoragePaths` ownership/lifecycle review remains deferred to 
 
 **Phase E2 is COMPLETE.**
 
-**E3 is IN PROGRESS. E3-A AND E3-B ARE COMPLETE; E3-C IS NEXT.**
+**E3 is IN PROGRESS. E3-A, E3-B AND E3-C ARE COMPLETE; E3-D IS NEXT.**
 
 ## 14. E3 — Native Article Timeline / Article Presentation
 
@@ -650,7 +650,29 @@ Validation:
 - canonical gate included unit tests, lint, development assembly and production release build
 - SDK/NDK provisioning, Rust/UniFFI, Kotlin compilation, Compose lint and production release build all passed on the modernized toolchain
 
-E3-C is next. It should build on the productive rows without reopening the paging or image-pipeline architecture unless measurements show a concrete need.
+### E3-C — Targeted article status projection
+
+Status: **COMPLETE**
+
+Implemented on 2 October 2026:
+
+- Android Core events are tagged with the owning Core-session generation before entering the app event stream;
+- stale events from retired account/Core sessions are ignored by the Timeline;
+- visible read/unread and star/unstar changes patch the loaded ArticleSummary rows directly instead of rebuilding the whole Timeline;
+- filter exits remove affected loaded rows without a full page reload;
+- filter re-entry for an article that is not currently loaded triggers a bounded first-page snapshot refresh because no complete ArticleSummary exists locally for that unseen article;
+- filtered selection totals are refreshed through Core count queries so non-loaded status changes cannot leave the title count stale;
+- sync-complete events with changed article data replace the bounded Timeline snapshot;
+- the existing paging, image-loading and batched media-projection architecture remains unchanged;
+- focused JVM tests cover visible status patching, stale-session rejection, unread-filter removal/re-entry, starred-scope removal/re-entry, and non-loaded count updates.
+
+Validation:
+
+- Android pull-request CI gate #25 — PASS
+- canonical gate included unit tests, lint, development assembly and production release build
+- no Core/UniFFI API change was required
+
+E3-D is next: native Android/Compose Scrollover behavior and its interaction/lifecycle guards.
 
 
 ### Baseline renderer
