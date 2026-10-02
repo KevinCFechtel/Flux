@@ -730,33 +730,42 @@ internal class AndroidArticleTimelineStore private constructor(
     }
 
     suspend fun ensureFeedIcon(feedId: Long, variant: FeedIconVariant) {
+        ensureFeedIcons(listOf(feedId), variant)
+    }
+
+    suspend fun ensureFeedIcons(feedIds: List<Long>, variant: FeedIconVariant) {
+        if (feedIds.isEmpty()) return
+
         val current = mutableState.value
         val selection = current.selection ?: return
         val sessionGeneration = current.sessionGeneration ?: return
         if (activeSessionGeneration() != sessionGeneration) return
 
         val cache = feedIconCacheByVariant.getOrPut(variant) { mutableMapOf() }
-        if (feedId in cache) {
-            publishFeedIconCache(
-                generation = current.queryGeneration,
-                selection = selection,
-                sessionGeneration = sessionGeneration,
-                variant = variant,
-                cache = cache,
-            )
+        val unavailable = unavailableFeedIconsByVariant.getOrPut(variant) { mutableSetOf() }
+        val requested = feedIds.asSequence()
+            .distinct()
+            .filterNot { it in cache || it in unavailable }
+            .filter { feedIconRequestsInFlight.add(it to variant) }
+            .toList()
+
+        if (requested.isEmpty()) {
+            if (cache.isNotEmpty()) {
+                publishFeedIconCache(
+                    generation = current.queryGeneration,
+                    selection = selection,
+                    sessionGeneration = sessionGeneration,
+                    variant = variant,
+                    cache = cache,
+                )
+            }
             return
         }
-
-        val unavailable = unavailableFeedIconsByVariant.getOrPut(variant) { mutableSetOf() }
-        if (feedId in unavailable) return
-
-        val requestKey = feedId to variant
-        if (!feedIconRequestsInFlight.add(requestKey)) return
 
         try {
             repeat(ANDROID_FEED_ICON_MAX_ATTEMPTS) { attempt ->
                 val loaded = try {
-                    feedIconLoader(listOf(feedId), variant)
+                    feedIconLoader(requested, variant)
                 } catch (_: Exception) {
                     if (attempt + 1 < ANDROID_FEED_ICON_MAX_ATTEMPTS) {
                         delay(ANDROID_FEED_ICON_RETRY_DELAY_MILLIS * (attempt + 1))
@@ -766,13 +775,14 @@ internal class AndroidArticleTimelineStore private constructor(
 
                 if (!owns(current.queryGeneration, selection, sessionGeneration)) return
 
-                val png = loaded[feedId]
-                if (png == null) {
-                    unavailable += feedId
-                    return
+                requested.forEach { feedId ->
+                    val png = loaded[feedId]
+                    if (png == null) {
+                        unavailable += feedId
+                    } else {
+                        cache[feedId] = png
+                    }
                 }
-
-                cache[feedId] = png
                 publishFeedIconCache(
                     generation = current.queryGeneration,
                     selection = selection,
@@ -783,7 +793,7 @@ internal class AndroidArticleTimelineStore private constructor(
                 return
             }
         } finally {
-            feedIconRequestsInFlight.remove(requestKey)
+            requested.forEach { feedIconRequestsInFlight.remove(it to variant) }
         }
     }
 
@@ -930,6 +940,9 @@ internal fun AndroidArticleTimeline(
     val articleIds = remember(state.queryGeneration, state.articles.size) {
         state.articles.map { it.id }
     }
+    val articleFeedIds = remember(state.queryGeneration, state.articles.size) {
+        state.articles.map { it.feedId }.distinct()
+    }
     val feedIconVariant = if (isSystemInDarkTheme()) {
         FeedIconVariant.DARK
     } else {
@@ -954,6 +967,10 @@ internal fun AndroidArticleTimeline(
 
     LaunchedEffect(articleIds) {
         scrolloverTracker.updateSnapshot(articleIds)
+    }
+
+    LaunchedEffect(articleFeedIds, feedIconVariant) {
+        store.ensureFeedIcons(articleFeedIds, feedIconVariant)
     }
 
     LaunchedEffect(listState, scrolloverTracker, articlePreferences.markReadOnScrollover) {
@@ -1040,7 +1057,7 @@ internal fun AndroidArticleTimeline(
     }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-    val availableWidth = maxWidth
+    val availableWidth = (maxWidth - 32.dp).coerceAtLeast(0.dp)
     val availableWidthDp = availableWidth.value.toInt()
     when {
         state.initialLoading && state.articles.isEmpty() -> {
@@ -1199,6 +1216,7 @@ private fun AndroidArticleTimelineRow(
                 feedIconPng = feedIconPng,
                 feedIconVariant = feedIconVariant,
                 onRequestFeedIcon = onRequestFeedIcon,
+                requestIfMissing = false,
             )
         }
         val title: @Composable () -> Unit = {
@@ -1360,16 +1378,17 @@ internal fun FeedIcon(
     pngData: ByteArray?,
     variant: FeedIconVariant,
     onRequest: suspend (Long, FeedIconVariant) -> Unit,
+    requestIfMissing: Boolean = true,
 ) {
-    LaunchedEffect(feedId, variant, pngData == null) {
-        if (pngData == null) onRequest(feedId, variant)
+    LaunchedEffect(feedId, variant, pngData == null, requestIfMissing) {
+        if (requestIfMissing && pngData == null) onRequest(feedId, variant)
     }
     val context = LocalContext.current
     val imageRequest = remember(context, feedId, variant, pngData) {
         pngData?.let { bytes ->
             ImageRequest.Builder(context)
                 .data(bytes)
-                .memoryCacheKey("feed-icon:$feedId:$variant")
+                .memoryCacheKey("feed-icon:$feedId:$variant:${pngData.contentHashCode()}")
                 .build()
         }
     }
