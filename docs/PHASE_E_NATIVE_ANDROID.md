@@ -1,6 +1,6 @@
 # Phase E — Native Android
 
-> **Status: PHASE E1 AND E2 COMPLETE — E3 IN ACCEPTANCE (E3-A THROUGH E3-D COMPLETE / E3-E PHYSICAL-DEVICE, PERFORMANCE AND UI ACCEPTANCE IN PROGRESS) / PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
+> **Status: PHASE E1, E2 AND E3 COMPLETE — E4 NEXT / PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
 >
@@ -597,7 +597,7 @@ The larger `AndroidStoragePaths` ownership/lifecycle review remains deferred to 
 
 **Phase E2 is COMPLETE.**
 
-**E3 is IN PROGRESS. E3-A, E3-B, E3-C AND E3-D ARE COMPLETE; E3-E IS NEXT.**
+**Phase E3 is COMPLETE. E4 — Actions, Search, Sync and Mutations — is NEXT.**
 
 ## 14. E3 — Native Article Timeline / Article Presentation
 
@@ -705,36 +705,32 @@ Validation:
 
 ### E3-E — Physical-device, performance and UI acceptance
 
-Status: **IN PROGRESS**
+Status: **COMPLETE**
 
-E3-E is the current Phase-E work. The productive Android shell and Timeline are now distributed through the separate Native Dev Google Play internal-test application so real-device acceptance can drive final presentation and performance refinement.
+E3-E was accepted on 2 October 2026 after physical-device use of the Native Dev Google Play internal-test build.
 
-Acceptance work includes:
+Accepted results:
 
-- physical arm64-v8a validation on representative supported Android hardware;
-- normal reading-speed and fast-scroll behavior with realistic article sets and real images;
-- Scrollover behavior and status mutations under real touch/fling interaction;
-- image loading, memory behavior and Compose scrolling performance;
-- adaptive phone/wide-layout presentation checks;
-- visual comparison of Compact, Visual and Visual Compact against the shared mobile product semantics and the current accepted iOS presentation where those semantics are shared;
-- small native Android UI/spacing/geometry corrections discovered during real-device use;
-- rerunning the deferred E1-B physical UniFFI runtime smoke before E3 closes.
+- normal reading-speed and fast scrolling with realistic article sets and real images are smooth on the tested physical Android device;
+- Scrollover remains smooth with Mark Read on Scrollover enabled, including real touch/fling interaction and batched read mutations;
+- Compact, Visual and Visual Compact presentation, native image loading, adaptive layout, Light/Dark presentation and navigation chrome were refined during physical-device use;
+- no measured evidence currently justifies replacing the Compose `LazyColumn` renderer or introducing a second rendering architecture;
+- small UI and performance findings discovered later may be fixed as normal refinement without reopening E3 unless they expose a concrete architectural contradiction.
 
 Acceptance corrections implemented during E3-E include:
 
-- the process-scoped app owner now retains the Android Timeline presentation store across Activity recreation, so orientation and Light/Dark configuration changes keep the current local snapshot instead of constructing an empty Timeline store;
+- the process-scoped app owner retains the Android Timeline presentation store across Activity recreation, so orientation and Light/Dark configuration changes keep the current local snapshot instead of constructing an empty Timeline store;
 - the selected scope is restored only when the retained Timeline belongs to the active Core-session generation; a real account/session replacement still re-evaluates Startup Scope;
 - Timeline reset/scroll-to-top occurs only for a semantic context/session change; a pure configuration recreation no longer counts as a context change;
 - ordinary Activity recreation no longer requests `SyncReason.APP_START`; the internal AppStart reason remains limited to account activation/replacement bootstrap where an initial synchronization is required;
-- the Timeline's decorative feed icon no longer adds duplicate TalkBack speech and the unread status dot carries an explicit accessibility description;
-- native read/star/Scrollover feedback uses system haptics rather than direct vibration control and therefore respects Android system haptic settings.
+- decorative feed icons avoid duplicate TalkBack speech and unread state carries explicit accessibility semantics;
+- native read/star/Scrollover feedback uses system haptics rather than direct vibration control;
+- Scrollover Undo is generation-safe and uses the shared Core bulk mutation path;
+- Timeline composition work was reduced by hoisting row-width decisions, adding lazy-list content types, batching feed-icon loading and avoiding unnecessary Scrollover sampling.
 
-The remaining E3-E closure gates are physical-device acceptance: TalkBack/font-scaling review, normal and fast scrolling with real images, portrait/landscape and Light/Dark lifecycle checks, and the deferred physical arm64-v8a `android/Build/test-uniffi-runtime.sh` run.
+The deferred physical UniFFI runtime/production-upgrade proof remains a later release/runtime acceptance responsibility and is not represented here as completed. E9 remains the authoritative final Flutter-to-native production-upgrade gate.
 
-UI refinements found during this acceptance pass do **not** reopen the completed E3-B architecture. They are acceptance corrections as long as they preserve the existing Compose Timeline, Core/UniFFI ownership, stable IDs, bounded paging, batched projections and native image pipeline. A renderer or architecture replacement still requires measured evidence.
-
-E3-E remains open until the physical-device presentation, interaction and performance pass is accepted.
-
+**Phase E3 is COMPLETE.**
 ### Baseline renderer
 
 Start with Compose LazyColumn or the current idiomatic Compose lazy-list equivalent.
@@ -771,11 +767,11 @@ Programmatic movement, layout changes, snapshot resets and unseen skipped rows m
 
 Performance is measured on physical Android devices, with the first meaningful real-device product pass occurring in E3 once the shell, account flow and Timeline make the native app realistically testable. The API-29 runtime floor remains covered by the E1-B emulator smoke; E3 physical-device performance acceptance uses representative supported hardware and a contemporary device where available. Test with realistic large article sets and real article images.
 
-As part of that first physical arm64-v8a pass, rerun the existing E1-B UniFFI runtime smoke before accepting Timeline behavior. This closes the deliberately deferred real-hardware runtime check without making the earlier foundation phase wait for a product surface.
+The physical Timeline acceptance pass is complete. The deferred standalone UniFFI runtime/production-upgrade proof remains tracked separately for the later final Android runtime/release acceptance rather than blocking the accepted Article Timeline.
 
-Use Android tracing/benchmark tools to identify actual bottlenecks. Only replace or specialize the renderer when reproducible evidence shows the default Compose path cannot meet the product requirement.
+Use Android tracing/benchmark tools to identify actual bottlenecks if future reproducible performance regressions appear. Only replace or specialize the renderer when measured evidence shows the default Compose path cannot meet the product requirement.
 
-E3 closes only after normal reading-speed scrolling, image loading, mutations and Scrollover are accepted without systematic jank on the agreed device matrix.
+E3 is accepted after normal reading-speed scrolling, fast scrolling, image loading, mutations and Scrollover were verified without systematic jank on physical hardware.
 
 ## 15. E4 — Actions, Search, Sync and Mutations
 
