@@ -23,15 +23,15 @@ android {
     }
     sourceSets {
         getByName("debug").apply {
-            kotlin.directories.add(file("../Build/Products/Bindings/debug/kotlin"))
-            jniLibs.directories.add(file("../Build/Products/debug"))
+            kotlin.directories.add("../Build/Products/Bindings/debug/kotlin")
+            jniLibs.directories.add("../Build/Products/debug")
         }
         getByName("release").apply {
-            kotlin.directories.add(file("../Build/Products/Bindings/release/kotlin"))
-            jniLibs.directories.add(file("../Build/Products/release"))
+            kotlin.directories.add("../Build/Products/Bindings/release/kotlin")
+            jniLibs.directories.add("../Build/Products/release")
         }
         getByName("migrationProbe").apply {
-            java.directories.add(file("src/migrationProbe/java"))
+            java.directories.add("src/migrationProbe/java")
             kotlin.directories.add(file("../Build/Products/Bindings/debug/kotlin"))
             jniLibs.directories.add(file("../Build/Products/debug"))
         }
