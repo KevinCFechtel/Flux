@@ -38,7 +38,7 @@ class AndroidCoreRuntime(
         .asCoroutineDispatcher()
     private val lifecycleMutex = Mutex()
     private val sessionLock = ReentrantReadWriteLock(true)
-    private val _events = MutableSharedFlow<CoreEvent>(
+    private val _events = MutableSharedFlow<AndroidCoreRuntimeEvent>(
         replay = 0,
         extraBufferCapacity = CoreRuntimeExecutionPolicy.EVENT_BUFFER_CAPACITY,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
@@ -48,7 +48,7 @@ class AndroidCoreRuntime(
     private var nextGeneration = 0L
     private val mutableSessionGeneration = MutableStateFlow<Long?>(null)
 
-    val events: SharedFlow<CoreEvent> = _events.asSharedFlow()
+    val events: SharedFlow<AndroidCoreRuntimeEvent> = _events.asSharedFlow()
     val sessionGeneration: StateFlow<Long?> = mutableSessionGeneration.asStateFlow()
 
     fun hasActiveSession(): Boolean = sessionLock.readLock().run {
@@ -145,8 +145,8 @@ class AndroidCoreRuntime(
     private fun installSession(config: InitializationConfig): Long {
         val flux = diagnosticListener?.let { Flux.initializeWithDiagnostics(config, it) } ?: Flux.initialize(config)
         try {
-            val subscription = flux.subscribeEvents(RuntimeEventListener(_events))
             val generation = ++nextGeneration
+            val subscription = flux.subscribeEvents(RuntimeEventListener(generation, _events))
             activeSession = CoreSession(generation, config, flux, subscription)
             acceptingWork = true
             mutableSessionGeneration.value = generation
@@ -190,11 +190,19 @@ class AndroidCoreRuntime(
     )
 
     private class RuntimeEventListener(
-        private val events: MutableSharedFlow<CoreEvent>,
+        private val generation: Long,
+        private val events: MutableSharedFlow<AndroidCoreRuntimeEvent>,
     ) : EventListener {
-        override fun onEvent(event: CoreEvent) { events.tryEmit(event) }
+        override fun onEvent(event: CoreEvent) {
+            events.tryEmit(AndroidCoreRuntimeEvent(generation = generation, event = event))
+        }
     }
 }
+
+internal data class AndroidCoreRuntimeEvent(
+    val generation: Long,
+    val event: CoreEvent,
+)
 
 internal object CoreRuntimeExecutionPolicy {
     const val LOCAL_WORKERS = 2
