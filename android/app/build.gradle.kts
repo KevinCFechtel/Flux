@@ -10,7 +10,7 @@ plugins {
 android {
     namespace = "de.circledev.fluxnews.nativeapp"
     compileSdk = 37
-    defaultConfig { applicationId = "de.circle_dev.flux_news"; minSdk = 29; targetSdk = 37; versionCode = 1; versionName = "0.1.0"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+    defaultConfig { applicationId = "de.circle_dev.flux_news"; minSdk = 29; targetSdk = 36; versionCode = 1; versionName = "0.1.0"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
     buildTypes {
         debug { isMinifyEnabled = false }
         release { isMinifyEnabled = false; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") }
