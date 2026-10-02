@@ -41,7 +41,6 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
-import androidx.compose.material3.NavigationDrawerItemColors
 import androidx.compose.material3.PermanentDrawerSheet
 import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.Scaffold
@@ -602,7 +601,6 @@ private fun NewsNavigationContent(
                                     selected = selectedScope == feedScope,
                                     iconPng = timelineState.feedIconPngByFeedId[feed.id],
                                     iconVariant = feedIconVariant,
-                                    itemColors = drawerItemColors,
                                     onRequestFeedIcon = timelineStore::ensureFeedIcon,
                                     onClick = { onScopeSelected(feedScope) },
                                 )
@@ -692,15 +690,21 @@ private fun FeedNavigationRow(
     selected: Boolean,
     iconPng: ByteArray?,
     iconVariant: uniffi.flux_uniffi.FeedIconVariant,
-    itemColors: NavigationDrawerItemColors,
     onRequestFeedIcon: suspend (Long, uniffi.flux_uniffi.FeedIconVariant) -> Unit,
     onClick: () -> Unit,
 ) {
-    NavigationDrawerItem(
-        label = { DrawerLabel(title, count) },
-        selected = selected,
-        onClick = onClick,
-        icon = {
+    Surface(
+        color = MaterialTheme.colorScheme.background,
+        shape = MaterialTheme.shapes.extraLarge,
+        modifier = Modifier.fillMaxWidth().padding(start = 32.dp, vertical = 2.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             FeedIcon(
                 feedId = feedId,
                 title = title,
@@ -708,10 +712,15 @@ private fun FeedNavigationRow(
                 variant = iconVariant,
                 onRequest = onRequestFeedIcon,
             )
-        },
-        colors = itemColors,
-        modifier = Modifier.padding(start = 32.dp),
-    )
+            Text(
+                title,
+                modifier = Modifier.weight(1f).padding(start = 12.dp),
+                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            )
+            CountText(count)
+        }
+    }
 }
 
 @Composable
