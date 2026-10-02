@@ -1,9 +1,11 @@
 package de.circledev.fluxnews.nativeapp
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -493,7 +495,7 @@ class AndroidArticleTimelineTest {
             testOnly = Unit,
         )
         store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
-        val feedback = async { store.feedback.first() }
+        val feedback = async(start = CoroutineStart.UNDISPATCHED) { store.feedback.first() }
 
         assertTrue(store.markReadFromScrollover(listOf(1L)).isEmpty())
         assertTrue(store.markReadFromScrollover(listOf(2L)).isEmpty())
@@ -501,7 +503,10 @@ class AndroidArticleTimelineTest {
 
         store.completeScrolloverInteraction()
 
-        assertEquals(AndroidTimelineHaptic.Confirmation, feedback.await())
+        assertEquals(
+            AndroidTimelineHaptic.Confirmation,
+            withTimeout(1_000) { feedback.await() },
+        )
     }
 
     @Test
@@ -554,7 +559,7 @@ class AndroidArticleTimelineTest {
         assertEquals(listOf(1L, 2L, 3L), store.undoState.value.articleIds)
         assertEquals(0uL, store.state.value.total)
 
-        val feedback = async { store.feedback.first() }
+        val feedback = async(start = CoroutineStart.UNDISPATCHED) { store.feedback.first() }
         val restored = store.undoScrollover()
 
         assertEquals(listOf(1L, 2L, 3L), restored)
@@ -562,7 +567,10 @@ class AndroidArticleTimelineTest {
         assertTrue(store.state.value.articles.none { it.isRead })
         assertEquals(3uL, store.state.value.total)
         assertFalse(store.undoState.value.visible)
-        assertEquals(AndroidTimelineHaptic.Selection, feedback.await())
+        assertEquals(
+            AndroidTimelineHaptic.Selection,
+            withTimeout(1_000) { feedback.await() },
+        )
     }
 
     @Test
