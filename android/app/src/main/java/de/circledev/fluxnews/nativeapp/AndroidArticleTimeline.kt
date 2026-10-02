@@ -1,5 +1,8 @@
 package de.circledev.fluxnews.nativeapp
 
+import android.os.Build
+import android.view.HapticFeedbackConstants
+import android.view.View
 import android.graphics.BitmapFactory
 import android.text.format.DateUtils
 import android.text.format.DateUtils.FORMAT_ABBREV_RELATIVE
@@ -51,13 +54,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import coil3.compose.AsyncImage
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.Date
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
@@ -94,6 +100,11 @@ internal enum class AndroidArticleAccessory {
     Star,
     Comments,
     Audio,
+}
+
+internal enum class AndroidTimelineHaptic {
+    Confirmation,
+    Selection,
 }
 
 internal enum class AndroidArticleRowLayoutVariant {
@@ -268,16 +279,22 @@ internal class AndroidArticleTimelineStore private constructor(
     )
 
     private val mutableState = MutableStateFlow(AndroidArticleTimelineState())
+    private val mutableFeedback = MutableSharedFlow<AndroidTimelineHaptic>(extraBufferCapacity = 8)
     private val scrolloverRetainedReadIds = mutableSetOf<Long>()
+    private val scrolloverFeedbackSuppressedReadIds = mutableSetOf<Long>()
+    private var scrolloverConfirmationPending = false
     private val feedIconCacheByVariant = mutableMapOf<FeedIconVariant, MutableMap<Long, ByteArray>>()
     private val unavailableFeedIconsByVariant = mutableMapOf<FeedIconVariant, MutableSet<Long>>()
     private val feedIconRequestsInFlight = mutableSetOf<Pair<Long, FeedIconVariant>>()
     private var requestGeneration = 0L
 
     val state = mutableState.asStateFlow()
+    val feedback = mutableFeedback.asSharedFlow()
 
     suspend fun reset(selection: AndroidArticleTimelineSelection) {
         scrolloverRetainedReadIds.clear()
+        scrolloverFeedbackSuppressedReadIds.clear()
+        scrolloverConfirmationPending = false
         val generation = ++requestGeneration
         val sessionGeneration = activeSessionGeneration()
         val previous = mutableState.value
@@ -337,10 +354,15 @@ internal class AndroidArticleTimelineStore private constructor(
 
         when (val event = runtimeEvent.event) {
             is CoreEvent.ArticleReadStateChanged -> {
+                val suppressFeedback =
+                    event.read && scrolloverFeedbackSuppressedReadIds.remove(event.articleId)
+                if (!event.read) scrolloverFeedbackSuppressedReadIds.remove(event.articleId)
                 applyReadStateChanged(selection, event.articleId, event.read)
+                if (!suppressFeedback) mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
             }
             is CoreEvent.ArticleStarredStateChanged -> {
                 applyStarredStateChanged(selection, event.articleId, event.starred)
+                mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
             }
             is CoreEvent.SyncDidComplete -> {
                 if (event.metadata.navigationChanged) {
@@ -410,6 +432,7 @@ internal class AndroidArticleTimelineStore private constructor(
         if (accepted.isEmpty()) return emptyList()
 
         scrolloverRetainedReadIds.addAll(accepted)
+        scrolloverFeedbackSuppressedReadIds.addAll(accepted)
         mutableState.update { state ->
             if (
                 state.queryGeneration != current.queryGeneration ||
@@ -436,9 +459,11 @@ internal class AndroidArticleTimelineStore private constructor(
 
         return try {
             scrolloverReadWriter(sessionGeneration, accepted)
+            scrolloverConfirmationPending = true
             emptyList()
         } catch (_: Exception) {
             scrolloverRetainedReadIds.removeAll(accepted.toSet())
+            scrolloverFeedbackSuppressedReadIds.removeAll(accepted.toSet())
             if (owns(current.queryGeneration, selection, sessionGeneration)) {
                 val acceptedSet = accepted.toHashSet()
                 mutableState.update { state ->
@@ -456,6 +481,12 @@ internal class AndroidArticleTimelineStore private constructor(
             }
             accepted
         }
+    }
+
+    fun completeScrolloverInteraction() {
+        if (!scrolloverConfirmationPending) return
+        scrolloverConfirmationPending = false
+        mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
     }
 
     private suspend fun applyStarredStateChanged(
@@ -714,11 +745,21 @@ internal fun AndroidArticleTimeline(
     val listState = rememberLazyListState()
     val scrolloverTracker = remember { AndroidScrolloverTracker() }
     val actionScope = rememberCoroutineScope()
+    val view = LocalView.current
     val publicationReferenceMillis = remember(state.queryGeneration) { System.currentTimeMillis() }
     val feedIconVariant = if (isSystemInDarkTheme()) {
         FeedIconVariant.DARK
     } else {
         FeedIconVariant.NORMAL
+    }
+
+    LaunchedEffect(store, view) {
+        store.feedback.collect { feedback ->
+            when (feedback) {
+                AndroidTimelineHaptic.Confirmation -> view.performFluxConfirmationHaptic()
+                AndroidTimelineHaptic.Selection -> view.performFluxSelectionHaptic()
+            }
+        }
     }
 
     LaunchedEffect(state.articles.map { it.id }) {
@@ -761,7 +802,10 @@ internal fun AndroidArticleTimeline(
                     val failed = store.markReadFromScrollover(candidates)
                     if (failed.isNotEmpty()) scrolloverTracker.rearm(failed)
                 }
-                if (!scrolling) scrolloverTracker.endUserScroll()
+                if (!scrolling) {
+                    scrolloverTracker.endUserScroll()
+                    store.completeScrolloverInteraction()
+                }
             }
     }
 
@@ -853,6 +897,19 @@ internal fun AndroidArticleTimeline(
             }
         }
     }
+}
+
+private fun View.performFluxConfirmationHaptic() {
+    val feedbackConstant = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        HapticFeedbackConstants.CONFIRM
+    } else {
+        HapticFeedbackConstants.VIRTUAL_KEY
+    }
+    performHapticFeedback(feedbackConstant)
+}
+
+private fun View.performFluxSelectionHaptic() {
+    performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
 }
 
 private fun androidx.compose.foundation.lazy.LazyListState.scrolloverGeometrySample(): AndroidScrolloverGeometrySample {
