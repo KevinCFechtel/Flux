@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -57,8 +58,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
@@ -350,28 +349,32 @@ private fun NewsRootContent(
                 if (scopeTitleLeading) {
                 TopAppBar(
                     title = {
-                        ScopeNavigationCapsule(
-                            scope = scope,
-                            showArticleCount = articlePreferences.showArticleCount,
-                            timelineCount = timelineCount,
-                            readFilter = timelineState.selection?.readFilter,
-                            opensNavigation = !persistentNavigation,
-                            onOpenNavigation = onOpenNavigation,
-                        )
+                        Box(Modifier.offset(y = (-6).dp)) {
+                            ScopeNavigationCapsule(
+                                scope = scope,
+                                showArticleCount = articlePreferences.showArticleCount,
+                                timelineCount = timelineCount,
+                                readFilter = timelineState.selection?.readFilter,
+                                opensNavigation = !persistentNavigation,
+                                onOpenNavigation = onOpenNavigation,
+                            )
+                        }
                     },
                     colors = appBarColors,
                 )
             } else {
                 CenterAlignedTopAppBar(
                     title = {
-                        ScopeNavigationCapsule(
-                            scope = scope,
-                            showArticleCount = articlePreferences.showArticleCount,
-                            timelineCount = timelineCount,
-                            readFilter = timelineState.selection?.readFilter,
-                            opensNavigation = !persistentNavigation,
-                            onOpenNavigation = onOpenNavigation,
-                        )
+                        Box(Modifier.offset(y = (-6).dp)) {
+                            ScopeNavigationCapsule(
+                                scope = scope,
+                                showArticleCount = articlePreferences.showArticleCount,
+                                timelineCount = timelineCount,
+                                readFilter = timelineState.selection?.readFilter,
+                                opensNavigation = !persistentNavigation,
+                                onOpenNavigation = onOpenNavigation,
+                            )
+                        }
                     },
                     colors = appBarColors,
                 )
@@ -650,31 +653,71 @@ private fun DrawerIcon(drawable: Int, description: String) {
 }
 
 private val ConnectedScopeChromeShape = GenericShape { size, _ ->
-    val stemHeight = size.height * 0.14f
-    val capsuleHeight = size.height - stemHeight
-    val capsuleRadius = capsuleHeight / 2f
-    val stemWidth = size.width * 0.34f
+    val bodyTop = size.height * 0.20f
+    val bodyRadius = (size.height - bodyTop) / 2f
+    val bodyCenterY = bodyTop + bodyRadius
+    val stemWidth = size.width * 0.52f
     val stemLeft = (size.width - stemWidth) / 2f
     val stemRight = stemLeft + stemWidth
+    val shoulderStartY = size.height * 0.07f
+    val rightBodyTangent = size.width - bodyRadius
+    val leftBodyTangent = bodyRadius
+    val circleControl = bodyRadius * 0.5522848f
 
-    addRoundRect(
-        RoundRect(
-            left = 0f,
-            top = stemHeight,
-            right = size.width,
-            bottom = size.height,
-            radiusX = capsuleRadius,
-            radiusY = capsuleRadius,
-        ),
+    moveTo(stemLeft, 0f)
+    lineTo(stemRight, 0f)
+    lineTo(stemRight, shoulderStartY)
+    cubicTo(
+        stemRight,
+        bodyTop * 0.88f,
+        rightBodyTangent - bodyRadius * 0.22f,
+        bodyTop,
+        rightBodyTangent,
+        bodyTop,
     )
-    addRect(
-        Rect(
-            left = stemLeft,
-            top = 0f,
-            right = stemRight,
-            bottom = stemHeight + capsuleRadius * 0.45f,
-        ),
+    cubicTo(
+        rightBodyTangent + circleControl,
+        bodyTop,
+        size.width,
+        bodyCenterY - circleControl,
+        size.width,
+        bodyCenterY,
     )
+    cubicTo(
+        size.width,
+        bodyCenterY + circleControl,
+        rightBodyTangent + circleControl,
+        size.height,
+        rightBodyTangent,
+        size.height,
+    )
+    lineTo(leftBodyTangent, size.height)
+    cubicTo(
+        leftBodyTangent - circleControl,
+        size.height,
+        0f,
+        bodyCenterY + circleControl,
+        0f,
+        bodyCenterY,
+    )
+    cubicTo(
+        0f,
+        bodyCenterY - circleControl,
+        leftBodyTangent - circleControl,
+        bodyTop,
+        leftBodyTangent,
+        bodyTop,
+    )
+    cubicTo(
+        leftBodyTangent + bodyRadius * 0.22f,
+        bodyTop,
+        stemLeft,
+        bodyTop * 0.88f,
+        stemLeft,
+        shoulderStartY,
+    )
+    lineTo(stemLeft, 0f)
+    close()
 }
 
 @Composable
@@ -696,7 +739,7 @@ private fun ScopeNavigationCapsule(
         shadowElevation = 1.dp,
     ) {
         Row(
-            modifier = Modifier.padding(start = 14.dp, top = 11.dp, end = 14.dp, bottom = 5.dp),
+            modifier = Modifier.padding(start = 14.dp, top = 13.dp, end = 14.dp, bottom = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
