@@ -105,9 +105,7 @@ internal fun AdaptiveAppShell(
 ) {
     val navController = rememberNavController()
     val sessionGeneration by coreRuntime.sessionGeneration.collectAsState()
-    val retainedTimelineSelection = timelineStore.state.value
-        .takeIf { it.sessionGeneration == sessionGeneration }
-        ?.selection
+    val retainedTimelineSelection = timelineStore.retainedSelectionForSession(sessionGeneration)
     var selectedScope by remember(timelineStore, sessionGeneration) {
         mutableStateOf(retainedTimelineSelection?.scope ?: AndroidNewsScope.All)
     }
