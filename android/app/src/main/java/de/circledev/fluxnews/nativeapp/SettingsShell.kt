@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import java.text.NumberFormat
 import kotlinx.coroutines.CoroutineScope
@@ -65,8 +66,11 @@ internal fun SettingsShell(
                 TopAppBar(
                     title = { Text(if (compactDetail) selected!!.title else "Settings") },
                     navigationIcon = {
-                        TextButton(onClick = { if (compactDetail) selected = null else onBack() }) {
-                            Text(if (compactDetail) "‹ Settings" else "‹ News")
+                        IconButton(onClick = { if (compactDetail) selected = null else onBack() }) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_arrow_back),
+                                contentDescription = "Back",
+                            )
                         }
                     },
                 )
