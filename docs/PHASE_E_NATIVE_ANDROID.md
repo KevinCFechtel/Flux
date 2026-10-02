@@ -689,6 +689,14 @@ Implemented on 2 October 2026:
 - navigation refreshes are conflated across Core-event bursts to avoid per-event scroll-adjacent reload work;
 - focused JVM tests cover geometry, programmatic-scroll exclusion, direction reversal, layout/snapshot rebasing, session ownership, bulk mutation behavior and rollback.
 
+E3-E physical-device acceptance subsequently found and closed the remaining Scrollover presentation-feedback gap without changing the E3-D architecture:
+
+- successful Scrollover reads publish one native confirmation haptic per completed user scroll interaction, never one vibration per article/Core event;
+- a qualified successful Scrollover burst exposes a native Undo snackbar; qualification requires three successful reads within the short burst window, later successes extend the active group, inactivity closes it after 4 seconds and the group has a 15-second maximum lifetime;
+- Undo writes the exact qualified Article IDs back to unread through the generation-bound Core bulk mutation path, re-arms those IDs for future Scrollover qualification and emits a lighter native selection haptic only after success;
+- stale/account-replaced Undo state is rejected and failed Undo does not publish success feedback;
+- focused JVM tests cover haptic batching, Undo qualification, expiry, successful unread restoration and session replacement.
+
 Validation:
 
 - Android pull-request CI gate #27 — PASS
@@ -711,6 +719,17 @@ Acceptance work includes:
 - visual comparison of Compact, Visual and Visual Compact against the shared mobile product semantics and the current accepted iOS presentation where those semantics are shared;
 - small native Android UI/spacing/geometry corrections discovered during real-device use;
 - rerunning the deferred E1-B physical UniFFI runtime smoke before E3 closes.
+
+Acceptance corrections implemented during E3-E include:
+
+- the process-scoped app owner now retains the Android Timeline presentation store across Activity recreation, so orientation and Light/Dark configuration changes keep the current local snapshot instead of constructing an empty Timeline store;
+- the selected scope is restored only when the retained Timeline belongs to the active Core-session generation; a real account/session replacement still re-evaluates Startup Scope;
+- Timeline reset/scroll-to-top occurs only for a semantic context/session change; a pure configuration recreation no longer counts as a context change;
+- ordinary Activity recreation no longer requests `SyncReason.APP_START`; the internal AppStart reason remains limited to account activation/replacement bootstrap where an initial synchronization is required;
+- the Timeline's decorative feed icon no longer adds duplicate TalkBack speech and the unread status dot carries an explicit accessibility description;
+- native read/star/Scrollover feedback uses system haptics rather than direct vibration control and therefore respects Android system haptic settings.
+
+The remaining E3-E closure gates are physical-device acceptance: TalkBack/font-scaling review, normal and fast scrolling with real images, portrait/landscape and Light/Dark lifecycle checks, and the deferred physical arm64-v8a `android/Build/test-uniffi-runtime.sh` run.
 
 UI refinements found during this acceptance pass do **not** reopen the completed E3-B architecture. They are acceptance corrections as long as they preserve the existing Compose Timeline, Core/UniFFI ownership, stable IDs, bounded paging, batched projections and native image pipeline. A renderer or architecture replacement still requires measured evidence.
 
