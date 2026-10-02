@@ -1,6 +1,11 @@
 package de.circledev.fluxnews.nativeapp
 
 import android.app.Application
+import android.content.Context
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
+import coil3.disk.DiskCache
+import coil3.memory.MemoryCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,7 +18,7 @@ import kotlinx.coroutines.launch
  * intentionally empty after process death; AndroidAccountBootstrap reconstructs its session from
  * the native credential store when an app or future headless entry point requests readiness.
  */
-class FluxApplication : Application() {
+class FluxApplication : Application(), SingletonImageLoader.Factory {
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val storagePaths: AndroidStoragePaths by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidStoragePaths.create(applicationContext) }
     val preferenceStore: AndroidPreferenceStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidPreferenceStore.create(applicationContext) }
@@ -31,6 +36,22 @@ class FluxApplication : Application() {
     val accountBootstrap: AndroidAccountBootstrap by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidAccountBootstrap(credentialStore = credentialStore, preferenceStore = preferenceStore, coreRuntime = coreRuntime, storagePaths = storagePaths)
     }
+
+    override fun newImageLoader(context: Context): ImageLoader =
+        ImageLoader.Builder(context.applicationContext)
+            .memoryCache {
+                MemoryCache.Builder()
+                    .maxSizePercent(context.applicationContext, 0.15)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(context.applicationContext.cacheDir.resolve("article-images"))
+                    .maxSizeBytes(256L * 1024L * 1024L)
+                    .build()
+            }
+            .crossfade(150)
+            .build()
 
     override fun onCreate() {
         super.onCreate()
