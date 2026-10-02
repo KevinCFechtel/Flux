@@ -696,7 +696,7 @@ private fun FeedNavigationRow(
     Surface(
         color = MaterialTheme.colorScheme.background,
         shape = MaterialTheme.shapes.extraLarge,
-        modifier = Modifier.fillMaxWidth().padding(start = 32.dp, vertical = 2.dp),
+        modifier = Modifier.fillMaxWidth().padding(start = 32.dp, top = 2.dp, bottom = 2.dp),
     ) {
         Row(
             modifier = Modifier
