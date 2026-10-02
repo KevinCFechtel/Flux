@@ -56,7 +56,9 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import uniffi.flux_uniffi.CoreEvent
 import uniffi.flux_uniffi.NavigationCountMode
 import uniffi.flux_uniffi.NavigationProjection
 
@@ -92,6 +94,7 @@ internal fun AdaptiveAppShell(
     var navigation by remember { mutableStateOf(NewsNavigationModel()) }
     var preferenceState by remember { mutableStateOf<AndroidNavigationPreferenceState?>(null) }
     var startupScopeApplied by remember { mutableStateOf(false) }
+    val navigationRefreshes = remember { Channel<Unit>(capacity = Channel.CONFLATED) }
 
     suspend fun reloadNavigation() {
         navigation = try {
@@ -104,9 +107,16 @@ internal fun AdaptiveAppShell(
     }
 
     LaunchedEffect(coreRuntime, timelineStore) {
-        reloadNavigation()
         coreRuntime.events.collect { runtimeEvent ->
             timelineStore.handleCoreEvent(runtimeEvent)
+            if (runtimeEvent.event.requiresNavigationRefresh()) {
+                navigationRefreshes.trySend(Unit)
+            }
+        }
+    }
+    LaunchedEffect(coreRuntime, navigationRefreshes) {
+        reloadNavigation()
+        for (ignored in navigationRefreshes) {
             reloadNavigation()
         }
     }
@@ -187,6 +197,14 @@ internal fun AdaptiveAppShell(
             )
         }
     }
+}
+
+private fun CoreEvent.requiresNavigationRefresh(): Boolean = when (this) {
+    is CoreEvent.ArticleReadStateChanged,
+    is CoreEvent.ArticleStarredStateChanged,
+    -> true
+    is CoreEvent.SyncDidComplete -> metadata.navigationChanged || metadata.dataChanged
+    else -> false
 }
 
 private fun forwardEnterTransition(): EnterTransition =

@@ -5,6 +5,7 @@ import android.text.format.DateUtils.FORMAT_ABBREV_RELATIVE
 import android.text.format.DateUtils.MINUTE_IN_MILLIS
 import android.text.format.DateFormat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +49,7 @@ import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.Date
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
@@ -158,6 +160,7 @@ internal class AndroidArticleTimelineStore private constructor(
     private val pageLoader: suspend (ArticleQuery, Boolean) -> ArticlePage,
     private val audioArticleIdsLoader: suspend (List<Long>) -> Set<Long>,
     private val selectionCountLoader: suspend (ArticleQuery) -> ULong,
+    private val scrolloverReadWriter: suspend (Long, List<Long>) -> Unit,
     private val activeSessionGeneration: () -> Long?,
 ) {
     internal constructor(coreRuntime: AndroidCoreRuntime) : this(
@@ -181,6 +184,12 @@ internal class AndroidArticleTimelineStore private constructor(
         selectionCountLoader = { query ->
             coreRuntime.local { core -> core.countArticles(query) }
         },
+        scrolloverReadWriter = { generation, articleIds ->
+            coreRuntime.localForGeneration(generation) { core ->
+                core.setReadStateBulk(articleIds = articleIds, read = true)
+            }
+            Unit
+        },
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
     )
 
@@ -189,15 +198,24 @@ internal class AndroidArticleTimelineStore private constructor(
         activeSessionGeneration: () -> Long?,
         audioArticleIdsLoader: suspend (List<Long>) -> Set<Long> = { emptySet() },
         selectionCountLoader: suspend (ArticleQuery) -> ULong = { 0uL },
+        scrolloverReadWriter: suspend (Long, List<Long>) -> Unit = { _, _ -> },
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
-    ) : this(pageLoader, audioArticleIdsLoader, selectionCountLoader, activeSessionGeneration)
+    ) : this(
+        pageLoader,
+        audioArticleIdsLoader,
+        selectionCountLoader,
+        scrolloverReadWriter,
+        activeSessionGeneration,
+    )
 
     private val mutableState = MutableStateFlow(AndroidArticleTimelineState())
+    private val scrolloverRetainedReadIds = mutableSetOf<Long>()
     private var requestGeneration = 0L
 
     val state = mutableState.asStateFlow()
 
     suspend fun reset(selection: AndroidArticleTimelineSelection) {
+        scrolloverRetainedReadIds.clear()
         val generation = ++requestGeneration
         val sessionGeneration = activeSessionGeneration()
         mutableState.value = AndroidArticleTimelineState(
@@ -262,8 +280,11 @@ internal class AndroidArticleTimelineStore private constructor(
         articleId: Long,
         read: Boolean,
     ) {
+        if (!read) scrolloverRetainedReadIds.remove(articleId)
+
         val current = mutableState.value
         val index = current.articles.indexOfFirst { it.id == articleId }
+        val retainScrolloverRow = read && articleId in scrolloverRetainedReadIds
 
         if (selection.readFilter == AndroidArticleReadFilter.Unread && !read && index < 0) {
             reset(selection)
@@ -275,7 +296,7 @@ internal class AndroidArticleTimelineStore private constructor(
             val currentIndex = state.articles.indexOfFirst { it.id == articleId }
             if (currentIndex < 0) return@update state
 
-            if (selection.readFilter == AndroidArticleReadFilter.Unread && read) {
+            if (selection.readFilter == AndroidArticleReadFilter.Unread && read && !retainScrolloverRow) {
                 state.copy(
                     articles = state.articles.filterNot { it.id == articleId },
                     audioArticleIds = state.audioArticleIds - articleId,
@@ -287,8 +308,76 @@ internal class AndroidArticleTimelineStore private constructor(
             }
         }
 
-        if (selection.readFilter == AndroidArticleReadFilter.Unread && read) {
+        if (
+            selection.readFilter == AndroidArticleReadFilter.Unread &&
+            read &&
+            !retainScrolloverRow
+        ) {
             refreshSelectionTotal(selection, current.queryGeneration, current.sessionGeneration)
+        }
+    }
+
+    suspend fun markReadFromScrollover(articleIds: List<Long>): List<Long> {
+        if (articleIds.isEmpty()) return emptyList()
+
+        val current = mutableState.value
+        val selection = current.selection ?: return emptyList()
+        val sessionGeneration = current.sessionGeneration ?: return emptyList()
+        if (activeSessionGeneration() != sessionGeneration) return emptyList()
+
+        val byId = current.articles.associateBy { it.id }
+        val accepted = articleIds.asSequence()
+            .distinct()
+            .filter { id -> byId[id]?.isRead == false }
+            .toList()
+        if (accepted.isEmpty()) return emptyList()
+
+        scrolloverRetainedReadIds.addAll(accepted)
+        mutableState.update { state ->
+            if (
+                state.queryGeneration != current.queryGeneration ||
+                state.selection != selection ||
+                state.sessionGeneration != sessionGeneration
+            ) {
+                return@update state
+            }
+            val acceptedSet = accepted.toHashSet()
+            state.copy(
+                articles = state.articles.map { article ->
+                    if (article.id in acceptedSet) article.copy(isRead = true) else article
+                },
+                total = if (selection.readFilter == AndroidArticleReadFilter.Unread) {
+                    state.total?.let { total ->
+                        val delta = accepted.size.toULong().coerceAtMost(total)
+                        total - delta
+                    }
+                } else {
+                    state.total
+                },
+            )
+        }
+
+        return try {
+            scrolloverReadWriter(sessionGeneration, accepted)
+            emptyList()
+        } catch (_: Exception) {
+            scrolloverRetainedReadIds.removeAll(accepted.toSet())
+            if (owns(current.queryGeneration, selection, sessionGeneration)) {
+                val acceptedSet = accepted.toHashSet()
+                mutableState.update { state ->
+                    state.copy(
+                        articles = state.articles.map { article ->
+                            if (article.id in acceptedSet) article.copy(isRead = false) else article
+                        },
+                        total = if (selection.readFilter == AndroidArticleReadFilter.Unread) {
+                            state.total?.plus(accepted.size.toULong())
+                        } else {
+                            state.total
+                        },
+                    )
+                }
+            }
+            accepted
         }
     }
 
@@ -465,8 +554,53 @@ internal fun AndroidArticleTimeline(
     )
     val errorMessage = state.errorMessage
     val listState = rememberLazyListState()
+    val scrolloverTracker = remember { AndroidScrolloverTracker() }
     val actionScope = rememberCoroutineScope()
     val publicationReferenceMillis = remember(state.queryGeneration) { System.currentTimeMillis() }
+
+    LaunchedEffect(state.articles.map { it.id }) {
+        scrolloverTracker.updateSnapshot(state.articles.map { it.id })
+    }
+
+    LaunchedEffect(listState, scrolloverTracker, articlePreferences.markReadOnScrollover) {
+        listState.interactionSource.interactions
+            .filterIsInstance<DragInteraction>()
+            .collect { interaction ->
+                when (interaction) {
+                    is DragInteraction.Start -> {
+                        scrolloverTracker.beginUserScroll(
+                            sample = listState.scrolloverGeometrySample(),
+                            enabled = articlePreferences.markReadOnScrollover,
+                        )
+                    }
+                    is DragInteraction.Stop,
+                    is DragInteraction.Cancel,
+                    -> Unit
+                }
+            }
+    }
+
+    LaunchedEffect(
+        listState,
+        scrolloverTracker,
+        articlePreferences.markReadOnScrollover,
+        state.queryGeneration,
+    ) {
+        snapshotFlow {
+            listState.scrolloverGeometrySample() to listState.isScrollInProgress
+        }
+            .collect { (sample, scrolling) ->
+                val candidates = scrolloverTracker.receive(
+                    sample = sample,
+                    enabled = articlePreferences.markReadOnScrollover,
+                )
+                if (candidates.isNotEmpty()) {
+                    val failed = store.markReadFromScrollover(candidates)
+                    if (failed.isNotEmpty()) scrolloverTracker.rearm(failed)
+                }
+                if (!scrolling) scrolloverTracker.endUserScroll()
+            }
+    }
 
     LaunchedEffect(selection, sessionGeneration, accountKey) {
         if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
@@ -552,6 +686,25 @@ internal fun AndroidArticleTimeline(
             }
         }
     }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListState.scrolloverGeometrySample(): AndroidScrolloverGeometrySample {
+    val layout = layoutInfo
+    return AndroidScrolloverGeometrySample(
+        firstVisibleIndex = firstVisibleItemIndex,
+        firstVisibleScrollOffset = firstVisibleItemScrollOffset,
+        viewportStartOffset = layout.viewportStartOffset,
+        viewportEndOffset = layout.viewportEndOffset,
+        visibleRows = layout.visibleItemsInfo.mapNotNull { item ->
+            val articleId = item.key as? Long ?: return@mapNotNull null
+            AndroidScrolloverVisibleRow(
+                articleId = articleId,
+                index = item.index,
+                offset = item.offset,
+                size = item.size,
+            )
+        },
+    )
 }
 
 @Composable

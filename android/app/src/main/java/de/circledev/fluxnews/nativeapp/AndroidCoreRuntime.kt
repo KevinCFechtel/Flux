@@ -127,6 +127,25 @@ class AndroidCoreRuntime(
     suspend fun <T> local(block: (Flux) -> T): T = execute(localDispatcher, block)
     suspend fun <T> remote(block: (Flux) -> T): T = execute(remoteDispatcher, block)
 
+    internal suspend fun <T> localForGeneration(
+        generation: Long,
+        block: (Flux) -> T,
+    ): T = withContext(localDispatcher) {
+        requireOffMainThread()
+        sessionLock.readLock().run {
+            lock()
+            try {
+                val session = activeSession
+                check(
+                    acceptingWork &&
+                        session != null &&
+                        session.generation == generation
+                ) { "Core session generation is no longer active." }
+                block(session.flux)
+            } finally { unlock() }
+        }
+    }
+
     private suspend fun <T> execute(
         dispatcher: kotlinx.coroutines.CoroutineDispatcher,
         block: (Flux) -> T,
