@@ -252,10 +252,15 @@ private fun TimelineDestination(
         if (persistentNewsNavigation) {
             PermanentNavigationDrawer(
                 drawerContent = {
-                    PermanentDrawerSheet(modifier = Modifier.width(320.dp)) {
+                    PermanentDrawerSheet(
+                        modifier = Modifier.width(320.dp),
+                        drawerContainerColor = MaterialTheme.colorScheme.background,
+                        drawerTonalElevation = 0.dp,
+                    ) {
                         NewsNavigationContent(
                             navigation = navigation,
                             preferences = preferences,
+                            timelineStore = timelineStore,
                             selectedScope = scope,
                             onScopeSelected = onScopeSelected,
                             onSearch = { navController.navigate(ShellRoute.Search) },
@@ -289,10 +294,15 @@ private fun TimelineDestination(
             ModalNavigationDrawer(
                 drawerState = drawerState,
                 drawerContent = {
-                    ModalDrawerSheet(modifier = Modifier.width(modalDrawerWidth)) {
+                    ModalDrawerSheet(
+                        modifier = Modifier.width(modalDrawerWidth),
+                        drawerContainerColor = MaterialTheme.colorScheme.background,
+                        drawerTonalElevation = 0.dp,
+                    ) {
                         NewsNavigationContent(
                             navigation = navigation,
                             preferences = preferences,
+                            timelineStore = timelineStore,
                             selectedScope = scope,
                             onScopeSelected = {
                                 onScopeSelected(it)
@@ -448,6 +458,7 @@ private fun FloatingChromeTopGradient(
 private fun NewsNavigationContent(
     navigation: NewsNavigationModel,
     preferences: AndroidNavigationPreferenceState,
+    timelineStore: AndroidArticleTimelineStore,
     selectedScope: AndroidNewsScope,
     onScopeSelected: (AndroidNewsScope) -> Unit,
     onSearch: () -> Unit,
@@ -455,6 +466,12 @@ private fun NewsNavigationContent(
     onSettings: () -> Unit,
 ) {
     val projection = navigation.projection
+    val timelineState by timelineStore.state.collectAsState()
+    val feedIconVariant = if (isSystemInDarkTheme()) {
+        uniffi.flux_uniffi.FeedIconVariant.DARK
+    } else {
+        uniffi.flux_uniffi.FeedIconVariant.NORMAL
+    }
     val feedCounts = projection?.feedCounts?.associate { it.id to it.count }.orEmpty()
     val categoryCounts = projection?.categoryCounts?.associate { it.id to it.count }.orEmpty()
     val categoryRefs = projection?.catalog?.categories?.map { AndroidNavigationCategoryRef(it.id, it.title) }.orEmpty()
@@ -480,12 +497,23 @@ private fun NewsNavigationContent(
     Column(
         modifier = Modifier.fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp),
     ) {
-        Text(
-            "FluxNews",
+        Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp),
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-        )
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_fluxnews_logo),
+                contentDescription = null,
+                modifier = Modifier.size(30.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                "FluxNews",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+            )
+        }
         Text(
             "News",
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -554,9 +582,13 @@ private fun NewsNavigationContent(
                             .forEach { feed ->
                                 val feedScope = AndroidNewsScope.Feed(feed.id, feed.categoryId, feed.title)
                                 FeedNavigationRow(
+                                    feedId = feed.id,
                                     title = feed.title,
                                     count = feedCounts[feed.id] ?: 0uL,
                                     selected = selectedScope == feedScope,
+                                    iconPng = timelineState.feedIconPngByFeedId[feed.id],
+                                    iconVariant = feedIconVariant,
+                                    onRequestFeedIcon = timelineStore::ensureFeedIcon,
                                     onClick = { onScopeSelected(feedScope) },
                                 )
                             }
@@ -569,9 +601,13 @@ private fun NewsNavigationContent(
                 .forEach { feed ->
                     val feedScope = AndroidNewsScope.Feed(feed.id, feed.categoryId, feed.title)
                     FeedNavigationRow(
+                        feedId = feed.id,
                         title = feed.title,
                         count = feedCounts[feed.id] ?: 0uL,
                         selected = selectedScope == feedScope,
+                        iconPng = timelineState.feedIconPngByFeedId[feed.id],
+                        iconVariant = feedIconVariant,
+                        onRequestFeedIcon = timelineStore::ensureFeedIcon,
                         onClick = { onScopeSelected(feedScope) },
                     )
                 }
@@ -600,7 +636,7 @@ private fun CategoryNavigationRow(
     onSelected: () -> Unit,
 ) {
     Surface(
-        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.background,
         shape = MaterialTheme.shapes.extraLarge,
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
     ) {
@@ -632,12 +668,29 @@ private fun CategoryNavigationRow(
 }
 
 @Composable
-private fun FeedNavigationRow(title: String, count: ULong, selected: Boolean, onClick: () -> Unit) {
+private fun FeedNavigationRow(
+    feedId: Long,
+    title: String,
+    count: ULong,
+    selected: Boolean,
+    iconPng: ByteArray?,
+    iconVariant: uniffi.flux_uniffi.FeedIconVariant,
+    onRequestFeedIcon: suspend (Long, uniffi.flux_uniffi.FeedIconVariant) -> Unit,
+    onClick: () -> Unit,
+) {
     NavigationDrawerItem(
         label = { DrawerLabel(title, count) },
         selected = selected,
         onClick = onClick,
-        icon = { Text("•", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary) },
+        icon = {
+            FeedIcon(
+                feedId = feedId,
+                title = title,
+                pngData = iconPng,
+                variant = iconVariant,
+                onRequest = onRequestFeedIcon,
+            )
+        },
         modifier = Modifier.padding(start = 32.dp),
     )
 }
