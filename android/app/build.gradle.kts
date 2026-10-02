@@ -22,9 +22,19 @@ android {
         create("production") { dimension = "distribution" }
     }
     sourceSets {
-        getByName("debug").kotlin.srcDir("../Build/Products/Bindings/debug/kotlin"); getByName("debug").jniLibs.srcDir("../Build/Products/debug")
-        getByName("release").kotlin.srcDir("../Build/Products/Bindings/release/kotlin"); getByName("release").jniLibs.srcDir("../Build/Products/release")
-        getByName("migrationProbe").java.srcDir("src/migrationProbe/java"); getByName("migrationProbe").kotlin.srcDir("../Build/Products/Bindings/debug/kotlin"); getByName("migrationProbe").jniLibs.srcDir("../Build/Products/debug")
+        getByName("debug").apply {
+            kotlin.directories.add(file("../Build/Products/Bindings/debug/kotlin"))
+            jniLibs.directories.add(file("../Build/Products/debug"))
+        }
+        getByName("release").apply {
+            kotlin.directories.add(file("../Build/Products/Bindings/release/kotlin"))
+            jniLibs.directories.add(file("../Build/Products/release"))
+        }
+        getByName("migrationProbe").apply {
+            java.directories.add(file("src/migrationProbe/java"))
+            kotlin.directories.add(file("../Build/Products/Bindings/debug/kotlin"))
+            jniLibs.directories.add(file("../Build/Products/debug"))
+        }
     }
     buildFeatures { buildConfig = true; compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
