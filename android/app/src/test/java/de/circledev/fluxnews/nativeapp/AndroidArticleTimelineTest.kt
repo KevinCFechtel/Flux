@@ -244,19 +244,122 @@ class AndroidArticleTimelineTest {
         assertTrue(store.state.value.errorMessage == null)
     }
 
-    private fun article(id: Long): ArticleSummary = ArticleSummary(
+
+    @Test
+    fun rowPolicyPreservesSemanticAccessoryOrderAndImageModes() {
+        val article = article(
+            id = 7,
+            read = false,
+            starred = true,
+            commentsUrl = "https://example.test/comments",
+            imageUrl = "https://example.test/image.jpg",
+        )
+
+        assertEquals(
+            listOf(
+                AndroidArticleAccessory.Unread,
+                AndroidArticleAccessory.Star,
+                AndroidArticleAccessory.Comments,
+                AndroidArticleAccessory.Audio,
+            ),
+            AndroidArticleRowPolicy.accessories(article, hasAudio = true),
+        )
+        assertFalse(
+            AndroidArticleRowPolicy.showsImage(
+                AndroidArticlePresentationMode.Compact,
+                article.imageUrl,
+            ),
+        )
+        assertTrue(
+            AndroidArticleRowPolicy.showsImage(
+                AndroidArticlePresentationMode.Visual,
+                article.imageUrl,
+            ),
+        )
+        assertTrue(
+            AndroidArticleRowPolicy.showsImage(
+                AndroidArticlePresentationMode.VisualCompact,
+                article.imageUrl,
+            ),
+        )
+        assertFalse(
+            AndroidArticleRowPolicy.showsImage(
+                AndroidArticlePresentationMode.Visual,
+                null,
+            ),
+        )
+    }
+
+    @Test
+    fun audioProjectionIsBatchedOncePerLoadedPage() = runBlocking {
+        val cursor = ArticleCursor(
+            publishedAt = "2026-10-01T10:00:00Z",
+            articleId = 2,
+        )
+        val audioCalls = mutableListOf<List<Long>>()
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, includeTotal ->
+                if (includeTotal) {
+                    ArticlePage(
+                        articles = listOf(article(1), article(2)),
+                        total = 3uL,
+                        nextCursor = cursor,
+                    )
+                } else {
+                    ArticlePage(
+                        articles = listOf(article(2), article(3)),
+                        total = null,
+                        nextCursor = null,
+                    )
+                }
+            },
+            activeSessionGeneration = { 12L },
+            audioArticleIdsLoader = { ids ->
+                audioCalls += ids
+                ids.filterTo(mutableSetOf()) { it % 2L == 1L }
+            },
+            testOnly = Unit,
+        )
+
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+        store.loadNextPage()
+
+        assertEquals(listOf(listOf(1L, 2L), listOf(3L)), audioCalls)
+        assertEquals(setOf(1L, 3L), store.state.value.audioArticleIds)
+    }
+
+    @Test
+    fun publishedAtParserAcceptsRfc3339Offsets() {
+        assertEquals(
+            1_759_320_000_000L,
+            parseArticlePublishedAtMillis("2025-10-01T12:00:00Z"),
+        )
+        assertEquals(
+            parseArticlePublishedAtMillis("2025-10-01T12:00:00Z"),
+            parseArticlePublishedAtMillis("2025-10-01T14:00:00+02:00"),
+        )
+        assertNull(parseArticlePublishedAtMillis("not-a-date"))
+    }
+
+    private fun article(
+        id: Long,
+        read: Boolean = false,
+        starred: Boolean = false,
+        commentsUrl: String = "",
+        imageUrl: String? = null,
+    ): ArticleSummary = ArticleSummary(
         id = id,
         feedId = 10,
         categoryId = 20,
         feedTitle = "Feed",
         title = "Article $id",
         url = "https://example.test/$id",
-        commentsUrl = "",
+        commentsUrl = commentsUrl,
         publishedAt = "2026-10-01T12:00:00Z",
-        isRead = false,
-        isStarred = false,
+        isRead = read,
+        isStarred = starred,
         readingTimeMinutes = 3u,
         preview = "Preview",
-        imageUrl = null,
+        imageUrl = imageUrl,
     )
 }
