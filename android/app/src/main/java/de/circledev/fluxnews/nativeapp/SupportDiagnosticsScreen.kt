@@ -34,12 +34,12 @@ internal fun SupportDiagnosticsScreen(diagnostics: AndroidAppDiagnostics, modifi
     if (viewerOpen) { AndroidLogViewer(diagnostics, { viewerOpen = false }, modifier); return }
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Support Diagnostics", style = MaterialTheme.typography.headlineMedium)
-        Text("Logging", style = MaterialTheme.typography.titleMedium)
+        SettingsSectionTitle("Logging")
         SettingsSwitchRow("Debug Logging", debugEnabled) { enabled -> scope.launch { diagnostics.setDebugLoggingEnabled(enabled); debugEnabled = enabled } }
         ValueRow("Stored Records", records.size.toString())
         TextButton(onClick = { viewerOpen = true }) { Text("Log Viewer") }
         Text("Info, warning and error records are kept even when Debug Logging is off. Debug and trace records are stored only while Debug Logging is enabled.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        HorizontalDivider(); Text("Support Export", style = MaterialTheme.typography.titleMedium)
+        HorizontalDivider(); SettingsSectionTitle("Support Export")
         Button(onClick = { shareDiagnostics(context, diagnostics) }) { Text("Export Diagnostics") }
         Text("The export contains retained native and Core support records plus app, OS, device and Debug Logging metadata.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         HorizontalDivider(); TextButton(onClick = { confirmClear = true }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Clear Logs") }
