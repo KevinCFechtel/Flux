@@ -32,8 +32,8 @@ android {
         }
         getByName("migrationProbe").apply {
             java.directories.add("src/migrationProbe/java")
-            kotlin.directories.add(file("../Build/Products/Bindings/debug/kotlin"))
-            jniLibs.directories.add(file("../Build/Products/debug"))
+            kotlin.directories.add("../Build/Products/Bindings/debug/kotlin")
+            jniLibs.directories.add("../Build/Products/debug")
         }
     }
     buildFeatures { buildConfig = true; compose = true }
