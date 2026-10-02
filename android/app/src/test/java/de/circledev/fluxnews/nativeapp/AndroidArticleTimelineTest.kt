@@ -659,14 +659,19 @@ class AndroidArticleTimelineTest {
         )
         store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
 
-        store.ensureFeedIcons(FeedIconVariant.NORMAL)
-        store.ensureFeedIcons(FeedIconVariant.NORMAL)
-        store.ensureFeedIcons(FeedIconVariant.DARK)
+        store.ensureFeedIcon(10L, FeedIconVariant.NORMAL)
+        store.ensureFeedIcon(11L, FeedIconVariant.NORMAL)
+        store.ensureFeedIcon(10L, FeedIconVariant.NORMAL)
+        store.ensureFeedIcon(11L, FeedIconVariant.NORMAL)
+        store.ensureFeedIcon(10L, FeedIconVariant.DARK)
+        store.ensureFeedIcon(11L, FeedIconVariant.DARK)
 
         assertEquals(
             listOf(
-                listOf(10L, 11L) to FeedIconVariant.NORMAL,
-                listOf(10L, 11L) to FeedIconVariant.DARK,
+                listOf(10L) to FeedIconVariant.NORMAL,
+                listOf(11L) to FeedIconVariant.NORMAL,
+                listOf(10L) to FeedIconVariant.DARK,
+                listOf(11L) to FeedIconVariant.DARK,
             ),
             calls,
         )
@@ -695,9 +700,9 @@ class AndroidArticleTimelineTest {
         val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
 
         store.reset(selection)
-        store.ensureFeedIcons(FeedIconVariant.NORMAL)
+        store.ensureFeedIcon(10L, FeedIconVariant.NORMAL)
         store.reset(selection)
-        store.ensureFeedIcons(FeedIconVariant.NORMAL)
+        store.ensureFeedIcon(10L, FeedIconVariant.NORMAL)
 
         assertEquals(
             listOf(listOf(10L) to FeedIconVariant.NORMAL),
@@ -728,11 +733,11 @@ class AndroidArticleTimelineTest {
         val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
 
         store.reset(selection)
-        store.ensureFeedIcons(FeedIconVariant.NORMAL)
+        store.ensureFeedIcon(10L, FeedIconVariant.NORMAL)
 
         generation = 42L
         store.reset(selection)
-        store.ensureFeedIcons(FeedIconVariant.NORMAL)
+        store.ensureFeedIcon(10L, FeedIconVariant.NORMAL)
 
         assertEquals(
             listOf(
