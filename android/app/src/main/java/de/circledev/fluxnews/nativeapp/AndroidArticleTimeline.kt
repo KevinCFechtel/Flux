@@ -76,8 +76,8 @@ import uniffi.flux_uniffi.StarredFilter
 
 private const val ANDROID_ARTICLE_TIMELINE_PAGE_SIZE = 64
 private const val ANDROID_ARTICLE_TIMELINE_PREFETCH_DISTANCE = 8
-private const val ANDROID_FEED_ICON_BATCH_SIZE = 8
-private const val ANDROID_FEED_ICON_RETRY_DELAY_MILLIS = 1_500L
+private const val ANDROID_FEED_ICON_RETRY_DELAY_MILLIS = 1_000L
+private const val ANDROID_FEED_ICON_MAX_ATTEMPTS = 3
 
 internal enum class AndroidArticleReadFilter {
     Unread,
@@ -235,11 +235,9 @@ internal class AndroidArticleTimelineStore private constructor(
         feedIconLoader = { feedIds, variant ->
             coreRuntime.remote { core ->
                 feedIds.distinct().mapNotNull { feedId ->
-                    runCatching {
-                        core.feedIcon(feedId = feedId, variant = variant)
-                            ?.pngData
-                            ?.let { png -> feedId to png }
-                    }.getOrNull()
+                    core.feedIcon(feedId = feedId, variant = variant)
+                        ?.pngData
+                        ?.let { png -> feedId to png }
                 }.toMap()
             }
         },
@@ -272,6 +270,8 @@ internal class AndroidArticleTimelineStore private constructor(
     private val mutableState = MutableStateFlow(AndroidArticleTimelineState())
     private val scrolloverRetainedReadIds = mutableSetOf<Long>()
     private val feedIconCacheByVariant = mutableMapOf<FeedIconVariant, MutableMap<Long, ByteArray>>()
+    private val unavailableFeedIconsByVariant = mutableMapOf<FeedIconVariant, MutableSet<Long>>()
+    private val feedIconRequestsInFlight = mutableSetOf<Pair<Long, FeedIconVariant>>()
     private var requestGeneration = 0L
 
     val state = mutableState.asStateFlow()
@@ -282,7 +282,11 @@ internal class AndroidArticleTimelineStore private constructor(
         val sessionGeneration = activeSessionGeneration()
         val previous = mutableState.value
         val sameSession = previous.sessionGeneration == null || previous.sessionGeneration == sessionGeneration
-        if (!sameSession) feedIconCacheByVariant.clear()
+        if (!sameSession) {
+            feedIconCacheByVariant.clear()
+            unavailableFeedIconsByVariant.clear()
+            feedIconRequestsInFlight.clear()
+        }
         mutableState.value = AndroidArticleTimelineState(
             selection = selection,
             feedIconVariant = previous.feedIconVariant.takeIf { sameSession },
@@ -339,6 +343,9 @@ internal class AndroidArticleTimelineStore private constructor(
                 applyStarredStateChanged(selection, event.articleId, event.starred)
             }
             is CoreEvent.SyncDidComplete -> {
+                if (event.metadata.navigationChanged) {
+                    unavailableFeedIconsByVariant.clear()
+                }
                 if (event.metadata.dataChanged) reset(selection)
             }
             else -> Unit
@@ -512,38 +519,50 @@ internal class AndroidArticleTimelineStore private constructor(
         }
     }
 
-    suspend fun ensureFeedIcons(variant: FeedIconVariant): Boolean {
+    suspend fun ensureFeedIcon(feedId: Long, variant: FeedIconVariant) {
         val current = mutableState.value
-        val selection = current.selection ?: return false
-        val sessionGeneration = current.sessionGeneration ?: return false
-        if (activeSessionGeneration() != sessionGeneration) return false
+        val selection = current.selection ?: return
+        val sessionGeneration = current.sessionGeneration ?: return
+        if (activeSessionGeneration() != sessionGeneration) return
 
         val cache = feedIconCacheByVariant.getOrPut(variant) { mutableMapOf() }
-        val requiredFeedIds = current.articles.asSequence()
-            .map { it.feedId }
-            .distinct()
-            .toList()
+        if (feedId in cache) {
+            publishFeedIconCache(
+                generation = current.queryGeneration,
+                selection = selection,
+                sessionGeneration = sessionGeneration,
+                variant = variant,
+                cache = cache,
+            )
+            return
+        }
 
-        publishFeedIconCache(
-            generation = current.queryGeneration,
-            selection = selection,
-            sessionGeneration = sessionGeneration,
-            variant = variant,
-            cache = cache,
-        )
+        val unavailable = unavailableFeedIconsByVariant.getOrPut(variant) { mutableSetOf() }
+        if (feedId in unavailable) return
 
-        val missingFeedIds = requiredFeedIds.filterNot(cache::containsKey)
-        if (missingFeedIds.isEmpty()) return false
+        val requestKey = feedId to variant
+        if (!feedIconRequestsInFlight.add(requestKey)) return
 
-        for (batch in missingFeedIds.chunked(ANDROID_FEED_ICON_BATCH_SIZE)) {
-            val loaded = try {
-                feedIconLoader(batch, variant)
-            } catch (_: Exception) {
-                emptyMap()
-            }
-            if (!owns(current.queryGeneration, selection, sessionGeneration)) return false
-            if (loaded.isNotEmpty()) {
-                cache.putAll(loaded)
+        try {
+            repeat(ANDROID_FEED_ICON_MAX_ATTEMPTS) { attempt ->
+                val loaded = try {
+                    feedIconLoader(listOf(feedId), variant)
+                } catch (_: Exception) {
+                    if (attempt + 1 < ANDROID_FEED_ICON_MAX_ATTEMPTS) {
+                        delay(ANDROID_FEED_ICON_RETRY_DELAY_MILLIS * (attempt + 1))
+                    }
+                    return@repeat
+                }
+
+                if (!owns(current.queryGeneration, selection, sessionGeneration)) return
+
+                val png = loaded[feedId]
+                if (png == null) {
+                    unavailable += feedId
+                    return
+                }
+
+                cache[feedId] = png
                 publishFeedIconCache(
                     generation = current.queryGeneration,
                     selection = selection,
@@ -551,10 +570,11 @@ internal class AndroidArticleTimelineStore private constructor(
                     variant = variant,
                     cache = cache,
                 )
+                return
             }
+        } finally {
+            feedIconRequestsInFlight.remove(requestKey)
         }
-
-        return requiredFeedIds.any { it !in cache }
     }
 
     private fun publishFeedIconCache(
@@ -705,14 +725,6 @@ internal fun AndroidArticleTimeline(
         scrolloverTracker.updateSnapshot(state.articles.map { it.id })
     }
 
-    LaunchedEffect(state.articles.map { it.feedId }, feedIconVariant) {
-        val unresolved = store.ensureFeedIcons(feedIconVariant)
-        if (unresolved) {
-            delay(ANDROID_FEED_ICON_RETRY_DELAY_MILLIS)
-            store.ensureFeedIcons(feedIconVariant)
-        }
-    }
-
     LaunchedEffect(listState, scrolloverTracker, articlePreferences.markReadOnScrollover) {
         listState.interactionSource.interactions
             .filterIsInstance<DragInteraction>()
@@ -814,6 +826,8 @@ internal fun AndroidArticleTimeline(
                         preferences = articlePreferences,
                         publicationReferenceMillis = publicationReferenceMillis,
                         feedIconPng = state.feedIconPngByFeedId[article.feedId],
+                        feedIconVariant = feedIconVariant,
+                        onRequestFeedIcon = store::ensureFeedIcon,
                     )
                 }
 
@@ -867,6 +881,8 @@ private fun AndroidArticleTimelineRow(
     preferences: AndroidArticlePreferenceState,
     publicationReferenceMillis: Long,
     feedIconPng: ByteArray?,
+    feedIconVariant: FeedIconVariant,
+    onRequestFeedIcon: suspend (Long, FeedIconVariant) -> Unit,
 ) {
     BoxWithConstraints(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
@@ -877,7 +893,13 @@ private fun AndroidArticleTimelineRow(
             availableWidthDp = maxWidth.value.toInt(),
         )
         val metadata: @Composable () -> Unit = {
-            ArticleMetadataRow(article = article, hasAudio = hasAudio, feedIconPng = feedIconPng)
+            ArticleMetadataRow(
+                article = article,
+                hasAudio = hasAudio,
+                feedIconPng = feedIconPng,
+                feedIconVariant = feedIconVariant,
+                onRequestFeedIcon = onRequestFeedIcon,
+            )
         }
         val title: @Composable () -> Unit = {
             ArticleTitle(article)
@@ -1000,6 +1022,8 @@ private fun ArticleMetadataRow(
     article: ArticleSummary,
     hasAudio: Boolean,
     feedIconPng: ByteArray?,
+    feedIconVariant: FeedIconVariant,
+    onRequestFeedIcon: suspend (Long, FeedIconVariant) -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1007,8 +1031,11 @@ private fun ArticleMetadataRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         FeedIcon(
+            feedId = article.feedId,
             title = article.feedTitle,
             pngData = feedIconPng,
+            variant = feedIconVariant,
+            onRequest = onRequestFeedIcon,
         )
         Text(
             article.feedTitle,
@@ -1028,9 +1055,15 @@ private fun ArticleMetadataRow(
 
 @Composable
 private fun FeedIcon(
+    feedId: Long,
     title: String,
     pngData: ByteArray?,
+    variant: FeedIconVariant,
+    onRequest: suspend (Long, FeedIconVariant) -> Unit,
 ) {
+    LaunchedEffect(feedId, variant, pngData == null) {
+        if (pngData == null) onRequest(feedId, variant)
+    }
     val image = remember(pngData) {
         pngData?.let { bytes ->
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
