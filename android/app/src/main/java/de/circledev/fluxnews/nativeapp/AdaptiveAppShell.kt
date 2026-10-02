@@ -732,10 +732,10 @@ private fun ScopeNavigationCapsule(
         onClick = onOpenNavigation,
         enabled = opensNavigation,
         shape = CircleShape,
-        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.84f),
+        color = MaterialTheme.colorScheme.background.copy(alpha = 0.72f),
         contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp,
-        shadowElevation = 1.dp,
+        shadowElevation = 0.5.dp,
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
