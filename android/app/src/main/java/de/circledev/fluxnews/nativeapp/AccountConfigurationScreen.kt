@@ -43,6 +43,7 @@ internal fun AccountConfigurationScreen(
     onAccountRemoved: () -> Unit,
     onRestoreRequested: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    showTitle: Boolean = true,
 ) {
     val stored = remember(bootstrap) { bootstrap.credentialsForEditing() }
     var server by remember(stored) { mutableStateOf(stored?.serverUrl.orEmpty()) }
@@ -73,10 +74,12 @@ internal fun AccountConfigurationScreen(
             .padding(horizontal = 24.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text(
-            if (allowsRemoval) "Account" else "Set Up FluxNews",
-            style = MaterialTheme.typography.headlineMedium,
-        )
+        if (showTitle) {
+            Text(
+                if (allowsRemoval) "Account" else "Set Up FluxNews",
+                style = MaterialTheme.typography.headlineMedium,
+            )
+        }
 
         SectionTitle("Miniflux Account")
         OutlinedTextField(
