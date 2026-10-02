@@ -407,16 +407,16 @@ private fun StatusBarProtection(
             Modifier
                 .windowInsetsTopHeight(WindowInsets.statusBars)
                 .fillMaxWidth()
-                .background(surface.copy(alpha = 0.88f)),
+                .background(surface.copy(alpha = 0.82f)),
         )
         Box(
             Modifier
-                .height(16.dp)
+                .height(8.dp)
                 .fillMaxWidth()
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            surface.copy(alpha = 0.88f),
+                            surface.copy(alpha = 0.82f),
                             Color.Transparent,
                         ),
                     ),
@@ -666,14 +666,14 @@ private fun ScopeNavigationCapsule(
         shadowElevation = 1.dp,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_fluxnews_logo),
                 contentDescription = null,
-                modifier = Modifier.size(28.dp),
+                modifier = Modifier.size(26.dp),
                 tint = MaterialTheme.colorScheme.primary,
             )
             Column {
