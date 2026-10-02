@@ -1,40 +1,63 @@
 package de.circledev.fluxnews.nativeapp
 
+import android.text.format.DateUtils
+import android.text.format.DateUtils.FORMAT_ABBREV_RELATIVE
+import android.text.format.DateUtils.MINUTE_IN_MILLIS
+import android.text.format.DateFormat
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import coil3.compose.AsyncImage
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.util.Date
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.ArticleCursor
 import uniffi.flux_uniffi.ArticlePage
 import uniffi.flux_uniffi.ArticleQuery
 import uniffi.flux_uniffi.ArticleScope
 import uniffi.flux_uniffi.ArticleSort
 import uniffi.flux_uniffi.ArticleSummary
+import uniffi.flux_uniffi.MediaKind
 import uniffi.flux_uniffi.ReadFilter
 import uniffi.flux_uniffi.StarredFilter
 
@@ -50,6 +73,30 @@ internal enum class AndroidArticleSortOrder {
     OldestFirst,
     NewestFirst,
 }
+
+internal enum class AndroidArticleAccessory {
+    Unread,
+    Star,
+    Comments,
+    Audio,
+}
+
+internal object AndroidArticleRowPolicy {
+    fun accessories(article: ArticleSummary, hasAudio: Boolean): List<AndroidArticleAccessory> = buildList {
+        if (!article.isRead) add(AndroidArticleAccessory.Unread)
+        if (article.isStarred) add(AndroidArticleAccessory.Star)
+        if (article.commentsUrl.isNotBlank()) add(AndroidArticleAccessory.Comments)
+        if (hasAudio) add(AndroidArticleAccessory.Audio)
+    }
+
+    fun showsImage(mode: AndroidArticlePresentationMode, imageUrl: String?): Boolean =
+        mode != AndroidArticlePresentationMode.Compact && !imageUrl.isNullOrBlank()
+}
+
+internal fun parseArticlePublishedAtMillis(value: String): Long? =
+    runCatching { OffsetDateTime.parse(value).toInstant().toEpochMilli() }
+        .recoverCatching { Instant.parse(value).toEpochMilli() }
+        .getOrNull()
 
 /**
  * Transient Article List selection. Scope comes from the app shell while read/sort remain
@@ -88,6 +135,7 @@ internal data class AndroidArticleTimelineSelection(
 internal data class AndroidArticleTimelineState(
     val selection: AndroidArticleTimelineSelection? = null,
     val articles: List<ArticleSummary> = emptyList(),
+    val audioArticleIds: Set<Long> = emptySet(),
     val total: ULong? = null,
     val nextCursor: ArticleCursor? = null,
     val initialLoading: Boolean = false,
@@ -106,11 +154,26 @@ internal data class AndroidArticleTimelineState(
  */
 internal class AndroidArticleTimelineStore private constructor(
     private val pageLoader: suspend (ArticleQuery, Boolean) -> ArticlePage,
+    private val audioArticleIdsLoader: suspend (List<Long>) -> Set<Long>,
     private val activeSessionGeneration: () -> Long?,
 ) {
     internal constructor(coreRuntime: AndroidCoreRuntime) : this(
         pageLoader = { query, includeTotal ->
             coreRuntime.local { core -> core.articlePage(query, includeTotal) }
+        },
+        audioArticleIdsLoader = { articleIds ->
+            if (articleIds.isEmpty()) {
+                emptySet()
+            } else {
+                coreRuntime.local { core ->
+                    core.articleAudioActionStates(articleIds)
+                        .asSequence()
+                        .filter { projection ->
+                            projection.enclosures.any { enclosure -> enclosure.mediaKind == MediaKind.AUDIO }
+                        }
+                        .mapTo(mutableSetOf()) { projection -> projection.articleId }
+                }
+            }
         },
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
     )
@@ -118,8 +181,9 @@ internal class AndroidArticleTimelineStore private constructor(
     internal constructor(
         pageLoader: suspend (ArticleQuery, Boolean) -> ArticlePage,
         activeSessionGeneration: () -> Long?,
+        audioArticleIdsLoader: suspend (List<Long>) -> Set<Long> = { emptySet() },
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
-    ) : this(pageLoader, activeSessionGeneration)
+    ) : this(pageLoader, audioArticleIdsLoader, activeSessionGeneration)
 
     private val mutableState = MutableStateFlow(AndroidArticleTimelineState())
     private var requestGeneration = 0L
@@ -150,9 +214,13 @@ internal class AndroidArticleTimelineStore private constructor(
 
         if (!owns(generation, selection, sessionGeneration)) return
         val articles = page.articles.distinctBy { it.id }
+        val audioArticleIds = loadAudioArticleIds(articles.map { it.id })
+
+        if (!owns(generation, selection, sessionGeneration)) return
         mutableState.value = AndroidArticleTimelineState(
             selection = selection,
             articles = articles,
+            audioArticleIds = audioArticleIds,
             total = page.total,
             nextCursor = page.nextCursor.takeIf { articles.isNotEmpty() },
             initialLoading = false,
@@ -198,23 +266,35 @@ internal class AndroidArticleTimelineStore private constructor(
         }
 
         if (!owns(generation, selection, currentSessionGeneration)) return
+        val existingIDs = current.articles.asSequence().map { it.id }.toHashSet()
+        val appended = page.articles.filter { existingIDs.add(it.id) }
+        val appendedAudioArticleIds = loadAudioArticleIds(appended.map { it.id })
+
+        if (!owns(generation, selection, currentSessionGeneration)) return
         mutableState.update { state ->
             if (state.queryGeneration != generation || state.selection != selection) return@update state
 
-            val existingIDs = state.articles.asSequence().map { it.id }.toHashSet()
-            val appended = page.articles.filter { existingIDs.add(it.id) }
-            val madeProgress = appended.isNotEmpty()
-            val nextCursor = page.nextCursor
-                .takeIf { madeProgress && it != cursor }
+            val stateIDs = state.articles.asSequence().map { it.id }.toHashSet()
+            val currentAppend = appended.filter { stateIDs.add(it.id) }
+            val madeProgress = currentAppend.isNotEmpty()
+            val nextCursor = page.nextCursor.takeIf { madeProgress && it != cursor }
 
             state.copy(
-                articles = state.articles + appended,
+                articles = state.articles + currentAppend,
+                audioArticleIds = state.audioArticleIds + appendedAudioArticleIds,
                 nextCursor = nextCursor,
                 loadingNextPage = false,
                 errorMessage = null,
             )
         }
     }
+
+    private suspend fun loadAudioArticleIds(articleIds: List<Long>): Set<Long> =
+        try {
+            audioArticleIdsLoader(articleIds)
+        } catch (_: Exception) {
+            emptySet()
+        }
 
     private fun owns(
         generation: Long,
@@ -256,9 +336,13 @@ internal fun AndroidArticleTimeline(
     modifier: Modifier = Modifier,
 ) {
     val state by store.state.collectAsState()
+    val articlePreferences by LocalAndroidArticlePreferences.current.state.collectAsState(
+        initial = AndroidArticlePreferenceState(),
+    )
     val errorMessage = state.errorMessage
     val listState = rememberLazyListState()
     val actionScope = rememberCoroutineScope()
+    val publicationReferenceMillis = remember(state.queryGeneration) { System.currentTimeMillis() }
 
     LaunchedEffect(selection, sessionGeneration, accountKey) {
         if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
@@ -314,7 +398,12 @@ internal fun AndroidArticleTimeline(
                     items = state.articles,
                     key = { article -> article.id },
                 ) { article ->
-                    AndroidArticleTimelineFoundationRow(article)
+                    AndroidArticleTimelineRow(
+                        article = article,
+                        hasAudio = article.id in state.audioArticleIds,
+                        preferences = articlePreferences,
+                        publicationReferenceMillis = publicationReferenceMillis,
+                    )
                 }
 
                 if (state.loadingNextPage) {
@@ -342,23 +431,196 @@ internal fun AndroidArticleTimeline(
 }
 
 @Composable
-private fun AndroidArticleTimelineFoundationRow(article: ArticleSummary) {
+private fun AndroidArticleTimelineRow(
+    article: ArticleSummary,
+    hasAudio: Boolean,
+    preferences: AndroidArticlePreferenceState,
+    publicationReferenceMillis: Long,
+) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
             article.feedTitle,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.primary,
         )
-        Text(
-            article.title,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = if (article.isRead) FontWeight.Normal else FontWeight.SemiBold,
+
+        when (preferences.presentationMode) {
+            AndroidArticlePresentationMode.Compact -> {
+                ArticleTextContent(
+                    article = article,
+                    preferences = preferences,
+                    publicationReferenceMillis = publicationReferenceMillis,
+                )
+            }
+            AndroidArticlePresentationMode.Visual -> {
+                ArticleTextContent(
+                    article = article,
+                    preferences = preferences,
+                    publicationReferenceMillis = publicationReferenceMillis,
+                )
+                if (AndroidArticleRowPolicy.showsImage(preferences.presentationMode, article.imageUrl)) {
+                    ArticleImage(
+                        imageUrl = article.imageUrl!!,
+                        modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                    )
+                }
+            }
+            AndroidArticlePresentationMode.VisualCompact -> {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        ArticleTextContent(
+                            article = article,
+                            preferences = preferences,
+                            publicationReferenceMillis = publicationReferenceMillis,
+                        )
+                    }
+                    if (AndroidArticleRowPolicy.showsImage(preferences.presentationMode, article.imageUrl)) {
+                        ArticleImage(
+                            imageUrl = article.imageUrl!!,
+                            modifier = Modifier.width(112.dp).height(84.dp),
+                        )
+                    }
+                }
+            }
+        }
+
+        ArticleAccessories(
+            accessories = AndroidArticleRowPolicy.accessories(article, hasAudio),
         )
     }
     HorizontalDivider()
+}
+
+@Composable
+private fun ArticleTextContent(
+    article: ArticleSummary,
+    preferences: AndroidArticlePreferenceState,
+    publicationReferenceMillis: Long,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            article.title,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = if (article.isRead) FontWeight.Normal else FontWeight.SemiBold,
+            color = if (article.isRead) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
+        )
+        Text(
+            publicationLabel(
+                article = article,
+                relative = preferences.showRelativePublicationTime,
+                referenceMillis = publicationReferenceMillis,
+            ),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        val preview = article.preview.trim()
+        if (preview.isNotEmpty()) {
+            Text(
+                preview,
+                maxLines = preferences.previewLines.lineCount,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun publicationLabel(
+    article: ArticleSummary,
+    relative: Boolean,
+    referenceMillis: Long,
+): String {
+    val context = LocalContext.current
+    val publishedMillis = parseArticlePublishedAtMillis(article.publishedAt)
+    val publication = remember(article.publishedAt, relative, referenceMillis, context.resources.configuration.locales) {
+        if (publishedMillis == null) {
+            article.publishedAt
+        } else if (relative) {
+            DateUtils.getRelativeTimeSpanString(
+                publishedMillis,
+                referenceMillis,
+                MINUTE_IN_MILLIS,
+                FORMAT_ABBREV_RELATIVE,
+            ).toString()
+        } else {
+            val published = Date(publishedMillis)
+            val date = DateFormat.getMediumDateFormat(context).format(published)
+            val time = DateFormat.getTimeFormat(context).format(published)
+            "$date · $time"
+        }
+    }
+    return if (article.readingTimeMinutes > 0u) {
+        "$publication · ${article.readingTimeMinutes} min"
+    } else {
+        publication
+    }
+}
+
+@Composable
+private fun ArticleImage(imageUrl: String, modifier: Modifier = Modifier) {
+    AsyncImage(
+        model = imageUrl,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = modifier
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    )
+}
+
+@Composable
+private fun ArticleAccessories(accessories: List<AndroidArticleAccessory>) {
+    if (accessories.isEmpty()) return
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        accessories.forEach { accessory ->
+            when (accessory) {
+                AndroidArticleAccessory.Unread -> Box(
+                    Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary),
+                )
+                AndroidArticleAccessory.Star -> Icon(
+                    painter = painterResource(R.drawable.ic_star),
+                    contentDescription = "Starred",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                AndroidArticleAccessory.Comments -> Icon(
+                    painter = painterResource(R.drawable.ic_comment),
+                    contentDescription = "Comments",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                AndroidArticleAccessory.Audio -> Icon(
+                    painter = painterResource(R.drawable.ic_headphones),
+                    contentDescription = "Audio",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
 
 @Composable
