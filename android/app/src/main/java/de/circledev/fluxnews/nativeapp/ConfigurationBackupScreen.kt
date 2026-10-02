@@ -106,7 +106,7 @@ internal fun ConfigurationBackupScreen(
         if (allowExport) {
             Text("Configuration Backup", style = MaterialTheme.typography.headlineMedium)
             Text("Backups are password-encrypted and include the account, Core settings, feed preferences, and Android settings. Articles, downloads, and playback state are not included.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Export", style = MaterialTheme.typography.titleMedium)
+            SettingsSectionTitle("Export")
             OutlinedTextField(exportPassword, { exportPassword = it }, label = { Text("Backup password") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(exportConfirmation, { exportConfirmation = it }, label = { Text("Confirm backup password") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
             Button(enabled = !working && exportPassword.isNotEmpty() && exportPassword == exportConfirmation, onClick = {
@@ -120,7 +120,7 @@ internal fun ConfigurationBackupScreen(
                 }
             }) { Text("Export Configuration Backup") }
         }
-        Text("Restore", style = MaterialTheme.typography.titleMedium)
+        SettingsSectionTitle("Restore")
         Text("Use a backup created by FluxNews for Android. Restoring replaces this installation's configuration.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         OutlinedButton(enabled = !working, onClick = { openDocument.launch(arrayOf("application/octet-stream", "application/*", "*/*")) }) { Text(if (pendingImport == null) "Choose Backup to Restore" else "Choose Another Backup") }
         OutlinedTextField(importPassword, { importPassword = it }, label = { Text("Backup password") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
