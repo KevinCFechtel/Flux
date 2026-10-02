@@ -13,6 +13,7 @@ import uniffi.flux_uniffi.ArticlePage
 import uniffi.flux_uniffi.ArticleScope
 import uniffi.flux_uniffi.ArticleSort
 import uniffi.flux_uniffi.ArticleSummary
+import uniffi.flux_uniffi.CoreEvent
 import uniffi.flux_uniffi.ReadFilter
 import uniffi.flux_uniffi.StarredFilter
 
@@ -242,6 +243,170 @@ class AndroidArticleTimelineTest {
         assertEquals(listOf(1L), store.state.value.articles.map { it.id })
         assertNull(store.state.value.nextCursor)
         assertTrue(store.state.value.errorMessage == null)
+    }
+
+
+    @Test
+    fun readEventsPatchVisibleRowsAndIgnoreRetiredSessions() = runBlocking {
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1), article(2)),
+                    total = 2uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 7L },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
+        store.reset(selection)
+
+        store.handleCoreEvent(
+            AndroidCoreRuntimeEvent(
+                generation = 6L,
+                event = CoreEvent.ArticleReadStateChanged(articleId = 1L, read = true),
+            ),
+        )
+        assertEquals(listOf(1L, 2L), store.state.value.articles.map { it.id })
+
+        store.handleCoreEvent(
+            AndroidCoreRuntimeEvent(
+                generation = 7L,
+                event = CoreEvent.ArticleReadStateChanged(articleId = 1L, read = true),
+            ),
+        )
+
+        assertEquals(listOf(2L), store.state.value.articles.map { it.id })
+        assertEquals(1uL, store.state.value.total)
+    }
+
+    @Test
+    fun allFilterStatusEventsPatchRowsWithoutReloadingTimeline() = runBlocking {
+        var pageCalls = 0
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                pageCalls += 1
+                ArticlePage(
+                    articles = listOf(article(1)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 3L },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(
+            scope = AndroidNewsScope.All,
+            readFilter = AndroidArticleReadFilter.All,
+        )
+        store.reset(selection)
+
+        store.handleCoreEvent(
+            AndroidCoreRuntimeEvent(
+                generation = 3L,
+                event = CoreEvent.ArticleReadStateChanged(articleId = 1L, read = true),
+            ),
+        )
+        store.handleCoreEvent(
+            AndroidCoreRuntimeEvent(
+                generation = 3L,
+                event = CoreEvent.ArticleStarredStateChanged(articleId = 1L, starred = true),
+            ),
+        )
+
+        assertEquals(1, pageCalls)
+        assertTrue(store.state.value.articles.single().isRead)
+        assertTrue(store.state.value.articles.single().isStarred)
+        assertEquals(1uL, store.state.value.total)
+    }
+
+    @Test
+    fun filteredReadReentryTriggersOneSnapshotRefresh() = runBlocking {
+        var pageCalls = 0
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                pageCalls += 1
+                if (pageCalls == 1) {
+                    ArticlePage(
+                        articles = listOf(article(1)),
+                        total = 1uL,
+                        nextCursor = null,
+                    )
+                } else {
+                    ArticlePage(
+                        articles = listOf(article(1), article(2)),
+                        total = 2uL,
+                        nextCursor = null,
+                    )
+                }
+            },
+            activeSessionGeneration = { 4L },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
+        store.reset(selection)
+
+        store.handleCoreEvent(
+            AndroidCoreRuntimeEvent(
+                generation = 4L,
+                event = CoreEvent.ArticleReadStateChanged(articleId = 2L, read = false),
+            ),
+        )
+
+        assertEquals(2, pageCalls)
+        assertEquals(listOf(1L, 2L), store.state.value.articles.map { it.id })
+        assertEquals(2uL, store.state.value.total)
+    }
+
+    @Test
+    fun starredScopeRemovesVisibleRowsAndRefreshesForReentry() = runBlocking {
+        var pageCalls = 0
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                pageCalls += 1
+                if (pageCalls == 1) {
+                    ArticlePage(
+                        articles = listOf(article(1, starred = true)),
+                        total = 1uL,
+                        nextCursor = null,
+                    )
+                } else {
+                    ArticlePage(
+                        articles = listOf(article(2, starred = true)),
+                        total = 1uL,
+                        nextCursor = null,
+                    )
+                }
+            },
+            activeSessionGeneration = { 5L },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(
+            scope = AndroidNewsScope.Starred,
+            readFilter = AndroidArticleReadFilter.All,
+        )
+        store.reset(selection)
+
+        store.handleCoreEvent(
+            AndroidCoreRuntimeEvent(
+                generation = 5L,
+                event = CoreEvent.ArticleStarredStateChanged(articleId = 1L, starred = false),
+            ),
+        )
+        assertTrue(store.state.value.articles.isEmpty())
+        assertEquals(0uL, store.state.value.total)
+
+        store.handleCoreEvent(
+            AndroidCoreRuntimeEvent(
+                generation = 5L,
+                event = CoreEvent.ArticleStarredStateChanged(articleId = 2L, starred = true),
+            ),
+        )
+
+        assertEquals(2, pageCalls)
+        assertEquals(listOf(2L), store.state.value.articles.map { it.id })
+        assertEquals(1uL, store.state.value.total)
     }
 
 
