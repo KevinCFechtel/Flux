@@ -41,6 +41,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import coil3.compose.AsyncImage
 import java.time.Instant
@@ -548,8 +549,9 @@ private fun publicationLabel(
     referenceMillis: Long,
 ): String {
     val context = LocalContext.current
+    val locales = LocalConfiguration.current.locales
     val publishedMillis = parseArticlePublishedAtMillis(article.publishedAt)
-    val publication = remember(article.publishedAt, relative, referenceMillis, context.resources.configuration.locales) {
+    val publication = remember(article.publishedAt, relative, referenceMillis, locales) {
         if (publishedMillis == null) {
             article.publishedAt
         } else if (relative) {
