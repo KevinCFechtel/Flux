@@ -7,10 +7,26 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val developmentBundleSigningProperties = Properties().apply {
+    val propertiesFile = rootProject.file("developmentBundle-signing.properties")
+    if (propertiesFile.exists()) propertiesFile.inputStream().use(::load)
+}
+
 android {
     namespace = "de.circledev.fluxnews.nativeapp"
     compileSdk = 37
     defaultConfig { applicationId = "de.circle_dev.flux_news"; minSdk = 29; targetSdk = 36; versionCode = 1; versionName = "0.1.0"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+    signingConfigs {
+        if (developmentBundleSigningProperties.isNotEmpty()) {
+            create("developmentBundle") {
+                keyAlias = developmentBundleSigningProperties.getProperty("keyAlias")
+                keyPassword = developmentBundleSigningProperties.getProperty("keyPassword")
+                storeFile = developmentBundleSigningProperties.getProperty("storeFile")
+                    ?.let(rootProject::file)
+                storePassword = developmentBundleSigningProperties.getProperty("storePassword")
+            }
+        }
+    }
     buildTypes {
         debug { isMinifyEnabled = false }
         release { isMinifyEnabled = false; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") }
@@ -18,7 +34,13 @@ android {
     }
     flavorDimensions += "distribution"
     productFlavors {
-        create("development") { dimension = "distribution"; applicationIdSuffix = ".native.dev"; versionNameSuffix = "-native-dev" }
+        create("development") {
+            dimension = "distribution"
+            applicationIdSuffix = ".native.dev"
+            versionNameSuffix = "-native-dev"
+            resValue("string", "app_name", "FluxNews Native Dev")
+            signingConfigs.findByName("developmentBundle")?.let { signingConfig = it }
+        }
         create("production") { dimension = "distribution" }
     }
     sourceSets {
@@ -43,7 +65,7 @@ android {
 androidComponents {
     beforeVariants { variantBuilder ->
         val flavor = variantBuilder.productFlavors.singleOrNull { it.first == "distribution" }?.second
-        if ((flavor == "production" && variantBuilder.buildType == "debug") || (flavor == "development" && variantBuilder.buildType == "release")) variantBuilder.enable = false
+        if (flavor == "production" && variantBuilder.buildType == "debug") variantBuilder.enable = false
     }
 }
 
@@ -51,12 +73,26 @@ val uniffiBuildScript = file("../Build/build-uniffi.sh")
 fun registerUniffiPreparation(variantName: String, mode: String): TaskProvider<Exec> = tasks.register<Exec>("prepare${variantName.replaceFirstChar { it.uppercase() }}Uniffi") { inputs.file(uniffiBuildScript); inputs.file(file("../../core/crates/flux-uniffi/uniffi.toml")); outputs.dir(file("../Build/Products/$mode")); outputs.dir(file("../Build/Products/Bindings/$mode/kotlin")); commandLine(uniffiBuildScript.absolutePath, mode) }
 fun wireUniffiPreparation(variantName: String, preparation: TaskProvider<Exec>) { val capitalized = variantName.replaceFirstChar { it.uppercase() }; tasks.matching { it.name == "compile${capitalized}Kotlin" || it.name == "merge${capitalized}JniLibFolders" || it.name == "merge${capitalized}NativeLibs" }.configureEach { dependsOn(preparation) } }
 wireUniffiPreparation("developmentDebug", registerUniffiPreparation("developmentDebug", "debug"))
+wireUniffiPreparation("developmentRelease", registerUniffiPreparation("developmentRelease", "release"))
 wireUniffiPreparation("productionMigrationProbe", registerUniffiPreparation("productionMigrationProbe", "debug"))
 
 val migrationSigningProperties = Properties().apply { val file = rootProject.file("migration-signing.properties"); if (file.exists()) file.inputStream().use(::load) }
 android.buildTypes.named("migrationProbe") { if (migrationSigningProperties.isNotEmpty()) signingConfig = android.signingConfigs.maybeCreate("migrationProbe").apply { keyAlias = migrationSigningProperties.getProperty("keyAlias"); keyPassword = migrationSigningProperties.getProperty("keyPassword"); storeFile = migrationSigningProperties.getProperty("storeFile")?.let(::file); storePassword = migrationSigningProperties.getProperty("storePassword") } }
 val migrationVersionCode = providers.gradleProperty("fluxMigrationVersionCode").map(String::toInt).orElse(1)
 androidComponents.onVariants(androidComponents.selector().withBuildType("migrationProbe")) { variant -> variant.outputs.forEach { output -> output.versionCode.set(migrationVersionCode) } }
+
+val developmentPlayVersionCode = providers.gradleProperty("fluxDevelopmentPlayVersionCode")
+    .map(String::toInt)
+    .orElse(1)
+androidComponents.onVariants(
+    androidComponents.selector()
+        .withFlavor("distribution" to "development")
+        .withBuildType("release"),
+) { variant ->
+    variant.outputs.forEach { output ->
+        output.versionCode.set(developmentPlayVersionCode)
+    }
+}
 tasks.matching { it.name == "testProductionMigrationProbeUnitTest" }.configureEach { (this as org.gradle.api.tasks.testing.Test).exclude("**/DevelopmentIdentityTest.class") }
 wireUniffiPreparation("productionRelease", registerUniffiPreparation("productionRelease", "release"))
 
