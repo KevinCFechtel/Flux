@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -46,6 +47,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -643,6 +645,7 @@ internal fun AndroidArticleTimeline(
     selection: AndroidArticleTimelineSelection,
     sessionGeneration: Long?,
     accountKey: String,
+    topContentPadding: Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
     val state by store.state.collectAsState()
@@ -757,6 +760,7 @@ internal fun AndroidArticleTimeline(
             LazyColumn(
                 state = listState,
                 modifier = modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = topContentPadding),
             ) {
                 items(
                     items = state.articles,
