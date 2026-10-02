@@ -52,6 +52,7 @@ android/build/
 android/app/build/
 android/local.properties
 android/migration-signing.properties
+android/developmentBundle-signing.properties
 android/captures/
 android/**/*.apk
 android/**/*.aab
