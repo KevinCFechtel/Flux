@@ -390,6 +390,7 @@ private fun NewsRootContent(
                     bottom = padding.calculateBottomPadding(),
                 ),
         )
+    }
         StatusBarProtection(
             modifier = Modifier.align(Alignment.TopCenter),
         )
