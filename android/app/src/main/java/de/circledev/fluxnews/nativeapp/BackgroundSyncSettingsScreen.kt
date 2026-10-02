@@ -53,7 +53,6 @@ internal fun BackgroundSyncSettingsScreen(
             .padding(horizontal = 24.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text("Background Sync", style = MaterialTheme.typography.headlineMedium)
         Text(
             "Allow FluxNews to refresh your Miniflux account periodically while the app is not open.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
