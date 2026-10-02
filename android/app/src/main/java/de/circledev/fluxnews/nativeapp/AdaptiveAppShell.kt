@@ -345,6 +345,7 @@ private fun NewsRootContent(
     )
     Box(Modifier.fillMaxSize()) {
         Scaffold(
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
                 Box(Modifier.fillMaxWidth()) {
                     FloatingChromeTopGradient(
@@ -393,7 +394,6 @@ private fun NewsRootContent(
                 .padding(
                     start = padding.calculateStartPadding(layoutDirection),
                     end = padding.calculateEndPadding(layoutDirection),
-                    bottom = padding.calculateBottomPadding(),
                 ),
         )
     }
