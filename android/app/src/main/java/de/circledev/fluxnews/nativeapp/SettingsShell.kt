@@ -11,6 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.text.NumberFormat
 import kotlinx.coroutines.CoroutineScope
@@ -96,10 +97,33 @@ internal fun SettingsShell(
 private fun SettingsList(selected: SettingsDestination?, onSelected: (SettingsDestination) -> Unit, modifier: Modifier) {
     Column(modifier.verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
         SettingsDestination.entries.forEach { destination ->
-            Surface(color = if (selected == destination) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth().clickable { onSelected(destination) }) {
-                Row(Modifier.padding(horizontal = 24.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text(destination.title, style = MaterialTheme.typography.titleMedium); Text(destination.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    Text("›", style = MaterialTheme.typography.titleLarge)
+            val isSelected = selected == destination
+            Surface(
+                color = MaterialTheme.colorScheme.background,
+                modifier = Modifier.fillMaxWidth().clickable { onSelected(destination) },
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 24.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            destination.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                        )
+                        Text(
+                            destination.subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        "›",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
