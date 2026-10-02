@@ -1054,7 +1054,7 @@ private fun ArticleMetadataRow(
 }
 
 @Composable
-private fun FeedIcon(
+internal fun FeedIcon(
     feedId: Long,
     title: String,
     pngData: ByteArray?,
