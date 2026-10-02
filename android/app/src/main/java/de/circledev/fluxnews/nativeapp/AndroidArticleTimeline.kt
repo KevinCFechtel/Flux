@@ -281,10 +281,12 @@ internal class AndroidArticleTimelineStore private constructor(
         val generation = ++requestGeneration
         val sessionGeneration = activeSessionGeneration()
         val previous = mutableState.value
+        val sameSession = previous.sessionGeneration == null || previous.sessionGeneration == sessionGeneration
+        if (!sameSession) feedIconCacheByVariant.clear()
         mutableState.value = AndroidArticleTimelineState(
             selection = selection,
-            feedIconVariant = previous.feedIconVariant,
-            feedIconPngByFeedId = previous.feedIconPngByFeedId,
+            feedIconVariant = previous.feedIconVariant.takeIf { sameSession },
+            feedIconPngByFeedId = previous.feedIconPngByFeedId.takeIf { sameSession }.orEmpty(),
             initialLoading = true,
             queryGeneration = generation,
             sessionGeneration = sessionGeneration,
@@ -569,7 +571,7 @@ internal class AndroidArticleTimelineStore private constructor(
             }
             state.copy(
                 feedIconVariant = variant,
-                feedIconPngByFeedId = cache,
+                feedIconPngByFeedId = cache.toMap(),
             )
         }
     }
