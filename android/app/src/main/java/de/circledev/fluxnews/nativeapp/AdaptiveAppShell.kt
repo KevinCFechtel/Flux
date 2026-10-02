@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +25,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -53,6 +57,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -337,9 +342,10 @@ private fun NewsRootContent(
         containerColor = Color.Transparent,
         scrolledContainerColor = Color.Transparent,
     )
-    Scaffold(
-        topBar = {
-            if (scopeTitleLeading) {
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                if (scopeTitleLeading) {
                 TopAppBar(
                     title = {
                         ScopeNavigationCapsule(
@@ -382,6 +388,37 @@ private fun NewsRootContent(
                     start = padding.calculateStartPadding(layoutDirection),
                     end = padding.calculateEndPadding(layoutDirection),
                     bottom = padding.calculateBottomPadding(),
+                ),
+        )
+        StatusBarProtection(
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
+    }
+}
+
+@Composable
+private fun StatusBarProtection(
+    modifier: Modifier = Modifier,
+) {
+    val surface = MaterialTheme.colorScheme.surface
+    Column(modifier = modifier.fillMaxWidth()) {
+        Box(
+            Modifier
+                .windowInsetsTopHeight(WindowInsets.statusBars)
+                .fillMaxWidth()
+                .background(surface.copy(alpha = 0.88f)),
+        )
+        Box(
+            Modifier
+                .height(16.dp)
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            surface.copy(alpha = 0.88f),
+                            Color.Transparent,
+                        ),
+                    ),
                 ),
         )
     }
