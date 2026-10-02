@@ -1,6 +1,6 @@
 # Phase E — Native Android
 
-> **Status: PHASE E1 AND E2 COMPLETE — E3 IN PROGRESS (E3-A COMPLETE / E3-B NEXT) / PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
+> **Status: PHASE E1 AND E2 COMPLETE — E3 IN ACCEPTANCE (E3-A THROUGH E3-D COMPLETE / E3-E PHYSICAL-DEVICE, PERFORMANCE AND UI ACCEPTANCE IN PROGRESS) / PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
 >
@@ -695,8 +695,26 @@ Validation:
 - unit tests, lint, development assembly and production release assembly all passed
 - no Core/UniFFI API change was required
 
-E3-E is next: physical-device and performance acceptance for the productive Android Timeline.
+### E3-E — Physical-device, performance and UI acceptance
 
+Status: **IN PROGRESS**
+
+E3-E is the current Phase-E work. The productive Android shell and Timeline are now distributed through the separate Native Dev Google Play internal-test application so real-device acceptance can drive final presentation and performance refinement.
+
+Acceptance work includes:
+
+- physical arm64-v8a validation on representative supported Android hardware;
+- normal reading-speed and fast-scroll behavior with realistic article sets and real images;
+- Scrollover behavior and status mutations under real touch/fling interaction;
+- image loading, memory behavior and Compose scrolling performance;
+- adaptive phone/wide-layout presentation checks;
+- visual comparison of Compact, Visual and Visual Compact against the shared mobile product semantics and the current accepted iOS presentation where those semantics are shared;
+- small native Android UI/spacing/geometry corrections discovered during real-device use;
+- rerunning the deferred E1-B physical UniFFI runtime smoke before E3 closes.
+
+UI refinements found during this acceptance pass do **not** reopen the completed E3-B architecture. They are acceptance corrections as long as they preserve the existing Compose Timeline, Core/UniFFI ownership, stable IDs, bounded paging, batched projections and native image pipeline. A renderer or architecture replacement still requires measured evidence.
+
+E3-E remains open until the physical-device presentation, interaction and performance pass is accepted.
 
 ### Baseline renderer
 
