@@ -675,6 +675,75 @@ class AndroidArticleTimelineTest {
     }
 
     @Test
+    fun feedIconCacheSurvivesTimelineResetWithinSameSession() = runBlocking {
+        val calls = mutableListOf<Pair<List<Long>, FeedIconVariant>>()
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1).copy(feedId = 10)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 31L },
+            feedIconLoader = { ids, variant ->
+                calls += ids to variant
+                ids.associateWith { byteArrayOf(it.toByte()) }
+            },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
+
+        store.reset(selection)
+        store.ensureFeedIcons(FeedIconVariant.NORMAL)
+        store.reset(selection)
+        store.ensureFeedIcons(FeedIconVariant.NORMAL)
+
+        assertEquals(
+            listOf(listOf(10L) to FeedIconVariant.NORMAL),
+            calls,
+        )
+        assertEquals(setOf(10L), store.state.value.feedIconPngByFeedId.keys)
+    }
+
+    @Test
+    fun feedIconCacheIsClearedWhenCoreSessionChanges() = runBlocking {
+        var generation: Long? = 41L
+        val calls = mutableListOf<Pair<List<Long>, FeedIconVariant>>()
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1).copy(feedId = 10)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { generation },
+            feedIconLoader = { ids, variant ->
+                calls += ids to variant
+                ids.associateWith { byteArrayOf(it.toByte()) }
+            },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
+
+        store.reset(selection)
+        store.ensureFeedIcons(FeedIconVariant.NORMAL)
+
+        generation = 42L
+        store.reset(selection)
+        store.ensureFeedIcons(FeedIconVariant.NORMAL)
+
+        assertEquals(
+            listOf(
+                listOf(10L) to FeedIconVariant.NORMAL,
+                listOf(10L) to FeedIconVariant.NORMAL,
+            ),
+            calls,
+        )
+    }
+
+    @Test
     fun audioProjectionIsBatchedOncePerLoadedPage() = runBlocking {
         val cursor = ArticleCursor(
             publishedAt = "2026-10-01T10:00:00Z",
