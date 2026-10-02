@@ -7,6 +7,7 @@ import android.text.format.DateUtils.MINUTE_IN_MILLIS
 import android.text.format.DateFormat
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -47,7 +48,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
 import coil3.compose.AsyncImage
 import java.time.Instant
@@ -228,11 +228,13 @@ internal class AndroidArticleTimelineStore private constructor(
             coreRuntime.local { core -> core.countArticles(query) }
         },
         feedIconLoader = { feedIds, variant ->
-            coreRuntime.local { core ->
+            coreRuntime.remote { core ->
                 feedIds.distinct().mapNotNull { feedId ->
-                    core.feedIcon(feedId = feedId, variant = variant)
-                        ?.pngData
-                        ?.let { png -> feedId to png }
+                    runCatching {
+                        core.feedIcon(feedId = feedId, variant = variant)
+                            ?.pngData
+                            ?.let { png -> feedId to png }
+                    }.getOrNull()
                 }.toMap()
             }
         },
@@ -652,11 +654,7 @@ internal fun AndroidArticleTimeline(
     val scrolloverTracker = remember { AndroidScrolloverTracker() }
     val actionScope = rememberCoroutineScope()
     val publicationReferenceMillis = remember(state.queryGeneration) { System.currentTimeMillis() }
-    val feedIconVariant = if (LocalView.current.isInEditMode) {
-        FeedIconVariant.NORMAL
-    } else if ((LocalConfiguration.current.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-        android.content.res.Configuration.UI_MODE_NIGHT_YES
-    ) {
+    val feedIconVariant = if (isSystemInDarkTheme()) {
         FeedIconVariant.DARK
     } else {
         FeedIconVariant.NORMAL
