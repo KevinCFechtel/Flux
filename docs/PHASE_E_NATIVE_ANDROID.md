@@ -597,7 +597,7 @@ The larger `AndroidStoragePaths` ownership/lifecycle review remains deferred to 
 
 **Phase E2 is COMPLETE.**
 
-**E3 is IN PROGRESS. E3-A, E3-B AND E3-C ARE COMPLETE; E3-D IS NEXT.**
+**E3 is IN PROGRESS. E3-A, E3-B, E3-C AND E3-D ARE COMPLETE; E3-E IS NEXT.**
 
 ## 14. E3 — Native Article Timeline / Article Presentation
 
@@ -672,7 +672,30 @@ Validation:
 - canonical gate included unit tests, lint, development assembly and production release build
 - no Core/UniFFI API change was required
 
-E3-D is next: native Android/Compose Scrollover behavior and its interaction/lifecycle guards.
+### E3-D — Native Android Scrollover
+
+Status: **COMPLETE**
+
+Implemented on 2 October 2026:
+
+- Compose-native Scrollover detection based on LazyList geometry and user drag interaction state;
+- programmatic scrolling, layout changes and structural snapshot resets do not qualify articles;
+- reverse movement never emits Scrollover candidates;
+- fast forward scrolling may emit multiple candidates only when those rows were previously genuinely visible/qualified;
+- Scrollover read mutations use the existing Core bulk read API and are bound to the active Core-session generation;
+- optimistic read presentation is kept non-structural during active Scrollover so rows are not removed mid-scroll from the unread Timeline;
+- failed Core writes roll back the optimistic read state and re-arm the affected IDs;
+- Scrollover count handling avoids redundant Core count reloads for each emitted read event;
+- navigation refreshes are conflated across Core-event bursts to avoid per-event scroll-adjacent reload work;
+- focused JVM tests cover geometry, programmatic-scroll exclusion, direction reversal, layout/snapshot rebasing, session ownership, bulk mutation behavior and rollback.
+
+Validation:
+
+- Android pull-request CI gate #27 — PASS
+- unit tests, lint, development assembly and production release assembly all passed
+- no Core/UniFFI API change was required
+
+E3-E is next: physical-device and performance acceptance for the productive Android Timeline.
 
 
 ### Baseline renderer
