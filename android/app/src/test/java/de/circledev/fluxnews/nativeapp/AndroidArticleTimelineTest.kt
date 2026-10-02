@@ -14,6 +14,7 @@ import uniffi.flux_uniffi.ArticleScope
 import uniffi.flux_uniffi.ArticleSort
 import uniffi.flux_uniffi.ArticleSummary
 import uniffi.flux_uniffi.CoreEvent
+import uniffi.flux_uniffi.FeedIconVariant
 import uniffi.flux_uniffi.ReadFilter
 import uniffi.flux_uniffi.StarredFilter
 
@@ -570,6 +571,107 @@ class AndroidArticleTimelineTest {
                 null,
             ),
         )
+    }
+
+    @Test
+    fun rowLayoutVariantsMatchCurrentSharedPresentationSemantics() {
+        val image = "https://example.test/image.jpg"
+
+        assertEquals(
+            AndroidArticleRowLayoutVariant.Compact,
+            AndroidArticleRowPolicy.layoutVariant(
+                AndroidArticlePresentationMode.Compact,
+                image,
+                390,
+            ),
+        )
+        assertEquals(
+            AndroidArticleRowLayoutVariant.VisualPortrait,
+            AndroidArticleRowPolicy.layoutVariant(
+                AndroidArticlePresentationMode.Visual,
+                image,
+                390,
+            ),
+        )
+        assertEquals(
+            AndroidArticleRowLayoutVariant.VisualLandscape,
+            AndroidArticleRowPolicy.layoutVariant(
+                AndroidArticlePresentationMode.Visual,
+                image,
+                700,
+            ),
+        )
+        assertEquals(
+            AndroidArticleRowLayoutVariant.VisualCompactNarrow,
+            AndroidArticleRowPolicy.layoutVariant(
+                AndroidArticlePresentationMode.VisualCompact,
+                image,
+                390,
+            ),
+        )
+        assertEquals(
+            AndroidArticleRowLayoutVariant.VisualCompactWide,
+            AndroidArticleRowPolicy.layoutVariant(
+                AndroidArticlePresentationMode.VisualCompact,
+                image,
+                700,
+            ),
+        )
+        assertEquals(
+            AndroidArticleRowLayoutVariant.VisualTextOnly,
+            AndroidArticleRowPolicy.layoutVariant(
+                AndroidArticlePresentationMode.Visual,
+                null,
+                390,
+            ),
+        )
+        assertEquals(
+            AndroidArticleRowLayoutVariant.VisualCompactTextOnly,
+            AndroidArticleRowPolicy.layoutVariant(
+                AndroidArticlePresentationMode.VisualCompact,
+                null,
+                390,
+            ),
+        )
+    }
+
+    @Test
+    fun feedIconsLoadOncePerUniqueFeedAndThemeVariant() = runBlocking {
+        val calls = mutableListOf<Pair<List<Long>, FeedIconVariant>>()
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(
+                        article(1),
+                        article(2).copy(feedId = 10),
+                        article(3).copy(feedId = 11),
+                    ),
+                    total = 3uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 21L },
+            feedIconLoader = { ids, variant ->
+                calls += ids to variant
+                ids.associateWith { byteArrayOf(it.toByte()) }
+            },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+
+        store.ensureFeedIcons(FeedIconVariant.NORMAL)
+        store.ensureFeedIcons(FeedIconVariant.NORMAL)
+        store.ensureFeedIcons(FeedIconVariant.DARK)
+
+        assertEquals(
+            listOf(
+                listOf(10L, 11L) to FeedIconVariant.NORMAL,
+                listOf(10L, 11L) to FeedIconVariant.DARK,
+            ),
+            calls,
+        )
+        assertEquals(FeedIconVariant.DARK, store.state.value.feedIconVariant)
+        assertEquals(setOf(10L, 11L), store.state.value.feedIconPngByFeedId.keys)
     }
 
     @Test
