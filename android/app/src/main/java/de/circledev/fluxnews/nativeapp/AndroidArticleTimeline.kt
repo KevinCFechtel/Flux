@@ -4,12 +4,10 @@ import android.os.Build
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import android.view.View
-import android.graphics.BitmapFactory
 import android.text.format.DateUtils
 import android.text.format.DateUtils.FORMAT_ABBREV_RELATIVE
 import android.text.format.DateUtils.MINUTE_IN_MILLIS
 import android.text.format.DateFormat
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.DragInteraction
@@ -48,7 +46,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -62,6 +59,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.Date
@@ -929,6 +927,9 @@ internal fun AndroidArticleTimeline(
     val actionScope = rememberCoroutineScope()
     val view = LocalView.current
     val publicationReferenceMillis = remember(state.queryGeneration) { System.currentTimeMillis() }
+    val articleIds = remember(state.queryGeneration, state.articles.size) {
+        state.articles.map { it.id }
+    }
     val feedIconVariant = if (isSystemInDarkTheme()) {
         FeedIconVariant.DARK
     } else {
@@ -951,11 +952,15 @@ internal fun AndroidArticleTimeline(
         store.expireScrolloverUndo(undoState.revision)
     }
 
-    LaunchedEffect(state.articles.map { it.id }) {
-        scrolloverTracker.updateSnapshot(state.articles.map { it.id })
+    LaunchedEffect(articleIds) {
+        scrolloverTracker.updateSnapshot(articleIds)
     }
 
     LaunchedEffect(listState, scrolloverTracker, articlePreferences.markReadOnScrollover) {
+        if (!articlePreferences.markReadOnScrollover) {
+            scrolloverTracker.endUserScroll()
+            return@LaunchedEffect
+        }
         listState.interactionSource.interactions
             .filterIsInstance<DragInteraction>()
             .collect { interaction ->
@@ -979,6 +984,10 @@ internal fun AndroidArticleTimeline(
         articlePreferences.markReadOnScrollover,
         state.queryGeneration,
     ) {
+        if (!articlePreferences.markReadOnScrollover) {
+            scrolloverTracker.endUserScroll()
+            return@LaunchedEffect
+        }
         snapshotFlow {
             listState.scrolloverGeometrySample() to listState.isScrollInProgress
         }
@@ -1030,7 +1039,9 @@ internal fun AndroidArticleTimeline(
             }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+    val availableWidth = maxWidth
+    val availableWidthDp = availableWidth.value.toInt()
     when {
         state.initialLoading && state.articles.isEmpty() -> {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1060,6 +1071,13 @@ internal fun AndroidArticleTimeline(
                 items(
                     items = state.articles,
                     key = { article -> article.id },
+                    contentType = { article ->
+                        AndroidArticleRowPolicy.layoutVariant(
+                            mode = articlePreferences.presentationMode,
+                            imageUrl = article.imageUrl,
+                            availableWidthDp = availableWidthDp,
+                        )
+                    },
                 ) { article ->
                     AndroidArticleTimelineRow(
                         article = article,
@@ -1068,6 +1086,7 @@ internal fun AndroidArticleTimeline(
                         publicationReferenceMillis = publicationReferenceMillis,
                         feedIconPng = state.feedIconPngByFeedId[article.feedId],
                         feedIconVariant = feedIconVariant,
+                        availableWidth = availableWidth,
                         onRequestFeedIcon = store::ensureFeedIcon,
                     )
                 }
@@ -1162,15 +1181,16 @@ private fun AndroidArticleTimelineRow(
     publicationReferenceMillis: Long,
     feedIconPng: ByteArray?,
     feedIconVariant: FeedIconVariant,
+    availableWidth: Dp,
     onRequestFeedIcon: suspend (Long, FeedIconVariant) -> Unit,
 ) {
-    BoxWithConstraints(
+    Box(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
         val layoutVariant = AndroidArticleRowPolicy.layoutVariant(
             mode = preferences.presentationMode,
             imageUrl = article.imageUrl,
-            availableWidthDp = maxWidth.value.toInt(),
+            availableWidthDp = availableWidth.value.toInt(),
         )
         val metadata: @Composable () -> Unit = {
             ArticleMetadataRow(
@@ -1244,7 +1264,7 @@ private fun AndroidArticleTimelineRow(
             }
 
             AndroidArticleRowLayoutVariant.VisualCompactNarrow -> {
-                val imageWidth = maxWidth * 0.32f
+                val imageWidth = availableWidth * 0.32f
                 Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     metadata()
                     Row(
@@ -1269,7 +1289,7 @@ private fun AndroidArticleTimelineRow(
             }
 
             AndroidArticleRowLayoutVariant.VisualCompactWide -> {
-                val imageWidth = maxWidth * 0.32f
+                val imageWidth = availableWidth * 0.32f
                 Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     metadata()
                     Row(
@@ -1344,14 +1364,18 @@ internal fun FeedIcon(
     LaunchedEffect(feedId, variant, pngData == null) {
         if (pngData == null) onRequest(feedId, variant)
     }
-    val image = remember(pngData) {
+    val context = LocalContext.current
+    val imageRequest = remember(context, feedId, variant, pngData) {
         pngData?.let { bytes ->
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            ImageRequest.Builder(context)
+                .data(bytes)
+                .memoryCacheKey("feed-icon:$feedId:$variant")
+                .build()
         }
     }
-    if (image != null) {
-        Image(
-            bitmap = image,
+    if (imageRequest != null) {
+        AsyncImage(
+            model = imageRequest,
             contentDescription = null,
             modifier = Modifier.size(22.dp).clip(CircleShape),
         )
@@ -1429,8 +1453,10 @@ private fun publicationLabel(
 ): String {
     val context = LocalContext.current
     val locales = LocalConfiguration.current.locales
-    val publishedMillis = parseArticlePublishedAtMillis(article.publishedAt)
-    val publication = remember(article.publishedAt, relative, referenceMillis, locales) {
+    val publishedMillis = remember(article.publishedAt) {
+        parseArticlePublishedAtMillis(article.publishedAt)
+    }
+    val publication = remember(article.publishedAt, publishedMillis, relative, referenceMillis, locales) {
         if (publishedMillis == null) {
             article.publishedAt
         } else if (relative) {
