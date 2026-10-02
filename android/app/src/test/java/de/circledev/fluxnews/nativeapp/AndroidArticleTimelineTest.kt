@@ -448,6 +448,86 @@ class AndroidArticleTimelineTest {
 
 
     @Test
+    fun scrolloverWritesOnlyUnreadVisibleRowsAndKeepsUnreadSnapshotStable() = runBlocking {
+        val writes = mutableListOf<Pair<Long, List<Long>>>()
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1), article(2, read = true), article(3)),
+                    total = 3uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 11L },
+            scrolloverReadWriter = { generation, ids -> writes += generation to ids },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
+        store.reset(selection)
+
+        val failed = store.markReadFromScrollover(listOf(1L, 2L, 1L, 99L, 3L))
+
+        assertTrue(failed.isEmpty())
+        assertEquals(listOf(11L to listOf(1L, 3L)), writes)
+        assertEquals(listOf(1L, 2L, 3L), store.state.value.articles.map { it.id })
+        assertTrue(store.state.value.articles.first { it.id == 1L }.isRead)
+        assertTrue(store.state.value.articles.first { it.id == 3L }.isRead)
+        assertEquals(1uL, store.state.value.total)
+    }
+
+    @Test
+    fun scrolloverWriteFailureRollsBackOptimisticReadStateAndCount() = runBlocking {
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1), article(2)),
+                    total = 2uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 12L },
+            scrolloverReadWriter = { _, _ -> error("write failed") },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
+        store.reset(selection)
+
+        val failed = store.markReadFromScrollover(listOf(1L))
+
+        assertEquals(listOf(1L), failed)
+        assertFalse(store.state.value.articles.first { it.id == 1L }.isRead)
+        assertEquals(2uL, store.state.value.total)
+    }
+
+    @Test
+    fun scrolloverWriteIsRejectedWhenSessionGenerationChanged() = runBlocking {
+        var generation: Long? = 13L
+        var writes = 0
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { generation },
+            scrolloverReadWriter = { _, _ -> writes += 1 },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
+        store.reset(selection)
+        generation = 14L
+
+        val failed = store.markReadFromScrollover(listOf(1L))
+
+        assertTrue(failed.isEmpty())
+        assertEquals(0, writes)
+        assertFalse(store.state.value.articles.single().isRead)
+        assertEquals(1uL, store.state.value.total)
+    }
+
+    @Test
     fun rowPolicyPreservesSemanticAccessoryOrderAndImageModes() {
         val article = article(
             id = 7,
