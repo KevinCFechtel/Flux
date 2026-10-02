@@ -597,7 +597,7 @@ The larger `AndroidStoragePaths` ownership/lifecycle review remains deferred to 
 
 **Phase E2 is COMPLETE.**
 
-**E3 is IN PROGRESS. E3-A is COMPLETE; E3-B is NEXT.**
+**E3 is IN PROGRESS. E3-A AND E3-B ARE COMPLETE; E3-C IS NEXT.**
 
 ## 14. E3 — Native Article Timeline / Article Presentation
 
@@ -627,7 +627,30 @@ Validation:
 - canonical gate included unit tests, lint, development assembly and production release build
 - no Core/UniFFI API change was required
 
-E3-B is next: productive Compact / Visual / Visual Compact row presentation and the single Android-native article image pipeline.
+### E3-B — Productive article presentation and native image pipeline
+
+Status: **COMPLETE**
+
+Implemented on 2 October 2026:
+
+- productive Compact, Visual and Visual Compact Compose row presentations;
+- shared feed/source metadata, headline, publication-time, Core reading-time and preview semantics;
+- shared accessory ordering for unread, star, comments and audio;
+- page-level batched Core audio projection without per-row Core calls;
+- one app-wide Coil 3.6.3 image loader with bounded memory and disk caches;
+- Compact performs no article-image work, while visual modes request images at presentation constraints;
+- the Timeline's Core total is used for the Settings-controlled article-count presentation;
+- the Android build/toolchain baseline was modernized to current stable components where available: AGP 9.4.0, Gradle 9.7.1, Kotlin/Compose compiler 2.4.20, current stable AndroidX/Material/Coil libraries, NDK r29, and compile SDK 37 with stable runtime target SDK 36;
+- CI uses the current Android CLI to provision API 37 tooling while keeping production runtime targeting on stable Android 16/API 36;
+- focused tests cover presentation policy, image-mode behavior, accessory ordering, RFC3339 publication parsing and batched audio projection.
+
+Validation:
+
+- Android pull-request CI gate #20 — PASS
+- canonical gate included unit tests, lint, development assembly and production release build
+- SDK/NDK provisioning, Rust/UniFFI, Kotlin compilation, Compose lint and production release build all passed on the modernized toolchain
+
+E3-C is next. It should build on the productive rows without reopening the paging or image-pipeline architecture unless measurements show a concrete need.
 
 
 ### Baseline renderer
