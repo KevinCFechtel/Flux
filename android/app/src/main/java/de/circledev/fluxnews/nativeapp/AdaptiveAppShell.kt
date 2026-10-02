@@ -411,9 +411,9 @@ private fun FloatingChromeTopGradient(
     val background = MaterialTheme.colorScheme.background
     val totalHeight = statusBarHeight + 81.dp
     val opacities = if (isSystemInDarkTheme()) {
-        listOf(0.96f, 0.94f, 0.88f, 0.74f, 0.50f, 0.25f, 0f)
+        listOf(0.96f, 0.94f, 0.88f, 0.74f, 0.50f, 0.25f, 0.10f, 0f)
     } else {
-        listOf(0.96f, 0.91f, 0.84f, 0.68f, 0.44f, 0.20f, 0f)
+        listOf(0.96f, 0.91f, 0.84f, 0.68f, 0.44f, 0.20f, 0.08f, 0f)
     }
     val stopOffsets = listOf(
         0.dp,
@@ -422,6 +422,7 @@ private fun FloatingChromeTopGradient(
         statusBarHeight + 10.dp,
         statusBarHeight + 28.dp,
         statusBarHeight + 52.dp,
+        statusBarHeight + 68.dp,
         totalHeight,
     )
     val colorStops = stopOffsets
