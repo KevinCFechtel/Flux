@@ -1,6 +1,7 @@
 package de.circledev.fluxnews.nativeapp
 
 import android.os.Build
+import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.graphics.BitmapFactory
@@ -34,7 +35,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -55,6 +58,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import coil3.compose.AsyncImage
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -84,6 +89,10 @@ private const val ANDROID_ARTICLE_TIMELINE_PAGE_SIZE = 64
 private const val ANDROID_ARTICLE_TIMELINE_PREFETCH_DISTANCE = 8
 private const val ANDROID_FEED_ICON_RETRY_DELAY_MILLIS = 1_000L
 private const val ANDROID_FEED_ICON_MAX_ATTEMPTS = 3
+private const val ANDROID_SCROLL_OVER_UNDO_INACTIVITY_MILLIS = 4_000L
+private const val ANDROID_SCROLL_OVER_UNDO_MAX_LIFETIME_MILLIS = 15_000L
+private const val ANDROID_SCROLL_OVER_UNDO_QUALIFICATION_MILLIS = 1_000L
+private const val ANDROID_SCROLL_OVER_UNDO_MIN_READS = 3
 
 internal enum class AndroidArticleReadFilter {
     Unread,
@@ -105,6 +114,15 @@ internal enum class AndroidArticleAccessory {
 internal enum class AndroidTimelineHaptic {
     Confirmation,
     Selection,
+}
+
+internal data class AndroidScrolloverUndoState(
+    val articleIds: List<Long> = emptyList(),
+    val revision: Long = 0,
+    val expiresAtUptimeMillis: Long? = null,
+) {
+    val visible: Boolean
+        get() = articleIds.size >= ANDROID_SCROLL_OVER_UNDO_MIN_READS
 }
 
 internal enum class AndroidArticleRowLayoutVariant {
@@ -150,6 +168,32 @@ internal object AndroidArticleRowPolicy {
                 else -> AndroidArticleRowLayoutVariant.VisualCompactNarrow
             }
         }
+    }
+
+    if (undoState.visible) {
+        Snackbar(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 16.dp, vertical = 20.dp),
+            action = {
+                TextButton(
+                    onClick = {
+                        actionScope.launch {
+                            val restoredIds = store.undoScrollover()
+                            if (restoredIds.isNotEmpty()) scrolloverTracker.rearm(restoredIds)
+                        }
+                    },
+                ) {
+                    Text("Undo")
+                }
+            },
+        ) {
+            val count = undoState.articleIds.size
+            Text(
+                if (count == 1) "1 article marked as read" else "$count articles marked as read",
+            )
+        }
+    }
     }
 }
 
@@ -220,6 +264,7 @@ internal class AndroidArticleTimelineStore private constructor(
     private val selectionCountLoader: suspend (ArticleQuery) -> ULong,
     private val feedIconLoader: suspend (List<Long>, FeedIconVariant) -> Map<Long, ByteArray>,
     private val scrolloverReadWriter: suspend (Long, List<Long>) -> Unit,
+    private val scrolloverUnreadWriter: suspend (Long, List<Long>) -> Unit,
     private val activeSessionGeneration: () -> Long?,
 ) {
     internal constructor(coreRuntime: AndroidCoreRuntime) : this(
@@ -258,6 +303,12 @@ internal class AndroidArticleTimelineStore private constructor(
             }
             Unit
         },
+        scrolloverUnreadWriter = { generation, articleIds ->
+            coreRuntime.localForGeneration(generation) { core ->
+                core.setReadStateBulk(articleIds = articleIds, read = false)
+            }
+            Unit
+        },
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
     )
 
@@ -268,6 +319,7 @@ internal class AndroidArticleTimelineStore private constructor(
         selectionCountLoader: suspend (ArticleQuery) -> ULong = { 0uL },
         feedIconLoader: suspend (List<Long>, FeedIconVariant) -> Map<Long, ByteArray> = { _, _ -> emptyMap() },
         scrolloverReadWriter: suspend (Long, List<Long>) -> Unit = { _, _ -> },
+        scrolloverUnreadWriter: suspend (Long, List<Long>) -> Unit = { _, _ -> },
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
     ) : this(
         pageLoader,
@@ -275,13 +327,20 @@ internal class AndroidArticleTimelineStore private constructor(
         selectionCountLoader,
         feedIconLoader,
         scrolloverReadWriter,
+        scrolloverUnreadWriter,
         activeSessionGeneration,
     )
 
     private val mutableState = MutableStateFlow(AndroidArticleTimelineState())
     private val mutableFeedback = MutableSharedFlow<AndroidTimelineHaptic>(extraBufferCapacity = 8)
+    private val mutableUndoState = MutableStateFlow(AndroidScrolloverUndoState())
     private val scrolloverRetainedReadIds = mutableSetOf<Long>()
     private val scrolloverFeedbackSuppressedReadIds = mutableSetOf<Long>()
+    private val undoFeedbackSuppressedUnreadIds = mutableSetOf<Long>()
+    private val pendingSuccessfulScrolloverUndoIds = mutableListOf<Long>()
+    private val recentSuccessfulScrolloverReads = mutableListOf<Pair<Long, Long>>()
+    private var scrolloverUndoOpenedAtUptimeMillis: Long? = null
+    private var scrolloverUndoLastSuccessAtUptimeMillis: Long? = null
     private var scrolloverConfirmationPending = false
     private val feedIconCacheByVariant = mutableMapOf<FeedIconVariant, MutableMap<Long, ByteArray>>()
     private val unavailableFeedIconsByVariant = mutableMapOf<FeedIconVariant, MutableSet<Long>>()
@@ -290,10 +349,15 @@ internal class AndroidArticleTimelineStore private constructor(
 
     val state = mutableState.asStateFlow()
     val feedback = mutableFeedback.asSharedFlow()
+    val undoState = mutableUndoState.asStateFlow()
 
     suspend fun reset(selection: AndroidArticleTimelineSelection) {
         scrolloverRetainedReadIds.clear()
         scrolloverFeedbackSuppressedReadIds.clear()
+        undoFeedbackSuppressedUnreadIds.clear()
+        pendingSuccessfulScrolloverUndoIds.clear()
+        recentSuccessfulScrolloverReads.clear()
+        clearScrolloverUndoGroup()
         scrolloverConfirmationPending = false
         val generation = ++requestGeneration
         val sessionGeneration = activeSessionGeneration()
@@ -354,8 +418,11 @@ internal class AndroidArticleTimelineStore private constructor(
 
         when (val event = runtimeEvent.event) {
             is CoreEvent.ArticleReadStateChanged -> {
-                val suppressFeedback =
-                    event.read && scrolloverFeedbackSuppressedReadIds.remove(event.articleId)
+                val suppressFeedback = if (event.read) {
+                    scrolloverFeedbackSuppressedReadIds.remove(event.articleId)
+                } else {
+                    undoFeedbackSuppressedUnreadIds.remove(event.articleId)
+                }
                 if (!event.read) scrolloverFeedbackSuppressedReadIds.remove(event.articleId)
                 applyReadStateChanged(selection, event.articleId, event.read)
                 if (!suppressFeedback) mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
@@ -459,6 +526,7 @@ internal class AndroidArticleTimelineStore private constructor(
 
         return try {
             scrolloverReadWriter(sessionGeneration, accepted)
+            pendingSuccessfulScrolloverUndoIds += accepted
             scrolloverConfirmationPending = true
             emptyList()
         } catch (_: Exception) {
@@ -484,9 +552,142 @@ internal class AndroidArticleTimelineStore private constructor(
     }
 
     fun completeScrolloverInteraction() {
+        if (pendingSuccessfulScrolloverUndoIds.isNotEmpty()) {
+            recordSuccessfulScrolloverUndo(
+                pendingSuccessfulScrolloverUndoIds.distinct(),
+                SystemClock.elapsedRealtime(),
+            )
+            pendingSuccessfulScrolloverUndoIds.clear()
+        }
         if (!scrolloverConfirmationPending) return
         scrolloverConfirmationPending = false
         mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
+    }
+
+    fun expireScrolloverUndo(revision: Long) {
+        val current = mutableUndoState.value
+        if (current.revision != revision || !current.visible) return
+        val expiresAt = current.expiresAtUptimeMillis ?: return
+        if (SystemClock.elapsedRealtime() >= expiresAt) clearScrolloverUndoGroup()
+    }
+
+    suspend fun undoScrollover(): List<Long> {
+        val currentUndo = mutableUndoState.value
+        val ids = currentUndo.articleIds.distinct()
+        if (!currentUndo.visible || ids.isEmpty()) return emptyList()
+
+        val current = mutableState.value
+        val selection = current.selection ?: return emptyList()
+        val sessionGeneration = current.sessionGeneration ?: return emptyList()
+        if (activeSessionGeneration() != sessionGeneration) {
+            clearScrolloverUndoGroup()
+            return emptyList()
+        }
+
+        undoFeedbackSuppressedUnreadIds.addAll(ids)
+        return try {
+            scrolloverUnreadWriter(sessionGeneration, ids)
+            scrolloverRetainedReadIds.removeAll(ids.toSet())
+            scrolloverFeedbackSuppressedReadIds.removeAll(ids.toSet())
+            mutableState.update { state ->
+                if (
+                    state.selection != selection ||
+                    state.sessionGeneration != sessionGeneration
+                ) {
+                    return@update state
+                }
+                val idSet = ids.toHashSet()
+                val restoredCount = state.articles.count { it.id in idSet && it.isRead }
+                state.copy(
+                    articles = state.articles.map { article ->
+                        if (article.id in idSet) article.copy(isRead = false) else article
+                    },
+                    total = if (selection.readFilter == AndroidArticleReadFilter.Unread) {
+                        state.total?.plus(restoredCount.toULong())
+                    } else {
+                        state.total
+                    },
+                    errorMessage = null,
+                )
+            }
+            clearScrolloverUndoGroup()
+            mutableFeedback.tryEmit(AndroidTimelineHaptic.Selection)
+            ids
+        } catch (_: Exception) {
+            undoFeedbackSuppressedUnreadIds.removeAll(ids.toSet())
+            mutableState.update { state ->
+                if (state.selection == selection && state.sessionGeneration == sessionGeneration) {
+                    state.copy(errorMessage = "Articles could not be marked unread.")
+                } else {
+                    state
+                }
+            }
+            emptyList()
+        }
+    }
+
+    private fun recordSuccessfulScrolloverUndo(ids: List<Long>, now: Long) {
+        if (ids.isEmpty()) return
+
+        val currentUndo = mutableUndoState.value
+        val openedAt = scrolloverUndoOpenedAtUptimeMillis
+        val lastSuccessAt = scrolloverUndoLastSuccessAtUptimeMillis
+        val existingGroupExpired =
+            openedAt != null &&
+                lastSuccessAt != null &&
+                (now - lastSuccessAt >= ANDROID_SCROLL_OVER_UNDO_INACTIVITY_MILLIS ||
+                    now - openedAt >= ANDROID_SCROLL_OVER_UNDO_MAX_LIFETIME_MILLIS)
+
+        if (existingGroupExpired) clearScrolloverUndoGroup()
+
+        if (mutableUndoState.value.visible) {
+            appendScrolloverUndo(ids, now)
+            return
+        }
+
+        recentSuccessfulScrolloverReads += ids.map { it to now }
+        recentSuccessfulScrolloverReads.removeAll {
+            now - it.second > ANDROID_SCROLL_OVER_UNDO_QUALIFICATION_MILLIS
+        }
+        val burstIds = recentSuccessfulScrolloverReads.map { it.first }.distinct()
+        if (burstIds.size < ANDROID_SCROLL_OVER_UNDO_MIN_READS) return
+
+        recentSuccessfulScrolloverReads.clear()
+        scrolloverUndoOpenedAtUptimeMillis = now
+        appendScrolloverUndo(burstIds, now)
+    }
+
+    private fun appendScrolloverUndo(ids: List<Long>, now: Long) {
+        val existing = mutableUndoState.value.articleIds.toMutableList()
+        val seen = existing.toMutableSet()
+        ids.forEach { if (seen.add(it)) existing += it }
+        if (existing.isEmpty()) return
+
+        if (scrolloverUndoOpenedAtUptimeMillis == null) {
+            scrolloverUndoOpenedAtUptimeMillis = now
+        }
+        scrolloverUndoLastSuccessAtUptimeMillis = now
+        val openedAt = scrolloverUndoOpenedAtUptimeMillis ?: now
+        val expiresAt = minOf(
+            now + ANDROID_SCROLL_OVER_UNDO_INACTIVITY_MILLIS,
+            openedAt + ANDROID_SCROLL_OVER_UNDO_MAX_LIFETIME_MILLIS,
+        )
+        val previous = mutableUndoState.value
+        mutableUndoState.value = AndroidScrolloverUndoState(
+            articleIds = existing,
+            revision = previous.revision + 1,
+            expiresAtUptimeMillis = expiresAt,
+        )
+    }
+
+    private fun clearScrolloverUndoGroup() {
+        val previous = mutableUndoState.value
+        if (previous.articleIds.isNotEmpty() || previous.expiresAtUptimeMillis != null) {
+            mutableUndoState.value = AndroidScrolloverUndoState(revision = previous.revision + 1)
+        }
+        scrolloverUndoOpenedAtUptimeMillis = null
+        scrolloverUndoLastSuccessAtUptimeMillis = null
+        recentSuccessfulScrolloverReads.clear()
     }
 
     private suspend fun applyStarredStateChanged(
@@ -738,6 +939,7 @@ internal fun AndroidArticleTimeline(
     modifier: Modifier = Modifier,
 ) {
     val state by store.state.collectAsState()
+    val undoState by store.undoState.collectAsState()
     val articlePreferences by LocalAndroidArticlePreferences.current.state.collectAsState(
         initial = AndroidArticlePreferenceState(),
     )
@@ -760,6 +962,13 @@ internal fun AndroidArticleTimeline(
                 AndroidTimelineHaptic.Selection -> view.performFluxSelectionHaptic()
             }
         }
+    }
+
+    LaunchedEffect(undoState.revision, undoState.expiresAtUptimeMillis) {
+        val expiresAt = undoState.expiresAtUptimeMillis ?: return@LaunchedEffect
+        val delayMillis = (expiresAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+        delay(delayMillis)
+        store.expireScrolloverUndo(undoState.revision)
     }
 
     LaunchedEffect(state.articles.map { it.id }) {
@@ -810,6 +1019,13 @@ internal fun AndroidArticleTimeline(
     }
 
     LaunchedEffect(selection, sessionGeneration, accountKey) {
+        val current = store.state.value
+        val sameContext =
+            current.selection == selection &&
+                current.sessionGeneration == sessionGeneration &&
+                current.selection != null
+        if (sameContext) return@LaunchedEffect
+
         if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
             listState.scrollToItem(0)
         }
@@ -834,9 +1050,10 @@ internal fun AndroidArticleTimeline(
             }
     }
 
+    Box(modifier = modifier.fillMaxSize()) {
     when {
         state.initialLoading && state.articles.isEmpty() -> {
-            Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         }
@@ -845,19 +1062,19 @@ internal fun AndroidArticleTimeline(
                 message = errorMessage,
                 actionLabel = "Retry",
                 onAction = { actionScope.launch { store.reset(selection) } },
-                modifier = modifier,
+                modifier = Modifier.fillMaxSize(),
             )
         }
         state.empty -> {
             TimelineMessage(
                 message = "No articles in this view.",
-                modifier = modifier,
+                modifier = Modifier.fillMaxSize(),
             )
         }
         else -> {
             LazyColumn(
                 state = listState,
-                modifier = modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(top = topContentPadding),
             ) {
                 items(
@@ -1129,7 +1346,7 @@ internal fun FeedIcon(
     if (image != null) {
         Image(
             bitmap = image,
-            contentDescription = "Feed icon",
+            contentDescription = null,
             modifier = Modifier.size(22.dp).clip(CircleShape),
         )
     } else {
@@ -1285,6 +1502,7 @@ private fun ArticleAccessories(
                 Box(
                     Modifier
                         .size(8.dp)
+                        .semantics { contentDescription = "Unread" }
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary),
                 )
