@@ -65,7 +65,7 @@ internal fun SettingsShell(
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text(if (compactDetail) selected!!.title else "Settings") },
+                    title = { Text(selected?.title ?: "Settings") },
                     navigationIcon = {
                         IconButton(onClick = { if (compactDetail) selected = null else onBack() }) {
                             Icon(
@@ -133,7 +133,14 @@ private fun SettingsList(selected: SettingsDestination?, onSelected: (SettingsDe
 @Composable
 private fun SettingsDetail(destination: SettingsDestination, bootstrap: AndroidAccountBootstrap, navigationPreferences: AndroidNavigationPreferences, navigationState: AndroidNavigationPreferenceState, categories: List<AndroidNavigationCategoryRef>, feeds: List<AndroidNavigationFeedRef>, articlePreferences: AndroidArticlePreferences, articleState: AndroidArticlePreferenceState, actionBarPreferences: AndroidActionBarPreferences, actionBarState: AndroidActionBarPreferenceState, coreArticleSettings: AndroidCoreArticleSettings, mediaSettings: AndroidMediaSettings, downloadedData: AndroidDownloadedData, backgroundSync: AndroidBackgroundSync, configurationBackup: AndroidConfigurationBackupController, diagnostics: AndroidAppDiagnostics, onAccountChanged: (AndroidAccountBootstrap.State) -> Unit, modifier: Modifier) {
     when (destination) {
-        SettingsDestination.Account -> AccountConfigurationScreen(bootstrap, true, onAccountChanged, { onAccountChanged(AndroidAccountBootstrap.State.AccountRequired) }, modifier = modifier)
+        SettingsDestination.Account -> AccountConfigurationScreen(
+            bootstrap,
+            true,
+            onAccountChanged,
+            { onAccountChanged(AndroidAccountBootstrap.State.AccountRequired) },
+            modifier = modifier,
+            showTitle = false,
+        )
         SettingsDestination.Articles -> ArticleSettingsScreen(articlePreferences, articleState, coreArticleSettings, modifier)
         SettingsDestination.ActionBar -> ActionBarSettingsScreen(actionBarPreferences, actionBarState, modifier)
         SettingsDestination.Navigation -> NavigationSettingsScreen(navigationPreferences, navigationState, categories, feeds, modifier)
@@ -150,7 +157,6 @@ private fun SettingsDetail(destination: SettingsDestination, bootstrap: AndroidA
 private fun ArticleSettingsScreen(preferences: AndroidArticlePreferences, state: AndroidArticlePreferenceState, core: AndroidCoreArticleSettings, modifier: Modifier) {
     val scope = rememberCoroutineScope()
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Articles", style = MaterialTheme.typography.headlineMedium)
         Text("Choose how articles are presented and how reading interactions behave.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         SettingsPickerRow(
             title = "Open article",
@@ -208,7 +214,7 @@ private fun SwipeSlotSettings(
 private fun ActionBarSettingsScreen(preferences: AndroidActionBarPreferences, state: AndroidActionBarPreferenceState, modifier: Modifier) {
     val scope = rememberCoroutineScope(); val available = AndroidActionBarAction.entries.filterNot(state.actions::contains)
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Action Bar", style = MaterialTheme.typography.headlineMedium); Text("Choose the article-list actions and their display priority.", color = MaterialTheme.colorScheme.onSurfaceVariant); SettingsSectionTitle("Article List Actions"); ActionBarFixedRow("Sync", "Always shown")
+Text("Choose the article-list actions and their display priority.", color = MaterialTheme.colorScheme.onSurfaceVariant); SettingsSectionTitle("Article List Actions"); ActionBarFixedRow("Sync", "Always shown")
         state.actions.forEachIndexed { index, action -> Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) { Text(action.displayName, Modifier.weight(1f)); TextButton(enabled = index > 0, onClick = { scope.launch { preferences.moveUp(action, state.actions) } }) { Text("↑") }; TextButton(enabled = index < state.actions.lastIndex, onClick = { scope.launch { preferences.moveDown(action, state.actions) } }) { Text("↓") }; TextButton(onClick = { scope.launch { preferences.remove(action, state.actions) } }) { Text("Remove") } } }
         ActionBarFixedRow("More", "Always available"); Text("Sync stays fixed at the beginning and More stays available as the fallback. The order of selected actions sets their display priority.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (available.isNotEmpty()) { HorizontalDivider(); SettingsSectionTitle("Available Actions"); available.forEach { action -> TextButton(onClick = { scope.launch { preferences.add(action, state.actions) } }, modifier = Modifier.fillMaxWidth()) { Text("+ ${action.displayName}", Modifier.fillMaxWidth()) } } }
@@ -221,7 +227,6 @@ private fun ActionBarSettingsScreen(preferences: AndroidActionBarPreferences, st
 private fun NavigationSettingsScreen(preferences: AndroidNavigationPreferences, state: AndroidNavigationPreferenceState, categories: List<AndroidNavigationCategoryRef>, feeds: List<AndroidNavigationFeedRef>, modifier: Modifier) {
     val scope = rememberCoroutineScope()
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Navigation", style = MaterialTheme.typography.headlineMedium)
         Text(
             "Choose which news scope FluxNews opens with and whether empty feeds are shown.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -285,7 +290,7 @@ private fun MediaSettingsScreen(settings: AndroidMediaSettings, modifier: Modifi
     var state by remember { mutableStateOf<AndroidMediaSettings.State?>(null) }; var saving by remember { mutableStateOf(false) }; var error by remember { mutableStateOf<String?>(null) }; val scope = rememberCoroutineScope()
     suspend fun reload() { settings.load().fold({ state = it; error = null }, { error = "Media settings could not be loaded. Please try again." }) }; LaunchedEffect(settings) { reload() }
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Media", style = MaterialTheme.typography.headlineMedium); val current = state
+val current = state
         if (current == null) CircularProgressIndicator() else {
             SettingsSectionTitle("Downloads")
             SettingsPickerRow(
@@ -364,7 +369,6 @@ private fun DownloadedDataSettingsScreen(downloadedData: AndroidDownloadedData, 
     suspend fun reload() { loading = true; downloadedData.summary().fold({ summary = it; error = null }, { error = "Downloaded data could not be loaded. Please try again." }); loading = false }; LaunchedEffect(downloadedData) { reload() }
     if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text("Delete All Downloads?") }, text = { Text("This removes all downloaded media files. Listening List membership and playback progress are kept.") }, confirmButton = { TextButton(onClick = { confirmDelete = false; scope.launch { deleting = true; downloadedData.requestDeleteAll().fold({ reload() }, { error = "Downloads could not be deleted. Please try again." }); deleting = false } }) { Text("Delete") } }, dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } })
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("Downloaded Data", style = MaterialTheme.typography.headlineMedium)
         if (loading && summary == null) CircularProgressIndicator() else summary?.let { current -> DownloadedDataValueRow("Downloaded Files", NumberFormat.getIntegerInstance().format(current.fileCount.toLong())); DownloadedDataValueRow("Storage Used", formatBytes(current.totalSizeBytes)); Text("This includes local audio files that are still waiting for physical deletion. Listening List items and playback progress are stored separately.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant); HorizontalDivider(); Button(enabled = !deleting && current.fileCount > 0uL, onClick = { confirmDelete = true }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)) { Text("Delete All Downloads") } }
         if (deleting) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) { CircularProgressIndicator(Modifier.size(20.dp)); Text("Deleting Downloads…") }; error?.let { Text(it, color = MaterialTheme.colorScheme.error) }; TextButton(enabled = !loading && !deleting, onClick = { scope.launch { reload() } }) { Text("Refresh") }
     }
