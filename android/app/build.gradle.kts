@@ -58,7 +58,7 @@ android {
             jniLibs.directories.add("../Build/Products/debug")
         }
     }
-    buildFeatures { buildConfig = true; compose = true }
+    buildFeatures { buildConfig = true; compose = true; resValues = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
 }
 
