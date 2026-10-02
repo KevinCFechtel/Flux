@@ -48,7 +48,7 @@ class AndroidCoreRuntime(
     private var nextGeneration = 0L
     private val mutableSessionGeneration = MutableStateFlow<Long?>(null)
 
-    val events: SharedFlow<AndroidCoreRuntimeEvent> = _events.asSharedFlow()
+    internal val events: SharedFlow<AndroidCoreRuntimeEvent> = _events.asSharedFlow()
     val sessionGeneration: StateFlow<Long?> = mutableSessionGeneration.asStateFlow()
 
     fun hasActiveSession(): Boolean = sessionLock.readLock().run {
