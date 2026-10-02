@@ -284,6 +284,12 @@ private fun NewsRootContent(
     persistentNavigation: Boolean,
     onOpenNavigation: () -> Unit,
 ) {
+    val timelineState by timelineStore.state.collectAsState()
+    val articlePreferences by LocalAndroidArticlePreferences.current.state.collectAsState(
+        initial = AndroidArticlePreferenceState(),
+    )
+    val timelineCount = timelineState.total.takeIf { timelineState.selection?.scope == scope }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -296,10 +302,10 @@ private fun NewsRootContent(
                 },
                 title = {
                     if (persistentNavigation) {
-                        ScopeTitle(scope, navigation)
+                        ScopeTitle(scope, articlePreferences.showArticleCount, timelineCount)
                     } else {
                         TextButton(onClick = onOpenNavigation) {
-                            ScopeTitle(scope, navigation)
+                            ScopeTitle(scope, articlePreferences.showArticleCount, timelineCount)
                             Icon(
                                 painterResource(R.drawable.ic_expand_more),
                                 "Choose news scope",
@@ -544,18 +550,16 @@ private fun DrawerIcon(drawable: Int, description: String) {
 }
 
 @Composable
-private fun ScopeTitle(scope: AndroidNewsScope, navigation: NewsNavigationModel) {
-    val count = when (scope) {
-        AndroidNewsScope.All -> navigation.projection?.unreadTotal
-        AndroidNewsScope.Starred -> navigation.projection?.starredTotal
-        is AndroidNewsScope.Category -> navigation.projection?.categoryCounts?.firstOrNull { it.id == scope.id }?.count
-        is AndroidNewsScope.Feed -> navigation.projection?.feedCounts?.firstOrNull { it.id == scope.id }?.count
-    }
+private fun ScopeTitle(
+    scope: AndroidNewsScope,
+    showArticleCount: Boolean,
+    timelineCount: ULong?,
+) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(scopeTitle(scope), style = MaterialTheme.typography.titleLarge)
-        if (count != null && count > 0u) {
+        if (showArticleCount && timelineCount != null) {
             Text(
-                if (count > 999u) "999+" else count.toString(),
+                if (timelineCount > 999u) "999+" else timelineCount.toString(),
                 modifier = Modifier.padding(start = 8.dp),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

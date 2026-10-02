@@ -1,17 +1,15 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.TaskProvider
 import java.util.Properties
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "de.circledev.fluxnews.nativeapp"
-    compileSdk = 36
+    compileSdk = 37
     defaultConfig { applicationId = "de.circle_dev.flux_news"; minSdk = 29; targetSdk = 36; versionCode = 1; versionName = "0.1.0"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
     buildTypes {
         debug { isMinifyEnabled = false }
@@ -24,9 +22,19 @@ android {
         create("production") { dimension = "distribution" }
     }
     sourceSets {
-        getByName("debug").java.srcDir("../Build/Products/Bindings/debug/kotlin"); getByName("debug").jniLibs.srcDir("../Build/Products/debug")
-        getByName("release").java.srcDir("../Build/Products/Bindings/release/kotlin"); getByName("release").jniLibs.srcDir("../Build/Products/release")
-        getByName("migrationProbe").java.srcDir("src/migrationProbe/java"); getByName("migrationProbe").java.srcDir("../Build/Products/Bindings/debug/kotlin"); getByName("migrationProbe").jniLibs.srcDir("../Build/Products/debug")
+        getByName("debug").apply {
+            kotlin.directories.add("../Build/Products/Bindings/debug/kotlin")
+            jniLibs.directories.add("../Build/Products/debug")
+        }
+        getByName("release").apply {
+            kotlin.directories.add("../Build/Products/Bindings/release/kotlin")
+            jniLibs.directories.add("../Build/Products/release")
+        }
+        getByName("migrationProbe").apply {
+            java.directories.add("src/migrationProbe/java")
+            kotlin.directories.add("../Build/Products/Bindings/debug/kotlin")
+            jniLibs.directories.add("../Build/Products/debug")
+        }
     }
     buildFeatures { buildConfig = true; compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -52,23 +60,24 @@ androidComponents.onVariants(androidComponents.selector().withBuildType("migrati
 tasks.matching { it.name == "testProductionMigrationProbeUnitTest" }.configureEach { (this as org.gradle.api.tasks.testing.Test).exclude("**/DevelopmentIdentityTest.class") }
 wireUniffiPreparation("productionRelease", registerUniffiPreparation("productionRelease", "release"))
 
-kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
 
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2025.02.00"))
-    implementation("androidx.core:core-ktx:1.15.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-    implementation("androidx.activity:activity-compose:1.10.1")
-    implementation("androidx.navigation:navigation-compose:2.8.9")
+    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    implementation("androidx.core:core-ktx:1.19.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.navigation:navigation-compose:2.10.2")
     implementation("androidx.datastore:datastore-preferences:1.2.1")
-    implementation("androidx.work:work-runtime-ktx:2.10.1")
+    implementation("androidx.work:work-runtime-ktx:2.12.0")
     implementation("androidx.compose.material3:material3")
-    implementation("com.google.android.material:material:1.12.0")
+    implementation("io.coil-kt.coil3:coil-compose:3.6.3")
+    implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
+    implementation("com.google.android.material:material:1.14.0")
     implementation("net.java.dev.jna:jna:5.19.1@aar")
     implementation("rustls:rustls-platform-verifier:${rootProject.extra["rustlsPlatformVerifierVersion"]}@aar")
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20240303")
-    androidTestImplementation("androidx.test.ext:junit:1.2.1")
-    androidTestImplementation("androidx.test:core-ktx:1.6.1")
-    androidTestImplementation("androidx.test:runner:1.6.2")
+    testImplementation("org.json:json:20260814")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:core-ktx:1.7.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
 }
