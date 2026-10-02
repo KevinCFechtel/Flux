@@ -585,7 +585,6 @@ private fun NewsNavigationContent(
                         selected = selectedScope == categoryScope,
                         containsSelectedFeed = selectedScope is AndroidNewsScope.Feed && selectedScope.categoryId == category.id,
                         expanded = expanded,
-                        itemColors = drawerItemColors,
                         onToggleExpanded = {
                             expandedCategories = if (expanded) expandedCategories - category.id else expandedCategories + category.id
                         },
@@ -649,7 +648,6 @@ private fun CategoryNavigationRow(
     selected: Boolean,
     containsSelectedFeed: Boolean,
     expanded: Boolean,
-    itemColors: NavigationDrawerItemColors,
     onToggleExpanded: () -> Unit,
     onSelected: () -> Unit,
 ) {
