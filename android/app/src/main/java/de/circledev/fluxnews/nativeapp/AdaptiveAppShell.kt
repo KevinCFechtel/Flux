@@ -9,6 +9,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,14 +22,12 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -61,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -347,38 +347,34 @@ private fun NewsRootContent(
         Scaffold(
             topBar = {
                 Box(Modifier.fillMaxWidth()) {
-                    StatusBarProtection(
+                    FloatingChromeTopGradient(
                         modifier = Modifier.align(Alignment.TopCenter),
                     )
                     if (scopeTitleLeading) {
                         TopAppBar(
                     title = {
-                        Box(Modifier.offset(y = (-8).dp)) {
-                            ScopeNavigationCapsule(
-                                scope = scope,
-                                showArticleCount = articlePreferences.showArticleCount,
-                                timelineCount = timelineCount,
-                                readFilter = timelineState.selection?.readFilter,
-                                opensNavigation = !persistentNavigation,
-                                onOpenNavigation = onOpenNavigation,
-                            )
-                        }
+                        ScopeNavigationCapsule(
+                            scope = scope,
+                            showArticleCount = articlePreferences.showArticleCount,
+                            timelineCount = timelineCount,
+                            readFilter = timelineState.selection?.readFilter,
+                            opensNavigation = !persistentNavigation,
+                            onOpenNavigation = onOpenNavigation,
+                        )
                     },
                     colors = appBarColors,
                 )
             } else {
                 CenterAlignedTopAppBar(
                     title = {
-                        Box(Modifier.offset(y = (-8).dp)) {
-                            ScopeNavigationCapsule(
-                                scope = scope,
-                                showArticleCount = articlePreferences.showArticleCount,
-                                timelineCount = timelineCount,
-                                readFilter = timelineState.selection?.readFilter,
-                                opensNavigation = !persistentNavigation,
-                                onOpenNavigation = onOpenNavigation,
-                            )
-                        }
+                        ScopeNavigationCapsule(
+                            scope = scope,
+                            showArticleCount = articlePreferences.showArticleCount,
+                            timelineCount = timelineCount,
+                            readFilter = timelineState.selection?.readFilter,
+                            opensNavigation = !persistentNavigation,
+                            onOpenNavigation = onOpenNavigation,
+                        )
                     },
                         colors = appBarColors,
                     )
@@ -405,32 +401,35 @@ private fun NewsRootContent(
 }
 
 @Composable
-private fun StatusBarProtection(
+private fun FloatingChromeTopGradient(
     modifier: Modifier = Modifier,
 ) {
-    val surface = MaterialTheme.colorScheme.surface
-    Column(modifier = modifier.fillMaxWidth()) {
-        Box(
-            Modifier
-                .windowInsetsTopHeight(WindowInsets.statusBars)
-                .fillMaxWidth()
-                .background(surface.copy(alpha = 0.78f)),
-        )
-        Box(
-            Modifier
-                .height(36.dp)
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0f to surface.copy(alpha = 0.78f),
-                            0.45f to surface.copy(alpha = 0.30f),
-                            1f to Color.Transparent,
-                        ),
-                    ),
-                ),
-        )
+    val density = LocalDensity.current
+    val statusBarHeight = with(density) {
+        WindowInsets.statusBars.getTop(this).toDp()
     }
+    val background = MaterialTheme.colorScheme.background
+    val opacities = if (isSystemInDarkTheme()) {
+        listOf(0.90f, 0.70f, 0.55f, 0.45f, 0.25f, 0.15f, 0f)
+    } else {
+        listOf(0.90f, 0.62f, 0.46f, 0.36f, 0.20f, 0.12f, 0f)
+    }
+    val stops = listOf(0f, 0.16f, 0.34f, 0.51f, 0.68f, 0.84f, 1f)
+    val colorStops = stops
+        .zip(opacities)
+        .map { (stop, opacity) -> stop to background.copy(alpha = opacity) }
+        .toTypedArray()
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(statusBarHeight + 81.dp)
+            .background(
+                Brush.verticalGradient(
+                    colorStops = colorStops,
+                ),
+            ),
+    )
 }
 
 @Composable
