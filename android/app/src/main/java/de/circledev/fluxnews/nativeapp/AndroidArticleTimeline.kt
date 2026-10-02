@@ -169,31 +169,6 @@ internal object AndroidArticleRowPolicy {
             }
         }
     }
-
-    if (undoState.visible) {
-        Snackbar(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = 16.dp, vertical = 20.dp),
-            action = {
-                TextButton(
-                    onClick = {
-                        actionScope.launch {
-                            val restoredIds = store.undoScrollover()
-                            if (restoredIds.isNotEmpty()) scrolloverTracker.rearm(restoredIds)
-                        }
-                    },
-                ) {
-                    Text("Undo")
-                }
-            },
-        ) {
-            val count = undoState.articleIds.size
-            Text(
-                if (count == 1) "1 article marked as read" else "$count articles marked as read",
-            )
-        }
-    }
     }
 }
 
@@ -1113,6 +1088,32 @@ internal fun AndroidArticleTimeline(
                 }
             }
         }
+    }
+
+    if (undoState.visible) {
+        Snackbar(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 16.dp, vertical = 20.dp),
+            action = {
+                TextButton(
+                    onClick = {
+                        actionScope.launch {
+                            val restoredIds = store.undoScrollover()
+                            if (restoredIds.isNotEmpty()) scrolloverTracker.rearm(restoredIds)
+                        }
+                    },
+                ) {
+                    Text("Undo")
+                }
+            },
+        ) {
+            val count = undoState.articleIds.size
+            Text(
+                if (count == 1) "1 article marked as read" else "$count articles marked as read",
+            )
+        }
+    }
     }
 }
 
