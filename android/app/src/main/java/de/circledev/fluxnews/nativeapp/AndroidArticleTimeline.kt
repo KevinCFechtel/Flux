@@ -58,6 +58,7 @@ import uniffi.flux_uniffi.ArticleQuery
 import uniffi.flux_uniffi.ArticleScope
 import uniffi.flux_uniffi.ArticleSort
 import uniffi.flux_uniffi.ArticleSummary
+import uniffi.flux_uniffi.CoreEvent
 import uniffi.flux_uniffi.MediaKind
 import uniffi.flux_uniffi.ReadFilter
 import uniffi.flux_uniffi.StarredFilter
@@ -228,6 +229,96 @@ internal class AndroidArticleTimelineStore private constructor(
             queryGeneration = generation,
             sessionGeneration = sessionGeneration,
         )
+    }
+
+    suspend fun handleCoreEvent(runtimeEvent: AndroidCoreRuntimeEvent) {
+        val current = mutableState.value
+        val selection = current.selection ?: return
+        if (runtimeEvent.generation != current.sessionGeneration || runtimeEvent.generation != activeSessionGeneration()) {
+            return
+        }
+
+        when (val event = runtimeEvent.event) {
+            is CoreEvent.ArticleReadStateChanged -> {
+                applyReadStateChanged(selection, event.articleId, event.read)
+            }
+            is CoreEvent.ArticleStarredStateChanged -> {
+                applyStarredStateChanged(selection, event.articleId, event.starred)
+            }
+            is CoreEvent.SyncDidComplete -> {
+                if (event.metadata.dataChanged) reset(selection)
+            }
+            else -> Unit
+        }
+    }
+
+    private suspend fun applyReadStateChanged(
+        selection: AndroidArticleTimelineSelection,
+        articleId: Long,
+        read: Boolean,
+    ) {
+        val current = mutableState.value
+        val index = current.articles.indexOfFirst { it.id == articleId }
+
+        if (selection.readFilter == AndroidArticleReadFilter.Unread && !read && index < 0) {
+            reset(selection)
+            return
+        }
+
+        if (index < 0) return
+
+        mutableState.update { state ->
+            if (state.selection != selection || state.sessionGeneration != current.sessionGeneration) return@update state
+            val currentIndex = state.articles.indexOfFirst { it.id == articleId }
+            if (currentIndex < 0) return@update state
+
+            if (selection.readFilter == AndroidArticleReadFilter.Unread && read) {
+                state.copy(
+                    articles = state.articles.filterNot { it.id == articleId },
+                    audioArticleIds = state.audioArticleIds - articleId,
+                    total = state.total?.let { if (it > 0uL) it - 1uL else 0uL },
+                )
+            } else {
+                val articles = state.articles.toMutableList()
+                articles[currentIndex] = articles[currentIndex].copy(isRead = read)
+                state.copy(articles = articles)
+            }
+        }
+    }
+
+    private suspend fun applyStarredStateChanged(
+        selection: AndroidArticleTimelineSelection,
+        articleId: Long,
+        starred: Boolean,
+    ) {
+        val current = mutableState.value
+        val index = current.articles.indexOfFirst { it.id == articleId }
+        val starredScope = selection.scope == AndroidNewsScope.Starred
+
+        if (starredScope && starred && index < 0) {
+            reset(selection)
+            return
+        }
+
+        if (index < 0) return
+
+        mutableState.update { state ->
+            if (state.selection != selection || state.sessionGeneration != current.sessionGeneration) return@update state
+            val currentIndex = state.articles.indexOfFirst { it.id == articleId }
+            if (currentIndex < 0) return@update state
+
+            if (starredScope && !starred) {
+                state.copy(
+                    articles = state.articles.filterNot { it.id == articleId },
+                    audioArticleIds = state.audioArticleIds - articleId,
+                    total = state.total?.let { if (it > 0uL) it - 1uL else 0uL },
+                )
+            } else {
+                val articles = state.articles.toMutableList()
+                articles[currentIndex] = articles[currentIndex].copy(isStarred = starred)
+                state.copy(articles = articles)
+            }
+        }
     }
 
     suspend fun loadNextPage() {
