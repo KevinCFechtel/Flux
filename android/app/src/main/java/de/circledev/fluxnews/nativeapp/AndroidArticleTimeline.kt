@@ -58,6 +58,7 @@ import uniffi.flux_uniffi.ArticleQuery
 import uniffi.flux_uniffi.ArticleScope
 import uniffi.flux_uniffi.ArticleSort
 import uniffi.flux_uniffi.ArticleSummary
+import uniffi.flux_uniffi.CoreEvent
 import uniffi.flux_uniffi.MediaKind
 import uniffi.flux_uniffi.ReadFilter
 import uniffi.flux_uniffi.StarredFilter
@@ -156,6 +157,7 @@ internal data class AndroidArticleTimelineState(
 internal class AndroidArticleTimelineStore private constructor(
     private val pageLoader: suspend (ArticleQuery, Boolean) -> ArticlePage,
     private val audioArticleIdsLoader: suspend (List<Long>) -> Set<Long>,
+    private val selectionCountLoader: suspend (ArticleQuery) -> ULong,
     private val activeSessionGeneration: () -> Long?,
 ) {
     internal constructor(coreRuntime: AndroidCoreRuntime) : this(
@@ -176,6 +178,9 @@ internal class AndroidArticleTimelineStore private constructor(
                 }
             }
         },
+        selectionCountLoader = { query ->
+            coreRuntime.local { core -> core.countArticles(query) }
+        },
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
     )
 
@@ -183,8 +188,9 @@ internal class AndroidArticleTimelineStore private constructor(
         pageLoader: suspend (ArticleQuery, Boolean) -> ArticlePage,
         activeSessionGeneration: () -> Long?,
         audioArticleIdsLoader: suspend (List<Long>) -> Set<Long> = { emptySet() },
+        selectionCountLoader: suspend (ArticleQuery) -> ULong = { 0uL },
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
-    ) : this(pageLoader, audioArticleIdsLoader, activeSessionGeneration)
+    ) : this(pageLoader, audioArticleIdsLoader, selectionCountLoader, activeSessionGeneration)
 
     private val mutableState = MutableStateFlow(AndroidArticleTimelineState())
     private var requestGeneration = 0L
@@ -228,6 +234,123 @@ internal class AndroidArticleTimelineStore private constructor(
             queryGeneration = generation,
             sessionGeneration = sessionGeneration,
         )
+    }
+
+    suspend fun handleCoreEvent(runtimeEvent: AndroidCoreRuntimeEvent) {
+        val current = mutableState.value
+        val selection = current.selection ?: return
+        if (runtimeEvent.generation != current.sessionGeneration || runtimeEvent.generation != activeSessionGeneration()) {
+            return
+        }
+
+        when (val event = runtimeEvent.event) {
+            is CoreEvent.ArticleReadStateChanged -> {
+                applyReadStateChanged(selection, event.articleId, event.read)
+            }
+            is CoreEvent.ArticleStarredStateChanged -> {
+                applyStarredStateChanged(selection, event.articleId, event.starred)
+            }
+            is CoreEvent.SyncDidComplete -> {
+                if (event.metadata.dataChanged) reset(selection)
+            }
+            else -> Unit
+        }
+    }
+
+    private suspend fun applyReadStateChanged(
+        selection: AndroidArticleTimelineSelection,
+        articleId: Long,
+        read: Boolean,
+    ) {
+        val current = mutableState.value
+        val index = current.articles.indexOfFirst { it.id == articleId }
+
+        if (selection.readFilter == AndroidArticleReadFilter.Unread && !read && index < 0) {
+            reset(selection)
+            return
+        }
+
+        if (index >= 0) mutableState.update { state ->
+            if (state.selection != selection || state.sessionGeneration != current.sessionGeneration) return@update state
+            val currentIndex = state.articles.indexOfFirst { it.id == articleId }
+            if (currentIndex < 0) return@update state
+
+            if (selection.readFilter == AndroidArticleReadFilter.Unread && read) {
+                state.copy(
+                    articles = state.articles.filterNot { it.id == articleId },
+                    audioArticleIds = state.audioArticleIds - articleId,
+                )
+            } else {
+                val articles = state.articles.toMutableList()
+                articles[currentIndex] = articles[currentIndex].copy(isRead = read)
+                state.copy(articles = articles)
+            }
+        }
+
+        if (selection.readFilter == AndroidArticleReadFilter.Unread && read) {
+            refreshSelectionTotal(selection, current.queryGeneration, current.sessionGeneration)
+        }
+    }
+
+    private suspend fun applyStarredStateChanged(
+        selection: AndroidArticleTimelineSelection,
+        articleId: Long,
+        starred: Boolean,
+    ) {
+        val current = mutableState.value
+        val index = current.articles.indexOfFirst { it.id == articleId }
+        val starredScope = selection.scope == AndroidNewsScope.Starred
+
+        if (starredScope && starred && index < 0) {
+            reset(selection)
+            return
+        }
+
+        if (index >= 0) mutableState.update { state ->
+            if (state.selection != selection || state.sessionGeneration != current.sessionGeneration) return@update state
+            val currentIndex = state.articles.indexOfFirst { it.id == articleId }
+            if (currentIndex < 0) return@update state
+
+            if (starredScope && !starred) {
+                state.copy(
+                    articles = state.articles.filterNot { it.id == articleId },
+                    audioArticleIds = state.audioArticleIds - articleId,
+                )
+            } else {
+                val articles = state.articles.toMutableList()
+                articles[currentIndex] = articles[currentIndex].copy(isStarred = starred)
+                state.copy(articles = articles)
+            }
+        }
+
+        if (starredScope && !starred) {
+            refreshSelectionTotal(selection, current.queryGeneration, current.sessionGeneration)
+        }
+    }
+
+    private suspend fun refreshSelectionTotal(
+        selection: AndroidArticleTimelineSelection,
+        generation: Long,
+        sessionGeneration: Long?,
+    ) {
+        val ownedSession = sessionGeneration ?: return
+        val total = try {
+            selectionCountLoader(selection.coreQuery())
+        } catch (_: Exception) {
+            return
+        }
+        if (!owns(generation, selection, ownedSession)) return
+        mutableState.update { state ->
+            if (
+                state.queryGeneration == generation &&
+                state.selection == selection &&
+                state.sessionGeneration == ownedSession
+            ) {
+                state.copy(total = total)
+            } else {
+                state
+            }
+        }
     }
 
     suspend fun loadNextPage() {

@@ -103,9 +103,12 @@ internal fun AdaptiveAppShell(
         }
     }
 
-    LaunchedEffect(coreRuntime) {
+    LaunchedEffect(coreRuntime, timelineStore) {
         reloadNavigation()
-        coreRuntime.events.collect { reloadNavigation() }
+        coreRuntime.events.collect { runtimeEvent ->
+            timelineStore.handleCoreEvent(runtimeEvent)
+            reloadNavigation()
+        }
     }
     LaunchedEffect(navigationPreferences) {
         navigationPreferences.state.collect { preferenceState = it }
