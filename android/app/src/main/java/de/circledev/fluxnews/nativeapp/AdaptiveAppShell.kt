@@ -783,7 +783,7 @@ private fun ScopeNavigationCapsule(
         enabled = opensNavigation,
         shape = CircleShape,
         color = MaterialTheme.colorScheme.background.copy(
-            alpha = if (darkMode) 0.72f else 0.56f,
+            alpha = 0.72f,
         ),
         contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp,
