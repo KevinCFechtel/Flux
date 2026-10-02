@@ -40,6 +40,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
+import androidx.compose.material3.NavigationDrawerItemColors
 import androidx.compose.material3.PermanentDrawerSheet
 import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.Scaffold
@@ -487,6 +489,14 @@ private fun NewsNavigationContent(
         categoryRefs.mapTo(mutableSetOf()) { it.id }
     }
     var expandedCategories by remember { mutableStateOf(setOf<Long>()) }
+    val drawerItemColors = NavigationDrawerItemDefaults.colors(
+        selectedContainerColor = MaterialTheme.colorScheme.background,
+        unselectedContainerColor = MaterialTheme.colorScheme.background,
+        selectedIconColor = MaterialTheme.colorScheme.primary,
+        selectedTextColor = MaterialTheme.colorScheme.primary,
+        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        unselectedTextColor = MaterialTheme.colorScheme.onSurface,
+    )
 
     LaunchedEffect(selectedScope, projection) {
         if (selectedScope is AndroidNewsScope.Feed) {
@@ -525,24 +535,28 @@ private fun NewsNavigationContent(
             selected = selectedScope == AndroidNewsScope.All,
             onClick = { onScopeSelected(AndroidNewsScope.All) },
             icon = { DrawerIcon(R.drawable.ic_news, "All News") },
+            colors = drawerItemColors,
         )
         NavigationDrawerItem(
             label = { DrawerLabel("Starred", projection?.starredTotal ?: 0uL) },
             selected = selectedScope == AndroidNewsScope.Starred,
             onClick = { onScopeSelected(AndroidNewsScope.Starred) },
             icon = { DrawerIcon(R.drawable.ic_star, "Starred") },
+            colors = drawerItemColors,
         )
         NavigationDrawerItem(
             label = { Text("Listening List") },
             selected = false,
             onClick = onListeningList,
             icon = { DrawerIcon(R.drawable.ic_headphones, "Listening List") },
+            colors = drawerItemColors,
         )
         NavigationDrawerItem(
             label = { Text("Search") },
             selected = false,
             onClick = onSearch,
             icon = { DrawerIcon(R.drawable.ic_search, "Search") },
+            colors = drawerItemColors,
         )
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
@@ -571,6 +585,7 @@ private fun NewsNavigationContent(
                         selected = selectedScope == categoryScope,
                         containsSelectedFeed = selectedScope is AndroidNewsScope.Feed && selectedScope.categoryId == category.id,
                         expanded = expanded,
+                        itemColors = drawerItemColors,
                         onToggleExpanded = {
                             expandedCategories = if (expanded) expandedCategories - category.id else expandedCategories + category.id
                         },
@@ -588,6 +603,7 @@ private fun NewsNavigationContent(
                                     selected = selectedScope == feedScope,
                                     iconPng = timelineState.feedIconPngByFeedId[feed.id],
                                     iconVariant = feedIconVariant,
+                                    itemColors = drawerItemColors,
                                     onRequestFeedIcon = timelineStore::ensureFeedIcon,
                                     onClick = { onScopeSelected(feedScope) },
                                 )
@@ -620,6 +636,7 @@ private fun NewsNavigationContent(
             selected = false,
             onClick = onSettings,
             icon = { DrawerIcon(R.drawable.ic_settings, "Settings") },
+            colors = drawerItemColors,
             modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
         )
     }
@@ -632,11 +649,12 @@ private fun CategoryNavigationRow(
     selected: Boolean,
     containsSelectedFeed: Boolean,
     expanded: Boolean,
+    itemColors: NavigationDrawerItemColors,
     onToggleExpanded: () -> Unit,
     onSelected: () -> Unit,
 ) {
     Surface(
-        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.background,
+        color = MaterialTheme.colorScheme.background,
         shape = MaterialTheme.shapes.extraLarge,
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
     ) {
@@ -654,12 +672,13 @@ private fun CategoryNavigationRow(
                 Icon(
                     painterResource(R.drawable.ic_folder),
                     null,
-                    tint = if (containsSelectedFeed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = if (selected || containsSelectedFeed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
                     title,
                     modifier = Modifier.weight(1f).padding(start = 12.dp),
-                    fontWeight = if (containsSelectedFeed) FontWeight.Medium else FontWeight.Normal,
+                    fontWeight = if (selected || containsSelectedFeed) FontWeight.Medium else FontWeight.Normal,
+                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                 )
                 CountText(count)
             }
@@ -675,6 +694,7 @@ private fun FeedNavigationRow(
     selected: Boolean,
     iconPng: ByteArray?,
     iconVariant: uniffi.flux_uniffi.FeedIconVariant,
+    itemColors: NavigationDrawerItemColors,
     onRequestFeedIcon: suspend (Long, uniffi.flux_uniffi.FeedIconVariant) -> Unit,
     onClick: () -> Unit,
 ) {
@@ -691,6 +711,7 @@ private fun FeedNavigationRow(
                 onRequest = onRequestFeedIcon,
             )
         },
+        colors = itemColors,
         modifier = Modifier.padding(start = 32.dp),
     )
 }
