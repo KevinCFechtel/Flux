@@ -309,10 +309,13 @@ internal class AndroidArticleTimelineStore private constructor(
         val audioArticleIds = loadAudioArticleIds(articles.map { it.id })
 
         if (!owns(generation, selection, sessionGeneration)) return
+        val iconState = mutableState.value
         mutableState.value = AndroidArticleTimelineState(
             selection = selection,
             articles = articles,
             audioArticleIds = audioArticleIds,
+            feedIconVariant = iconState.feedIconVariant,
+            feedIconPngByFeedId = iconState.feedIconPngByFeedId,
             total = page.total,
             nextCursor = page.nextCursor.takeIf { articles.isNotEmpty() },
             initialLoading = false,
