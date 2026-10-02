@@ -41,7 +41,6 @@ import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
@@ -242,6 +241,7 @@ private fun TimelineDestination(
 ) {
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
         val persistentNewsNavigation = maxWidth >= 600.dp && maxHeight >= 600.dp
+        val compactLandscape = !persistentNewsNavigation && maxWidth > maxHeight
 
         if (persistentNewsNavigation) {
             PermanentNavigationDrawer(
@@ -259,7 +259,16 @@ private fun TimelineDestination(
                     }
                 },
             ) {
-                NewsRootContent(scope, navigation, state, timelineStore, sessionGeneration, true) {}
+                NewsRootContent(
+                    scope = scope,
+                    navigation = navigation,
+                    state = state,
+                    timelineStore = timelineStore,
+                    sessionGeneration = sessionGeneration,
+                    persistentNavigation = true,
+                    scopeTitleLeading = false,
+                    onOpenNavigation = {},
+                )
             }
         } else {
             val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -270,10 +279,11 @@ private fun TimelineDestination(
                     navController.navigate(route)
                 }
             }
+            val modalDrawerWidth = minOf(maxWidth * 0.85f, 360.dp)
             ModalNavigationDrawer(
                 drawerState = drawerState,
                 drawerContent = {
-                    ModalDrawerSheet(modifier = Modifier.widthIn(max = 360.dp)) {
+                    ModalDrawerSheet(modifier = Modifier.width(modalDrawerWidth)) {
                         NewsNavigationContent(
                             navigation = navigation,
                             preferences = preferences,
@@ -296,6 +306,7 @@ private fun TimelineDestination(
                     timelineStore = timelineStore,
                     sessionGeneration = sessionGeneration,
                     persistentNavigation = false,
+                    scopeTitleLeading = compactLandscape,
                     onOpenNavigation = { coroutineScope.launch { drawerState.open() } },
                 )
             }
@@ -312,6 +323,7 @@ private fun NewsRootContent(
     timelineStore: AndroidArticleTimelineStore,
     sessionGeneration: Long?,
     persistentNavigation: Boolean,
+    scopeTitleLeading: Boolean,
     onOpenNavigation: () -> Unit,
 ) {
     val timelineState by timelineStore.state.collectAsState()
@@ -321,24 +333,41 @@ private fun NewsRootContent(
     val timelineCount = timelineState.total.takeIf { timelineState.selection?.scope == scope }
 
     val layoutDirection = LocalLayoutDirection.current
+    val appBarColors = TopAppBarDefaults.topAppBarColors(
+        containerColor = Color.Transparent,
+        scrolledContainerColor = Color.Transparent,
+    )
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    ScopeNavigationCapsule(
-                        scope = scope,
-                        showArticleCount = articlePreferences.showArticleCount,
-                        timelineCount = timelineCount,
-                        readFilter = timelineState.selection?.readFilter,
-                        opensNavigation = !persistentNavigation,
-                        onOpenNavigation = onOpenNavigation,
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
-                    scrolledContainerColor = Color.Transparent,
-                ),
-            )
+            if (scopeTitleLeading) {
+                TopAppBar(
+                    title = {
+                        ScopeNavigationCapsule(
+                            scope = scope,
+                            showArticleCount = articlePreferences.showArticleCount,
+                            timelineCount = timelineCount,
+                            readFilter = timelineState.selection?.readFilter,
+                            opensNavigation = !persistentNavigation,
+                            onOpenNavigation = onOpenNavigation,
+                        )
+                    },
+                    colors = appBarColors,
+                )
+            } else {
+                CenterAlignedTopAppBar(
+                    title = {
+                        ScopeNavigationCapsule(
+                            scope = scope,
+                            showArticleCount = articlePreferences.showArticleCount,
+                            timelineCount = timelineCount,
+                            readFilter = timelineState.selection?.readFilter,
+                            opensNavigation = !persistentNavigation,
+                            onOpenNavigation = onOpenNavigation,
+                        )
+                    },
+                    colors = appBarColors,
+                )
+            }
         },
     ) { padding ->
         AndroidArticleTimeline(
@@ -663,7 +692,14 @@ private fun SecondaryDestination(title: String, message: String, onBack: () -> U
         topBar = {
             TopAppBar(
                 title = { Text(title) },
-                navigationIcon = { TextButton(onClick = onBack) { Text("‹ News") } },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_arrow_back),
+                            contentDescription = "Back",
+                        )
+                    }
+                },
             )
         },
     ) { padding ->
