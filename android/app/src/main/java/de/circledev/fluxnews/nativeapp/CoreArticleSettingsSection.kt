@@ -54,7 +54,7 @@ internal fun CoreArticleSettingsSection(settings: AndroidCoreArticleSettings) {
     }
 
     HorizontalDivider()
-    Text("Storage & Reader", style = MaterialTheme.typography.titleMedium)
+    SettingsSectionTitle("Storage & Reader")
 
     when {
         loading -> CircularProgressIndicator()
