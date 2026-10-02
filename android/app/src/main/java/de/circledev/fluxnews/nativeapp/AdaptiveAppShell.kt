@@ -9,8 +9,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -59,6 +57,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
@@ -350,32 +350,28 @@ private fun NewsRootContent(
                 if (scopeTitleLeading) {
                 TopAppBar(
                     title = {
-                        Box(Modifier.offset(y = (-3).dp)) {
-                            ScopeNavigationCapsule(
-                                scope = scope,
-                                showArticleCount = articlePreferences.showArticleCount,
-                                timelineCount = timelineCount,
-                                readFilter = timelineState.selection?.readFilter,
-                                opensNavigation = !persistentNavigation,
-                                onOpenNavigation = onOpenNavigation,
-                            )
-                        }
+                        ScopeNavigationCapsule(
+                            scope = scope,
+                            showArticleCount = articlePreferences.showArticleCount,
+                            timelineCount = timelineCount,
+                            readFilter = timelineState.selection?.readFilter,
+                            opensNavigation = !persistentNavigation,
+                            onOpenNavigation = onOpenNavigation,
+                        )
                     },
                     colors = appBarColors,
                 )
             } else {
                 CenterAlignedTopAppBar(
                     title = {
-                        Box(Modifier.offset(y = (-3).dp)) {
-                            ScopeNavigationCapsule(
-                                scope = scope,
-                                showArticleCount = articlePreferences.showArticleCount,
-                                timelineCount = timelineCount,
-                                readFilter = timelineState.selection?.readFilter,
-                                opensNavigation = !persistentNavigation,
-                                onOpenNavigation = onOpenNavigation,
-                            )
-                        }
+                        ScopeNavigationCapsule(
+                            scope = scope,
+                            showArticleCount = articlePreferences.showArticleCount,
+                            timelineCount = timelineCount,
+                            readFilter = timelineState.selection?.readFilter,
+                            opensNavigation = !persistentNavigation,
+                            onOpenNavigation = onOpenNavigation,
+                        )
                     },
                     colors = appBarColors,
                 )
@@ -398,7 +394,6 @@ private fun NewsRootContent(
         )
     }
         StatusBarProtection(
-            scopeTitleLeading = scopeTitleLeading,
             modifier = Modifier.align(Alignment.TopCenter),
         )
     }
@@ -406,56 +401,29 @@ private fun NewsRootContent(
 
 @Composable
 private fun StatusBarProtection(
-    scopeTitleLeading: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val surface = MaterialTheme.colorScheme.surface
-    val bridgeColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.84f)
     Column(modifier = modifier.fillMaxWidth()) {
         Box(
             Modifier
                 .windowInsetsTopHeight(WindowInsets.statusBars)
                 .fillMaxWidth()
-                .background(surface.copy(alpha = 0.80f)),
+                .background(surface.copy(alpha = 0.78f)),
         )
         Box(
             Modifier
-                .height(12.dp)
-                .fillMaxWidth(),
-        ) {
-            Box(
-                Modifier
-                    .height(4.dp)
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                surface.copy(alpha = 0.80f),
-                                Color.Transparent,
-                            ),
+                .height(3.dp)
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            surface.copy(alpha = 0.78f),
+                            Color.Transparent,
                         ),
                     ),
-            )
-            Surface(
-                modifier = Modifier
-                    .then(
-                        if (scopeTitleLeading) {
-                            Modifier.align(Alignment.TopStart).padding(start = 16.dp)
-                        } else {
-                            Modifier.align(Alignment.TopCenter)
-                        },
-                    )
-                    .width(112.dp)
-                    .height(12.dp),
-                shape = RoundedCornerShape(
-                    bottomStart = 16.dp,
-                    bottomEnd = 16.dp,
                 ),
-                color = bridgeColor,
-                tonalElevation = 0.dp,
-                shadowElevation = 0.dp,
-            ) {}
-        }
+        )
     }
 }
 
@@ -681,6 +649,34 @@ private fun DrawerIcon(drawable: Int, description: String) {
     Icon(painterResource(drawable), description)
 }
 
+private val ConnectedScopeChromeShape = GenericShape { size, _ ->
+    val stemHeight = size.height * 0.14f
+    val capsuleHeight = size.height - stemHeight
+    val capsuleRadius = capsuleHeight / 2f
+    val stemWidth = size.width * 0.34f
+    val stemLeft = (size.width - stemWidth) / 2f
+    val stemRight = stemLeft + stemWidth
+
+    addRoundRect(
+        RoundRect(
+            left = 0f,
+            top = stemHeight,
+            right = size.width,
+            bottom = size.height,
+            radiusX = capsuleRadius,
+            radiusY = capsuleRadius,
+        ),
+    )
+    addRect(
+        Rect(
+            left = stemLeft,
+            top = 0f,
+            right = stemRight,
+            bottom = stemHeight + capsuleRadius * 0.45f,
+        ),
+    )
+}
+
 @Composable
 private fun ScopeNavigationCapsule(
     scope: AndroidNewsScope,
@@ -693,14 +689,14 @@ private fun ScopeNavigationCapsule(
     Surface(
         onClick = onOpenNavigation,
         enabled = opensNavigation,
-        shape = CircleShape,
+        shape = ConnectedScopeChromeShape,
         color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.84f),
         contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp,
         shadowElevation = 1.dp,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
+            modifier = Modifier.padding(start = 14.dp, top = 11.dp, end = 14.dp, bottom = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
