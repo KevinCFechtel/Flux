@@ -10,6 +10,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -348,28 +350,32 @@ private fun NewsRootContent(
                 if (scopeTitleLeading) {
                 TopAppBar(
                     title = {
-                        ScopeNavigationCapsule(
-                            scope = scope,
-                            showArticleCount = articlePreferences.showArticleCount,
-                            timelineCount = timelineCount,
-                            readFilter = timelineState.selection?.readFilter,
-                            opensNavigation = !persistentNavigation,
-                            onOpenNavigation = onOpenNavigation,
-                        )
+                        Box(Modifier.offset(y = (-3).dp)) {
+                            ScopeNavigationCapsule(
+                                scope = scope,
+                                showArticleCount = articlePreferences.showArticleCount,
+                                timelineCount = timelineCount,
+                                readFilter = timelineState.selection?.readFilter,
+                                opensNavigation = !persistentNavigation,
+                                onOpenNavigation = onOpenNavigation,
+                            )
+                        }
                     },
                     colors = appBarColors,
                 )
             } else {
                 CenterAlignedTopAppBar(
                     title = {
-                        ScopeNavigationCapsule(
-                            scope = scope,
-                            showArticleCount = articlePreferences.showArticleCount,
-                            timelineCount = timelineCount,
-                            readFilter = timelineState.selection?.readFilter,
-                            opensNavigation = !persistentNavigation,
-                            onOpenNavigation = onOpenNavigation,
-                        )
+                        Box(Modifier.offset(y = (-3).dp)) {
+                            ScopeNavigationCapsule(
+                                scope = scope,
+                                showArticleCount = articlePreferences.showArticleCount,
+                                timelineCount = timelineCount,
+                                readFilter = timelineState.selection?.readFilter,
+                                opensNavigation = !persistentNavigation,
+                                onOpenNavigation = onOpenNavigation,
+                            )
+                        }
                     },
                     colors = appBarColors,
                 )
@@ -392,6 +398,7 @@ private fun NewsRootContent(
         )
     }
         StatusBarProtection(
+            scopeTitleLeading = scopeTitleLeading,
             modifier = Modifier.align(Alignment.TopCenter),
         )
     }
@@ -399,29 +406,56 @@ private fun NewsRootContent(
 
 @Composable
 private fun StatusBarProtection(
+    scopeTitleLeading: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val surface = MaterialTheme.colorScheme.surface
+    val bridgeColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.84f)
     Column(modifier = modifier.fillMaxWidth()) {
         Box(
             Modifier
                 .windowInsetsTopHeight(WindowInsets.statusBars)
                 .fillMaxWidth()
-                .background(surface.copy(alpha = 0.82f)),
+                .background(surface.copy(alpha = 0.80f)),
         )
         Box(
             Modifier
-                .height(8.dp)
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            surface.copy(alpha = 0.82f),
-                            Color.Transparent,
+                .height(12.dp)
+                .fillMaxWidth(),
+        ) {
+            Box(
+                Modifier
+                    .height(4.dp)
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                surface.copy(alpha = 0.80f),
+                                Color.Transparent,
+                            ),
                         ),
                     ),
+            )
+            Surface(
+                modifier = Modifier
+                    .then(
+                        if (scopeTitleLeading) {
+                            Modifier.align(Alignment.TopStart).padding(start = 16.dp)
+                        } else {
+                            Modifier.align(Alignment.TopCenter)
+                        },
+                    )
+                    .width(112.dp)
+                    .height(12.dp),
+                shape = RoundedCornerShape(
+                    bottomStart = 16.dp,
+                    bottomEnd = 16.dp,
                 ),
-        )
+                color = bridgeColor,
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
+            ) {}
+        }
     }
 }
 
