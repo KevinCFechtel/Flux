@@ -257,6 +257,7 @@ class AndroidArticleTimelineTest {
                 )
             },
             activeSessionGeneration = { 7L },
+            selectionCountLoader = { 1uL },
             testOnly = Unit,
         )
         val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
@@ -278,6 +279,42 @@ class AndroidArticleTimelineTest {
         )
 
         assertEquals(listOf(2L), store.state.value.articles.map { it.id })
+        assertEquals(1uL, store.state.value.total)
+    }
+
+    @Test
+    fun unloadedUnreadRemovalRefreshesOnlySelectionTotal() = runBlocking {
+        var pageCalls = 0
+        var countCalls = 0
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                pageCalls += 1
+                ArticlePage(
+                    articles = listOf(article(1)),
+                    total = 2uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 8L },
+            selectionCountLoader = {
+                countCalls += 1
+                1uL
+            },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
+        store.reset(selection)
+
+        store.handleCoreEvent(
+            AndroidCoreRuntimeEvent(
+                generation = 8L,
+                event = CoreEvent.ArticleReadStateChanged(articleId = 2L, read = true),
+            ),
+        )
+
+        assertEquals(1, pageCalls)
+        assertEquals(1, countCalls)
+        assertEquals(listOf(1L), store.state.value.articles.map { it.id })
         assertEquals(1uL, store.state.value.total)
     }
 
