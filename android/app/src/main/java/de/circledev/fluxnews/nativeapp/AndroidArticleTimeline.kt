@@ -169,7 +169,6 @@ internal object AndroidArticleRowPolicy {
             }
         }
     }
-    }
 }
 
 internal fun parseArticlePublishedAtMillis(value: String): Long? =
@@ -241,6 +240,7 @@ internal class AndroidArticleTimelineStore private constructor(
     private val scrolloverReadWriter: suspend (Long, List<Long>) -> Unit,
     private val scrolloverUnreadWriter: suspend (Long, List<Long>) -> Unit,
     private val activeSessionGeneration: () -> Long?,
+    private val monotonicMillis: () -> Long,
 ) {
     internal constructor(coreRuntime: AndroidCoreRuntime) : this(
         pageLoader = { query, includeTotal ->
@@ -285,6 +285,7 @@ internal class AndroidArticleTimelineStore private constructor(
             Unit
         },
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
+        monotonicMillis = SystemClock::elapsedRealtime,
     )
 
     internal constructor(
@@ -295,6 +296,7 @@ internal class AndroidArticleTimelineStore private constructor(
         feedIconLoader: suspend (List<Long>, FeedIconVariant) -> Map<Long, ByteArray> = { _, _ -> emptyMap() },
         scrolloverReadWriter: suspend (Long, List<Long>) -> Unit = { _, _ -> },
         scrolloverUnreadWriter: suspend (Long, List<Long>) -> Unit = { _, _ -> },
+        monotonicMillis: () -> Long = { System.nanoTime() / 1_000_000L },
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
     ) : this(
         pageLoader,
@@ -304,6 +306,7 @@ internal class AndroidArticleTimelineStore private constructor(
         scrolloverReadWriter,
         scrolloverUnreadWriter,
         activeSessionGeneration,
+        monotonicMillis,
     )
 
     private val mutableState = MutableStateFlow(AndroidArticleTimelineState())
@@ -530,7 +533,7 @@ internal class AndroidArticleTimelineStore private constructor(
         if (pendingSuccessfulScrolloverUndoIds.isNotEmpty()) {
             recordSuccessfulScrolloverUndo(
                 pendingSuccessfulScrolloverUndoIds.distinct(),
-                SystemClock.elapsedRealtime(),
+                monotonicMillis(),
             )
             pendingSuccessfulScrolloverUndoIds.clear()
         }
@@ -543,7 +546,7 @@ internal class AndroidArticleTimelineStore private constructor(
         val current = mutableUndoState.value
         if (current.revision != revision || !current.visible) return
         val expiresAt = current.expiresAtUptimeMillis ?: return
-        if (SystemClock.elapsedRealtime() >= expiresAt) clearScrolloverUndoGroup()
+        if (monotonicMillis() >= expiresAt) clearScrolloverUndoGroup()
     }
 
     suspend fun undoScrollover(): List<Long> {
@@ -585,6 +588,7 @@ internal class AndroidArticleTimelineStore private constructor(
                     errorMessage = null,
                 )
             }
+            refreshSelectionTotal(selection, current.queryGeneration, sessionGeneration)
             clearScrolloverUndoGroup()
             mutableFeedback.tryEmit(AndroidTimelineHaptic.Selection)
             ids
