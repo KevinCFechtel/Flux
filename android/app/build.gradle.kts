@@ -63,6 +63,8 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.2.1")
     implementation("androidx.work:work-runtime-ktx:2.10.1")
     implementation("androidx.compose.material3:material3")
+    implementation("io.coil-kt.coil3:coil-compose:3.0.4")
+    implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
     implementation("com.google.android.material:material:1.12.0")
     implementation("net.java.dev.jna:jna:5.19.1@aar")
     implementation("rustls:rustls-platform-verifier:${rootProject.extra["rustlsPlatformVerifierVersion"]}@aar")
