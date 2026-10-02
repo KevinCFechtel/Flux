@@ -409,21 +409,32 @@ private fun FloatingChromeTopGradient(
         WindowInsets.statusBars.getTop(this).toDp()
     }
     val background = MaterialTheme.colorScheme.background
+    val totalHeight = statusBarHeight + 81.dp
     val opacities = if (isSystemInDarkTheme()) {
-        listOf(0.96f, 0.82f, 0.62f, 0.45f, 0.25f, 0.15f, 0f)
+        listOf(0.96f, 0.94f, 0.90f, 0.78f, 0.50f, 0.25f, 0f)
     } else {
-        listOf(0.96f, 0.74f, 0.54f, 0.36f, 0.20f, 0.12f, 0f)
+        listOf(0.96f, 0.91f, 0.86f, 0.72f, 0.44f, 0.20f, 0f)
     }
-    val stops = listOf(0f, 0.16f, 0.34f, 0.51f, 0.68f, 0.84f, 1f)
-    val colorStops = stops
+    val stopOffsets = listOf(
+        0.dp,
+        (statusBarHeight.value * 0.5f).dp,
+        statusBarHeight,
+        statusBarHeight + 10.dp,
+        statusBarHeight + 28.dp,
+        statusBarHeight + 52.dp,
+        totalHeight,
+    )
+    val colorStops = stopOffsets
         .zip(opacities)
-        .map { (stop, opacity) -> stop to background.copy(alpha = opacity) }
+        .map { (offset, opacity) ->
+            (offset.value / totalHeight.value).coerceIn(0f, 1f) to background.copy(alpha = opacity)
+        }
         .toTypedArray()
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(statusBarHeight + 81.dp)
+            .height(totalHeight)
             .background(
                 Brush.verticalGradient(
                     colorStops = colorStops,
