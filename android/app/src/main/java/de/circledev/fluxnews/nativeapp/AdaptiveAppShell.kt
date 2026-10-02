@@ -8,9 +8,14 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.calculateBottomPadding
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.calculateTopPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -18,10 +23,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -38,6 +45,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -48,9 +56,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -311,30 +322,24 @@ private fun NewsRootContent(
     )
     val timelineCount = timelineState.total.takeIf { timelineState.selection?.scope == scope }
 
+    val layoutDirection = LocalLayoutDirection.current
     Scaffold(
         topBar = {
-            TopAppBar(
-                navigationIcon = {
-                    if (!persistentNavigation) {
-                        IconButton(onClick = onOpenNavigation) {
-                            Icon(painterResource(R.drawable.ic_menu), "Open navigation")
-                        }
-                    }
-                },
+            CenterAlignedTopAppBar(
                 title = {
-                    if (persistentNavigation) {
-                        ScopeTitle(scope, articlePreferences.showArticleCount, timelineCount)
-                    } else {
-                        TextButton(onClick = onOpenNavigation) {
-                            ScopeTitle(scope, articlePreferences.showArticleCount, timelineCount)
-                            Icon(
-                                painterResource(R.drawable.ic_expand_more),
-                                "Choose news scope",
-                                Modifier.padding(start = 4.dp),
-                            )
-                        }
-                    }
+                    ScopeNavigationCapsule(
+                        scope = scope,
+                        showArticleCount = articlePreferences.showArticleCount,
+                        timelineCount = timelineCount,
+                        readFilter = timelineState.selection?.readFilter,
+                        opensNavigation = !persistentNavigation,
+                        onOpenNavigation = onOpenNavigation,
+                    )
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
+                ),
             )
         },
     ) { padding ->
@@ -343,7 +348,14 @@ private fun NewsRootContent(
             selection = AndroidArticleTimelineSelection(scope = scope),
             sessionGeneration = sessionGeneration,
             accountKey = state.serverUrl,
-            modifier = Modifier.fillMaxSize().padding(padding),
+            topContentPadding = padding.calculateTopPadding(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    start = padding.calculateStartPadding(layoutDirection),
+                    end = padding.calculateEndPadding(layoutDirection),
+                    bottom = padding.calculateBottomPadding(),
+                ),
         )
     }
 }
@@ -571,23 +583,73 @@ private fun DrawerIcon(drawable: Int, description: String) {
 }
 
 @Composable
-private fun ScopeTitle(
+private fun ScopeNavigationCapsule(
     scope: AndroidNewsScope,
     showArticleCount: Boolean,
     timelineCount: ULong?,
+    readFilter: AndroidArticleReadFilter?,
+    opensNavigation: Boolean,
+    onOpenNavigation: () -> Unit,
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(scopeTitle(scope), style = MaterialTheme.typography.titleLarge)
-        if (showArticleCount && timelineCount != null) {
-            Text(
-                if (timelineCount > 999u) "999+" else timelineCount.toString(),
-                modifier = Modifier.padding(start = 8.dp),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+    Surface(
+        onClick = onOpenNavigation,
+        enabled = opensNavigation,
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.84f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        tonalElevation = 0.dp,
+        shadowElevation = 1.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_fluxnews_logo),
+                contentDescription = null,
+                modifier = Modifier.size(28.dp),
+                tint = MaterialTheme.colorScheme.primary,
             )
+            Column {
+                Text(
+                    scopeTitle(scope),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (showArticleCount && timelineCount != null) {
+                    Text(
+                        scopeCountLabel(scope, readFilter, timelineCount),
+                        maxLines = 1,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (opensNavigation) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_expand_more),
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
+
+private fun scopeCountLabel(
+    scope: AndroidNewsScope,
+    readFilter: AndroidArticleReadFilter?,
+    count: ULong,
+): String =
+    if (readFilter == AndroidArticleReadFilter.Unread && scope != AndroidNewsScope.Starred) {
+        "$count unread"
+    } else {
+        "$count " + if (count == 1uL) "article" else "articles"
+    }
 
 private fun scopeTitle(scope: AndroidNewsScope): String = when (scope) {
     AndroidNewsScope.All -> "All News"
