@@ -1,14 +1,21 @@
 package de.circledev.fluxnews.nativeapp
 
+import android.os.Build
+import android.os.SystemClock
+import android.view.HapticFeedbackConstants
+import android.view.View
 import android.text.format.DateUtils
 import android.text.format.DateUtils.FORMAT_ABBREV_RELATIVE
 import android.text.format.DateUtils.MINUTE_IN_MILLIS
 import android.text.format.DateFormat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,7 +33,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -41,15 +50,24 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.Date
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
@@ -61,12 +79,19 @@ import uniffi.flux_uniffi.ArticleScope
 import uniffi.flux_uniffi.ArticleSort
 import uniffi.flux_uniffi.ArticleSummary
 import uniffi.flux_uniffi.CoreEvent
+import uniffi.flux_uniffi.FeedIconVariant
 import uniffi.flux_uniffi.MediaKind
 import uniffi.flux_uniffi.ReadFilter
 import uniffi.flux_uniffi.StarredFilter
 
 private const val ANDROID_ARTICLE_TIMELINE_PAGE_SIZE = 64
 private const val ANDROID_ARTICLE_TIMELINE_PREFETCH_DISTANCE = 8
+private const val ANDROID_FEED_ICON_RETRY_DELAY_MILLIS = 1_000L
+private const val ANDROID_FEED_ICON_MAX_ATTEMPTS = 3
+private const val ANDROID_SCROLL_OVER_UNDO_INACTIVITY_MILLIS = 4_000L
+private const val ANDROID_SCROLL_OVER_UNDO_MAX_LIFETIME_MILLIS = 15_000L
+private const val ANDROID_SCROLL_OVER_UNDO_QUALIFICATION_MILLIS = 1_000L
+private const val ANDROID_SCROLL_OVER_UNDO_MIN_READS = 3
 
 internal enum class AndroidArticleReadFilter {
     Unread,
@@ -85,7 +110,33 @@ internal enum class AndroidArticleAccessory {
     Audio,
 }
 
+internal enum class AndroidTimelineHaptic {
+    Confirmation,
+    Selection,
+}
+
+internal data class AndroidScrolloverUndoState(
+    val articleIds: List<Long> = emptyList(),
+    val revision: Long = 0,
+    val expiresAtUptimeMillis: Long? = null,
+) {
+    val visible: Boolean
+        get() = articleIds.size >= ANDROID_SCROLL_OVER_UNDO_MIN_READS
+}
+
+internal enum class AndroidArticleRowLayoutVariant {
+    Compact,
+    VisualTextOnly,
+    VisualPortrait,
+    VisualLandscape,
+    VisualCompactTextOnly,
+    VisualCompactNarrow,
+    VisualCompactWide,
+}
+
 internal object AndroidArticleRowPolicy {
+    private const val WIDE_LAYOUT_THRESHOLD_DP = 600
+
     fun accessories(article: ArticleSummary, hasAudio: Boolean): List<AndroidArticleAccessory> = buildList {
         if (!article.isRead) add(AndroidArticleAccessory.Unread)
         if (article.isStarred) add(AndroidArticleAccessory.Star)
@@ -95,6 +146,28 @@ internal object AndroidArticleRowPolicy {
 
     fun showsImage(mode: AndroidArticlePresentationMode, imageUrl: String?): Boolean =
         mode != AndroidArticlePresentationMode.Compact && !imageUrl.isNullOrBlank()
+
+    fun layoutVariant(
+        mode: AndroidArticlePresentationMode,
+        imageUrl: String?,
+        availableWidthDp: Int,
+    ): AndroidArticleRowLayoutVariant {
+        val hasImage = showsImage(mode, imageUrl)
+        val wide = availableWidthDp > WIDE_LAYOUT_THRESHOLD_DP
+        return when (mode) {
+            AndroidArticlePresentationMode.Compact -> AndroidArticleRowLayoutVariant.Compact
+            AndroidArticlePresentationMode.Visual -> when {
+                !hasImage -> AndroidArticleRowLayoutVariant.VisualTextOnly
+                wide -> AndroidArticleRowLayoutVariant.VisualLandscape
+                else -> AndroidArticleRowLayoutVariant.VisualPortrait
+            }
+            AndroidArticlePresentationMode.VisualCompact -> when {
+                !hasImage -> AndroidArticleRowLayoutVariant.VisualCompactTextOnly
+                wide -> AndroidArticleRowLayoutVariant.VisualCompactWide
+                else -> AndroidArticleRowLayoutVariant.VisualCompactNarrow
+            }
+        }
+    }
 }
 
 internal fun parseArticlePublishedAtMillis(value: String): Long? =
@@ -140,6 +213,8 @@ internal data class AndroidArticleTimelineState(
     val selection: AndroidArticleTimelineSelection? = null,
     val articles: List<ArticleSummary> = emptyList(),
     val audioArticleIds: Set<Long> = emptySet(),
+    val feedIconVariant: FeedIconVariant? = null,
+    val feedIconPngByFeedId: Map<Long, ByteArray> = emptyMap(),
     val total: ULong? = null,
     val nextCursor: ArticleCursor? = null,
     val initialLoading: Boolean = false,
@@ -160,8 +235,11 @@ internal class AndroidArticleTimelineStore private constructor(
     private val pageLoader: suspend (ArticleQuery, Boolean) -> ArticlePage,
     private val audioArticleIdsLoader: suspend (List<Long>) -> Set<Long>,
     private val selectionCountLoader: suspend (ArticleQuery) -> ULong,
+    private val feedIconLoader: suspend (List<Long>, FeedIconVariant) -> Map<Long, ByteArray>,
     private val scrolloverReadWriter: suspend (Long, List<Long>) -> Unit,
+    private val scrolloverUnreadWriter: suspend (Long, List<Long>) -> Unit,
     private val activeSessionGeneration: () -> Long?,
+    private val monotonicMillis: () -> Long,
 ) {
     internal constructor(coreRuntime: AndroidCoreRuntime) : this(
         pageLoader = { query, includeTotal ->
@@ -184,13 +262,29 @@ internal class AndroidArticleTimelineStore private constructor(
         selectionCountLoader = { query ->
             coreRuntime.local { core -> core.countArticles(query) }
         },
+        feedIconLoader = { feedIds, variant ->
+            coreRuntime.remote { core ->
+                feedIds.distinct().mapNotNull { feedId ->
+                    core.feedIcon(feedId = feedId, variant = variant)
+                        ?.pngData
+                        ?.let { png -> feedId to png }
+                }.toMap()
+            }
+        },
         scrolloverReadWriter = { generation, articleIds ->
             coreRuntime.localForGeneration(generation) { core ->
                 core.setReadStateBulk(articleIds = articleIds, read = true)
             }
             Unit
         },
+        scrolloverUnreadWriter = { generation, articleIds ->
+            coreRuntime.localForGeneration(generation) { core ->
+                core.setReadStateBulk(articleIds = articleIds, read = false)
+            }
+            Unit
+        },
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
+        monotonicMillis = SystemClock::elapsedRealtime,
     )
 
     internal constructor(
@@ -198,28 +292,68 @@ internal class AndroidArticleTimelineStore private constructor(
         activeSessionGeneration: () -> Long?,
         audioArticleIdsLoader: suspend (List<Long>) -> Set<Long> = { emptySet() },
         selectionCountLoader: suspend (ArticleQuery) -> ULong = { 0uL },
+        feedIconLoader: suspend (List<Long>, FeedIconVariant) -> Map<Long, ByteArray> = { _, _ -> emptyMap() },
         scrolloverReadWriter: suspend (Long, List<Long>) -> Unit = { _, _ -> },
+        scrolloverUnreadWriter: suspend (Long, List<Long>) -> Unit = { _, _ -> },
+        monotonicMillis: () -> Long = { System.nanoTime() / 1_000_000L },
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
     ) : this(
         pageLoader,
         audioArticleIdsLoader,
         selectionCountLoader,
+        feedIconLoader,
         scrolloverReadWriter,
+        scrolloverUnreadWriter,
         activeSessionGeneration,
+        monotonicMillis,
     )
 
     private val mutableState = MutableStateFlow(AndroidArticleTimelineState())
+    private val mutableFeedback = MutableSharedFlow<AndroidTimelineHaptic>(extraBufferCapacity = 8)
+    private val mutableUndoState = MutableStateFlow(AndroidScrolloverUndoState())
     private val scrolloverRetainedReadIds = mutableSetOf<Long>()
+    private val scrolloverFeedbackSuppressedReadIds = mutableSetOf<Long>()
+    private val undoFeedbackSuppressedUnreadIds = mutableSetOf<Long>()
+    private val pendingSuccessfulScrolloverUndoIds = mutableListOf<Long>()
+    private val recentSuccessfulScrolloverReads = mutableListOf<Pair<Long, Long>>()
+    private var scrolloverUndoOpenedAtUptimeMillis: Long? = null
+    private var scrolloverUndoLastSuccessAtUptimeMillis: Long? = null
+    private var scrolloverConfirmationPending = false
+    private val feedIconCacheByVariant = mutableMapOf<FeedIconVariant, MutableMap<Long, ByteArray>>()
+    private val unavailableFeedIconsByVariant = mutableMapOf<FeedIconVariant, MutableSet<Long>>()
+    private val feedIconRequestsInFlight = mutableSetOf<Pair<Long, FeedIconVariant>>()
     private var requestGeneration = 0L
 
     val state = mutableState.asStateFlow()
+    val feedback = mutableFeedback.asSharedFlow()
+    val undoState = mutableUndoState.asStateFlow()
+
+    fun retainedSelectionForSession(sessionGeneration: Long?): AndroidArticleTimelineSelection? =
+        mutableState.value
+            .takeIf { it.sessionGeneration == sessionGeneration }
+            ?.selection
 
     suspend fun reset(selection: AndroidArticleTimelineSelection) {
         scrolloverRetainedReadIds.clear()
+        scrolloverFeedbackSuppressedReadIds.clear()
+        undoFeedbackSuppressedUnreadIds.clear()
+        pendingSuccessfulScrolloverUndoIds.clear()
+        recentSuccessfulScrolloverReads.clear()
+        clearScrolloverUndoGroup()
+        scrolloverConfirmationPending = false
         val generation = ++requestGeneration
         val sessionGeneration = activeSessionGeneration()
+        val previous = mutableState.value
+        val sameSession = previous.sessionGeneration == null || previous.sessionGeneration == sessionGeneration
+        if (!sameSession) {
+            feedIconCacheByVariant.clear()
+            unavailableFeedIconsByVariant.clear()
+            feedIconRequestsInFlight.clear()
+        }
         mutableState.value = AndroidArticleTimelineState(
             selection = selection,
+            feedIconVariant = previous.feedIconVariant.takeIf { sameSession },
+            feedIconPngByFeedId = previous.feedIconPngByFeedId.takeIf { sameSession }.orEmpty(),
             initialLoading = true,
             queryGeneration = generation,
             sessionGeneration = sessionGeneration,
@@ -242,10 +376,13 @@ internal class AndroidArticleTimelineStore private constructor(
         val audioArticleIds = loadAudioArticleIds(articles.map { it.id })
 
         if (!owns(generation, selection, sessionGeneration)) return
+        val iconState = mutableState.value
         mutableState.value = AndroidArticleTimelineState(
             selection = selection,
             articles = articles,
             audioArticleIds = audioArticleIds,
+            feedIconVariant = iconState.feedIconVariant,
+            feedIconPngByFeedId = iconState.feedIconPngByFeedId,
             total = page.total,
             nextCursor = page.nextCursor.takeIf { articles.isNotEmpty() },
             initialLoading = false,
@@ -263,12 +400,23 @@ internal class AndroidArticleTimelineStore private constructor(
 
         when (val event = runtimeEvent.event) {
             is CoreEvent.ArticleReadStateChanged -> {
+                val suppressFeedback = if (event.read) {
+                    scrolloverFeedbackSuppressedReadIds.remove(event.articleId)
+                } else {
+                    undoFeedbackSuppressedUnreadIds.remove(event.articleId)
+                }
+                if (!event.read) scrolloverFeedbackSuppressedReadIds.remove(event.articleId)
                 applyReadStateChanged(selection, event.articleId, event.read)
+                if (!suppressFeedback) mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
             }
             is CoreEvent.ArticleStarredStateChanged -> {
                 applyStarredStateChanged(selection, event.articleId, event.starred)
+                mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
             }
             is CoreEvent.SyncDidComplete -> {
+                if (event.metadata.navigationChanged) {
+                    unavailableFeedIconsByVariant.clear()
+                }
                 if (event.metadata.dataChanged) reset(selection)
             }
             else -> Unit
@@ -333,6 +481,7 @@ internal class AndroidArticleTimelineStore private constructor(
         if (accepted.isEmpty()) return emptyList()
 
         scrolloverRetainedReadIds.addAll(accepted)
+        scrolloverFeedbackSuppressedReadIds.addAll(accepted)
         mutableState.update { state ->
             if (
                 state.queryGeneration != current.queryGeneration ||
@@ -359,9 +508,12 @@ internal class AndroidArticleTimelineStore private constructor(
 
         return try {
             scrolloverReadWriter(sessionGeneration, accepted)
+            pendingSuccessfulScrolloverUndoIds += accepted
+            scrolloverConfirmationPending = true
             emptyList()
         } catch (_: Exception) {
             scrolloverRetainedReadIds.removeAll(accepted.toSet())
+            scrolloverFeedbackSuppressedReadIds.removeAll(accepted.toSet())
             if (owns(current.queryGeneration, selection, sessionGeneration)) {
                 val acceptedSet = accepted.toHashSet()
                 mutableState.update { state ->
@@ -379,6 +531,146 @@ internal class AndroidArticleTimelineStore private constructor(
             }
             accepted
         }
+    }
+
+    fun completeScrolloverInteraction() {
+        if (pendingSuccessfulScrolloverUndoIds.isNotEmpty()) {
+            recordSuccessfulScrolloverUndo(
+                pendingSuccessfulScrolloverUndoIds.distinct(),
+                monotonicMillis(),
+            )
+            pendingSuccessfulScrolloverUndoIds.clear()
+        }
+        if (!scrolloverConfirmationPending) return
+        scrolloverConfirmationPending = false
+        mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
+    }
+
+    fun expireScrolloverUndo(revision: Long) {
+        val current = mutableUndoState.value
+        if (current.revision != revision || !current.visible) return
+        val expiresAt = current.expiresAtUptimeMillis ?: return
+        if (monotonicMillis() >= expiresAt) clearScrolloverUndoGroup()
+    }
+
+    suspend fun undoScrollover(): List<Long> {
+        val currentUndo = mutableUndoState.value
+        val ids = currentUndo.articleIds.distinct()
+        if (!currentUndo.visible || ids.isEmpty()) return emptyList()
+
+        val current = mutableState.value
+        val selection = current.selection ?: return emptyList()
+        val sessionGeneration = current.sessionGeneration ?: return emptyList()
+        if (activeSessionGeneration() != sessionGeneration) {
+            clearScrolloverUndoGroup()
+            return emptyList()
+        }
+
+        undoFeedbackSuppressedUnreadIds.addAll(ids)
+        return try {
+            scrolloverUnreadWriter(sessionGeneration, ids)
+            scrolloverRetainedReadIds.removeAll(ids.toSet())
+            scrolloverFeedbackSuppressedReadIds.removeAll(ids.toSet())
+            mutableState.update { state ->
+                if (
+                    state.selection != selection ||
+                    state.sessionGeneration != sessionGeneration
+                ) {
+                    return@update state
+                }
+                val idSet = ids.toHashSet()
+                val restoredCount = state.articles.count { it.id in idSet && it.isRead }
+                state.copy(
+                    articles = state.articles.map { article ->
+                        if (article.id in idSet) article.copy(isRead = false) else article
+                    },
+                    total = if (selection.readFilter == AndroidArticleReadFilter.Unread) {
+                        state.total?.plus(restoredCount.toULong())
+                    } else {
+                        state.total
+                    },
+                    errorMessage = null,
+                )
+            }
+            refreshSelectionTotal(selection, current.queryGeneration, sessionGeneration)
+            clearScrolloverUndoGroup()
+            mutableFeedback.tryEmit(AndroidTimelineHaptic.Selection)
+            ids
+        } catch (_: Exception) {
+            undoFeedbackSuppressedUnreadIds.removeAll(ids.toSet())
+            mutableState.update { state ->
+                if (state.selection == selection && state.sessionGeneration == sessionGeneration) {
+                    state.copy(errorMessage = "Articles could not be marked unread.")
+                } else {
+                    state
+                }
+            }
+            emptyList()
+        }
+    }
+
+    private fun recordSuccessfulScrolloverUndo(ids: List<Long>, now: Long) {
+        if (ids.isEmpty()) return
+
+        val currentUndo = mutableUndoState.value
+        val openedAt = scrolloverUndoOpenedAtUptimeMillis
+        val lastSuccessAt = scrolloverUndoLastSuccessAtUptimeMillis
+        val existingGroupExpired =
+            openedAt != null &&
+                lastSuccessAt != null &&
+                (now - lastSuccessAt >= ANDROID_SCROLL_OVER_UNDO_INACTIVITY_MILLIS ||
+                    now - openedAt >= ANDROID_SCROLL_OVER_UNDO_MAX_LIFETIME_MILLIS)
+
+        if (existingGroupExpired) clearScrolloverUndoGroup()
+
+        if (mutableUndoState.value.visible) {
+            appendScrolloverUndo(ids, now)
+            return
+        }
+
+        recentSuccessfulScrolloverReads += ids.map { it to now }
+        recentSuccessfulScrolloverReads.removeAll {
+            now - it.second > ANDROID_SCROLL_OVER_UNDO_QUALIFICATION_MILLIS
+        }
+        val burstIds = recentSuccessfulScrolloverReads.map { it.first }.distinct()
+        if (burstIds.size < ANDROID_SCROLL_OVER_UNDO_MIN_READS) return
+
+        recentSuccessfulScrolloverReads.clear()
+        scrolloverUndoOpenedAtUptimeMillis = now
+        appendScrolloverUndo(burstIds, now)
+    }
+
+    private fun appendScrolloverUndo(ids: List<Long>, now: Long) {
+        val existing = mutableUndoState.value.articleIds.toMutableList()
+        val seen = existing.toMutableSet()
+        ids.forEach { if (seen.add(it)) existing += it }
+        if (existing.isEmpty()) return
+
+        if (scrolloverUndoOpenedAtUptimeMillis == null) {
+            scrolloverUndoOpenedAtUptimeMillis = now
+        }
+        scrolloverUndoLastSuccessAtUptimeMillis = now
+        val openedAt = scrolloverUndoOpenedAtUptimeMillis ?: now
+        val expiresAt = minOf(
+            now + ANDROID_SCROLL_OVER_UNDO_INACTIVITY_MILLIS,
+            openedAt + ANDROID_SCROLL_OVER_UNDO_MAX_LIFETIME_MILLIS,
+        )
+        val previous = mutableUndoState.value
+        mutableUndoState.value = AndroidScrolloverUndoState(
+            articleIds = existing,
+            revision = previous.revision + 1,
+            expiresAtUptimeMillis = expiresAt,
+        )
+    }
+
+    private fun clearScrolloverUndoGroup() {
+        val previous = mutableUndoState.value
+        if (previous.articleIds.isNotEmpty() || previous.expiresAtUptimeMillis != null) {
+            mutableUndoState.value = AndroidScrolloverUndoState(revision = previous.revision + 1)
+        }
+        scrolloverUndoOpenedAtUptimeMillis = null
+        scrolloverUndoLastSuccessAtUptimeMillis = null
+        recentSuccessfulScrolloverReads.clear()
     }
 
     private suspend fun applyStarredStateChanged(
@@ -439,6 +731,96 @@ internal class AndroidArticleTimelineStore private constructor(
             } else {
                 state
             }
+        }
+    }
+
+    suspend fun ensureFeedIcon(feedId: Long, variant: FeedIconVariant) {
+        ensureFeedIcons(listOf(feedId), variant)
+    }
+
+    suspend fun ensureFeedIcons(feedIds: List<Long>, variant: FeedIconVariant) {
+        if (feedIds.isEmpty()) return
+
+        val current = mutableState.value
+        val selection = current.selection ?: return
+        val sessionGeneration = current.sessionGeneration ?: return
+        if (activeSessionGeneration() != sessionGeneration) return
+
+        val cache = feedIconCacheByVariant.getOrPut(variant) { mutableMapOf() }
+        val unavailable = unavailableFeedIconsByVariant.getOrPut(variant) { mutableSetOf() }
+        val requested = feedIds.asSequence()
+            .distinct()
+            .filterNot { it in cache || it in unavailable }
+            .filter { feedIconRequestsInFlight.add(it to variant) }
+            .toList()
+
+        if (requested.isEmpty()) {
+            if (cache.isNotEmpty()) {
+                publishFeedIconCache(
+                    generation = current.queryGeneration,
+                    selection = selection,
+                    sessionGeneration = sessionGeneration,
+                    variant = variant,
+                    cache = cache,
+                )
+            }
+            return
+        }
+
+        try {
+            repeat(ANDROID_FEED_ICON_MAX_ATTEMPTS) { attempt ->
+                val loaded = try {
+                    feedIconLoader(requested, variant)
+                } catch (_: Exception) {
+                    if (attempt + 1 < ANDROID_FEED_ICON_MAX_ATTEMPTS) {
+                        delay(ANDROID_FEED_ICON_RETRY_DELAY_MILLIS * (attempt + 1))
+                    }
+                    return@repeat
+                }
+
+                if (!owns(current.queryGeneration, selection, sessionGeneration)) return
+
+                requested.forEach { feedId ->
+                    val png = loaded[feedId]
+                    if (png == null) {
+                        unavailable += feedId
+                    } else {
+                        cache[feedId] = png
+                    }
+                }
+                publishFeedIconCache(
+                    generation = current.queryGeneration,
+                    selection = selection,
+                    sessionGeneration = sessionGeneration,
+                    variant = variant,
+                    cache = cache,
+                )
+                return
+            }
+        } finally {
+            requested.forEach { feedIconRequestsInFlight.remove(it to variant) }
+        }
+    }
+
+    private fun publishFeedIconCache(
+        generation: Long,
+        selection: AndroidArticleTimelineSelection,
+        sessionGeneration: Long,
+        variant: FeedIconVariant,
+        cache: Map<Long, ByteArray>,
+    ) {
+        mutableState.update { state ->
+            if (
+                state.queryGeneration != generation ||
+                state.selection != selection ||
+                state.sessionGeneration != sessionGeneration
+            ) {
+                return@update state
+            }
+            state.copy(
+                feedIconVariant = variant,
+                feedIconPngByFeedId = cache.toMap(),
+            )
         }
     }
 
@@ -546,9 +928,11 @@ internal fun AndroidArticleTimeline(
     selection: AndroidArticleTimelineSelection,
     sessionGeneration: Long?,
     accountKey: String,
+    topContentPadding: Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
     val state by store.state.collectAsState()
+    val undoState by store.undoState.collectAsState()
     val articlePreferences by LocalAndroidArticlePreferences.current.state.collectAsState(
         initial = AndroidArticlePreferenceState(),
     )
@@ -556,13 +940,49 @@ internal fun AndroidArticleTimeline(
     val listState = rememberLazyListState()
     val scrolloverTracker = remember { AndroidScrolloverTracker() }
     val actionScope = rememberCoroutineScope()
+    val view = LocalView.current
     val publicationReferenceMillis = remember(state.queryGeneration) { System.currentTimeMillis() }
+    val articleIds = remember(state.queryGeneration, state.articles.size) {
+        state.articles.map { it.id }
+    }
+    val articleFeedIds = remember(state.queryGeneration, state.articles.size) {
+        state.articles.map { it.feedId }.distinct()
+    }
+    val feedIconVariant = if (isSystemInDarkTheme()) {
+        FeedIconVariant.DARK
+    } else {
+        FeedIconVariant.NORMAL
+    }
 
-    LaunchedEffect(state.articles.map { it.id }) {
-        scrolloverTracker.updateSnapshot(state.articles.map { it.id })
+    LaunchedEffect(store, view) {
+        store.feedback.collect { feedback ->
+            when (feedback) {
+                AndroidTimelineHaptic.Confirmation -> view.performFluxConfirmationHaptic()
+                AndroidTimelineHaptic.Selection -> view.performFluxSelectionHaptic()
+            }
+        }
+    }
+
+    LaunchedEffect(undoState.revision, undoState.expiresAtUptimeMillis) {
+        val expiresAt = undoState.expiresAtUptimeMillis ?: return@LaunchedEffect
+        val delayMillis = (expiresAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+        delay(delayMillis)
+        store.expireScrolloverUndo(undoState.revision)
+    }
+
+    LaunchedEffect(articleIds) {
+        scrolloverTracker.updateSnapshot(articleIds)
+    }
+
+    LaunchedEffect(articleFeedIds, feedIconVariant) {
+        store.ensureFeedIcons(articleFeedIds, feedIconVariant)
     }
 
     LaunchedEffect(listState, scrolloverTracker, articlePreferences.markReadOnScrollover) {
+        if (!articlePreferences.markReadOnScrollover) {
+            scrolloverTracker.endUserScroll()
+            return@LaunchedEffect
+        }
         listState.interactionSource.interactions
             .filterIsInstance<DragInteraction>()
             .collect { interaction ->
@@ -586,6 +1006,10 @@ internal fun AndroidArticleTimeline(
         articlePreferences.markReadOnScrollover,
         state.queryGeneration,
     ) {
+        if (!articlePreferences.markReadOnScrollover) {
+            scrolloverTracker.endUserScroll()
+            return@LaunchedEffect
+        }
         snapshotFlow {
             listState.scrolloverGeometrySample() to listState.isScrollInProgress
         }
@@ -598,11 +1022,20 @@ internal fun AndroidArticleTimeline(
                     val failed = store.markReadFromScrollover(candidates)
                     if (failed.isNotEmpty()) scrolloverTracker.rearm(failed)
                 }
-                if (!scrolling) scrolloverTracker.endUserScroll()
+                if (!scrolling) {
+                    scrolloverTracker.endUserScroll()
+                    store.completeScrolloverInteraction()
+                }
             }
     }
 
     LaunchedEffect(selection, sessionGeneration, accountKey) {
+        val current = store.state.value
+        val sameContext =
+            current.selection == selection &&
+                current.sessionGeneration == sessionGeneration
+        if (sameContext) return@LaunchedEffect
+
         if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
             listState.scrollToItem(0)
         }
@@ -627,9 +1060,12 @@ internal fun AndroidArticleTimeline(
             }
     }
 
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+    val availableWidth = (maxWidth - 32.dp).coerceAtLeast(0.dp)
+    val availableWidthDp = availableWidth.value.toInt()
     when {
         state.initialLoading && state.articles.isEmpty() -> {
-            Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         }
@@ -638,29 +1074,41 @@ internal fun AndroidArticleTimeline(
                 message = errorMessage,
                 actionLabel = "Retry",
                 onAction = { actionScope.launch { store.reset(selection) } },
-                modifier = modifier,
+                modifier = Modifier.fillMaxSize(),
             )
         }
         state.empty -> {
             TimelineMessage(
                 message = "No articles in this view.",
-                modifier = modifier,
+                modifier = Modifier.fillMaxSize(),
             )
         }
         else -> {
             LazyColumn(
                 state = listState,
-                modifier = modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = topContentPadding),
             ) {
                 items(
                     items = state.articles,
                     key = { article -> article.id },
+                    contentType = { article ->
+                        AndroidArticleRowPolicy.layoutVariant(
+                            mode = articlePreferences.presentationMode,
+                            imageUrl = article.imageUrl,
+                            availableWidthDp = availableWidthDp,
+                        )
+                    },
                 ) { article ->
                     AndroidArticleTimelineRow(
                         article = article,
                         hasAudio = article.id in state.audioArticleIds,
                         preferences = articlePreferences,
                         publicationReferenceMillis = publicationReferenceMillis,
+                        feedIconPng = state.feedIconPngByFeedId[article.feedId],
+                        feedIconVariant = feedIconVariant,
+                        availableWidth = availableWidth,
+                        onRequestFeedIcon = store::ensureFeedIcon,
                     )
                 }
 
@@ -686,6 +1134,45 @@ internal fun AndroidArticleTimeline(
             }
         }
     }
+
+    if (undoState.visible) {
+        Snackbar(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 16.dp, vertical = 20.dp),
+            action = {
+                TextButton(
+                    onClick = {
+                        actionScope.launch {
+                            val restoredIds = store.undoScrollover()
+                            if (restoredIds.isNotEmpty()) scrolloverTracker.rearm(restoredIds)
+                        }
+                    },
+                ) {
+                    Text("Undo")
+                }
+            },
+        ) {
+            val count = undoState.articleIds.size
+            Text(
+                if (count == 1) "1 article marked as read" else "$count articles marked as read",
+            )
+        }
+    }
+    }
+}
+
+private fun View.performFluxConfirmationHaptic() {
+    val feedbackConstant = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        HapticFeedbackConstants.CONFIRM
+    } else {
+        HapticFeedbackConstants.VIRTUAL_KEY
+    }
+    performHapticFeedback(feedbackConstant)
+}
+
+private fun View.performFluxSelectionHaptic() {
+    performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
 }
 
 private fun androidx.compose.foundation.lazy.LazyListState.scrolloverGeometrySample(): AndroidScrolloverGeometrySample {
@@ -713,109 +1200,274 @@ private fun AndroidArticleTimelineRow(
     hasAudio: Boolean,
     preferences: AndroidArticlePreferenceState,
     publicationReferenceMillis: Long,
+    feedIconPng: ByteArray?,
+    feedIconVariant: FeedIconVariant,
+    availableWidth: Dp,
+    onRequestFeedIcon: suspend (Long, FeedIconVariant) -> Unit,
 ) {
-    Column(
+    Box(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            article.feedTitle,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
+        val layoutVariant = AndroidArticleRowPolicy.layoutVariant(
+            mode = preferences.presentationMode,
+            imageUrl = article.imageUrl,
+            availableWidthDp = availableWidth.value.toInt(),
         )
+        val metadata: @Composable () -> Unit = {
+            ArticleMetadataRow(
+                article = article,
+                hasAudio = hasAudio,
+                feedIconPng = feedIconPng,
+                feedIconVariant = feedIconVariant,
+                onRequestFeedIcon = onRequestFeedIcon,
+                requestIfMissing = false,
+            )
+        }
+        val title: @Composable () -> Unit = {
+            ArticleTitle(article)
+        }
+        val publication: @Composable () -> Unit = {
+            ArticlePublicationRow(
+                article = article,
+                preferences = preferences,
+                publicationReferenceMillis = publicationReferenceMillis,
+            )
+        }
+        val preview: @Composable () -> Unit = {
+            ArticlePreview(article = article, preferences = preferences)
+        }
 
-        when (preferences.presentationMode) {
-            AndroidArticlePresentationMode.Compact -> {
-                ArticleTextContent(
-                    article = article,
-                    preferences = preferences,
-                    publicationReferenceMillis = publicationReferenceMillis,
-                )
+        when (layoutVariant) {
+            AndroidArticleRowLayoutVariant.Compact,
+            AndroidArticleRowLayoutVariant.VisualTextOnly,
+            AndroidArticleRowLayoutVariant.VisualCompactTextOnly,
+            -> {
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    metadata()
+                    title()
+                    publication()
+                    preview()
+                }
             }
-            AndroidArticlePresentationMode.Visual -> {
-                ArticleTextContent(
-                    article = article,
-                    preferences = preferences,
-                    publicationReferenceMillis = publicationReferenceMillis,
-                )
-                if (AndroidArticleRowPolicy.showsImage(preferences.presentationMode, article.imageUrl)) {
+
+            AndroidArticleRowLayoutVariant.VisualPortrait -> {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     ArticleImage(
                         imageUrl = article.imageUrl!!,
                         modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
                     )
+                    metadata()
+                    title()
+                    publication()
+                    preview()
                 }
             }
-            AndroidArticlePresentationMode.VisualCompact -> {
+
+            AndroidArticleRowLayoutVariant.VisualLandscape -> {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
                     verticalAlignment = Alignment.Top,
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        ArticleTextContent(
-                            article = article,
-                            preferences = preferences,
-                            publicationReferenceMillis = publicationReferenceMillis,
-                        )
+                    ArticleImage(
+                        imageUrl = article.imageUrl!!,
+                        modifier = Modifier.weight(0.48f).aspectRatio(16f / 9f),
+                    )
+                    Column(
+                        modifier = Modifier.weight(0.52f),
+                        verticalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        metadata()
+                        title()
+                        publication()
+                        preview()
                     }
-                    if (AndroidArticleRowPolicy.showsImage(preferences.presentationMode, article.imageUrl)) {
+                }
+            }
+
+            AndroidArticleRowLayoutVariant.VisualCompactNarrow -> {
+                val imageWidth = availableWidth * 0.32f
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    metadata()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
+                            title()
+                            publication()
+                        }
                         ArticleImage(
                             imageUrl = article.imageUrl!!,
-                            modifier = Modifier.width(112.dp).height(84.dp),
+                            modifier = Modifier.width(imageWidth).aspectRatio(4f / 3f),
+                        )
+                    }
+                    preview()
+                }
+            }
+
+            AndroidArticleRowLayoutVariant.VisualCompactWide -> {
+                val imageWidth = availableWidth * 0.32f
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    metadata()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
+                            title()
+                            publication()
+                            preview()
+                        }
+                        ArticleImage(
+                            imageUrl = article.imageUrl!!,
+                            modifier = Modifier.width(imageWidth).aspectRatio(4f / 3f),
                         )
                     }
                 }
             }
         }
-
-        ArticleAccessories(
-            accessories = AndroidArticleRowPolicy.accessories(article, hasAudio),
-        )
     }
     HorizontalDivider()
 }
 
 @Composable
-private fun ArticleTextContent(
+private fun ArticleMetadataRow(
+    article: ArticleSummary,
+    hasAudio: Boolean,
+    feedIconPng: ByteArray?,
+    feedIconVariant: FeedIconVariant,
+    onRequestFeedIcon: suspend (Long, FeedIconVariant) -> Unit,
+    requestIfMissing: Boolean = true,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        FeedIcon(
+            feedId = article.feedId,
+            title = article.feedTitle,
+            pngData = feedIconPng,
+            variant = feedIconVariant,
+            onRequest = onRequestFeedIcon,
+            requestIfMissing = requestIfMissing,
+        )
+        Text(
+            article.feedTitle,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ArticleAccessories(
+            article = article,
+            hasAudio = hasAudio,
+        )
+    }
+}
+
+@Composable
+internal fun FeedIcon(
+    feedId: Long,
+    title: String,
+    pngData: ByteArray?,
+    variant: FeedIconVariant,
+    onRequest: suspend (Long, FeedIconVariant) -> Unit,
+    requestIfMissing: Boolean = true,
+) {
+    LaunchedEffect(feedId, variant, pngData == null, requestIfMissing) {
+        if (requestIfMissing && pngData == null) onRequest(feedId, variant)
+    }
+    val context = LocalContext.current
+    val imageRequest = remember(context, feedId, variant, pngData) {
+        pngData?.let { bytes ->
+            ImageRequest.Builder(context)
+                .data(bytes)
+                .memoryCacheKey("feed-icon:$feedId:$variant:${pngData.contentHashCode()}")
+                .build()
+        }
+    }
+    if (imageRequest != null) {
+        AsyncImage(
+            model = imageRequest,
+            contentDescription = null,
+            modifier = Modifier.size(22.dp).clip(CircleShape),
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .clearAndSetSemantics { }
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                title.trim().firstOrNull()?.uppercase() ?: "•",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimary,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ArticleTitle(article: ArticleSummary) {
+    Text(
+        article.title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = if (article.isRead) FontWeight.Normal else FontWeight.SemiBold,
+        color = if (article.isRead) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        },
+    )
+}
+
+@Composable
+private fun ArticlePublicationRow(
     article: ArticleSummary,
     preferences: AndroidArticlePreferenceState,
     publicationReferenceMillis: Long,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            article.title,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = if (article.isRead) FontWeight.Normal else FontWeight.SemiBold,
-            color = if (article.isRead) {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            } else {
-                MaterialTheme.colorScheme.onSurface
-            },
-        )
-        Text(
-            publicationLabel(
-                article = article,
-                relative = preferences.showRelativePublicationTime,
-                referenceMillis = publicationReferenceMillis,
-            ),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        val preview = article.preview.trim()
-        if (preview.isNotEmpty()) {
-            Text(
-                preview,
-                maxLines = preferences.previewLines.lineCount,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
+    Text(
+        publicationLabel(
+            article = article,
+            relative = preferences.showRelativePublicationTime,
+            referenceMillis = publicationReferenceMillis,
+        ),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun ArticlePreview(
+    article: ArticleSummary,
+    preferences: AndroidArticlePreferenceState,
+) {
+    val preview = article.preview.trim()
+    if (preview.isEmpty()) return
+    Text(
+        preview,
+        maxLines = preferences.previewLines.lineCount,
+        overflow = TextOverflow.Ellipsis,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
@@ -826,8 +1478,10 @@ private fun publicationLabel(
 ): String {
     val context = LocalContext.current
     val locales = LocalConfiguration.current.locales
-    val publishedMillis = parseArticlePublishedAtMillis(article.publishedAt)
-    val publication = remember(article.publishedAt, relative, referenceMillis, locales) {
+    val publishedMillis = remember(article.publishedAt) {
+        parseArticlePublishedAtMillis(article.publishedAt)
+    }
+    val publication = remember(article.publishedAt, publishedMillis, relative, referenceMillis, locales) {
         if (publishedMillis == null) {
             article.publishedAt
         } else if (relative) {
@@ -864,37 +1518,51 @@ private fun ArticleImage(imageUrl: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ArticleAccessories(accessories: List<AndroidArticleAccessory>) {
-    if (accessories.isEmpty()) return
+private fun ArticleAccessories(
+    article: ArticleSummary,
+    hasAudio: Boolean,
+) {
     Row(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        accessories.forEach { accessory ->
-            when (accessory) {
-                AndroidArticleAccessory.Unread -> Box(
-                    Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary),
-                )
-                AndroidArticleAccessory.Star -> Icon(
+        if (hasAudio) {
+            Icon(
+                painter = painterResource(R.drawable.ic_headphones),
+                contentDescription = "Audio",
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (article.commentsUrl.isNotBlank()) {
+            Icon(
+                painter = painterResource(R.drawable.ic_comment),
+                contentDescription = "Comments",
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        // Star and unread keep fixed slots so status-only mutations do not move
+        // the feed title or the immutable comments/audio accessories.
+        Box(Modifier.size(16.dp), contentAlignment = Alignment.Center) {
+            if (article.isStarred) {
+                Icon(
                     painter = painterResource(R.drawable.ic_star),
                     contentDescription = "Starred",
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.primary,
                 )
-                AndroidArticleAccessory.Comments -> Icon(
-                    painter = painterResource(R.drawable.ic_comment),
-                    contentDescription = "Comments",
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                AndroidArticleAccessory.Audio -> Icon(
-                    painter = painterResource(R.drawable.ic_headphones),
-                    contentDescription = "Audio",
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            }
+        }
+        Box(Modifier.size(16.dp), contentAlignment = Alignment.Center) {
+            if (!article.isRead) {
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .semantics { contentDescription = "Unread" }
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary),
                 )
             }
         }

@@ -12,8 +12,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Text
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -34,6 +37,7 @@ class MainActivity : ComponentActivity() {
         val bootstrap = application.accountBootstrap
         val coreRuntime = application.coreRuntime
         val syncCoordinator = application.syncCoordinator
+        val timelineStore = application.timelineStore
         val navigationPreferences = application.navigationPreferences
         val articlePreferences = application.articlePreferences
         val actionBarPreferences = application.actionBarPreferences
@@ -53,7 +57,7 @@ class MainActivity : ComponentActivity() {
                     LocalAndroidBackgroundSync provides backgroundSync,
                     LocalAndroidConfigurationBackup provides configurationBackup,
                 ) {
-                    FluxNewsApp(bootstrap, coreRuntime, syncCoordinator, navigationPreferences, backgroundSync)
+                    FluxNewsApp(bootstrap, coreRuntime, syncCoordinator, timelineStore, navigationPreferences, backgroundSync)
                 }
             }
         }
@@ -61,25 +65,89 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun FluxNewsApp(bootstrap: AndroidAccountBootstrap, coreRuntime: AndroidCoreRuntime, syncCoordinator: AndroidSyncCoordinator, navigationPreferences: AndroidNavigationPreferences, backgroundSync: AndroidBackgroundSync) {
+private fun FluxNewsApp(bootstrap: AndroidAccountBootstrap, coreRuntime: AndroidCoreRuntime, syncCoordinator: AndroidSyncCoordinator, timelineStore: AndroidArticleTimelineStore, navigationPreferences: AndroidNavigationPreferences, backgroundSync: AndroidBackgroundSync) {
     var bootstrapState by remember { mutableStateOf(bootstrap.state) }; var retryGeneration by remember { mutableStateOf(0) }; var showingRestore by remember { mutableStateOf(false) }
     LaunchedEffect(bootstrap, retryGeneration) { bootstrapState = bootstrap.restoreStoredAccount() }
     val readyState = bootstrapState as? AndroidAccountBootstrap.State.Ready
-    LaunchedEffect(readyState?.serverUrl) { if (readyState != null) { syncCoordinator.requestSync(SyncReason.APP_START); backgroundSync.reconcileFromCore() } }
+    LaunchedEffect(readyState?.serverUrl) { if (readyState != null) backgroundSync.reconcileFromCore() }
     fun acceptActivatedAccount(ready: AndroidAccountBootstrap.State.Ready) { bootstrapState = ready; syncCoordinator.requestSync(SyncReason.APP_START) }
     Surface(modifier = Modifier.fillMaxSize()) {
         when (val state = bootstrapState) {
             AndroidAccountBootstrap.State.Starting -> StartupProgress()
             AndroidAccountBootstrap.State.AccountRequired -> if (showingRestore) {
-                ConfigurationBackupScreen(LocalAndroidConfigurationBackup.current, { showingRestore = false; (bootstrap.state as? AndroidAccountBootstrap.State.Ready)?.let(::acceptActivatedAccount) }, Modifier.fillMaxSize(), allowExport = false, onDismiss = { showingRestore = false })
+                StandaloneStartupSurface(title = "Restore Configuration") { contentModifier ->
+                    ConfigurationBackupScreen(
+                        LocalAndroidConfigurationBackup.current,
+                        { showingRestore = false; (bootstrap.state as? AndroidAccountBootstrap.State.Ready)?.let(::acceptActivatedAccount) },
+                        contentModifier,
+                        allowExport = false,
+                        onDismiss = { showingRestore = false },
+                    )
+                }
             } else {
-                AccountConfigurationScreen(bootstrap, false, ::acceptActivatedAccount, { bootstrapState = AndroidAccountBootstrap.State.AccountRequired }, { showingRestore = true }, Modifier.fillMaxSize())
+                StandaloneStartupSurface(title = "Set Up FluxNews") { contentModifier ->
+                    AccountConfigurationScreen(
+                        bootstrap,
+                        false,
+                        ::acceptActivatedAccount,
+                        { bootstrapState = AndroidAccountBootstrap.State.AccountRequired },
+                        { showingRestore = true },
+                        contentModifier,
+                        showTitle = false,
+                    )
+                }
             }
             is AndroidAccountBootstrap.State.RecoverableError -> RecoverableStartup(state.message, bootstrap, { bootstrapState = AndroidAccountBootstrap.State.Starting; retryGeneration += 1 }, ::acceptActivatedAccount)
-            is AndroidAccountBootstrap.State.Ready -> AdaptiveAppShell(bootstrap, coreRuntime, navigationPreferences, state, { changedState -> bootstrapState = changedState; if (changedState is AndroidAccountBootstrap.State.Ready) syncCoordinator.requestSync(SyncReason.APP_START) }, Modifier.fillMaxSize())
+            is AndroidAccountBootstrap.State.Ready -> AdaptiveAppShell(bootstrap, coreRuntime, timelineStore, navigationPreferences, state, { changedState ->
+                bootstrapState = changedState
+                if (changedState is AndroidAccountBootstrap.State.Ready) syncCoordinator.requestSync(SyncReason.APP_START)
+            }, Modifier.fillMaxSize())
         }
     }
 }
 
 @Composable private fun StartupProgress() { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) { CircularProgressIndicator(); Text("Starting FluxNews…", style = MaterialTheme.typography.bodyLarge) } } }
-@Composable private fun RecoverableStartup(message: String, bootstrap: AndroidAccountBootstrap, onRetry: () -> Unit, onAccountActivated: (AndroidAccountBootstrap.State.Ready) -> Unit) { Column(modifier = Modifier.fillMaxSize()) { Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Text("FluxNews could not start", style = MaterialTheme.typography.headlineSmall); Text(message, color = MaterialTheme.colorScheme.error); Button(onClick = onRetry) { Text("Retry") } }; AccountConfigurationScreen(bootstrap, false, onAccountActivated, {}, modifier = Modifier.weight(1f)) } }
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StandaloneStartupSurface(
+    title: String,
+    content: @Composable (Modifier) -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(title) },
+            )
+        },
+    ) { padding ->
+        content(Modifier.fillMaxSize().padding(padding))
+    }
+}
+
+@Composable
+private fun RecoverableStartup(
+    message: String,
+    bootstrap: AndroidAccountBootstrap,
+    onRetry: () -> Unit,
+    onAccountActivated: (AndroidAccountBootstrap.State.Ready) -> Unit,
+) {
+    StandaloneStartupSurface(title = "FluxNews could not start") { contentModifier ->
+        Column(modifier = contentModifier) {
+            Column(
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(message, color = MaterialTheme.colorScheme.error)
+                Button(onClick = onRetry) { Text("Retry") }
+            }
+            AccountConfigurationScreen(
+                bootstrap,
+                false,
+                onAccountActivated,
+                {},
+                modifier = Modifier.weight(1f),
+                showTitle = false,
+            )
+        }
+    }
+}

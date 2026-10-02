@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import java.io.File
@@ -32,13 +33,12 @@ internal fun SupportDiagnosticsScreen(diagnostics: AndroidAppDiagnostics, modifi
     val context = LocalContext.current
     if (viewerOpen) { AndroidLogViewer(diagnostics, { viewerOpen = false }, modifier); return }
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("Support Diagnostics", style = MaterialTheme.typography.headlineMedium)
-        Text("Logging", style = MaterialTheme.typography.titleMedium)
+        SettingsSectionTitle("Logging")
         SettingsSwitchRow("Debug Logging", debugEnabled) { enabled -> scope.launch { diagnostics.setDebugLoggingEnabled(enabled); debugEnabled = enabled } }
         ValueRow("Stored Records", records.size.toString())
         TextButton(onClick = { viewerOpen = true }) { Text("Log Viewer") }
         Text("Info, warning and error records are kept even when Debug Logging is off. Debug and trace records are stored only while Debug Logging is enabled.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        HorizontalDivider(); Text("Support Export", style = MaterialTheme.typography.titleMedium)
+        HorizontalDivider(); SettingsSectionTitle("Support Export")
         Button(onClick = { shareDiagnostics(context, diagnostics) }) { Text("Export Diagnostics") }
         Text("The export contains retained native and Core support records plus app, OS, device and Debug Logging metadata.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         HorizontalDivider(); TextButton(onClick = { confirmClear = true }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Clear Logs") }
@@ -52,7 +52,15 @@ private fun AndroidLogViewer(diagnostics: AndroidAppDiagnostics, onBack: () -> U
     val records by diagnostics.entries.collectAsState(); var search by remember { mutableStateOf("") }; var filter by remember { mutableStateOf(AndroidLogLevelFilter.All) }; var menuOpen by remember { mutableStateOf(false) }; val context = LocalContext.current
     val visible = remember(records, search, filter) { records.asReversed().filter { entry -> filter.accepts(entry.level) && (search.isBlank() || entry.category.contains(search, true) || entry.message.contains(search, true)) } }
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { TextButton(onClick = onBack) { Text("‹ Support Diagnostics") }; TextButton(onClick = {}) { Text("Refresh") } }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_arrow_back),
+                    contentDescription = "Back",
+                )
+            }
+            TextButton(onClick = {}) { Text("Refresh") }
+        }
         Text("Log Viewer", style = MaterialTheme.typography.headlineMedium)
         OutlinedTextField(search, { search = it }, label = { Text("Search category or message") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         Box { OutlinedButton(onClick = { menuOpen = true }) { Text("Level: ${filter.title}") }; DropdownMenu(menuOpen, { menuOpen = false }) { AndroidLogLevelFilter.entries.forEach { item -> DropdownMenuItem({ Text(item.title) }, { filter = item; menuOpen = false }) } } }

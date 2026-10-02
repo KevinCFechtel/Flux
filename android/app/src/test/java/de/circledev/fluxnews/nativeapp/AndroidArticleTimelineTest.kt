@@ -1,8 +1,12 @@
 package de.circledev.fluxnews.nativeapp
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -14,6 +18,7 @@ import uniffi.flux_uniffi.ArticleScope
 import uniffi.flux_uniffi.ArticleSort
 import uniffi.flux_uniffi.ArticleSummary
 import uniffi.flux_uniffi.CoreEvent
+import uniffi.flux_uniffi.FeedIconVariant
 import uniffi.flux_uniffi.ReadFilter
 import uniffi.flux_uniffi.StarredFilter
 
@@ -476,6 +481,165 @@ class AndroidArticleTimelineTest {
     }
 
     @Test
+    fun scrolloverPublishesOneConfirmationOnlyAfterInteractionCompletes() = runBlocking {
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1), article(2)),
+                    total = 2uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 21L },
+            scrolloverReadWriter = { _, _ -> },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+        val feedback = async(start = CoroutineStart.UNDISPATCHED) { store.feedback.first() }
+
+        assertTrue(store.markReadFromScrollover(listOf(1L)).isEmpty())
+        assertTrue(store.markReadFromScrollover(listOf(2L)).isEmpty())
+        assertFalse(feedback.isCompleted)
+
+        store.completeScrolloverInteraction()
+
+        assertEquals(
+            AndroidTimelineHaptic.Confirmation,
+            withTimeout(1_000) { feedback.await() },
+        )
+    }
+
+    @Test
+    fun failedScrolloverDoesNotPublishConfirmation() = runBlocking {
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 22L },
+            scrolloverReadWriter = { _, _ -> error("write failed") },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+
+        assertEquals(listOf(1L), store.markReadFromScrollover(listOf(1L)))
+        store.completeScrolloverInteraction()
+
+        assertNull(withTimeoutOrNull(100) { store.feedback.first() })
+    }
+
+    @Test
+    fun scrolloverUndoAppearsAfterQualifiedBurstAndRestoresUnreadState() = runBlocking {
+        var now = 1_000L
+        val unreadWrites = mutableListOf<Pair<Long, List<Long>>>()
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1), article(2), article(3)),
+                    total = 3uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 31L },
+            selectionCountLoader = { 3uL },
+            scrolloverReadWriter = { _, _ -> },
+            scrolloverUnreadWriter = { generation, ids -> unreadWrites += generation to ids },
+            monotonicMillis = { now },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+
+        assertTrue(store.markReadFromScrollover(listOf(1L, 2L, 3L)).isEmpty())
+        store.completeScrolloverInteraction()
+
+        assertTrue(store.undoState.value.visible)
+        assertEquals(listOf(1L, 2L, 3L), store.undoState.value.articleIds)
+        assertEquals(0uL, store.state.value.total)
+
+        val feedback = async(start = CoroutineStart.UNDISPATCHED) { store.feedback.first() }
+        val restored = store.undoScrollover()
+
+        assertEquals(listOf(1L, 2L, 3L), restored)
+        assertEquals(listOf(31L to listOf(1L, 2L, 3L)), unreadWrites)
+        assertTrue(store.state.value.articles.none { it.isRead })
+        assertEquals(3uL, store.state.value.total)
+        assertFalse(store.undoState.value.visible)
+        assertEquals(
+            AndroidTimelineHaptic.Selection,
+            withTimeout(1_000) { feedback.await() },
+        )
+    }
+
+    @Test
+    fun scrolloverUndoDoesNotAppearForSmallBurstAndExpiresAfterInactivity() = runBlocking {
+        var now = 2_000L
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1), article(2), article(3)),
+                    total = 3uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 32L },
+            scrolloverReadWriter = { _, _ -> },
+            monotonicMillis = { now },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+
+        store.markReadFromScrollover(listOf(1L, 2L))
+        store.completeScrolloverInteraction()
+        assertFalse(store.undoState.value.visible)
+
+        now += 500L
+        store.markReadFromScrollover(listOf(3L))
+        store.completeScrolloverInteraction()
+        assertTrue(store.undoState.value.visible)
+        val revision = store.undoState.value.revision
+
+        now = store.undoState.value.expiresAtUptimeMillis!! + 1L
+        store.expireScrolloverUndo(revision)
+
+        assertFalse(store.undoState.value.visible)
+        assertTrue(store.undoState.value.articleIds.isEmpty())
+    }
+
+    @Test
+    fun scrolloverUndoIsRejectedAfterSessionReplacement() = runBlocking {
+        var generation: Long? = 41L
+        var unreadWrites = 0
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1), article(2), article(3)),
+                    total = 3uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { generation },
+            scrolloverReadWriter = { _, _ -> },
+            scrolloverUnreadWriter = { _, _ -> unreadWrites += 1 },
+            monotonicMillis = { 3_000L },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+        store.markReadFromScrollover(listOf(1L, 2L, 3L))
+        store.completeScrolloverInteraction()
+        assertTrue(store.undoState.value.visible)
+
+        generation = 42L
+        val restored = store.undoScrollover()
+
+        assertTrue(restored.isEmpty())
+        assertEquals(0, unreadWrites)
+        assertFalse(store.undoState.value.visible)
+    }
+
+    @Test
     fun scrolloverWriteFailureRollsBackOptimisticReadStateAndCount() = runBlocking {
         val store = AndroidArticleTimelineStore(
             pageLoader = { _, _ ->
@@ -569,6 +733,181 @@ class AndroidArticleTimelineTest {
                 AndroidArticlePresentationMode.Visual,
                 null,
             ),
+        )
+    }
+
+    @Test
+    fun rowLayoutVariantsMatchCurrentSharedPresentationSemantics() {
+        val image = "https://example.test/image.jpg"
+
+        assertEquals(
+            AndroidArticleRowLayoutVariant.Compact,
+            AndroidArticleRowPolicy.layoutVariant(
+                AndroidArticlePresentationMode.Compact,
+                image,
+                390,
+            ),
+        )
+        assertEquals(
+            AndroidArticleRowLayoutVariant.VisualPortrait,
+            AndroidArticleRowPolicy.layoutVariant(
+                AndroidArticlePresentationMode.Visual,
+                image,
+                390,
+            ),
+        )
+        assertEquals(
+            AndroidArticleRowLayoutVariant.VisualLandscape,
+            AndroidArticleRowPolicy.layoutVariant(
+                AndroidArticlePresentationMode.Visual,
+                image,
+                700,
+            ),
+        )
+        assertEquals(
+            AndroidArticleRowLayoutVariant.VisualCompactNarrow,
+            AndroidArticleRowPolicy.layoutVariant(
+                AndroidArticlePresentationMode.VisualCompact,
+                image,
+                390,
+            ),
+        )
+        assertEquals(
+            AndroidArticleRowLayoutVariant.VisualCompactWide,
+            AndroidArticleRowPolicy.layoutVariant(
+                AndroidArticlePresentationMode.VisualCompact,
+                image,
+                700,
+            ),
+        )
+        assertEquals(
+            AndroidArticleRowLayoutVariant.VisualTextOnly,
+            AndroidArticleRowPolicy.layoutVariant(
+                AndroidArticlePresentationMode.Visual,
+                null,
+                390,
+            ),
+        )
+        assertEquals(
+            AndroidArticleRowLayoutVariant.VisualCompactTextOnly,
+            AndroidArticleRowPolicy.layoutVariant(
+                AndroidArticlePresentationMode.VisualCompact,
+                null,
+                390,
+            ),
+        )
+    }
+
+    @Test
+    fun feedIconsLoadOncePerUniqueFeedAndThemeVariant() = runBlocking {
+        val calls = mutableListOf<Pair<List<Long>, FeedIconVariant>>()
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(
+                        article(1),
+                        article(2).copy(feedId = 10),
+                        article(3).copy(feedId = 11),
+                    ),
+                    total = 3uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 21L },
+            feedIconLoader = { ids, variant ->
+                calls += ids to variant
+                ids.associateWith { byteArrayOf(it.toByte()) }
+            },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+
+        store.ensureFeedIcon(10L, FeedIconVariant.NORMAL)
+        store.ensureFeedIcon(11L, FeedIconVariant.NORMAL)
+        store.ensureFeedIcon(10L, FeedIconVariant.NORMAL)
+        store.ensureFeedIcon(11L, FeedIconVariant.NORMAL)
+        store.ensureFeedIcon(10L, FeedIconVariant.DARK)
+        store.ensureFeedIcon(11L, FeedIconVariant.DARK)
+
+        assertEquals(
+            listOf(
+                listOf(10L) to FeedIconVariant.NORMAL,
+                listOf(11L) to FeedIconVariant.NORMAL,
+                listOf(10L) to FeedIconVariant.DARK,
+                listOf(11L) to FeedIconVariant.DARK,
+            ),
+            calls,
+        )
+        assertEquals(FeedIconVariant.DARK, store.state.value.feedIconVariant)
+        assertEquals(setOf(10L, 11L), store.state.value.feedIconPngByFeedId.keys)
+    }
+
+    @Test
+    fun feedIconCacheSurvivesTimelineResetWithinSameSession() = runBlocking {
+        val calls = mutableListOf<Pair<List<Long>, FeedIconVariant>>()
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1).copy(feedId = 10)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 31L },
+            feedIconLoader = { ids, variant ->
+                calls += ids to variant
+                ids.associateWith { byteArrayOf(it.toByte()) }
+            },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
+
+        store.reset(selection)
+        store.ensureFeedIcon(10L, FeedIconVariant.NORMAL)
+        store.reset(selection)
+        store.ensureFeedIcon(10L, FeedIconVariant.NORMAL)
+
+        assertEquals(
+            listOf(listOf(10L) to FeedIconVariant.NORMAL),
+            calls,
+        )
+        assertEquals(setOf(10L), store.state.value.feedIconPngByFeedId.keys)
+    }
+
+    @Test
+    fun feedIconCacheIsClearedWhenCoreSessionChanges() = runBlocking {
+        var generation: Long? = 41L
+        val calls = mutableListOf<Pair<List<Long>, FeedIconVariant>>()
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1).copy(feedId = 10)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { generation },
+            feedIconLoader = { ids, variant ->
+                calls += ids to variant
+                ids.associateWith { byteArrayOf(it.toByte()) }
+            },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
+
+        store.reset(selection)
+        store.ensureFeedIcon(10L, FeedIconVariant.NORMAL)
+
+        generation = 42L
+        store.reset(selection)
+        store.ensureFeedIcon(10L, FeedIconVariant.NORMAL)
+
+        assertEquals(
+            listOf(
+                listOf(10L) to FeedIconVariant.NORMAL,
+                listOf(10L) to FeedIconVariant.NORMAL,
+            ),
+            calls,
         )
     }
 

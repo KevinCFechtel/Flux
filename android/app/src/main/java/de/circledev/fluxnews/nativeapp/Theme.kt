@@ -8,17 +8,22 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 @Composable
 fun FluxNewsTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val colorScheme = if (isSystemInDarkTheme()) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val darkScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             dynamicDarkColorScheme(context)
         } else {
             darkColorScheme()
         }
+        darkScheme.copy(
+            background = Color.Black,
+            surface = Color.Black,
+        )
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         dynamicLightColorScheme(context)
     } else {

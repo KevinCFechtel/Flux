@@ -47,5 +47,6 @@ jobs:
       - name: Run Android CI gate
         run: |
           ./android/Build/test.sh
+          ./android/Build/build-app.sh developmentRelease
           ./android/Build/build-app.sh productionRelease
           bash -n android/Build/*.sh

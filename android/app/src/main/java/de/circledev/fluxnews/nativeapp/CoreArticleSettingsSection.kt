@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -55,55 +54,57 @@ internal fun CoreArticleSettingsSection(settings: AndroidCoreArticleSettings) {
     }
 
     HorizontalDivider()
-    Text("Storage & Reader", style = MaterialTheme.typography.titleMedium)
+    SettingsSectionTitle("Storage & Reader")
 
     when {
         loading -> CircularProgressIndicator()
         state != null -> {
             val current = state!!
-            CoreChoiceGroup("Keep read articles") {
-                listOf(
-                    ReadArticleRetention.DAYS30,
-                    ReadArticleRetention.DAYS60,
-                    ReadArticleRetention.DAYS90,
-                    ReadArticleRetention.DAYS180,
-                    ReadArticleRetention.DAYS365,
-                ).forEach { option ->
-                    CoreRadioRow(option.androidDisplayName(), current.retention == option, !saving) {
-                        val previous = current
-                        state = current.copy(retention = option)
-                        saving = true
-                        error = null
-                        scope.launch {
-                            settings.setRetention(option).onFailure {
-                                state = previous
-                                error = "Read article retention setting could not be saved. Please try again."
-                            }
-                            saving = false
-                        }
+            val retentionOptions = listOf(
+                ReadArticleRetention.DAYS30,
+                ReadArticleRetention.DAYS60,
+                ReadArticleRetention.DAYS90,
+                ReadArticleRetention.DAYS180,
+                ReadArticleRetention.DAYS365,
+            )
+            SettingsPickerRow(
+                title = "Keep read articles",
+                selected = current.retention,
+                options = retentionOptions.map { it to it.androidDisplayName() },
+                enabled = !saving,
+            ) { option ->
+                val previous = current
+                state = current.copy(retention = option)
+                saving = true
+                error = null
+                scope.launch {
+                    settings.setRetention(option).onFailure {
+                        state = previous
+                        error = "Read article retention setting could not be saved. Please try again."
                     }
+                    saving = false
                 }
             }
 
-            CoreChoiceGroup("Reader detail limit") {
-                listOf(5_000u, 10_000u, 20_000u).forEach { option ->
-                    CoreRadioRow(
-                        "${option.toInt().formattedWithGrouping()} characters",
-                        current.detailCharacterLimit == option,
-                        !saving,
-                    ) {
-                        val previous = current
-                        state = current.copy(detailCharacterLimit = option)
-                        saving = true
-                        error = null
-                        scope.launch {
-                            settings.setDetailCharacterLimit(option).onFailure {
-                                state = previous
-                                error = "Reader detail limit setting could not be saved. Please try again."
-                            }
-                            saving = false
-                        }
+            val detailLimitOptions = listOf(5_000u, 10_000u, 20_000u)
+            SettingsPickerRow(
+                title = "Reader detail limit",
+                selected = current.detailCharacterLimit,
+                options = detailLimitOptions.map { option ->
+                    option to "${option.toInt().formattedWithGrouping()} characters"
+                },
+                enabled = !saving,
+            ) { option ->
+                val previous = current
+                state = current.copy(detailCharacterLimit = option)
+                saving = true
+                error = null
+                scope.launch {
+                    settings.setDetailCharacterLimit(option).onFailure {
+                        state = previous
+                        error = "Reader detail limit setting could not be saved. Please try again."
                     }
+                    saving = false
                 }
             }
 
@@ -149,32 +150,6 @@ internal fun CoreArticleSettingsSection(settings: AndroidCoreArticleSettings) {
     error?.let {
         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
         if (state == null) TextButton(onClick = ::reload) { Text("Retry") }
-    }
-}
-
-@Composable
-private fun CoreChoiceGroup(title: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        content()
-    }
-}
-
-@Composable
-private fun CoreRadioRow(title: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = selected, onClick = onClick, enabled = enabled)
-        Text(
-            title,
-            modifier = Modifier.padding(start = 8.dp),
-            style = MaterialTheme.typography.bodyLarge,
-            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-        )
     }
 }
 
