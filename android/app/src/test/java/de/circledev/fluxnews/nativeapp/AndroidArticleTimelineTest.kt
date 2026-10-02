@@ -2,7 +2,9 @@ package de.circledev.fluxnews.nativeapp
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -474,6 +476,54 @@ class AndroidArticleTimelineTest {
         assertTrue(store.state.value.articles.first { it.id == 1L }.isRead)
         assertTrue(store.state.value.articles.first { it.id == 3L }.isRead)
         assertEquals(1uL, store.state.value.total)
+    }
+
+    @Test
+    fun scrolloverPublishesOneConfirmationOnlyAfterInteractionCompletes() = runBlocking {
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1), article(2)),
+                    total = 2uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 21L },
+            scrolloverReadWriter = { _, _ -> },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+        val feedback = async { store.feedback.first() }
+
+        assertTrue(store.markReadFromScrollover(listOf(1L)).isEmpty())
+        assertTrue(store.markReadFromScrollover(listOf(2L)).isEmpty())
+        assertFalse(feedback.isCompleted)
+
+        store.completeScrolloverInteraction()
+
+        assertEquals(AndroidTimelineHaptic.Confirmation, feedback.await())
+    }
+
+    @Test
+    fun failedScrolloverDoesNotPublishConfirmation() = runBlocking {
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 22L },
+            scrolloverReadWriter = { _, _ -> error("write failed") },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+
+        assertEquals(listOf(1L), store.markReadFromScrollover(listOf(1L)))
+        store.completeScrolloverInteraction()
+
+        assertNull(withTimeoutOrNull(100) { store.feedback.first() })
     }
 
     @Test
