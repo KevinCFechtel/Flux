@@ -97,18 +97,23 @@ private data class NewsNavigationModel(
 internal fun AdaptiveAppShell(
     bootstrap: AndroidAccountBootstrap,
     coreRuntime: AndroidCoreRuntime,
+    timelineStore: AndroidArticleTimelineStore,
     navigationPreferences: AndroidNavigationPreferences,
     state: AndroidAccountBootstrap.State.Ready,
     onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val navController = rememberNavController()
-    val timelineStore = remember(coreRuntime) { AndroidArticleTimelineStore(coreRuntime) }
     val sessionGeneration by coreRuntime.sessionGeneration.collectAsState()
-    var selectedScope by remember { mutableStateOf<AndroidNewsScope>(AndroidNewsScope.All) }
+    val retainedTimelineSelection = timelineStore.state.value.selection
+    var selectedScope by remember(timelineStore) {
+        mutableStateOf(retainedTimelineSelection?.scope ?: AndroidNewsScope.All)
+    }
     var navigation by remember { mutableStateOf(NewsNavigationModel()) }
     var preferenceState by remember { mutableStateOf<AndroidNavigationPreferenceState?>(null) }
-    var startupScopeApplied by remember { mutableStateOf(false) }
+    var startupScopeApplied by remember(timelineStore) {
+        mutableStateOf(retainedTimelineSelection != null)
+    }
     val navigationRefreshes = remember { Channel<Unit>(capacity = Channel.CONFLATED) }
 
     suspend fun reloadNavigation() {
