@@ -9,7 +9,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.shape.GenericShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -346,10 +346,14 @@ private fun NewsRootContent(
     Box(Modifier.fillMaxSize()) {
         Scaffold(
             topBar = {
-                if (scopeTitleLeading) {
-                TopAppBar(
+                Box(Modifier.fillMaxWidth()) {
+                    StatusBarProtection(
+                        modifier = Modifier.align(Alignment.TopCenter),
+                    )
+                    if (scopeTitleLeading) {
+                        TopAppBar(
                     title = {
-                        Box(Modifier.offset(y = (-6).dp)) {
+                        Box(Modifier.offset(y = (-8).dp)) {
                             ScopeNavigationCapsule(
                                 scope = scope,
                                 showArticleCount = articlePreferences.showArticleCount,
@@ -365,7 +369,7 @@ private fun NewsRootContent(
             } else {
                 CenterAlignedTopAppBar(
                     title = {
-                        Box(Modifier.offset(y = (-6).dp)) {
+                        Box(Modifier.offset(y = (-8).dp)) {
                             ScopeNavigationCapsule(
                                 scope = scope,
                                 showArticleCount = articlePreferences.showArticleCount,
@@ -376,8 +380,9 @@ private fun NewsRootContent(
                             )
                         }
                     },
-                    colors = appBarColors,
-                )
+                        colors = appBarColors,
+                    )
+                }
             }
         },
     ) { padding ->
@@ -396,9 +401,6 @@ private fun NewsRootContent(
                 ),
         )
     }
-        StatusBarProtection(
-            modifier = Modifier.align(Alignment.TopCenter),
-        )
     }
 }
 
@@ -416,13 +418,14 @@ private fun StatusBarProtection(
         )
         Box(
             Modifier
-                .height(3.dp)
+                .height(36.dp)
                 .fillMaxWidth()
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(
-                            surface.copy(alpha = 0.78f),
-                            Color.Transparent,
+                        colorStops = arrayOf(
+                            0f to surface.copy(alpha = 0.78f),
+                            0.45f to surface.copy(alpha = 0.30f),
+                            1f to Color.Transparent,
                         ),
                     ),
                 ),
@@ -652,74 +655,6 @@ private fun DrawerIcon(drawable: Int, description: String) {
     Icon(painterResource(drawable), description)
 }
 
-private val ConnectedScopeChromeShape = GenericShape { size, _ ->
-    val bodyTop = size.height * 0.20f
-    val bodyRadius = (size.height - bodyTop) / 2f
-    val bodyCenterY = bodyTop + bodyRadius
-    val stemWidth = size.width * 0.52f
-    val stemLeft = (size.width - stemWidth) / 2f
-    val stemRight = stemLeft + stemWidth
-    val shoulderStartY = size.height * 0.07f
-    val rightBodyTangent = size.width - bodyRadius
-    val leftBodyTangent = bodyRadius
-    val circleControl = bodyRadius * 0.5522848f
-
-    moveTo(stemLeft, 0f)
-    lineTo(stemRight, 0f)
-    lineTo(stemRight, shoulderStartY)
-    cubicTo(
-        stemRight,
-        bodyTop * 0.88f,
-        rightBodyTangent - bodyRadius * 0.22f,
-        bodyTop,
-        rightBodyTangent,
-        bodyTop,
-    )
-    cubicTo(
-        rightBodyTangent + circleControl,
-        bodyTop,
-        size.width,
-        bodyCenterY - circleControl,
-        size.width,
-        bodyCenterY,
-    )
-    cubicTo(
-        size.width,
-        bodyCenterY + circleControl,
-        rightBodyTangent + circleControl,
-        size.height,
-        rightBodyTangent,
-        size.height,
-    )
-    lineTo(leftBodyTangent, size.height)
-    cubicTo(
-        leftBodyTangent - circleControl,
-        size.height,
-        0f,
-        bodyCenterY + circleControl,
-        0f,
-        bodyCenterY,
-    )
-    cubicTo(
-        0f,
-        bodyCenterY - circleControl,
-        leftBodyTangent - circleControl,
-        bodyTop,
-        leftBodyTangent,
-        bodyTop,
-    )
-    cubicTo(
-        leftBodyTangent + bodyRadius * 0.22f,
-        bodyTop,
-        stemLeft,
-        bodyTop * 0.88f,
-        stemLeft,
-        shoulderStartY,
-    )
-    lineTo(stemLeft, 0f)
-    close()
-}
-
 @Composable
 private fun ScopeNavigationCapsule(
     scope: AndroidNewsScope,
@@ -732,14 +667,14 @@ private fun ScopeNavigationCapsule(
     Surface(
         onClick = onOpenNavigation,
         enabled = opensNavigation,
-        shape = ConnectedScopeChromeShape,
+        shape = CircleShape,
         color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.84f),
         contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp,
         shadowElevation = 1.dp,
     ) {
         Row(
-            modifier = Modifier.padding(start = 14.dp, top = 13.dp, end = 14.dp, bottom = 5.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
