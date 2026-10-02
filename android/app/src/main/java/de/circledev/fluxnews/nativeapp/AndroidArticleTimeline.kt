@@ -328,6 +328,11 @@ internal class AndroidArticleTimelineStore private constructor(
     val feedback = mutableFeedback.asSharedFlow()
     val undoState = mutableUndoState.asStateFlow()
 
+    fun retainedSelectionForSession(sessionGeneration: Long?): AndroidArticleTimelineSelection? =
+        mutableState.value
+            .takeIf { it.sessionGeneration == sessionGeneration }
+            ?.selection
+
     suspend fun reset(selection: AndroidArticleTimelineSelection) {
         scrolloverRetainedReadIds.clear()
         scrolloverFeedbackSuppressedReadIds.clear()
