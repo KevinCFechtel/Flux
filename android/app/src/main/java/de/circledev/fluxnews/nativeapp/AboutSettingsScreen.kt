@@ -16,7 +16,6 @@ internal fun AboutSettingsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("About", style = MaterialTheme.typography.headlineMedium)
         Text("FluxNews", style = MaterialTheme.typography.titleLarge)
         Text("Version ${packageInfo.versionName ?: "unknown"} (${packageInfo.longVersionCode})", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("A native Miniflux client with a shared Rust core.")
