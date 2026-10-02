@@ -157,6 +157,7 @@ internal data class AndroidArticleTimelineState(
 internal class AndroidArticleTimelineStore private constructor(
     private val pageLoader: suspend (ArticleQuery, Boolean) -> ArticlePage,
     private val audioArticleIdsLoader: suspend (List<Long>) -> Set<Long>,
+    private val selectionCountLoader: suspend (ArticleQuery) -> ULong,
     private val activeSessionGeneration: () -> Long?,
 ) {
     internal constructor(coreRuntime: AndroidCoreRuntime) : this(
@@ -177,6 +178,9 @@ internal class AndroidArticleTimelineStore private constructor(
                 }
             }
         },
+        selectionCountLoader = { query ->
+            coreRuntime.local { core -> core.countArticles(query) }
+        },
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
     )
 
@@ -184,8 +188,9 @@ internal class AndroidArticleTimelineStore private constructor(
         pageLoader: suspend (ArticleQuery, Boolean) -> ArticlePage,
         activeSessionGeneration: () -> Long?,
         audioArticleIdsLoader: suspend (List<Long>) -> Set<Long> = { emptySet() },
+        selectionCountLoader: suspend (ArticleQuery) -> ULong = { 0uL },
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
-    ) : this(pageLoader, audioArticleIdsLoader, activeSessionGeneration)
+    ) : this(pageLoader, audioArticleIdsLoader, selectionCountLoader, activeSessionGeneration)
 
     private val mutableState = MutableStateFlow(AndroidArticleTimelineState())
     private var requestGeneration = 0L
@@ -265,9 +270,7 @@ internal class AndroidArticleTimelineStore private constructor(
             return
         }
 
-        if (index < 0) return
-
-        mutableState.update { state ->
+        if (index >= 0) mutableState.update { state ->
             if (state.selection != selection || state.sessionGeneration != current.sessionGeneration) return@update state
             val currentIndex = state.articles.indexOfFirst { it.id == articleId }
             if (currentIndex < 0) return@update state
@@ -276,13 +279,16 @@ internal class AndroidArticleTimelineStore private constructor(
                 state.copy(
                     articles = state.articles.filterNot { it.id == articleId },
                     audioArticleIds = state.audioArticleIds - articleId,
-                    total = state.total?.let { if (it > 0uL) it - 1uL else 0uL },
                 )
             } else {
                 val articles = state.articles.toMutableList()
                 articles[currentIndex] = articles[currentIndex].copy(isRead = read)
                 state.copy(articles = articles)
             }
+        }
+
+        if (selection.readFilter == AndroidArticleReadFilter.Unread && read) {
+            refreshSelectionTotal(selection, current.queryGeneration, current.sessionGeneration)
         }
     }
 
@@ -300,9 +306,7 @@ internal class AndroidArticleTimelineStore private constructor(
             return
         }
 
-        if (index < 0) return
-
-        mutableState.update { state ->
+        if (index >= 0) mutableState.update { state ->
             if (state.selection != selection || state.sessionGeneration != current.sessionGeneration) return@update state
             val currentIndex = state.articles.indexOfFirst { it.id == articleId }
             if (currentIndex < 0) return@update state
@@ -311,12 +315,40 @@ internal class AndroidArticleTimelineStore private constructor(
                 state.copy(
                     articles = state.articles.filterNot { it.id == articleId },
                     audioArticleIds = state.audioArticleIds - articleId,
-                    total = state.total?.let { if (it > 0uL) it - 1uL else 0uL },
                 )
             } else {
                 val articles = state.articles.toMutableList()
                 articles[currentIndex] = articles[currentIndex].copy(isStarred = starred)
                 state.copy(articles = articles)
+            }
+        }
+
+        if (starredScope && !starred) {
+            refreshSelectionTotal(selection, current.queryGeneration, current.sessionGeneration)
+        }
+    }
+
+    private suspend fun refreshSelectionTotal(
+        selection: AndroidArticleTimelineSelection,
+        generation: Long,
+        sessionGeneration: Long?,
+    ) {
+        val ownedSession = sessionGeneration ?: return
+        val total = try {
+            selectionCountLoader(selection.coreQuery())
+        } catch (_: Exception) {
+            return
+        }
+        if (!owns(generation, selection, ownedSession)) return
+        mutableState.update { state ->
+            if (
+                state.queryGeneration == generation &&
+                state.selection == selection &&
+                state.sessionGeneration == ownedSession
+            ) {
+                state.copy(total = total)
+            } else {
+                state
             }
         }
     }
