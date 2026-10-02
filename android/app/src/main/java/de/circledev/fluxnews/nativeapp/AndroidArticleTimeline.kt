@@ -1342,6 +1342,7 @@ private fun ArticleMetadataRow(
     feedIconPng: ByteArray?,
     feedIconVariant: FeedIconVariant,
     onRequestFeedIcon: suspend (Long, FeedIconVariant) -> Unit,
+    requestIfMissing: Boolean = true,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1354,6 +1355,7 @@ private fun ArticleMetadataRow(
             pngData = feedIconPng,
             variant = feedIconVariant,
             onRequest = onRequestFeedIcon,
+            requestIfMissing = requestIfMissing,
         )
         Text(
             article.feedTitle,
