@@ -104,7 +104,6 @@ internal fun ConfigurationBackupScreen(
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         onDismiss?.let { dismiss -> TextButton(onClick = dismiss) { Text("Back to account setup") } }
         if (allowExport) {
-            Text("Configuration Backup", style = MaterialTheme.typography.headlineMedium)
             Text("Backups are password-encrypted and include the account, Core settings, feed preferences, and Android settings. Articles, downloads, and playback state are not included.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             SettingsSectionTitle("Export")
             OutlinedTextField(exportPassword, { exportPassword = it }, label = { Text("Backup password") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
