@@ -37,6 +37,7 @@ class MainActivity : ComponentActivity() {
         val bootstrap = application.accountBootstrap
         val coreRuntime = application.coreRuntime
         val syncCoordinator = application.syncCoordinator
+        val timelineStore = application.timelineStore
         val navigationPreferences = application.navigationPreferences
         val articlePreferences = application.articlePreferences
         val actionBarPreferences = application.actionBarPreferences
@@ -56,7 +57,7 @@ class MainActivity : ComponentActivity() {
                     LocalAndroidBackgroundSync provides backgroundSync,
                     LocalAndroidConfigurationBackup provides configurationBackup,
                 ) {
-                    FluxNewsApp(bootstrap, coreRuntime, syncCoordinator, navigationPreferences, backgroundSync)
+                    FluxNewsApp(bootstrap, coreRuntime, syncCoordinator, timelineStore, navigationPreferences, backgroundSync)
                 }
             }
         }
@@ -64,11 +65,11 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun FluxNewsApp(bootstrap: AndroidAccountBootstrap, coreRuntime: AndroidCoreRuntime, syncCoordinator: AndroidSyncCoordinator, navigationPreferences: AndroidNavigationPreferences, backgroundSync: AndroidBackgroundSync) {
+private fun FluxNewsApp(bootstrap: AndroidAccountBootstrap, coreRuntime: AndroidCoreRuntime, syncCoordinator: AndroidSyncCoordinator, timelineStore: AndroidArticleTimelineStore, navigationPreferences: AndroidNavigationPreferences, backgroundSync: AndroidBackgroundSync) {
     var bootstrapState by remember { mutableStateOf(bootstrap.state) }; var retryGeneration by remember { mutableStateOf(0) }; var showingRestore by remember { mutableStateOf(false) }
     LaunchedEffect(bootstrap, retryGeneration) { bootstrapState = bootstrap.restoreStoredAccount() }
     val readyState = bootstrapState as? AndroidAccountBootstrap.State.Ready
-    LaunchedEffect(readyState?.serverUrl) { if (readyState != null) { syncCoordinator.requestSync(SyncReason.APP_START); backgroundSync.reconcileFromCore() } }
+    LaunchedEffect(readyState?.serverUrl) { if (readyState != null) backgroundSync.reconcileFromCore() }
     fun acceptActivatedAccount(ready: AndroidAccountBootstrap.State.Ready) { bootstrapState = ready; syncCoordinator.requestSync(SyncReason.APP_START) }
     Surface(modifier = Modifier.fillMaxSize()) {
         when (val state = bootstrapState) {
@@ -97,7 +98,10 @@ private fun FluxNewsApp(bootstrap: AndroidAccountBootstrap, coreRuntime: Android
                 }
             }
             is AndroidAccountBootstrap.State.RecoverableError -> RecoverableStartup(state.message, bootstrap, { bootstrapState = AndroidAccountBootstrap.State.Starting; retryGeneration += 1 }, ::acceptActivatedAccount)
-            is AndroidAccountBootstrap.State.Ready -> AdaptiveAppShell(bootstrap, coreRuntime, navigationPreferences, state, { changedState -> bootstrapState = changedState; if (changedState is AndroidAccountBootstrap.State.Ready) syncCoordinator.requestSync(SyncReason.APP_START) }, Modifier.fillMaxSize())
+            is AndroidAccountBootstrap.State.Ready -> AdaptiveAppShell(bootstrap, coreRuntime, timelineStore, navigationPreferences, state, { changedState ->
+                bootstrapState = changedState
+                if (changedState is AndroidAccountBootstrap.State.Ready) syncCoordinator.requestSync(SyncReason.APP_START)
+            }, Modifier.fillMaxSize())
         }
     }
 }
