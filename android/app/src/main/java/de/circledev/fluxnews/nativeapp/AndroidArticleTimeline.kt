@@ -55,6 +55,7 @@ import coil3.compose.AsyncImage
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.Date
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.asStateFlow
@@ -75,6 +76,8 @@ import uniffi.flux_uniffi.StarredFilter
 
 private const val ANDROID_ARTICLE_TIMELINE_PAGE_SIZE = 64
 private const val ANDROID_ARTICLE_TIMELINE_PREFETCH_DISTANCE = 8
+private const val ANDROID_FEED_ICON_BATCH_SIZE = 8
+private const val ANDROID_FEED_ICON_RETRY_DELAY_MILLIS = 1_500L
 
 internal enum class AndroidArticleReadFilter {
     Unread,
@@ -268,6 +271,7 @@ internal class AndroidArticleTimelineStore private constructor(
 
     private val mutableState = MutableStateFlow(AndroidArticleTimelineState())
     private val scrolloverRetainedReadIds = mutableSetOf<Long>()
+    private val feedIconCacheByVariant = mutableMapOf<FeedIconVariant, MutableMap<Long, ByteArray>>()
     private var requestGeneration = 0L
 
     val state = mutableState.asStateFlow()
@@ -276,8 +280,11 @@ internal class AndroidArticleTimelineStore private constructor(
         scrolloverRetainedReadIds.clear()
         val generation = ++requestGeneration
         val sessionGeneration = activeSessionGeneration()
+        val previous = mutableState.value
         mutableState.value = AndroidArticleTimelineState(
             selection = selection,
+            feedIconVariant = previous.feedIconVariant,
+            feedIconPngByFeedId = previous.feedIconPngByFeedId,
             initialLoading = true,
             queryGeneration = generation,
             sessionGeneration = sessionGeneration,
@@ -500,43 +507,69 @@ internal class AndroidArticleTimelineStore private constructor(
         }
     }
 
-    suspend fun ensureFeedIcons(variant: FeedIconVariant) {
+    suspend fun ensureFeedIcons(variant: FeedIconVariant): Boolean {
         val current = mutableState.value
-        val selection = current.selection ?: return
-        val sessionGeneration = current.sessionGeneration ?: return
-        if (activeSessionGeneration() != sessionGeneration) return
+        val selection = current.selection ?: return false
+        val sessionGeneration = current.sessionGeneration ?: return false
+        if (activeSessionGeneration() != sessionGeneration) return false
 
-        val loadedForVariant = if (current.feedIconVariant == variant) {
-            current.feedIconPngByFeedId.keys
-        } else {
-            emptySet()
-        }
-        val missingFeedIds = current.articles.asSequence()
+        val cache = feedIconCacheByVariant.getOrPut(variant) { mutableMapOf() }
+        val requiredFeedIds = current.articles.asSequence()
             .map { it.feedId }
             .distinct()
-            .filterNot { it in loadedForVariant }
             .toList()
-        if (missingFeedIds.isEmpty() && current.feedIconVariant == variant) return
 
-        val loaded = try {
-            feedIconLoader(missingFeedIds, variant)
-        } catch (_: Exception) {
-            emptyMap()
+        publishFeedIconCache(
+            generation = current.queryGeneration,
+            selection = selection,
+            sessionGeneration = sessionGeneration,
+            variant = variant,
+            cache = cache,
+        )
+
+        val missingFeedIds = requiredFeedIds.filterNot(cache::containsKey)
+        if (missingFeedIds.isEmpty()) return false
+
+        for (batch in missingFeedIds.chunked(ANDROID_FEED_ICON_BATCH_SIZE)) {
+            val loaded = try {
+                feedIconLoader(batch, variant)
+            } catch (_: Exception) {
+                emptyMap()
+            }
+            if (!owns(current.queryGeneration, selection, sessionGeneration)) return false
+            if (loaded.isNotEmpty()) {
+                cache.putAll(loaded)
+                publishFeedIconCache(
+                    generation = current.queryGeneration,
+                    selection = selection,
+                    sessionGeneration = sessionGeneration,
+                    variant = variant,
+                    cache = cache,
+                )
+            }
         }
-        if (!owns(current.queryGeneration, selection, sessionGeneration)) return
 
+        return requiredFeedIds.any { it !in cache }
+    }
+
+    private fun publishFeedIconCache(
+        generation: Long,
+        selection: AndroidArticleTimelineSelection,
+        sessionGeneration: Long,
+        variant: FeedIconVariant,
+        cache: Map<Long, ByteArray>,
+    ) {
         mutableState.update { state ->
             if (
-                state.queryGeneration != current.queryGeneration ||
+                state.queryGeneration != generation ||
                 state.selection != selection ||
                 state.sessionGeneration != sessionGeneration
             ) {
                 return@update state
             }
-            val existing = if (state.feedIconVariant == variant) state.feedIconPngByFeedId else emptyMap()
             state.copy(
                 feedIconVariant = variant,
-                feedIconPngByFeedId = existing + loaded,
+                feedIconPngByFeedId = cache,
             )
         }
     }
@@ -668,7 +701,11 @@ internal fun AndroidArticleTimeline(
     }
 
     LaunchedEffect(state.articles.map { it.feedId }, feedIconVariant) {
-        store.ensureFeedIcons(feedIconVariant)
+        val unresolved = store.ensureFeedIcons(feedIconVariant)
+        if (unresolved) {
+            delay(ANDROID_FEED_ICON_RETRY_DELAY_MILLIS)
+            store.ensureFeedIcons(feedIconVariant)
+        }
     }
 
     LaunchedEffect(listState, scrolloverTracker, articlePreferences.markReadOnScrollover) {
