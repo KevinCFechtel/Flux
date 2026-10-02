@@ -113,7 +113,7 @@ internal fun AdaptiveAppShell(
     }
     var navigation by remember { mutableStateOf(NewsNavigationModel()) }
     var preferenceState by remember { mutableStateOf<AndroidNavigationPreferenceState?>(null) }
-    var startupScopeApplied by remember(timelineStore) {
+    var startupScopeApplied by remember(timelineStore, sessionGeneration) {
         mutableStateOf(retainedTimelineSelection != null)
     }
     val navigationRefreshes = remember { Channel<Unit>(capacity = Channel.CONFLATED) }
