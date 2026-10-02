@@ -50,7 +50,6 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
                     .maxSizeBytes(256L * 1024L * 1024L)
                     .build()
             }
-            .crossfade(150)
             .build()
 
     override fun onCreate() {
