@@ -308,7 +308,11 @@ internal class AndroidArticleTimelineStore private constructor(
             }
         }
 
-        if (selection.readFilter == AndroidArticleReadFilter.Unread && read) {
+        if (
+            selection.readFilter == AndroidArticleReadFilter.Unread &&
+            read &&
+            !retainScrolloverRow
+        ) {
             refreshSelectionTotal(selection, current.queryGeneration, current.sessionGeneration)
         }
     }
@@ -342,6 +346,14 @@ internal class AndroidArticleTimelineStore private constructor(
                 articles = state.articles.map { article ->
                     if (article.id in acceptedSet) article.copy(isRead = true) else article
                 },
+                total = if (selection.readFilter == AndroidArticleReadFilter.Unread) {
+                    state.total?.let { total ->
+                        val delta = accepted.size.toULong().coerceAtMost(total)
+                        total - delta
+                    }
+                } else {
+                    state.total
+                },
             )
         }
 
@@ -356,6 +368,11 @@ internal class AndroidArticleTimelineStore private constructor(
                     state.copy(
                         articles = state.articles.map { article ->
                             if (article.id in acceptedSet) article.copy(isRead = false) else article
+                        },
+                        total = if (selection.readFilter == AndroidArticleReadFilter.Unread) {
+                            state.total?.plus(accepted.size.toULong())
+                        } else {
+                            state.total
                         },
                     )
                 }
