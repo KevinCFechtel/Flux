@@ -152,7 +152,7 @@ private fun ArticleSettingsScreen(preferences: AndroidArticlePreferences, state:
     }
 }
 
-@Composable private fun ArticleSwipeSettingsSection(preferences: AndroidArticlePreferences, configuration: AndroidArticleSwipeConfiguration) { val scope = rememberCoroutineScope(); HorizontalDivider(); Text("Swipe actions", style = MaterialTheme.typography.titleMedium); Text("Choose up to two actions on each side. The Full Swipe action is the outer action and is triggered when the row is swiped all the way.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant); SwipeSideSettings("Swipe right", AndroidArticleSwipeSide.Leading, configuration, preferences, scope); SwipeSideSettings("Swipe left", AndroidArticleSwipeSide.Trailing, configuration, preferences, scope) }
+@Composable private fun ArticleSwipeSettingsSection(preferences: AndroidArticlePreferences, configuration: AndroidArticleSwipeConfiguration) { val scope = rememberCoroutineScope(); HorizontalDivider(); SettingsSectionTitle("Swipe actions"); Text("Choose up to two actions on each side. The Full Swipe action is the outer action and is triggered when the row is swiped all the way.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant); SwipeSideSettings("Swipe right", AndroidArticleSwipeSide.Leading, configuration, preferences, scope); SwipeSideSettings("Swipe left", AndroidArticleSwipeSide.Trailing, configuration, preferences, scope) }
 @Composable private fun SwipeSideSettings(title: String, side: AndroidArticleSwipeSide, configuration: AndroidArticleSwipeConfiguration, preferences: AndroidArticlePreferences, scope: CoroutineScope) { Column { Text(title, style = MaterialTheme.typography.titleSmall); SwipeSlotSettings("Full Swipe", side, AndroidArticleSwipeSlot.FullSwipe, configuration.fullSwipeAction(side), configuration, preferences, scope, true); SwipeSlotSettings("Additional Action", side, AndroidArticleSwipeSlot.Additional, configuration.additionalAction(side), configuration, preferences, scope, true, configuration.fullSwipeAction(side) != null) } }
 @Composable
 private fun SwipeSlotSettings(
@@ -184,10 +184,10 @@ private fun SwipeSlotSettings(
 private fun ActionBarSettingsScreen(preferences: AndroidActionBarPreferences, state: AndroidActionBarPreferenceState, modifier: Modifier) {
     val scope = rememberCoroutineScope(); val available = AndroidActionBarAction.entries.filterNot(state.actions::contains)
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Action Bar", style = MaterialTheme.typography.headlineMedium); Text("Choose the article-list actions and their display priority.", color = MaterialTheme.colorScheme.onSurfaceVariant); Text("Article List Actions", style = MaterialTheme.typography.titleMedium); ActionBarFixedRow("Sync", "Always shown")
+        Text("Action Bar", style = MaterialTheme.typography.headlineMedium); Text("Choose the article-list actions and their display priority.", color = MaterialTheme.colorScheme.onSurfaceVariant); SettingsSectionTitle("Article List Actions"); ActionBarFixedRow("Sync", "Always shown")
         state.actions.forEachIndexed { index, action -> Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) { Text(action.displayName, Modifier.weight(1f)); TextButton(enabled = index > 0, onClick = { scope.launch { preferences.moveUp(action, state.actions) } }) { Text("↑") }; TextButton(enabled = index < state.actions.lastIndex, onClick = { scope.launch { preferences.moveDown(action, state.actions) } }) { Text("↓") }; TextButton(onClick = { scope.launch { preferences.remove(action, state.actions) } }) { Text("Remove") } } }
         ActionBarFixedRow("More", "Always available"); Text("Sync stays fixed at the beginning and More stays available as the fallback. The order of selected actions sets their display priority.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (available.isNotEmpty()) { HorizontalDivider(); Text("Available Actions", style = MaterialTheme.typography.titleMedium); available.forEach { action -> TextButton(onClick = { scope.launch { preferences.add(action, state.actions) } }, modifier = Modifier.fillMaxWidth()) { Text("+ ${action.displayName}", Modifier.fillMaxWidth()) } } }
+        if (available.isNotEmpty()) { HorizontalDivider(); SettingsSectionTitle("Available Actions"); available.forEach { action -> TextButton(onClick = { scope.launch { preferences.add(action, state.actions) } }, modifier = Modifier.fillMaxWidth()) { Text("+ ${action.displayName}", Modifier.fillMaxWidth()) } } }
         HorizontalDivider(); TextButton(onClick = { scope.launch { preferences.resetToDefault() } }) { Text("Reset to Default") }
     }
 }
@@ -263,7 +263,7 @@ private fun MediaSettingsScreen(settings: AndroidMediaSettings, modifier: Modifi
     Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Media", style = MaterialTheme.typography.headlineMedium); val current = state
         if (current == null) CircularProgressIndicator() else {
-            Text("Downloads", style = MaterialTheme.typography.titleMedium)
+            SettingsSectionTitle("Downloads")
             SettingsPickerRow(
                 title = "Download Network",
                 selected = current.downloadNetworkPolicy,
@@ -298,7 +298,7 @@ private fun MediaSettingsScreen(settings: AndroidMediaSettings, modifier: Modifi
                 }
             }
             HorizontalDivider()
-            Text("Listening List", style = MaterialTheme.typography.titleMedium)
+            SettingsSectionTitle("Listening List")
             SettingsSwitchRow("Automatically download Listening List audio", current.autoDownloadListeningList, !saving) { value ->
                 scope.launch {
                     saving = true
@@ -347,6 +347,15 @@ private fun DownloadedDataSettingsScreen(downloadedData: AndroidDownloadedData, 
 }
 @Composable private fun DownloadedDataValueRow(label: String, value: String) { Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) { Text(label, Modifier.weight(1f)); Text(value, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
 private fun formatBytes(bytes: ULong): String { var amount = bytes.toDouble(); val units = arrayOf("B", "KB", "MB", "GB", "TB"); var index = 0; while (amount >= 1000.0 && index < units.lastIndex) { amount /= 1000.0; index++ }; return if (index == 0) "$bytes B" else String.format(java.util.Locale.getDefault(), "%.1f %s", amount, units[index]) }
+
+@Composable
+internal fun SettingsSectionTitle(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.primary,
+    )
+}
 
 @Composable
 internal fun <T> SettingsPickerRow(
