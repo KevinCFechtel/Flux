@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -85,7 +86,19 @@ internal enum class AndroidArticleAccessory {
     Audio,
 }
 
+internal enum class AndroidArticleRowLayoutVariant {
+    Compact,
+    VisualTextOnly,
+    VisualPortrait,
+    VisualLandscape,
+    VisualCompactTextOnly,
+    VisualCompactNarrow,
+    VisualCompactWide,
+}
+
 internal object AndroidArticleRowPolicy {
+    private const val WIDE_LAYOUT_THRESHOLD_DP = 600
+
     fun accessories(article: ArticleSummary, hasAudio: Boolean): List<AndroidArticleAccessory> = buildList {
         if (!article.isRead) add(AndroidArticleAccessory.Unread)
         if (article.isStarred) add(AndroidArticleAccessory.Star)
@@ -95,6 +108,28 @@ internal object AndroidArticleRowPolicy {
 
     fun showsImage(mode: AndroidArticlePresentationMode, imageUrl: String?): Boolean =
         mode != AndroidArticlePresentationMode.Compact && !imageUrl.isNullOrBlank()
+
+    fun layoutVariant(
+        mode: AndroidArticlePresentationMode,
+        imageUrl: String?,
+        availableWidthDp: Int,
+    ): AndroidArticleRowLayoutVariant {
+        val hasImage = showsImage(mode, imageUrl)
+        val wide = availableWidthDp > WIDE_LAYOUT_THRESHOLD_DP
+        return when (mode) {
+            AndroidArticlePresentationMode.Compact -> AndroidArticleRowLayoutVariant.Compact
+            AndroidArticlePresentationMode.Visual -> when {
+                !hasImage -> AndroidArticleRowLayoutVariant.VisualTextOnly
+                wide -> AndroidArticleRowLayoutVariant.VisualLandscape
+                else -> AndroidArticleRowLayoutVariant.VisualPortrait
+            }
+            AndroidArticlePresentationMode.VisualCompact -> when {
+                !hasImage -> AndroidArticleRowLayoutVariant.VisualCompactTextOnly
+                wide -> AndroidArticleRowLayoutVariant.VisualCompactWide
+                else -> AndroidArticleRowLayoutVariant.VisualCompactNarrow
+            }
+        }
+    }
 }
 
 internal fun parseArticlePublishedAtMillis(value: String): Long? =
@@ -714,108 +749,204 @@ private fun AndroidArticleTimelineRow(
     preferences: AndroidArticlePreferenceState,
     publicationReferenceMillis: Long,
 ) {
-    Column(
+    BoxWithConstraints(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            article.feedTitle,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
+        val layoutVariant = AndroidArticleRowPolicy.layoutVariant(
+            mode = preferences.presentationMode,
+            imageUrl = article.imageUrl,
+            availableWidthDp = maxWidth.value.toInt(),
         )
+        val metadata: @Composable () -> Unit = {
+            ArticleMetadataRow(article = article, hasAudio = hasAudio)
+        }
+        val title: @Composable () -> Unit = {
+            ArticleTitle(article)
+        }
+        val publication: @Composable () -> Unit = {
+            ArticlePublicationRow(
+                article = article,
+                preferences = preferences,
+                publicationReferenceMillis = publicationReferenceMillis,
+            )
+        }
+        val preview: @Composable () -> Unit = {
+            ArticlePreview(article = article, preferences = preferences)
+        }
 
-        when (preferences.presentationMode) {
-            AndroidArticlePresentationMode.Compact -> {
-                ArticleTextContent(
-                    article = article,
-                    preferences = preferences,
-                    publicationReferenceMillis = publicationReferenceMillis,
-                )
+        when (layoutVariant) {
+            AndroidArticleRowLayoutVariant.Compact,
+            AndroidArticleRowLayoutVariant.VisualTextOnly,
+            AndroidArticleRowLayoutVariant.VisualCompactTextOnly,
+            -> {
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    metadata()
+                    title()
+                    publication()
+                    preview()
+                }
             }
-            AndroidArticlePresentationMode.Visual -> {
-                ArticleTextContent(
-                    article = article,
-                    preferences = preferences,
-                    publicationReferenceMillis = publicationReferenceMillis,
-                )
-                if (AndroidArticleRowPolicy.showsImage(preferences.presentationMode, article.imageUrl)) {
+
+            AndroidArticleRowLayoutVariant.VisualPortrait -> {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     ArticleImage(
                         imageUrl = article.imageUrl!!,
                         modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
                     )
+                    metadata()
+                    title()
+                    publication()
+                    preview()
                 }
             }
-            AndroidArticlePresentationMode.VisualCompact -> {
+
+            AndroidArticleRowLayoutVariant.VisualLandscape -> {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
                     verticalAlignment = Alignment.Top,
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        ArticleTextContent(
-                            article = article,
-                            preferences = preferences,
-                            publicationReferenceMillis = publicationReferenceMillis,
-                        )
+                    ArticleImage(
+                        imageUrl = article.imageUrl!!,
+                        modifier = Modifier.weight(0.48f).aspectRatio(16f / 9f),
+                    )
+                    Column(
+                        modifier = Modifier.weight(0.52f),
+                        verticalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        metadata()
+                        title()
+                        publication()
+                        preview()
                     }
-                    if (AndroidArticleRowPolicy.showsImage(preferences.presentationMode, article.imageUrl)) {
+                }
+            }
+
+            AndroidArticleRowLayoutVariant.VisualCompactNarrow -> {
+                val imageWidth = maxWidth * 0.32f
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    metadata()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
+                            title()
+                            publication()
+                        }
                         ArticleImage(
                             imageUrl = article.imageUrl!!,
-                            modifier = Modifier.width(112.dp).height(84.dp),
+                            modifier = Modifier.width(imageWidth).aspectRatio(4f / 3f),
+                        )
+                    }
+                    preview()
+                }
+            }
+
+            AndroidArticleRowLayoutVariant.VisualCompactWide -> {
+                val imageWidth = maxWidth * 0.32f
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    metadata()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
+                            title()
+                            publication()
+                            preview()
+                        }
+                        ArticleImage(
+                            imageUrl = article.imageUrl!!,
+                            modifier = Modifier.width(imageWidth).aspectRatio(4f / 3f),
                         )
                     }
                 }
             }
         }
-
-        ArticleAccessories(
-            accessories = AndroidArticleRowPolicy.accessories(article, hasAudio),
-        )
     }
     HorizontalDivider()
 }
 
 @Composable
-private fun ArticleTextContent(
+private fun ArticleMetadataRow(
+    article: ArticleSummary,
+    hasAudio: Boolean,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            article.feedTitle,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ArticleAccessories(
+            article = article,
+            hasAudio = hasAudio,
+        )
+    }
+}
+
+@Composable
+private fun ArticleTitle(article: ArticleSummary) {
+    Text(
+        article.title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = if (article.isRead) FontWeight.Normal else FontWeight.SemiBold,
+        color = if (article.isRead) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        },
+    )
+}
+
+@Composable
+private fun ArticlePublicationRow(
     article: ArticleSummary,
     preferences: AndroidArticlePreferenceState,
     publicationReferenceMillis: Long,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            article.title,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = if (article.isRead) FontWeight.Normal else FontWeight.SemiBold,
-            color = if (article.isRead) {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            } else {
-                MaterialTheme.colorScheme.onSurface
-            },
-        )
-        Text(
-            publicationLabel(
-                article = article,
-                relative = preferences.showRelativePublicationTime,
-                referenceMillis = publicationReferenceMillis,
-            ),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        val preview = article.preview.trim()
-        if (preview.isNotEmpty()) {
-            Text(
-                preview,
-                maxLines = preferences.previewLines.lineCount,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
+    Text(
+        publicationLabel(
+            article = article,
+            relative = preferences.showRelativePublicationTime,
+            referenceMillis = publicationReferenceMillis,
+        ),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun ArticlePreview(
+    article: ArticleSummary,
+    preferences: AndroidArticlePreferenceState,
+) {
+    val preview = article.preview.trim()
+    if (preview.isEmpty()) return
+    Text(
+        preview,
+        maxLines = preferences.previewLines.lineCount,
+        overflow = TextOverflow.Ellipsis,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
@@ -864,37 +995,50 @@ private fun ArticleImage(imageUrl: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ArticleAccessories(accessories: List<AndroidArticleAccessory>) {
-    if (accessories.isEmpty()) return
+private fun ArticleAccessories(
+    article: ArticleSummary,
+    hasAudio: Boolean,
+) {
     Row(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        accessories.forEach { accessory ->
-            when (accessory) {
-                AndroidArticleAccessory.Unread -> Box(
-                    Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary),
-                )
-                AndroidArticleAccessory.Star -> Icon(
+        if (hasAudio) {
+            Icon(
+                painter = painterResource(R.drawable.ic_headphones),
+                contentDescription = "Audio",
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (article.commentsUrl.isNotBlank()) {
+            Icon(
+                painter = painterResource(R.drawable.ic_comment),
+                contentDescription = "Comments",
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        // Star and unread keep fixed slots so status-only mutations do not move
+        // the feed title or the immutable comments/audio accessories.
+        Box(Modifier.size(16.dp), contentAlignment = Alignment.Center) {
+            if (article.isStarred) {
+                Icon(
                     painter = painterResource(R.drawable.ic_star),
                     contentDescription = "Starred",
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.primary,
                 )
-                AndroidArticleAccessory.Comments -> Icon(
-                    painter = painterResource(R.drawable.ic_comment),
-                    contentDescription = "Comments",
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                AndroidArticleAccessory.Audio -> Icon(
-                    painter = painterResource(R.drawable.ic_headphones),
-                    contentDescription = "Audio",
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            }
+        }
+        Box(Modifier.size(16.dp), contentAlignment = Alignment.Center) {
+            if (!article.isRead) {
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary),
                 )
             }
         }
