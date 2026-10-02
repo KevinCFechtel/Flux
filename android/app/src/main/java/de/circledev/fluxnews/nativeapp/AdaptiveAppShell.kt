@@ -495,8 +495,14 @@ private fun NewsNavigationContent(
         categoryRefs.mapTo(mutableSetOf()) { it.id }
     }
     var expandedCategories by remember { mutableStateOf(setOf<Long>()) }
+    val darkMode = isSystemInDarkTheme()
+    val selectedDrawerContainer = if (darkMode) {
+        MaterialTheme.colorScheme.background
+    } else {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f)
+    }
     val drawerItemColors = NavigationDrawerItemDefaults.colors(
-        selectedContainerColor = MaterialTheme.colorScheme.background,
+        selectedContainerColor = selectedDrawerContainer,
         unselectedContainerColor = MaterialTheme.colorScheme.background,
         selectedIconColor = MaterialTheme.colorScheme.primary,
         selectedTextColor = MaterialTheme.colorScheme.primary,
@@ -656,8 +662,13 @@ private fun CategoryNavigationRow(
     onToggleExpanded: () -> Unit,
     onSelected: () -> Unit,
 ) {
+    val selectedContainer = if (selected && !isSystemInDarkTheme()) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f)
+    } else {
+        MaterialTheme.colorScheme.background
+    }
     Surface(
-        color = MaterialTheme.colorScheme.background,
+        color = selectedContainer,
         shape = MaterialTheme.shapes.extraLarge,
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
     ) {
@@ -700,8 +711,13 @@ private fun FeedNavigationRow(
     onRequestFeedIcon: suspend (Long, uniffi.flux_uniffi.FeedIconVariant) -> Unit,
     onClick: () -> Unit,
 ) {
+    val selectedContainer = if (selected && !isSystemInDarkTheme()) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f)
+    } else {
+        MaterialTheme.colorScheme.background
+    }
     Surface(
-        color = MaterialTheme.colorScheme.background,
+        color = selectedContainer,
         shape = MaterialTheme.shapes.extraLarge,
         modifier = Modifier.fillMaxWidth().padding(start = 32.dp, top = 2.dp, bottom = 2.dp),
     ) {
@@ -763,14 +779,17 @@ private fun ScopeNavigationCapsule(
     opensNavigation: Boolean,
     onOpenNavigation: () -> Unit,
 ) {
+    val darkMode = isSystemInDarkTheme()
     Surface(
         onClick = onOpenNavigation,
         enabled = opensNavigation,
         shape = CircleShape,
-        color = MaterialTheme.colorScheme.background.copy(alpha = 0.72f),
+        color = MaterialTheme.colorScheme.background.copy(
+            alpha = if (darkMode) 0.72f else 0.48f,
+        ),
         contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp,
-        shadowElevation = 0.5.dp,
+        shadowElevation = if (darkMode) 0.5.dp else 0.dp,
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
