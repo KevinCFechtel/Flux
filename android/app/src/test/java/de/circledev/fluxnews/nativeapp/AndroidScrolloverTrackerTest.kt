@@ -1,5 +1,9 @@
 package de.circledev.fluxnews.nativeapp
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -142,6 +146,39 @@ class AndroidScrolloverTrackerTest {
         )
 
         assertTrue(emitted.isEmpty())
+    }
+
+    @Test
+    fun slowReadWriterDoesNotBlockLaterScrolloverCandidates() = runBlocking {
+        val firstWriteStarted = CompletableDeferred<Unit>()
+        val releaseFirstWrite = CompletableDeferred<Unit>()
+        val writes = mutableListOf<List<Long>>()
+        val requests = Channel<AndroidScrolloverMutationRequest>(Channel.UNLIMITED)
+
+        val consumer = launch {
+            consumeAndroidScrolloverMutationRequests(
+                requests = requests,
+                markRead = { ids ->
+                    writes += ids
+                    if (writes.size == 1) {
+                        firstWriteStarted.complete(Unit)
+                        releaseFirstWrite.await()
+                    }
+                    emptyList()
+                },
+                rearm = {},
+                completeInteraction = {},
+            )
+        }
+
+        requests.send(AndroidScrolloverMutationRequest.MarkRead(listOf(1L)))
+        firstWriteStarted.await()
+        requests.send(AndroidScrolloverMutationRequest.MarkRead(listOf(2L)))
+        releaseFirstWrite.complete(Unit)
+        requests.close()
+        consumer.join()
+
+        assertEquals(listOf(listOf(1L), listOf(2L)), writes)
     }
 
     @Test
