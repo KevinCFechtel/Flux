@@ -77,11 +77,13 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -594,6 +596,14 @@ internal class AndroidArticleTimelineStore private constructor(
     }
 
     val state = mutableState.asStateFlow()
+    val contentState: StateFlow<AndroidArticleTimelineContentState> =
+        mutableState
+            .map(AndroidArticleTimelineState::contentState)
+            .stateIn(
+                scope = explicitActionScope,
+                started = SharingStarted.Eagerly,
+                initialValue = mutableState.value.contentState(),
+            )
     val feedback = mutableFeedback.asSharedFlow()
     val actionMessages = mutableActionMessages.asSharedFlow()
     val scrollResetRequests = mutableScrollResetRequests.asSharedFlow()
@@ -1727,12 +1737,7 @@ internal fun AndroidArticleTimeline(
     bottomOverlayPadding: Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
-    val stateFlow = remember(store) {
-        store.state
-            .map { it.contentState() }
-            .distinctUntilChanged()
-    }
-    val state by stateFlow.collectAsState(initial = store.state.value.contentState())
+    val state by store.contentState.collectAsState()
     val undoState by store.undoState.collectAsState()
     val articlePreferences by LocalAndroidArticlePreferences.current.state.collectAsState(
         initial = AndroidArticlePreferenceState(),
