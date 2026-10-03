@@ -454,7 +454,7 @@ Required scope:
 - Open Source/About/version/legal;
 - Support Diagnostics shell where settings dependencies are needed.
 
-Use Material/Android conventions. The accepted Article List chrome intentionally shares Flux's capsule concept with iOS while remaining a native Compose/Material implementation: the scope capsule stays at the top, the action capsule floats at the bottom in portrait, and the same action capsule moves to the top-right only in landscape.
+Use Material/Android conventions. The accepted Article List chrome intentionally shares Flux's capsule concept with iOS while remaining a native Compose/Material implementation. Compact phone portrait keeps the scope capsule at the top and the action capsule floating above the bottom system inset; compact landscape moves the action capsule to the top-right. Wide tablet/foldable windows use persistent 320 dp navigation with the duplicate scope capsule hidden and up to five direct actions at the top-right. That persistent navigation can be collapsed without leaving the wide layout; the collapsed state restores an interactive scope capsule at the top-leading position, keeps actions at the top-right, and opens the navigation transiently so it can be expanded again.
 
 Config Backup remains platform-specific. Android uses BackupPlatform.Android and an Android platform-settings payload. A backup is not promised to be portable to or from iOS unless a future explicit cross-platform backup contract is created.
 
@@ -570,7 +570,7 @@ Phase E2 — Adaptive App Shell, Account and Settings Foundation — is complete
 
 The completed E2 scope includes:
 
-- adaptive native Android app shell and navigation
+- adaptive native Android app shell and navigation, including compact transient navigation, persistent wide navigation, and a collapsible wide-navigation state
 - account bootstrap and account management
 - custom headers and account/server handling
 - navigation preferences
@@ -856,8 +856,8 @@ Implemented on 3 October 2026:
 - Comments still do not mark read, while Original, Reader and Miniflux article-opening actions do;
 - Search/Reader state is app-process scoped but invalidated on Core-session replacement, so Activity recreation does not manufacture a second domain owner or stale account presentation;
 - no Core/UniFFI API change was required.
-- Article List chrome uses a shared Material capsule treatment: portrait keeps the action capsule floating above the bottom system inset, landscape moves the same capsule to the top-right, and controls use semantic icons rather than text buttons;
-- portrait reserves Timeline and Snackbar clearance for the floating action capsule;
+- Article List chrome uses a shared Material capsule treatment: compact portrait keeps the action capsule floating above the bottom system inset, compact landscape moves it to the top-right, persistent tablet navigation hides duplicate scope chrome and keeps up to five direct actions at the top-right, and a collapsed persistent-navigation state restores the interactive scope capsule at top-leading while retaining top-right actions;
+- only compact portrait reserves Timeline and Snackbar clearance for the floating bottom action capsule; persistent and collapsed-persistent tablet states do not reserve bottom-action space;
 - swipe presentation keeps the E4-B 0-2-action/full-swipe contract but follows Material dismissal visuals with a continuous tonal reveal, circular icon targets, an action-colored armed full-swipe state and one selection haptic when crossing the threshold.
 - a successful explicit Read → Unread transition re-arms that article in the Scrollover geometry tracker, matching the iOS behavior; failed unread writes do not re-arm, and external Core unread events also re-arm the visible article.
 - the article long-press menu uses Material leading icons and visual grouping for state, opening and share/save actions instead of an undifferentiated text-only list.
