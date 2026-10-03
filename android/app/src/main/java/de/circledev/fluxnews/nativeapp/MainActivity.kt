@@ -98,7 +98,7 @@ private fun FluxNewsApp(bootstrap: AndroidAccountBootstrap, coreRuntime: Android
                 }
             }
             is AndroidAccountBootstrap.State.RecoverableError -> RecoverableStartup(state.message, bootstrap, { bootstrapState = AndroidAccountBootstrap.State.Starting; retryGeneration += 1 }, ::acceptActivatedAccount)
-            is AndroidAccountBootstrap.State.Ready -> AdaptiveAppShell(bootstrap, coreRuntime, timelineStore, navigationPreferences, state, { changedState ->
+            is AndroidAccountBootstrap.State.Ready -> AdaptiveAppShell(bootstrap, coreRuntime, syncCoordinator, timelineStore, navigationPreferences, state, { changedState ->
                 bootstrapState = changedState
                 if (changedState is AndroidAccountBootstrap.State.Ready) syncCoordinator.requestSync(SyncReason.APP_START)
             }, Modifier.fillMaxSize())

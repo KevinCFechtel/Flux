@@ -88,6 +88,17 @@ class AndroidSyncCoordinator private constructor(
         true
     }
 
+    /**
+     * User cancellation is deliberately limited to a user-owned Manual Sync. Startup/background
+     * ownership must not become cancellable merely because the same coordinator exposes state.
+     */
+    fun cancelManualSync(): Boolean = synchronized(lock) {
+        val run = activeRun ?: return false
+        if (run.reason != SyncReason.MANUAL) return false
+        run.cancellation.cancel()
+        true
+    }
+
     private suspend fun runSync(
         generation: Long,
         reason: SyncReason,

@@ -14,6 +14,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import uniffi.flux_uniffi.ArticleCursor
 import uniffi.flux_uniffi.ArticlePage
+import uniffi.flux_uniffi.ArticleQuery
 import uniffi.flux_uniffi.ArticleScope
 import uniffi.flux_uniffi.ArticleSort
 import uniffi.flux_uniffi.ArticleSummary
@@ -57,6 +58,22 @@ class AndroidArticleTimelineTest {
         ).coreQuery(cursor)
         assertEquals(ArticleScope.Feed(id = 42), feed.scope)
         assertEquals(cursor, feed.cursor)
+    }
+
+    @Test
+    fun markAllQueryUsesExactUnreadUnboundedNewestScopeSemantics() {
+        val query = AndroidArticleTimelineSelection(
+            scope = AndroidNewsScope.Feed(42, 7, "Feed"),
+            readFilter = AndroidArticleReadFilter.All,
+            sort = AndroidArticleSortOrder.OldestFirst,
+        ).markAllReadQuery()
+
+        assertEquals(ArticleScope.Feed(id = 42), query.scope)
+        assertEquals(ReadFilter.UNREAD, query.readFilter)
+        assertEquals(StarredFilter.ALL, query.starredFilter)
+        assertEquals(ArticleSort.NEWEST_FIRST, query.sort)
+        assertEquals(0u, query.limit)
+        assertNull(query.cursor)
     }
 
     @Test
@@ -955,6 +972,147 @@ class AndroidArticleTimelineTest {
         assertFalse(staleMutation.await())
         assertTrue(store.state.value.articles.single().isRead)
         assertEquals(62L, store.state.value.sessionGeneration)
+    }
+
+    @Test
+    fun markCurrentScopeReadPassesExactQueriedIdsAndReloadsOnlyAfterSuccess() = runBlocking {
+        val queries = mutableListOf<ArticleQuery>()
+        val writes = mutableListOf<Pair<Long, List<Long>>>()
+        var pageCalls = 0
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                pageCalls += 1
+                if (pageCalls == 1) {
+                    ArticlePage(
+                        articles = listOf(article(1), article(2)),
+                        total = 2uL,
+                        nextCursor = null,
+                    )
+                } else {
+                    ArticlePage(
+                        articles = emptyList(),
+                        total = 0uL,
+                        nextCursor = null,
+                    )
+                }
+            },
+            activeSessionGeneration = { 71L },
+            scopeUnreadIdsLoader = { _, query ->
+                queries += query
+                listOf(2L, 1L, 2L)
+            },
+            scopeReadWriter = { generation, ids ->
+                writes += generation to ids
+            },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(
+            scope = AndroidNewsScope.Category(7, "Category"),
+            readFilter = AndroidArticleReadFilter.All,
+            sort = AndroidArticleSortOrder.OldestFirst,
+        )
+        store.reset(selection)
+
+        assertTrue(store.markCurrentScopeAsRead())
+
+        assertEquals(2, pageCalls)
+        assertEquals(1, queries.size)
+        assertEquals(ReadFilter.UNREAD, queries.single().readFilter)
+        assertEquals(ArticleSort.NEWEST_FIRST, queries.single().sort)
+        assertEquals(0u, queries.single().limit)
+        assertEquals(listOf(71L to listOf(2L, 1L)), writes)
+        assertTrue(store.state.value.articles.isEmpty())
+        assertEquals(0uL, store.state.value.total)
+    }
+
+    @Test
+    fun markReadAndNextCanSkipReloadingTheOldScope() = runBlocking {
+        var pageCalls = 0
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                pageCalls += 1
+                ArticlePage(
+                    articles = listOf(article(1)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 74L },
+            scopeUnreadIdsLoader = { _, _ -> listOf(1L) },
+            scopeReadWriter = { _, _ -> },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.Feed(1, 7, "Current")))
+
+        assertTrue(store.markCurrentScopeAsRead(reloadCurrentScope = false))
+
+        assertEquals(1, pageCalls)
+        assertEquals(AndroidNewsScope.Feed(1, 7, "Current"), store.state.value.selection?.scope)
+    }
+
+    @Test
+    fun markCurrentScopeReadFailureDoesNotReloadOrPretendSuccess() = runBlocking {
+        var pageCalls = 0
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                pageCalls += 1
+                ArticlePage(
+                    articles = listOf(article(1)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 72L },
+            scopeUnreadIdsLoader = { _, _ -> listOf(1L) },
+            scopeReadWriter = { _, _ -> error("expected bulk failure") },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+
+        assertFalse(store.markCurrentScopeAsRead())
+        assertEquals(1, pageCalls)
+        assertEquals(listOf(1L), store.state.value.articles.map { it.id })
+    }
+
+    @Test
+    fun markCurrentScopeReadNeverWritesAfterSelectionWasSuperseded() = runBlocking {
+        val loaderStarted = CompletableDeferred<Unit>()
+        val releaseLoader = CompletableDeferred<Unit>()
+        var writes = 0
+        var pageCalls = 0
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                pageCalls += 1
+                ArticlePage(
+                    articles = listOf(article(pageCalls.toLong())),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 73L },
+            scopeUnreadIdsLoader = { _, _ ->
+                loaderStarted.complete(Unit)
+                releaseLoader.await()
+                listOf(1L)
+            },
+            scopeReadWriter = { _, _ -> writes += 1 },
+            testOnly = Unit,
+        )
+        val original = AndroidArticleTimelineSelection(AndroidNewsScope.All)
+        store.reset(original)
+
+        val markAll = async { store.markCurrentScopeAsRead() }
+        loaderStarted.await()
+        store.reset(
+            AndroidArticleTimelineSelection(
+                AndroidNewsScope.Feed(9, 4, "Other"),
+            ),
+        )
+        releaseLoader.complete(Unit)
+
+        assertFalse(markAll.await())
+        assertEquals(0, writes)
+        assertEquals(AndroidNewsScope.Feed(9, 4, "Other"), store.state.value.selection?.scope)
     }
 
     @Test

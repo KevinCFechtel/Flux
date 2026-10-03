@@ -45,6 +45,37 @@ class AndroidSyncCoordinatorTest {
     }
 
     @Test
+    fun userCancellationOnlyCancelsManualRuns() = runBlocking {
+        val startupRelease = CompletableDeferred<Unit>()
+        var startupHandle: FakeCancellation? = null
+        val coordinator = AndroidSyncCoordinator(
+            scope = this,
+            cancellationFactory = { FakeCancellation().also { startupHandle = it } },
+            syncRunner = { _, _ -> startupRelease.await() },
+            testOnly = Unit,
+        )
+
+        assertTrue(coordinator.requestSync(SyncReason.APP_START))
+        assertFalse(coordinator.cancelManualSync())
+        assertFalse(startupHandle?.isCancelled() == true)
+        startupRelease.complete(Unit)
+        awaitTerminal(coordinator)
+
+        val manualRelease = CompletableDeferred<Unit>()
+        val manualCoordinator = AndroidSyncCoordinator(
+            scope = this,
+            cancellationFactory = { FakeCancellation() },
+            syncRunner = { _, _ -> manualRelease.await() },
+            testOnly = Unit,
+        )
+        assertTrue(manualCoordinator.requestSync(SyncReason.MANUAL))
+        assertTrue(manualCoordinator.cancelManualSync())
+        manualRelease.complete(Unit)
+        awaitTerminal(manualCoordinator)
+        assertTrue(manualCoordinator.state.value is AndroidSyncCoordinator.State.Cancelled)
+    }
+
+    @Test
     fun failureKeepsARecoverableLocalDataMessage() = runBlocking {
         val coordinator = coordinator { _, _ -> error("token=must-not-leak") }
 

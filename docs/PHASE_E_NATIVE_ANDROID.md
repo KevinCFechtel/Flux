@@ -812,7 +812,27 @@ Implemented on 3 October 2026:
 
 The normal article-row Open action remains intentionally deferred until E4-D, because the existing Reader preference must not be temporarily bypassed by forcing every row tap to the original URL. E4-D adds Reader and then activates normal row Open with the complete routing contract.
 
-E4-C is next and adds Manual Sync/pull-to-refresh plus Mark All as Read and Mark All as Read & Next workflows.
+### E4-C — Manual Sync, pull-to-refresh and scope-wide read workflows
+
+Status: **COMPLETE**
+
+Implemented on 3 October 2026:
+
+- the fixed Article List Sync control now drives the existing process-scoped `AndroidSyncCoordinator` with `SyncReason.MANUAL`; Compose does not own a second Sync state machine;
+- a running Manual Sync exposes cooperative Cancel through the existing Core `SyncCancellation` handle, while startup-owned Sync runs are not user-cancellable through the Manual Sync control;
+- the Timeline uses Material 3 `PullToRefreshBox` and routes pull-to-refresh through that same Manual Sync path; an existing foreground Sync suppresses duplicate refresh requests;
+- Sync failure keeps the local Timeline visible and surfaces the coordinator's sanitized recoverable message; cancellation is treated as a normal terminal outcome rather than a network failure;
+- the persisted semantic Article List configuration is now productive in the Android top bar: fixed Sync, configured direct slots and the always-reachable More overflow share the E4-A availability policy;
+- Filter/Sort, Search, Listening List and Settings actions route through their existing native destinations/presentation paths, while Mark All actions use an explicit destructive confirmation;
+- Mark All as Read queries the Core for the exact unread IDs in the current All/Category/Feed scope using `Unread + StarredFilter.All + NewestFirst + limit=0`, then passes exactly those IDs to `setReadStateBulk`;
+- Mark All as Read & Next computes its target from the current visible navigation order before mutation, performs no wrap-around, and navigates only after the bulk mutation succeeds;
+- visible-feed order respects Hide Empty navigation semantics, including category grouping and orphan-feed placement; Category & Next likewise skips categories hidden by the current visible navigation projection;
+- successful plain Mark All reloads the current Timeline at its natural start; Mark All & Next avoids reloading the old scope and lets the successful scope transition perform the next Timeline reset; both emit one confirmation while per-article Core events are suppressed from producing an N-event haptic/reload burst;
+- stale selection/session completions cannot trigger a bulk write, a Timeline replacement or an `& Next` navigation;
+- focused JVM tests cover Manual-only cancellation, next-scope ordering/no-wrap behavior, the exact Mark-All query, exact bulk IDs, failure behavior and stale-selection suppression;
+- no Core/UniFFI API change was required.
+
+E4-D is next and completes native Reader plus remote Search, then activates normal article-row Open with the full Reader/original/Miniflux routing contract.
 
 E4 completes interactive Newsreader behavior:
 

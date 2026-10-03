@@ -214,6 +214,18 @@ internal data class AndroidArticleTimelineSelection(
             },
         )
 
+    fun markAllReadQuery(): ArticleQuery {
+        val base = coreQuery()
+        return ArticleQuery(
+            scope = base.scope,
+            readFilter = ReadFilter.UNREAD,
+            starredFilter = StarredFilter.ALL,
+            sort = ArticleSort.NEWEST_FIRST,
+            limit = 0u,
+            cursor = null,
+        )
+    }
+
     fun coreQuery(cursor: ArticleCursor? = null): ArticleQuery {
         val coreScope = when (scope) {
             AndroidNewsScope.All,
@@ -270,6 +282,8 @@ internal class AndroidArticleTimelineStore private constructor(
     private val scrolloverUnreadWriter: suspend (Long, List<Long>) -> Unit,
     private val explicitReadWriter: suspend (Long, Long, Boolean) -> Unit,
     private val explicitStarredWriter: suspend (Long, Long, Boolean) -> Unit,
+    private val scopeUnreadIdsLoader: suspend (Long, ArticleQuery) -> List<Long>,
+    private val scopeReadWriter: suspend (Long, List<Long>) -> Unit,
     private val minifluxEntryUrlLoader: suspend (Long, Long) -> String,
     private val saveToServiceWriter: suspend (Long, Long) -> AndroidSaveToServiceOutcome,
     private val activeSessionGeneration: () -> Long?,
@@ -329,6 +343,17 @@ internal class AndroidArticleTimelineStore private constructor(
             }
             Unit
         },
+        scopeUnreadIdsLoader = { generation, query ->
+            coreRuntime.localForGeneration(generation) { core ->
+                core.queryArticles(query).map { it.id }
+            }
+        },
+        scopeReadWriter = { generation, articleIds ->
+            coreRuntime.localForGeneration(generation) { core ->
+                core.setReadStateBulk(articleIds = articleIds, read = true)
+            }
+            Unit
+        },
         minifluxEntryUrlLoader = { generation, articleId ->
             coreRuntime.localForGeneration(generation) { core ->
                 core.minifluxEntryUrl(articleId = articleId)
@@ -358,6 +383,8 @@ internal class AndroidArticleTimelineStore private constructor(
         scrolloverUnreadWriter: suspend (Long, List<Long>) -> Unit = { _, _ -> },
         explicitReadWriter: suspend (Long, Long, Boolean) -> Unit = { _, _, _ -> },
         explicitStarredWriter: suspend (Long, Long, Boolean) -> Unit = { _, _, _ -> },
+        scopeUnreadIdsLoader: suspend (Long, ArticleQuery) -> List<Long> = { _, _ -> emptyList() },
+        scopeReadWriter: suspend (Long, List<Long>) -> Unit = { _, _ -> },
         minifluxEntryUrlLoader: suspend (Long, Long) -> String = { _, articleId ->
             "https://example.test/miniflux/entry/$articleId"
         },
@@ -375,6 +402,8 @@ internal class AndroidArticleTimelineStore private constructor(
         scrolloverUnreadWriter,
         explicitReadWriter,
         explicitStarredWriter,
+        scopeUnreadIdsLoader,
+        scopeReadWriter,
         minifluxEntryUrlLoader,
         saveToServiceWriter,
         activeSessionGeneration,
@@ -384,6 +413,7 @@ internal class AndroidArticleTimelineStore private constructor(
     private val mutableState = MutableStateFlow(AndroidArticleTimelineState())
     private val mutableFeedback = MutableSharedFlow<AndroidTimelineHaptic>(extraBufferCapacity = 8)
     private val mutableActionMessages = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    private val mutableScrollResetRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private val mutableUndoState = MutableStateFlow(AndroidScrolloverUndoState())
     private val explicitActionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val explicitMutationMutex = Mutex()
@@ -392,6 +422,7 @@ internal class AndroidArticleTimelineStore private constructor(
     private val explicitStarredMutationTokens = ConcurrentHashMap<Long, Long>()
     private val expectedReadEvents = ConcurrentHashMap<Long, ConcurrentLinkedQueue<Boolean>>()
     private val expectedStarredEvents = ConcurrentHashMap<Long, ConcurrentLinkedQueue<Boolean>>()
+    private val expectedBulkReadEventIds = ConcurrentHashMap.newKeySet<Long>()
     private val scrolloverRetainedReadIds = mutableSetOf<Long>()
     private val scrolloverFeedbackSuppressedReadIds = mutableSetOf<Long>()
     private val undoFeedbackSuppressedUnreadIds = mutableSetOf<Long>()
@@ -408,6 +439,7 @@ internal class AndroidArticleTimelineStore private constructor(
     val state = mutableState.asStateFlow()
     val feedback = mutableFeedback.asSharedFlow()
     val actionMessages = mutableActionMessages.asSharedFlow()
+    val scrollResetRequests = mutableScrollResetRequests.asSharedFlow()
     val undoState = mutableUndoState.asStateFlow()
 
     fun retainedSelectionForSession(sessionGeneration: Long?): AndroidArticleTimelineSelection? =
@@ -638,6 +670,56 @@ internal class AndroidArticleTimelineStore private constructor(
         return false
     }
 
+    suspend fun markCurrentScopeAsRead(reloadCurrentScope: Boolean = true): Boolean {
+        val current = mutableState.value
+        val selection = current.selection ?: return false
+        if (
+            selection.scope != AndroidNewsScope.All &&
+            selection.scope !is AndroidNewsScope.Category &&
+            selection.scope !is AndroidNewsScope.Feed
+        ) {
+            return false
+        }
+        val sessionGeneration = current.sessionGeneration ?: return false
+        if (activeSessionGeneration() != sessionGeneration) return false
+        val generation = current.queryGeneration
+
+        val ids = try {
+            scopeUnreadIdsLoader(sessionGeneration, selection.markAllReadQuery()).distinct()
+        } catch (_: Exception) {
+            if (owns(generation, selection, sessionGeneration)) {
+                mutableActionMessages.emit("Unread articles could not be loaded.")
+            }
+            return false
+        }
+        if (!owns(generation, selection, sessionGeneration)) return false
+        if (ids.isEmpty()) return true
+
+        expectedBulkReadEventIds.addAll(ids)
+        val mutation = runCatching {
+            explicitMutationMutex.withLock {
+                scopeReadWriter(sessionGeneration, ids)
+            }
+        }
+        if (mutation.isFailure) {
+            expectedBulkReadEventIds.removeAll(ids.toSet())
+        }
+        if (!owns(generation, selection, sessionGeneration)) return false
+
+        if (mutation.isFailure) {
+            mutableActionMessages.emit("Articles could not be marked as read.")
+            return false
+        }
+
+        if (reloadCurrentScope) {
+            reset(selection)
+            mutableScrollResetRequests.tryEmit(Unit)
+        }
+        mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
+        mutableActionMessages.emit("All unread articles in this scope were marked as read.")
+        return true
+    }
+
     suspend fun resolveMinifluxEntryUrl(articleId: Long): String? {
         val generation = activeSessionGeneration() ?: return null
         val result = runCatching { minifluxEntryUrlLoader(generation, articleId) }.getOrNull()
@@ -740,6 +822,7 @@ internal class AndroidArticleTimelineStore private constructor(
         val previous = mutableState.value
         val sameSession = previous.sessionGeneration == null || previous.sessionGeneration == sessionGeneration
         if (!sameSession) {
+            expectedBulkReadEventIds.clear()
             feedIconCacheByVariant.clear()
             unavailableFeedIconsByVariant.clear()
             feedIconRequestsInFlight.clear()
@@ -794,6 +877,7 @@ internal class AndroidArticleTimelineStore private constructor(
 
         when (val event = runtimeEvent.event) {
             is CoreEvent.ArticleReadStateChanged -> {
+                if (event.read && expectedBulkReadEventIds.remove(event.articleId)) return
                 if (consumeExpectedEvent(expectedReadEvents, event.articleId, event.read)) return
                 val suppressFeedback = if (event.read) {
                     scrolloverFeedbackSuppressedReadIds.remove(event.articleId)
@@ -1456,6 +1540,14 @@ internal fun AndroidArticleTimeline(
 
     LaunchedEffect(articleIds) {
         scrolloverTracker.updateSnapshot(articleIds)
+    }
+
+    LaunchedEffect(store, listState) {
+        store.scrollResetRequests.collect {
+            if (listState.layoutInfo.totalItemsCount > 0) {
+                listState.scrollToItem(0)
+            }
+        }
     }
 
     LaunchedEffect(articleFeedIds, feedIconVariant) {

@@ -90,6 +90,69 @@ internal object AndroidNavigationPolicy {
             .filter { it.id in visibleFeedIds && it.categoryId in knownCategoryIds }
             .mapTo(mutableSetOf()) { it.categoryId }
     }
+
+    /**
+     * Mark All & Next follows the same order the news drawer presents. There is no wrap-around and
+     * global scopes never invent a sibling target.
+     */
+    fun nextScope(
+        after scope: AndroidNewsScope,
+        hidingEmpty: Boolean,
+        categories: List<AndroidNavigationCategoryRef>,
+        feeds: List<AndroidNavigationFeedRef>,
+        counts: Map<Long, ULong>,
+    ): AndroidNewsScope? {
+        val visibleFeedIds = visibleFeedIds(
+            hidingEmpty = hidingEmpty,
+            feeds = feeds,
+            counts = counts,
+        )
+        val visibleCategoryIds = if (hidingEmpty) {
+            visibleCategoryIds(categories, feeds, visibleFeedIds)
+        } else {
+            categories.mapTo(mutableSetOf()) { it.id }
+        }
+
+        return when (scope) {
+            is AndroidNewsScope.Feed -> {
+                val knownCategoryIds = categories.mapTo(mutableSetOf()) { it.id }
+                val orderedFeeds = buildList {
+                    categories
+                        .filter { it.id in visibleCategoryIds }
+                        .forEach { category ->
+                            addAll(
+                                feeds.filter {
+                                    it.categoryId == category.id && it.id in visibleFeedIds
+                                },
+                            )
+                        }
+                    addAll(
+                        feeds.filter {
+                            it.categoryId !in knownCategoryIds && it.id in visibleFeedIds
+                        },
+                    )
+                }
+                val index = orderedFeeds.indexOfFirst { it.id == scope.id }
+                orderedFeeds
+                    .getOrNull(index + 1)
+                    ?.takeIf { index >= 0 }
+                    ?.let { AndroidNewsScope.Feed(it.id, it.categoryId, it.title) }
+            }
+
+            is AndroidNewsScope.Category -> {
+                val orderedCategories = categories.filter { it.id in visibleCategoryIds }
+                val index = orderedCategories.indexOfFirst { it.id == scope.id }
+                orderedCategories
+                    .getOrNull(index + 1)
+                    ?.takeIf { index >= 0 }
+                    ?.let { AndroidNewsScope.Category(it.id, it.title) }
+            }
+
+            AndroidNewsScope.All,
+            AndroidNewsScope.Starred,
+            -> null
+        }
+    }
 }
 
 /** Platform-local E2 navigation preferences. No shared Core state is duplicated here. */
