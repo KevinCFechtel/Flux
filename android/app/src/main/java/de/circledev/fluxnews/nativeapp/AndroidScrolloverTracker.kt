@@ -2,6 +2,7 @@ package de.circledev.fluxnews.nativeapp
 
 internal data class AndroidScrolloverPositionSample(
     val firstVisibleIndex: Int,
+    val atDatasetEnd: Boolean = false,
 )
 
 /**
@@ -23,6 +24,7 @@ internal class AndroidScrolloverTracker(
     private var idleFirstVisibleIndex: Int = initialFirstVisibleIndex
     private var sessionStartIndex: Int? = null
     private var sessionMaxIndex: Int? = null
+    private var sessionReachedDatasetEnd = false
     private var programmaticScrollActive = false
 
     fun updateSnapshot(ids: List<Long>) {
@@ -44,11 +46,13 @@ internal class AndroidScrolloverTracker(
         emittedIds.retainAll(ids.toSet())
         sessionStartIndex = null
         sessionMaxIndex = null
+        sessionReachedDatasetEnd = false
     }
 
     fun synchronizeIdlePosition(firstVisibleIndex: Int) {
         sessionStartIndex = null
         sessionMaxIndex = null
+        sessionReachedDatasetEnd = false
         idleFirstVisibleIndex = firstVisibleIndex.coerceAtLeast(0)
     }
 
@@ -83,19 +87,26 @@ internal class AndroidScrolloverTracker(
             } else {
                 sessionMaxIndex = maxOf(sessionMaxIndex ?: currentIndex, currentIndex)
             }
+            if (sample.atDatasetEnd) sessionReachedDatasetEnd = true
             return emptyList()
         }
 
         val start = sessionStartIndex
         val maxReached = sessionMaxIndex
+        val reachedDatasetEnd = sessionReachedDatasetEnd || sample.atDatasetEnd
         sessionStartIndex = null
         sessionMaxIndex = null
+        sessionReachedDatasetEnd = false
         idleFirstVisibleIndex = currentIndex
 
-        if (start == null || maxReached == null || maxReached <= start) return emptyList()
+        if (start == null || maxReached == null) return emptyList()
 
         val startIndex = start.coerceIn(0, orderedIds.size)
-        val endExclusive = maxReached.coerceIn(startIndex, orderedIds.size)
+        val endExclusive = if (reachedDatasetEnd) {
+            orderedIds.size
+        } else {
+            maxReached.coerceIn(startIndex, orderedIds.size)
+        }
         if (startIndex >= endExclusive) return emptyList()
 
         val candidates = buildList {
