@@ -791,7 +791,28 @@ Implemented on 3 October 2026:
 - focused JVM tests cover transient selection transitions, action availability, direct-slot priority, overflow completeness and contextual filtering;
 - the E3 Timeline store, renderer, paging architecture and Core/UniFFI surface remain unchanged.
 
-E4-B is next and adds productive per-article actions/mutations and Android interaction presentation over this semantic foundation.
+### E4-B — Productive article actions, mutations and swipe interaction
+
+Status: **COMPLETE**
+
+Implemented on 3 October 2026:
+
+- configured leading/trailing semantic swipe actions are now resolved per article and rendered by a Compose-native horizontal gesture adapter;
+- partial swipe only reveals actions, tapping a revealed action executes it, and a full swipe executes only the configured outer/full slot;
+- a missing contextual outer action is omitted without promoting the configured inner action to Full Swipe, and reversing an already-open swipe must return to neutral before the opposite side can open;
+- long-press article actions plus a TalkBack custom action expose Read/Unread, Star/Unstar, Original, Miniflux, Comments, Copy Link, Share and third-party Save when applicable;
+- media swipe semantics remain persisted but are contextually omitted until E6 provides the native media runtime;
+- explicit Read/Unread and Star/Unstar use optimistic row state, generation-bound Core writes, serialized mutation delivery, per-article stale-completion tokens and rollback on failure;
+- successful explicit Read respects the existing Remove Articles When Read preference, while successful unstar removes a row only from the Starred scope;
+- explicit Original open marks the article read without stacking read haptic feedback; Comments does not mark the article read;
+- Original, Comments, Share and clipboard handling use Android platform APIs, while Miniflux URL resolution and third-party Save remain Core-backed;
+- a generation-bound remote execution helper prevents a retired account session from servicing third-party Save work;
+- focused JVM tests cover swipe-slot preservation, contextual action availability, URL validation, optimistic mutation/rollback, successful structural removal and retired-session completion suppression;
+- no Core/UniFFI API or E3 paging/renderer ownership change was required.
+
+The normal article-row Open action remains intentionally deferred until E4-D, because the existing Reader preference must not be temporarily bypassed by forcing every row tap to the original URL. E4-D adds Reader and then activates normal row Open with the complete routing contract.
+
+E4-C is next and adds Manual Sync/pull-to-refresh plus Mark All as Read and Mark All as Read & Next workflows.
 
 E4 completes interactive Newsreader behavior:
 

@@ -717,6 +717,247 @@ class AndroidArticleTimelineTest {
     }
 
     @Test
+    fun explicitReadMutationIsOptimisticAndRollsBackOnFailure() = runBlocking {
+        val writerStarted = CompletableDeferred<Unit>()
+        val releaseWriter = CompletableDeferred<Unit>()
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 51L },
+            selectionCountLoader = { 1uL },
+            explicitReadWriter = { _, _, _ ->
+                writerStarted.complete(Unit)
+                releaseWriter.await()
+                error("expected write failure")
+            },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+
+        val mutation = async {
+            store.setReadExplicit(
+                articleId = 1L,
+                read = true,
+                removeWhenRead = false,
+            )
+        }
+        writerStarted.await()
+
+        assertTrue(store.state.value.articles.single().isRead)
+        assertEquals(0uL, store.state.value.total)
+
+        releaseWriter.complete(Unit)
+        assertFalse(mutation.await())
+        assertFalse(store.state.value.articles.single().isRead)
+        assertEquals(1uL, store.state.value.total)
+    }
+
+    @Test
+    fun successfulExplicitReadRemovesOnlyWhenPreferenceRequestsIt() = runBlocking {
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1), article(2)),
+                    total = 2uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 52L },
+            selectionCountLoader = { 1uL },
+            explicitReadWriter = { _, _, _ -> },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+
+        assertTrue(
+            store.setReadExplicit(
+                articleId = 1L,
+                read = true,
+                removeWhenRead = true,
+            ),
+        )
+
+        assertEquals(listOf(2L), store.state.value.articles.map { it.id })
+        assertEquals(1uL, store.state.value.total)
+    }
+
+    @Test
+    fun failedSupersededReadDoesNotLeaveAStaleExpectedEvent() = runBlocking {
+        val firstStarted = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        var call = 0
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 55L },
+            selectionCountLoader = { 1uL },
+            explicitReadWriter = { _, _, _ ->
+                call += 1
+                if (call == 1) {
+                    firstStarted.complete(Unit)
+                    releaseFirst.await()
+                    error("superseded write failed")
+                }
+            },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(
+            scope = AndroidNewsScope.All,
+            readFilter = AndroidArticleReadFilter.All,
+        )
+        store.reset(selection)
+
+        val first = async {
+            store.setReadExplicit(1L, read = true, removeWhenRead = false)
+        }
+        firstStarted.await()
+        val second = async {
+            store.setReadExplicit(1L, read = false, removeWhenRead = false)
+        }
+        releaseFirst.complete(Unit)
+        assertFalse(first.await())
+        assertTrue(second.await())
+
+        store.handleCoreEvent(
+            AndroidCoreRuntimeEvent(
+                generation = 55L,
+                event = CoreEvent.ArticleReadStateChanged(articleId = 1L, read = true),
+            ),
+        )
+
+        assertTrue(store.state.value.articles.single().isRead)
+    }
+
+    @Test
+    fun ownDelayedReadEventDoesNotOverrideRemoveWhenReadPreference() = runBlocking {
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 54L },
+            selectionCountLoader = { 0uL },
+            explicitReadWriter = { _, _, _ -> },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
+        store.reset(selection)
+
+        assertTrue(
+            store.setReadExplicit(
+                articleId = 1L,
+                read = true,
+                removeWhenRead = false,
+            ),
+        )
+        assertEquals(listOf(1L), store.state.value.articles.map { it.id })
+
+        store.handleCoreEvent(
+            AndroidCoreRuntimeEvent(
+                generation = 54L,
+                event = CoreEvent.ArticleReadStateChanged(articleId = 1L, read = true),
+            ),
+        )
+
+        assertEquals(listOf(1L), store.state.value.articles.map { it.id })
+        assertTrue(store.state.value.articles.single().isRead)
+    }
+
+    @Test
+    fun explicitStarMutationRollsBackAndStarredRemovalWaitsForSuccess() = runBlocking {
+        var shouldFail = true
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1, starred = true)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 53L },
+            selectionCountLoader = { if (shouldFail) 1uL else 0uL },
+            explicitStarredWriter = { _, _, _ ->
+                if (shouldFail) error("expected write failure")
+            },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(
+            scope = AndroidNewsScope.Starred,
+            readFilter = AndroidArticleReadFilter.All,
+        )
+        store.reset(selection)
+
+        assertFalse(store.setStarredExplicit(articleId = 1L, starred = false))
+        assertTrue(store.state.value.articles.single().isStarred)
+        assertEquals(1uL, store.state.value.total)
+
+        shouldFail = false
+        assertTrue(store.setStarredExplicit(articleId = 1L, starred = false))
+        assertTrue(store.state.value.articles.isEmpty())
+        assertEquals(0uL, store.state.value.total)
+    }
+
+    @Test
+    fun staleExplicitMutationCompletionCannotOverwriteReplacementSession() = runBlocking {
+        var sessionGeneration: Long? = 61L
+        val writerStarted = CompletableDeferred<Unit>()
+        val releaseWriter = CompletableDeferred<Unit>()
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1, read = sessionGeneration == 62L)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { sessionGeneration },
+            selectionCountLoader = { 1uL },
+            explicitReadWriter = { _, _, _ ->
+                writerStarted.complete(Unit)
+                releaseWriter.await()
+                error("retired session failure")
+            },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(
+            scope = AndroidNewsScope.All,
+            readFilter = AndroidArticleReadFilter.All,
+        )
+        store.reset(selection)
+
+        val staleMutation = async {
+            store.setReadExplicit(
+                articleId = 1L,
+                read = true,
+                removeWhenRead = false,
+            )
+        }
+        writerStarted.await()
+
+        sessionGeneration = 62L
+        store.reset(selection)
+        assertTrue(store.state.value.articles.single().isRead)
+
+        releaseWriter.complete(Unit)
+        assertFalse(staleMutation.await())
+        assertTrue(store.state.value.articles.single().isRead)
+        assertEquals(62L, store.state.value.sessionGeneration)
+    }
+
+    @Test
     fun rowPolicyPreservesSemanticAccessoryOrderAndImageModes() {
         val article = article(
             id = 7,

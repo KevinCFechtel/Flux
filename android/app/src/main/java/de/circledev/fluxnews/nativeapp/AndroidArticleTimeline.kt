@@ -34,6 +34,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -63,6 +65,12 @@ import coil3.request.ImageRequest
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.Date
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,6 +80,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import uniffi.flux_uniffi.ArticleCursor
 import uniffi.flux_uniffi.ArticlePage
 import uniffi.flux_uniffi.ArticleQuery
@@ -82,6 +92,7 @@ import uniffi.flux_uniffi.CoreEvent
 import uniffi.flux_uniffi.FeedIconVariant
 import uniffi.flux_uniffi.MediaKind
 import uniffi.flux_uniffi.ReadFilter
+import uniffi.flux_uniffi.SaveToServiceResult
 import uniffi.flux_uniffi.StarredFilter
 
 private const val ANDROID_ARTICLE_TIMELINE_PAGE_SIZE = 64
@@ -257,6 +268,10 @@ internal class AndroidArticleTimelineStore private constructor(
     private val feedIconLoader: suspend (List<Long>, FeedIconVariant) -> Map<Long, ByteArray>,
     private val scrolloverReadWriter: suspend (Long, List<Long>) -> Unit,
     private val scrolloverUnreadWriter: suspend (Long, List<Long>) -> Unit,
+    private val explicitReadWriter: suspend (Long, Long, Boolean) -> Unit,
+    private val explicitStarredWriter: suspend (Long, Long, Boolean) -> Unit,
+    private val minifluxEntryUrlLoader: suspend (Long, Long) -> String,
+    private val saveToServiceWriter: suspend (Long, Long) -> AndroidSaveToServiceOutcome,
     private val activeSessionGeneration: () -> Long?,
     private val monotonicMillis: () -> Long,
 ) {
@@ -302,6 +317,33 @@ internal class AndroidArticleTimelineStore private constructor(
             }
             Unit
         },
+        explicitReadWriter = { generation, articleId, read ->
+            coreRuntime.localForGeneration(generation) { core ->
+                core.setReadState(articleId = articleId, read = read)
+            }
+            Unit
+        },
+        explicitStarredWriter = { generation, articleId, starred ->
+            coreRuntime.localForGeneration(generation) { core ->
+                core.setStarredState(articleId = articleId, starred = starred)
+            }
+            Unit
+        },
+        minifluxEntryUrlLoader = { generation, articleId ->
+            coreRuntime.localForGeneration(generation) { core ->
+                core.minifluxEntryUrl(articleId = articleId)
+            }
+        },
+        saveToServiceWriter = { generation, articleId ->
+            when (
+                coreRuntime.remoteForGeneration(generation) { core ->
+                    core.saveToService(articleId = articleId)
+                }
+            ) {
+                SaveToServiceResult.SAVED -> AndroidSaveToServiceOutcome.Saved
+                SaveToServiceResult.NO_INTEGRATION_CONFIGURED -> AndroidSaveToServiceOutcome.NoIntegrationConfigured
+            }
+        },
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
         monotonicMillis = SystemClock::elapsedRealtime,
     )
@@ -314,6 +356,14 @@ internal class AndroidArticleTimelineStore private constructor(
         feedIconLoader: suspend (List<Long>, FeedIconVariant) -> Map<Long, ByteArray> = { _, _ -> emptyMap() },
         scrolloverReadWriter: suspend (Long, List<Long>) -> Unit = { _, _ -> },
         scrolloverUnreadWriter: suspend (Long, List<Long>) -> Unit = { _, _ -> },
+        explicitReadWriter: suspend (Long, Long, Boolean) -> Unit = { _, _, _ -> },
+        explicitStarredWriter: suspend (Long, Long, Boolean) -> Unit = { _, _, _ -> },
+        minifluxEntryUrlLoader: suspend (Long, Long) -> String = { _, articleId ->
+            "https://example.test/miniflux/entry/$articleId"
+        },
+        saveToServiceWriter: suspend (Long, Long) -> AndroidSaveToServiceOutcome = { _, _ ->
+            AndroidSaveToServiceOutcome.Saved
+        },
         monotonicMillis: () -> Long = { System.nanoTime() / 1_000_000L },
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
     ) : this(
@@ -323,13 +373,25 @@ internal class AndroidArticleTimelineStore private constructor(
         feedIconLoader,
         scrolloverReadWriter,
         scrolloverUnreadWriter,
+        explicitReadWriter,
+        explicitStarredWriter,
+        minifluxEntryUrlLoader,
+        saveToServiceWriter,
         activeSessionGeneration,
         monotonicMillis,
     )
 
     private val mutableState = MutableStateFlow(AndroidArticleTimelineState())
     private val mutableFeedback = MutableSharedFlow<AndroidTimelineHaptic>(extraBufferCapacity = 8)
+    private val mutableActionMessages = MutableSharedFlow<String>(extraBufferCapacity = 8)
     private val mutableUndoState = MutableStateFlow(AndroidScrolloverUndoState())
+    private val explicitActionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val explicitMutationMutex = Mutex()
+    private val nextExplicitMutationToken = AtomicLong(0)
+    private val explicitReadMutationTokens = ConcurrentHashMap<Long, Long>()
+    private val explicitStarredMutationTokens = ConcurrentHashMap<Long, Long>()
+    private val expectedReadEvents = ConcurrentHashMap<Long, ConcurrentLinkedQueue<Boolean>>()
+    private val expectedStarredEvents = ConcurrentHashMap<Long, ConcurrentLinkedQueue<Boolean>>()
     private val scrolloverRetainedReadIds = mutableSetOf<Long>()
     private val scrolloverFeedbackSuppressedReadIds = mutableSetOf<Long>()
     private val undoFeedbackSuppressedUnreadIds = mutableSetOf<Long>()
@@ -345,6 +407,7 @@ internal class AndroidArticleTimelineStore private constructor(
 
     val state = mutableState.asStateFlow()
     val feedback = mutableFeedback.asSharedFlow()
+    val actionMessages = mutableActionMessages.asSharedFlow()
     val undoState = mutableUndoState.asStateFlow()
 
     fun retainedSelectionForSession(sessionGeneration: Long?): AndroidArticleTimelineSelection? =
@@ -352,7 +415,319 @@ internal class AndroidArticleTimelineStore private constructor(
             .takeIf { it.sessionGeneration == sessionGeneration }
             ?.selection
 
+    fun requestSetRead(
+        articleId: Long,
+        read: Boolean,
+        removeWhenRead: Boolean,
+        providesFeedback: Boolean = true,
+    ) {
+        explicitActionScope.launch {
+            setReadExplicit(
+                articleId = articleId,
+                read = read,
+                removeWhenRead = removeWhenRead,
+                providesFeedback = providesFeedback,
+            )
+        }
+    }
+
+    internal suspend fun setReadExplicit(
+        articleId: Long,
+        read: Boolean,
+        removeWhenRead: Boolean,
+        providesFeedback: Boolean = true,
+    ): Boolean {
+        val current = mutableState.value
+        val selection = current.selection ?: return false
+        val sessionGeneration = current.sessionGeneration ?: return false
+        if (activeSessionGeneration() != sessionGeneration) return false
+        val previous = current.articles.firstOrNull { it.id == articleId }?.isRead ?: return false
+        if (previous == read) return true
+
+        val token = nextExplicitMutationToken.incrementAndGet()
+        explicitReadMutationTokens[articleId] = token
+        expectedReadEvents.computeIfAbsent(articleId) { ConcurrentLinkedQueue() }.add(read)
+        val generation = current.queryGeneration
+        mutableState.update { state ->
+            if (
+                state.queryGeneration != generation ||
+                state.selection != selection ||
+                state.sessionGeneration != sessionGeneration
+            ) {
+                return@update state
+            }
+            state.copy(
+                articles = state.articles.map { article ->
+                    if (article.id == articleId) article.copy(isRead = read) else article
+                },
+                total = adjustedReadTotal(
+                    total = state.total,
+                    selection = selection,
+                    previous = previous,
+                    requested = read,
+                ),
+            )
+        }
+
+        val result = runCatching {
+            explicitMutationMutex.withLock {
+                explicitReadWriter(sessionGeneration, articleId, read)
+            }
+        }
+        if (result.isFailure) {
+            discardExpectedEvent(expectedReadEvents, articleId, read)
+        }
+        if (activeSessionGeneration() != sessionGeneration) return result.isSuccess
+        if (explicitReadMutationTokens[articleId] != token) return result.isSuccess
+        explicitReadMutationTokens.remove(articleId, token)
+        if (!owns(generation, selection, sessionGeneration)) return result.isSuccess
+
+        if (result.isSuccess) {
+            if (
+                read &&
+                removeWhenRead &&
+                selection.readFilter == AndroidArticleReadFilter.Unread
+            ) {
+                mutableState.update { state ->
+                    if (
+                        state.queryGeneration == generation &&
+                        state.selection == selection &&
+                        state.sessionGeneration == sessionGeneration
+                    ) {
+                        state.copy(
+                            articles = state.articles.filterNot { it.id == articleId },
+                            audioArticleIds = state.audioArticleIds - articleId,
+                        )
+                    } else {
+                        state
+                    }
+                }
+            }
+            refreshSelectionTotal(selection, generation, sessionGeneration)
+            if (providesFeedback && !previous && read) {
+                mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
+            }
+            return true
+        }
+
+        mutableState.update { state ->
+            if (
+                state.queryGeneration == generation &&
+                state.selection == selection &&
+                state.sessionGeneration == sessionGeneration
+            ) {
+                state.copy(
+                    articles = state.articles.map { article ->
+                        if (article.id == articleId && article.isRead == read) {
+                            article.copy(isRead = previous)
+                        } else {
+                            article
+                        }
+                    },
+                )
+            } else {
+                state
+            }
+        }
+        refreshSelectionTotal(selection, generation, sessionGeneration)
+        mutableActionMessages.emit(
+            if (read) "Article could not be marked as read." else "Article could not be marked as unread.",
+        )
+        return false
+    }
+
+    fun requestSetStarred(articleId: Long, starred: Boolean) {
+        explicitActionScope.launch { setStarredExplicit(articleId, starred) }
+    }
+
+    internal suspend fun setStarredExplicit(articleId: Long, starred: Boolean): Boolean {
+        val current = mutableState.value
+        val selection = current.selection ?: return false
+        val sessionGeneration = current.sessionGeneration ?: return false
+        if (activeSessionGeneration() != sessionGeneration) return false
+        val previous = current.articles.firstOrNull { it.id == articleId }?.isStarred ?: return false
+        if (previous == starred) return true
+
+        val token = nextExplicitMutationToken.incrementAndGet()
+        explicitStarredMutationTokens[articleId] = token
+        expectedStarredEvents.computeIfAbsent(articleId) { ConcurrentLinkedQueue() }.add(starred)
+        val generation = current.queryGeneration
+        mutableState.update { state ->
+            if (
+                state.queryGeneration != generation ||
+                state.selection != selection ||
+                state.sessionGeneration != sessionGeneration
+            ) {
+                return@update state
+            }
+            state.copy(
+                articles = state.articles.map { article ->
+                    if (article.id == articleId) article.copy(isStarred = starred) else article
+                },
+                total = adjustedStarredTotal(
+                    total = state.total,
+                    selection = selection,
+                    previous = previous,
+                    requested = starred,
+                ),
+            )
+        }
+
+        val result = runCatching {
+            explicitMutationMutex.withLock {
+                explicitStarredWriter(sessionGeneration, articleId, starred)
+            }
+        }
+        if (result.isFailure) {
+            discardExpectedEvent(expectedStarredEvents, articleId, starred)
+        }
+        if (activeSessionGeneration() != sessionGeneration) return result.isSuccess
+        if (explicitStarredMutationTokens[articleId] != token) return result.isSuccess
+        explicitStarredMutationTokens.remove(articleId, token)
+        if (!owns(generation, selection, sessionGeneration)) return result.isSuccess
+
+        if (result.isSuccess) {
+            if (!starred && selection.scope == AndroidNewsScope.Starred) {
+                mutableState.update { state ->
+                    if (
+                        state.queryGeneration == generation &&
+                        state.selection == selection &&
+                        state.sessionGeneration == sessionGeneration
+                    ) {
+                        state.copy(
+                            articles = state.articles.filterNot { it.id == articleId },
+                            audioArticleIds = state.audioArticleIds - articleId,
+                        )
+                    } else {
+                        state
+                    }
+                }
+            }
+            if (selection.scope == AndroidNewsScope.Starred) {
+                refreshSelectionTotal(selection, generation, sessionGeneration)
+            }
+            mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
+            return true
+        }
+
+        mutableState.update { state ->
+            if (
+                state.queryGeneration == generation &&
+                state.selection == selection &&
+                state.sessionGeneration == sessionGeneration
+            ) {
+                state.copy(
+                    articles = state.articles.map { article ->
+                        if (article.id == articleId && article.isStarred == starred) {
+                            article.copy(isStarred = previous)
+                        } else {
+                            article
+                        }
+                    },
+                )
+            } else {
+                state
+            }
+        }
+        if (selection.scope == AndroidNewsScope.Starred) {
+            refreshSelectionTotal(selection, generation, sessionGeneration)
+        }
+        mutableActionMessages.emit(
+            if (starred) "Article could not be starred." else "Article could not be unstarred.",
+        )
+        return false
+    }
+
+    suspend fun resolveMinifluxEntryUrl(articleId: Long): String? {
+        val generation = activeSessionGeneration() ?: return null
+        val result = runCatching { minifluxEntryUrlLoader(generation, articleId) }.getOrNull()
+        return result?.takeIf { activeSessionGeneration() == generation }
+    }
+
+    fun requestSaveToService(articleId: Long) {
+        val generation = activeSessionGeneration() ?: return
+        explicitActionScope.launch {
+            val result = runCatching { saveToServiceWriter(generation, articleId) }
+            if (activeSessionGeneration() != generation) return@launch
+            result.fold(
+                onSuccess = { outcome ->
+                    when (outcome) {
+                        AndroidSaveToServiceOutcome.Saved -> {
+                            mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
+                            mutableActionMessages.emit("Saved to third-party service.")
+                        }
+                        AndroidSaveToServiceOutcome.NoIntegrationConfigured -> {
+                            mutableActionMessages.emit("No third-party integration is configured.")
+                        }
+                    }
+                },
+                onFailure = {
+                    mutableActionMessages.emit("Article could not be saved to the third-party service.")
+                },
+            )
+        }
+    }
+
+    private fun consumeExpectedEvent(
+        events: ConcurrentHashMap<Long, ConcurrentLinkedQueue<Boolean>>,
+        articleId: Long,
+        value: Boolean,
+    ): Boolean {
+        val queue = events[articleId] ?: return false
+        val expected = queue.peek() ?: return false
+        if (expected != value) return false
+        queue.poll()
+        if (queue.isEmpty()) events.remove(articleId, queue)
+        return true
+    }
+
+    private fun discardExpectedEvent(
+        events: ConcurrentHashMap<Long, ConcurrentLinkedQueue<Boolean>>,
+        articleId: Long,
+        value: Boolean,
+    ) {
+        val queue = events[articleId] ?: return
+        queue.remove(value)
+        if (queue.isEmpty()) events.remove(articleId, queue)
+    }
+
+    private fun adjustedReadTotal(
+        total: ULong?,
+        selection: AndroidArticleTimelineSelection,
+        previous: Boolean,
+        requested: Boolean,
+    ): ULong? {
+        if (total == null || selection.readFilter != AndroidArticleReadFilter.Unread || previous == requested) {
+            return total
+        }
+        return if (!previous && requested) {
+            total - 1uL.coerceAtMost(total)
+        } else {
+            total + 1uL
+        }
+    }
+
+    private fun adjustedStarredTotal(
+        total: ULong?,
+        selection: AndroidArticleTimelineSelection,
+        previous: Boolean,
+        requested: Boolean,
+    ): ULong? {
+        if (total == null || selection.scope != AndroidNewsScope.Starred || previous == requested) {
+            return total
+        }
+        return if (previous && !requested) {
+            total - 1uL.coerceAtMost(total)
+        } else {
+            total + 1uL
+        }
+    }
+
     suspend fun reset(selection: AndroidArticleTimelineSelection) {
+        explicitReadMutationTokens.clear()
+        explicitStarredMutationTokens.clear()
+        expectedReadEvents.clear()
+        expectedStarredEvents.clear()
         scrolloverRetainedReadIds.clear()
         scrolloverFeedbackSuppressedReadIds.clear()
         undoFeedbackSuppressedUnreadIds.clear()
@@ -419,6 +794,7 @@ internal class AndroidArticleTimelineStore private constructor(
 
         when (val event = runtimeEvent.event) {
             is CoreEvent.ArticleReadStateChanged -> {
+                if (consumeExpectedEvent(expectedReadEvents, event.articleId, event.read)) return
                 val suppressFeedback = if (event.read) {
                     scrolloverFeedbackSuppressedReadIds.remove(event.articleId)
                 } else {
@@ -429,6 +805,7 @@ internal class AndroidArticleTimelineStore private constructor(
                 if (!suppressFeedback) mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
             }
             is CoreEvent.ArticleStarredStateChanged -> {
+                if (consumeExpectedEvent(expectedStarredEvents, event.articleId, event.starred)) return
                 applyStarredStateChanged(selection, event.articleId, event.starred)
                 mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
             }
@@ -959,6 +1336,8 @@ internal fun AndroidArticleTimeline(
     val listState = rememberLazyListState()
     val scrolloverTracker = remember { AndroidScrolloverTracker() }
     val actionScope = rememberCoroutineScope()
+    val actionSnackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
     val view = LocalView.current
     val publicationReferenceMillis = remember(state.queryGeneration) { System.currentTimeMillis() }
     val articleIds = remember(state.queryGeneration, state.articles.size) {
@@ -971,6 +1350,92 @@ internal fun AndroidArticleTimeline(
         FeedIconVariant.DARK
     } else {
         FeedIconVariant.NORMAL
+    }
+
+    fun showActionMessage(message: String) {
+        actionScope.launch { actionSnackbar.showSnackbar(message) }
+    }
+
+    fun performSwipeAction(article: ArticleSummary, action: AndroidArticleSwipeAction) {
+        when (action) {
+            AndroidArticleSwipeAction.ReadUnread -> {
+                store.requestSetRead(
+                    articleId = article.id,
+                    read = !article.isRead,
+                    removeWhenRead = articlePreferences.removeArticlesWhenRead,
+                )
+            }
+            AndroidArticleSwipeAction.StarUnstar -> {
+                store.requestSetStarred(article.id, !article.isStarred)
+            }
+            AndroidArticleSwipeAction.OpenOriginal -> {
+                store.requestSetRead(
+                    articleId = article.id,
+                    read = true,
+                    removeWhenRead = articlePreferences.removeArticlesWhenRead,
+                    providesFeedback = false,
+                )
+                if (!AndroidArticlePlatformActions.openUrl(context, article.url)) {
+                    showActionMessage("The article does not have a valid web URL.")
+                }
+            }
+            AndroidArticleSwipeAction.OpenMiniflux -> {
+                actionScope.launch {
+                    val url = store.resolveMinifluxEntryUrl(article.id)
+                    if (url == null || !AndroidArticlePlatformActions.openUrl(context, url)) {
+                        actionSnackbar.showSnackbar("Flux could not resolve a valid Miniflux entry URL.")
+                    }
+                }
+            }
+            AndroidArticleSwipeAction.Comments -> {
+                if (!AndroidArticlePlatformActions.openUrl(context, article.commentsUrl)) {
+                    showActionMessage("The article does not have a valid comments URL.")
+                }
+            }
+            AndroidArticleSwipeAction.Share -> {
+                if (!AndroidArticlePlatformActions.share(context, article)) {
+                    showActionMessage("The article could not be shared.")
+                }
+            }
+            AndroidArticleSwipeAction.SaveToService -> {
+                store.requestSaveToService(article.id)
+            }
+            AndroidArticleSwipeAction.ListeningList,
+            AndroidArticleSwipeAction.DownloadAudio,
+            -> Unit
+        }
+    }
+
+    fun performContextAction(article: ArticleSummary, action: AndroidArticleContextAction) {
+        when (action) {
+            AndroidArticleContextAction.ReadUnread ->
+                performSwipeAction(article, AndroidArticleSwipeAction.ReadUnread)
+            AndroidArticleContextAction.StarUnstar ->
+                performSwipeAction(article, AndroidArticleSwipeAction.StarUnstar)
+            AndroidArticleContextAction.OpenOriginal ->
+                performSwipeAction(article, AndroidArticleSwipeAction.OpenOriginal)
+            AndroidArticleContextAction.OpenMiniflux ->
+                performSwipeAction(article, AndroidArticleSwipeAction.OpenMiniflux)
+            AndroidArticleContextAction.Comments ->
+                performSwipeAction(article, AndroidArticleSwipeAction.Comments)
+            AndroidArticleContextAction.CopyLink -> {
+                if (AndroidArticlePlatformActions.copyLink(context, article)) {
+                    showActionMessage("Link copied.")
+                } else {
+                    showActionMessage("The article does not have a valid web URL.")
+                }
+            }
+            AndroidArticleContextAction.Share ->
+                performSwipeAction(article, AndroidArticleSwipeAction.Share)
+            AndroidArticleContextAction.SaveToService ->
+                performSwipeAction(article, AndroidArticleSwipeAction.SaveToService)
+        }
+    }
+
+    LaunchedEffect(store, actionSnackbar) {
+        store.actionMessages.collect { message ->
+            actionSnackbar.showSnackbar(message)
+        }
     }
 
     LaunchedEffect(store, view) {
@@ -1119,16 +1584,25 @@ internal fun AndroidArticleTimeline(
                         )
                     },
                 ) { article ->
-                    AndroidArticleTimelineRow(
+                    val hasAudio = article.id in state.audioArticleIds
+                    AndroidArticleSwipeContainer(
                         article = article,
-                        hasAudio = article.id in state.audioArticleIds,
-                        preferences = articlePreferences,
-                        publicationReferenceMillis = publicationReferenceMillis,
-                        feedIconPng = state.feedIconPngByFeedId[article.feedId],
-                        feedIconVariant = feedIconVariant,
-                        availableWidth = availableWidth,
-                        onRequestFeedIcon = store::ensureFeedIcon,
-                    )
+                        hasAudio = hasAudio,
+                        configuration = articlePreferences.swipeConfiguration,
+                        onSwipeAction = { action -> performSwipeAction(article, action) },
+                        onContextAction = { action -> performContextAction(article, action) },
+                    ) {
+                        AndroidArticleTimelineRow(
+                            article = article,
+                            hasAudio = hasAudio,
+                            preferences = articlePreferences,
+                            publicationReferenceMillis = publicationReferenceMillis,
+                            feedIconPng = state.feedIconPngByFeedId[article.feedId],
+                            feedIconVariant = feedIconVariant,
+                            availableWidth = availableWidth,
+                            onRequestFeedIcon = store::ensureFeedIcon,
+                        )
+                    }
                 }
 
                 if (state.loadingNextPage) {
@@ -1153,6 +1627,16 @@ internal fun AndroidArticleTimeline(
             }
         }
     }
+
+    SnackbarHost(
+        hostState = actionSnackbar,
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(
+                horizontal = 16.dp,
+                bottom = if (undoState.visible) 88.dp else 20.dp,
+            ),
+    )
 
     if (undoState.visible) {
         Snackbar(
