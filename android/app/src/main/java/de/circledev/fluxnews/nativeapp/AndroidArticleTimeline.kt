@@ -1722,10 +1722,15 @@ internal fun AndroidArticleTimeline(
             .collect { interaction ->
                 when (interaction) {
                     is DragInteraction.Start -> {
-                        scrolloverTracker.beginUserScroll(
+                        val candidates = scrolloverTracker.beginUserScroll(
                             sample = listState.scrolloverGeometrySample(),
                             enabled = articlePreferences.markReadOnScrollover,
                         )
+                        if (candidates.isNotEmpty()) {
+                            scrolloverMutationRequests.trySend(
+                                AndroidScrolloverMutationRequest.MarkRead(candidates),
+                            )
+                        }
                     }
                     is DragInteraction.Stop,
                     is DragInteraction.Cancel,
