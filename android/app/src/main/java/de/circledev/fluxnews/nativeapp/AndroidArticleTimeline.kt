@@ -1876,7 +1876,13 @@ internal fun AndroidArticleTimeline(
 
     LaunchedEffect(listState, scrolloverTracker, articlePreferences.markReadOnScrollover) {
         if (!articlePreferences.markReadOnScrollover) {
-            scrolloverTracker.endUserScroll()
+            scrolloverTracker.observe(
+                sample = AndroidScrolloverPositionSample(
+                    firstVisibleIndex = listState.firstVisibleItemIndex,
+                ),
+                scrolling = false,
+                enabled = false,
+            )
             return@LaunchedEffect
         }
         listState.interactionSource.interactions
@@ -1913,15 +1919,15 @@ internal fun AndroidArticleTimeline(
             listState.firstVisibleItemIndex to listState.isScrollInProgress
         }
             .collect { (firstVisibleIndex, scrolling) ->
-                val candidates = scrolloverTracker.receive(
+                val candidates = scrolloverTracker.observe(
                     sample = AndroidScrolloverPositionSample(
                         firstVisibleIndex = firstVisibleIndex,
                     ),
+                    scrolling = scrolling,
                     enabled = articlePreferences.markReadOnScrollover,
                 )
                 store.enqueueScrolloverCandidates(candidates)
                 if (!scrolling) {
-                    scrolloverTracker.endUserScroll()
                     store.enqueueScrolloverInteractionComplete()
                 }
             }
