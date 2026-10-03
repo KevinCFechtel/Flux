@@ -7,16 +7,23 @@ internal data class AndroidScrolloverPositionSample(
 /**
  * Lightweight Compose-native Scrollover detector.
  *
- * The tracker keeps an idle baseline separate from an active user-scroll baseline.
- * LazyList position changes and DragInteraction.Start are delivered independently,
- * so an index change that arrives just before the drag event must not overwrite the
- * last idle position. Programmatic scrolling never activates the user-scroll phase.
+ * A scroll interaction is summarized by the first-visible index at its start and
+ * the highest first-visible index reached before LazyList becomes idle again.
+ * Candidates are emitted once, at interaction end. Reverse movement does not erase
+ * forward progress, so slow forward/backward movement remains deterministic.
+ *
+ * Known programmatic scrolls explicitly suppress collection and synchronize the
+ * idle baseline afterwards.
  */
-internal class AndroidScrolloverTracker {
+internal class AndroidScrolloverTracker(
+    initialFirstVisibleIndex: Int = 0,
+) {
     private val orderedIds = mutableListOf<Long>()
     private val emittedIds = mutableSetOf<Long>()
-    private var baselineFirstVisibleIndex: Int? = null
-    private var userScrollActive = false
+    private var idleFirstVisibleIndex: Int = initialFirstVisibleIndex
+    private var sessionStartIndex: Int? = null
+    private var sessionMaxIndex: Int? = null
+    private var programmaticScrollActive = false
 
     fun updateSnapshot(ids: List<Long>) {
         if (ids.size == orderedIds.size && ids.indices.all { ids[it] == orderedIds[it] }) return
@@ -35,29 +42,24 @@ internal class AndroidScrolloverTracker {
         orderedIds.clear()
         orderedIds.addAll(ids)
         emittedIds.retainAll(ids.toSet())
-        baselineFirstVisibleIndex = null
-        userScrollActive = false
+        sessionStartIndex = null
+        sessionMaxIndex = null
     }
 
-    fun beginUserScroll(
-        sample: AndroidScrolloverPositionSample,
-        enabled: Boolean,
-    ): List<Long> {
-        if (!enabled) {
-            userScrollActive = false
-            return emptyList()
-        }
+    fun synchronizeIdlePosition(firstVisibleIndex: Int) {
+        sessionStartIndex = null
+        sessionMaxIndex = null
+        idleFirstVisibleIndex = firstVisibleIndex.coerceAtLeast(0)
+    }
 
-        if (userScrollActive) {
-            return emitForwardCrossings(sample.firstVisibleIndex)
-        }
+    fun beginProgrammaticScroll(firstVisibleIndex: Int) {
+        programmaticScrollActive = true
+        synchronizeIdlePosition(firstVisibleIndex)
+    }
 
-        userScrollActive = true
-        if (baselineFirstVisibleIndex == null) {
-            baselineFirstVisibleIndex = sample.firstVisibleIndex
-            return emptyList()
-        }
-        return emitForwardCrossings(sample.firstVisibleIndex)
+    fun endProgrammaticScroll(firstVisibleIndex: Int) {
+        synchronizeIdlePosition(firstVisibleIndex)
+        programmaticScrollActive = false
     }
 
     fun observe(
@@ -65,55 +67,48 @@ internal class AndroidScrolloverTracker {
         scrolling: Boolean,
         enabled: Boolean,
     ): List<Long> {
-        val currentIndex = sample.firstVisibleIndex
+        val currentIndex = sample.firstVisibleIndex.coerceAtLeast(0)
 
-        if (!enabled) {
-            userScrollActive = false
-            if (!scrolling) baselineFirstVisibleIndex = currentIndex
-            return emptyList()
-        }
-
-        if (!scrolling) {
-            val candidates = if (userScrollActive) {
-                emitForwardCrossings(currentIndex)
-            } else {
-                emptyList()
+        if (!enabled || programmaticScrollActive) {
+            if (!scrolling && !programmaticScrollActive) {
+                synchronizeIdlePosition(currentIndex)
             }
-            userScrollActive = false
-            baselineFirstVisibleIndex = currentIndex
-            return candidates
-        }
-
-        if (!userScrollActive) {
-            // Movement can arrive before DragInteraction.Start, or it can be
-            // programmatic. Keep the previous idle baseline intact so the former
-            // is not lost; without a user drag we emit nothing.
             return emptyList()
         }
 
-        return emitForwardCrossings(currentIndex)
-    }
+        if (scrolling) {
+            if (sessionStartIndex == null) {
+                sessionStartIndex = idleFirstVisibleIndex
+                sessionMaxIndex = maxOf(idleFirstVisibleIndex, currentIndex)
+            } else {
+                sessionMaxIndex = maxOf(sessionMaxIndex ?: currentIndex, currentIndex)
+            }
+            return emptyList()
+        }
 
-    fun rearm(articleIds: Collection<Long>) {
-        emittedIds.removeAll(articleIds.toSet())
-    }
+        val start = sessionStartIndex
+        val maxReached = sessionMaxIndex
+        sessionStartIndex = null
+        sessionMaxIndex = null
+        idleFirstVisibleIndex = currentIndex
 
-    private fun emitForwardCrossings(currentIndex: Int): List<Long> {
-        val previousIndex = baselineFirstVisibleIndex
-        baselineFirstVisibleIndex = currentIndex
-        if (previousIndex == null || currentIndex <= previousIndex) return emptyList()
+        if (start == null || maxReached == null || maxReached <= start) return emptyList()
 
-        val start = previousIndex.coerceAtLeast(0)
-        val endExclusive = currentIndex.coerceAtMost(orderedIds.size)
-        if (start >= endExclusive) return emptyList()
+        val startIndex = start.coerceIn(0, orderedIds.size)
+        val endExclusive = maxReached.coerceIn(startIndex, orderedIds.size)
+        if (startIndex >= endExclusive) return emptyList()
 
         val candidates = buildList {
-            for (index in start until endExclusive) {
+            for (index in startIndex until endExclusive) {
                 val id = orderedIds[index]
                 if (id !in emittedIds) add(id)
             }
         }
         emittedIds.addAll(candidates)
         return candidates
+    }
+
+    fun rearm(articleIds: Collection<Long>) {
+        emittedIds.removeAll(articleIds.toSet())
     }
 }
