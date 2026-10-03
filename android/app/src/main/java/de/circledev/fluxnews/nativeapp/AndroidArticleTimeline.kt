@@ -1989,17 +1989,28 @@ internal fun AndroidArticleTimeline(
                     },
                 ) { article ->
                     val hasAudio = article.id in state.audioArticleIds
+                    val presentation by store.rowPresentationState(article).collectAsState()
+                    val presentedArticle = remember(
+                        article,
+                        presentation.isRead,
+                        presentation.isStarred,
+                    ) {
+                        article.copy(
+                            isRead = presentation.isRead,
+                            isStarred = presentation.isStarred,
+                        )
+                    }
                     AndroidArticleSwipeContainer(
-                        article = article,
+                        article = presentedArticle,
                         hasAudio = hasAudio,
                         configuration = articlePreferences.swipeConfiguration,
                         rowWidth = maxWidth,
-                        onOpen = { onOpenArticle(article) },
-                        onSwipeAction = { action -> performSwipeAction(article, action) },
-                        onContextAction = { action -> performContextAction(article, action) },
+                        onOpen = { onOpenArticle(presentedArticle) },
+                        onSwipeAction = { action -> performSwipeAction(presentedArticle, action) },
+                        onContextAction = { action -> performContextAction(presentedArticle, action) },
                     ) {
                         AndroidArticleTimelineRow(
-                            article = article,
+                            article = presentedArticle,
                             hasAudio = hasAudio,
                             preferences = articlePreferences,
                             publicationReferenceMillis = publicationReferenceMillis,
@@ -2362,7 +2373,9 @@ private fun ArticleTitle(article: ArticleSummary) {
     Text(
         article.title,
         style = MaterialTheme.typography.titleMedium,
-        fontWeight = if (article.isRead) FontWeight.Normal else FontWeight.SemiBold,
+        // Keep typography geometry stable across read-state changes. iOS uses the
+        // same headline font for read and unread rows and changes colour only.
+        fontWeight = FontWeight.SemiBold,
         color = if (article.isRead) {
             MaterialTheme.colorScheme.onSurfaceVariant
         } else {
@@ -2378,7 +2391,11 @@ private fun ArticlePublicationRow(
     preferences: AndroidArticlePreferenceState,
     publicationReferenceMillis: Long,
 ) {
-    val supportingColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val supportingColor = if (article.isRead) {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -2435,7 +2452,11 @@ private fun ArticlePreview(
         maxLines = preferences.previewLines.lineCount,
         overflow = TextOverflow.Ellipsis,
         style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = if (article.isRead) {
+            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
     )
 }
 
