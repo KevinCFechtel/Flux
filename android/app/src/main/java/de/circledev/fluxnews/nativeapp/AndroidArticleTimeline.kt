@@ -461,6 +461,7 @@ internal class AndroidArticleTimelineStore private constructor(
     private val explicitActionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val scrolloverMutationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val scrolloverMutationRequests = Channel<AndroidScrolloverMutationRequest>(capacity = Channel.UNLIMITED)
+    private val articleIndexById = mutableMapOf<Long, Int>()
     private val explicitMutationMutex = Mutex()
     private val nextExplicitMutationToken = AtomicLong(0)
     private val explicitReadMutationTokens = ConcurrentHashMap<Long, Long>()
@@ -911,6 +912,10 @@ internal class AndroidArticleTimelineStore private constructor(
         recentSuccessfulScrolloverReads.clear()
         clearScrolloverUndoGroup()
         scrolloverConfirmationPending = false
+        articleIndexById.clear()
+        while (scrolloverMutationRequests.tryReceive().isSuccess) {
+            // A semantic Timeline reset starts a new Scrollover generation.
+        }
         val generation = ++requestGeneration
         val sessionGeneration = activeSessionGeneration()
         val previous = mutableState.value
@@ -949,6 +954,7 @@ internal class AndroidArticleTimelineStore private constructor(
         val audioArticleIds = loadAudioArticleIds(articles.map { it.id })
 
         if (!owns(generation, selection, sessionGeneration)) return
+        rebuildArticleIndex(articles)
         val iconState = mutableState.value
         mutableState.value = AndroidArticleTimelineState(
             selection = selection,
@@ -1087,7 +1093,7 @@ internal class AndroidArticleTimelineStore private constructor(
         if (!read) scrolloverRetainedReadIds.remove(articleId)
 
         val current = mutableState.value
-        val index = current.articles.indexOfFirst { it.id == articleId }
+        val index = articleIndexById[articleId] ?: -1
         val retainScrolloverRow = read && articleId in scrolloverRetainedReadIds
 
         if (selection.readFilter == AndroidArticleReadFilter.Unread && !read && index < 0) {
@@ -1097,12 +1103,14 @@ internal class AndroidArticleTimelineStore private constructor(
 
         if (index >= 0) mutableState.update { state ->
             if (state.selection != selection || state.sessionGeneration != current.sessionGeneration) return@update state
-            val currentIndex = state.articles.indexOfFirst { it.id == articleId }
-            if (currentIndex < 0) return@update state
+            val currentIndex = articleIndexById[articleId] ?: return@update state
+            if (currentIndex !in state.articles.indices || state.articles[currentIndex].id != articleId) return@update state
 
             if (selection.readFilter == AndroidArticleReadFilter.Unread && read && !retainScrolloverRow) {
+                val filtered = state.articles.filterNot { it.id == articleId }
+                rebuildArticleIndex(filtered)
                 state.copy(
-                    articles = state.articles.filterNot { it.id == articleId },
+                    articles = filtered,
                     audioArticleIds = state.audioArticleIds - articleId,
                 )
             } else {
@@ -1129,15 +1137,17 @@ internal class AndroidArticleTimelineStore private constructor(
         val sessionGeneration = current.sessionGeneration ?: return emptyList()
         if (activeSessionGeneration() != sessionGeneration) return emptyList()
 
-        val byId = current.articles.associateBy { it.id }
         val accepted = articleIds.asSequence()
             .distinct()
-            .filter { id -> byId[id]?.isRead == false }
+            .filter { id ->
+                val index = articleIndexById[id] ?: return@filter false
+                current.articles.getOrNull(index)?.let { it.id == id && !it.isRead } == true
+            }
             .toList()
         if (accepted.isEmpty()) return emptyList()
 
         scrolloverRetainedReadIds.addAll(accepted)
-        scrolloverFeedbackSuppressedReadIds.addAll(accepted)
+        expectedBulkReadEventIds.addAll(accepted)
         mutableState.update { state ->
             if (
                 state.queryGeneration != current.queryGeneration ||
@@ -1146,11 +1156,16 @@ internal class AndroidArticleTimelineStore private constructor(
             ) {
                 return@update state
             }
-            val acceptedSet = accepted.toHashSet()
+            val articles = state.articles.toMutableList()
+            accepted.forEach { id ->
+                val index = articleIndexById[id] ?: return@forEach
+                val article = articles.getOrNull(index) ?: return@forEach
+                if (article.id == id && !article.isRead) {
+                    articles[index] = article.copy(isRead = true)
+                }
+            }
             state.copy(
-                articles = state.articles.map { article ->
-                    if (article.id in acceptedSet) article.copy(isRead = true) else article
-                },
+                articles = articles,
                 total = if (selection.readFilter == AndroidArticleReadFilter.Unread) {
                     state.total?.let { total ->
                         val delta = accepted.size.toULong().coerceAtMost(total)
@@ -1164,19 +1179,25 @@ internal class AndroidArticleTimelineStore private constructor(
 
         return try {
             scrolloverReadWriter(sessionGeneration, accepted)
+            if (!owns(current.queryGeneration, selection, sessionGeneration)) return emptyList()
             pendingSuccessfulScrolloverUndoIds += accepted
             scrolloverConfirmationPending = true
             emptyList()
         } catch (_: Exception) {
+            expectedBulkReadEventIds.removeAll(accepted.toSet())
             scrolloverRetainedReadIds.removeAll(accepted.toSet())
-            scrolloverFeedbackSuppressedReadIds.removeAll(accepted.toSet())
             if (owns(current.queryGeneration, selection, sessionGeneration)) {
-                val acceptedSet = accepted.toHashSet()
                 mutableState.update { state ->
+                    val articles = state.articles.toMutableList()
+                    accepted.forEach { id ->
+                        val index = articleIndexById[id] ?: return@forEach
+                        val article = articles.getOrNull(index) ?: return@forEach
+                        if (article.id == id && article.isRead) {
+                            articles[index] = article.copy(isRead = false)
+                        }
+                    }
                     state.copy(
-                        articles = state.articles.map { article ->
-                            if (article.id in acceptedSet) article.copy(isRead = false) else article
-                        },
+                        articles = articles,
                         total = if (selection.readFilter == AndroidArticleReadFilter.Unread) {
                             state.total?.plus(accepted.size.toULong())
                         } else {
@@ -1517,19 +1538,20 @@ internal class AndroidArticleTimelineStore private constructor(
         }
 
         if (!owns(generation, selection, currentSessionGeneration)) return
-        val existingIDs = current.articles.asSequence().map { it.id }.toHashSet()
-        val appended = page.articles.filter { existingIDs.add(it.id) }
+        val appended = page.articles.filter { it.id !in articleIndexById }
         val appendedAudioArticleIds = loadAudioArticleIds(appended.map { it.id })
 
         if (!owns(generation, selection, currentSessionGeneration)) return
         mutableState.update { state ->
             if (state.queryGeneration != generation || state.selection != selection) return@update state
 
-            val stateIDs = state.articles.asSequence().map { it.id }.toHashSet()
-            val currentAppend = appended.filter { stateIDs.add(it.id) }
+            val currentAppend = appended.filter { it.id !in articleIndexById }
             val madeProgress = currentAppend.isNotEmpty()
             val nextCursor = page.nextCursor.takeIf { madeProgress && it != cursor }
 
+            currentAppend.forEachIndexed { offset, article ->
+                articleIndexById[article.id] = state.articles.size + offset
+            }
             state.copy(
                 articles = state.articles + currentAppend,
                 audioArticleIds = state.audioArticleIds + appendedAudioArticleIds,
@@ -1538,6 +1560,11 @@ internal class AndroidArticleTimelineStore private constructor(
                 errorMessage = null,
             )
         }
+    }
+
+    private fun rebuildArticleIndex(articles: List<ArticleSummary>) {
+        articleIndexById.clear()
+        articles.forEachIndexed { index, article -> articleIndexById[article.id] = index }
     }
 
     private suspend fun loadAudioArticleIds(articleIds: List<Long>): Set<Long> =
