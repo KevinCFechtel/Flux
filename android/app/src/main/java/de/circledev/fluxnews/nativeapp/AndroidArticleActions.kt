@@ -56,6 +56,7 @@ internal enum class AndroidArticleContextAction {
     ReadUnread,
     StarUnstar,
     OpenOriginal,
+    Reader,
     OpenMiniflux,
     Comments,
     CopyLink,
@@ -128,6 +129,7 @@ internal object AndroidArticleActionPolicy {
         add(AndroidArticleContextAction.StarUnstar)
         add(AndroidArticleContextAction.ReadUnread)
         if (validWebUrl(article.url)) add(AndroidArticleContextAction.OpenOriginal)
+        add(AndroidArticleContextAction.Reader)
         add(AndroidArticleContextAction.OpenMiniflux)
         if (validWebUrl(article.commentsUrl)) add(AndroidArticleContextAction.Comments)
         if (validWebUrl(article.url)) {
@@ -153,6 +155,7 @@ internal object AndroidArticleActionPolicy {
         AndroidArticleContextAction.ReadUnread -> if (article.isRead) "Mark as unread" else "Mark as read"
         AndroidArticleContextAction.StarUnstar -> if (article.isStarred) "Unstar" else "Star"
         AndroidArticleContextAction.OpenOriginal -> "Open original"
+        AndroidArticleContextAction.Reader -> "Open in Reader"
         AndroidArticleContextAction.OpenMiniflux -> "Open in Miniflux"
         AndroidArticleContextAction.Comments -> "Open comments"
         AndroidArticleContextAction.CopyLink -> "Copy link"
@@ -208,6 +211,7 @@ internal fun AndroidArticleSwipeContainer(
     article: ArticleSummary,
     hasAudio: Boolean,
     configuration: AndroidArticleSwipeConfiguration,
+    onOpen: () -> Unit = {},
     onSwipeAction: (AndroidArticleSwipeAction) -> Unit,
     onContextAction: (AndroidArticleContextAction) -> Unit,
     modifier: Modifier = Modifier,
@@ -346,6 +350,7 @@ internal fun AndroidArticleSwipeContainer(
                 }
                 .pointerInput(article.id) {
                     detectTapGestures(
+                        onTap = { onOpen() },
                         onLongPress = { contextExpanded = true },
                     )
                 }

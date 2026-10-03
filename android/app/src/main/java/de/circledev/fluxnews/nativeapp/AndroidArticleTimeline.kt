@@ -1408,6 +1408,8 @@ internal fun AndroidArticleTimeline(
     selection: AndroidArticleTimelineSelection,
     sessionGeneration: Long?,
     accountKey: String,
+    onOpenArticle: (ArticleSummary) -> Unit,
+    onOpenReader: (ArticleSummary) -> Unit,
     topContentPadding: Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
@@ -1464,6 +1466,12 @@ internal fun AndroidArticleTimeline(
                 }
             }
             AndroidArticleSwipeAction.OpenMiniflux -> {
+                store.requestSetRead(
+                    articleId = article.id,
+                    read = true,
+                    removeWhenRead = articlePreferences.removeArticlesWhenRead,
+                    providesFeedback = false,
+                )
                 actionScope.launch {
                     val url = store.resolveMinifluxEntryUrl(article.id)
                     if (url == null || !AndroidArticlePlatformActions.openUrl(context, url)) {
@@ -1498,6 +1506,15 @@ internal fun AndroidArticleTimeline(
                 performSwipeAction(article, AndroidArticleSwipeAction.StarUnstar)
             AndroidArticleContextAction.OpenOriginal ->
                 performSwipeAction(article, AndroidArticleSwipeAction.OpenOriginal)
+            AndroidArticleContextAction.Reader -> {
+                store.requestSetRead(
+                    articleId = article.id,
+                    read = true,
+                    removeWhenRead = articlePreferences.removeArticlesWhenRead,
+                    providesFeedback = false,
+                )
+                onOpenReader(article)
+            }
             AndroidArticleContextAction.OpenMiniflux ->
                 performSwipeAction(article, AndroidArticleSwipeAction.OpenMiniflux)
             AndroidArticleContextAction.Comments ->
@@ -1681,6 +1698,7 @@ internal fun AndroidArticleTimeline(
                         article = article,
                         hasAudio = hasAudio,
                         configuration = articlePreferences.swipeConfiguration,
+                        onOpen = { onOpenArticle(article) },
                         onSwipeAction = { action -> performSwipeAction(article, action) },
                         onContextAction = { action -> performContextAction(article, action) },
                     ) {
@@ -1758,7 +1776,7 @@ internal fun AndroidArticleTimeline(
     }
 }
 
-private fun View.performFluxConfirmationHaptic() {
+internal fun View.performFluxConfirmationHaptic() {
     val feedbackConstant = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         HapticFeedbackConstants.CONFIRM
     } else {
@@ -1767,7 +1785,7 @@ private fun View.performFluxConfirmationHaptic() {
     performHapticFeedback(feedbackConstant)
 }
 
-private fun View.performFluxSelectionHaptic() {
+internal fun View.performFluxSelectionHaptic() {
     performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
 }
 
@@ -1791,7 +1809,7 @@ private fun androidx.compose.foundation.lazy.LazyListState.scrolloverGeometrySam
 }
 
 @Composable
-private fun AndroidArticleTimelineRow(
+internal fun AndroidArticleTimelineRow(
     article: ArticleSummary,
     hasAudio: Boolean,
     preferences: AndroidArticlePreferenceState,

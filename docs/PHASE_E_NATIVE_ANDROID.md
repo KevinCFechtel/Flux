@@ -832,7 +832,28 @@ Implemented on 3 October 2026:
 - focused JVM tests cover Manual-only cancellation, next-scope ordering/no-wrap behavior, the exact Mark-All query, exact bulk IDs, failure behavior and stale-selection suppression;
 - no Core/UniFFI API change was required.
 
-E4-D is next and completes native Reader plus remote Search, then activates normal article-row Open with the full Reader/original/Miniflux routing contract.
+### E4-D — Reader overlay, normal article routing and remote Search
+
+Status: **IMPLEMENTATION COMPLETE — CI and real-device acceptance pending**
+
+Implemented on 3 October 2026:
+
+- Reader is temporary presentation rather than a Navigation Compose destination: the active Timeline or Search surface remains mounted underneath and retains its list state;
+- compact portrait uses a near-full-height closable Reader surface over the list, while wider/landscape/tablet layouts use a centered floating panel; Android Back, the close control and the outside scrim dismiss only Reader;
+- Reader content is loaded from the semantic Core `ReaderDocument`, including headings, paragraphs, inline emphasis/code/links, images, lists, quotes, code blocks, rules, external content and the simplified/truncated notice;
+- Reader requests are process/session-generation bound; switching article, dismissing Reader or replacing the account invalidates stale completions;
+- normal Timeline row taps are now productive and always mark the article read before routing;
+- the existing global Open Article preference selects Reader versus web opening, and web opening additionally honors the feed-specific `openInMiniflux` preference; explicit Original, explicit Reader and explicit Miniflux remain independent actions;
+- Search remains a real secondary Navigation Compose destination, so Back returns to the preserved News Timeline rather than treating Search as a Reader-style overlay;
+- Search uses Core/Miniflux `searchArticles` with its own 50-item offset pagination, request-generation stale suppression and result de-duplication; it does not create a local FTS/index;
+- Search reuses the normal Android article row renderer, swipe configuration, context actions, feed icons and available audio projection;
+- Search Read/Unread and Star/Unstar use the Core search mutation APIs with optimistic presentation and rollback on failure;
+- opening a Search result follows the same normal Reader/original/Miniflux routing policy; Search Reader uses `readerDocumentForSearch` and closes back to the current Search result list;
+- Comments still do not mark read, while Original, Reader and Miniflux article-opening actions do;
+- Search/Reader state is app-process scoped but invalidated on Core-session replacement, so Activity recreation does not manufacture a second domain owner or stale account presentation;
+- no Core/UniFFI API change was required.
+
+With E4-D implemented, the E4 feature surface is implementation-complete. Acceptance remains subject to the Android CI gate and a focused physical-device pass for Reader overlay geometry, Back behavior, Search pagination and article-open routing.
 
 E4 completes interactive Newsreader behavior:
 

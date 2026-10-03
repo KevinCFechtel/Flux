@@ -84,6 +84,7 @@ class AndroidArticleActionsTest {
 
         assertTrue(AndroidArticleContextAction.ReadUnread in actions)
         assertTrue(AndroidArticleContextAction.StarUnstar in actions)
+        assertTrue(AndroidArticleContextAction.Reader in actions)
         assertTrue(AndroidArticleContextAction.OpenMiniflux in actions)
         assertTrue(AndroidArticleContextAction.SaveToService in actions)
         assertFalse(AndroidArticleContextAction.OpenOriginal in actions)

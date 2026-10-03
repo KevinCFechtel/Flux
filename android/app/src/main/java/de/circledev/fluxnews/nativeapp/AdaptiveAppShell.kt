@@ -108,6 +108,9 @@ internal fun AdaptiveAppShell(
     coreRuntime: AndroidCoreRuntime,
     syncCoordinator: AndroidSyncCoordinator,
     timelineStore: AndroidArticleTimelineStore,
+    searchStore: AndroidSearchStore,
+    readerStore: AndroidReaderStore,
+    articleOpenResolver: AndroidArticleOpenResolver,
     navigationPreferences: AndroidNavigationPreferences,
     state: AndroidAccountBootstrap.State.Ready,
     onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
@@ -127,6 +130,11 @@ internal fun AdaptiveAppShell(
         mutableStateOf(retainedTimelineSelection != null)
     }
     val navigationRefreshes = remember { Channel<Unit>(capacity = Channel.CONFLATED) }
+
+    LaunchedEffect(sessionGeneration) {
+        searchStore.activateSession(sessionGeneration)
+        readerStore.activateSession(sessionGeneration)
+    }
 
     suspend fun reloadNavigation() {
         navigation = try {
@@ -201,15 +209,19 @@ internal fun AdaptiveAppShell(
                 state = state,
                 timelineStore = timelineStore,
                 syncCoordinator = syncCoordinator,
+                readerStore = readerStore,
+                articleOpenResolver = articleOpenResolver,
                 sessionGeneration = sessionGeneration,
                 navController = navController,
                 onSelectionChanged = { timelineSelection = it },
             )
         }
         composable(ShellRoute.Search) {
-            SecondaryDestination(
-                title = "Search",
-                message = "Native article search is connected to this destination in E4.",
+            AndroidSearchDestination(
+                store = searchStore,
+                readerStore = readerStore,
+                openResolver = articleOpenResolver,
+                sessionGeneration = sessionGeneration,
                 onBack = navController::popBackStack,
             )
         }
@@ -263,6 +275,8 @@ private fun TimelineDestination(
     state: AndroidAccountBootstrap.State.Ready,
     timelineStore: AndroidArticleTimelineStore,
     syncCoordinator: AndroidSyncCoordinator,
+    readerStore: AndroidReaderStore,
+    articleOpenResolver: AndroidArticleOpenResolver,
     sessionGeneration: Long?,
     navController: NavHostController,
     onSelectionChanged: (AndroidArticleTimelineSelection) -> Unit,
@@ -299,6 +313,8 @@ private fun TimelineDestination(
                     state = state,
                     timelineStore = timelineStore,
                     syncCoordinator = syncCoordinator,
+                    readerStore = readerStore,
+                    articleOpenResolver = articleOpenResolver,
                     navigationPreferences = preferences,
                     sessionGeneration = sessionGeneration,
                     persistentNavigation = true,
@@ -350,6 +366,8 @@ private fun TimelineDestination(
                     state = state,
                     timelineStore = timelineStore,
                     syncCoordinator = syncCoordinator,
+                    readerStore = readerStore,
+                    articleOpenResolver = articleOpenResolver,
                     navigationPreferences = preferences,
                     sessionGeneration = sessionGeneration,
                     persistentNavigation = false,
@@ -373,6 +391,8 @@ private fun NewsRootContent(
     state: AndroidAccountBootstrap.State.Ready,
     timelineStore: AndroidArticleTimelineStore,
     syncCoordinator: AndroidSyncCoordinator,
+    readerStore: AndroidReaderStore,
+    articleOpenResolver: AndroidArticleOpenResolver,
     navigationPreferences: AndroidNavigationPreferenceState,
     sessionGeneration: Long?,
     persistentNavigation: Boolean,
@@ -421,6 +441,35 @@ private fun NewsRootContent(
     val shellSnackbar = remember { SnackbarHostState() }
     var markReadRequest by remember { mutableStateOf<AndroidPendingMarkRead?>(null) }
     var markReadRunning by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    fun openReader(article: uniffi.flux_uniffi.ArticleSummary) {
+        readerStore.open(article, AndroidReaderSource.Timeline)
+    }
+
+    fun openArticle(article: uniffi.flux_uniffi.ArticleSummary) {
+        timelineStore.requestSetRead(
+            articleId = article.id,
+            read = true,
+            removeWhenRead = articlePreferences.removeArticlesWhenRead,
+            providesFeedback = false,
+        )
+        if (articlePreferences.openArticle == AndroidArticleOpenPreference.Reader) {
+            openReader(article)
+            return
+        }
+        actionScope.launch {
+            when (val destination = articleOpenResolver.resolve(article, articlePreferences.openArticle)) {
+                AndroidNormalOpenDestination.Reader -> openReader(article)
+                is AndroidNormalOpenDestination.Web -> {
+                    if (!AndroidArticlePlatformActions.openUrl(context, destination.url)) {
+                        shellSnackbar.showSnackbar("The article does not have a valid web URL.")
+                    }
+                }
+                null -> shellSnackbar.showSnackbar("The article could not be opened.")
+            }
+        }
+    }
 
     LaunchedEffect(syncState, shellSnackbar) {
         val failed = syncState as? AndroidSyncCoordinator.State.Failed
@@ -550,11 +599,25 @@ private fun NewsRootContent(
                     selection = selection,
                     sessionGeneration = sessionGeneration,
                     accountKey = state.serverUrl,
+                    onOpenArticle = ::openArticle,
+                    onOpenReader = ::openReader,
                     topContentPadding = padding.calculateTopPadding(),
                     modifier = Modifier.fillMaxSize(),
                 )
             }
         }
+
+        AndroidArticleReaderOverlay(
+            store = readerStore,
+            source = AndroidReaderSource.Timeline,
+            onOpenOriginal = { article ->
+                if (!AndroidArticlePlatformActions.openUrl(context, article.url)) {
+                    actionScope.launch {
+                        shellSnackbar.showSnackbar("The article does not have a valid web URL.")
+                    }
+                }
+            },
+        )
     }
 
     markReadRequest?.let { request ->
