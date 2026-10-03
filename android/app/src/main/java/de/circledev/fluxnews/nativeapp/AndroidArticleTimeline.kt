@@ -681,7 +681,8 @@ internal class AndroidArticleTimelineStore private constructor(
         val selection = current.selection ?: return false
         val sessionGeneration = current.sessionGeneration ?: return false
         if (activeSessionGeneration() != sessionGeneration) return false
-        val previous = current.articles.firstOrNull { it.id == articleId }?.isStarred ?: return false
+        val articleIndex = articleIndexById[articleId] ?: return false
+        val previous = current.articles.getOrNull(articleIndex)?.takeIf { it.id == articleId }?.isStarred ?: return false
         if (previous == starred) return true
 
         val token = nextExplicitMutationToken.incrementAndGet()
@@ -696,10 +697,13 @@ internal class AndroidArticleTimelineStore private constructor(
             ) {
                 return@update state
             }
+            val articles = state.articles.toMutableList()
+            val index = articleIndexById[articleId]
+            if (index != null && index in articles.indices && articles[index].id == articleId) {
+                articles[index] = articles[index].copy(isStarred = starred)
+            }
             state.copy(
-                articles = state.articles.map { article ->
-                    if (article.id == articleId) article.copy(isStarred = starred) else article
-                },
+                articles = articles,
                 total = adjustedStarredTotal(
                     total = state.total,
                     selection = selection,
@@ -730,8 +734,10 @@ internal class AndroidArticleTimelineStore private constructor(
                         state.selection == selection &&
                         state.sessionGeneration == sessionGeneration
                     ) {
+                        val filtered = state.articles.filterNot { it.id == articleId }
+                        rebuildArticleIndex(filtered)
                         state.copy(
-                            articles = state.articles.filterNot { it.id == articleId },
+                            articles = filtered,
                             audioArticleIds = state.audioArticleIds - articleId,
                         )
                     } else {
@@ -752,15 +758,17 @@ internal class AndroidArticleTimelineStore private constructor(
                 state.selection == selection &&
                 state.sessionGeneration == sessionGeneration
             ) {
-                state.copy(
-                    articles = state.articles.map { article ->
-                        if (article.id == articleId && article.isStarred == starred) {
-                            article.copy(isStarred = previous)
-                        } else {
-                            article
-                        }
-                    },
-                )
+                val articles = state.articles.toMutableList()
+                val index = articleIndexById[articleId]
+                if (
+                    index != null &&
+                    index in articles.indices &&
+                    articles[index].id == articleId &&
+                    articles[index].isStarred == starred
+                ) {
+                    articles[index] = articles[index].copy(isStarred = previous)
+                }
+                state.copy(articles = articles)
             } else {
                 state
             }
@@ -1365,7 +1373,7 @@ internal class AndroidArticleTimelineStore private constructor(
         starred: Boolean,
     ) {
         val current = mutableState.value
-        val index = current.articles.indexOfFirst { it.id == articleId }
+        val index = articleIndexById[articleId] ?: -1
         val starredScope = selection.scope == AndroidNewsScope.Starred
 
         if (starredScope && starred && index < 0) {
@@ -1375,12 +1383,14 @@ internal class AndroidArticleTimelineStore private constructor(
 
         if (index >= 0) mutableState.update { state ->
             if (state.selection != selection || state.sessionGeneration != current.sessionGeneration) return@update state
-            val currentIndex = state.articles.indexOfFirst { it.id == articleId }
-            if (currentIndex < 0) return@update state
+            val currentIndex = articleIndexById[articleId] ?: return@update state
+            if (currentIndex !in state.articles.indices || state.articles[currentIndex].id != articleId) return@update state
 
             if (starredScope && !starred) {
+                val filtered = state.articles.filterNot { it.id == articleId }
+                rebuildArticleIndex(filtered)
                 state.copy(
-                    articles = state.articles.filterNot { it.id == articleId },
+                    articles = filtered,
                     audioArticleIds = state.audioArticleIds - articleId,
                 )
             } else {
