@@ -2296,6 +2296,11 @@ private fun ArticleMetadataRow(
     onRequestFeedIcon: suspend (Long, FeedIconVariant) -> Unit,
     requestIfMissing: Boolean = true,
 ) {
+    val supportingColor = if (article.isRead) {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -2316,7 +2321,7 @@ private fun ArticleMetadataRow(
             overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = supportingColor,
         )
         ArticleAccessories(
             article = article,
@@ -2557,6 +2562,11 @@ private fun ArticleAccessories(
     article: ArticleSummary,
     hasAudio: Boolean,
 ) {
+    val supportingColor = if (article.isRead) {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
     Row(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2566,7 +2576,7 @@ private fun ArticleAccessories(
                 painter = painterResource(R.drawable.ic_headphones),
                 contentDescription = "Audio",
                 modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = supportingColor,
             )
         }
         if (article.commentsUrl.isNotBlank()) {
@@ -2574,7 +2584,7 @@ private fun ArticleAccessories(
                 painter = painterResource(R.drawable.ic_comment),
                 contentDescription = "Comments",
                 modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = supportingColor,
             )
         }
 
