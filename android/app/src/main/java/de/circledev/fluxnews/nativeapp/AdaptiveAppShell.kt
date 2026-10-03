@@ -331,7 +331,7 @@ private fun TimelineDestination(
                 },
             ) {
                 NewsRootContent(
-                    scope = scope,
+                    selection = selection,
                     navigation = navigation,
                     state = state,
                     timelineStore = timelineStore,
