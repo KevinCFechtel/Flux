@@ -11,9 +11,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-internal val AndroidFormContentMaxWidth: Dp = 680.dp
-internal val AndroidSecondaryContentMaxWidth: Dp = 960.dp
-internal val AndroidSettingsDetailMaxWidth: Dp = 760.dp
+internal val AndroidFormContentMaxWidth: Dp = 600.dp
+internal val AndroidSecondaryContentMaxWidth: Dp = 720.dp
+internal val AndroidSettingsDetailMaxWidth: Dp = 720.dp
 
 /**
  * Keeps phone presentation edge-to-edge while giving larger Android windows a readable
