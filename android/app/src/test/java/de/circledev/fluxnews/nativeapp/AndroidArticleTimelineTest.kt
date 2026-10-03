@@ -60,6 +60,31 @@ class AndroidArticleTimelineTest {
     }
 
     @Test
+    fun semanticSelectionTransitionsPreserveTransientFilterAndSortAcrossScopeChanges() {
+        val original = AndroidArticleTimelineSelection(
+            scope = AndroidNewsScope.All,
+            readFilter = AndroidArticleReadFilter.All,
+            sort = AndroidArticleSortOrder.NewestFirst,
+        )
+
+        val feed = original.selectingScope(AndroidNewsScope.Feed(42, 7, "Feed"))
+        assertEquals(AndroidNewsScope.Feed(42, 7, "Feed"), feed.scope)
+        assertEquals(AndroidArticleReadFilter.All, feed.readFilter)
+        assertEquals(AndroidArticleSortOrder.NewestFirst, feed.sort)
+
+        val unread = feed.togglingReadFilter()
+        assertEquals(AndroidArticleReadFilter.Unread, unread.readFilter)
+        assertEquals(AndroidArticleSortOrder.NewestFirst, unread.sort)
+
+        val oldest = unread.togglingSortOrder()
+        assertEquals(AndroidArticleReadFilter.Unread, oldest.readFilter)
+        assertEquals(AndroidArticleSortOrder.OldestFirst, oldest.sort)
+
+        assertEquals(AndroidArticleReadFilter.All, original.readFilter)
+        assertEquals(AndroidArticleSortOrder.NewestFirst, original.sort)
+    }
+
+    @Test
     fun firstPageOwnsTotalAndFollowingPageAppendsOnlyNewStableIds() = runBlocking {
         var sessionGeneration: Long? = 4
         val calls = mutableListOf<Pair<Boolean, ArticleCursor?>>()
