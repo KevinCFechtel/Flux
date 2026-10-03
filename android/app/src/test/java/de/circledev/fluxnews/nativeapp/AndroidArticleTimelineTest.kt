@@ -572,6 +572,10 @@ class AndroidArticleTimelineTest {
         assertEquals(listOf(1L, 2L, 3L), store.state.value.articles.map { it.id })
         assertTrue(store.rowPresentationForTesting(1L)!!.isRead)
         assertTrue(store.rowPresentationForTesting(3L)!!.isRead)
+        assertEquals(3uL, store.state.value.total)
+
+        store.completeScrolloverInteraction()
+
         assertEquals(1uL, store.state.value.total)
     }
 
