@@ -53,16 +53,22 @@ internal class AndroidScrolloverTracker {
 
         if (!userScrollActive) {
             userScrollActive = true
-            previousFirstVisibleIndex = sample.firstVisibleIndex
-            return emptyList()
+            if (previousFirstVisibleIndex == null) {
+                previousFirstVisibleIndex = sample.firstVisibleIndex
+                return emptyList()
+            }
+            return receive(sample, enabled = true)
         }
 
         return receive(sample, enabled = true)
     }
 
     fun endUserScroll() {
+        // Keep the last observed idle position as the next drag baseline. The
+        // interaction event and LazyList state update are delivered independently,
+        // so clearing it here can lose the first crossed article if the list moves
+        // before DragInteraction.Start is collected.
         userScrollActive = false
-        previousFirstVisibleIndex = null
     }
 
     fun rearm(articleIds: Collection<Long>) {
