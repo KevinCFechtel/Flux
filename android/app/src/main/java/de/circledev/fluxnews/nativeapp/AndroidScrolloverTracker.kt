@@ -24,8 +24,8 @@ internal data class AndroidScrolloverGeometrySample(
  * later forward crossing can emit it.
  */
 internal class AndroidScrolloverTracker {
-    private var orderedIds: List<Long> = emptyList()
-    private var positions: Map<Long, Int> = emptyMap()
+    private val orderedIds = mutableListOf<Long>()
+    private val positions = mutableMapOf<Long, Int>()
     private val qualifiedIds = linkedSetOf<Long>()
     private val emittedIds = mutableSetOf<Long>()
     private var previousPosition: ScrollPosition? = null
@@ -34,19 +34,28 @@ internal class AndroidScrolloverTracker {
     private var userScrollActive = false
 
     fun updateSnapshot(ids: List<Long>) {
-        if (ids == orderedIds) return
+        if (ids.size == orderedIds.size && ids.indices.all { ids[it] == orderedIds[it] }) return
 
-        val appendOnly = ids.size >= orderedIds.size &&
-            ids.subList(0, orderedIds.size) == orderedIds
+        val previousSize = orderedIds.size
+        val appendOnly = ids.size >= previousSize &&
+            (0 until previousSize).all { ids[it] == orderedIds[it] }
 
-        orderedIds = ids.toList()
-        positions = ids.withIndex().associate { (index, id) -> id to index }
-
-        if (!appendOnly) {
-            qualifiedIds.retainAll(positions.keys)
-            emittedIds.retainAll(positions.keys)
-            invalidateGeometry(clearQualification = true)
+        if (appendOnly) {
+            for (index in previousSize until ids.size) {
+                val id = ids[index]
+                orderedIds += id
+                positions[id] = index
+            }
+            return
         }
+
+        orderedIds.clear()
+        orderedIds.addAll(ids)
+        positions.clear()
+        ids.forEachIndexed { index, id -> positions[id] = index }
+        qualifiedIds.retainAll(positions.keys)
+        emittedIds.retainAll(positions.keys)
+        invalidateGeometry(clearQualification = true)
     }
 
     fun beginUserScroll(
@@ -92,30 +101,14 @@ internal class AndroidScrolloverTracker {
         val current = ScrollPosition(sample.firstVisibleIndex, sample.firstVisibleScrollOffset)
         val direction = current.compareTo(previous)
         val candidates = if (enabled && direction > 0) {
-            val crossedIds = linkedSetOf<Long>()
-
-            // Rows that Compose explicitly exposed remain the strongest signal.
+            // Only IDs that were actually observed intersecting the viewport may emit.
+            // Keeping this strict mirrors the iOS geometry contract and prevents a
+            // layout jump or skipped composition from manufacturing read candidates.
             qualifiedIds.asSequence()
                 .filter { it !in emittedIds }
                 .filter { id -> positions[id]?.let { it < sample.firstVisibleIndex } == true }
                 .sortedBy { positions[it] ?: Int.MAX_VALUE }
-                .forEach(crossedIds::add)
-
-            // snapshotFlow may coalesce intermediate LazyList layouts during a fast
-            // fling or a rapid direction change. If firstVisibleIndex advanced from
-            // N to M, every article index in [N, M) necessarily crossed the upper
-            // viewport boundary during this still-active user interaction, even if
-            // Compose never published an intermediate visibleRows sample for it.
-            if (current.index > previous.index) {
-                val fromIndex = previous.index.coerceAtLeast(0)
-                val untilIndex = current.index.coerceAtMost(orderedIds.size)
-                for (index in fromIndex until untilIndex) {
-                    val id = orderedIds[index]
-                    if (id !in emittedIds) crossedIds += id
-                }
-            }
-
-            crossedIds.sortedBy { positions[it] ?: Int.MAX_VALUE }
+                .toList()
         } else {
             emptyList()
         }
