@@ -54,6 +54,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -200,10 +201,10 @@ internal class AndroidSearchStore private constructor(
         mutableState.value = AndroidSearchState(requestGeneration = request, sessionGeneration = activeSessionGeneration())
     }
 
-    fun submit() {
+    fun submit(): Job? {
         val query = mutableState.value.query.trim()
-        val sessionGeneration = activeSessionGeneration() ?: return
-        if (query.isEmpty()) return
+        val sessionGeneration = activeSessionGeneration() ?: return null
+        if (query.isEmpty()) return null
         val request = nextRequestGeneration.incrementAndGet()
         mutableState.value = AndroidSearchState(
             query = query,
@@ -213,7 +214,7 @@ internal class AndroidSearchStore private constructor(
             requestGeneration = request,
             sessionGeneration = sessionGeneration,
         )
-        scope.launch {
+        return scope.launch {
             val result = runCatching {
                 searchLoader(sessionGeneration, SearchArticlesRequest(query = query, offset = 0, limit = ANDROID_SEARCH_PAGE_SIZE.toUInt()))
             }
