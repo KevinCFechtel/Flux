@@ -130,7 +130,18 @@ class AndroidCoreRuntime(
     internal suspend fun <T> localForGeneration(
         generation: Long,
         block: (Flux) -> T,
-    ): T = withContext(localDispatcher) {
+    ): T = executeForGeneration(localDispatcher, generation, block)
+
+    internal suspend fun <T> remoteForGeneration(
+        generation: Long,
+        block: (Flux) -> T,
+    ): T = executeForGeneration(remoteDispatcher, generation, block)
+
+    private suspend fun <T> executeForGeneration(
+        dispatcher: kotlinx.coroutines.CoroutineDispatcher,
+        generation: Long,
+        block: (Flux) -> T,
+    ): T = withContext(dispatcher) {
         requireOffMainThread()
         sessionLock.readLock().run {
             lock()

@@ -75,6 +75,98 @@ class AndroidNavigationPolicyTest {
     }
 
     @Test
+    fun nextFeedUsesVisibleDrawerOrderSkipsEmptyAndNeverWraps() {
+        val extendedCategories = categories + AndroidNavigationCategoryRef(30, "Science")
+        val extendedFeeds = feeds + AndroidNavigationFeedRef(5, 30, "Five")
+        val counts = mapOf(
+            1L to 2uL,
+            2L to 0uL,
+            3L to 4uL,
+            4L to 3uL,
+            5L to 1uL,
+        )
+
+        assertEquals(
+            AndroidNewsScope.Feed(3, 20, "Three"),
+            AndroidNavigationPolicy.nextScope(
+                after = AndroidNewsScope.Feed(1, 10, "One"),
+                hidingEmpty = true,
+                categories = extendedCategories,
+                feeds = extendedFeeds,
+                counts = counts,
+            ),
+        )
+        assertEquals(
+            AndroidNewsScope.Feed(4, 999, "Orphan"),
+            AndroidNavigationPolicy.nextScope(
+                after = AndroidNewsScope.Feed(5, 30, "Five"),
+                hidingEmpty = true,
+                categories = extendedCategories,
+                feeds = extendedFeeds,
+                counts = counts,
+            ),
+        )
+        assertEquals(
+            null,
+            AndroidNavigationPolicy.nextScope(
+                after = AndroidNewsScope.Feed(4, 999, "Orphan"),
+                hidingEmpty = true,
+                categories = extendedCategories,
+                feeds = extendedFeeds,
+                counts = counts,
+            ),
+        )
+    }
+
+    @Test
+    fun nextCategoryUsesVisibleDrawerOrderAndGlobalScopesHaveNoNext() {
+        val extendedCategories = categories + AndroidNavigationCategoryRef(30, "Science")
+        val extendedFeeds = feeds + AndroidNavigationFeedRef(5, 30, "Five")
+        val counts = mapOf(1L to 1uL, 2L to 0uL, 3L to 0uL, 4L to 2uL, 5L to 1uL)
+
+        assertEquals(
+            AndroidNewsScope.Category(30, "Science"),
+            AndroidNavigationPolicy.nextScope(
+                after = AndroidNewsScope.Category(10, "Tech"),
+                hidingEmpty = true,
+                categories = extendedCategories,
+                feeds = extendedFeeds,
+                counts = counts,
+            ),
+        )
+        assertEquals(
+            null,
+            AndroidNavigationPolicy.nextScope(
+                after = AndroidNewsScope.Category(30, "Science"),
+                hidingEmpty = true,
+                categories = extendedCategories,
+                feeds = extendedFeeds,
+                counts = counts,
+            ),
+        )
+        assertEquals(
+            null,
+            AndroidNavigationPolicy.nextScope(
+                after = AndroidNewsScope.All,
+                hidingEmpty = false,
+                categories = extendedCategories,
+                feeds = extendedFeeds,
+                counts = counts,
+            ),
+        )
+        assertEquals(
+            null,
+            AndroidNavigationPolicy.nextScope(
+                after = AndroidNewsScope.Starred,
+                hidingEmpty = false,
+                categories = extendedCategories,
+                feeds = extendedFeeds,
+                counts = counts,
+            ),
+        )
+    }
+
+    @Test
     fun disablingHideEmptyKeepsEveryFeed() {
         assertEquals(
             setOf(1L, 2L, 3L, 4L),

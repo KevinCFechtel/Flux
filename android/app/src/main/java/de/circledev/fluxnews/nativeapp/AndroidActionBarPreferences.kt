@@ -40,6 +40,70 @@ internal data class AndroidActionBarPreferenceState(
     val actions: List<AndroidActionBarAction> = AndroidActionBarAction.defaultConfiguredActions,
 )
 
+internal data class AndroidArticleListResolvedActions(
+    val direct: List<AndroidActionBarAction>,
+    val overflow: List<AndroidActionBarAction>,
+)
+
+/**
+ * Resolves persisted semantic Article List priorities into the controls a concrete Android
+ * presentation may expose directly and through its always-reachable overflow.
+ *
+ * Availability is contextual presentation state only. It never rewrites the stored action order.
+ */
+internal object AndroidArticleListActionPolicy {
+    fun isAvailable(
+        action: AndroidActionBarAction,
+        scope: AndroidNewsScope,
+        hasNextScope: Boolean,
+    ): Boolean = when (action) {
+        AndroidActionBarAction.FilterAndSort,
+        AndroidActionBarAction.ToggleSortOrder,
+        AndroidActionBarAction.Search,
+        AndroidActionBarAction.ListeningList,
+        AndroidActionBarAction.Settings,
+        -> true
+
+        AndroidActionBarAction.ToggleReadFilter -> scope != AndroidNewsScope.Starred
+
+        AndroidActionBarAction.MarkAllRead -> when (scope) {
+            AndroidNewsScope.All,
+            is AndroidNewsScope.Category,
+            is AndroidNewsScope.Feed,
+            -> true
+            AndroidNewsScope.Starred -> false
+        }
+
+        AndroidActionBarAction.MarkAllReadAndNext ->
+            hasNextScope && (scope is AndroidNewsScope.Category || scope is AndroidNewsScope.Feed)
+    }
+
+    fun resolvedActions(
+        configuredActions: List<AndroidActionBarAction>,
+        directCapacity: Int,
+        scope: AndroidNewsScope,
+        hasNextScope: Boolean,
+    ): AndroidArticleListResolvedActions {
+        val configured = configuredActions.distinct()
+        val availableConfigured = configured.filter {
+            isAvailable(it, scope = scope, hasNextScope = hasNextScope)
+        }
+        val direct = availableConfigured.take(directCapacity.coerceAtLeast(0))
+        val directSet = direct.toSet()
+        val configuredSet = configured.toSet()
+
+        val overflowSelected = availableConfigured.filterNot(directSet::contains)
+        val overflowUnselected = AndroidActionBarAction.entries.filter {
+            it !in configuredSet && isAvailable(it, scope = scope, hasNextScope = hasNextScope)
+        }
+
+        return AndroidArticleListResolvedActions(
+            direct = direct,
+            overflow = overflowSelected + overflowUnselected,
+        )
+    }
+}
+
 internal class AndroidActionBarPreferences(
     private val store: AndroidPreferenceStore,
 ) {
