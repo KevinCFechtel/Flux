@@ -341,6 +341,8 @@ internal fun AndroidArticleSwipeContainer(
             hasAudio = hasAudio,
         )
     }
+    val currentLeading by rememberUpdatedState(leading)
+    val currentTrailing by rememberUpdatedState(trailing)
     var offsetPx by remember(article.id) { mutableFloatStateOf(0f) }
     var gestureSide by remember(article.id) { mutableStateOf<AndroidArticleSwipeSide?>(null) }
     var gestureStartOffset by remember(article.id) { mutableFloatStateOf(0f) }
@@ -401,7 +403,7 @@ internal fun AndroidArticleSwipeContainer(
                 .fillMaxWidth()
                 .offset { IntOffset(offsetPx.roundToInt(), 0) }
                 .background(MaterialTheme.colorScheme.background)
-                .pointerInput(article.id, leading, trailing, rowWidthPx) {
+                .pointerInput(article.id, rowWidthPx) {
                     detectHorizontalDragGestures(
                         onDragStart = {
                             gestureStartOffset = offsetPx
@@ -420,7 +422,7 @@ internal fun AndroidArticleSwipeContainer(
                                 }
                             }
                             val side = gestureSide ?: return@detectHorizontalDragGestures
-                            val resolved = if (side == AndroidArticleSwipeSide.Leading) leading else trailing
+                            val resolved = if (side == AndroidArticleSwipeSide.Leading) currentLeading else currentTrailing
                             if (resolved.visibleActions.isEmpty()) {
                                 offsetPx = 0f
                                 return@detectHorizontalDragGestures
@@ -452,7 +454,7 @@ internal fun AndroidArticleSwipeContainer(
                             val side = gestureSide
                             gestureSide = null
                             if (side == null) return@detectHorizontalDragGestures
-                            val resolved = if (side == AndroidArticleSwipeSide.Leading) leading else trailing
+                            val resolved = if (side == AndroidArticleSwipeSide.Leading) currentLeading else currentTrailing
                             val direction = if (side == AndroidArticleSwipeSide.Leading) 1f else -1f
                             val fullAction = resolved.full
                             if (
