@@ -482,7 +482,6 @@ internal class AndroidArticleTimelineStore private constructor(
     private val expectedStarredEvents = ConcurrentHashMap<Long, ConcurrentLinkedQueue<Boolean>>()
     private val expectedBulkReadEventIds = ConcurrentHashMap.newKeySet<Long>()
     private val scrolloverRetainedReadIds = ConcurrentHashMap.newKeySet<Long>()
-    private val scrolloverFeedbackSuppressedReadIds = ConcurrentHashMap.newKeySet<Long>()
     private val undoFeedbackSuppressedUnreadIds = ConcurrentHashMap.newKeySet<Long>()
     private val pendingSuccessfulScrolloverUndoIds = mutableListOf<Long>()
     private val recentSuccessfulScrolloverReads = mutableListOf<Pair<Long, Long>>()
@@ -936,7 +935,6 @@ internal class AndroidArticleTimelineStore private constructor(
         expectedReadEvents.clear()
         expectedStarredEvents.clear()
         scrolloverRetainedReadIds.clear()
-        scrolloverFeedbackSuppressedReadIds.clear()
         undoFeedbackSuppressedUnreadIds.clear()
         pendingSuccessfulScrolloverUndoIds.clear()
         recentSuccessfulScrolloverReads.clear()
@@ -1067,12 +1065,8 @@ internal class AndroidArticleTimelineStore private constructor(
             is CoreEvent.ArticleReadStateChanged -> {
                 if (event.read && expectedBulkReadEventIds.remove(event.articleId)) return
                 if (consumeExpectedEvent(expectedReadEvents, event.articleId, event.read)) return
-                val suppressFeedback = if (event.read) {
-                    scrolloverFeedbackSuppressedReadIds.remove(event.articleId)
-                } else {
-                    undoFeedbackSuppressedUnreadIds.remove(event.articleId)
-                }
-                if (!event.read) scrolloverFeedbackSuppressedReadIds.remove(event.articleId)
+                val suppressFeedback =
+                    !event.read && undoFeedbackSuppressedUnreadIds.remove(event.articleId)
                 applyReadStateChanged(selection, event.articleId, event.read)
                 if (!event.read) {
                     mutableScrolloverRearmRequests.tryEmit(listOf(event.articleId))
@@ -1271,7 +1265,6 @@ internal class AndroidArticleTimelineStore private constructor(
         return try {
             scrolloverUnreadWriter(sessionGeneration, ids)
             scrolloverRetainedReadIds.removeAll(ids.toSet())
-            scrolloverFeedbackSuppressedReadIds.removeAll(ids.toSet())
             val restoredCount = ids.count { rowPresentationById[it]?.value?.isRead == true }
             ids.forEach { setRowRead(it, false) }
             mutableState.update { state ->
