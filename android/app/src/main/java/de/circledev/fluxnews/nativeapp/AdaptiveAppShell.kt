@@ -103,6 +103,18 @@ private data class NewsNavigationModel(
     val error: String? = null,
 )
 
+internal object AndroidSyncPresentationPolicy {
+    fun successVisible(
+        state: AndroidSyncCoordinator.State,
+        successGeneration: Long?,
+    ): Boolean {
+        val succeeded = state as? AndroidSyncCoordinator.State.Succeeded ?: return false
+        return succeeded.reason == SyncReason.MANUAL &&
+            successGeneration != null &&
+            succeeded.generation == successGeneration
+    }
+}
+
 /**
  * The timeline is the app root. Scope selection stays inside its transient/permanent news drawer;
  * Search, Listening List and Settings are real secondary Navigation Compose destinations.
@@ -444,10 +456,10 @@ private fun NewsRootContent(
     val manualSyncInProgress =
         (syncState as? AndroidSyncCoordinator.State.Syncing)?.reason == SyncReason.MANUAL
     var syncSuccessGeneration by remember { mutableStateOf<Long?>(null) }
-    val syncSuccessVisible =
-        (syncState as? AndroidSyncCoordinator.State.Succeeded)
-            ?.takeIf { it.reason == SyncReason.MANUAL }
-            ?.generation == syncSuccessGeneration
+    val syncSuccessVisible = AndroidSyncPresentationPolicy.successVisible(
+        state = syncState,
+        successGeneration = syncSuccessGeneration,
+    )
     val actionScope = rememberCoroutineScope()
     val shellSnackbar = remember { SnackbarHostState() }
     var markReadRequest by remember { mutableStateOf<AndroidPendingMarkRead?>(null) }

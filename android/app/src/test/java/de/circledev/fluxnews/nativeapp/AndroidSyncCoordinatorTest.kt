@@ -76,6 +76,43 @@ class AndroidSyncCoordinatorTest {
     }
 
     @Test
+    fun successPresentationNeverTreatsNullAsActiveSuccess() {
+        assertFalse(
+            AndroidSyncPresentationPolicy.successVisible(
+                state = AndroidSyncCoordinator.State.Syncing(
+                    generation = 7L,
+                    reason = SyncReason.MANUAL,
+                ),
+                successGeneration = null,
+            ),
+        )
+        assertFalse(
+            AndroidSyncPresentationPolicy.successVisible(
+                state = AndroidSyncCoordinator.State.Idle,
+                successGeneration = null,
+            ),
+        )
+        assertTrue(
+            AndroidSyncPresentationPolicy.successVisible(
+                state = AndroidSyncCoordinator.State.Succeeded(
+                    generation = 7L,
+                    reason = SyncReason.MANUAL,
+                ),
+                successGeneration = 7L,
+            ),
+        )
+        assertFalse(
+            AndroidSyncPresentationPolicy.successVisible(
+                state = AndroidSyncCoordinator.State.Succeeded(
+                    generation = 7L,
+                    reason = SyncReason.APP_START,
+                ),
+                successGeneration = 7L,
+            ),
+        )
+    }
+
+    @Test
     fun failureKeepsARecoverableLocalDataMessage() = runBlocking {
         val coordinator = coordinator { _, _ -> error("token=must-not-leak") }
 
