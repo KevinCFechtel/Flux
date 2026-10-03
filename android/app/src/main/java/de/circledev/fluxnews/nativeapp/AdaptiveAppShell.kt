@@ -651,6 +651,13 @@ private fun NewsRootContent(
                     accountKey = state.serverUrl,
                     onOpenArticle = ::openArticle,
                     onOpenReader = ::openReader,
+                    categoryFeedIds = when (val selectedScope = scope) {
+                        is AndroidNewsScope.Category -> feedRefs
+                            .asSequence()
+                            .filter { it.categoryId == selectedScope.id }
+                            .mapTo(mutableSetOf()) { it.id }
+                        else -> emptySet()
+                    },
                     topContentPadding = padding.calculateTopPadding(),
                     bottomOverlayPadding = bottomActionClearance,
                     modifier = Modifier.fillMaxSize(),
