@@ -1,11 +1,15 @@
 package de.circledev.fluxnews.nativeapp
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -164,11 +168,73 @@ internal object AndroidArticleActionPolicy {
     }
 }
 
+internal object AndroidWebRoutingPolicy {
+    fun dedicatedHandlerPackages(
+        specificUrlHandlers: Set<String>,
+        genericWebHandlers: Set<String>,
+    ): List<String> =
+        (specificUrlHandlers - genericWebHandlers).sorted()
+}
+
 internal object AndroidArticlePlatformActions {
     fun openUrl(context: Context, value: String): Boolean {
         if (!AndroidArticleActionPolicy.validWebUrl(value)) return false
-        return start(context, Intent(Intent.ACTION_VIEW, Uri.parse(value)))
+        val uri = Uri.parse(value)
+        return openInDedicatedApp(context, uri) || openInCustomTab(context, uri)
     }
+
+    private fun openInDedicatedApp(context: Context, uri: Uri): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            start(
+                context,
+                webIntent(uri).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_REQUIRE_NON_BROWSER)
+                },
+            )
+        } else {
+            openInDedicatedAppBeforeR(context, uri)
+        }
+
+    private fun openInDedicatedAppBeforeR(context: Context, uri: Uri): Boolean {
+        val packageManager = context.packageManager
+        val specificHandlers = packageManager
+            .queryIntentActivities(webIntent(uri), PackageManager.MATCH_DEFAULT_ONLY)
+            .mapTo(mutableSetOf()) { it.activityInfo.packageName }
+        val genericUri = Uri.Builder()
+            .scheme(uri.scheme)
+            .authority("example.com")
+            .path("/")
+            .build()
+        val genericWebHandlers = packageManager
+            .queryIntentActivities(webIntent(genericUri), PackageManager.MATCH_DEFAULT_ONLY)
+            .mapTo(mutableSetOf()) { it.activityInfo.packageName }
+        val dedicatedPackages = AndroidWebRoutingPolicy.dedicatedHandlerPackages(
+            specificUrlHandlers = specificHandlers,
+            genericWebHandlers = genericWebHandlers,
+        )
+        val targetPackage = dedicatedPackages.firstOrNull() ?: return false
+        return start(context, webIntent(uri).setPackage(targetPackage))
+    }
+
+    private fun openInCustomTab(context: Context, uri: Uri): Boolean = try {
+        val customTab = CustomTabsIntent.Builder()
+            .setShowTitle(true)
+            .build()
+        if (context !is Activity) {
+            customTab.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        customTab.launchUrl(context, uri)
+        true
+    } catch (_: ActivityNotFoundException) {
+        false
+    } catch (_: SecurityException) {
+        false
+    }
+
+    private fun webIntent(uri: Uri): Intent =
+        Intent(Intent.ACTION_VIEW, uri).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+        }
 
     fun copyLink(context: Context, article: ArticleSummary): Boolean {
         if (!AndroidArticleActionPolicy.validWebUrl(article.url)) return false

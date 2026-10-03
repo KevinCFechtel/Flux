@@ -844,6 +844,7 @@ Implemented on 3 October 2026:
 - Reader requests are process/session-generation bound; switching article, dismissing Reader or replacing the account invalidates stale completions;
 - normal Timeline row taps are now productive and always mark the article read before routing;
 - the existing global Open Article preference selects Reader versus web opening, and web opening additionally honors the feed-specific `openInMiniflux` preference; explicit Original, explicit Reader and explicit Miniflux remain independent actions;
+- Android web routing first attempts a non-browser App Link/deep-link handler; when no dedicated app can handle the URL, Flux keeps the user in the app flow with an AndroidX Custom Tab instead of handing the URL straight to the external default browser; Android 10 uses handler-set comparison for the same compatibility behavior;
 - Search remains a real secondary Navigation Compose destination, so Back returns to the preserved News Timeline rather than treating Search as a Reader-style overlay;
 - Search uses Core/Miniflux `searchArticles` with its own 50-item offset pagination, request-generation stale suppression and result de-duplication; it does not create a local FTS/index;
 - Search reuses the normal Android article row renderer, swipe configuration, context actions, feed icons and available audio projection;

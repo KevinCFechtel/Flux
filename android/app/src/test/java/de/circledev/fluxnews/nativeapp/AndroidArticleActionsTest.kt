@@ -94,6 +94,30 @@ class AndroidArticleActionsTest {
     }
 
     @Test
+    fun legacyDeepLinkRoutingRemovesGenericBrowserHandlers() {
+        assertEquals(
+            listOf("com.example.news", "com.example.social"),
+            AndroidWebRoutingPolicy.dedicatedHandlerPackages(
+                specificUrlHandlers = setOf(
+                    "com.example.browser",
+                    "com.example.news",
+                    "com.example.social",
+                ),
+                genericWebHandlers = setOf(
+                    "com.example.browser",
+                    "org.example.otherbrowser",
+                ),
+            ),
+        )
+        assertTrue(
+            AndroidWebRoutingPolicy.dedicatedHandlerPackages(
+                specificUrlHandlers = setOf("com.example.browser"),
+                genericWebHandlers = setOf("com.example.browser"),
+            ).isEmpty(),
+        )
+    }
+
+    @Test
     fun urlValidationAcceptsOnlyHttpAndHttpsWebUrls() {
         assertTrue(AndroidArticleActionPolicy.validWebUrl("https://example.test/article"))
         assertTrue(AndroidArticleActionPolicy.validWebUrl("http://example.test/article"))
