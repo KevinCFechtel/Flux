@@ -1602,7 +1602,9 @@ internal class AndroidArticleTimelineStore private constructor(
     ) {
         if (replace) {
             val retainedIds = articles.asSequence().map { it.id }.toHashSet()
-            rowPresentationById.keys.removeIf { it !in retainedIds }
+            rowPresentationById.keys
+                .filter { it !in retainedIds }
+                .forEach(rowPresentationById::remove)
         }
         articles.forEach { article ->
             val state = rowPresentationById[article.id]
