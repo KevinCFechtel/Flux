@@ -81,6 +81,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -307,6 +308,25 @@ internal data class AndroidArticleRowPresentation(
     val revision: Long = 0L,
 )
 
+internal data class AndroidArticleTimelineContentState(
+    val selection: AndroidArticleTimelineSelection? = null,
+    val articles: List<ArticleSummary> = emptyList(),
+    val audioArticleIds: Set<Long> = emptySet(),
+    val feedIconVariant: FeedIconVariant? = null,
+    val feedIconPngByFeedId: Map<Long, ByteArray> = emptyMap(),
+    val nextCursor: ArticleCursor? = null,
+    val initialLoading: Boolean = false,
+    val loadingNextPage: Boolean = false,
+    val errorMessage: String? = null,
+    val queryGeneration: Long = 0,
+    val sessionGeneration: Long? = null,
+    val pendingNewFeedIds: Set<Long> = emptySet(),
+    val hasUnscopedNewDataSignal: Boolean = false,
+) {
+    val empty: Boolean
+        get() = !initialLoading && articles.isEmpty() && errorMessage == null
+}
+
 internal data class AndroidArticleTimelineState(
     val selection: AndroidArticleTimelineSelection? = null,
     val articles: List<ArticleSummary> = emptyList(),
@@ -325,6 +345,23 @@ internal data class AndroidArticleTimelineState(
 ) {
     val empty: Boolean
         get() = !initialLoading && articles.isEmpty() && errorMessage == null
+
+    fun contentState(): AndroidArticleTimelineContentState =
+        AndroidArticleTimelineContentState(
+            selection = selection,
+            articles = articles,
+            audioArticleIds = audioArticleIds,
+            feedIconVariant = feedIconVariant,
+            feedIconPngByFeedId = feedIconPngByFeedId,
+            nextCursor = nextCursor,
+            initialLoading = initialLoading,
+            loadingNextPage = loadingNextPage,
+            errorMessage = errorMessage,
+            queryGeneration = queryGeneration,
+            sessionGeneration = sessionGeneration,
+            pendingNewFeedIds = pendingNewFeedIds,
+            hasUnscopedNewDataSignal = hasUnscopedNewDataSignal,
+        )
 }
 
 /**
@@ -635,22 +672,23 @@ internal class AndroidArticleTimelineStore private constructor(
         expectedReadEvents.computeIfAbsent(articleId) { ConcurrentLinkedQueue() }.add(read)
         val generation = current.queryGeneration
         setRowRead(articleId, read)
-        mutableState.update { state ->
-            if (
-                state.queryGeneration != generation ||
-                state.selection != selection ||
-                state.sessionGeneration != sessionGeneration
-            ) {
-                return@update state
-            }
-            state.copy(
-                total = adjustedReadTotal(
+        if (selection.readFilter == AndroidArticleReadFilter.Unread) {
+            mutableState.update { state ->
+                if (
+                    state.queryGeneration != generation ||
+                    state.selection != selection ||
+                    state.sessionGeneration != sessionGeneration
+                ) {
+                    return@update state
+                }
+                val adjustedTotal = adjustedReadTotal(
                     total = state.total,
                     selection = selection,
                     previous = previous,
                     requested = read,
-                ),
-            )
+                )
+                if (adjustedTotal == state.total) state else state.copy(total = adjustedTotal)
+            }
         }
 
         val result = runCatching {
@@ -1423,7 +1461,7 @@ internal class AndroidArticleTimelineStore private constructor(
                 state.selection == selection &&
                 state.sessionGeneration == ownedSession
             ) {
-                state.copy(total = total)
+                if (state.total == total) state else state.copy(total = total)
             } else {
                 state
             }
@@ -1689,7 +1727,12 @@ internal fun AndroidArticleTimeline(
     bottomOverlayPadding: Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
-    val state by store.state.collectAsState()
+    val stateFlow = remember(store) {
+        store.state
+            .map { it.contentState() }
+            .distinctUntilChanged()
+    }
+    val state by stateFlow.collectAsState(initial = store.state.value.contentState())
     val undoState by store.undoState.collectAsState()
     val articlePreferences by LocalAndroidArticlePreferences.current.state.collectAsState(
         initial = AndroidArticlePreferenceState(),
