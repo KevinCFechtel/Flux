@@ -62,6 +62,7 @@ import java.util.Date
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -124,8 +125,8 @@ internal class AndroidReaderStore private constructor(
         }
     }
 
-    fun open(article: ArticleSummary, source: AndroidReaderSource) {
-        val sessionGeneration = activeSessionGeneration() ?: return
+    fun open(article: ArticleSummary, source: AndroidReaderSource): Job? {
+        val sessionGeneration = activeSessionGeneration() ?: return null
         val request = nextRequestGeneration.incrementAndGet()
         mutableState.value = AndroidReaderState(
             article = article,
@@ -134,7 +135,7 @@ internal class AndroidReaderStore private constructor(
             requestGeneration = request,
             sessionGeneration = sessionGeneration,
         )
-        scope.launch {
+        return scope.launch {
             val result = runCatching {
                 when (source) {
                     AndroidReaderSource.Timeline -> timelineLoader(sessionGeneration, article.id)
