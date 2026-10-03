@@ -108,6 +108,7 @@ private const val ANDROID_SCROLL_OVER_UNDO_INACTIVITY_MILLIS = 4_000L
 private const val ANDROID_SCROLL_OVER_UNDO_MAX_LIFETIME_MILLIS = 15_000L
 private const val ANDROID_SCROLL_OVER_UNDO_QUALIFICATION_MILLIS = 1_000L
 private const val ANDROID_SCROLL_OVER_UNDO_MIN_READS = 3
+private const val ANDROID_SCROLL_OVER_MUTATION_BATCH_SIZE = 32
 
 internal enum class AndroidArticleReadFilter {
     Unread,
@@ -460,7 +461,9 @@ internal class AndroidArticleTimelineStore private constructor(
     private val mutableScrolloverRearmRequests = MutableSharedFlow<List<Long>>(extraBufferCapacity = 8)
     private val mutableUndoState = MutableStateFlow(AndroidScrolloverUndoState())
     private val explicitActionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val scrolloverMutationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val scrolloverMutationScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Default.limitedParallelism(1),
+    )
     private val scrolloverMutationRequests = Channel<AndroidScrolloverMutationRequest>(capacity = Channel.UNLIMITED)
     private val articleIndexById = mutableMapOf<Long, Int>()
     private val explicitMutationMutex = Mutex()
@@ -470,9 +473,9 @@ internal class AndroidArticleTimelineStore private constructor(
     private val expectedReadEvents = ConcurrentHashMap<Long, ConcurrentLinkedQueue<Boolean>>()
     private val expectedStarredEvents = ConcurrentHashMap<Long, ConcurrentLinkedQueue<Boolean>>()
     private val expectedBulkReadEventIds = ConcurrentHashMap.newKeySet<Long>()
-    private val scrolloverRetainedReadIds = mutableSetOf<Long>()
-    private val scrolloverFeedbackSuppressedReadIds = mutableSetOf<Long>()
-    private val undoFeedbackSuppressedUnreadIds = mutableSetOf<Long>()
+    private val scrolloverRetainedReadIds = ConcurrentHashMap.newKeySet<Long>()
+    private val scrolloverFeedbackSuppressedReadIds = ConcurrentHashMap.newKeySet<Long>()
+    private val undoFeedbackSuppressedUnreadIds = ConcurrentHashMap.newKeySet<Long>()
     private val pendingSuccessfulScrolloverUndoIds = mutableListOf<Long>()
     private val recentSuccessfulScrolloverReads = mutableListOf<Pair<Long, Long>>()
     private var scrolloverUndoOpenedAtUptimeMillis: Long? = null
@@ -488,14 +491,43 @@ internal class AndroidArticleTimelineStore private constructor(
             for (request in scrolloverMutationRequests) {
                 when (request) {
                     is AndroidScrolloverMutationRequest.MarkRead -> {
+                        val currentGeneration = mutableState.value.queryGeneration
                         if (
                             request.queryGeneration != null &&
-                            request.queryGeneration != mutableState.value.queryGeneration
+                            request.queryGeneration != currentGeneration
                         ) {
                             continue
                         }
-                        val failed = markReadFromScrollover(request.articleIds)
+
+                        val combined = linkedSetOf<Long>()
+                        combined.addAll(request.articleIds)
+                        var completeInteraction = false
+                        while (combined.size < ANDROID_SCROLL_OVER_MUTATION_BATCH_SIZE) {
+                            val next = scrolloverMutationRequests.tryReceive().getOrNull() ?: break
+                            when (next) {
+                                is AndroidScrolloverMutationRequest.MarkRead -> {
+                                    if (
+                                        next.queryGeneration == null ||
+                                        next.queryGeneration == currentGeneration
+                                    ) {
+                                        combined.addAll(next.articleIds)
+                                    }
+                                }
+                                is AndroidScrolloverMutationRequest.CompleteInteraction -> {
+                                    if (
+                                        next.queryGeneration == null ||
+                                        next.queryGeneration == currentGeneration
+                                    ) {
+                                        completeInteraction = true
+                                    }
+                                    break
+                                }
+                            }
+                        }
+
+                        val failed = markReadFromScrollover(combined.toList())
                         if (failed.isNotEmpty()) mutableScrolloverRearmRequests.tryEmit(failed)
+                        if (completeInteraction) completeScrolloverInteraction()
                     }
                     is AndroidScrolloverMutationRequest.CompleteInteraction -> {
                         if (
