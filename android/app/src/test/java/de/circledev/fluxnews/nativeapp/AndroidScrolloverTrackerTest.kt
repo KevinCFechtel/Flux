@@ -14,259 +14,96 @@ class AndroidScrolloverTrackerTest {
         val tracker = AndroidScrolloverTracker()
         tracker.updateSnapshot(listOf(1L, 2L, 3L))
 
-        tracker.receive(sample(first = 0, offset = 0, visible = rows(0, 1L, 2L, 3L)), enabled = true)
-        val emitted = tracker.receive(
-            sample(first = 2, offset = 10, visible = rows(2, 3L)),
-            enabled = true,
-        )
-
-        assertTrue(emitted.isEmpty())
+        tracker.receive(sample(0), enabled = true)
+        assertTrue(tracker.receive(sample(2), enabled = true).isEmpty())
     }
 
     @Test
-    fun forwardCrossingEmitsOnlyPreviouslyVisibleRowsOnce() {
-        val tracker = AndroidScrolloverTracker()
-        tracker.updateSnapshot(listOf(1L, 2L, 3L, 4L, 5L))
-        tracker.beginUserScroll(
-            sample(first = 0, offset = 0, visible = rows(0, 1L, 2L, 3L)),
-            enabled = true,
-        )
-
-        val first = tracker.receive(
-            sample(first = 1, offset = 10, visible = rows(1, 2L, 3L, 4L)),
-            enabled = true,
-        )
-        val fast = tracker.receive(
-            sample(first = 4, offset = 5, visible = rows(4, 5L)),
-            enabled = true,
-        )
-
-        assertEquals(listOf(1L), first)
-        assertEquals(listOf(2L, 3L, 4L), fast)
-        assertTrue(
-            tracker.receive(
-                sample(first = 4, offset = 20, visible = rows(4, 5L)),
-                enabled = true,
-            ).isEmpty(),
-        )
-    }
-
-    @Test
-    fun rearmedArticleCanEmitAgainAfterBecomingUnread() {
+    fun firstArticleEmitsWhenFirstVisibleIndexAdvances() {
         val tracker = AndroidScrolloverTracker()
         tracker.updateSnapshot(listOf(1L, 2L, 3L))
-        tracker.beginUserScroll(
-            sample(first = 0, offset = 0, visible = rows(0, 1L, 2L)),
-            enabled = true,
-        )
+        tracker.beginUserScroll(sample(0), enabled = true)
 
-        assertEquals(
-            listOf(1L),
-            tracker.receive(
-                sample(first = 1, offset = 5, visible = rows(1, 2L, 3L)),
-                enabled = true,
-            ),
-        )
-        tracker.endUserScroll()
-        tracker.rearm(listOf(1L))
-
-        tracker.beginUserScroll(
-            sample(first = 0, offset = 0, visible = rows(0, 1L, 2L)),
-            enabled = true,
-        )
-        assertEquals(
-            listOf(1L),
-            tracker.receive(
-                sample(first = 1, offset = 5, visible = rows(1, 2L, 3L)),
-                enabled = true,
-            ),
-        )
+        assertEquals(listOf(1L), tracker.receive(sample(1), enabled = true))
     }
 
     @Test
-    fun skippedUnobservedRowsAreNeverManufacturedAsScrolloverCandidates() {
+    fun forwardMovementEmitsCrossedIdsOnce() {
         val tracker = AndroidScrolloverTracker()
         tracker.updateSnapshot(listOf(1L, 2L, 3L, 4L, 5L))
-        tracker.beginUserScroll(
-            sample(first = 0, offset = 0, visible = rows(0, 1L, 2L)),
-            enabled = true,
-        )
+        tracker.beginUserScroll(sample(0), enabled = true)
 
-        val emitted = tracker.receive(
-            sample(first = 3, offset = 10, visible = rows(3, 4L, 5L)),
-            enabled = true,
-        )
-
-        assertEquals(listOf(1L, 2L), emitted)
+        assertEquals(listOf(1L), tracker.receive(sample(1), enabled = true))
+        assertEquals(listOf(2L, 3L), tracker.receive(sample(3), enabled = true))
+        assertTrue(tracker.receive(sample(3), enabled = true).isEmpty())
     }
 
     @Test
-    fun appendOnlySnapshotKeepsActiveQualification() {
-        val tracker = AndroidScrolloverTracker()
-        tracker.updateSnapshot(listOf(1L, 2L, 3L))
-        tracker.beginUserScroll(
-            sample(first = 0, offset = 0, visible = rows(0, 1L, 2L)),
-            enabled = true,
-        )
-
-        tracker.updateSnapshot(listOf(1L, 2L, 3L, 4L, 5L))
-
-        assertEquals(
-            listOf(1L),
-            tracker.receive(
-                sample(first = 1, offset = 5, visible = rows(1, 2L, 3L)),
-                enabled = true,
-            ),
-        )
-    }
-
-    @Test
-    fun newDragDuringActiveScrollPreservesObservedRows() {
+    fun reverseThenForwardRemainsReliable() {
         val tracker = AndroidScrolloverTracker()
         tracker.updateSnapshot(listOf(1L, 2L, 3L, 4L))
-        tracker.beginUserScroll(
-            sample(first = 0, offset = 0, visible = rows(0, 1L, 2L)),
-            enabled = true,
-        )
-        tracker.receive(
-            sample(first = 1, offset = 10, visible = rows(1, 2L, 3L)),
-            enabled = true,
-        )
+        tracker.beginUserScroll(sample(0), enabled = true)
 
-        val emittedOnRetouch = tracker.beginUserScroll(
-            sample(first = 2, offset = 5, visible = rows(2, 3L, 4L)),
-            enabled = true,
-        )
-
-        assertEquals(listOf(2L), emittedOnRetouch)
+        assertEquals(listOf(1L), tracker.receive(sample(1), enabled = true))
+        assertTrue(tracker.receive(sample(0), enabled = true).isEmpty())
+        assertTrue(tracker.receive(sample(1), enabled = true).isEmpty())
+        assertEquals(listOf(2L), tracker.receive(sample(2), enabled = true))
     }
 
     @Test
-    fun reverseMovementNeverEmitsAndQualificationSurvivesDirectionChange() {
+    fun rearmedArticleCanEmitAgain() {
         val tracker = AndroidScrolloverTracker()
         tracker.updateSnapshot(listOf(1L, 2L, 3L))
-        tracker.beginUserScroll(
-            sample(first = 0, offset = 20, visible = rows(0, 1L, 2L)),
-            enabled = true,
-        )
+        tracker.beginUserScroll(sample(0), enabled = true)
+        assertEquals(listOf(1L), tracker.receive(sample(1), enabled = true))
 
-        assertTrue(
-            tracker.receive(
-                sample(first = 0, offset = 0, visible = rows(0, 1L, 2L)),
-                enabled = true,
-            ).isEmpty(),
-        )
-        assertEquals(
-            listOf(1L),
-            tracker.receive(
-                sample(first = 1, offset = 5, visible = rows(1, 2L, 3L)),
-                enabled = true,
-            ),
-        )
+        tracker.endUserScroll()
+        tracker.rearm(listOf(1L))
+        tracker.beginUserScroll(sample(0), enabled = true)
+
+        assertEquals(listOf(1L), tracker.receive(sample(1), enabled = true))
     }
 
     @Test
-    fun forwardBackwardForwardAcrossSameArticleStillEmitsOnce() {
+    fun appendOnlySnapshotKeepsActiveSession() {
         val tracker = AndroidScrolloverTracker()
         tracker.updateSnapshot(listOf(1L, 2L, 3L))
-        tracker.beginUserScroll(
-            sample(
-                first = 0,
-                offset = 0,
-                visible = listOf(
-                    AndroidScrolloverVisibleRow(1L, 0, 0, 100),
-                    AndroidScrolloverVisibleRow(2L, 1, 100, 100),
-                    AndroidScrolloverVisibleRow(3L, 2, 200, 100),
-                ),
-            ),
-            enabled = true,
-        )
+        tracker.beginUserScroll(sample(0), enabled = true)
 
-        assertTrue(
-            tracker.receive(
-                sample(
-                    first = 0,
-                    offset = 35,
-                    visible = listOf(
-                        AndroidScrolloverVisibleRow(1L, 0, -35, 100),
-                        AndroidScrolloverVisibleRow(2L, 1, 65, 100),
-                        AndroidScrolloverVisibleRow(3L, 2, 165, 100),
-                    ),
-                ),
-                enabled = true,
-            ).isEmpty(),
-        )
+        tracker.updateSnapshot(listOf(1L, 2L, 3L, 4L, 5L))
 
-        assertTrue(
-            tracker.receive(
-                sample(
-                    first = 0,
-                    offset = 10,
-                    visible = listOf(
-                        AndroidScrolloverVisibleRow(1L, 0, -10, 100),
-                        AndroidScrolloverVisibleRow(2L, 1, 90, 100),
-                        AndroidScrolloverVisibleRow(3L, 2, 190, 100),
-                    ),
-                ),
-                enabled = true,
-            ).isEmpty(),
-        )
-
-        assertEquals(
-            listOf(1L),
-            tracker.receive(
-                sample(
-                    first = 1,
-                    offset = 5,
-                    visible = listOf(
-                        AndroidScrolloverVisibleRow(2L, 1, -5, 100),
-                        AndroidScrolloverVisibleRow(3L, 2, 95, 100),
-                    ),
-                ),
-                enabled = true,
-            ),
-        )
+        assertEquals(listOf(1L), tracker.receive(sample(1), enabled = true))
     }
 
     @Test
-    fun layoutChangeRebaselinesInsteadOfManufacturingCrossing() {
+    fun newDragDuringActiveSessionDoesNotResetProgress() {
         val tracker = AndroidScrolloverTracker()
-        tracker.updateSnapshot(listOf(1L, 2L, 3L))
-        tracker.beginUserScroll(
-            sample(first = 0, offset = 0, visible = rows(0, 1L, 2L)),
-            enabled = true,
-        )
+        tracker.updateSnapshot(listOf(1L, 2L, 3L, 4L))
+        tracker.beginUserScroll(sample(0), enabled = true)
+        assertEquals(listOf(1L), tracker.receive(sample(1), enabled = true))
 
-        val resized = AndroidScrolloverGeometrySample(
-            firstVisibleIndex = 1,
-            firstVisibleScrollOffset = 5,
-            viewportStartOffset = 0,
-            viewportEndOffset = 250,
-            visibleRows = listOf(
-                AndroidScrolloverVisibleRow(2L, 1, 0, 120),
-                AndroidScrolloverVisibleRow(3L, 2, 120, 120),
-            ),
-        )
-
-        assertTrue(tracker.receive(resized, enabled = true).isEmpty())
+        assertEquals(listOf(2L), tracker.beginUserScroll(sample(2), enabled = true))
     }
 
     @Test
-    fun structuralSnapshotResetDropsOldQualification() {
+    fun structuralSnapshotResetStopsOldSession() {
         val tracker = AndroidScrolloverTracker()
         tracker.updateSnapshot(listOf(1L, 2L, 3L))
-        tracker.beginUserScroll(
-            sample(first = 0, offset = 0, visible = rows(0, 1L, 2L)),
-            enabled = true,
-        )
+        tracker.beginUserScroll(sample(0), enabled = true)
 
         tracker.updateSnapshot(listOf(10L, 11L, 12L))
-        val emitted = tracker.receive(
-            sample(first = 2, offset = 5, visible = rows(2, 12L)),
-            enabled = true,
-        )
 
-        assertTrue(emitted.isEmpty())
+        assertTrue(tracker.receive(sample(2), enabled = true).isEmpty())
+    }
+
+    @Test
+    fun endingUserScrollStopsFurtherEmission() {
+        val tracker = AndroidScrolloverTracker()
+        tracker.updateSnapshot(listOf(1L, 2L, 3L))
+        tracker.beginUserScroll(sample(0), enabled = true)
+        tracker.endUserScroll()
+
+        assertTrue(tracker.receive(sample(2), enabled = true).isEmpty())
     }
 
     @Test
@@ -302,43 +139,6 @@ class AndroidScrolloverTrackerTest {
         assertEquals(listOf(listOf(1L), listOf(2L)), writes)
     }
 
-    @Test
-    fun endingUserScrollClearsQualification() {
-        val tracker = AndroidScrolloverTracker()
-        tracker.updateSnapshot(listOf(1L, 2L, 3L))
-        tracker.beginUserScroll(
-            sample(first = 0, offset = 0, visible = rows(0, 1L, 2L)),
-            enabled = true,
-        )
-        tracker.endUserScroll()
-
-        assertTrue(
-            tracker.receive(
-                sample(first = 2, offset = 0, visible = rows(2, 3L)),
-                enabled = true,
-            ).isEmpty(),
-        )
-    }
-
-    private fun sample(
-        first: Int,
-        offset: Int,
-        visible: List<AndroidScrolloverVisibleRow>,
-    ) = AndroidScrolloverGeometrySample(
-        firstVisibleIndex = first,
-        firstVisibleScrollOffset = offset,
-        viewportStartOffset = 0,
-        viewportEndOffset = 250,
-        visibleRows = visible,
-    )
-
-    private fun rows(startIndex: Int, vararg ids: Long): List<AndroidScrolloverVisibleRow> =
-        ids.mapIndexed { offset, id ->
-            AndroidScrolloverVisibleRow(
-                articleId = id,
-                index = startIndex + offset,
-                offset = offset * 100,
-                size = 100,
-            )
-        }
+    private fun sample(firstVisibleIndex: Int) =
+        AndroidScrolloverPositionSample(firstVisibleIndex = firstVisibleIndex)
 }
