@@ -2,7 +2,6 @@ package de.circledev.fluxnews.nativeapp
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -60,11 +59,12 @@ class AndroidArticleReaderTest {
             testOnly = Unit,
         )
 
-        store.open(article(1), AndroidReaderSource.Timeline)
-        store.open(article(2), AndroidReaderSource.Timeline)
-        repeat(10) { yield() }
+        val firstJob = store.open(article(1), AndroidReaderSource.Timeline)!!
+        val secondJob = store.open(article(2), AndroidReaderSource.Timeline)!!
+
+        secondJob.join()
         firstRelease.complete(Unit)
-        repeat(10) { yield() }
+        firstJob.join()
 
         assertEquals(2L, store.state.value.article?.id)
         assertEquals(second, store.state.value.document)
