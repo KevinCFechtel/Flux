@@ -61,6 +61,37 @@ class AndroidArticleTimelineTest {
     }
 
     @Test
+    fun starredScopeAlwaysQueriesAllStarredArticlesRegardlessOfReadFilter() {
+        val staleUnreadSelection = AndroidArticleTimelineSelection(
+            scope = AndroidNewsScope.Starred,
+            readFilter = AndroidArticleReadFilter.Unread,
+            sort = AndroidArticleSortOrder.NewestFirst,
+        )
+        val query = staleUnreadSelection.coreQuery()
+
+        assertEquals(ArticleScope.All, query.scope)
+        assertEquals(ReadFilter.ALL, query.readFilter)
+        assertEquals(StarredFilter.STARRED, query.starredFilter)
+
+        val selectedFromUnread = AndroidArticleTimelineSelection(
+            scope = AndroidNewsScope.All,
+            readFilter = AndroidArticleReadFilter.Unread,
+        ).selectingScope(AndroidNewsScope.Starred)
+        assertEquals(AndroidArticleReadFilter.Unread, selectedFromUnread.readFilter)
+        assertEquals(ReadFilter.ALL, selectedFromUnread.coreQuery().readFilter)
+        assertEquals(
+            AndroidArticleReadFilter.Unread,
+            selectedFromUnread.togglingReadFilter().readFilter,
+        )
+        assertEquals(
+            AndroidArticleReadFilter.Unread,
+            selectedFromUnread
+                .selectingScope(AndroidNewsScope.All)
+                .readFilter,
+        )
+    }
+
+    @Test
     fun markAllQueryUsesExactUnreadUnboundedNewestScopeSemantics() {
         val query = AndroidArticleTimelineSelection(
             scope = AndroidNewsScope.Feed(42, 7, "Feed"),
@@ -84,7 +115,11 @@ class AndroidArticleTimelineTest {
             sort = AndroidArticleSortOrder.NewestFirst,
         )
 
-        val feed = original.selectingScope(AndroidNewsScope.Feed(42, 7, "Feed"))
+        val starred = original.selectingScope(AndroidNewsScope.Starred)
+        assertEquals(AndroidNewsScope.Starred, starred.scope)
+        assertEquals(AndroidArticleReadFilter.All, starred.readFilter)
+
+        val feed = starred.selectingScope(AndroidNewsScope.Feed(42, 7, "Feed"))
         assertEquals(AndroidNewsScope.Feed(42, 7, "Feed"), feed.scope)
         assertEquals(AndroidArticleReadFilter.All, feed.readFilter)
         assertEquals(AndroidArticleSortOrder.NewestFirst, feed.sort)

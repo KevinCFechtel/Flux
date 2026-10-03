@@ -843,21 +843,23 @@ private fun AndroidArticleActionCapsule(
             expanded = filterExpanded,
             onDismissRequest = { filterExpanded = false },
         ) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        if (selection.readFilter == AndroidArticleReadFilter.Unread) {
-                            "Show all articles"
-                        } else {
-                            "Show unread only"
-                        },
-                    )
-                },
-                onClick = {
-                    filterExpanded = false
-                    onSelectionChanged(selection.togglingReadFilter())
-                },
-            )
+            if (selection.scope != AndroidNewsScope.Starred) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            if (selection.readFilter == AndroidArticleReadFilter.Unread) {
+                                "Show all articles"
+                            } else {
+                                "Show unread only"
+                            },
+                        )
+                    },
+                    onClick = {
+                        filterExpanded = false
+                        onSelectionChanged(selection.togglingReadFilter())
+                    },
+                )
+            }
             DropdownMenuItem(
                 text = {
                     Text(

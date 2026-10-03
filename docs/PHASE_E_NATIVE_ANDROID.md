@@ -858,6 +858,8 @@ Implemented on 3 October 2026:
 - swipe presentation keeps the E4-B 0-2-action/full-swipe contract but follows Material dismissal visuals with a continuous tonal reveal, circular icon targets, an action-colored armed full-swipe state and one selection haptic when crossing the threshold.
 - a successful explicit Read → Unread transition re-arms that article in the Scrollover geometry tracker, matching the iOS behavior; failed unread writes do not re-arm, and external Core unread events also re-arm the visible article.
 - the article long-press menu uses Material leading icons and visual grouping for state, opening and share/save actions instead of an undifferentiated text-only list.
+- full-swipe dispatch uses the latest recomposed action callback so repeating Read/Unread or Star/Unstar full swipes toggles against the current article state instead of a stale pre-mutation snapshot;
+- Starred is an all-read-state scope: Core queries force `ReadFilter.ALL` and read-filter controls are omitted while Starred is active, while the user's underlying All/Unread selection is preserved for returning to normal scopes.
 
 With E4-D implemented, the E4 feature surface is implementation-complete. Acceptance remains subject to the Android CI gate and a focused physical-device pass for Reader overlay geometry, Back behavior, Search pagination and article-open routing.
 

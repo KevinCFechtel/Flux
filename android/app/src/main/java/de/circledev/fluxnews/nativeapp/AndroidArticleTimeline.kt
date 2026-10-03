@@ -199,12 +199,16 @@ internal data class AndroidArticleTimelineSelection(
         copy(scope = scope)
 
     fun togglingReadFilter(): AndroidArticleTimelineSelection =
-        copy(
-            readFilter = when (readFilter) {
-                AndroidArticleReadFilter.Unread -> AndroidArticleReadFilter.All
-                AndroidArticleReadFilter.All -> AndroidArticleReadFilter.Unread
-            },
-        )
+        if (scope == AndroidNewsScope.Starred) {
+            this
+        } else {
+            copy(
+                readFilter = when (readFilter) {
+                    AndroidArticleReadFilter.Unread -> AndroidArticleReadFilter.All
+                    AndroidArticleReadFilter.All -> AndroidArticleReadFilter.Unread
+                },
+            )
+        }
 
     fun togglingSortOrder(): AndroidArticleTimelineSelection =
         copy(
@@ -236,9 +240,13 @@ internal data class AndroidArticleTimelineSelection(
         }
         return ArticleQuery(
             scope = coreScope,
-            readFilter = when (readFilter) {
-                AndroidArticleReadFilter.Unread -> ReadFilter.UNREAD
-                AndroidArticleReadFilter.All -> ReadFilter.ALL
+            readFilter = if (scope == AndroidNewsScope.Starred) {
+                ReadFilter.ALL
+            } else {
+                when (readFilter) {
+                    AndroidArticleReadFilter.Unread -> ReadFilter.UNREAD
+                    AndroidArticleReadFilter.All -> ReadFilter.ALL
+                }
             },
             starredFilter = if (scope == AndroidNewsScope.Starred) StarredFilter.STARRED else StarredFilter.ALL,
             sort = when (sort) {

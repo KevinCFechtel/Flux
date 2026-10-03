@@ -58,12 +58,13 @@ internal object AndroidArticleListActionPolicy {
         hasNextScope: Boolean,
     ): Boolean = when (action) {
         AndroidActionBarAction.FilterAndSort,
-        AndroidActionBarAction.ToggleReadFilter,
         AndroidActionBarAction.ToggleSortOrder,
         AndroidActionBarAction.Search,
         AndroidActionBarAction.ListeningList,
         AndroidActionBarAction.Settings,
         -> true
+
+        AndroidActionBarAction.ToggleReadFilter -> scope != AndroidNewsScope.Starred
 
         AndroidActionBarAction.MarkAllRead -> when (scope) {
             AndroidNewsScope.All,

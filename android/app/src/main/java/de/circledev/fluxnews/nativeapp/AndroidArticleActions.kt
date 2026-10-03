@@ -43,6 +43,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -309,6 +310,8 @@ internal fun AndroidArticleSwipeContainer(
     val density = LocalDensity.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
+    val currentOnSwipeAction by rememberUpdatedState(onSwipeAction)
+    val currentOnOpen by rememberUpdatedState(onOpen)
     val leading = remember(configuration, article, hasAudio) {
         AndroidArticleActionPolicy.resolveSwipeSide(
             configuration = configuration,
@@ -360,7 +363,7 @@ internal fun AndroidArticleSwipeContainer(
                     scope.launch {
                         fullSwipeArmed = false
                         animateOffset(0f)
-                        onSwipeAction(action)
+                        currentOnSwipeAction(action)
                     }
                 },
                 modifier = Modifier.fillMaxSize(),
@@ -436,7 +439,7 @@ internal fun AndroidArticleSwipeContainer(
                             ) {
                                 scope.launch {
                                     animateOffset(direction * rowWidthPx)
-                                    onSwipeAction(fullAction)
+                                    currentOnSwipeAction(fullAction)
                                     offsetPx = 0f
                                     fullSwipeArmed = false
                                 }
@@ -453,7 +456,7 @@ internal fun AndroidArticleSwipeContainer(
                 }
                 .pointerInput(article.id) {
                     detectTapGestures(
-                        onTap = { onOpen() },
+                        onTap = { currentOnOpen() },
                         onLongPress = { contextExpanded = true },
                     )
                 }
