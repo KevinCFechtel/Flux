@@ -860,6 +860,8 @@ Implemented on 3 October 2026:
 - the article long-press menu uses Material leading icons and visual grouping for state, opening and share/save actions instead of an undifferentiated text-only list.
 - full-swipe dispatch uses the latest recomposed action callback so repeating Read/Unread or Star/Unstar full swipes toggles against the current article state instead of a stale pre-mutation snapshot;
 - Starred is an all-read-state scope: Core queries force `ReadFilter.ALL` and read-filter controls are omitted while Starred is active, while the user's underlying All/Unread selection is preserved for returning to normal scopes.
+- swipe visuals use flat Material action zones rather than circular/capsule targets: partial reveal keeps up to two full-height tonal zones with bare icons, while the configured outer action expands into the continuous background for full swipe and becomes the sole visible action after the threshold;
+- the floating Article List action capsule keeps the same semantic controls but uses tighter chrome and smaller visual icons; active Sync is represented by a thin progress ring around the current Sync/Cancel glyph instead of replacing the button with a standalone spinner.
 
 With E4-D implemented, the E4 feature surface is implementation-complete. Acceptance remains subject to the Android CI gate and a focused physical-device pass for Reader overlay geometry, Back behavior, Search pagination and article-open routing.
 

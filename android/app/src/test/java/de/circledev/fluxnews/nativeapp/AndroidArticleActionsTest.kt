@@ -125,6 +125,45 @@ class AndroidArticleActionsTest {
     }
 
     @Test
+    fun swipePresentationKeepsTwoFlatActionZonesUntilFullSwipeIsArmed() {
+        val resolved = AndroidResolvedSwipeSide(
+            additional = AndroidArticleSwipeAction.StarUnstar,
+            full = AndroidArticleSwipeAction.ReadUnread,
+        )
+
+        assertEquals(
+            listOf(
+                AndroidArticleSwipeAction.ReadUnread,
+                AndroidArticleSwipeAction.StarUnstar,
+            ),
+            AndroidSwipePresentationPolicy.presentationActions(
+                side = AndroidArticleSwipeSide.Leading,
+                resolved = resolved,
+                fullSwipeArmed = false,
+            ),
+        )
+        assertEquals(
+            listOf(AndroidArticleSwipeAction.ReadUnread),
+            AndroidSwipePresentationPolicy.presentationActions(
+                side = AndroidArticleSwipeSide.Leading,
+                resolved = resolved,
+                fullSwipeArmed = true,
+            ),
+        )
+        assertEquals(
+            listOf(
+                AndroidArticleSwipeAction.StarUnstar,
+                AndroidArticleSwipeAction.ReadUnread,
+            ),
+            AndroidSwipePresentationPolicy.presentationActions(
+                side = AndroidArticleSwipeSide.Trailing,
+                resolved = resolved,
+                fullSwipeArmed = false,
+            ),
+        )
+    }
+
+    @Test
     fun urlValidationAcceptsOnlyHttpAndHttpsWebUrls() {
         assertTrue(AndroidArticleActionPolicy.validWebUrl("https://example.test/article"))
         assertTrue(AndroidArticleActionPolicy.validWebUrl("http://example.test/article"))

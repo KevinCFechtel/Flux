@@ -753,7 +753,7 @@ private fun AndroidArticleActionCapsule(
             shadowElevation = if (darkMode) 0.5.dp else 0.dp,
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                modifier = Modifier.padding(horizontal = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(
@@ -761,22 +761,32 @@ private fun AndroidArticleActionCapsule(
                     onClick = {
                         if (manualSyncing) onCancelManualSync() else onRequestManualSync()
                     },
-                    modifier = Modifier.size(48.dp),
+                    modifier = Modifier.size(44.dp),
                 ) {
-                    when {
-                        manualSyncing -> Icon(
-                            painter = painterResource(R.drawable.ic_close),
-                            contentDescription = "Cancel sync",
-                            modifier = Modifier.size(22.dp),
-                        )
-                        syncing -> CircularProgressIndicator(
-                            modifier = Modifier.size(22.dp),
-                            strokeWidth = 2.dp,
-                        )
-                        else -> Icon(
+                    if (syncing) {
+                        Box(
+                            modifier = Modifier.size(30.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.fillMaxSize(),
+                                strokeWidth = 1.5.dp,
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                            )
+                            Icon(
+                                painter = painterResource(
+                                    if (manualSyncing) R.drawable.ic_close else R.drawable.ic_sync,
+                                ),
+                                contentDescription = if (manualSyncing) "Cancel sync" else "Syncing",
+                                modifier = Modifier.size(15.dp),
+                            )
+                        }
+                    } else {
+                        Icon(
                             painter = painterResource(R.drawable.ic_sync),
                             contentDescription = "Sync",
-                            modifier = Modifier.size(22.dp),
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 }
@@ -785,12 +795,12 @@ private fun AndroidArticleActionCapsule(
                     IconButton(
                         enabled = actionsEnabled,
                         onClick = { perform(action) },
-                        modifier = Modifier.size(48.dp),
+                        modifier = Modifier.size(44.dp),
                     ) {
                         Icon(
                             painter = painterResource(articleListActionIcon(action, selection)),
                             contentDescription = articleListActionContentDescription(action, selection),
-                            modifier = Modifier.size(22.dp),
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 }
@@ -799,12 +809,12 @@ private fun AndroidArticleActionCapsule(
                     IconButton(
                         enabled = actionsEnabled,
                         onClick = { overflowExpanded = true },
-                        modifier = Modifier.size(48.dp),
+                        modifier = Modifier.size(44.dp),
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_more),
                             contentDescription = "More",
-                            modifier = Modifier.size(22.dp),
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                     DropdownMenu(

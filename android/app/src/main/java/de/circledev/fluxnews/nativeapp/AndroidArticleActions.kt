@@ -12,13 +12,11 @@ import android.os.Build
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -29,13 +27,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -286,6 +282,19 @@ internal object AndroidSwipePresentationPolicy {
         hasFullAction &&
             rowWidthPx > 0f &&
             abs(offsetPx) >= rowWidthPx * ANDROID_ARTICLE_SWIPE_FULL_THRESHOLD
+
+    fun presentationActions(
+        side: AndroidArticleSwipeSide,
+        resolved: AndroidResolvedSwipeSide,
+        fullSwipeArmed: Boolean,
+    ): List<AndroidArticleSwipeAction> {
+        if (fullSwipeArmed && resolved.full != null) return listOf(resolved.full)
+        return if (side == AndroidArticleSwipeSide.Leading) {
+            resolved.visibleActions.reversed()
+        } else {
+            resolved.visibleActions
+        }
+    }
 }
 
 /**
@@ -354,11 +363,15 @@ internal fun AndroidArticleSwipeContainer(
         }
         if (visibleSide != null) {
             val visibleResolved = if (visibleSide == AndroidArticleSwipeSide.Leading) leading else trailing
+            val revealWidthPx =
+                (actionWidthPx * visibleResolved.visibleActions.size).coerceAtLeast(1f)
             SwipeActionBackground(
                 side = visibleSide,
                 resolved = visibleResolved,
                 article = article,
                 fullSwipeArmed = fullSwipeArmed,
+                revealProgress = (abs(offsetPx) / revealWidthPx).coerceIn(0f, 1f),
+                actionWidth = actionWidth,
                 onAction = { action ->
                     scope.launch {
                         fullSwipeArmed = false
@@ -547,58 +560,72 @@ private fun SwipeActionBackground(
     resolved: AndroidResolvedSwipeSide,
     article: ArticleSummary,
     fullSwipeArmed: Boolean,
+    revealProgress: Float,
+    actionWidth: androidx.compose.ui.unit.Dp,
     onAction: (AndroidArticleSwipeAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val orderedActions = if (side == AndroidArticleSwipeSide.Leading) {
-        resolved.visibleActions.reversed()
-    } else {
-        resolved.visibleActions
-    }
-    if (orderedActions.isEmpty()) return
+    val displayedActions = AndroidSwipePresentationPolicy.presentationActions(
+        side = side,
+        resolved = resolved,
+        fullSwipeArmed = fullSwipeArmed,
+    )
+    if (displayedActions.isEmpty()) return
 
-    val dominantAction = resolved.full ?: orderedActions.first()
+    val dominantAction = resolved.full ?: displayedActions.first()
     val dominantColors = swipeActionColors(dominantAction)
     val backgroundColor by animateColorAsState(
-        targetValue = if (fullSwipeArmed) dominantColors.container else MaterialTheme.colorScheme.surfaceVariant,
+        targetValue = dominantColors.container,
         label = "article-swipe-background",
     )
-    val displayedActions = if (fullSwipeArmed && resolved.full != null) listOf(resolved.full) else orderedActions
-    val targetScale by animateFloatAsState(
-        targetValue = if (fullSwipeArmed) 1.14f else 1f,
-        label = "article-swipe-target-scale",
-    )
+    val density = LocalDensity.current
+    val travelPx = with(density) { 8.dp.toPx() }
+    val direction = if (side == AndroidArticleSwipeSide.Leading) -1f else 1f
+    val iconTranslation = direction * travelPx * (1f - revealProgress)
+    val iconAlpha = 0.55f + (0.45f * revealProgress)
 
-    Box(modifier = modifier.background(backgroundColor)) {
+    Box(
+        modifier = modifier.background(backgroundColor),
+    ) {
         Row(
             modifier = Modifier
-                .align(if (side == AndroidArticleSwipeSide.Leading) Alignment.CenterStart else Alignment.CenterEnd)
-                .padding(horizontal = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .align(
+                    if (side == AndroidArticleSwipeSide.Leading) {
+                        Alignment.CenterStart
+                    } else {
+                        Alignment.CenterEnd
+                    },
+                )
+                .fillMaxHeight(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             displayedActions.forEach { action ->
                 val colors = swipeActionColors(action)
-                Surface(
-                    onClick = { onAction(action) },
+                Box(
                     modifier = Modifier
-                        .size(48.dp)
-                        .graphicsLayer {
-                            scaleX = targetScale
-                            scaleY = targetScale
-                        },
-                    shape = CircleShape,
-                    color = if (fullSwipeArmed) MaterialTheme.colorScheme.surface else colors.container,
-                    contentColor = colors.content,
-                    tonalElevation = if (fullSwipeArmed) 2.dp else 0.dp,
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            painter = painterResource(swipeActionIcon(action, article)),
-                            contentDescription = AndroidArticleActionPolicy.swipeLabel(action, article),
-                            modifier = Modifier.size(24.dp),
+                        .width(actionWidth)
+                        .fillMaxHeight()
+                        .background(
+                            if (fullSwipeArmed) {
+                                Color.Transparent
+                            } else {
+                                colors.container
+                            },
                         )
-                    }
+                        .clickable { onAction(action) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        painter = painterResource(swipeActionIcon(action, article)),
+                        contentDescription = AndroidArticleActionPolicy.swipeLabel(action, article),
+                        tint = if (fullSwipeArmed) dominantColors.content else colors.content,
+                        modifier = Modifier
+                            .size(if (fullSwipeArmed) 26.dp else 24.dp)
+                            .graphicsLayer {
+                                alpha = if (fullSwipeArmed) 1f else iconAlpha
+                                translationX = if (fullSwipeArmed) 0f else iconTranslation
+                            },
+                    )
                 }
             }
         }
