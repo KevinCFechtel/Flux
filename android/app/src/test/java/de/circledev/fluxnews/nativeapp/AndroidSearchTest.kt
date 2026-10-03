@@ -4,7 +4,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -43,13 +42,13 @@ class AndroidSearchTest {
         )
         store.activateSession(9L)
         store.setQuery("first")
-        store.submit()
-        repeat(10) { yield() }
+        val first = store.submit()!!
         store.setQuery("second")
-        store.submit()
-        repeat(10) { yield() }
+        val second = store.submit()!!
+
+        second.join()
         firstRelease.complete(Unit)
-        repeat(10) { yield() }
+        first.join()
 
         assertEquals("second", store.state.value.submittedQuery)
         assertEquals(listOf(2L), store.state.value.results.map { it.id })
