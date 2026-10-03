@@ -41,6 +41,40 @@ class AndroidArticleTimelineTest {
     }
 
     @Test
+    fun allFilterReadMutationKeepsStructuralContentStateStable() = runBlocking {
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 1L },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(
+            scope = AndroidNewsScope.All,
+            readFilter = AndroidArticleReadFilter.All,
+        )
+        store.reset(selection)
+        val structuralArticles = store.state.value.articles
+        val contentBefore = store.state.value.contentState()
+
+        assertTrue(
+            store.setReadExplicit(
+                articleId = 1L,
+                read = true,
+                removeWhenRead = false,
+            ),
+        )
+
+        assertSame(structuralArticles, store.state.value.articles)
+        assertEquals(contentBefore, store.state.value.contentState())
+        assertTrue(store.rowPresentationForTesting(1L)!!.isRead)
+    }
+
+    @Test
     fun selectionMapsScopesFiltersSortAndBoundedPageSize() {
         val all = AndroidArticleTimelineSelection(AndroidNewsScope.All).coreQuery()
         assertEquals(ArticleScope.All, all.scope)
