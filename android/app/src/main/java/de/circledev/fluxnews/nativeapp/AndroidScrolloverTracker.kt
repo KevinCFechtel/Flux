@@ -7,18 +7,15 @@ internal data class AndroidScrolloverPositionSample(
 /**
  * Lightweight Compose-native Scrollover detector.
  *
- * A real user drag starts the session and the session remains active through the
- * following fling until LazyList becomes idle. During that session an article is
- * considered crossed as soon as the first-visible item index advances beyond it.
- *
- * This deliberately favors reliability over proving that every crossed row was
- * independently sampled as visible. Programmatic list movement never starts a
- * session, and reverse movement never emits candidates.
+ * The tracker keeps an idle baseline separate from an active user-scroll baseline.
+ * LazyList position changes and DragInteraction.Start are delivered independently,
+ * so an index change that arrives just before the drag event must not overwrite the
+ * last idle position. Programmatic scrolling never activates the user-scroll phase.
  */
 internal class AndroidScrolloverTracker {
     private val orderedIds = mutableListOf<Long>()
     private val emittedIds = mutableSetOf<Long>()
-    private var previousFirstVisibleIndex: Int? = null
+    private var baselineFirstVisibleIndex: Int? = null
     private var userScrollActive = false
 
     fun updateSnapshot(ids: List<Long>) {
@@ -38,7 +35,7 @@ internal class AndroidScrolloverTracker {
         orderedIds.clear()
         orderedIds.addAll(ids)
         emittedIds.retainAll(ids.toSet())
-        previousFirstVisibleIndex = null
+        baselineFirstVisibleIndex = null
         userScrollActive = false
     }
 
@@ -47,52 +44,63 @@ internal class AndroidScrolloverTracker {
         enabled: Boolean,
     ): List<Long> {
         if (!enabled) {
-            endUserScroll()
+            userScrollActive = false
             return emptyList()
         }
 
-        if (!userScrollActive) {
-            userScrollActive = true
-            if (previousFirstVisibleIndex == null) {
-                previousFirstVisibleIndex = sample.firstVisibleIndex
-                return emptyList()
-            }
-            return receive(sample, enabled = true)
+        if (userScrollActive) {
+            return emitForwardCrossings(sample.firstVisibleIndex)
         }
 
-        return receive(sample, enabled = true)
+        userScrollActive = true
+        if (baselineFirstVisibleIndex == null) {
+            baselineFirstVisibleIndex = sample.firstVisibleIndex
+            return emptyList()
+        }
+        return emitForwardCrossings(sample.firstVisibleIndex)
     }
 
-    fun endUserScroll() {
-        // Keep the last observed idle position as the next drag baseline. The
-        // interaction event and LazyList state update are delivered independently,
-        // so clearing it here can lose the first crossed article if the list moves
-        // before DragInteraction.Start is collected.
-        userScrollActive = false
+    fun observe(
+        sample: AndroidScrolloverPositionSample,
+        scrolling: Boolean,
+        enabled: Boolean,
+    ): List<Long> {
+        val currentIndex = sample.firstVisibleIndex
+
+        if (!enabled) {
+            userScrollActive = false
+            if (!scrolling) baselineFirstVisibleIndex = currentIndex
+            return emptyList()
+        }
+
+        if (!scrolling) {
+            val candidates = if (userScrollActive) {
+                emitForwardCrossings(currentIndex)
+            } else {
+                emptyList()
+            }
+            userScrollActive = false
+            baselineFirstVisibleIndex = currentIndex
+            return candidates
+        }
+
+        if (!userScrollActive) {
+            // Movement can arrive before DragInteraction.Start, or it can be
+            // programmatic. Keep the previous idle baseline intact so the former
+            // is not lost; without a user drag we emit nothing.
+            return emptyList()
+        }
+
+        return emitForwardCrossings(currentIndex)
     }
 
     fun rearm(articleIds: Collection<Long>) {
         emittedIds.removeAll(articleIds.toSet())
     }
 
-    fun receive(
-        sample: AndroidScrolloverPositionSample,
-        enabled: Boolean,
-    ): List<Long> {
-        if (!userScrollActive) {
-            previousFirstVisibleIndex = sample.firstVisibleIndex
-            return emptyList()
-        }
-
-        if (!enabled) {
-            previousFirstVisibleIndex = sample.firstVisibleIndex
-            return emptyList()
-        }
-
-        val previousIndex = previousFirstVisibleIndex
-        val currentIndex = sample.firstVisibleIndex
-        previousFirstVisibleIndex = currentIndex
-
+    private fun emitForwardCrossings(currentIndex: Int): List<Long> {
+        val previousIndex = baselineFirstVisibleIndex
+        baselineFirstVisibleIndex = currentIndex
         if (previousIndex == null || currentIndex <= previousIndex) return emptyList()
 
         val start = previousIndex.coerceAtLeast(0)
