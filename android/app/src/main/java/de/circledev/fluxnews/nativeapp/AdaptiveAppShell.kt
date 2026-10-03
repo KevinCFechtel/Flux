@@ -447,7 +447,7 @@ private fun NewsRootContent(
     )
     val resolvedActions = AndroidArticleListActionPolicy.resolvedActions(
         configuredActions = actionBarState.actions,
-        directCapacity = 3,
+        directCapacity = if (persistentNavigation) 5 else 3,
         scope = scope,
         hasNextScope = nextScope != null,
     )
@@ -560,7 +560,28 @@ private fun NewsRootContent(
                     FloatingChromeTopGradient(
                         modifier = Modifier.align(Alignment.TopCenter),
                     )
-                    if (scopeTitleLeading) {
+                    if (persistentNavigation) {
+                        TopAppBar(
+                            title = {},
+                            actions = {
+                                AndroidArticleActionCapsule(
+                                    selection = selection,
+                                    resolvedActions = resolvedActions,
+                                    syncState = syncState,
+                                    syncSuccessVisible = syncSuccessVisible,
+                                    actionsEnabled = !markReadRunning,
+                                    onRequestManualSync = {
+                                        syncCoordinator.requestSync(SyncReason.MANUAL)
+                                    },
+                                    onCancelManualSync = syncCoordinator::cancelManualSync,
+                                    onSelectionChanged = onSelectionChanged,
+                                    onAction = ::executeArticleListAction,
+                                    modifier = Modifier.padding(end = 8.dp),
+                                )
+                            },
+                            colors = appBarColors,
+                        )
+                    } else if (scopeTitleLeading) {
                         TopAppBar(
                             title = {
                                 ScopeNavigationCapsule(
@@ -665,7 +686,7 @@ private fun NewsRootContent(
             }
         }
 
-        if (!isLandscape) {
+        if (!isLandscape && !persistentNavigation) {
             AndroidArticleActionCapsule(
                 selection = selection,
                 resolvedActions = resolvedActions,
