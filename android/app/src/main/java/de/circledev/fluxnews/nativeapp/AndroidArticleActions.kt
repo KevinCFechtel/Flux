@@ -18,7 +18,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -55,6 +54,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import java.net.URI
@@ -313,6 +313,7 @@ internal fun AndroidArticleSwipeContainer(
     article: ArticleSummary,
     hasAudio: Boolean,
     configuration: AndroidArticleSwipeConfiguration,
+    rowWidth: Dp,
     onOpen: () -> Unit = {},
     onSwipeAction: (AndroidArticleSwipeAction) -> Unit,
     onContextAction: (AndroidArticleContextAction) -> Unit,
@@ -357,14 +358,14 @@ internal fun AndroidArticleSwipeContainer(
         offsetPx = target
     }
 
-    BoxWithConstraints(
+    val rowWidthPx = with(density) { rowWidth.toPx() }.coerceAtLeast(1f)
+    Box(
         modifier
             .fillMaxWidth()
             .onSizeChanged { size ->
                 if (rowHeightPx != size.height) rowHeightPx = size.height
             },
     ) {
-        val rowWidthPx = with(density) { maxWidth.toPx() }.coerceAtLeast(1f)
 
         val visibleSide = when {
             offsetPx > 0f -> AndroidArticleSwipeSide.Leading
