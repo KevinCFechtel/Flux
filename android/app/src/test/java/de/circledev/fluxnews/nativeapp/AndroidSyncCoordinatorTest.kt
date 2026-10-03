@@ -76,20 +76,14 @@ class AndroidSyncCoordinatorTest {
     }
 
     @Test
-    fun successPresentationNeverTreatsNullAsActiveSuccess() {
+    fun successPresentationIsImmediateAndOnlyDismissesAfterItsGenerationExpires() {
         assertFalse(
             AndroidSyncPresentationPolicy.successVisible(
                 state = AndroidSyncCoordinator.State.Syncing(
                     generation = 7L,
                     reason = SyncReason.MANUAL,
                 ),
-                successGeneration = null,
-            ),
-        )
-        assertFalse(
-            AndroidSyncPresentationPolicy.successVisible(
-                state = AndroidSyncCoordinator.State.Idle,
-                successGeneration = null,
+                dismissedGeneration = null,
             ),
         )
         assertTrue(
@@ -98,7 +92,16 @@ class AndroidSyncCoordinatorTest {
                     generation = 7L,
                     reason = SyncReason.MANUAL,
                 ),
-                successGeneration = 7L,
+                dismissedGeneration = null,
+            ),
+        )
+        assertFalse(
+            AndroidSyncPresentationPolicy.successVisible(
+                state = AndroidSyncCoordinator.State.Succeeded(
+                    generation = 7L,
+                    reason = SyncReason.MANUAL,
+                ),
+                dismissedGeneration = 7L,
             ),
         )
         assertFalse(
@@ -107,7 +110,7 @@ class AndroidSyncCoordinatorTest {
                     generation = 7L,
                     reason = SyncReason.APP_START,
                 ),
-                successGeneration = 7L,
+                dismissedGeneration = null,
             ),
         )
     }

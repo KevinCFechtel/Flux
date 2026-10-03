@@ -106,12 +106,11 @@ private data class NewsNavigationModel(
 internal object AndroidSyncPresentationPolicy {
     fun successVisible(
         state: AndroidSyncCoordinator.State,
-        successGeneration: Long?,
+        dismissedGeneration: Long?,
     ): Boolean {
         val succeeded = state as? AndroidSyncCoordinator.State.Succeeded ?: return false
         return succeeded.reason == SyncReason.MANUAL &&
-            successGeneration != null &&
-            succeeded.generation == successGeneration
+            succeeded.generation != dismissedGeneration
     }
 }
 
@@ -455,10 +454,10 @@ private fun NewsRootContent(
     val syncInProgress = syncState is AndroidSyncCoordinator.State.Syncing
     val manualSyncInProgress =
         (syncState as? AndroidSyncCoordinator.State.Syncing)?.reason == SyncReason.MANUAL
-    var syncSuccessGeneration by remember { mutableStateOf<Long?>(null) }
+    var dismissedSyncSuccessGeneration by remember { mutableStateOf<Long?>(null) }
     val syncSuccessVisible = AndroidSyncPresentationPolicy.successVisible(
         state = syncState,
-        successGeneration = syncSuccessGeneration,
+        dismissedGeneration = dismissedSyncSuccessGeneration,
     )
     val actionScope = rememberCoroutineScope()
     val shellSnackbar = remember { SnackbarHostState() }
@@ -497,13 +496,8 @@ private fun NewsRootContent(
     LaunchedEffect(syncState) {
         val succeeded = syncState as? AndroidSyncCoordinator.State.Succeeded
         if (succeeded?.reason == SyncReason.MANUAL) {
-            syncSuccessGeneration = succeeded.generation
             delay(1_500)
-            if (syncSuccessGeneration == succeeded.generation) {
-                syncSuccessGeneration = null
-            }
-        } else {
-            syncSuccessGeneration = null
+            dismissedSyncSuccessGeneration = succeeded.generation
         }
     }
 
