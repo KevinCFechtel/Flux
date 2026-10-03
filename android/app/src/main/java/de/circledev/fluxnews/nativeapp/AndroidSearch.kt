@@ -529,7 +529,13 @@ internal fun AndroidSearchDestination(
                 )
             },
         ) { padding ->
-            Column(Modifier.fillMaxSize().padding(padding)) {
+            AndroidCenteredContent(
+                maxWidth = AndroidSecondaryContentMaxWidth,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+            ) { contentModifier ->
+            Column(contentModifier) {
                 TextField(
                     value = state.query,
                     onValueChange = store::setQuery,
@@ -645,6 +651,7 @@ internal fun AndroidSearchDestination(
                         }
                     }
                 }
+            }
             }
         }
         AndroidArticleReaderOverlay(
