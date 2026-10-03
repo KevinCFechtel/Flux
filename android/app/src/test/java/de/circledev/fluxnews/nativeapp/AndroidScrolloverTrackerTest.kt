@@ -166,6 +166,69 @@ class AndroidScrolloverTrackerTest {
     }
 
     @Test
+    fun forwardBackwardForwardAcrossSameArticleStillEmitsOnce() {
+        val tracker = AndroidScrolloverTracker()
+        tracker.updateSnapshot(listOf(1L, 2L, 3L))
+        tracker.beginUserScroll(
+            sample(
+                first = 0,
+                offset = 0,
+                visible = listOf(
+                    AndroidScrolloverVisibleRow(1L, 0, 0, 100),
+                    AndroidScrolloverVisibleRow(2L, 1, 100, 100),
+                    AndroidScrolloverVisibleRow(3L, 2, 200, 100),
+                ),
+            ),
+            enabled = true,
+        )
+
+        assertTrue(
+            tracker.receive(
+                sample(
+                    first = 0,
+                    offset = 35,
+                    visible = listOf(
+                        AndroidScrolloverVisibleRow(1L, 0, -35, 100),
+                        AndroidScrolloverVisibleRow(2L, 1, 65, 100),
+                        AndroidScrolloverVisibleRow(3L, 2, 165, 100),
+                    ),
+                ),
+                enabled = true,
+            ).isEmpty(),
+        )
+
+        assertTrue(
+            tracker.receive(
+                sample(
+                    first = 0,
+                    offset = 10,
+                    visible = listOf(
+                        AndroidScrolloverVisibleRow(1L, 0, -10, 100),
+                        AndroidScrolloverVisibleRow(2L, 1, 90, 100),
+                        AndroidScrolloverVisibleRow(3L, 2, 190, 100),
+                    ),
+                ),
+                enabled = true,
+            ).isEmpty(),
+        )
+
+        assertEquals(
+            listOf(1L),
+            tracker.receive(
+                sample(
+                    first = 1,
+                    offset = 5,
+                    visible = listOf(
+                        AndroidScrolloverVisibleRow(2L, 1, -5, 100),
+                        AndroidScrolloverVisibleRow(3L, 2, 95, 100),
+                    ),
+                ),
+                enabled = true,
+            ),
+        )
+    }
+
+    @Test
     fun layoutChangeRebaselinesInsteadOfManufacturingCrossing() {
         val tracker = AndroidScrolloverTracker()
         tracker.updateSnapshot(listOf(1L, 2L, 3L))
