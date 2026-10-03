@@ -96,7 +96,7 @@ internal object AndroidNavigationPolicy {
      * global scopes never invent a sibling target.
      */
     fun nextScope(
-        after scope: AndroidNewsScope,
+        after: AndroidNewsScope,
         hidingEmpty: Boolean,
         categories: List<AndroidNavigationCategoryRef>,
         feeds: List<AndroidNavigationFeedRef>,
@@ -113,7 +113,7 @@ internal object AndroidNavigationPolicy {
             categories.mapTo(mutableSetOf()) { it.id }
         }
 
-        return when (scope) {
+        return when (after) {
             is AndroidNewsScope.Feed -> {
                 val knownCategoryIds = categories.mapTo(mutableSetOf()) { it.id }
                 val orderedFeeds = buildList {
@@ -132,7 +132,7 @@ internal object AndroidNavigationPolicy {
                         },
                     )
                 }
-                val index = orderedFeeds.indexOfFirst { it.id == scope.id }
+                val index = orderedFeeds.indexOfFirst { it.id == after.id }
                 orderedFeeds
                     .getOrNull(index + 1)
                     ?.takeIf { index >= 0 }
@@ -141,7 +141,7 @@ internal object AndroidNavigationPolicy {
 
             is AndroidNewsScope.Category -> {
                 val orderedCategories = categories.filter { it.id in visibleCategoryIds }
-                val index = orderedCategories.indexOfFirst { it.id == scope.id }
+                val index = orderedCategories.indexOfFirst { it.id == after.id }
                 orderedCategories
                     .getOrNull(index + 1)
                     ?.takeIf { index >= 0 }

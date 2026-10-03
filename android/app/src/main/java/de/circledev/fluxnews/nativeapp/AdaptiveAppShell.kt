@@ -534,9 +534,10 @@ private fun NewsRootContent(
             PullToRefreshBox(
                 isRefreshing = manualSyncInProgress,
                 onRefresh = {
-                    syncCoordinator.requestSync(SyncReason.MANUAL)
+                    if (!syncInProgress && !markReadRunning) {
+                        syncCoordinator.requestSync(SyncReason.MANUAL)
+                    }
                 },
-                enabled = !syncInProgress && !markReadRunning,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(
