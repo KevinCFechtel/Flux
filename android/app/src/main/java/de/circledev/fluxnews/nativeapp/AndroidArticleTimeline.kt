@@ -93,6 +93,7 @@ import uniffi.flux_uniffi.MediaKind
 import uniffi.flux_uniffi.ReadFilter
 import uniffi.flux_uniffi.SaveToServiceResult
 import uniffi.flux_uniffi.StarredFilter
+import uniffi.flux_uniffi.SyncReason
 
 private const val ANDROID_ARTICLE_TIMELINE_PAGE_SIZE = 64
 private const val ANDROID_ARTICLE_TIMELINE_PREFETCH_DISTANCE = 8
@@ -271,6 +272,8 @@ internal data class AndroidArticleTimelineState(
     val errorMessage: String? = null,
     val queryGeneration: Long = 0,
     val sessionGeneration: Long? = null,
+    val pendingNewFeedIds: Set<Long> = emptySet(),
+    val hasUnscopedNewDataSignal: Boolean = false,
 ) {
     val empty: Boolean
         get() = !initialLoading && articles.isEmpty() && errorMessage == null
@@ -843,6 +846,8 @@ internal class AndroidArticleTimelineStore private constructor(
             selection = selection,
             feedIconVariant = previous.feedIconVariant.takeIf { sameSession },
             feedIconPngByFeedId = previous.feedIconPngByFeedId.takeIf { sameSession }.orEmpty(),
+            pendingNewFeedIds = previous.pendingNewFeedIds.takeIf { sameSession }.orEmpty(),
+            hasUnscopedNewDataSignal = sameSession && previous.hasUnscopedNewDataSignal,
             initialLoading = true,
             queryGeneration = generation,
             sessionGeneration = sessionGeneration,
@@ -872,12 +877,66 @@ internal class AndroidArticleTimelineStore private constructor(
             audioArticleIds = audioArticleIds,
             feedIconVariant = iconState.feedIconVariant,
             feedIconPngByFeedId = iconState.feedIconPngByFeedId,
+            pendingNewFeedIds = iconState.pendingNewFeedIds,
+            hasUnscopedNewDataSignal = iconState.hasUnscopedNewDataSignal,
             total = page.total,
             nextCursor = page.nextCursor.takeIf { articles.isNotEmpty() },
             initialLoading = false,
             queryGeneration = generation,
             sessionGeneration = sessionGeneration,
         )
+    }
+
+    fun hasPendingNewDataForScope(
+        scope: AndroidNewsScope,
+        categoryFeedIds: Set<Long> = emptySet(),
+    ): Boolean {
+        val current = mutableState.value
+        if (current.hasUnscopedNewDataSignal) return true
+        return when (scope) {
+            AndroidNewsScope.All,
+            AndroidNewsScope.Starred,
+            -> current.pendingNewFeedIds.isNotEmpty()
+            is AndroidNewsScope.Category -> current.pendingNewFeedIds.any { it in categoryFeedIds }
+            is AndroidNewsScope.Feed -> scope.id in current.pendingNewFeedIds
+        }
+    }
+
+    fun acknowledgePendingNewDataForScope(
+        scope: AndroidNewsScope,
+        categoryFeedIds: Set<Long> = emptySet(),
+    ) {
+        mutableState.update { state ->
+            val remainingFeedIds = when (scope) {
+                AndroidNewsScope.All,
+                AndroidNewsScope.Starred,
+                -> emptySet()
+                is AndroidNewsScope.Category -> state.pendingNewFeedIds - categoryFeedIds
+                is AndroidNewsScope.Feed -> state.pendingNewFeedIds - scope.id
+            }
+            state.copy(
+                pendingNewFeedIds = remainingFeedIds,
+                hasUnscopedNewDataSignal = false,
+            )
+        }
+    }
+
+    suspend fun adoptPendingNewData(
+        selection: AndroidArticleTimelineSelection,
+        categoryFeedIds: Set<Long> = emptySet(),
+    ) {
+        acknowledgePendingNewDataForScope(selection.scope, categoryFeedIds)
+        reset(selection)
+        mutableScrollResetRequests.tryEmit(Unit)
+    }
+
+    private fun clearPendingNewData() {
+        mutableState.update {
+            it.copy(
+                pendingNewFeedIds = emptySet(),
+                hasUnscopedNewDataSignal = false,
+            )
+        }
     }
 
     suspend fun handleCoreEvent(runtimeEvent: AndroidCoreRuntimeEvent) {
@@ -909,10 +968,33 @@ internal class AndroidArticleTimelineStore private constructor(
                 mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
             }
             is CoreEvent.SyncDidComplete -> {
-                if (event.metadata.navigationChanged) {
+                val metadata = event.metadata
+                if (metadata.navigationChanged) {
                     unavailableFeedIconsByVariant.clear()
                 }
-                if (event.metadata.dataChanged) reset(selection)
+
+                if (metadata.reason == SyncReason.MANUAL) {
+                    clearPendingNewData()
+                    reset(selection)
+                    mutableScrollResetRequests.tryEmit(Unit)
+                } else if (metadata.dataChanged) {
+                    val newFeedIds = metadata.newArticlesByFeed
+                        .asSequence()
+                        .filter { it.count > 0u }
+                        .mapTo(mutableSetOf()) { it.feedId }
+                    mutableState.update { state ->
+                        state.copy(
+                            pendingNewFeedIds = state.pendingNewFeedIds + newFeedIds,
+                            hasUnscopedNewDataSignal =
+                                state.hasUnscopedNewDataSignal || newFeedIds.isEmpty(),
+                        )
+                    }
+                    refreshSelectionTotal(
+                        selection = selection,
+                        generation = current.queryGeneration,
+                        sessionGeneration = current.sessionGeneration,
+                    )
+                }
             }
             else -> Unit
         }
@@ -1407,12 +1489,15 @@ internal class AndroidArticleTimelineStore private constructor(
         ) {
             return
         }
+        val current = mutableState.value
         mutableState.value = AndroidArticleTimelineState(
             selection = selection,
             initialLoading = false,
             errorMessage = "Articles could not be loaded.",
             queryGeneration = generation,
             sessionGeneration = sessionGeneration,
+            pendingNewFeedIds = current.pendingNewFeedIds,
+            hasUnscopedNewDataSignal = current.hasUnscopedNewDataSignal,
         )
     }
 }
@@ -1425,6 +1510,7 @@ internal fun AndroidArticleTimeline(
     accountKey: String,
     onOpenArticle: (ArticleSummary) -> Unit,
     onOpenReader: (ArticleSummary) -> Unit,
+    categoryFeedIds: Set<Long> = emptySet(),
     topContentPadding: Dp = 0.dp,
     bottomOverlayPadding: Dp = 0.dp,
     modifier: Modifier = Modifier,
@@ -1435,6 +1521,10 @@ internal fun AndroidArticleTimeline(
         initial = AndroidArticlePreferenceState(),
     )
     val errorMessage = state.errorMessage
+    val pendingNewDataForCurrentScope = store.hasPendingNewDataForScope(
+        scope = selection.scope,
+        categoryFeedIds = categoryFeedIds,
+    )
     val listState = rememberLazyListState()
     val scrolloverTracker = remember { AndroidScrolloverTracker() }
     val actionScope = rememberCoroutineScope()
@@ -1654,6 +1744,7 @@ internal fun AndroidArticleTimeline(
         if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
             listState.scrollToItem(0)
         }
+        store.acknowledgePendingNewDataForScope(selection.scope, categoryFeedIds)
         store.reset(selection)
     }
 
@@ -1760,6 +1851,7 @@ internal fun AndroidArticleTimeline(
         }
     }
 
+    val supplementalOverlayVisible = undoState.visible || pendingNewDataForCurrentScope
     SnackbarHost(
         hostState = actionSnackbar,
         modifier = Modifier
@@ -1767,7 +1859,7 @@ internal fun AndroidArticleTimeline(
             .padding(
                 start = 16.dp,
                 end = 16.dp,
-                bottom = bottomOverlayPadding + (if (undoState.visible) 88.dp else 20.dp),
+                bottom = bottomOverlayPadding + (if (supplementalOverlayVisible) 88.dp else 20.dp),
             ),
     )
 
@@ -1798,6 +1890,24 @@ internal fun AndroidArticleTimeline(
             Text(
                 if (count == 1) "1 article marked as read" else "$count articles marked as read",
             )
+        }
+    } else if (pendingNewDataForCurrentScope) {
+        Button(
+            onClick = {
+                actionScope.launch {
+                    store.adoptPendingNewData(selection, categoryFeedIds)
+                }
+            },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 20.dp,
+                    bottom = bottomOverlayPadding + 20.dp,
+                ),
+        ) {
+            Text("New articles available")
         }
     }
     }
