@@ -20,8 +20,11 @@ import uniffi.flux_uniffi.ArticleSort
 import uniffi.flux_uniffi.ArticleSummary
 import uniffi.flux_uniffi.CoreEvent
 import uniffi.flux_uniffi.FeedIconVariant
+import uniffi.flux_uniffi.NewArticlesByFeed
 import uniffi.flux_uniffi.ReadFilter
 import uniffi.flux_uniffi.StarredFilter
+import uniffi.flux_uniffi.SyncCompleted
+import uniffi.flux_uniffi.SyncReason
 
 class AndroidArticleTimelineTest {
     @Test
@@ -1519,6 +1522,133 @@ class AndroidArticleTimelineTest {
     }
 
     @Test
+    fun manualSyncReplacesSnapshotAndRequestsScrollReset() = runBlocking {
+        var pageCalls = 0
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                pageCalls += 1
+                ArticlePage(
+                    articles = if (pageCalls == 1) listOf(article(1)) else listOf(article(2)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 12L },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
+        store.reset(selection)
+        val resetRequest = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeout(1_000) { store.scrollResetRequests.first() }
+        }
+
+        store.handleCoreEvent(
+            AndroidCoreRuntimeEvent(
+                generation = 12L,
+                event = CoreEvent.SyncDidComplete(
+                    metadata = syncCompleted(
+                        reason = SyncReason.MANUAL,
+                        dataChanged = true,
+                        feedIds = listOf(10L),
+                    ),
+                ),
+            ),
+        )
+
+        resetRequest.await()
+        assertEquals(2, pageCalls)
+        assertEquals(listOf(2L), store.state.value.articles.map { it.id })
+        assertFalse(store.hasPendingNewDataForScope(AndroidNewsScope.All))
+    }
+
+    @Test
+    fun nonManualSyncPreservesSnapshotAndSignalsPendingNewArticles() = runBlocking {
+        var pageCalls = 0
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                pageCalls += 1
+                ArticlePage(
+                    articles = listOf(article(1)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 13L },
+            selectionCountLoader = { 2uL },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
+        store.reset(selection)
+
+        store.handleCoreEvent(
+            AndroidCoreRuntimeEvent(
+                generation = 13L,
+                event = CoreEvent.SyncDidComplete(
+                    metadata = syncCompleted(
+                        reason = SyncReason.APP_START,
+                        dataChanged = true,
+                        feedIds = listOf(10L),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(1, pageCalls)
+        assertEquals(listOf(1L), store.state.value.articles.map { it.id })
+        assertEquals(2uL, store.state.value.total)
+        assertTrue(store.hasPendingNewDataForScope(AndroidNewsScope.All))
+        assertTrue(
+            store.hasPendingNewDataForScope(
+                scope = AndroidNewsScope.Category(20L, "Category"),
+                categoryFeedIds = setOf(10L),
+            ),
+        )
+        assertFalse(store.hasPendingNewDataForScope(AndroidNewsScope.Feed(99L, 20L, "Other")))
+    }
+
+    @Test
+    fun adoptingPendingNewArticlesReloadsSnapshotAndRequestsScrollReset() = runBlocking {
+        var pageCalls = 0
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                pageCalls += 1
+                ArticlePage(
+                    articles = if (pageCalls == 1) listOf(article(1)) else listOf(article(2)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 14L },
+            selectionCountLoader = { 2uL },
+            testOnly = Unit,
+        )
+        val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
+        store.reset(selection)
+        store.handleCoreEvent(
+            AndroidCoreRuntimeEvent(
+                generation = 14L,
+                event = CoreEvent.SyncDidComplete(
+                    metadata = syncCompleted(
+                        reason = SyncReason.BACKGROUND,
+                        dataChanged = true,
+                        feedIds = listOf(10L),
+                    ),
+                ),
+            ),
+        )
+        val resetRequest = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeout(1_000) { store.scrollResetRequests.first() }
+        }
+
+        store.adoptPendingNewData(selection)
+
+        resetRequest.await()
+        assertEquals(2, pageCalls)
+        assertEquals(listOf(2L), store.state.value.articles.map { it.id })
+        assertFalse(store.hasPendingNewDataForScope(AndroidNewsScope.All))
+    }
+
+    @Test
     fun publishedAtParserAcceptsRfc3339Offsets() {
         assertEquals(
             1_759_320_000_000L,
@@ -1530,6 +1660,23 @@ class AndroidArticleTimelineTest {
         )
         assertNull(parseArticlePublishedAtMillis("not-a-date"))
     }
+
+    private fun syncCompleted(
+        reason: SyncReason,
+        dataChanged: Boolean,
+        feedIds: List<Long> = emptyList(),
+    ): SyncCompleted = SyncCompleted(
+        reason = reason,
+        newArticles = feedIds.size.toUInt(),
+        updatedArticles = 0u,
+        mutationsDelivered = 0u,
+        dataChanged = dataChanged,
+        navigationChanged = dataChanged,
+        newArticlesByFeed = feedIds.map { feedId ->
+            NewArticlesByFeed(feedId = feedId, count = 1u)
+        },
+        systemNotificationCandidates = emptyList(),
+    )
 
     private fun article(
         id: Long,
