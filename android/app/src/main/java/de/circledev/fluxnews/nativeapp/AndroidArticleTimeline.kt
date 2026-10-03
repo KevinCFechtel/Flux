@@ -293,6 +293,12 @@ internal data class AndroidArticleTimelineSelection(
     }
 }
 
+internal data class AndroidArticleRowPresentation(
+    val isRead: Boolean,
+    val isStarred: Boolean,
+    val revision: Long = 0L,
+)
+
 internal data class AndroidArticleTimelineState(
     val selection: AndroidArticleTimelineSelection? = null,
     val articles: List<ArticleSummary> = emptyList(),
@@ -466,6 +472,7 @@ internal class AndroidArticleTimelineStore private constructor(
     )
     private val scrolloverMutationRequests = Channel<AndroidScrolloverMutationRequest>(capacity = Channel.UNLIMITED)
     private val articleIndexById = ConcurrentHashMap<Long, Int>()
+    private val rowPresentationById = ConcurrentHashMap<Long, MutableStateFlow<AndroidArticleRowPresentation>>()
     private val explicitMutationMutex = Mutex()
     private val nextExplicitMutationToken = AtomicLong(0)
     private val explicitReadMutationTokens = ConcurrentHashMap<Long, Long>()
@@ -548,6 +555,19 @@ internal class AndroidArticleTimelineStore private constructor(
     val scrollResetRequests = mutableScrollResetRequests.asSharedFlow()
     val scrolloverRearmRequests = mutableScrolloverRearmRequests.asSharedFlow()
     val undoState = mutableUndoState.asStateFlow()
+
+    fun rowPresentationState(article: ArticleSummary) =
+        rowPresentationById.computeIfAbsent(article.id) {
+            MutableStateFlow(
+                AndroidArticleRowPresentation(
+                    isRead = article.isRead,
+                    isStarred = article.isStarred,
+                ),
+            )
+        }.asStateFlow()
+
+    internal fun rowPresentationForTesting(articleId: Long): AndroidArticleRowPresentation? =
+        rowPresentationById[articleId]?.value
 
     fun enqueueScrolloverCandidates(articleIds: List<Long>) {
         if (articleIds.isEmpty()) return
@@ -962,6 +982,7 @@ internal class AndroidArticleTimelineStore private constructor(
         clearScrolloverUndoGroup()
         scrolloverConfirmationPending = false
         articleIndexById.clear()
+        rowPresentationById.clear()
         while (scrolloverMutationRequests.tryReceive().isSuccess) {
             // A semantic Timeline reset starts a new Scrollover generation.
         }
@@ -1004,6 +1025,7 @@ internal class AndroidArticleTimelineStore private constructor(
 
         if (!owns(generation, selection, sessionGeneration)) return
         rebuildArticleIndex(articles)
+        reconcileRowPresentations(articles, replace = true)
         val iconState = mutableState.value
         mutableState.value = AndroidArticleTimelineState(
             selection = selection,
@@ -1603,6 +1625,7 @@ internal class AndroidArticleTimelineStore private constructor(
             currentAppend.forEachIndexed { offset, article ->
                 articleIndexById[article.id] = state.articles.size + offset
             }
+            reconcileRowPresentations(currentAppend, replace = false)
             state.copy(
                 articles = state.articles + currentAppend,
                 audioArticleIds = state.audioArticleIds + appendedAudioArticleIds,
@@ -1616,6 +1639,52 @@ internal class AndroidArticleTimelineStore private constructor(
     private fun rebuildArticleIndex(articles: List<ArticleSummary>) {
         articleIndexById.clear()
         articles.forEachIndexed { index, article -> articleIndexById[article.id] = index }
+    }
+
+    private fun reconcileRowPresentations(
+        articles: List<ArticleSummary>,
+        replace: Boolean,
+    ) {
+        if (replace) {
+            val retainedIds = articles.asSequence().map { it.id }.toHashSet()
+            rowPresentationById.keys.removeIf { it !in retainedIds }
+        }
+        articles.forEach { article ->
+            val state = rowPresentationById[article.id]
+            if (state == null) {
+                rowPresentationById[article.id] = MutableStateFlow(
+                    AndroidArticleRowPresentation(
+                        isRead = article.isRead,
+                        isStarred = article.isStarred,
+                    ),
+                )
+            } else {
+                val current = state.value
+                if (current.isRead != article.isRead || current.isStarred != article.isStarred) {
+                    state.value = current.copy(
+                        isRead = article.isRead,
+                        isStarred = article.isStarred,
+                        revision = current.revision + 1L,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun setRowRead(articleId: Long, read: Boolean): Boolean {
+        val state = rowPresentationById[articleId] ?: return false
+        val current = state.value
+        if (current.isRead == read) return false
+        state.value = current.copy(isRead = read, revision = current.revision + 1L)
+        return true
+    }
+
+    private fun setRowStarred(articleId: Long, starred: Boolean): Boolean {
+        val state = rowPresentationById[articleId] ?: return false
+        val current = state.value
+        if (current.isStarred == starred) return false
+        state.value = current.copy(isStarred = starred, revision = current.revision + 1L)
+        return true
     }
 
     private suspend fun loadAudioArticleIds(articleIds: List<Long>): Set<Long> =
