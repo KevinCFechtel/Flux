@@ -184,7 +184,9 @@ internal object AndroidArticleStatusPresentationPolicy {
     fun titleFontWeight(@Suppress("UNUSED_PARAMETER") isRead: Boolean): FontWeight =
         FontWeight.SemiBold
 
-    fun supportingAlpha(isRead: Boolean): Float = if (isRead) 0.72f else 1f
+    fun titleAlpha(isRead: Boolean): Float = if (isRead) 0.62f else 1f
+
+    fun supportingAlpha(isRead: Boolean): Float = if (isRead) 0.50f else 0.80f
 }
 
 internal object AndroidArticleRowPolicy {
@@ -2298,13 +2300,9 @@ private fun ArticleMetadataRow(
     onRequestFeedIcon: suspend (Long, FeedIconVariant) -> Unit,
     requestIfMissing: Boolean = true,
 ) {
-    val supportingColor = if (article.isRead) {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(
-            alpha = AndroidArticleStatusPresentationPolicy.supportingAlpha(article.isRead),
-        )
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val supportingColor = MaterialTheme.colorScheme.onSurface.copy(
+        alpha = AndroidArticleStatusPresentationPolicy.supportingAlpha(article.isRead),
+    )
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -2388,11 +2386,9 @@ private fun ArticleTitle(article: ArticleSummary) {
         // Keep typography geometry stable across read-state changes. iOS uses the
         // same headline font for read and unread rows and changes colour only.
         fontWeight = AndroidArticleStatusPresentationPolicy.titleFontWeight(article.isRead),
-        color = if (article.isRead) {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        } else {
-            MaterialTheme.colorScheme.onSurface
-        },
+        color = MaterialTheme.colorScheme.onSurface.copy(
+            alpha = AndroidArticleStatusPresentationPolicy.titleAlpha(article.isRead),
+        ),
     )
 }
 
@@ -2403,13 +2399,9 @@ private fun ArticlePublicationRow(
     preferences: AndroidArticlePreferenceState,
     publicationReferenceMillis: Long,
 ) {
-    val supportingColor = if (article.isRead) {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(
-            alpha = AndroidArticleStatusPresentationPolicy.supportingAlpha(article.isRead),
-        )
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val supportingColor = MaterialTheme.colorScheme.onSurface.copy(
+        alpha = AndroidArticleStatusPresentationPolicy.supportingAlpha(article.isRead),
+    )
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -2466,13 +2458,9 @@ private fun ArticlePreview(
         maxLines = preferences.previewLines.lineCount,
         overflow = TextOverflow.Ellipsis,
         style = MaterialTheme.typography.bodyMedium,
-        color = if (article.isRead) {
-            MaterialTheme.colorScheme.onSurfaceVariant.copy(
-                alpha = AndroidArticleStatusPresentationPolicy.supportingAlpha(article.isRead),
-            )
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        },
+        color = MaterialTheme.colorScheme.onSurface.copy(
+            alpha = AndroidArticleStatusPresentationPolicy.supportingAlpha(article.isRead),
+        ),
     )
 }
 
@@ -2543,13 +2531,9 @@ private fun ArticleAccessories(
     article: ArticleSummary,
     hasAudio: Boolean,
 ) {
-    val supportingColor = if (article.isRead) {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(
-            alpha = AndroidArticleStatusPresentationPolicy.supportingAlpha(article.isRead),
-        )
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val supportingColor = MaterialTheme.colorScheme.onSurface.copy(
+        alpha = AndroidArticleStatusPresentationPolicy.supportingAlpha(article.isRead),
+    )
     Row(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
