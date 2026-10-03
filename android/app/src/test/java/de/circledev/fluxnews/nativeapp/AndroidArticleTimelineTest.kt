@@ -29,6 +29,18 @@ import uniffi.flux_uniffi.SyncReason
 
 class AndroidArticleTimelineTest {
     @Test
+    fun readPresentationKeepsHeadlineGeometryStable() {
+        assertEquals(
+            AndroidArticleStatusPresentationPolicy.titleFontWeight(isRead = false),
+            AndroidArticleStatusPresentationPolicy.titleFontWeight(isRead = true),
+        )
+        assertTrue(
+            AndroidArticleStatusPresentationPolicy.supportingAlpha(isRead = true) <
+                AndroidArticleStatusPresentationPolicy.supportingAlpha(isRead = false),
+        )
+    }
+
+    @Test
     fun selectionMapsScopesFiltersSortAndBoundedPageSize() {
         val all = AndroidArticleTimelineSelection(AndroidNewsScope.All).coreQuery()
         assertEquals(ArticleScope.All, all.scope)
