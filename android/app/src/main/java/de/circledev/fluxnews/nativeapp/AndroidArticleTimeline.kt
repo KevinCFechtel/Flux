@@ -2468,8 +2468,8 @@ private fun ArticlePreview(
         style = MaterialTheme.typography.bodyMedium,
         color = if (article.isRead) {
             MaterialTheme.colorScheme.onSurfaceVariant.copy(
-            alpha = AndroidArticleStatusPresentationPolicy.supportingAlpha(article.isRead),
-        )
+                alpha = AndroidArticleStatusPresentationPolicy.supportingAlpha(article.isRead),
+            )
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
         },
