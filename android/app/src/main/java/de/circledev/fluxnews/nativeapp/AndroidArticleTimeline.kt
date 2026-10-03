@@ -1870,6 +1870,7 @@ internal fun AndroidArticleTimelineRow(
         val publication: @Composable () -> Unit = {
             ArticlePublicationRow(
                 article = article,
+                hasAudio = hasAudio,
                 preferences = preferences,
                 publicationReferenceMillis = publicationReferenceMillis,
             )
@@ -2080,18 +2081,53 @@ private fun ArticleTitle(article: ArticleSummary) {
 @Composable
 private fun ArticlePublicationRow(
     article: ArticleSummary,
+    hasAudio: Boolean,
     preferences: AndroidArticlePreferenceState,
     publicationReferenceMillis: Long,
 ) {
-    Text(
-        publicationLabel(
-            article = article,
-            relative = preferences.showRelativePublicationTime,
-            referenceMillis = publicationReferenceMillis,
-        ),
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    val supportingColor = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        if (preferences.showRelativePublicationTime) {
+            Icon(
+                painter = painterResource(R.drawable.ic_relative_time),
+                contentDescription = null,
+                modifier = Modifier.size(13.dp),
+                tint = supportingColor,
+            )
+        }
+        Text(
+            publicationLabel(
+                article = article,
+                relative = preferences.showRelativePublicationTime,
+                referenceMillis = publicationReferenceMillis,
+            ),
+            style = MaterialTheme.typography.labelSmall,
+            color = supportingColor,
+        )
+        if (article.readingTimeMinutes > 0u) {
+            Text(
+                "·",
+                style = MaterialTheme.typography.labelSmall,
+                color = supportingColor,
+            )
+            Icon(
+                painter = painterResource(
+                    if (hasAudio) R.drawable.ic_headphones else R.drawable.ic_reading_time,
+                ),
+                contentDescription = if (hasAudio) "Audio duration" else "Reading time",
+                modifier = Modifier.size(13.dp),
+                tint = supportingColor,
+            )
+            Text(
+                "${article.readingTimeMinutes} min",
+                style = MaterialTheme.typography.labelSmall,
+                color = supportingColor,
+            )
+        }
+    }
 }
 
 @Composable
@@ -2138,11 +2174,7 @@ private fun publicationLabel(
             "$date · $time"
         }
     }
-    return if (article.readingTimeMinutes > 0u) {
-        "$publication · ${article.readingTimeMinutes} min"
-    } else {
-        publication
-    }
+    return publication
 }
 
 @Composable

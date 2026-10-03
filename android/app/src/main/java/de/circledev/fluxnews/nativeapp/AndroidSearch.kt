@@ -589,10 +589,7 @@ internal fun AndroidSearchDestination(
                         )
                         state.searching && state.results.isEmpty() -> Box(
                             Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            CircularProgressIndicator()
-                        }
+                        )
                         state.errorMessage != null && state.results.isEmpty() -> SearchMessage(
                             title = "Search unavailable",
                             message = state.errorMessage ?: "Search could not be completed.",

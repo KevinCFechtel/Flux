@@ -848,7 +848,9 @@ Implemented on 3 October 2026:
 - Search remains a real secondary Navigation Compose destination, so Back returns to the preserved News Timeline rather than treating Search as a Reader-style overlay;
 - Search uses Core/Miniflux `searchArticles` with its own 50-item offset pagination, request-generation stale suppression and result de-duplication; it does not create a local FTS/index;
 - Search reuses the normal Android article row renderer, swipe configuration, context actions, feed icons and available audio projection;
+- Article publication rows mirror the accepted iOS temporal semantics: relative publication time carries a small history/clock icon, optional Miniflux reading time is an inline document icon plus duration after the centered dot, and audio articles substitute the reading-time document icon with headphones;
 - Search chrome uses a single stable Material text-field surface with an integrated leading Search action, in-field progress/clear affordance, IME Search handling and focused tonal treatment; initial/no-result states use a centered icon, headline and supporting text rather than a bare sentence;
+- Search loading feedback is intentionally singular: the in-field progress indicator is the only initial-search spinner; the result area does not render a second centered progress indicator;
 - Search Read/Unread and Star/Unstar use the Core search mutation APIs with optimistic presentation and rollback on failure;
 - opening a Search result follows the same normal Reader/original/Miniflux routing policy; Search Reader uses `readerDocumentForSearch` and closes back to the current Search result list;
 - Comments still do not mark read, while Original, Reader and Miniflux article-opening actions do;
