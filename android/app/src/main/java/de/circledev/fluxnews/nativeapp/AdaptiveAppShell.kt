@@ -67,6 +67,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Brush
@@ -299,8 +300,11 @@ private fun TimelineDestination(
 ) {
     val scope = selection.scope
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
-        val persistentNewsNavigation = maxWidth >= 600.dp && maxHeight >= 600.dp
-        val compactLandscape = !persistentNewsNavigation && maxWidth > maxHeight
+        val supportsPersistentNavigation = maxWidth >= 600.dp && maxHeight >= 600.dp
+        var persistentNavigationCollapsed by rememberSaveable { mutableStateOf(false) }
+        val persistentNewsNavigation = supportsPersistentNavigation && !persistentNavigationCollapsed
+        val collapsedPersistentNavigation = supportsPersistentNavigation && persistentNavigationCollapsed
+        val compactLandscape = !supportsPersistentNavigation && maxWidth > maxHeight
 
         if (persistentNewsNavigation) {
             PermanentNavigationDrawer(
@@ -319,6 +323,9 @@ private fun TimelineDestination(
                             onSearch = { navController.navigate(ShellRoute.Search) },
                             onListeningList = { navController.navigate(ShellRoute.ListeningList) },
                             onSettings = { navController.navigate(ShellRoute.Settings) },
+                            navigationToggleIcon = R.drawable.ic_arrow_back,
+                            navigationToggleDescription = "Collapse navigation",
+                            onNavigationToggle = { persistentNavigationCollapsed = true },
                         )
                     }
                 },
@@ -334,6 +341,7 @@ private fun TimelineDestination(
                     navigationPreferences = preferences,
                     sessionGeneration = sessionGeneration,
                     persistentNavigation = true,
+                    collapsedPersistentNavigation = false,
                     scopeTitleLeading = false,
                     onOpenNavigation = {},
                     onSearch = { navController.navigate(ShellRoute.Search) },
@@ -372,6 +380,18 @@ private fun TimelineDestination(
                             onSearch = { navigateAfterDrawerCloses(ShellRoute.Search) },
                             onListeningList = { navigateAfterDrawerCloses(ShellRoute.ListeningList) },
                             onSettings = { navigateAfterDrawerCloses(ShellRoute.Settings) },
+                            navigationToggleIcon = if (collapsedPersistentNavigation) R.drawable.ic_chevron_right else null,
+                            navigationToggleDescription = if (collapsedPersistentNavigation) "Expand navigation" else null,
+                            onNavigationToggle = if (collapsedPersistentNavigation) {
+                                {
+                                    coroutineScope.launch {
+                                        drawerState.close()
+                                        persistentNavigationCollapsed = false
+                                    }
+                                }
+                            } else {
+                                null
+                            },
                         )
                     }
                 },
@@ -387,7 +407,8 @@ private fun TimelineDestination(
                     navigationPreferences = preferences,
                     sessionGeneration = sessionGeneration,
                     persistentNavigation = false,
-                    scopeTitleLeading = compactLandscape,
+                    collapsedPersistentNavigation = collapsedPersistentNavigation,
+                    scopeTitleLeading = collapsedPersistentNavigation || compactLandscape,
                     onOpenNavigation = { coroutineScope.launch { drawerState.open() } },
                     onSearch = { navController.navigate(ShellRoute.Search) },
                     onListeningList = { navController.navigate(ShellRoute.ListeningList) },
@@ -412,6 +433,7 @@ private fun NewsRootContent(
     navigationPreferences: AndroidNavigationPreferenceState,
     sessionGeneration: Long?,
     persistentNavigation: Boolean,
+    collapsedPersistentNavigation: Boolean,
     scopeTitleLeading: Boolean,
     onOpenNavigation: () -> Unit,
     onSearch: () -> Unit,
@@ -541,7 +563,8 @@ private fun NewsRootContent(
     val navigationBarHeight = with(density) {
         WindowInsets.navigationBars.getBottom(this).toDp()
     }
-    val bottomActionClearance = if (isLandscape) 0.dp else navigationBarHeight + 76.dp
+    val bottomActionsVisible = !isLandscape && !persistentNavigation && !collapsedPersistentNavigation
+    val bottomActionClearance = if (bottomActionsVisible) navigationBarHeight + 76.dp else 0.dp
     val appBarColors = TopAppBarDefaults.topAppBarColors(
         containerColor = Color.Transparent,
         scrolledContainerColor = Color.Transparent,
@@ -595,7 +618,7 @@ private fun NewsRootContent(
                                 )
                             },
                             actions = {
-                                if (isLandscape) {
+                                if (isLandscape || collapsedPersistentNavigation) {
                                     AndroidArticleActionCapsule(
                                         selection = selection,
                                         resolvedActions = resolvedActions,
@@ -686,7 +709,7 @@ private fun NewsRootContent(
             }
         }
 
-        if (!isLandscape && !persistentNavigation) {
+        if (bottomActionsVisible) {
             AndroidArticleActionCapsule(
                 selection = selection,
                 resolvedActions = resolvedActions,
@@ -1053,6 +1076,9 @@ private fun NewsNavigationContent(
     onSearch: () -> Unit,
     onListeningList: () -> Unit,
     onSettings: () -> Unit,
+    navigationToggleIcon: Int? = null,
+    navigationToggleDescription: String? = null,
+    onNavigationToggle: (() -> Unit)? = null,
 ) {
     val projection = navigation.projection
     val timelineState by timelineStore.state.collectAsState()
@@ -1101,7 +1127,9 @@ private fun NewsNavigationContent(
         modifier = Modifier.fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -1113,9 +1141,18 @@ private fun NewsNavigationContent(
             )
             Text(
                 "FluxNews",
+                modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
             )
+            if (navigationToggleIcon != null && onNavigationToggle != null) {
+                IconButton(onClick = onNavigationToggle) {
+                    Icon(
+                        painter = painterResource(navigationToggleIcon),
+                        contentDescription = navigationToggleDescription ?: "Toggle navigation",
+                    )
+                }
+            }
         }
         Text(
             "News",
