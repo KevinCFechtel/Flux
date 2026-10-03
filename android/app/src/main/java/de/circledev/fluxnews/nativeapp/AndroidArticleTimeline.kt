@@ -40,6 +40,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -1632,6 +1633,9 @@ internal fun AndroidArticleTimeline(
         categoryFeedIds = categoryFeedIds,
     )
     val listState = rememberLazyListState()
+    val showAnimatedImageLoading by remember(listState) {
+        derivedStateOf { !listState.isScrollInProgress }
+    }
     val scrolloverTracker = remember { AndroidScrolloverTracker() }
     val actionScope = rememberCoroutineScope()
     val actionSnackbar = remember { SnackbarHostState() }
@@ -1915,6 +1919,7 @@ internal fun AndroidArticleTimeline(
                         article = article,
                         hasAudio = hasAudio,
                         configuration = articlePreferences.swipeConfiguration,
+                        rowWidth = maxWidth,
                         onOpen = { onOpenArticle(article) },
                         onSwipeAction = { action -> performSwipeAction(article, action) },
                         onContextAction = { action -> performContextAction(article, action) },
@@ -1927,6 +1932,7 @@ internal fun AndroidArticleTimeline(
                             feedIconPng = state.feedIconPngByFeedId[article.feedId],
                             feedIconVariant = feedIconVariant,
                             availableWidth = availableWidth,
+                            showAnimatedImageLoading = showAnimatedImageLoading,
                             onRequestFeedIcon = store::ensureFeedIcon,
                         )
                     }
@@ -2058,6 +2064,7 @@ internal fun AndroidArticleTimelineRow(
     feedIconPng: ByteArray?,
     feedIconVariant: FeedIconVariant,
     availableWidth: Dp,
+    showAnimatedImageLoading: Boolean = true,
     onRequestFeedIcon: suspend (Long, FeedIconVariant) -> Unit,
 ) {
     Box(
@@ -2110,6 +2117,7 @@ internal fun AndroidArticleTimelineRow(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     ArticleImage(
                         imageUrl = article.imageUrl!!,
+                        showAnimatedLoading = showAnimatedImageLoading,
                         modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
                     )
                     metadata()
@@ -2127,6 +2135,7 @@ internal fun AndroidArticleTimelineRow(
                 ) {
                     ArticleImage(
                         imageUrl = article.imageUrl!!,
+                        showAnimatedLoading = showAnimatedImageLoading,
                         modifier = Modifier.weight(0.48f).aspectRatio(16f / 9f),
                     )
                     Column(
@@ -2159,6 +2168,7 @@ internal fun AndroidArticleTimelineRow(
                         }
                         ArticleImage(
                             imageUrl = article.imageUrl!!,
+                            showAnimatedLoading = showAnimatedImageLoading,
                             modifier = Modifier.width(imageWidth).aspectRatio(4f / 3f),
                         )
                     }
@@ -2185,6 +2195,7 @@ internal fun AndroidArticleTimelineRow(
                         }
                         ArticleImage(
                             imageUrl = article.imageUrl!!,
+                            showAnimatedLoading = showAnimatedImageLoading,
                             modifier = Modifier.width(imageWidth).aspectRatio(4f / 3f),
                         )
                     }
@@ -2398,7 +2409,11 @@ private enum class AndroidArticleImageLoadState {
 }
 
 @Composable
-private fun ArticleImage(imageUrl: String, modifier: Modifier = Modifier) {
+private fun ArticleImage(
+    imageUrl: String,
+    showAnimatedLoading: Boolean,
+    modifier: Modifier = Modifier,
+) {
     var loadState by remember(imageUrl) {
         mutableStateOf(AndroidArticleImageLoadState.Loading)
     }
@@ -2427,11 +2442,13 @@ private fun ArticleImage(imageUrl: String, modifier: Modifier = Modifier) {
 
         when (loadState) {
             AndroidArticleImageLoadState.Loading -> {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(24.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (showAnimatedLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             AndroidArticleImageLoadState.Error -> {
                 Icon(
