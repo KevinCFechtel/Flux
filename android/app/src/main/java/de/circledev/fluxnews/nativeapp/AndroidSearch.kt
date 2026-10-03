@@ -621,6 +621,7 @@ internal fun AndroidSearchDestination(
                                     article = article,
                                     hasAudio = hasAudio,
                                     configuration = preferences.swipeConfiguration,
+                                    rowWidth = maxWidth,
                                     onOpen = { openNormal(article) },
                                     onSwipeAction = { performSwipe(article, it) },
                                     onContextAction = { performContext(article, it) },
