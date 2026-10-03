@@ -41,7 +41,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -1684,9 +1683,6 @@ internal fun AndroidArticleTimeline(
         categoryFeedIds = categoryFeedIds,
     )
     val listState = rememberLazyListState()
-    val showAnimatedImageLoading by remember(listState) {
-        derivedStateOf { !listState.isScrollInProgress }
-    }
     val scrolloverTracker = remember { AndroidScrolloverTracker() }
     val actionScope = rememberCoroutineScope()
     val actionSnackbar = remember { SnackbarHostState() }
@@ -1989,7 +1985,6 @@ internal fun AndroidArticleTimeline(
                             feedIconPng = state.feedIconPngByFeedId[article.feedId],
                             feedIconVariant = feedIconVariant,
                             availableWidth = availableWidth,
-                            showAnimatedImageLoading = showAnimatedImageLoading,
                             onRequestFeedIcon = store::ensureFeedIcon,
                         )
                     }
@@ -2121,7 +2116,6 @@ internal fun AndroidArticleTimelineRow(
     feedIconPng: ByteArray?,
     feedIconVariant: FeedIconVariant,
     availableWidth: Dp,
-    showAnimatedImageLoading: Boolean = true,
     onRequestFeedIcon: suspend (Long, FeedIconVariant) -> Unit,
 ) {
     Box(
@@ -2174,8 +2168,7 @@ internal fun AndroidArticleTimelineRow(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     ArticleImage(
                         imageUrl = article.imageUrl!!,
-                        showAnimatedLoading = showAnimatedImageLoading,
-                        modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                                        modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
                     )
                     metadata()
                     title()
@@ -2192,8 +2185,7 @@ internal fun AndroidArticleTimelineRow(
                 ) {
                     ArticleImage(
                         imageUrl = article.imageUrl!!,
-                        showAnimatedLoading = showAnimatedImageLoading,
-                        modifier = Modifier.weight(0.48f).aspectRatio(16f / 9f),
+                                        modifier = Modifier.weight(0.48f).aspectRatio(16f / 9f),
                     )
                     Column(
                         modifier = Modifier.weight(0.52f),
@@ -2225,8 +2217,7 @@ internal fun AndroidArticleTimelineRow(
                         }
                         ArticleImage(
                             imageUrl = article.imageUrl!!,
-                            showAnimatedLoading = showAnimatedImageLoading,
-                            modifier = Modifier.width(imageWidth).aspectRatio(4f / 3f),
+                                                modifier = Modifier.width(imageWidth).aspectRatio(4f / 3f),
                         )
                     }
                     preview()
@@ -2252,8 +2243,7 @@ internal fun AndroidArticleTimelineRow(
                         }
                         ArticleImage(
                             imageUrl = article.imageUrl!!,
-                            showAnimatedLoading = showAnimatedImageLoading,
-                            modifier = Modifier.width(imageWidth).aspectRatio(4f / 3f),
+                                                modifier = Modifier.width(imageWidth).aspectRatio(4f / 3f),
                         )
                     }
                 }
@@ -2468,7 +2458,6 @@ private enum class AndroidArticleImageLoadState {
 @Composable
 private fun ArticleImage(
     imageUrl: String,
-    showAnimatedLoading: Boolean,
     modifier: Modifier = Modifier,
 ) {
     var loadState by remember(imageUrl) {
@@ -2499,13 +2488,11 @@ private fun ArticleImage(
 
         when (loadState) {
             AndroidArticleImageLoadState.Loading -> {
-                if (showAnimatedLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             AndroidArticleImageLoadState.Error -> {
                 Icon(
