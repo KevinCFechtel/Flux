@@ -78,6 +78,7 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -556,7 +557,7 @@ internal class AndroidArticleTimelineStore private constructor(
     val scrolloverRearmRequests = mutableScrolloverRearmRequests.asSharedFlow()
     val undoState = mutableUndoState.asStateFlow()
 
-    fun rowPresentationState(article: ArticleSummary) =
+    fun rowPresentationState(article: ArticleSummary): StateFlow<AndroidArticleRowPresentation> =
         rowPresentationById.computeIfAbsent(article.id) {
             MutableStateFlow(
                 AndroidArticleRowPresentation(
@@ -564,7 +565,7 @@ internal class AndroidArticleTimelineStore private constructor(
                     isStarred = article.isStarred,
                 ),
             )
-        }.asStateFlow()
+        }
 
     internal fun rowPresentationForTesting(articleId: Long): AndroidArticleRowPresentation? =
         rowPresentationById[articleId]?.value
@@ -673,6 +674,7 @@ internal class AndroidArticleTimelineStore private constructor(
                     ) {
                         val filtered = state.articles.filterNot { it.id == articleId }
                         rebuildArticleIndex(filtered)
+                        rowPresentationById.remove(articleId)
                         state.copy(
                             articles = filtered,
                             audioArticleIds = state.audioArticleIds - articleId,
@@ -763,6 +765,7 @@ internal class AndroidArticleTimelineStore private constructor(
                     ) {
                         val filtered = state.articles.filterNot { it.id == articleId }
                         rebuildArticleIndex(filtered)
+                        rowPresentationById.remove(articleId)
                         state.copy(
                             articles = filtered,
                             audioArticleIds = state.audioArticleIds - articleId,
