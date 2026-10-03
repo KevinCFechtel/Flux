@@ -32,6 +32,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -46,6 +48,7 @@ import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
@@ -106,8 +109,10 @@ internal fun AdaptiveAppShell(
     val navController = rememberNavController()
     val sessionGeneration by coreRuntime.sessionGeneration.collectAsState()
     val retainedTimelineSelection = timelineStore.retainedSelectionForSession(sessionGeneration)
-    var selectedScope by remember(timelineStore, sessionGeneration) {
-        mutableStateOf(retainedTimelineSelection?.scope ?: AndroidNewsScope.All)
+    var timelineSelection by remember(timelineStore, sessionGeneration) {
+        mutableStateOf(
+            retainedTimelineSelection ?: AndroidArticleTimelineSelection(scope = AndroidNewsScope.All),
+        )
     }
     var navigation by remember { mutableStateOf(NewsNavigationModel()) }
     var preferenceState by remember { mutableStateOf<AndroidNavigationPreferenceState?>(null) }
@@ -148,14 +153,16 @@ internal fun AdaptiveAppShell(
             val preferences = preferenceState
             val projection = navigation.projection
             if (preferences != null && projection != null) {
-                selectedScope = AndroidNavigationPolicy.resolveStartupScope(
-                    preferences = preferences,
-                    categories = projection.catalog.categories.map {
-                        AndroidNavigationCategoryRef(it.id, it.title)
-                    },
-                    feeds = projection.catalog.feeds.map {
-                        AndroidNavigationFeedRef(it.id, it.categoryId, it.title)
-                    },
+                timelineSelection = timelineSelection.selectingScope(
+                    AndroidNavigationPolicy.resolveStartupScope(
+                        preferences = preferences,
+                        categories = projection.catalog.categories.map {
+                            AndroidNavigationCategoryRef(it.id, it.title)
+                        },
+                        feeds = projection.catalog.feeds.map {
+                            AndroidNavigationFeedRef(it.id, it.categoryId, it.title)
+                        },
+                    ),
                 )
                 startupScopeApplied = true
             }
@@ -181,14 +188,14 @@ internal fun AdaptiveAppShell(
     ) {
         composable(ShellRoute.Timeline) {
             TimelineDestination(
-                scope = selectedScope,
+                selection = timelineSelection,
                 navigation = navigation,
                 preferences = currentPreferences,
                 state = state,
                 timelineStore = timelineStore,
                 sessionGeneration = sessionGeneration,
                 navController = navController,
-                onScopeSelected = { selectedScope = it },
+                onSelectionChanged = { timelineSelection = it },
             )
         }
         composable(ShellRoute.Search) {
@@ -242,15 +249,16 @@ private fun backExitTransition(): ExitTransition =
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TimelineDestination(
-    scope: AndroidNewsScope,
+    selection: AndroidArticleTimelineSelection,
     navigation: NewsNavigationModel,
     preferences: AndroidNavigationPreferenceState,
     state: AndroidAccountBootstrap.State.Ready,
     timelineStore: AndroidArticleTimelineStore,
     sessionGeneration: Long?,
     navController: NavHostController,
-    onScopeSelected: (AndroidNewsScope) -> Unit,
+    onSelectionChanged: (AndroidArticleTimelineSelection) -> Unit,
 ) {
+    val scope = selection.scope
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
         val persistentNewsNavigation = maxWidth >= 600.dp && maxHeight >= 600.dp
         val compactLandscape = !persistentNewsNavigation && maxWidth > maxHeight
@@ -268,7 +276,7 @@ private fun TimelineDestination(
                             preferences = preferences,
                             timelineStore = timelineStore,
                             selectedScope = scope,
-                            onScopeSelected = onScopeSelected,
+                            onScopeSelected = { onSelectionChanged(selection.selectingScope(it)) },
                             onSearch = { navController.navigate(ShellRoute.Search) },
                             onListeningList = { navController.navigate(ShellRoute.ListeningList) },
                             onSettings = { navController.navigate(ShellRoute.Settings) },
@@ -277,7 +285,7 @@ private fun TimelineDestination(
                 },
             ) {
                 NewsRootContent(
-                    scope = scope,
+                    selection = selection,
                     navigation = navigation,
                     state = state,
                     timelineStore = timelineStore,
@@ -285,6 +293,7 @@ private fun TimelineDestination(
                     persistentNavigation = true,
                     scopeTitleLeading = false,
                     onOpenNavigation = {},
+                    onSelectionChanged = onSelectionChanged,
                 )
             }
         } else {
@@ -311,7 +320,7 @@ private fun TimelineDestination(
                             timelineStore = timelineStore,
                             selectedScope = scope,
                             onScopeSelected = {
-                                onScopeSelected(it)
+                                onSelectionChanged(selection.selectingScope(it))
                                 coroutineScope.launch { drawerState.close() }
                             },
                             onSearch = { navigateAfterDrawerCloses(ShellRoute.Search) },
@@ -330,6 +339,7 @@ private fun TimelineDestination(
                     persistentNavigation = false,
                     scopeTitleLeading = compactLandscape,
                     onOpenNavigation = { coroutineScope.launch { drawerState.open() } },
+                    onSelectionChanged = onSelectionChanged,
                 )
             }
         }
@@ -339,7 +349,7 @@ private fun TimelineDestination(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NewsRootContent(
-    scope: AndroidNewsScope,
+    selection: AndroidArticleTimelineSelection,
     navigation: NewsNavigationModel,
     state: AndroidAccountBootstrap.State.Ready,
     timelineStore: AndroidArticleTimelineStore,
@@ -347,7 +357,9 @@ private fun NewsRootContent(
     persistentNavigation: Boolean,
     scopeTitleLeading: Boolean,
     onOpenNavigation: () -> Unit,
+    onSelectionChanged: (AndroidArticleTimelineSelection) -> Unit,
 ) {
+    val scope = selection.scope
     val timelineState by timelineStore.state.collectAsState()
     val articlePreferences by LocalAndroidArticlePreferences.current.state.collectAsState(
         initial = AndroidArticlePreferenceState(),
@@ -379,6 +391,12 @@ private fun NewsRootContent(
                             onOpenNavigation = onOpenNavigation,
                         )
                     },
+                    actions = {
+                        ArticleListPresentationControls(
+                            selection = selection,
+                            onSelectionChanged = onSelectionChanged,
+                        )
+                    },
                     colors = appBarColors,
                 )
             } else {
@@ -393,15 +411,21 @@ private fun NewsRootContent(
                             onOpenNavigation = onOpenNavigation,
                         )
                     },
-                        colors = appBarColors,
-                    )
+                    actions = {
+                        ArticleListPresentationControls(
+                            selection = selection,
+                            onSelectionChanged = onSelectionChanged,
+                        )
+                    },
+                    colors = appBarColors,
+                )
                 }
             }
         },
     ) { padding ->
         AndroidArticleTimeline(
             store = timelineStore,
-            selection = AndroidArticleTimelineSelection(scope = scope),
+            selection = selection,
             sessionGeneration = sessionGeneration,
             accountKey = state.serverUrl,
             topContentPadding = padding.calculateTopPadding(),
@@ -413,6 +437,58 @@ private fun NewsRootContent(
                 ),
         )
     }
+    }
+}
+
+@Composable
+private fun ArticleListPresentationControls(
+    selection: AndroidArticleTimelineSelection,
+    onSelectionChanged: (AndroidArticleTimelineSelection) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { expanded = true }) {
+            Text(
+                when (selection.readFilter) {
+                    AndroidArticleReadFilter.Unread -> "Unread"
+                    AndroidArticleReadFilter.All -> "All"
+                },
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        if (selection.readFilter == AndroidArticleReadFilter.Unread) {
+                            "Show all articles"
+                        } else {
+                            "Show unread only"
+                        },
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onSelectionChanged(selection.togglingReadFilter())
+                },
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        when (selection.sort) {
+                            AndroidArticleSortOrder.OldestFirst -> "Newest first"
+                            AndroidArticleSortOrder.NewestFirst -> "Oldest first"
+                        },
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onSelectionChanged(selection.togglingSortOrder())
+                },
+            )
+        }
     }
 }
 
