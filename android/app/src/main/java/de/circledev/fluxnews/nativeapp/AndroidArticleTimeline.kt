@@ -180,6 +180,13 @@ internal enum class AndroidArticleRowLayoutVariant {
     VisualCompactWide,
 }
 
+internal object AndroidArticleStatusPresentationPolicy {
+    fun titleFontWeight(@Suppress("UNUSED_PARAMETER") isRead: Boolean): FontWeight =
+        FontWeight.SemiBold
+
+    fun supportingAlpha(isRead: Boolean): Float = if (isRead) 0.72f else 1f
+}
+
 internal object AndroidArticleRowPolicy {
     private const val WIDE_LAYOUT_THRESHOLD_DP = 600
 
@@ -2292,7 +2299,9 @@ private fun ArticleMetadataRow(
     requestIfMissing: Boolean = true,
 ) {
     val supportingColor = if (article.isRead) {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(
+            alpha = AndroidArticleStatusPresentationPolicy.supportingAlpha(article.isRead),
+        )
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
@@ -2378,7 +2387,7 @@ private fun ArticleTitle(article: ArticleSummary) {
         style = MaterialTheme.typography.titleMedium,
         // Keep typography geometry stable across read-state changes. iOS uses the
         // same headline font for read and unread rows and changes colour only.
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = AndroidArticleStatusPresentationPolicy.titleFontWeight(article.isRead),
         color = if (article.isRead) {
             MaterialTheme.colorScheme.onSurfaceVariant
         } else {
@@ -2395,7 +2404,9 @@ private fun ArticlePublicationRow(
     publicationReferenceMillis: Long,
 ) {
     val supportingColor = if (article.isRead) {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(
+            alpha = AndroidArticleStatusPresentationPolicy.supportingAlpha(article.isRead),
+        )
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
@@ -2456,7 +2467,9 @@ private fun ArticlePreview(
         overflow = TextOverflow.Ellipsis,
         style = MaterialTheme.typography.bodyMedium,
         color = if (article.isRead) {
-            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+            MaterialTheme.colorScheme.onSurfaceVariant.copy(
+            alpha = AndroidArticleStatusPresentationPolicy.supportingAlpha(article.isRead),
+        )
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
         },
@@ -2558,7 +2571,9 @@ private fun ArticleAccessories(
     hasAudio: Boolean,
 ) {
     val supportingColor = if (article.isRead) {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(
+            alpha = AndroidArticleStatusPresentationPolicy.supportingAlpha(article.isRead),
+        )
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
