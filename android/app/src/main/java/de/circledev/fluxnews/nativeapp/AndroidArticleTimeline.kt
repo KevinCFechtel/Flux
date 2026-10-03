@@ -1923,12 +1923,17 @@ internal fun AndroidArticleTimeline(
         }
         scrolloverTracker.synchronizeIdlePosition(listState.firstVisibleItemIndex)
         snapshotFlow {
-            listState.firstVisibleItemIndex to listState.isScrollInProgress
+            Triple(
+                listState.firstVisibleItemIndex,
+                listState.isScrollInProgress,
+                !listState.canScrollForward && state.nextCursor == null,
+            )
         }
-            .collect { (firstVisibleIndex, scrolling) ->
+            .collect { (firstVisibleIndex, scrolling, atDatasetEnd) ->
                 val candidates = scrolloverTracker.observe(
                     sample = AndroidScrolloverPositionSample(
                         firstVisibleIndex = firstVisibleIndex,
+                        atDatasetEnd = atDatasetEnd,
                     ),
                     scrolling = scrolling,
                     enabled = true,
