@@ -857,6 +857,7 @@ Implemented on 3 October 2026:
 - portrait reserves Timeline and Snackbar clearance for the floating action capsule;
 - swipe presentation keeps the E4-B 0-2-action/full-swipe contract but follows Material dismissal visuals with a continuous tonal reveal, circular icon targets, an action-colored armed full-swipe state and one selection haptic when crossing the threshold.
 - a successful explicit Read → Unread transition re-arms that article in the Scrollover geometry tracker, matching the iOS behavior; failed unread writes do not re-arm, and external Core unread events also re-arm the visible article.
+- the article long-press menu uses Material leading icons and visual grouping for state, opening and share/save actions instead of an undifferentiated text-only list.
 
 With E4-D implemented, the E4 feature surface is implementation-complete. Acceptance remains subject to the Android CI gate and a focused physical-device pass for Reader overlay geometry, Back behavior, Search pagination and article-open routing.
 

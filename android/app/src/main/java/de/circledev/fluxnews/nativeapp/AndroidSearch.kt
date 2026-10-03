@@ -303,18 +303,18 @@ internal class AndroidSearchStore private constructor(
     }
 
     fun requestSetRead(articleId: Long, read: Boolean, providesFeedback: Boolean = true) {
-        scope.launch { mutateRead(articleId, read, providesFeedback) }
+        scope.launch { setReadExplicit(articleId, read, providesFeedback) }
     }
 
     fun requestSetStarred(articleId: Long, starred: Boolean) {
         scope.launch { mutateStarred(articleId, starred) }
     }
 
-    private suspend fun mutateRead(articleId: Long, read: Boolean, providesFeedback: Boolean) {
+    internal suspend fun setReadExplicit(articleId: Long, read: Boolean, providesFeedback: Boolean = true): Boolean {
         val current = mutableState.value
-        val article = current.results.firstOrNull { it.id == articleId } ?: return
-        val sessionGeneration = current.sessionGeneration ?: return
-        if (activeSessionGeneration() != sessionGeneration || article.isRead == read) return
+        val article = current.results.firstOrNull { it.id == articleId } ?: return false
+        val sessionGeneration = current.sessionGeneration ?: return false
+        if (activeSessionGeneration() != sessionGeneration || article.isRead == read) return true
         val request = current.requestGeneration
         val query = current.submittedQuery
         val token = nextMutationToken.incrementAndGet()
@@ -323,18 +323,19 @@ internal class AndroidSearchStore private constructor(
             if (ownsState(state, request, sessionGeneration, query)) state.copy(results = state.results.map { if (it.id == articleId) it.copy(isRead = read) else it }) else state
         }
         val result = runCatching { mutationMutex.withLock { readWriter(sessionGeneration, articleId, read) } }
-        if (readTokens[articleId] != token) return
+        if (readTokens[articleId] != token) return result.isSuccess
         readTokens.remove(articleId, token)
-        if (!owns(request, sessionGeneration, query)) return
+        if (!owns(request, sessionGeneration, query)) return result.isSuccess
         if (result.isSuccess) {
             if (providesFeedback && read) mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
-            return
+            return true
         }
         mutableState.update { state ->
             if (!ownsState(state, request, sessionGeneration, query)) return@update state
             state.copy(results = state.results.map { if (it.id == articleId && it.isRead == read) it.copy(isRead = article.isRead) else it })
         }
         mutableActionMessages.emit(if (read) "Article could not be marked as read." else "Article could not be marked as unread.")
+        return false
     }
 
     private suspend fun mutateStarred(articleId: Long, starred: Boolean) {

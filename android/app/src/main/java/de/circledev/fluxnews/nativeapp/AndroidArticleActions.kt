@@ -27,10 +27,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -471,9 +473,26 @@ internal fun AndroidArticleSwipeContainer(
             expanded = contextExpanded,
             onDismissRequest = { contextExpanded = false },
         ) {
+            var previousGroup: Int? = null
             AndroidArticleActionPolicy.contextActions(article).forEach { action ->
+                val group = contextActionGroup(action)
+                if (previousGroup != null && previousGroup != group) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                }
+                previousGroup = group
                 DropdownMenuItem(
-                    text = { Text(AndroidArticleActionPolicy.contextLabel(action, article)) },
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(contextActionIcon(action, article)),
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    },
+                    text = {
+                        Text(AndroidArticleActionPolicy.contextLabel(action, article))
+                    },
                     onClick = {
                         contextExpanded = false
                         offsetPx = 0f
@@ -483,6 +502,40 @@ internal fun AndroidArticleSwipeContainer(
             }
         }
     }
+}
+
+private fun contextActionGroup(action: AndroidArticleContextAction): Int = when (action) {
+    AndroidArticleContextAction.ReadUnread,
+    AndroidArticleContextAction.StarUnstar,
+    -> 0
+
+    AndroidArticleContextAction.OpenOriginal,
+    AndroidArticleContextAction.Reader,
+    AndroidArticleContextAction.OpenMiniflux,
+    AndroidArticleContextAction.Comments,
+    -> 1
+
+    AndroidArticleContextAction.CopyLink,
+    AndroidArticleContextAction.Share,
+    AndroidArticleContextAction.SaveToService,
+    -> 2
+}
+
+private fun contextActionIcon(
+    action: AndroidArticleContextAction,
+    article: ArticleSummary,
+): Int = when (action) {
+    AndroidArticleContextAction.ReadUnread ->
+        if (article.isRead) R.drawable.ic_mark_unread else R.drawable.ic_mark_read
+    AndroidArticleContextAction.StarUnstar -> R.drawable.ic_star
+    AndroidArticleContextAction.OpenOriginal,
+    AndroidArticleContextAction.OpenMiniflux,
+    -> R.drawable.ic_open_external
+    AndroidArticleContextAction.Reader -> R.drawable.ic_reader
+    AndroidArticleContextAction.Comments -> R.drawable.ic_comment
+    AndroidArticleContextAction.CopyLink -> R.drawable.ic_copy
+    AndroidArticleContextAction.Share -> R.drawable.ic_share
+    AndroidArticleContextAction.SaveToService -> R.drawable.ic_save
 }
 
 @Composable

@@ -1,6 +1,8 @@
 package de.circledev.fluxnews.nativeapp
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
@@ -70,12 +72,16 @@ class AndroidSearchTest {
         store.activateSession(10L)
         store.setQuery("article")
         store.submit()
-        repeat(10) { yield() }
-        store.requestSetRead(1L, true)
+        store.state.first { !it.searching && it.results.size == 1 }
+
+        val mutation = async {
+            store.setReadExplicit(1L, true)
+        }
         started.await()
         assertTrue(store.state.value.results.single().isRead)
+
         release.complete(Unit)
-        repeat(20) { yield() }
+        assertFalse(mutation.await())
         assertFalse(store.state.value.results.single().isRead)
     }
 
