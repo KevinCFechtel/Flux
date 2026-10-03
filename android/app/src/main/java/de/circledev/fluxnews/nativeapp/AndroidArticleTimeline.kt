@@ -466,7 +466,7 @@ internal class AndroidArticleTimelineStore private constructor(
         SupervisorJob() + Dispatchers.Default.limitedParallelism(1),
     )
     private val scrolloverMutationRequests = Channel<AndroidScrolloverMutationRequest>(capacity = Channel.UNLIMITED)
-    private val articleIndexById = mutableMapOf<Long, Int>()
+    private val articleIndexById = ConcurrentHashMap<Long, Int>()
     private val explicitMutationMutex = Mutex()
     private val nextExplicitMutationToken = AtomicLong(0)
     private val explicitReadMutationTokens = ConcurrentHashMap<Long, Long>()
