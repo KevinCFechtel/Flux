@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
@@ -342,7 +343,7 @@ internal fun AndroidArticleSwipeContainer(
     var gestureStartOffset by remember(article.id) { mutableFloatStateOf(0f) }
     var contextExpanded by remember(article.id) { mutableStateOf(false) }
     var fullSwipeArmed by remember(article.id) { mutableStateOf(false) }
-    val actionWidth = 64.dp
+    val actionWidth = 80.dp
     val actionWidthPx = with(density) { actionWidth.toPx() }
 
     suspend fun animateOffset(target: Float) {
@@ -379,7 +380,7 @@ internal fun AndroidArticleSwipeContainer(
                         currentOnSwipeAction(action)
                     }
                 },
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.matchParentSize(),
             )
         }
 
@@ -620,7 +621,7 @@ private fun SwipeActionBackground(
                         contentDescription = AndroidArticleActionPolicy.swipeLabel(action, article),
                         tint = if (fullSwipeArmed) dominantColors.content else colors.content,
                         modifier = Modifier
-                            .size(if (fullSwipeArmed) 26.dp else 24.dp)
+                            .size(if (fullSwipeArmed) 30.dp else 28.dp)
                             .graphicsLayer {
                                 alpha = if (fullSwipeArmed) 1f else iconAlpha
                                 translationX = if (fullSwipeArmed) 0f else iconTranslation
