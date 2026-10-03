@@ -131,8 +131,14 @@ internal enum class AndroidTimelineHaptic {
 }
 
 internal sealed interface AndroidScrolloverMutationRequest {
-    data class MarkRead(val articleIds: List<Long>) : AndroidScrolloverMutationRequest
-    data object CompleteInteraction : AndroidScrolloverMutationRequest
+    data class MarkRead(
+        val articleIds: List<Long>,
+        val queryGeneration: Long? = null,
+    ) : AndroidScrolloverMutationRequest
+
+    data class CompleteInteraction(
+        val queryGeneration: Long? = null,
+    ) : AndroidScrolloverMutationRequest
 }
 
 internal suspend fun consumeAndroidScrolloverMutationRequests(
@@ -147,7 +153,7 @@ internal suspend fun consumeAndroidScrolloverMutationRequests(
                 val failed = markRead(request.articleIds)
                 if (failed.isNotEmpty()) rearm(failed)
             }
-            AndroidScrolloverMutationRequest.CompleteInteraction -> completeInteraction()
+            is AndroidScrolloverMutationRequest.CompleteInteraction -> completeInteraction()
         }
     }
 }
@@ -453,6 +459,8 @@ internal class AndroidArticleTimelineStore private constructor(
     private val mutableScrolloverRearmRequests = MutableSharedFlow<List<Long>>(extraBufferCapacity = 8)
     private val mutableUndoState = MutableStateFlow(AndroidScrolloverUndoState())
     private val explicitActionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scrolloverMutationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val scrolloverMutationRequests = Channel<AndroidScrolloverMutationRequest>(capacity = Channel.UNLIMITED)
     private val explicitMutationMutex = Mutex()
     private val nextExplicitMutationToken = AtomicLong(0)
     private val explicitReadMutationTokens = ConcurrentHashMap<Long, Long>()
@@ -473,12 +481,57 @@ internal class AndroidArticleTimelineStore private constructor(
     private val feedIconRequestsInFlight = mutableSetOf<Pair<Long, FeedIconVariant>>()
     private var requestGeneration = 0L
 
+    init {
+        scrolloverMutationScope.launch {
+            for (request in scrolloverMutationRequests) {
+                when (request) {
+                    is AndroidScrolloverMutationRequest.MarkRead -> {
+                        if (
+                            request.queryGeneration != null &&
+                            request.queryGeneration != mutableState.value.queryGeneration
+                        ) {
+                            continue
+                        }
+                        val failed = markReadFromScrollover(request.articleIds)
+                        if (failed.isNotEmpty()) mutableScrolloverRearmRequests.tryEmit(failed)
+                    }
+                    is AndroidScrolloverMutationRequest.CompleteInteraction -> {
+                        if (
+                            request.queryGeneration == null ||
+                            request.queryGeneration == mutableState.value.queryGeneration
+                        ) {
+                            completeScrolloverInteraction()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     val state = mutableState.asStateFlow()
     val feedback = mutableFeedback.asSharedFlow()
     val actionMessages = mutableActionMessages.asSharedFlow()
     val scrollResetRequests = mutableScrollResetRequests.asSharedFlow()
     val scrolloverRearmRequests = mutableScrolloverRearmRequests.asSharedFlow()
     val undoState = mutableUndoState.asStateFlow()
+
+    fun enqueueScrolloverCandidates(articleIds: List<Long>) {
+        if (articleIds.isEmpty()) return
+        scrolloverMutationRequests.trySend(
+            AndroidScrolloverMutationRequest.MarkRead(
+                articleIds = articleIds,
+                queryGeneration = mutableState.value.queryGeneration,
+            ),
+        )
+    }
+
+    fun enqueueScrolloverInteractionComplete() {
+        scrolloverMutationRequests.trySend(
+            AndroidScrolloverMutationRequest.CompleteInteraction(
+                queryGeneration = mutableState.value.queryGeneration,
+            ),
+        )
+    }
 
     fun retainedSelectionForSession(sessionGeneration: Long?): AndroidArticleTimelineSelection? =
         mutableState.value
@@ -1553,9 +1606,6 @@ internal fun AndroidArticleTimeline(
     )
     val listState = rememberLazyListState()
     val scrolloverTracker = remember { AndroidScrolloverTracker() }
-    val scrolloverMutationRequests = remember(store, state.queryGeneration) {
-        Channel<AndroidScrolloverMutationRequest>(capacity = Channel.UNLIMITED)
-    }
     val actionScope = rememberCoroutineScope()
     val actionSnackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -1726,11 +1776,7 @@ internal fun AndroidArticleTimeline(
                             sample = listState.scrolloverGeometrySample(),
                             enabled = articlePreferences.markReadOnScrollover,
                         )
-                        if (candidates.isNotEmpty()) {
-                            scrolloverMutationRequests.trySend(
-                                AndroidScrolloverMutationRequest.MarkRead(candidates),
-                            )
-                        }
+                        store.enqueueScrolloverCandidates(candidates)
                     }
                     is DragInteraction.Stop,
                     is DragInteraction.Cancel,
@@ -1739,23 +1785,9 @@ internal fun AndroidArticleTimeline(
             }
     }
 
-    LaunchedEffect(scrolloverMutationRequests, scrolloverTracker, store) {
-        try {
-            consumeAndroidScrolloverMutationRequests(
-                requests = scrolloverMutationRequests,
-                markRead = store::markReadFromScrollover,
-                rearm = scrolloverTracker::rearm,
-                completeInteraction = store::completeScrolloverInteraction,
-            )
-        } finally {
-            scrolloverMutationRequests.cancel()
-        }
-    }
-
     LaunchedEffect(
         listState,
         scrolloverTracker,
-        scrolloverMutationRequests,
         articlePreferences.markReadOnScrollover,
         state.queryGeneration,
     ) {
@@ -1771,16 +1803,10 @@ internal fun AndroidArticleTimeline(
                     sample = sample,
                     enabled = articlePreferences.markReadOnScrollover,
                 )
-                if (candidates.isNotEmpty()) {
-                    scrolloverMutationRequests.trySend(
-                        AndroidScrolloverMutationRequest.MarkRead(candidates),
-                    )
-                }
+                store.enqueueScrolloverCandidates(candidates)
                 if (!scrolling) {
                     scrolloverTracker.endUserScroll()
-                    scrolloverMutationRequests.trySend(
-                        AndroidScrolloverMutationRequest.CompleteInteraction,
-                    )
+                    store.enqueueScrolloverInteractionComplete()
                 }
             }
     }
