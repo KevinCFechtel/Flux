@@ -10,6 +10,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import uniffi.flux_uniffi.ArticleCursor
@@ -438,8 +439,8 @@ class AndroidArticleTimelineTest {
         )
 
         assertEquals(1, pageCalls)
-        assertTrue(store.state.value.articles.single().isRead)
-        assertTrue(store.state.value.articles.single().isStarred)
+        assertTrue(store.rowPresentationForTesting(1L)!!.isRead)
+        assertTrue(store.rowPresentationForTesting(1L)!!.isStarred)
         assertEquals(1uL, store.state.value.total)
     }
 
@@ -549,14 +550,16 @@ class AndroidArticleTimelineTest {
         )
         val selection = AndroidArticleTimelineSelection(AndroidNewsScope.All)
         store.reset(selection)
+        val structuralSnapshot = store.state.value.articles
 
         val failed = store.markReadFromScrollover(listOf(1L, 2L, 1L, 99L, 3L))
 
         assertTrue(failed.isEmpty())
+        assertSame(structuralSnapshot, store.state.value.articles)
         assertEquals(listOf(11L to listOf(1L, 3L)), writes)
         assertEquals(listOf(1L, 2L, 3L), store.state.value.articles.map { it.id })
-        assertTrue(store.state.value.articles.first { it.id == 1L }.isRead)
-        assertTrue(store.state.value.articles.first { it.id == 3L }.isRead)
+        assertTrue(store.rowPresentationForTesting(1L)!!.isRead)
+        assertTrue(store.rowPresentationForTesting(3L)!!.isRead)
         assertEquals(1uL, store.state.value.total)
     }
 
@@ -581,11 +584,15 @@ class AndroidArticleTimelineTest {
 
         assertEquals(listOf(1L, 2L), withTimeout(1_000) { persisted.await() })
         withTimeout(1_000) {
-            while (store.state.value.articles.any { !it.isRead }) {
+            while (
+                store.rowPresentationForTesting(1L)?.isRead != true ||
+                store.rowPresentationForTesting(2L)?.isRead != true
+            ) {
                 kotlinx.coroutines.yield()
             }
         }
-        assertTrue(store.state.value.articles.all { it.isRead })
+        assertTrue(store.rowPresentationForTesting(1L)!!.isRead)
+        assertTrue(store.rowPresentationForTesting(2L)!!.isRead)
     }
 
     @Test
@@ -672,7 +679,7 @@ class AndroidArticleTimelineTest {
 
         assertEquals(listOf(1L, 2L, 3L), restored)
         assertEquals(listOf(31L to listOf(1L, 2L, 3L)), unreadWrites)
-        assertTrue(store.state.value.articles.none { it.isRead })
+        assertTrue(listOf(1L, 2L, 3L).none { store.rowPresentationForTesting(it)!!.isRead })
         assertEquals(3uL, store.state.value.total)
         assertFalse(store.undoState.value.visible)
         assertEquals(
@@ -767,7 +774,7 @@ class AndroidArticleTimelineTest {
         val failed = store.markReadFromScrollover(listOf(1L))
 
         assertEquals(listOf(1L), failed)
-        assertFalse(store.state.value.articles.first { it.id == 1L }.isRead)
+        assertFalse(store.rowPresentationForTesting(1L)!!.isRead)
         assertEquals(2uL, store.state.value.total)
     }
 
@@ -795,7 +802,7 @@ class AndroidArticleTimelineTest {
 
         assertTrue(failed.isEmpty())
         assertEquals(0, writes)
-        assertFalse(store.state.value.articles.single().isRead)
+        assertFalse(store.rowPresentationForTesting(1L)!!.isRead)
         assertEquals(1uL, store.state.value.total)
     }
 
@@ -831,12 +838,12 @@ class AndroidArticleTimelineTest {
         }
         writerStarted.await()
 
-        assertTrue(store.state.value.articles.single().isRead)
+        assertTrue(store.rowPresentationForTesting(1L)!!.isRead)
         assertEquals(0uL, store.state.value.total)
 
         releaseWriter.complete(Unit)
         assertFalse(mutation.await())
-        assertFalse(store.state.value.articles.single().isRead)
+        assertFalse(store.rowPresentationForTesting(1L)!!.isRead)
         assertEquals(1uL, store.state.value.total)
     }
 
@@ -918,7 +925,7 @@ class AndroidArticleTimelineTest {
             ),
         )
 
-        assertTrue(store.state.value.articles.single().isRead)
+        assertTrue(store.rowPresentationForTesting(1L)!!.isRead)
     }
 
     @Test
@@ -956,7 +963,7 @@ class AndroidArticleTimelineTest {
         )
 
         assertEquals(listOf(1L), store.state.value.articles.map { it.id })
-        assertTrue(store.state.value.articles.single().isRead)
+        assertTrue(store.rowPresentationForTesting(1L)!!.isRead)
     }
 
     @Test
@@ -1094,7 +1101,7 @@ class AndroidArticleTimelineTest {
         store.reset(selection)
 
         assertFalse(store.setStarredExplicit(articleId = 1L, starred = false))
-        assertTrue(store.state.value.articles.single().isStarred)
+        assertTrue(store.rowPresentationForTesting(1L)!!.isStarred)
         assertEquals(1uL, store.state.value.total)
 
         shouldFail = false
@@ -1142,11 +1149,11 @@ class AndroidArticleTimelineTest {
 
         sessionGeneration = 62L
         store.reset(selection)
-        assertTrue(store.state.value.articles.single().isRead)
+        assertTrue(store.rowPresentationForTesting(1L)!!.isRead)
 
         releaseWriter.complete(Unit)
         assertFalse(staleMutation.await())
-        assertTrue(store.state.value.articles.single().isRead)
+        assertTrue(store.rowPresentationForTesting(1L)!!.isRead)
         assertEquals(62L, store.state.value.sessionGeneration)
     }
 
