@@ -679,17 +679,17 @@ Status: **COMPLETE**
 
 Implemented on 2 October 2026:
 
-- Compose-native Scrollover detection based on LazyList geometry and user drag interaction state;
-- programmatic scrolling, layout changes and structural snapshot resets do not qualify articles;
-- reverse movement never emits Scrollover candidates;
-- fast forward scrolling may emit multiple candidates only when those rows were previously genuinely visible/qualified;
+- Compose-native Scrollover detection uses only LazyList scroll progress plus the first-visible item index; no per-frame row geometry or visibility qualification is required;
+- each scroll interaction records the first-visible index at interaction start and the highest first-visible index reached before the list becomes idle;
+- reverse movement never erases forward progress; candidates are emitted once, at interaction end, for the stable Article IDs in [startIndex, highestReachedIndex);
+- known programmatic scrolls explicitly suppress Scrollover tracking and synchronize the idle baseline afterwards;
 - Scrollover read mutations use the existing Core bulk read API and are bound to the active Core-session generation;
-- optimistic read presentation is kept non-structural during active Scrollover: only the affected per-ID presentation state changes, while the ordered structural Timeline snapshot remains untouched;
-- Scrollover uses stable Article IDs with deduplicated, process-scoped pending mutation delivery; append-only paging extends the ID-to-position index incrementally and does not invalidate already qualified visible IDs;
+- optimistic read presentation remains non-structural: only the affected per-ID presentation state changes, while the ordered structural Timeline snapshot remains untouched;
+- pending Scrollover mutations remain process-scoped and generation-bound so Activity recreation cannot lose accepted work;
 - failed Core writes roll back only the affected presentation state and re-arm the affected IDs;
-- Scrollover count handling avoids redundant Core count reloads for each emitted read event;
+- the Timeline count is updated once at interaction completion instead of once per crossed article, avoiding global scroll-adjacent recomposition pulses;
 - navigation refreshes are conflated across Core-event bursts to avoid per-event scroll-adjacent reload work;
-- focused JVM tests cover geometry, programmatic-scroll exclusion, direction reversal, layout/snapshot rebasing, session ownership, bulk mutation behavior and rollback.
+- focused JVM tests cover first-item handling, forward/backward movement, highest-index accumulation, programmatic-scroll exclusion, append-only paging, snapshot replacement, bulk mutation behavior and rollback.
 
 E3-E physical-device acceptance subsequently found and closed the remaining Scrollover presentation-feedback gap without changing the E3-D architecture:
 
@@ -763,9 +763,9 @@ Preserve shared semantic ordering and the date/reading-time/accessory contracts 
 
 ### Scrollover
 
-Implement the shared Scrollover behavioral contract using Android/Compose list geometry and interaction state. Do not port the UIKit tracker line-for-line.
+Implement the shared Scrollover behavioral contract with Android/Compose-native scroll state. Do not port the UIKit geometry tracker line-for-line: Android intentionally commits one ID batch when scrolling becomes idle, using the interaction start index and highest reached first-visible index.
 
-Programmatic movement, layout changes, snapshot resets and unseen skipped rows must not manufacture read candidates.
+Known programmatic movement must be explicitly suppressed. Snapshot replacement clears in-flight Scrollover progress; append-only paging preserves it.
 
 ### Performance acceptance
 
@@ -863,7 +863,7 @@ Implemented on 3 October 2026:
 - Article List chrome uses a shared Material capsule treatment: compact portrait keeps the action capsule floating above the bottom system inset, compact landscape moves it to the top-right, persistent tablet navigation hides duplicate scope chrome and keeps up to five direct actions at the top-right, and a collapsed persistent-navigation state restores the interactive scope capsule at top-leading while retaining top-right actions;
 - only compact portrait reserves Timeline and Snackbar clearance for the floating bottom action capsule; persistent and collapsed-persistent tablet states do not reserve bottom-action space;
 - swipe presentation keeps the E4-B 0-2-action/full-swipe contract but follows Material dismissal visuals with a continuous tonal reveal, circular icon targets, an action-colored armed full-swipe state and one selection haptic when crossing the threshold.
-- a successful explicit Read → Unread transition re-arms that article in the Scrollover geometry tracker, matching the iOS behavior; failed unread writes do not re-arm, and external Core unread events also re-arm the visible article.
+- a successful explicit Read → Unread transition re-arms that Article ID in the Scrollover tracker; failed unread writes do not re-arm, and external Core unread events also re-arm the article.
 - the article long-press menu uses Material leading icons and visual grouping for state, opening and share/save actions instead of an undifferentiated text-only list.
 - full-swipe dispatch uses the latest recomposed action callback so repeating Read/Unread or Star/Unstar full swipes toggles against the current article state instead of a stale pre-mutation snapshot;
 - Starred is an all-read-state scope: Core queries force `ReadFilter.ALL` and read-filter controls are omitted while Starred is active, while the user's underlying All/Unread selection is preserved for returning to normal scopes.
