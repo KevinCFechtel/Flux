@@ -10,7 +10,6 @@ import android.text.format.DateUtils.MINUTE_IN_MILLIS
 import android.text.format.DateFormat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -79,7 +78,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -1847,10 +1845,15 @@ internal fun AndroidArticleTimeline(
         }
     }
 
-    LaunchedEffect(store, listState) {
+    LaunchedEffect(store, listState, scrolloverTracker) {
         store.scrollResetRequests.collect {
             if (listState.layoutInfo.totalItemsCount > 0) {
-                listState.scrollToItem(0)
+                scrolloverTracker.beginProgrammaticScroll(listState.firstVisibleItemIndex)
+                try {
+                    listState.scrollToItem(0)
+                } finally {
+                    scrolloverTracker.endProgrammaticScroll(listState.firstVisibleItemIndex)
+                }
             }
         }
     }
@@ -1865,37 +1868,6 @@ internal fun AndroidArticleTimeline(
         store.ensureFeedIcons(articleFeedIds, feedIconVariant)
     }
 
-    LaunchedEffect(listState, scrolloverTracker, articlePreferences.markReadOnScrollover) {
-        if (!articlePreferences.markReadOnScrollover) {
-            scrolloverTracker.observe(
-                sample = AndroidScrolloverPositionSample(
-                    firstVisibleIndex = listState.firstVisibleItemIndex,
-                ),
-                scrolling = false,
-                enabled = false,
-            )
-            return@LaunchedEffect
-        }
-        listState.interactionSource.interactions
-            .filterIsInstance<DragInteraction>()
-            .collect { interaction ->
-                when (interaction) {
-                    is DragInteraction.Start -> {
-                        val candidates = scrolloverTracker.beginUserScroll(
-                            sample = AndroidScrolloverPositionSample(
-                                firstVisibleIndex = listState.firstVisibleItemIndex,
-                            ),
-                            enabled = articlePreferences.markReadOnScrollover,
-                        )
-                        store.enqueueScrolloverCandidates(candidates)
-                    }
-                    is DragInteraction.Stop,
-                    is DragInteraction.Cancel,
-                    -> Unit
-                }
-            }
-    }
-
     LaunchedEffect(
         listState,
         scrolloverTracker,
@@ -1903,9 +1875,10 @@ internal fun AndroidArticleTimeline(
         state.queryGeneration,
     ) {
         if (!articlePreferences.markReadOnScrollover) {
-            scrolloverTracker.endUserScroll()
+            scrolloverTracker.synchronizeIdlePosition(listState.firstVisibleItemIndex)
             return@LaunchedEffect
         }
+        scrolloverTracker.synchronizeIdlePosition(listState.firstVisibleItemIndex)
         snapshotFlow {
             listState.firstVisibleItemIndex to listState.isScrollInProgress
         }
@@ -1915,10 +1888,10 @@ internal fun AndroidArticleTimeline(
                         firstVisibleIndex = firstVisibleIndex,
                     ),
                     scrolling = scrolling,
-                    enabled = articlePreferences.markReadOnScrollover,
+                    enabled = true,
                 )
-                store.enqueueScrolloverCandidates(candidates)
                 if (!scrolling) {
+                    store.enqueueScrolloverCandidates(candidates)
                     store.enqueueScrolloverInteractionComplete()
                 }
             }
@@ -1932,7 +1905,14 @@ internal fun AndroidArticleTimeline(
         if (sameContext) return@LaunchedEffect
 
         if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
-            listState.scrollToItem(0)
+            scrolloverTracker.beginProgrammaticScroll(listState.firstVisibleItemIndex)
+            try {
+                listState.scrollToItem(0)
+            } finally {
+                scrolloverTracker.endProgrammaticScroll(listState.firstVisibleItemIndex)
+            }
+        } else {
+            scrolloverTracker.synchronizeIdlePosition(0)
         }
         store.acknowledgePendingNewDataForScope(selection.scope, categoryFeedIds)
         store.reset(selection)
