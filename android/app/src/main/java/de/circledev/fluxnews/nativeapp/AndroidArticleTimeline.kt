@@ -1590,14 +1590,14 @@ internal class AndroidArticleTimelineStore private constructor(
         }
 
         if (!owns(generation, selection, currentSessionGeneration)) return
-        val appended = page.articles.filter { it.id !in articleIndexById }
+        val appended = page.articles.filter { !articleIndexById.containsKey(it.id) }
         val appendedAudioArticleIds = loadAudioArticleIds(appended.map { it.id })
 
         if (!owns(generation, selection, currentSessionGeneration)) return
         mutableState.update { state ->
             if (state.queryGeneration != generation || state.selection != selection) return@update state
 
-            val currentAppend = appended.filter { it.id !in articleIndexById }
+            val currentAppend = appended.filter { !articleIndexById.containsKey(it.id) }
             val madeProgress = currentAppend.isNotEmpty()
             val nextCursor = page.nextCursor.takeIf { madeProgress && it != cursor }
 
