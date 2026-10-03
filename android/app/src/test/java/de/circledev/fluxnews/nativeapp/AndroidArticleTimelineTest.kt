@@ -561,6 +561,34 @@ class AndroidArticleTimelineTest {
     }
 
     @Test
+    fun storeOwnedScrolloverQueuePersistsCandidatesWithoutComposableOwnership() = runBlocking {
+        val persisted = CompletableDeferred<List<Long>>()
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1), article(2)),
+                    total = 2uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 20L },
+            scrolloverReadWriter = { _, ids -> persisted.complete(ids) },
+            testOnly = Unit,
+        )
+        store.reset(AndroidArticleTimelineSelection(AndroidNewsScope.All))
+
+        store.enqueueScrolloverCandidates(listOf(1L, 2L))
+
+        assertEquals(listOf(1L, 2L), withTimeout(1_000) { persisted.await() })
+        withTimeout(1_000) {
+            while (store.state.value.articles.any { !it.isRead }) {
+                kotlinx.coroutines.yield()
+            }
+        }
+        assertTrue(store.state.value.articles.all { it.isRead })
+    }
+
+    @Test
     fun scrolloverPublishesOneConfirmationOnlyAfterInteractionCompletes() = runBlocking {
         val store = AndroidArticleTimelineStore(
             pageLoader = { _, _ ->
