@@ -114,7 +114,12 @@ internal class AndroidScrolloverTracker {
                     val previousRow = previousRows[id] ?: return@filter false
                     val previousBottom = previousRow.offset + previousRow.size
                     val currentBottom = currentRows[id]?.let { it.offset + it.size }
-                        ?: contentShift?.let { previousBottom + it }
+                        ?: contentShift
+                            ?.takeIf { it != 0 }
+                            ?.let { previousBottom + it }
+                        ?: positions[id]
+                            ?.takeIf { it < sample.firstVisibleIndex }
+                            ?.let { sample.viewportStartOffset }
                         ?: return@filter false
                     previousBottom > previousViewportStart &&
                         currentBottom <= sample.viewportStartOffset
