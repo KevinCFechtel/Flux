@@ -41,8 +41,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -2287,16 +2289,59 @@ private fun publicationLabel(
     return publication
 }
 
+private enum class AndroidArticleImageLoadState {
+    Loading,
+    Success,
+    Error,
+}
+
 @Composable
 private fun ArticleImage(imageUrl: String, modifier: Modifier = Modifier) {
-    AsyncImage(
-        model = imageUrl,
-        contentDescription = null,
-        contentScale = ContentScale.Crop,
+    var loadState by remember(imageUrl) {
+        mutableStateOf(AndroidArticleImageLoadState.Loading)
+    }
+
+    Box(
         modifier = modifier
             .clip(MaterialTheme.shapes.medium)
             .background(MaterialTheme.colorScheme.surfaceVariant),
-    )
+        contentAlignment = Alignment.Center,
+    ) {
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            onLoading = {
+                loadState = AndroidArticleImageLoadState.Loading
+            },
+            onSuccess = {
+                loadState = AndroidArticleImageLoadState.Success
+            },
+            onError = {
+                loadState = AndroidArticleImageLoadState.Error
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        when (loadState) {
+            AndroidArticleImageLoadState.Loading -> {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            AndroidArticleImageLoadState.Error -> {
+                Icon(
+                    painter = painterResource(R.drawable.ic_news),
+                    contentDescription = "Image could not be loaded",
+                    modifier = Modifier.size(32.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            AndroidArticleImageLoadState.Success -> Unit
+        }
+    }
 }
 
 @Composable
