@@ -1,6 +1,6 @@
 # Phase E — Native Android
 
-> **Status: PHASE E1, E2 AND E3 COMPLETE — E4 NEXT / PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
+> **Status: PHASE E1, E2 AND E3 COMPLETE — E4 IMPLEMENTATION COMPLETE / CI + REAL-DEVICE ACCEPTANCE IN PROGRESS / PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
 >
@@ -454,7 +454,7 @@ Required scope:
 - Open Source/About/version/legal;
 - Support Diagnostics shell where settings dependencies are needed.
 
-Use Material/Android conventions. Do not imitate the iOS split-view or navigation capsule.
+Use Material/Android conventions. The accepted Article List chrome intentionally shares Flux's capsule concept with iOS while remaining a native Compose/Material implementation: the scope capsule stays at the top, the action capsule floats at the bottom in portrait, and the same action capsule moves to the top-right only in landscape.
 
 Config Backup remains platform-specific. Android uses BackupPlatform.Android and an Android platform-settings payload. A backup is not promised to be portable to or from iOS unless a future explicit cross-platform backup contract is created.
 
@@ -853,6 +853,9 @@ Implemented on 3 October 2026:
 - Comments still do not mark read, while Original, Reader and Miniflux article-opening actions do;
 - Search/Reader state is app-process scoped but invalidated on Core-session replacement, so Activity recreation does not manufacture a second domain owner or stale account presentation;
 - no Core/UniFFI API change was required.
+- Article List chrome uses a shared Material capsule treatment: portrait keeps the action capsule floating above the bottom system inset, landscape moves the same capsule to the top-right, and controls use semantic icons rather than text buttons;
+- portrait reserves Timeline and Snackbar clearance for the floating action capsule;
+- swipe presentation keeps the E4-B 0-2-action/full-swipe contract but follows Material dismissal visuals with a continuous tonal reveal, circular icon targets, an action-colored armed full-swipe state and one selection haptic when crossing the threshold.
 
 With E4-D implemented, the E4 feature surface is implementation-complete. Acceptance remains subject to the Android CI gate and a focused physical-device pass for Reader overlay geometry, Back behavior, Search pagination and article-open routing.
 

@@ -1,5 +1,6 @@
 package de.circledev.fluxnews.nativeapp
 
+import android.content.res.Configuration
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
@@ -27,7 +28,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -69,6 +72,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
@@ -412,6 +416,7 @@ private fun NewsRootContent(
     val actionBarState by LocalAndroidActionBarPreferences.current.state.collectAsState(
         initial = AndroidActionBarPreferenceState(),
     )
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val timelineCount = timelineState.total.takeIf { timelineState.selection?.scope == scope }
     val projection = navigation.projection
     val categoryRefs = projection?.catalog?.categories?.map {
@@ -430,7 +435,7 @@ private fun NewsRootContent(
     )
     val resolvedActions = AndroidArticleListActionPolicy.resolvedActions(
         configuredActions = actionBarState.actions,
-        directCapacity = if (persistentNavigation) 3 else 1,
+        directCapacity = 3,
         scope = scope,
         hasNextScope = nextScope != null,
     )
@@ -507,6 +512,11 @@ private fun NewsRootContent(
     }
 
     val layoutDirection = LocalLayoutDirection.current
+    val density = LocalDensity.current
+    val navigationBarHeight = with(density) {
+        WindowInsets.navigationBars.getBottom(this).toDp()
+    }
+    val bottomActionClearance = if (isLandscape) 0.dp else navigationBarHeight + 76.dp
     val appBarColors = TopAppBarDefaults.topAppBarColors(
         containerColor = Color.Transparent,
         scrolledContainerColor = Color.Transparent,
@@ -514,7 +524,12 @@ private fun NewsRootContent(
     Box(Modifier.fillMaxSize()) {
         Scaffold(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            snackbarHost = { SnackbarHost(shellSnackbar) },
+            snackbarHost = {
+                SnackbarHost(
+                    hostState = shellSnackbar,
+                    modifier = Modifier.padding(bottom = bottomActionClearance),
+                )
+            },
             topBar = {
                 Box(Modifier.fillMaxWidth()) {
                     FloatingChromeTopGradient(
@@ -533,18 +548,21 @@ private fun NewsRootContent(
                                 )
                             },
                             actions = {
-                                AndroidArticleListActions(
-                                    selection = selection,
-                                    resolvedActions = resolvedActions,
-                                    syncState = syncState,
-                                    actionsEnabled = !markReadRunning,
-                                    onRequestManualSync = {
-                                        syncCoordinator.requestSync(SyncReason.MANUAL)
-                                    },
-                                    onCancelManualSync = syncCoordinator::cancelManualSync,
-                                    onSelectionChanged = onSelectionChanged,
-                                    onAction = ::executeArticleListAction,
-                                )
+                                if (isLandscape) {
+                                    AndroidArticleActionCapsule(
+                                        selection = selection,
+                                        resolvedActions = resolvedActions,
+                                        syncState = syncState,
+                                        actionsEnabled = !markReadRunning,
+                                        onRequestManualSync = {
+                                            syncCoordinator.requestSync(SyncReason.MANUAL)
+                                        },
+                                        onCancelManualSync = syncCoordinator::cancelManualSync,
+                                        onSelectionChanged = onSelectionChanged,
+                                        onAction = ::executeArticleListAction,
+                                        modifier = Modifier.padding(end = 8.dp),
+                                    )
+                                }
                             },
                             colors = appBarColors,
                         )
@@ -561,18 +579,21 @@ private fun NewsRootContent(
                                 )
                             },
                             actions = {
-                                AndroidArticleListActions(
-                                    selection = selection,
-                                    resolvedActions = resolvedActions,
-                                    syncState = syncState,
-                                    actionsEnabled = !markReadRunning,
-                                    onRequestManualSync = {
-                                        syncCoordinator.requestSync(SyncReason.MANUAL)
-                                    },
-                                    onCancelManualSync = syncCoordinator::cancelManualSync,
-                                    onSelectionChanged = onSelectionChanged,
-                                    onAction = ::executeArticleListAction,
-                                )
+                                if (isLandscape) {
+                                    AndroidArticleActionCapsule(
+                                        selection = selection,
+                                        resolvedActions = resolvedActions,
+                                        syncState = syncState,
+                                        actionsEnabled = !markReadRunning,
+                                        onRequestManualSync = {
+                                            syncCoordinator.requestSync(SyncReason.MANUAL)
+                                        },
+                                        onCancelManualSync = syncCoordinator::cancelManualSync,
+                                        onSelectionChanged = onSelectionChanged,
+                                        onAction = ::executeArticleListAction,
+                                        modifier = Modifier.padding(end = 8.dp),
+                                    )
+                                }
                             },
                             colors = appBarColors,
                         )
@@ -602,9 +623,29 @@ private fun NewsRootContent(
                     onOpenArticle = ::openArticle,
                     onOpenReader = ::openReader,
                     topContentPadding = padding.calculateTopPadding(),
+                    bottomOverlayPadding = bottomActionClearance,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
+        }
+
+        if (!isLandscape) {
+            AndroidArticleActionCapsule(
+                selection = selection,
+                resolvedActions = resolvedActions,
+                syncState = syncState,
+                actionsEnabled = !markReadRunning,
+                onRequestManualSync = {
+                    syncCoordinator.requestSync(SyncReason.MANUAL)
+                },
+                onCancelManualSync = syncCoordinator::cancelManualSync,
+                onSelectionChanged = onSelectionChanged,
+                onAction = ::executeArticleListAction,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(bottom = 12.dp),
+            )
         }
 
         AndroidArticleReaderOverlay(
@@ -676,7 +717,7 @@ private data class AndroidPendingMarkRead(
 )
 
 @Composable
-private fun AndroidArticleListActions(
+private fun AndroidArticleActionCapsule(
     selection: AndroidArticleTimelineSelection,
     resolvedActions: AndroidArticleListResolvedActions,
     syncState: AndroidSyncCoordinator.State,
@@ -685,142 +726,180 @@ private fun AndroidArticleListActions(
     onCancelManualSync: () -> Boolean,
     onSelectionChanged: (AndroidArticleTimelineSelection) -> Unit,
     onAction: (AndroidActionBarAction) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var overflowExpanded by remember { mutableStateOf(false) }
     var filterExpanded by remember { mutableStateOf(false) }
     val syncing = syncState is AndroidSyncCoordinator.State.Syncing
     val manualSyncing =
         (syncState as? AndroidSyncCoordinator.State.Syncing)?.reason == SyncReason.MANUAL
+    val darkMode = isSystemInDarkTheme()
 
     fun perform(action: AndroidActionBarAction) {
         when (action) {
             AndroidActionBarAction.FilterAndSort -> filterExpanded = true
-            AndroidActionBarAction.ToggleReadFilter ->
-                onSelectionChanged(selection.togglingReadFilter())
-            AndroidActionBarAction.ToggleSortOrder ->
-                onSelectionChanged(selection.togglingSortOrder())
+            AndroidActionBarAction.ToggleReadFilter -> onSelectionChanged(selection.togglingReadFilter())
+            AndroidActionBarAction.ToggleSortOrder -> onSelectionChanged(selection.togglingSortOrder())
             else -> onAction(action)
         }
     }
 
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        TextButton(
-            enabled = actionsEnabled && (!syncing || manualSyncing),
-            onClick = {
-                if (manualSyncing) {
-                    onCancelManualSync()
-                } else {
-                    onRequestManualSync()
-                }
-            },
+    Box(modifier) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.background.copy(alpha = if (darkMode) 0.70f else 0.85f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            tonalElevation = 0.dp,
+            shadowElevation = if (darkMode) 0.5.dp else 0.dp,
         ) {
-            if (syncing) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                )
-                Spacer(Modifier.width(6.dp))
-            }
-            Text(
-                when {
-                    manualSyncing -> "Cancel"
-                    syncing -> "Syncing"
-                    else -> "Sync"
-                },
-            )
-        }
-
-        resolvedActions.direct.forEach { action ->
-            TextButton(
-                enabled = actionsEnabled,
-                onClick = { perform(action) },
+            Row(
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(articleListActionButtonLabel(action, selection))
-            }
-        }
-
-        Box {
-            TextButton(
-                enabled = actionsEnabled,
-                onClick = { overflowExpanded = true },
-            ) {
-                Text("More")
-            }
-            DropdownMenu(
-                expanded = overflowExpanded,
-                onDismissRequest = { overflowExpanded = false },
-            ) {
-                if (resolvedActions.overflow.isEmpty()) {
-                    DropdownMenuItem(
-                        text = { Text("No additional actions") },
-                        enabled = false,
-                        onClick = {},
-                    )
-                } else {
-                    resolvedActions.overflow.forEach { action ->
-                        DropdownMenuItem(
-                            text = { Text(articleListActionMenuLabel(action, selection)) },
-                            onClick = {
-                                overflowExpanded = false
-                                perform(action)
-                            },
+                IconButton(
+                    enabled = actionsEnabled && (!syncing || manualSyncing),
+                    onClick = {
+                        if (manualSyncing) onCancelManualSync() else onRequestManualSync()
+                    },
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    when {
+                        manualSyncing -> Icon(
+                            painter = painterResource(R.drawable.ic_close),
+                            contentDescription = "Cancel sync",
+                            modifier = Modifier.size(22.dp),
+                        )
+                        syncing -> CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        else -> Icon(
+                            painter = painterResource(R.drawable.ic_sync),
+                            contentDescription = "Sync",
+                            modifier = Modifier.size(22.dp),
                         )
                     }
                 }
-            }
 
-            DropdownMenu(
-                expanded = filterExpanded,
-                onDismissRequest = { filterExpanded = false },
-            ) {
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            if (selection.readFilter == AndroidArticleReadFilter.Unread) {
-                                "Show all articles"
-                            } else {
-                                "Show unread only"
-                            },
+                resolvedActions.direct.forEach { action ->
+                    IconButton(
+                        enabled = actionsEnabled,
+                        onClick = { perform(action) },
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(
+                            painter = painterResource(articleListActionIcon(action, selection)),
+                            contentDescription = articleListActionContentDescription(action, selection),
+                            modifier = Modifier.size(22.dp),
                         )
-                    },
-                    onClick = {
-                        filterExpanded = false
-                        onSelectionChanged(selection.togglingReadFilter())
-                    },
-                )
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            when (selection.sort) {
-                                AndroidArticleSortOrder.OldestFirst -> "Newest first"
-                                AndroidArticleSortOrder.NewestFirst -> "Oldest first"
-                            },
+                    }
+                }
+
+                Box {
+                    IconButton(
+                        enabled = actionsEnabled,
+                        onClick = { overflowExpanded = true },
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_more),
+                            contentDescription = "More",
+                            modifier = Modifier.size(22.dp),
                         )
-                    },
-                    onClick = {
-                        filterExpanded = false
-                        onSelectionChanged(selection.togglingSortOrder())
-                    },
-                )
+                    }
+                    DropdownMenu(
+                        expanded = overflowExpanded,
+                        onDismissRequest = { overflowExpanded = false },
+                    ) {
+                        if (resolvedActions.overflow.isEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("No additional actions") },
+                                enabled = false,
+                                onClick = {},
+                            )
+                        } else {
+                            resolvedActions.overflow.forEach { action ->
+                                DropdownMenuItem(
+                                    leadingIcon = {
+                                        Icon(
+                                            painter = painterResource(articleListActionIcon(action, selection)),
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    text = { Text(articleListActionMenuLabel(action, selection)) },
+                                    onClick = {
+                                        overflowExpanded = false
+                                        perform(action)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
             }
+        }
+
+        DropdownMenu(
+            expanded = filterExpanded,
+            onDismissRequest = { filterExpanded = false },
+        ) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        if (selection.readFilter == AndroidArticleReadFilter.Unread) {
+                            "Show all articles"
+                        } else {
+                            "Show unread only"
+                        },
+                    )
+                },
+                onClick = {
+                    filterExpanded = false
+                    onSelectionChanged(selection.togglingReadFilter())
+                },
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        when (selection.sort) {
+                            AndroidArticleSortOrder.OldestFirst -> "Newest first"
+                            AndroidArticleSortOrder.NewestFirst -> "Oldest first"
+                        },
+                    )
+                },
+                onClick = {
+                    filterExpanded = false
+                    onSelectionChanged(selection.togglingSortOrder())
+                },
+            )
         }
     }
 }
 
-private fun articleListActionButtonLabel(
+private fun articleListActionIcon(
+    action: AndroidActionBarAction,
+    selection: AndroidArticleTimelineSelection,
+): Int = when (action) {
+    AndroidActionBarAction.FilterAndSort -> R.drawable.ic_filter
+    AndroidActionBarAction.ToggleReadFilter ->
+        if (selection.readFilter == AndroidArticleReadFilter.Unread) R.drawable.ic_news else R.drawable.ic_mark_unread
+    AndroidActionBarAction.ToggleSortOrder -> R.drawable.ic_sort
+    AndroidActionBarAction.Search -> R.drawable.ic_search
+    AndroidActionBarAction.MarkAllRead -> R.drawable.ic_mark_read
+    AndroidActionBarAction.MarkAllReadAndNext -> R.drawable.ic_mark_read_next
+    AndroidActionBarAction.ListeningList -> R.drawable.ic_headphones
+    AndroidActionBarAction.Settings -> R.drawable.ic_settings
+}
+
+private fun articleListActionContentDescription(
     action: AndroidActionBarAction,
     selection: AndroidArticleTimelineSelection,
 ): String = when (action) {
-    AndroidActionBarAction.FilterAndSort -> "Filter"
     AndroidActionBarAction.ToggleReadFilter ->
-        if (selection.readFilter == AndroidArticleReadFilter.Unread) "All" else "Unread"
+        if (selection.readFilter == AndroidArticleReadFilter.Unread) "Show all articles" else "Show unread only"
     AndroidActionBarAction.ToggleSortOrder ->
-        if (selection.sort == AndroidArticleSortOrder.OldestFirst) "Newest" else "Oldest"
-    AndroidActionBarAction.Search -> "Search"
-    AndroidActionBarAction.MarkAllRead -> "Read all"
-    AndroidActionBarAction.MarkAllReadAndNext -> "Read + Next"
-    AndroidActionBarAction.ListeningList -> "Listening"
-    AndroidActionBarAction.Settings -> "Settings"
+        if (selection.sort == AndroidArticleSortOrder.OldestFirst) "Newest first" else "Oldest first"
+    else -> action.displayName
 }
 
 private fun articleListActionMenuLabel(

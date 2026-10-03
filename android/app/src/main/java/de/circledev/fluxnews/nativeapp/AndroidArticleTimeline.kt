@@ -1411,6 +1411,7 @@ internal fun AndroidArticleTimeline(
     onOpenArticle: (ArticleSummary) -> Unit,
     onOpenReader: (ArticleSummary) -> Unit,
     topContentPadding: Dp = 0.dp,
+    bottomOverlayPadding: Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
     val state by store.state.collectAsState()
@@ -1680,7 +1681,7 @@ internal fun AndroidArticleTimeline(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = topContentPadding),
+                contentPadding = PaddingValues(top = topContentPadding, bottom = bottomOverlayPadding),
             ) {
                 items(
                     items = state.articles,
@@ -1745,7 +1746,7 @@ internal fun AndroidArticleTimeline(
             .padding(
                 start = 16.dp,
                 end = 16.dp,
-                bottom = if (undoState.visible) 88.dp else 20.dp,
+                bottom = bottomOverlayPadding + (if (undoState.visible) 88.dp else 20.dp),
             ),
     )
 
@@ -1753,7 +1754,12 @@ internal fun AndroidArticleTimeline(
         Snackbar(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(horizontal = 16.dp, vertical = 20.dp),
+                .padding(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 20.dp,
+                    bottom = bottomOverlayPadding + 20.dp,
+                ),
             action = {
                 TextButton(
                     onClick = {

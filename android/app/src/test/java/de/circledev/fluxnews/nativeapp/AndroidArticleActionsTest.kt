@@ -118,6 +118,13 @@ class AndroidArticleActionsTest {
     }
 
     @Test
+    fun materialSwipePresentationArmsOnlyAtTheFullSwipeThreshold() {
+        assertFalse(AndroidSwipePresentationPolicy.isFullSwipeArmed(57f, 100f, true))
+        assertTrue(AndroidSwipePresentationPolicy.isFullSwipeArmed(58f, 100f, true))
+        assertFalse(AndroidSwipePresentationPolicy.isFullSwipeArmed(100f, 100f, false))
+    }
+
+    @Test
     fun urlValidationAcceptsOnlyHttpAndHttpsWebUrls() {
         assertTrue(AndroidArticleActionPolicy.validWebUrl("https://example.test/article"))
         assertTrue(AndroidArticleActionPolicy.validWebUrl("http://example.test/article"))
