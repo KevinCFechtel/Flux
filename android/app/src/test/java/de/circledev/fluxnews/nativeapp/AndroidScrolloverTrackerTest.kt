@@ -39,6 +39,64 @@ class AndroidScrolloverTrackerTest {
     }
 
     @Test
+    fun reachingDatasetEndCommitsRemainingArticlesIncludingLastOne() {
+        val tracker = AndroidScrolloverTracker()
+        tracker.updateSnapshot(listOf(1L, 2L, 3L, 4L))
+        tracker.synchronizeIdlePosition(1)
+
+        assertTrue(
+            tracker.observe(
+                AndroidScrolloverPositionSample(
+                    firstVisibleIndex = 2,
+                    atDatasetEnd = true,
+                ),
+                scrolling = true,
+                enabled = true,
+            ).isEmpty(),
+        )
+
+        assertEquals(
+            listOf(2L, 3L, 4L),
+            tracker.observe(
+                AndroidScrolloverPositionSample(
+                    firstVisibleIndex = 2,
+                    atDatasetEnd = true,
+                ),
+                scrolling = false,
+                enabled = true,
+            ),
+        )
+    }
+
+    @Test
+    fun temporaryPagingEndDoesNotCommitPastHighestReachedIndex() {
+        val tracker = AndroidScrolloverTracker()
+        tracker.updateSnapshot(listOf(1L, 2L, 3L, 4L))
+        tracker.synchronizeIdlePosition(1)
+
+        tracker.observe(
+            AndroidScrolloverPositionSample(
+                firstVisibleIndex = 2,
+                atDatasetEnd = false,
+            ),
+            scrolling = true,
+            enabled = true,
+        )
+
+        assertEquals(
+            listOf(2L),
+            tracker.observe(
+                AndroidScrolloverPositionSample(
+                    firstVisibleIndex = 2,
+                    atDatasetEnd = false,
+                ),
+                scrolling = false,
+                enabled = true,
+            ),
+        )
+    }
+
+    @Test
     fun noForwardProgressCommitsNothing() {
         val tracker = AndroidScrolloverTracker()
         tracker.updateSnapshot(listOf(1L, 2L, 3L))
