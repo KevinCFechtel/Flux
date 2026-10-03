@@ -29,7 +29,7 @@ internal class AndroidScrolloverTracker {
     private val qualifiedIds = linkedSetOf<Long>()
     private val emittedIds = mutableSetOf<Long>()
     private var previousPosition: ScrollPosition? = null
-    private var previousVisibleSizes: Map<Long, Int> = emptyMap()
+    private var previousRows: Map<Long, AndroidScrolloverVisibleRow> = emptyMap()
     private var previousViewport: Pair<Int, Int>? = null
     private var userScrollActive = false
 
@@ -99,14 +99,26 @@ internal class AndroidScrolloverTracker {
         }
 
         val current = ScrollPosition(sample.firstVisibleIndex, sample.firstVisibleScrollOffset)
-        val direction = current.compareTo(previous)
+        val currentRows = sample.visibleRows.associateBy { it.articleId }
+        val contentShift = commonRowContentShift(currentRows)
+        val direction = when {
+            contentShift != null && contentShift < 0 -> 1
+            contentShift != null && contentShift > 0 -> -1
+            else -> current.compareTo(previous)
+        }
+        val previousViewportStart = previousViewport?.first ?: sample.viewportStartOffset
         val candidates = if (enabled && direction > 0) {
-            // Only IDs that were actually observed intersecting the viewport may emit.
-            // Keeping this strict mirrors the iOS geometry contract and prevents a
-            // layout jump or skipped composition from manufacturing read candidates.
             qualifiedIds.asSequence()
                 .filter { it !in emittedIds }
-                .filter { id -> positions[id]?.let { it < sample.firstVisibleIndex } == true }
+                .filter { id ->
+                    val previousRow = previousRows[id] ?: return@filter false
+                    val previousBottom = previousRow.offset + previousRow.size
+                    val currentBottom = currentRows[id]?.let { it.offset + it.size }
+                        ?: contentShift?.let { previousBottom + it }
+                        ?: return@filter false
+                    previousBottom > previousViewportStart &&
+                        currentBottom <= sample.viewportStartOffset
+                }
                 .sortedBy { positions[it] ?: Int.MAX_VALUE }
                 .toList()
         } else {
@@ -115,6 +127,8 @@ internal class AndroidScrolloverTracker {
 
         if (enabled) {
             qualifyVisible(sample)
+            val retainedGeometryIds = currentRows.keys + previousRows.keys
+            qualifiedIds.retainAll(retainedGeometryIds + candidates)
         } else {
             qualifiedIds.clear()
         }
@@ -141,21 +155,33 @@ internal class AndroidScrolloverTracker {
 
     private fun hasMaterialLayoutChange(sample: AndroidScrolloverGeometrySample): Boolean {
         if (previousViewport != (sample.viewportStartOffset to sample.viewportEndOffset)) return true
-        val currentSizes = sample.visibleRows.associate { it.articleId to it.size }
-        return previousVisibleSizes.any { (id, size) ->
-            currentSizes[id]?.let { it != size } == true
+        val currentRows = sample.visibleRows.associateBy { it.articleId }
+        return previousRows.any { (id, row) ->
+            currentRows[id]?.let { it.size != row.size } == true
         }
+    }
+
+    private fun commonRowContentShift(
+        currentRows: Map<Long, AndroidScrolloverVisibleRow>,
+    ): Int? {
+        previousRows.forEach { (id, previousRow) ->
+            val currentRow = currentRows[id] ?: return@forEach
+            if (currentRow.size == previousRow.size) {
+                return currentRow.offset - previousRow.offset
+            }
+        }
+        return null
     }
 
     private fun storeGeometry(sample: AndroidScrolloverGeometrySample) {
         previousPosition = ScrollPosition(sample.firstVisibleIndex, sample.firstVisibleScrollOffset)
-        previousVisibleSizes = sample.visibleRows.associate { it.articleId to it.size }
+        previousRows = sample.visibleRows.associateBy { it.articleId }
         previousViewport = sample.viewportStartOffset to sample.viewportEndOffset
     }
 
     private fun invalidateGeometry(clearQualification: Boolean) {
         previousPosition = null
-        previousVisibleSizes = emptyMap()
+        previousRows = emptyMap()
         previousViewport = null
         if (clearQualification) qualifiedIds.clear()
     }
