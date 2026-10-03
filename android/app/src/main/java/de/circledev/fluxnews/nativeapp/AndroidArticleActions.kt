@@ -23,7 +23,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.matchParentSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -47,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
@@ -343,6 +345,7 @@ internal fun AndroidArticleSwipeContainer(
     var gestureStartOffset by remember(article.id) { mutableFloatStateOf(0f) }
     var contextExpanded by remember(article.id) { mutableStateOf(false) }
     var fullSwipeArmed by remember(article.id) { mutableStateOf(false) }
+    var rowHeightPx by remember(article.id) { mutableIntStateOf(0) }
     val actionWidth = 80.dp
     val actionWidthPx = with(density) { actionWidth.toPx() }
 
@@ -354,7 +357,13 @@ internal fun AndroidArticleSwipeContainer(
         offsetPx = target
     }
 
-    BoxWithConstraints(modifier.fillMaxWidth()) {
+    BoxWithConstraints(
+        modifier
+            .fillMaxWidth()
+            .onSizeChanged { size ->
+                if (rowHeightPx != size.height) rowHeightPx = size.height
+            },
+    ) {
         val rowWidthPx = with(density) { maxWidth.toPx() }.coerceAtLeast(1f)
 
         val visibleSide = when {
@@ -380,7 +389,9 @@ internal fun AndroidArticleSwipeContainer(
                         currentOnSwipeAction(action)
                     }
                 },
-                modifier = Modifier.matchParentSize(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(with(density) { rowHeightPx.toDp() }),
             )
         }
 
