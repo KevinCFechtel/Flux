@@ -48,6 +48,38 @@ class AndroidScrolloverTrackerTest {
     }
 
     @Test
+    fun rearmedArticleCanEmitAgainAfterBecomingUnread() {
+        val tracker = AndroidScrolloverTracker()
+        tracker.updateSnapshot(listOf(1L, 2L, 3L))
+        tracker.beginUserScroll(
+            sample(first = 0, offset = 0, visible = rows(0, 1L, 2L)),
+            enabled = true,
+        )
+
+        assertEquals(
+            listOf(1L),
+            tracker.receive(
+                sample(first = 1, offset = 5, visible = rows(1, 2L, 3L)),
+                enabled = true,
+            ),
+        )
+        tracker.endUserScroll()
+        tracker.rearm(listOf(1L))
+
+        tracker.beginUserScroll(
+            sample(first = 0, offset = 0, visible = rows(0, 1L, 2L)),
+            enabled = true,
+        )
+        assertEquals(
+            listOf(1L),
+            tracker.receive(
+                sample(first = 1, offset = 5, visible = rows(1, 2L, 3L)),
+                enabled = true,
+            ),
+        )
+    }
+
+    @Test
     fun reverseMovementNeverEmitsAndQualificationSurvivesDirectionChange() {
         val tracker = AndroidScrolloverTracker()
         tracker.updateSnapshot(listOf(1L, 2L, 3L))

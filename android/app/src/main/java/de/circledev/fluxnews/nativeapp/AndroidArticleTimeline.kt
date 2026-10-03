@@ -414,6 +414,7 @@ internal class AndroidArticleTimelineStore private constructor(
     private val mutableFeedback = MutableSharedFlow<AndroidTimelineHaptic>(extraBufferCapacity = 8)
     private val mutableActionMessages = MutableSharedFlow<String>(extraBufferCapacity = 8)
     private val mutableScrollResetRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    private val mutableScrolloverRearmRequests = MutableSharedFlow<List<Long>>(extraBufferCapacity = 8)
     private val mutableUndoState = MutableStateFlow(AndroidScrolloverUndoState())
     private val explicitActionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val explicitMutationMutex = Mutex()
@@ -440,6 +441,7 @@ internal class AndroidArticleTimelineStore private constructor(
     val feedback = mutableFeedback.asSharedFlow()
     val actionMessages = mutableActionMessages.asSharedFlow()
     val scrollResetRequests = mutableScrollResetRequests.asSharedFlow()
+    val scrolloverRearmRequests = mutableScrolloverRearmRequests.asSharedFlow()
     val undoState = mutableUndoState.asStateFlow()
 
     fun retainedSelectionForSession(sessionGeneration: Long?): AndroidArticleTimelineSelection? =
@@ -536,6 +538,9 @@ internal class AndroidArticleTimelineStore private constructor(
                 }
             }
             refreshSelectionTotal(selection, generation, sessionGeneration)
+            if (previous && !read) {
+                mutableScrolloverRearmRequests.tryEmit(listOf(articleId))
+            }
             if (providesFeedback && !previous && read) {
                 mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
             }
@@ -886,6 +891,9 @@ internal class AndroidArticleTimelineStore private constructor(
                 }
                 if (!event.read) scrolloverFeedbackSuppressedReadIds.remove(event.articleId)
                 applyReadStateChanged(selection, event.articleId, event.read)
+                if (!event.read) {
+                    mutableScrolloverRearmRequests.tryEmit(listOf(event.articleId))
+                }
                 if (!suppressFeedback) mutableFeedback.tryEmit(AndroidTimelineHaptic.Confirmation)
             }
             is CoreEvent.ArticleStarredStateChanged -> {
@@ -1565,6 +1573,12 @@ internal fun AndroidArticleTimeline(
             if (listState.layoutInfo.totalItemsCount > 0) {
                 listState.scrollToItem(0)
             }
+        }
+    }
+
+    LaunchedEffect(store, scrolloverTracker) {
+        store.scrolloverRearmRequests.collect { articleIds ->
+            scrolloverTracker.rearm(articleIds)
         }
     }
 

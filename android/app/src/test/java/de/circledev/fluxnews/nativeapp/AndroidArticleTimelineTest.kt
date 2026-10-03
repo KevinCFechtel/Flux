@@ -894,6 +894,116 @@ class AndroidArticleTimelineTest {
     }
 
     @Test
+    fun successfulExplicitUnreadRearmsScrolloverOnlyAfterWriteSucceeds() = runBlocking {
+        val writerStarted = CompletableDeferred<Unit>()
+        val releaseWriter = CompletableDeferred<Unit>()
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1, read = true)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 56L },
+            selectionCountLoader = { 1uL },
+            explicitReadWriter = { _, _, _ ->
+                writerStarted.complete(Unit)
+                releaseWriter.await()
+            },
+            testOnly = Unit,
+        )
+        store.reset(
+            AndroidArticleTimelineSelection(
+                scope = AndroidNewsScope.All,
+                readFilter = AndroidArticleReadFilter.All,
+            ),
+        )
+        val rearm = async(start = CoroutineStart.UNDISPATCHED) {
+            store.scrolloverRearmRequests.first()
+        }
+
+        val mutation = async {
+            store.setReadExplicit(
+                articleId = 1L,
+                read = false,
+                removeWhenRead = false,
+            )
+        }
+        writerStarted.await()
+        assertFalse(rearm.isCompleted)
+
+        releaseWriter.complete(Unit)
+        assertTrue(mutation.await())
+        assertEquals(listOf(1L), withTimeout(1_000) { rearm.await() })
+    }
+
+    @Test
+    fun failedExplicitUnreadDoesNotRearmScrollover() = runBlocking {
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1, read = true)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 57L },
+            selectionCountLoader = { 1uL },
+            explicitReadWriter = { _, _, _ -> error("expected") },
+            testOnly = Unit,
+        )
+        store.reset(
+            AndroidArticleTimelineSelection(
+                scope = AndroidNewsScope.All,
+                readFilter = AndroidArticleReadFilter.All,
+            ),
+        )
+
+        assertFalse(
+            store.setReadExplicit(
+                articleId = 1L,
+                read = false,
+                removeWhenRead = false,
+            ),
+        )
+        assertNull(withTimeoutOrNull(100) { store.scrolloverRearmRequests.first() })
+    }
+
+    @Test
+    fun externalUnreadCoreEventRequestsScrolloverRearm() = runBlocking {
+        val store = AndroidArticleTimelineStore(
+            pageLoader = { _, _ ->
+                ArticlePage(
+                    articles = listOf(article(1, read = true)),
+                    total = 1uL,
+                    nextCursor = null,
+                )
+            },
+            activeSessionGeneration = { 58L },
+            testOnly = Unit,
+        )
+        store.reset(
+            AndroidArticleTimelineSelection(
+                scope = AndroidNewsScope.All,
+                readFilter = AndroidArticleReadFilter.All,
+            ),
+        )
+        val rearm = async(start = CoroutineStart.UNDISPATCHED) {
+            store.scrolloverRearmRequests.first()
+        }
+
+        store.handleCoreEvent(
+            AndroidCoreRuntimeEvent(
+                generation = 58L,
+                event = CoreEvent.ArticleReadStateChanged(articleId = 1L, read = false),
+            ),
+        )
+
+        assertEquals(listOf(1L), withTimeout(1_000) { rearm.await() })
+    }
+
+    @Test
     fun explicitStarMutationRollsBackAndStarredRemovalWaitsForSuccess() = runBlocking {
         var shouldFail = true
         val store = AndroidArticleTimelineStore(
