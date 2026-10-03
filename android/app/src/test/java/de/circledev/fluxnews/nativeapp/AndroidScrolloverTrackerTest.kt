@@ -19,6 +19,19 @@ class AndroidScrolloverTrackerTest {
     }
 
     @Test
+    fun firstArticleStillEmitsWhenListMovesBeforeDragStartSignal() {
+        val tracker = AndroidScrolloverTracker()
+        tracker.updateSnapshot(listOf(1L, 2L, 3L))
+
+        // Idle observation before the gesture.
+        tracker.receive(sample(0), enabled = true)
+
+        // Compose may publish the new first-visible index before the
+        // DragInteraction.Start collector receives the interaction event.
+        assertEquals(listOf(1L), tracker.beginUserScroll(sample(1), enabled = true))
+    }
+
+    @Test
     fun firstArticleEmitsWhenFirstVisibleIndexAdvances() {
         val tracker = AndroidScrolloverTracker()
         tracker.updateSnapshot(listOf(1L, 2L, 3L))
