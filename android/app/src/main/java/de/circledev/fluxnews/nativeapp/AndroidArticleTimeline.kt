@@ -184,6 +184,25 @@ internal data class AndroidArticleTimelineSelection(
     val readFilter: AndroidArticleReadFilter = AndroidArticleReadFilter.Unread,
     val sort: AndroidArticleSortOrder = AndroidArticleSortOrder.OldestFirst,
 ) {
+    fun selectingScope(scope: AndroidNewsScope): AndroidArticleTimelineSelection =
+        copy(scope = scope)
+
+    fun togglingReadFilter(): AndroidArticleTimelineSelection =
+        copy(
+            readFilter = when (readFilter) {
+                AndroidArticleReadFilter.Unread -> AndroidArticleReadFilter.All
+                AndroidArticleReadFilter.All -> AndroidArticleReadFilter.Unread
+            },
+        )
+
+    fun togglingSortOrder(): AndroidArticleTimelineSelection =
+        copy(
+            sort = when (sort) {
+                AndroidArticleSortOrder.OldestFirst -> AndroidArticleSortOrder.NewestFirst
+                AndroidArticleSortOrder.NewestFirst -> AndroidArticleSortOrder.OldestFirst
+            },
+        )
+
     fun coreQuery(cursor: ArticleCursor? = null): ArticleQuery {
         val coreScope = when (scope) {
             AndroidNewsScope.All,
