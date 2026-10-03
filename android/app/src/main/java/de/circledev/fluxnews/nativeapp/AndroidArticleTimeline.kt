@@ -1190,25 +1190,6 @@ internal class AndroidArticleTimelineStore private constructor(
         scrolloverRetainedReadIds.addAll(accepted)
         expectedBulkReadEventIds.addAll(accepted)
         accepted.forEach { setRowRead(it, true) }
-        mutableState.update { state ->
-            if (
-                state.queryGeneration != current.queryGeneration ||
-                state.selection != selection ||
-                state.sessionGeneration != sessionGeneration
-            ) {
-                return@update state
-            }
-            state.copy(
-                total = if (selection.readFilter == AndroidArticleReadFilter.Unread) {
-                    state.total?.let { total ->
-                        val delta = accepted.size.toULong().coerceAtMost(total)
-                        total - delta
-                    }
-                } else {
-                    state.total
-                },
-            )
-        }
 
         return try {
             scrolloverReadWriter(sessionGeneration, accepted)
@@ -1223,15 +1204,6 @@ internal class AndroidArticleTimelineStore private constructor(
                 accepted.forEach { id ->
                     if (rowPresentationById[id]?.value?.isRead == true) setRowRead(id, false)
                 }
-                mutableState.update { state ->
-                    state.copy(
-                        total = if (selection.readFilter == AndroidArticleReadFilter.Unread) {
-                            state.total?.plus(accepted.size.toULong())
-                        } else {
-                            state.total
-                        },
-                    )
-                }
             }
             accepted
         }
@@ -1239,8 +1211,27 @@ internal class AndroidArticleTimelineStore private constructor(
 
     fun completeScrolloverInteraction() {
         if (pendingSuccessfulScrolloverUndoIds.isNotEmpty()) {
+            val completedIds = pendingSuccessfulScrolloverUndoIds.distinct()
+            val current = mutableState.value
+            if (current.selection?.readFilter == AndroidArticleReadFilter.Unread) {
+                mutableState.update { state ->
+                    if (
+                        state.queryGeneration != current.queryGeneration ||
+                        state.selection != current.selection ||
+                        state.sessionGeneration != current.sessionGeneration
+                    ) {
+                        return@update state
+                    }
+                    state.copy(
+                        total = state.total?.let { total ->
+                            val delta = completedIds.size.toULong().coerceAtMost(total)
+                            total - delta
+                        },
+                    )
+                }
+            }
             recordSuccessfulScrolloverUndo(
-                pendingSuccessfulScrolloverUndoIds.distinct(),
+                completedIds,
                 monotonicMillis(),
             )
             pendingSuccessfulScrolloverUndoIds.clear()
