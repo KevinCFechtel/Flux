@@ -863,6 +863,7 @@ Implemented on 3 October 2026:
 - swipe visuals use flat Material action zones rather than circular/capsule targets: partial reveal keeps up to two full-height tonal zones with bare icons, while the configured outer action expands into the continuous background for full swipe and becomes the sole visible action after the threshold;
 - swipe backgrounds use the final measured Article Row height (`matchParentSize`) so tonal action surfaces span the complete item and icons remain vertically centered; action zones are 80 dp with 28 dp icons (30 dp while full-swipe armed), and Article Rows do not insert separator dividers.
 - the floating Article List action capsule keeps the same semantic controls but uses tighter chrome and smaller visual icons; active Sync is represented by a thin progress ring around the current Sync/Cancel glyph instead of replacing the button with a standalone spinner.
+- Sync idle presentation uses a single clockwise Material refresh glyph; while any foreground Sync is active the title-capsule count slot shows `Syncing…`, and a successful Manual Sync temporarily replaces the Sync glyph with a checkmark for 1.5 seconds. Cancelled, failed and startup Sync runs do not show the success check.
 
 With E4-D implemented, the E4 feature surface is implementation-complete. Acceptance remains subject to the Android CI gate and a focused physical-device pass for Reader overlay geometry, Back behavior, Search pagination and article-open routing.
 

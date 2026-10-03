@@ -84,6 +84,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.CoreEvent
 import uniffi.flux_uniffi.NavigationCountMode
@@ -442,6 +443,11 @@ private fun NewsRootContent(
     val syncInProgress = syncState is AndroidSyncCoordinator.State.Syncing
     val manualSyncInProgress =
         (syncState as? AndroidSyncCoordinator.State.Syncing)?.reason == SyncReason.MANUAL
+    var syncSuccessGeneration by remember { mutableStateOf<Long?>(null) }
+    val syncSuccessVisible =
+        (syncState as? AndroidSyncCoordinator.State.Succeeded)
+            ?.takeIf { it.reason == SyncReason.MANUAL }
+            ?.generation == syncSuccessGeneration
     val actionScope = rememberCoroutineScope()
     val shellSnackbar = remember { SnackbarHostState() }
     var markReadRequest by remember { mutableStateOf<AndroidPendingMarkRead?>(null) }
@@ -473,6 +479,19 @@ private fun NewsRootContent(
                 }
                 null -> shellSnackbar.showSnackbar("The article could not be opened.")
             }
+        }
+    }
+
+    LaunchedEffect(syncState) {
+        val succeeded = syncState as? AndroidSyncCoordinator.State.Succeeded
+        if (succeeded?.reason == SyncReason.MANUAL) {
+            syncSuccessGeneration = succeeded.generation
+            delay(1_500)
+            if (syncSuccessGeneration == succeeded.generation) {
+                syncSuccessGeneration = null
+            }
+        } else {
+            syncSuccessGeneration = null
         }
     }
 
@@ -543,6 +562,7 @@ private fun NewsRootContent(
                                     showArticleCount = articlePreferences.showArticleCount,
                                     timelineCount = timelineCount,
                                     readFilter = timelineState.selection?.readFilter,
+                                    syncing = syncInProgress,
                                     opensNavigation = !persistentNavigation,
                                     onOpenNavigation = onOpenNavigation,
                                 )
@@ -553,6 +573,7 @@ private fun NewsRootContent(
                                         selection = selection,
                                         resolvedActions = resolvedActions,
                                         syncState = syncState,
+                                        syncSuccessVisible = syncSuccessVisible,
                                         actionsEnabled = !markReadRunning,
                                         onRequestManualSync = {
                                             syncCoordinator.requestSync(SyncReason.MANUAL)
@@ -574,6 +595,7 @@ private fun NewsRootContent(
                                     showArticleCount = articlePreferences.showArticleCount,
                                     timelineCount = timelineCount,
                                     readFilter = timelineState.selection?.readFilter,
+                                    syncing = syncInProgress,
                                     opensNavigation = !persistentNavigation,
                                     onOpenNavigation = onOpenNavigation,
                                 )
@@ -584,6 +606,7 @@ private fun NewsRootContent(
                                         selection = selection,
                                         resolvedActions = resolvedActions,
                                         syncState = syncState,
+                                        syncSuccessVisible = syncSuccessVisible,
                                         actionsEnabled = !markReadRunning,
                                         onRequestManualSync = {
                                             syncCoordinator.requestSync(SyncReason.MANUAL)
@@ -634,6 +657,7 @@ private fun NewsRootContent(
                 selection = selection,
                 resolvedActions = resolvedActions,
                 syncState = syncState,
+                syncSuccessVisible = syncSuccessVisible,
                 actionsEnabled = !markReadRunning,
                 onRequestManualSync = {
                     syncCoordinator.requestSync(SyncReason.MANUAL)
@@ -721,6 +745,7 @@ private fun AndroidArticleActionCapsule(
     selection: AndroidArticleTimelineSelection,
     resolvedActions: AndroidArticleListResolvedActions,
     syncState: AndroidSyncCoordinator.State,
+    syncSuccessVisible: Boolean,
     actionsEnabled: Boolean,
     onRequestManualSync: () -> Boolean,
     onCancelManualSync: () -> Boolean,
@@ -763,7 +788,14 @@ private fun AndroidArticleActionCapsule(
                     },
                     modifier = Modifier.size(44.dp),
                 ) {
-                    if (syncing) {
+                    if (syncSuccessVisible) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_check),
+                            contentDescription = "Sync complete",
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    } else if (syncing) {
                         Box(
                             modifier = Modifier.size(30.dp),
                             contentAlignment = Alignment.Center,
@@ -1291,6 +1323,7 @@ private fun ScopeNavigationCapsule(
     showArticleCount: Boolean,
     timelineCount: ULong?,
     readFilter: AndroidArticleReadFilter?,
+    syncing: Boolean,
     opensNavigation: Boolean,
     onOpenNavigation: () -> Unit,
 ) {
@@ -1325,9 +1358,13 @@ private fun ScopeNavigationCapsule(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                if (showArticleCount && timelineCount != null) {
+                if (showArticleCount && (syncing || timelineCount != null)) {
                     Text(
-                        scopeCountLabel(scope, readFilter, timelineCount),
+                        if (syncing) {
+                            "Syncing…"
+                        } else {
+                            scopeCountLabel(scope, readFilter, requireNotNull(timelineCount))
+                        },
                         maxLines = 1,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
