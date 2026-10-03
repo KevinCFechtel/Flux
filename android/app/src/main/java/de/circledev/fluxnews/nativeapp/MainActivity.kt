@@ -157,7 +157,13 @@ private fun StandaloneStartupSurface(
             )
         },
     ) { padding ->
-        content(Modifier.fillMaxSize().padding(padding))
+        AndroidCenteredContent(
+            maxWidth = AndroidFormContentMaxWidth,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            content = content,
+        )
     }
 }
 
