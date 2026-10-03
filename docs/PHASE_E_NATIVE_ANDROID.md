@@ -658,8 +658,9 @@ Implemented on 2 October 2026:
 
 - Android Core events are tagged with the owning Core-session generation before entering the app event stream;
 - stale events from retired account/Core sessions are ignored by the Timeline;
-- visible read/unread and star/unstar changes patch the loaded ArticleSummary rows directly instead of rebuilding the whole Timeline;
-- filter exits remove affected loaded rows without a full page reload;
+- structural Timeline data (ordered ArticleSummary rows, IDs and paging) is separated from per-row presentation state (isRead, isStarred, revision);
+- status-only read/unread and star/unstar changes update only the affected row presentation state and keep the structural articles snapshot/list instance stable;
+- filter exits still remove affected loaded rows structurally without a full page reload;
 - filter re-entry for an article that is not currently loaded triggers a bounded first-page snapshot refresh because no complete ArticleSummary exists locally for that unseen article;
 - filtered selection totals are refreshed through Core count queries so non-loaded status changes cannot leave the title count stale;
 - sync-complete events with changed article data replace the bounded Timeline snapshot;
@@ -683,8 +684,9 @@ Implemented on 2 October 2026:
 - reverse movement never emits Scrollover candidates;
 - fast forward scrolling may emit multiple candidates only when those rows were previously genuinely visible/qualified;
 - Scrollover read mutations use the existing Core bulk read API and are bound to the active Core-session generation;
-- optimistic read presentation is kept non-structural during active Scrollover so rows are not removed mid-scroll from the unread Timeline;
-- failed Core writes roll back the optimistic read state and re-arm the affected IDs;
+- optimistic read presentation is kept non-structural during active Scrollover: only the affected per-ID presentation state changes, while the ordered structural Timeline snapshot remains untouched;
+- Scrollover uses stable Article IDs with deduplicated, process-scoped pending mutation delivery; append-only paging extends the ID-to-position index incrementally and does not invalidate already qualified visible IDs;
+- failed Core writes roll back only the affected presentation state and re-arm the affected IDs;
 - Scrollover count handling avoids redundant Core count reloads for each emitted read event;
 - navigation refreshes are conflated across Core-event bursts to avoid per-event scroll-adjacent reload work;
 - focused JVM tests cover geometry, programmatic-scroll exclusion, direction reversal, layout/snapshot rebasing, session ownership, bulk mutation behavior and rollback.
@@ -726,7 +728,8 @@ Acceptance corrections implemented during E3-E include:
 - decorative feed icons avoid duplicate TalkBack speech and unread state carries explicit accessibility semantics;
 - native read/star/Scrollover feedback uses system haptics rather than direct vibration control;
 - Scrollover Undo is generation-safe and uses the shared Core bulk mutation path;
-- Timeline composition work was reduced by hoisting row-width decisions, adding lazy-list content types, batching feed-icon loading and avoiding unnecessary Scrollover sampling.
+- Timeline composition work was reduced by hoisting row-width decisions, adding lazy-list content types, batching feed-icon loading, removing per-row BoxWithConstraints, avoiding Timeline-wide recomposition on scroll start, and separating volatile row presentation from the structural list snapshot;
+- read/unread presentation is geometry-stable like iOS: the headline keeps one fixed font weight, feed/publication/preview/accessory state changes are colour/opacity-only, and star/unread use permanently reserved slots so marking a row read cannot change its measured height or text wrapping.
 
 The deferred physical UniFFI runtime/production-upgrade proof remains a later release/runtime acceptance responsibility and is not represented here as completed. E9 remains the authoritative final Flutter-to-native production-upgrade gate.
 
@@ -743,7 +746,8 @@ Use:
 - one native image pipeline/cache;
 - no synchronous Core/network/image decode on the main thread;
 - batched article-level media projection where already provided by Core;
-- status-only presentation updates without reconstructing unrelated row content when practical.
+- status-only presentation updates must not replace the structural Timeline snapshot; each loaded Article ID owns an independently observable row-presentation state so unrelated visible rows are not invalidated;
+- read/unread visual treatment must be geometry-stable: do not change title font weight, slot allocation, line limits or any other measurement-affecting property as a consequence of read state.
 
 Do not introduce RecyclerView as a precautionary workaround.
 
