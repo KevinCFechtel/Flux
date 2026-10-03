@@ -1885,7 +1885,9 @@ internal fun AndroidArticleTimeline(
                 when (interaction) {
                     is DragInteraction.Start -> {
                         val candidates = scrolloverTracker.beginUserScroll(
-                            sample = listState.scrolloverGeometrySample(),
+                            sample = AndroidScrolloverPositionSample(
+                                firstVisibleIndex = listState.firstVisibleItemIndex,
+                            ),
                             enabled = articlePreferences.markReadOnScrollover,
                         )
                         store.enqueueScrolloverCandidates(candidates)
@@ -1908,11 +1910,13 @@ internal fun AndroidArticleTimeline(
             return@LaunchedEffect
         }
         snapshotFlow {
-            listState.scrolloverGeometrySample() to listState.isScrollInProgress
+            listState.firstVisibleItemIndex to listState.isScrollInProgress
         }
-            .collect { (sample, scrolling) ->
+            .collect { (firstVisibleIndex, scrolling) ->
                 val candidates = scrolloverTracker.receive(
-                    sample = sample,
+                    sample = AndroidScrolloverPositionSample(
+                        firstVisibleIndex = firstVisibleIndex,
+                    ),
                     enabled = articlePreferences.markReadOnScrollover,
                 )
                 store.enqueueScrolloverCandidates(candidates)
@@ -2125,25 +2129,6 @@ internal fun View.performFluxConfirmationHaptic() {
 
 internal fun View.performFluxSelectionHaptic() {
     performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-}
-
-private fun androidx.compose.foundation.lazy.LazyListState.scrolloverGeometrySample(): AndroidScrolloverGeometrySample {
-    val layout = layoutInfo
-    return AndroidScrolloverGeometrySample(
-        firstVisibleIndex = firstVisibleItemIndex,
-        firstVisibleScrollOffset = firstVisibleItemScrollOffset,
-        viewportStartOffset = layout.viewportStartOffset,
-        viewportEndOffset = layout.viewportEndOffset,
-        visibleRows = layout.visibleItemsInfo.mapNotNull { item ->
-            val articleId = item.key as? Long ?: return@mapNotNull null
-            AndroidScrolloverVisibleRow(
-                articleId = articleId,
-                index = item.index,
-                offset = item.offset,
-                size = item.size,
-            )
-        },
-    )
 }
 
 @Composable
