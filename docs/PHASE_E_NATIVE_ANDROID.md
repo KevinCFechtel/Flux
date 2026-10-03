@@ -775,6 +775,24 @@ E3 is accepted after normal reading-speed scrolling, fast scrolling, image loadi
 
 ## 15. E4 — Actions, Search, Sync and Mutations
 
+### E4-A — Semantic Article List actions and transient list controls
+
+Status: **COMPLETE**
+
+Implemented on 3 October 2026:
+
+- the app shell now owns the complete transient `AndroidArticleTimelineSelection` instead of reconstructing default Unread/Oldest values from the selected scope;
+- scope changes preserve the current transient All/Unread and sort choices while remaining non-persistent presentation state;
+- All/Unread and Oldest/Newest controls are exposed through native Material 3 menu presentation and continue to use the existing E3 semantic-reset path, including return to the natural list start;
+- Activity/configuration recreation retains the complete selection only when the retained Timeline belongs to the active Core-session generation;
+- a pure `AndroidArticleListActionPolicy` resolves persisted semantic action priorities into direct and overflow actions without storing Compose control identities;
+- contextual availability follows the shared mobile contract: Mark All as Read is unavailable for Starred, and Mark All as Read & Next exists only for Category/Feed when a next sibling is available;
+- unavailable actions are filtered only at presentation-resolution time and never rewrite the persisted semantic configuration;
+- focused JVM tests cover transient selection transitions, action availability, direct-slot priority, overflow completeness and contextual filtering;
+- the E3 Timeline store, renderer, paging architecture and Core/UniFFI surface remain unchanged.
+
+E4-B is next and adds productive per-article actions/mutations and Android interaction presentation over this semantic foundation.
+
 E4 completes interactive Newsreader behavior:
 
 - semantic swipe actions;
