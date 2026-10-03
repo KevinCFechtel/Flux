@@ -56,6 +56,28 @@ class AndroidSearchTest {
     }
 
     @Test
+    fun clearRestoresInitialSearchPresentation() = runBlocking {
+        val store = AndroidSearchStore(
+            searchLoader = { _, _ -> SearchArticlesResult(1, listOf(article(1))) },
+            activeSessionGeneration = { 12L },
+            testOnly = Unit,
+        )
+        store.activateSession(12L)
+        store.setQuery("article")
+        store.submit()
+        store.state.first { !it.searching && it.results.size == 1 }
+
+        store.clear()
+
+        val state = store.state.value
+        assertEquals("", state.query)
+        assertEquals("", state.submittedQuery)
+        assertTrue(state.results.isEmpty())
+        assertFalse(state.hasSearched)
+        assertFalse(state.searching)
+    }
+
+    @Test
     fun failedReadMutationRollsBackOptimisticState() = runBlocking {
         val started = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()

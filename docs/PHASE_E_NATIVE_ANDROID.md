@@ -848,6 +848,7 @@ Implemented on 3 October 2026:
 - Search remains a real secondary Navigation Compose destination, so Back returns to the preserved News Timeline rather than treating Search as a Reader-style overlay;
 - Search uses Core/Miniflux `searchArticles` with its own 50-item offset pagination, request-generation stale suppression and result de-duplication; it does not create a local FTS/index;
 - Search reuses the normal Android article row renderer, swipe configuration, context actions, feed icons and available audio projection;
+- Search chrome uses a single stable Material text-field surface with an integrated leading Search action, in-field progress/clear affordance, IME Search handling and focused tonal treatment; initial/no-result states use a centered icon, headline and supporting text rather than a bare sentence;
 - Search Read/Unread and Star/Unstar use the Core search mutation APIs with optimistic presentation and rollback on failure;
 - opening a Search result follows the same normal Reader/original/Miniflux routing policy; Search Reader uses `readerDocumentForSearch` and closes back to the current Search result list;
 - Comments still do not mark read, while Original, Reader and Miniflux article-opening actions do;
@@ -861,7 +862,7 @@ Implemented on 3 October 2026:
 - full-swipe dispatch uses the latest recomposed action callback so repeating Read/Unread or Star/Unstar full swipes toggles against the current article state instead of a stale pre-mutation snapshot;
 - Starred is an all-read-state scope: Core queries force `ReadFilter.ALL` and read-filter controls are omitted while Starred is active, while the user's underlying All/Unread selection is preserved for returning to normal scopes.
 - swipe visuals use flat Material action zones rather than circular/capsule targets: partial reveal keeps up to two full-height tonal zones with bare icons, while the configured outer action expands into the continuous background for full swipe and becomes the sole visible action after the threshold;
-- swipe backgrounds use the final measured Article Row height (`matchParentSize`) so tonal action surfaces span the complete item and icons remain vertically centered; action zones are 80 dp with 28 dp icons (30 dp while full-swipe armed), and Article Rows do not insert separator dividers.
+- swipe backgrounds use the final measured Article Row height so tonal action surfaces span the complete item and icons remain vertically centered; action zones are 80 dp with 28 dp icons (30 dp while full-swipe armed), and Article Rows do not insert separator dividers.
 - the floating Article List action capsule keeps the same semantic controls but uses tighter chrome and smaller visual icons; active Sync is represented by a thin progress ring around the current Sync/Cancel glyph instead of replacing the button with a standalone spinner.
 - Sync idle presentation uses a single clockwise Material refresh glyph; while any foreground Sync is active the title-capsule count slot shows `Syncing…`, and a successful Manual Sync temporarily replaces the Sync glyph with a checkmark for 1.5 seconds. Cancelled, failed and startup Sync runs do not show the success check.
 

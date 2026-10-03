@@ -1,6 +1,8 @@
 package de.circledev.fluxnews.nativeapp
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -21,8 +23,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -37,7 +41,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
@@ -422,10 +430,13 @@ internal fun AndroidSearchDestination(
     val actionScope = rememberCoroutineScope()
     val context = LocalContext.current
     val view = LocalView.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val searchFocusRequester = remember { FocusRequester() }
     val feedIconVariant = if (isSystemInDarkTheme()) FeedIconVariant.DARK else FeedIconVariant.NORMAL
     val referenceMillis = remember(state.requestGeneration) { System.currentTimeMillis() }
 
     LaunchedEffect(sessionGeneration) { store.activateSession(sessionGeneration) }
+    LaunchedEffect(Unit) { searchFocusRequester.requestFocus() }
     LaunchedEffect(state.results.map { it.feedId }, feedIconVariant) { store.ensureFeedIcons(feedIconVariant) }
     LaunchedEffect(store, snackbar) { store.actionMessages.collect { snackbar.showSnackbar(it) } }
     LaunchedEffect(store, view) {
@@ -444,6 +455,11 @@ internal fun AndroidSearchDestination(
         }.distinctUntilChanged().collect { if (it) store.loadMore() }
     }
 
+    fun submitSearch() {
+        if (state.query.isBlank() || state.searching) return
+        store.submit()
+        keyboardController?.hide()
+    }
     fun showMessage(message: String) { actionScope.launch { snackbar.showSnackbar(message) } }
     fun openReader(article: ArticleSummary) {
         store.requestSetRead(article.id, true, providesFeedback = false)
@@ -513,33 +529,83 @@ internal fun AndroidSearchDestination(
             },
         ) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    OutlinedTextField(
-                        value = state.query,
-                        onValueChange = store::setQuery,
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        label = { Text("Search articles") },
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { store.submit() }),
-                    )
-                    IconButton(onClick = store::submit, enabled = state.query.isNotBlank() && !state.searching) {
-                        if (state.searching) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                        else Icon(painter = painterResource(R.drawable.ic_search), contentDescription = "Search")
-                    }
-                }
+                TextField(
+                    value = state.query,
+                    onValueChange = store::setQuery,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .focusRequester(searchFocusRequester),
+                    singleLine = true,
+                    placeholder = { Text("Search articles") },
+                    leadingIcon = {
+                        IconButton(
+                            onClick = ::submitSearch,
+                            enabled = state.query.isNotBlank() && !state.searching,
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_search),
+                                contentDescription = "Search",
+                            )
+                        }
+                    },
+                    trailingIcon = {
+                        when {
+                            state.searching -> CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            state.query.isNotBlank() -> IconButton(
+                                onClick = store::clear,
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_close),
+                                    contentDescription = "Clear search",
+                                )
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(18.dp),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.52f),
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                        errorIndicatorColor = Color.Transparent,
+                    ),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { submitSearch() }),
+                )
                 BoxWithConstraints(Modifier.fillMaxSize()) {
                     val availableWidth = (maxWidth - 32.dp).coerceAtLeast(0.dp)
                     val availableWidthDp = availableWidth.value.toInt()
                     when {
-                        !state.hasSearched -> SearchMessage("Search your Miniflux articles.", Modifier.fillMaxSize())
-                        state.searching && state.results.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                        state.errorMessage != null && state.results.isEmpty() -> SearchMessage(state.errorMessage ?: "Search could not be completed.", Modifier.fillMaxSize(), "Retry", store::retry)
-                        state.results.isEmpty() -> SearchMessage("No matching articles.", Modifier.fillMaxSize())
+                        !state.hasSearched -> SearchMessage(
+                            title = "Search articles",
+                            message = "Find matching entries in your Miniflux account.",
+                            modifier = Modifier.fillMaxSize(),
+                            showSearchIcon = true,
+                        )
+                        state.searching && state.results.isEmpty() -> Box(
+                            Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                        state.errorMessage != null && state.results.isEmpty() -> SearchMessage(
+                            title = "Search unavailable",
+                            message = state.errorMessage ?: "Search could not be completed.",
+                            modifier = Modifier.fillMaxSize(),
+                            actionLabel = "Retry",
+                            onAction = store::retry,
+                        )
+                        state.results.isEmpty() -> SearchMessage(
+                            title = "No matching articles",
+                            message = "Try a different search term.",
+                            modifier = Modifier.fillMaxSize(),
+                            showSearchIcon = true,
+                        )
                         else -> LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
                             items(
                                 items = state.results,
@@ -570,7 +636,13 @@ internal fun AndroidSearchDestination(
                             if (state.loadingMore) item("search-loading-more") {
                                 Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                             } else if (state.errorMessage != null) item("search-page-error") {
-                                SearchMessage(state.errorMessage ?: "More results could not be loaded.", Modifier.fillMaxWidth(), "Retry", store::retryLoadMore)
+                                SearchMessage(
+                                    title = "More results unavailable",
+                                    message = state.errorMessage ?: "More results could not be loaded.",
+                                    modifier = Modifier.fillMaxWidth(),
+                                    actionLabel = "Retry",
+                                    onAction = store::retryLoadMore,
+                                )
                             }
                         }
                     }
@@ -589,15 +661,50 @@ internal fun AndroidSearchDestination(
 
 @Composable
 private fun SearchMessage(
+    title: String,
     message: String,
     modifier: Modifier = Modifier,
+    showSearchIcon: Boolean = false,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
 ) {
     Box(modifier, contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(24.dp)) {
-            Text(message, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (actionLabel != null && onAction != null) TextButton(onClick = onAction) { Text(actionLabel) }
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(32.dp),
+        ) {
+            if (showSearchIcon) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ) {
+                    Box(
+                        modifier = Modifier.size(56.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_search),
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
+                }
+            }
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (actionLabel != null && onAction != null) {
+                TextButton(onClick = onAction) { Text(actionLabel) }
+            }
         }
     }
 }
