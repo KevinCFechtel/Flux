@@ -49,9 +49,20 @@ internal class AndroidScrolloverTracker {
         }
     }
 
-    fun beginUserScroll(sample: AndroidScrolloverGeometrySample, enabled: Boolean) {
-        userScrollActive = true
-        rebaseline(sample, enabled)
+    fun beginUserScroll(
+        sample: AndroidScrolloverGeometrySample,
+        enabled: Boolean,
+    ): List<Long> {
+        if (!userScrollActive) {
+            userScrollActive = true
+            rebaseline(sample, enabled)
+            return emptyList()
+        }
+
+        // A new touch can interrupt an active fling before the geometry collector
+        // publishes its latest sample. Preserve the current interaction and process
+        // that movement instead of clearing already observed rows.
+        return receive(sample, enabled)
     }
 
     fun endUserScroll() {
@@ -81,11 +92,30 @@ internal class AndroidScrolloverTracker {
         val current = ScrollPosition(sample.firstVisibleIndex, sample.firstVisibleScrollOffset)
         val direction = current.compareTo(previous)
         val candidates = if (enabled && direction > 0) {
+            val crossedIds = linkedSetOf<Long>()
+
+            // Rows that Compose explicitly exposed remain the strongest signal.
             qualifiedIds.asSequence()
                 .filter { it !in emittedIds }
                 .filter { id -> positions[id]?.let { it < sample.firstVisibleIndex } == true }
                 .sortedBy { positions[it] ?: Int.MAX_VALUE }
-                .toList()
+                .forEach(crossedIds::add)
+
+            // snapshotFlow may coalesce intermediate LazyList layouts during a fast
+            // fling or a rapid direction change. If firstVisibleIndex advanced from
+            // N to M, every article index in [N, M) necessarily crossed the upper
+            // viewport boundary during this still-active user interaction, even if
+            // Compose never published an intermediate visibleRows sample for it.
+            if (current.index > previous.index) {
+                val fromIndex = previous.index.coerceAtLeast(0)
+                val untilIndex = current.index.coerceAtMost(orderedIds.size)
+                for (index in fromIndex until untilIndex) {
+                    val id = orderedIds[index]
+                    if (id !in emittedIds) crossedIds += id
+                }
+            }
+
+            crossedIds.sortedBy { positions[it] ?: Int.MAX_VALUE }
         } else {
             emptyList()
         }
