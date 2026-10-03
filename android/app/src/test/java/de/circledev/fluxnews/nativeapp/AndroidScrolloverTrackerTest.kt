@@ -84,6 +84,44 @@ class AndroidScrolloverTrackerTest {
     }
 
     @Test
+    fun skippedIntermediateRowsStillEmitDuringForwardJump() {
+        val tracker = AndroidScrolloverTracker()
+        tracker.updateSnapshot(listOf(1L, 2L, 3L, 4L, 5L))
+        tracker.beginUserScroll(
+            sample(first = 0, offset = 0, visible = rows(0, 1L, 2L)),
+            enabled = true,
+        )
+
+        val emitted = tracker.receive(
+            sample(first = 3, offset = 10, visible = rows(3, 4L, 5L)),
+            enabled = true,
+        )
+
+        assertEquals(listOf(1L, 2L, 3L), emitted)
+    }
+
+    @Test
+    fun newDragDuringActiveScrollPreservesObservedRows() {
+        val tracker = AndroidScrolloverTracker()
+        tracker.updateSnapshot(listOf(1L, 2L, 3L, 4L))
+        tracker.beginUserScroll(
+            sample(first = 0, offset = 0, visible = rows(0, 1L, 2L)),
+            enabled = true,
+        )
+        tracker.receive(
+            sample(first = 1, offset = 10, visible = rows(1, 2L, 3L)),
+            enabled = true,
+        )
+
+        val emittedOnRetouch = tracker.beginUserScroll(
+            sample(first = 2, offset = 5, visible = rows(2, 3L, 4L)),
+            enabled = true,
+        )
+
+        assertEquals(listOf(2L), emittedOnRetouch)
+    }
+
+    @Test
     fun reverseMovementNeverEmitsAndQualificationSurvivesDirectionChange() {
         val tracker = AndroidScrolloverTracker()
         tracker.updateSnapshot(listOf(1L, 2L, 3L))
