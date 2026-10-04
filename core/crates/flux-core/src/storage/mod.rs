@@ -5532,6 +5532,105 @@ mod tests {
     }
 
     #[test]
+    fn bulk_feed_preferences_patch_is_atomic_and_preserves_unpatched_values() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [Category { id: 1, title: "Category".into() }];
+        let feeds = [
+            Feed { id: 10, category_id: 1, title: "One".into() },
+            Feed { id: 20, category_id: 1, title: "Two".into() },
+        ];
+        store.reconcile(&categories, &feeds, &[]).unwrap();
+        store.set_feed_truncate_detail(10, true).unwrap();
+
+        store
+            .patch_feed_preferences_bulk(
+                &[10, 20],
+                FeedPreferencesPatch {
+                    detail_rendering: Some(DetailRenderingMode::TextOnly),
+                    open_in_miniflux: Some(true),
+                    ..FeedPreferencesPatch::default()
+                },
+            )
+            .unwrap();
+
+        let values = store.feed_preferences_bulk(&[10, 20]).unwrap();
+        assert_eq!(values.len(), 2);
+        assert_eq!(values[0].detail_rendering, DetailRenderingMode::TextOnly);
+        assert!(values[0].truncate_detail);
+        assert!(values[0].open_in_miniflux);
+        assert_eq!(values[1].detail_rendering, DetailRenderingMode::TextOnly);
+        assert!(!values[1].truncate_detail);
+        assert!(values[1].open_in_miniflux);
+
+        let before = store.feed_preferences(10).unwrap();
+        assert!(store
+            .patch_feed_preferences_bulk(
+                &[10, 999],
+                FeedPreferencesPatch {
+                    truncate_detail: Some(false),
+                    ..FeedPreferencesPatch::default()
+                },
+            )
+            .is_err());
+        assert_eq!(store.feed_preferences(10).unwrap(), before);
+    }
+
+    #[test]
+    fn bulk_notification_enablement_starts_from_current_point() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [Category { id: 1, title: "Category".into() }];
+        let feeds = [Feed { id: 2, category_id: 1, title: "Feed".into() }];
+        let article = |id| Article {
+            id,
+            feed_id: 2,
+            title: format!("Article {id}"),
+            url: format!("https://example.test/{id}"),
+            comments_url: String::new(),
+            published_at: format!("2026-02-0{id}T00:00:00Z"),
+            is_read: false,
+            is_starred: false,
+            raw_html_content: String::new(),
+            reading_time_minutes: 0,
+            preview: String::new(),
+            image_url: None,
+        };
+
+        let before_enable = store.reconcile(&categories, &feeds, &[article(1)]).unwrap();
+        assert!(store
+            .prepare_system_notification_candidates(&before_enable.new_article_ids_by_feed)
+            .unwrap()
+            .is_empty());
+
+        store
+            .patch_feed_preferences_bulk(
+                &[2],
+                FeedPreferencesPatch {
+                    system_notifications_enabled: Some(true),
+                    ..FeedPreferencesPatch::default()
+                },
+            )
+            .unwrap();
+
+        assert!(store
+            .prepare_system_notification_candidates(&before_enable.new_article_ids_by_feed)
+            .unwrap()
+            .is_empty());
+
+        let after_enable = store
+            .reconcile(&categories, &feeds, &[article(1), article(2)])
+            .unwrap();
+        let candidates = store
+            .prepare_system_notification_candidates(&after_enable.new_article_ids_by_feed)
+            .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].new_count, 1);
+    }
+
+    #[test]
     fn system_notifications_only_queue_articles_after_feed_enablement() {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
