@@ -61,4 +61,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "FluxNewsNative"
-include(":app")
+include(":app", ":baselineprofile")

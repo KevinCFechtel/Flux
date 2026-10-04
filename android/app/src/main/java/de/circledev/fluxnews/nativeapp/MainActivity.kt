@@ -30,9 +30,24 @@ import androidx.compose.ui.unit.dp
 import uniffi.flux_uniffi.SyncReason
 
 class MainActivity : ComponentActivity() {
+    private companion object {
+        const val BASELINE_PROFILE_TIMELINE_EXTRA = "flux.baselineProfile.timeline"
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (
+            BuildConfig.BUILD_TYPE == "nonMinifiedRelease" &&
+            intent?.getBooleanExtra(BASELINE_PROFILE_TIMELINE_EXTRA, false) == true
+        ) {
+            setContent {
+                FluxNewsTheme {
+                    BaselineProfileTimelineFixture()
+                }
+            }
+            return
+        }
+
         val application = application as FluxApplication
         val bootstrap = application.accountBootstrap
         val coreRuntime = application.coreRuntime

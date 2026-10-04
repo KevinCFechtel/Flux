@@ -4,6 +4,7 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
+    id("androidx.baselineprofile")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
@@ -29,7 +30,11 @@ android {
     }
     buildTypes {
         debug { isMinifyEnabled = false }
-        release { isMinifyEnabled = false; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") }
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
         create("migrationProbe") { initWith(getByName("debug")); isDebuggable = true; isMinifyEnabled = false; applicationIdSuffix = "" }
     }
     flavorDimensions += "distribution"
@@ -74,6 +79,7 @@ fun registerUniffiPreparation(variantName: String, mode: String): TaskProvider<E
 fun wireUniffiPreparation(variantName: String, preparation: TaskProvider<Exec>) { val capitalized = variantName.replaceFirstChar { it.uppercase() }; tasks.matching { it.name == "compile${capitalized}Kotlin" || it.name == "merge${capitalized}JniLibFolders" || it.name == "merge${capitalized}NativeLibs" }.configureEach { dependsOn(preparation) } }
 wireUniffiPreparation("developmentDebug", registerUniffiPreparation("developmentDebug", "debug"))
 wireUniffiPreparation("developmentRelease", registerUniffiPreparation("developmentRelease", "release"))
+wireUniffiPreparation("developmentNonMinifiedRelease", registerUniffiPreparation("developmentNonMinifiedRelease", "release"))
 wireUniffiPreparation("productionMigrationProbe", registerUniffiPreparation("productionMigrationProbe", "debug"))
 
 val migrationSigningProperties = Properties().apply { val file = rootProject.file("migration-signing.properties"); if (file.exists()) file.inputStream().use(::load) }
@@ -97,6 +103,12 @@ tasks.matching { it.name == "testProductionMigrationProbeUnitTest" }.configureEa
 wireUniffiPreparation("productionRelease", registerUniffiPreparation("productionRelease", "release"))
 
 
+baselineProfile {
+    // One generated profile is shared by Development and Production releases so the
+    // Play internal-test build exercises the same compiled app paths as production.
+    mergeIntoMain = true
+}
+
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.core:core-ktx:1.19.1")
@@ -106,6 +118,7 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.10.2")
     implementation("androidx.datastore:datastore-preferences:1.2.1")
     implementation("androidx.work:work-runtime-ktx:2.12.0")
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.compose.material3:material3")
     implementation("io.coil-kt.coil3:coil-compose:3.6.3")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
@@ -117,4 +130,5 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:core-ktx:1.7.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
+    baselineProfile(project(":baselineprofile"))
 }
