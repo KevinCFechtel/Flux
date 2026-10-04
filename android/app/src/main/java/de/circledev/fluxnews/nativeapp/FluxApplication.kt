@@ -63,7 +63,13 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
         AndroidConfigurationBackupController(accountBootstrap, coreRuntime, navigationPreferences, articlePreferences, actionBarPreferences)
     }
     val accountBootstrap: AndroidAccountBootstrap by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        AndroidAccountBootstrap(credentialStore = credentialStore, preferenceStore = preferenceStore, coreRuntime = coreRuntime, storagePaths = storagePaths)
+        AndroidAccountBootstrap(
+            credentialStore = credentialStore,
+            preferenceStore = preferenceStore,
+            coreRuntime = coreRuntime,
+            storagePaths = storagePaths,
+            onWidgetStateCleared = { AndroidWidgetUpdates.refreshAll(applicationContext) },
+        )
     }
 
     override fun newImageLoader(context: Context): ImageLoader =
