@@ -26,7 +26,6 @@ private enum class SettingsDestination(val title: String, val subtitle: String) 
     Media("Media", "Playback and Listening List preferences"),
     DownloadedData("Downloaded Data", "Downloaded media storage"),
     BackgroundSync("Background Sync", "Background refresh preference"),
-    SystemNotifications("System Notifications", "Per-feed Android notifications"),
     ConfigurationBackup("Configuration Backup", "Encrypted configuration export and restore"),
     SupportDiagnostics("Support Diagnostics", "Logging, viewer and support export"),
     About("About", "Version, open source and legal information"),
@@ -50,7 +49,6 @@ internal fun SettingsShell(
     val mediaSettings = LocalAndroidMediaSettings.current
     val downloadedData = LocalAndroidDownloadedData.current
     val backgroundSync = LocalAndroidBackgroundSync.current
-    val systemNotifications = LocalAndroidSystemNotifications.current
     val configurationBackup = LocalAndroidConfigurationBackup.current
     val diagnostics = (LocalContext.current.applicationContext as FluxApplication).diagnostics
     var articleState by remember { mutableStateOf(AndroidArticlePreferenceState()) }
@@ -88,7 +86,7 @@ internal fun SettingsShell(
                         maxWidth = AndroidSettingsDetailMaxWidth,
                         modifier = Modifier.weight(1f).fillMaxHeight(),
                     ) { detailModifier ->
-                        SettingsDetail(selected ?: SettingsDestination.Account, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, systemNotifications, configurationBackup, diagnostics, onAccountChanged, detailModifier)
+                        SettingsDetail(selected ?: SettingsDestination.Account, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, configurationBackup, diagnostics, onAccountChanged, detailModifier)
                     }
                 }
             } else if (selected == null) {
@@ -98,7 +96,7 @@ internal fun SettingsShell(
                     maxWidth = AndroidSettingsDetailMaxWidth,
                     modifier = contentModifier,
                 ) { detailModifier ->
-                    SettingsDetail(selected!!, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, systemNotifications, configurationBackup, diagnostics, onAccountChanged, detailModifier)
+                    SettingsDetail(selected!!, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, configurationBackup, diagnostics, onAccountChanged, detailModifier)
                 }
             }
         }
@@ -143,7 +141,7 @@ private fun SettingsList(selected: SettingsDestination?, onSelected: (SettingsDe
 }
 
 @Composable
-private fun SettingsDetail(destination: SettingsDestination, bootstrap: AndroidAccountBootstrap, navigationPreferences: AndroidNavigationPreferences, navigationState: AndroidNavigationPreferenceState, categories: List<AndroidNavigationCategoryRef>, feeds: List<AndroidNavigationFeedRef>, articlePreferences: AndroidArticlePreferences, articleState: AndroidArticlePreferenceState, actionBarPreferences: AndroidActionBarPreferences, actionBarState: AndroidActionBarPreferenceState, coreArticleSettings: AndroidCoreArticleSettings, mediaSettings: AndroidMediaSettings, downloadedData: AndroidDownloadedData, backgroundSync: AndroidBackgroundSync, systemNotifications: AndroidSystemNotificationManager, configurationBackup: AndroidConfigurationBackupController, diagnostics: AndroidAppDiagnostics, onAccountChanged: (AndroidAccountBootstrap.State) -> Unit, modifier: Modifier) {
+private fun SettingsDetail(destination: SettingsDestination, bootstrap: AndroidAccountBootstrap, navigationPreferences: AndroidNavigationPreferences, navigationState: AndroidNavigationPreferenceState, categories: List<AndroidNavigationCategoryRef>, feeds: List<AndroidNavigationFeedRef>, articlePreferences: AndroidArticlePreferences, articleState: AndroidArticlePreferenceState, actionBarPreferences: AndroidActionBarPreferences, actionBarState: AndroidActionBarPreferenceState, coreArticleSettings: AndroidCoreArticleSettings, mediaSettings: AndroidMediaSettings, downloadedData: AndroidDownloadedData, backgroundSync: AndroidBackgroundSync, configurationBackup: AndroidConfigurationBackupController, diagnostics: AndroidAppDiagnostics, onAccountChanged: (AndroidAccountBootstrap.State) -> Unit, modifier: Modifier) {
     when (destination) {
         SettingsDestination.Account -> AccountConfigurationScreen(
             bootstrap,
@@ -159,7 +157,6 @@ private fun SettingsDetail(destination: SettingsDestination, bootstrap: AndroidA
         SettingsDestination.Media -> MediaSettingsScreen(mediaSettings, modifier)
         SettingsDestination.DownloadedData -> DownloadedDataSettingsScreen(downloadedData, modifier)
         SettingsDestination.BackgroundSync -> BackgroundSyncSettingsScreen(backgroundSync, modifier)
-        SettingsDestination.SystemNotifications -> SystemNotificationsSettingsScreen(systemNotifications, modifier)
         SettingsDestination.ConfigurationBackup -> ConfigurationBackupScreen(configurationBackup, { (bootstrap.state as? AndroidAccountBootstrap.State.Ready)?.let(onAccountChanged) }, modifier)
         SettingsDestination.SupportDiagnostics -> SupportDiagnosticsScreen(diagnostics, modifier)
         SettingsDestination.About -> AboutSettingsScreen(modifier)
