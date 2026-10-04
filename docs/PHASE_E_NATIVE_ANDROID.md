@@ -771,9 +771,13 @@ Known programmatic movement must be explicitly suppressed. Snapshot replacement 
 
 Performance is measured on physical Android devices, with the first meaningful real-device product pass occurring in E3 once the shell, account flow and Timeline make the native app realistically testable. The API-29 runtime floor remains covered by the E1-B emulator smoke; E3 physical-device performance acceptance uses representative supported hardware and a contemporary device where available. Test with realistic large article sets and real article images.
 
-The physical Timeline acceptance pass is complete. The deferred standalone UniFFI runtime/production-upgrade proof remains tracked separately for the later final Android runtime/release acceptance rather than blocking the accepted Article Timeline.
+Performance acceptance must use a release-equivalent build. The Google Play internal-test artifact is `developmentRelease`; it shares the same `release` build type, R8 optimization, resource shrinking, Rust release build and Baseline Profile input as `productionRelease`. Debug builds remain diagnostic/development tools and are not authoritative evidence for product performance.
 
-Use Android tracing/benchmark tools to identify actual bottlenecks if future reproducible performance regressions appear. Only replace or specialize the renderer when measured evidence shows the default Compose path cannot meet the product requirement.
+The app owns a Baseline Profile producer module. Its reproducible baseline covers cold startup and, when the side-by-side benchmark app has a configured development account, the Article Timeline scroll path. Generate/update the profile on one connected API-33+ device with `android/Build/generate-baseline-profile.sh`, then commit the generated `app/src/main/generated/baselineProfiles` output before using the next Play internal-test build for performance acceptance. The benchmark build has a distinct `.benchmark` application-ID suffix, so it can coexist with the Play internal-test installation and must never reuse production identity or credentials implicitly.
+
+The physical Timeline acceptance pass completed before this release-performance pipeline was finalized. It remains valid as a functional/device acceptance result, but future claims about marginal jank or renderer-level performance must be reconfirmed on the optimized Play `developmentRelease` path before introducing new renderer/cache/recomposition complexity.
+
+Use Android Macrobenchmark/JankStats/tracing to identify actual bottlenecks if reproducible performance regressions remain after R8 and the committed Baseline Profile are active. Only replace or specialize the renderer when measured release-build evidence shows the default Compose path cannot meet the product requirement.
 
 E3 is accepted after normal reading-speed scrolling, fast scrolling, image loading, mutations and Scrollover were verified without systematic jank on physical hardware.
 
