@@ -2701,6 +2701,132 @@ impl Store {
         tx.commit().map_err(sql_error)
     }
 
+    pub fn feed_preferences_bulk(&self, feed_ids: &[i64]) -> Result<Vec<FeedPreferences>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let mut preferences = Vec::with_capacity(feed_ids.len());
+        for &feed_id in feed_ids {
+            let exists = connection
+                .query_row("SELECT 1 FROM feeds WHERE id=?1", [feed_id], |_| Ok(()))
+                .optional()
+                .map_err(sql_error)?
+                .is_some();
+            if !exists {
+                return Err(CoreError::data(format!("feed {feed_id} does not exist")));
+            }
+            let preference = connection
+                .query_row(
+                    "SELECT system_notifications_enabled,detail_rendering,truncate_detail,open_in_miniflux,auto_download_audio FROM feed_preferences WHERE feed_id=?1",
+                    [feed_id],
+                    |row| {
+                        Ok(FeedPreferences {
+                            feed_id,
+                            system_notifications_enabled: row.get(0)?,
+                            detail_rendering: match row.get::<_, String>(1)?.as_str() {
+                                "rendered" => DetailRenderingMode::Rendered,
+                                "text_only" => DetailRenderingMode::TextOnly,
+                                _ => return Err(rusqlite::Error::InvalidQuery),
+                            },
+                            truncate_detail: row.get(2)?,
+                            open_in_miniflux: row.get(3)?,
+                            auto_download_audio: row.get(4)?,
+                        })
+                    },
+                )
+                .optional()
+                .map_err(sql_error)?
+                .unwrap_or_else(|| FeedPreferences::defaults(feed_id));
+            preferences.push(preference);
+        }
+        Ok(preferences)
+    }
+
+    pub fn patch_feed_preferences_bulk(
+        &self,
+        feed_ids: &[i64],
+        patch: FeedPreferencesPatch,
+    ) -> Result<(), CoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        let tx = connection.transaction().map_err(sql_error)?;
+
+        for &feed_id in feed_ids {
+            if tx
+                .query_row("SELECT 1 FROM feeds WHERE id=?1", [feed_id], |_| Ok(()))
+                .optional()
+                .map_err(sql_error)?
+                .is_none()
+            {
+                return Err(CoreError::data(format!("feed {feed_id} does not exist")));
+            }
+        }
+
+        for &feed_id in feed_ids {
+            if let Some(enabled) = patch.system_notifications_enabled {
+                tx.execute(
+                    "INSERT INTO feed_preferences(feed_id,system_notifications_enabled) VALUES(?1,?2) ON CONFLICT(feed_id) DO UPDATE SET system_notifications_enabled=excluded.system_notifications_enabled",
+                    params![feed_id, enabled],
+                )
+                .map_err(sql_error)?;
+                tx.execute(
+                    "DELETE FROM pending_system_notifications WHERE article_id IN (SELECT id FROM articles WHERE feed_id=?1)",
+                    [feed_id],
+                )
+                .map_err(sql_error)?;
+                tx.execute(
+                    "DELETE FROM system_notification_candidates WHERE feed_id=?1",
+                    [feed_id],
+                )
+                .map_err(sql_error)?;
+            }
+            if let Some(mode) = patch.detail_rendering {
+                tx.execute(
+                    "INSERT INTO feed_preferences(feed_id,detail_rendering) VALUES(?1,?2) ON CONFLICT(feed_id) DO UPDATE SET detail_rendering=excluded.detail_rendering",
+                    params![
+                        feed_id,
+                        match mode {
+                            DetailRenderingMode::Rendered => "rendered",
+                            DetailRenderingMode::TextOnly => "text_only",
+                        }
+                    ],
+                )
+                .map_err(sql_error)?;
+            }
+            if let Some(enabled) = patch.truncate_detail {
+                tx.execute(
+                    "INSERT INTO feed_preferences(feed_id,truncate_detail) VALUES(?1,?2) ON CONFLICT(feed_id) DO UPDATE SET truncate_detail=excluded.truncate_detail",
+                    params![feed_id, enabled],
+                )
+                .map_err(sql_error)?;
+            }
+            if let Some(enabled) = patch.open_in_miniflux {
+                tx.execute(
+                    "INSERT INTO feed_preferences(feed_id,open_in_miniflux) VALUES(?1,?2) ON CONFLICT(feed_id) DO UPDATE SET open_in_miniflux=excluded.open_in_miniflux",
+                    params![feed_id, enabled],
+                )
+                .map_err(sql_error)?;
+                tx.execute(
+                    "INSERT INTO feed_open_in_miniflux_overrides(feed_id) VALUES(?1) ON CONFLICT(feed_id) DO NOTHING",
+                    [feed_id],
+                )
+                .map_err(sql_error)?;
+            }
+            if let Some(enabled) = patch.auto_download_audio {
+                tx.execute(
+                    "INSERT INTO feed_preferences(feed_id,auto_download_audio) VALUES(?1,?2) ON CONFLICT(feed_id) DO UPDATE SET auto_download_audio=excluded.auto_download_audio",
+                    params![feed_id, enabled],
+                )
+                .map_err(sql_error)?;
+            }
+        }
+
+        tx.commit().map_err(sql_error)
+    }
+
     pub fn feed_preferences(&self, feed_id: i64) -> Result<FeedPreferences, CoreError> {
         let connection = self
             .connection
