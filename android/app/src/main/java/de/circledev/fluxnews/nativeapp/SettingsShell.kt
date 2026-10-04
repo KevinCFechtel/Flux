@@ -23,6 +23,7 @@ private enum class SettingsDestination(val title: String, val subtitle: String) 
     Articles("Articles", "Article presentation and reading behavior"),
     ActionBar("Action Bar", "Article list actions"),
     Navigation("Navigation", "Startup scope and navigation behavior"),
+    FeedSettings("Feed Settings", "Search and configure one or multiple feeds"),
     Media("Media", "Playback and Listening List preferences"),
     DownloadedData("Downloaded Data", "Downloaded media storage"),
     BackgroundSync("Background Sync", "Background refresh preference"),
@@ -154,6 +155,7 @@ private fun SettingsDetail(destination: SettingsDestination, bootstrap: AndroidA
         SettingsDestination.Articles -> ArticleSettingsScreen(articlePreferences, articleState, coreArticleSettings, modifier)
         SettingsDestination.ActionBar -> ActionBarSettingsScreen(actionBarPreferences, actionBarState, modifier)
         SettingsDestination.Navigation -> NavigationSettingsScreen(navigationPreferences, navigationState, categories, feeds, modifier)
+        SettingsDestination.FeedSettings -> AndroidBulkFeedSettingsScreen(feeds, modifier)
         SettingsDestination.Media -> MediaSettingsScreen(mediaSettings, modifier)
         SettingsDestination.DownloadedData -> DownloadedDataSettingsScreen(downloadedData, modifier)
         SettingsDestination.BackgroundSync -> BackgroundSyncSettingsScreen(backgroundSync, modifier)
