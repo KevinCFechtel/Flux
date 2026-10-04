@@ -16,13 +16,6 @@ android {
 
     targetProjectPath = ":app"
 
-    buildTypes {
-        create("benchmark") {
-            isDebuggable = false
-            matchingFallbacks += listOf("release")
-        }
-    }
-
     experimentalProperties["android.experimental.self-instrumenting"] = true
 }
 
