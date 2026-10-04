@@ -14,7 +14,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -25,10 +29,46 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.DetailRenderingMode
 import uniffi.flux_uniffi.FeedPreferences
+
+@androidx.compose.material3.ExperimentalMaterial3Api
+@Composable
+internal fun AndroidFeedSettingsDestination(
+    feedId: Long,
+    feedTitle: String,
+    onBack: () -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Feed Settings") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_arrow_back),
+                            contentDescription = "Back",
+                        )
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        AndroidCenteredContent(
+            maxWidth = AndroidSettingsDetailMaxWidth,
+            modifier = Modifier.fillMaxWidth().padding(padding),
+        ) { contentModifier ->
+            AndroidFeedSettingsScreen(
+                feedId = feedId,
+                feedTitle = feedTitle,
+                modifier = contentModifier,
+            )
+        }
+    }
+}
 
 @Composable
 internal fun AndroidFeedSettingsScreen(
