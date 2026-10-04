@@ -2015,7 +2015,9 @@ internal fun AndroidArticleTimeline(
         else -> {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .semantics { contentDescription = "Article timeline" },
                 contentPadding = PaddingValues(top = topContentPadding, bottom = bottomOverlayPadding),
             ) {
                 items(
