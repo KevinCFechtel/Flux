@@ -1,13 +1,6 @@
 package de.circledev.fluxnews.nativeapp
 
 import android.content.res.Configuration
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -263,10 +256,10 @@ internal fun AdaptiveAppShell(
         navController = navController,
         startDestination = ShellRoute.Timeline,
         modifier = modifier,
-        enterTransition = { forwardEnterTransition() },
-        exitTransition = { forwardExitTransition() },
-        popEnterTransition = { backEnterTransition() },
-        popExitTransition = { backExitTransition() },
+        enterTransition = { AndroidMotion.topLevelEnter() },
+        exitTransition = { AndroidMotion.topLevelExit() },
+        popEnterTransition = { AndroidMotion.topLevelEnter() },
+        popExitTransition = { AndroidMotion.topLevelExit() },
     ) {
         composable(ShellRoute.Timeline) {
             TimelineDestination(
@@ -347,18 +340,6 @@ private fun CoreEvent.requiresNavigationRefresh(): Boolean = when (this) {
     is CoreEvent.SyncDidComplete -> metadata.navigationChanged || metadata.dataChanged
     else -> false
 }
-
-private fun forwardEnterTransition(): EnterTransition =
-    slideInHorizontally(animationSpec = tween(260), initialOffsetX = { it / 5 }) + fadeIn(animationSpec = tween(220))
-
-private fun forwardExitTransition(): ExitTransition =
-    slideOutHorizontally(animationSpec = tween(260), targetOffsetX = { -it / 12 }) + fadeOut(animationSpec = tween(180))
-
-private fun backEnterTransition(): EnterTransition =
-    slideInHorizontally(animationSpec = tween(240), initialOffsetX = { -it / 12 }) + fadeIn(animationSpec = tween(200))
-
-private fun backExitTransition(): ExitTransition =
-    slideOutHorizontally(animationSpec = tween(240), targetOffsetX = { it / 5 }) + fadeOut(animationSpec = tween(180))
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -456,9 +437,11 @@ private fun TimelineDestination(
                             preferences = preferences,
                             timelineStore = timelineStore,
                             selectedScope = scope,
-                            onScopeSelected = {
-                                onSelectionChanged(selection.selectingScope(it))
-                                coroutineScope.launch { drawerState.close() }
+                            onScopeSelected = { selectedScope ->
+                                coroutineScope.launch {
+                                    drawerState.close()
+                                    onSelectionChanged(selection.selectingScope(selectedScope))
+                                }
                             },
                             onSearch = { navigateAfterDrawerCloses(ShellRoute.Search) },
                             onListeningList = { navigateAfterDrawerCloses(ShellRoute.ListeningList) },
