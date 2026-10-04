@@ -182,7 +182,6 @@ internal class AndroidWidgetProjectionStore(
 
     private fun writeDatabase(file: File, data: WidgetData, articles: List<WidgetArticle>) {
         SQLiteDatabase.openOrCreateDatabase(file, null).use { db ->
-            db.execSQL("PRAGMA journal_mode=DELETE")
             db.beginTransaction()
             try {
                 db.execSQL("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
