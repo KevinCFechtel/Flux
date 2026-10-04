@@ -1,6 +1,6 @@
 # Phase E — Native Android
 
-> **Status: PHASE E1, E2 AND E3 COMPLETE — E4 IMPLEMENTATION COMPLETE / CI + REAL-DEVICE ACCEPTANCE IN PROGRESS / PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
+> **Status: PHASE E1, E2, E3 AND E4 COMPLETE — PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
 >
@@ -842,7 +842,7 @@ Implemented on 3 October 2026:
 
 ### E4-D — Reader overlay, normal article routing and remote Search
 
-Status: **IMPLEMENTATION COMPLETE — CI and real-device acceptance pending**
+Status: **COMPLETE**
 
 Implemented on 3 October 2026:
 
@@ -876,7 +876,7 @@ Implemented on 3 October 2026:
 - the floating Article List action capsule keeps the same semantic controls but uses tighter chrome and smaller visual icons; active Sync is represented by a thin progress ring around the current Sync/Cancel glyph instead of replacing the button with a standalone spinner.
 - Sync idle presentation uses a single clockwise Material refresh glyph; while any foreground Sync is active the title-capsule count slot shows `Syncing…`, and a successful Manual Sync temporarily replaces the Sync glyph with a checkmark for 1.5 seconds. Cancelled, failed and startup Sync runs do not show the success check.
 
-With E4-D implemented, the E4 feature surface is implementation-complete. Acceptance remains subject to the Android CI gate and a focused physical-device pass for Reader overlay geometry, Back behavior, Search pagination and article-open routing.
+E4-D and the complete E4 feature surface are accepted. The canonical Android CI gate is green and the physical-device acceptance pass covered the productive Timeline/Scrollover behavior, Manual Sync, Search/Reader presentation and normal article interaction. The accepted E4 implementation was merged to `main` in PR #23 on 4 October 2026 (merge commit `ab72c9cc`). New UI or performance findings discovered after this point are normal follow-up work and do not reopen E4 unless they expose a concrete architectural or product-contract contradiction.
 
 E4 completes interactive Newsreader behavior:
 
@@ -897,6 +897,24 @@ E4 completes interactive Newsreader behavior:
 - lifecycle-safe sync coordination.
 
 The Android action configuration stores semantic action IDs/priorities, never Compose control identities.
+
+
+### E4 acceptance addendum — release performance and final hardening
+
+The final E4 acceptance state includes the release-performance and correctness hardening completed immediately before the E4 merge:
+
+- release-equivalent Android builds use R8 minification, resource shrinking, Rust release artifacts and the committed Baseline Profile; the Google Play internal-test `developmentRelease` remains the authoritative path for marginal scrolling/jank assessment on physical hardware;
+- generated Baseline Profile source files under `android/app/src/main/generated/baselineProfiles/` are committed inputs, while producer-module Gradle output such as `android/baselineprofile/build/` is ignored and must never be committed;
+- Baseline Profile capture uses the deterministic Timeline fixture described in the E3 performance contract. It is reachable only in the plugin-generated `nonMinifiedRelease` capture variant with the private profile Intent extra; normal Debug, `developmentRelease` and `productionRelease` launches cannot activate it;
+- Core runtime events are correctness-sensitive and use lossless process-scoped delivery rather than a finite `DROP_OLDEST` SharedFlow buffer. Local and remote Core worker lanes remain deliberately bounded;
+- structural Timeline state changes no longer perform article-index or row-presentation side effects inside retriable `StateFlow.update` transforms; list state is committed first and the associated single-writer bookkeeping is then reconciled;
+- Compose-derived Article ID/feed-ID projections depend on the actual Article list rather than only list size/query generation, so equal-size replacements cannot retain stale projections;
+- persisted Article presentation preferences must be loaded before the Timeline renders preference-dependent rows; a transient default preference frame is not part of the accepted UI;
+- Mark as Read on Scrollover is optimized for normal reading-speed scrolling: one gesture commits the crossed Article IDs when scrolling ends, the end-of-list path consumes all remaining crossed items, and changing an Article's read state must not alter row/list geometry or cause Timeline jumps;
+- the floating Article List action capsule scales with Android system font scale from the accepted 1.0 baseline up to a bounded 1.35 factor. Button/icon/progress dimensions and compact-portrait Timeline/Snackbar clearance scale together so accessibility sizing cannot make the capsule overlap content;
+- compact-phone Reader presentation intentionally has no clipped drop shadow. In dark mode the Reader uses a distinct Material container surface above the True Black Timeline; its scrim is edge-to-edge behind status/navigation bars while the Reader surface itself respects safe drawing insets.
+
+The final hardening deliberately does **not** introduce speculative reset/event batching, renderer replacement, additional image/cache layers or broad recomposition optimizations. Those ideas are not E4 debt. Revisit them only if an optimized Play `developmentRelease` on physical hardware reproduces a concrete performance problem; use Macrobenchmark/JankStats/tracing before changing the accepted renderer architecture.
 
 Contextually invalid actions are omitted rather than represented as durable disabled state.
 
