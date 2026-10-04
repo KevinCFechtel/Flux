@@ -139,4 +139,4 @@ private val BENCHMARK_PREVIEWS = listOf(
 )
 
 private const val BENCHMARK_IMAGE_URL =
-    "android.resource://de.circle_dev.flux_news.native.dev.benchmark/drawable/benchmark_article_image"
+    "android.resource://de.circle_dev.flux_news.native.dev/drawable/benchmark_article_image"
