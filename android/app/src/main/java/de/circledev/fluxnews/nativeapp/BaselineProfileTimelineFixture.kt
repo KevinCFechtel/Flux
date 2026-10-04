@@ -110,4 +110,4 @@ private val BASELINE_PROFILE_PREVIEWS = listOf(
 )
 
 private const val BASELINE_PROFILE_IMAGE_URL =
-    "android.resource://de.circle_dev.flux_news.native.dev/drawable/benchmark_article_image"
+    "android.resource://de.circle_dev.flux_news.native.dev/mipmap/ic_launcher"
