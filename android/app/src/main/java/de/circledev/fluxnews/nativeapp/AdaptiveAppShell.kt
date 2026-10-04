@@ -136,6 +136,7 @@ internal fun AdaptiveAppShell(
     navigationPreferences: AndroidNavigationPreferences,
     systemNotifications: AndroidSystemNotificationManager,
     widgetProjection: AndroidWidgetProjectionCoordinator,
+    widgetRouting: AndroidWidgetRouting,
     state: AndroidAccountBootstrap.State.Ready,
     onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
     modifier: Modifier = Modifier,
@@ -143,6 +144,7 @@ internal fun AdaptiveAppShell(
     val navController = rememberNavController()
     val sessionGeneration by coreRuntime.sessionGeneration.collectAsState()
     val pendingNotificationFeedId by systemNotifications.pendingFeedRoute.collectAsState()
+    val pendingWidgetArticleId by widgetRouting.pendingArticleId.collectAsState()
     val retainedTimelineSelection = timelineStore.retainedSelectionForSession(sessionGeneration)
     var timelineSelection by remember(timelineStore, sessionGeneration) {
         mutableStateOf(
@@ -544,6 +546,21 @@ private fun NewsRootContent(
                 }
                 null -> shellSnackbar.showSnackbar("The article could not be opened.")
             }
+        }
+    }
+
+    LaunchedEffect(pendingWidgetArticleId, sessionGeneration) {
+        val articleId = pendingWidgetArticleId ?: return@LaunchedEffect
+        val generation = sessionGeneration ?: return@LaunchedEffect
+        val article = runCatching {
+            coreRuntime.localForGeneration(generation) { core -> core.articleSummary(articleId) }
+        }.getOrNull()
+        widgetRouting.consumeArticle(articleId)
+        if (article != null) {
+            navController.popBackStack(ShellRoute.Timeline, inclusive = false)
+            openArticle(article)
+        } else {
+            shellSnackbar.showSnackbar("The article is no longer available.")
         }
     }
 
