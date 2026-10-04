@@ -134,12 +134,14 @@ internal fun AdaptiveAppShell(
     readerStore: AndroidReaderStore,
     articleOpenResolver: AndroidArticleOpenResolver,
     navigationPreferences: AndroidNavigationPreferences,
+    systemNotifications: AndroidSystemNotificationManager,
     state: AndroidAccountBootstrap.State.Ready,
     onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val navController = rememberNavController()
     val sessionGeneration by coreRuntime.sessionGeneration.collectAsState()
+    val pendingNotificationFeedId by systemNotifications.pendingFeedRoute.collectAsState()
     val retainedTimelineSelection = timelineStore.retainedSelectionForSession(sessionGeneration)
     var timelineSelection by remember(timelineStore, sessionGeneration) {
         mutableStateOf(
@@ -213,6 +215,16 @@ internal fun AdaptiveAppShell(
     val feeds = navigation.projection?.catalog?.feeds?.map {
         AndroidNavigationFeedRef(it.id, it.categoryId, it.title)
     }.orEmpty()
+
+    LaunchedEffect(pendingNotificationFeedId, feeds, sessionGeneration) {
+        val feedId = pendingNotificationFeedId ?: return@LaunchedEffect
+        val feed = feeds.firstOrNull { it.id == feedId } ?: return@LaunchedEffect
+        timelineSelection = timelineSelection.selectingScope(
+            AndroidNewsScope.Feed(feed.id, feed.categoryId, feed.title),
+        )
+        navController.popBackStack(ShellRoute.Timeline, inclusive = false)
+        systemNotifications.consumeFeedRoute(feedId)
+    }
 
     NavHost(
         navController = navController,
