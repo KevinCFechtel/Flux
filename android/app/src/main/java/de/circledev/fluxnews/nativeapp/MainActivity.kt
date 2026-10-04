@@ -34,7 +34,9 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        (application as FluxApplication).systemNotifications.routeIntent(intent)
+        val application = application as FluxApplication
+        application.systemNotifications.routeIntent(intent)
+        application.widgetRouting.routeIntent(intent)
     }
 
     private companion object {
@@ -65,6 +67,7 @@ class MainActivity : ComponentActivity() {
 
         val application = application as FluxApplication
         application.systemNotifications.routeIntent(intent)
+        application.widgetRouting.routeIntent(intent)
         val bootstrap = application.accountBootstrap
         val coreRuntime = application.coreRuntime
         val syncCoordinator = application.syncCoordinator
@@ -77,6 +80,7 @@ class MainActivity : ComponentActivity() {
         val actionBarPreferences = application.actionBarPreferences
         val configurationBackup = application.configurationBackup
         val widgetProjection = application.widgetProjection
+        val widgetRouting = application.widgetRouting
         setContent {
             FluxNewsTheme {
                 val coreArticleSettings = remember(coreRuntime) { AndroidCoreArticleSettings(coreRuntime) }
@@ -106,6 +110,7 @@ class MainActivity : ComponentActivity() {
                         backgroundSync,
                         systemNotifications,
                         widgetProjection,
+                        widgetRouting,
                     )
                 }
             }
@@ -126,6 +131,7 @@ private fun FluxNewsApp(
     backgroundSync: AndroidBackgroundSync,
     systemNotifications: AndroidSystemNotificationManager,
     widgetProjection: AndroidWidgetProjectionCoordinator,
+    widgetRouting: AndroidWidgetRouting,
 ) {
     var bootstrapState by remember { mutableStateOf(bootstrap.state) }; var retryGeneration by remember { mutableStateOf(0) }; var showingRestore by remember { mutableStateOf(false) }
     LaunchedEffect(bootstrap, retryGeneration) { bootstrapState = bootstrap.restoreStoredAccount() }
@@ -170,6 +176,7 @@ private fun FluxNewsApp(
                 navigationPreferences = navigationPreferences,
                 systemNotifications = systemNotifications,
                 widgetProjection = widgetProjection,
+                widgetRouting = widgetRouting,
                 state = state,
                 onAccountChanged = { changedState ->
                     bootstrapState = changedState
