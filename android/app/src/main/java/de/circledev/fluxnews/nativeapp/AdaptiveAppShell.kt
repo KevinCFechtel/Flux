@@ -97,6 +97,7 @@ private object ShellRoute {
     const val Search = "search"
     const val ListeningList = "listening-list"
     const val Settings = "settings"
+    const val FeedSettings = "feed-settings"
 }
 
 private const val ANDROID_ACTION_CAPSULE_MAX_FONT_SCALE = 1.35f
@@ -148,6 +149,7 @@ internal fun AdaptiveAppShell(
     var pendingWidgetArticle by remember(sessionGeneration) {
         mutableStateOf<uniffi.flux_uniffi.ArticleSummary?>(null)
     }
+    var feedSettingsTarget by remember { mutableStateOf<AndroidNavigationFeedRef?>(null) }
     val retainedTimelineSelection = timelineStore.retainedSelectionForSession(sessionGeneration)
     var timelineSelection by remember(timelineStore, sessionGeneration) {
         mutableStateOf(
@@ -279,6 +281,10 @@ internal fun AdaptiveAppShell(
                 onWidgetArticleConsumed = { articleId ->
                     if (pendingWidgetArticle?.id == articleId) pendingWidgetArticle = null
                 },
+                onFeedSettings = { feed ->
+                    feedSettingsTarget = feed
+                    navController.navigate(ShellRoute.FeedSettings)
+                },
                 onSelectionChanged = { timelineSelection = it },
             )
         }
@@ -297,6 +303,18 @@ internal fun AdaptiveAppShell(
                 message = "Native media presentation is connected to this destination in the media phase.",
                 onBack = navController::popBackStack,
             )
+        }
+        composable(ShellRoute.FeedSettings) {
+            val target = feedSettingsTarget
+            if (target != null) {
+                AndroidFeedSettingsDestination(
+                    feedId = target.id,
+                    feedTitle = target.title,
+                    onBack = navController::popBackStack,
+                )
+            } else {
+                LaunchedEffect(Unit) { navController.popBackStack() }
+            }
         }
         composable(ShellRoute.Settings) {
             SettingsDestination(
@@ -354,6 +372,7 @@ private fun TimelineDestination(
     navController: NavHostController,
     pendingWidgetArticle: uniffi.flux_uniffi.ArticleSummary?,
     onWidgetArticleConsumed: (Long) -> Unit,
+    onFeedSettings: (AndroidNavigationFeedRef) -> Unit,
     onSelectionChanged: (AndroidArticleTimelineSelection) -> Unit,
 ) {
     val scope = selection.scope
@@ -381,6 +400,7 @@ private fun TimelineDestination(
                             onSearch = { navController.navigate(ShellRoute.Search) },
                             onListeningList = { navController.navigate(ShellRoute.ListeningList) },
                             onSettings = { navController.navigate(ShellRoute.Settings) },
+                            onFeedSettings = onFeedSettings,
                             navigationToggleIcon = R.drawable.ic_arrow_back,
                             navigationToggleDescription = "Collapse navigation",
                             onNavigationToggle = { persistentNavigationCollapsed = true },
@@ -440,6 +460,12 @@ private fun TimelineDestination(
                             onSearch = { navigateAfterDrawerCloses(ShellRoute.Search) },
                             onListeningList = { navigateAfterDrawerCloses(ShellRoute.ListeningList) },
                             onSettings = { navigateAfterDrawerCloses(ShellRoute.Settings) },
+                            onFeedSettings = { feed ->
+                                coroutineScope.launch {
+                                    drawerState.close()
+                                    onFeedSettings(feed)
+                                }
+                            },
                             navigationToggleIcon = if (collapsedPersistentNavigation) R.drawable.ic_chevron_right else null,
                             navigationToggleDescription = if (collapsedPersistentNavigation) "Expand navigation" else null,
                             onNavigationToggle = if (collapsedPersistentNavigation) {
@@ -1161,6 +1187,7 @@ private fun NewsNavigationContent(
     onSearch: () -> Unit,
     onListeningList: () -> Unit,
     onSettings: () -> Unit,
+    onFeedSettings: (AndroidNavigationFeedRef) -> Unit,
     navigationToggleIcon: Int? = null,
     navigationToggleDescription: String? = null,
     onNavigationToggle: (() -> Unit)? = null,
@@ -1319,6 +1346,7 @@ private fun NewsNavigationContent(
                                     iconVariant = feedIconVariant,
                                     onRequestFeedIcon = timelineStore::ensureFeedIcon,
                                     onClick = { onScopeSelected(feedScope) },
+                                    onSettings = { onFeedSettings(AndroidNavigationFeedRef(feed.id, feed.categoryId, feed.title)) },
                                 )
                             }
                     }
@@ -1338,6 +1366,7 @@ private fun NewsNavigationContent(
                         iconVariant = feedIconVariant,
                         onRequestFeedIcon = timelineStore::ensureFeedIcon,
                         onClick = { onScopeSelected(feedScope) },
+                        onSettings = { onFeedSettings(AndroidNavigationFeedRef(feed.id, feed.categoryId, feed.title)) },
                     )
                 }
         }
@@ -1413,6 +1442,7 @@ private fun FeedNavigationRow(
     iconVariant: uniffi.flux_uniffi.FeedIconVariant,
     onRequestFeedIcon: suspend (Long, uniffi.flux_uniffi.FeedIconVariant) -> Unit,
     onClick: () -> Unit,
+    onSettings: () -> Unit,
 ) {
     val selectedContainer = if (selected && !isSystemInDarkTheme()) {
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f)
@@ -1445,6 +1475,13 @@ private fun FeedNavigationRow(
                 color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
             )
             CountText(count)
+            IconButton(onClick = onSettings) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_settings),
+                    contentDescription = "Feed Settings",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
