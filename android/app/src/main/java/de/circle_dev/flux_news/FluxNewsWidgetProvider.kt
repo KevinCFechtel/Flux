@@ -36,6 +36,15 @@ import java.time.format.FormatStyle
  * best chance of surviving the native application update.
  */
 class FluxNewsWidgetProvider : AppWidgetProvider() {
+    override fun onReceive(context: Context, intent: Intent) {
+        super.onReceive(context, intent)
+        if (intent.action == Intent.ACTION_CONFIGURATION_CHANGED) {
+            val manager = AppWidgetManager.getInstance(context)
+            manager.getAppWidgetIds(android.content.ComponentName(context, FluxNewsWidgetProvider::class.java))
+                .forEach { updateWidget(context, manager, it) }
+        }
+    }
+
     override fun onUpdate(context: Context, manager: AppWidgetManager, widgetIds: IntArray) {
         widgetIds.forEach { updateWidget(context, manager, it) }
     }
