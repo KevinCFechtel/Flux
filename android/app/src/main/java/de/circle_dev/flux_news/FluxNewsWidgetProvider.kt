@@ -20,6 +20,7 @@ import de.circledev.fluxnews.nativeapp.AndroidWidgetProjectionReader
 import de.circledev.fluxnews.nativeapp.AndroidWidgetReadFilter
 import de.circledev.fluxnews.nativeapp.MainActivity
 import de.circledev.fluxnews.nativeapp.R
+import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
