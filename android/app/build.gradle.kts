@@ -57,6 +57,14 @@ android {
             kotlin.directories.add("../Build/Products/Bindings/release/kotlin")
             jniLibs.directories.add("../Build/Products/release")
         }
+        maybeCreate("nonMinifiedRelease").apply {
+            java.directories.add("src/nonMinifiedRelease/java")
+            kotlin.directories.add("src/nonMinifiedRelease/java")
+            res.directories.add("src/nonMinifiedRelease/res")
+            manifest.srcFile("src/nonMinifiedRelease/AndroidManifest.xml")
+            kotlin.directories.add("../Build/Products/Bindings/release/kotlin")
+            jniLibs.directories.add("../Build/Products/release")
+        }
         getByName("migrationProbe").apply {
             java.directories.add("src/migrationProbe/java")
             kotlin.directories.add("../Build/Products/Bindings/debug/kotlin")
