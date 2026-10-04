@@ -6,7 +6,12 @@ import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.BitmapShader
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Shader
 import android.net.Uri
 import android.os.Build
 import android.util.SizeF
@@ -202,7 +207,7 @@ private class FluxNewsWidgetFactory(
     private val widgetId: Int,
 ) : RemoteViewsService.RemoteViewsFactory {
     private var rows: de.circledev.fluxnews.nativeapp.AndroidWidgetRows? = null
-    private val iconCache = mutableMapOf<Long, android.graphics.Bitmap?>()
+    private val iconCache = mutableMapOf<Pair<Long, Boolean>, Bitmap?>()
 
     override fun onCreate() = Unit
 
@@ -242,9 +247,9 @@ private class FluxNewsWidgetFactory(
     private fun bindIcon(views: RemoteViews, feedId: Long, feedTitle: String) {
         val nightMode = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
         val dark = nightMode == Configuration.UI_MODE_NIGHT_YES
-        val icon = iconCache.getOrPut(feedId) {
+        val icon = iconCache.getOrPut(feedId to dark) {
             rows?.iconFile(feedId, dark)?.takeIf(File::isFile)?.let {
-                BitmapFactory.decodeFile(it.absolutePath)
+                BitmapFactory.decodeFile(it.absolutePath)?.let(::circleCrop)
             }
         }
         if (icon != null) {
@@ -256,6 +261,22 @@ private class FluxNewsWidgetFactory(
             views.setViewVisibility(R.id.widget_row_initial, View.VISIBLE)
             views.setTextViewText(R.id.widget_row_initial, feedTitle.trim().take(1).uppercase())
         }
+    }
+
+    private fun circleCrop(source: Bitmap): Bitmap {
+        val size = minOf(source.width, source.height)
+        if (size <= 0) return source
+        val left = (source.width - size) / 2
+        val top = (source.height - size) / 2
+        val square = Bitmap.createBitmap(source, left, top, size, size)
+        val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = BitmapShader(square, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        }
+        val radius = size / 2f
+        canvas.drawCircle(radius, radius, radius, paint)
+        return output
     }
 
     override fun getLoadingView(): RemoteViews? = null
