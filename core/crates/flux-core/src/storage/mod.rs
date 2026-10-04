@@ -29,7 +29,7 @@ use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
 
-const SCHEMA_VERSION: i64 = 20;
+const SCHEMA_VERSION: i64 = 21;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingSavedMediaReplication {
@@ -5389,6 +5389,20 @@ mod tests {
             store.core_settings().unwrap().detail_character_limit,
             10_000
         );
+    }
+
+    #[test]
+    fn schema_21_database_reopens_after_migration() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+
+        {
+            let store = Store::open(&data, &cache, &media).unwrap();
+            assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+        }
+
+        let reopened = Store::open(&data, &cache, &media).unwrap();
+        assert_eq!(reopened.schema_version().unwrap(), SCHEMA_VERSION);
     }
 
     #[test]
