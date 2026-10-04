@@ -35,11 +35,6 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
-        create("nonMinifiedRelease") {
-            initWith(getByName("release"))
-            applicationIdSuffix = ".benchmark"
-            matchingFallbacks += listOf("release")
-        }
         create("migrationProbe") { initWith(getByName("debug")); isDebuggable = true; isMinifyEnabled = false; applicationIdSuffix = "" }
     }
     flavorDimensions += "distribution"
@@ -59,10 +54,6 @@ android {
             jniLibs.directories.add("../Build/Products/debug")
         }
         getByName("release").apply {
-            kotlin.directories.add("../Build/Products/Bindings/release/kotlin")
-            jniLibs.directories.add("../Build/Products/release")
-        }
-        getByName("nonMinifiedRelease").apply {
             kotlin.directories.add("../Build/Products/Bindings/release/kotlin")
             jniLibs.directories.add("../Build/Products/release")
         }
@@ -89,7 +80,6 @@ fun wireUniffiPreparation(variantName: String, preparation: TaskProvider<Exec>) 
 wireUniffiPreparation("developmentDebug", registerUniffiPreparation("developmentDebug", "debug"))
 wireUniffiPreparation("developmentRelease", registerUniffiPreparation("developmentRelease", "release"))
 wireUniffiPreparation("developmentNonMinifiedRelease", registerUniffiPreparation("developmentNonMinifiedRelease", "release"))
-wireUniffiPreparation("productionNonMinifiedRelease", registerUniffiPreparation("productionNonMinifiedRelease", "release"))
 wireUniffiPreparation("productionMigrationProbe", registerUniffiPreparation("productionMigrationProbe", "debug"))
 
 val migrationSigningProperties = Properties().apply { val file = rootProject.file("migration-signing.properties"); if (file.exists()) file.inputStream().use(::load) }
