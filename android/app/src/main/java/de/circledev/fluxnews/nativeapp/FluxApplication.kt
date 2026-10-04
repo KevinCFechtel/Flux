@@ -25,8 +25,14 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
     val preferenceStore: AndroidPreferenceStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidPreferenceStore.create(applicationContext) }
     internal val diagnostics: AndroidAppDiagnostics by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidAppDiagnostics(applicationContext, storagePaths, preferenceStore) }
     val coreRuntime: AndroidCoreRuntime by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidCoreRuntime(AndroidCoreDiagnosticListener(diagnostics)) }
+    internal val systemNotifications: AndroidSystemNotificationManager by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidSystemNotificationManager(applicationContext, coreRuntime)
+    }
     internal val postSyncEffects: AndroidPostSyncEffects by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        AndroidPostSyncEffects(coreRuntime::activeSessionGeneration)
+        AndroidPostSyncEffects(
+            activeSessionGeneration = coreRuntime::activeSessionGeneration,
+            effects = listOf(systemNotifications),
+        )
     }
     val syncCoordinator: AndroidSyncCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidSyncCoordinator(coreRuntime, postSyncEffects)
