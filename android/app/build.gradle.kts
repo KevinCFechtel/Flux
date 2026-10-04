@@ -75,7 +75,17 @@ androidComponents {
 }
 
 val uniffiBuildScript = file("../Build/build-uniffi.sh")
-fun registerUniffiPreparation(variantName: String, mode: String): TaskProvider<Exec> = tasks.register<Exec>("prepare${variantName.replaceFirstChar { it.uppercase() }}Uniffi") { inputs.file(uniffiBuildScript); inputs.file(file("../../core/crates/flux-uniffi/uniffi.toml")); outputs.dir(file("../Build/Products/$mode")); outputs.dir(file("../Build/Products/Bindings/$mode/kotlin")); commandLine(uniffiBuildScript.absolutePath, mode) }
+fun registerUniffiPreparation(variantName: String, mode: String): TaskProvider<Exec> = tasks.register<Exec>("prepare${variantName.replaceFirstChar { it.uppercase() }}Uniffi") {
+    inputs.file(uniffiBuildScript)
+    inputs.files(
+        fileTree("../../core") {
+            include("Cargo.toml", "Cargo.lock", "crates/**/*.rs", "crates/**/Cargo.toml", "crates/**/*.toml")
+        },
+    )
+    outputs.dir(file("../Build/Products/$mode"))
+    outputs.dir(file("../Build/Products/Bindings/$mode/kotlin"))
+    commandLine(uniffiBuildScript.absolutePath, mode)
+}
 fun wireUniffiPreparation(variantName: String, preparation: TaskProvider<Exec>) { val capitalized = variantName.replaceFirstChar { it.uppercase() }; tasks.matching { it.name == "compile${capitalized}Kotlin" || it.name == "merge${capitalized}JniLibFolders" || it.name == "merge${capitalized}NativeLibs" }.configureEach { dependsOn(preparation) } }
 wireUniffiPreparation("developmentDebug", registerUniffiPreparation("developmentDebug", "debug"))
 wireUniffiPreparation("developmentRelease", registerUniffiPreparation("developmentRelease", "release"))
