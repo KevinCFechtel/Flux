@@ -969,11 +969,17 @@ The widget process/component must not:
 - call Miniflux;
 - become a durable article-domain owner.
 
-The main app writes a bounded versioned credential-free widget projection plus bounded icon assets into Android app-private widget-readable storage. This is the Android equivalent of the shared widget projection principle; it is not an App Group/WidgetKit copy.
+The main app writes a versioned credential-free widget projection plus bounded icon assets into Android app-private widget-readable storage. This is the Android equivalent of the shared widget projection principle; it is not an App Group/WidgetKit copy.
+
+Android must not inherit the small fixed article-count limit used by WidgetKit snapshots. The Android projection may contain the complete locally retained article timeline and is paged from Core into Android-owned projection storage. "Bounded" on Android means bounded fields per article, bounded icon variants/assets, bounded projection generations and controlled storage ownership — not a fixed maximum number of article rows.
+
+The Flutter Android widget is a UX reference rather than a fixed implementation contract. Preserve the useful product shape (responsive compact/status sizes and a large scrollable headline list), but evaluate native Android defaults first for background, corner radius, theming, padding and launcher integration instead of copying Flutter-specific styling.
+
+The native large widget should use Android collection-widget mechanics appropriate for long timelines (for example RemoteViewsService/RemoteViewsFactory) rather than materializing the entire timeline into one RemoteViews payload. Per-widget configuration remains platform-owned.
 
 Article taps route into the normal app article-open path. Widgets do not own a separate Open in Miniflux preference.
 
-Widget Sync, if exposed, schedules/requests normal app background sync rather than running a parallel widget Core.
+The legacy manual widget Sync button is intentionally retired in the native Android widget. Widget data refresh follows the normal app/background sync and local-mutation projection refresh paths; the widget must not expose a parallel Core sync path.
 
 ### Existing production widget component
 
