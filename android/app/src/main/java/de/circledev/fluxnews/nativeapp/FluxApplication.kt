@@ -6,10 +6,13 @@ import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
 import coil3.disk.directory
+import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.memory.MemoryCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.launch
 
 /**
@@ -79,8 +82,25 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
         )
     }
 
-    override fun newImageLoader(context: Context): ImageLoader =
-        ImageLoader.Builder(context.applicationContext)
+    override fun newImageLoader(context: Context): ImageLoader {
+        val imageHttpClient = OkHttpClient.Builder()
+            // OkHttp 5 Happy Eyeballs: race IPv6/IPv4 routes instead of waiting
+            // for a broken IPv6 path to time out before trying IPv4.
+            .fastFallback(true)
+            .retryOnConnectionFailure(true)
+            .connectTimeout(4, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .callTimeout(8, TimeUnit.SECONDS)
+            .build()
+
+        return ImageLoader.Builder(context.applicationContext)
+            .components {
+                add(
+                    OkHttpNetworkFetcherFactory(
+                        callFactory = { imageHttpClient },
+                    ),
+                )
+            }
             .memoryCache {
                 MemoryCache.Builder()
                     .maxSizePercent(context.applicationContext, 0.15)
@@ -93,6 +113,7 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
                     .build()
             }
             .build()
+    }
 
     override fun onCreate() {
         super.onCreate()
