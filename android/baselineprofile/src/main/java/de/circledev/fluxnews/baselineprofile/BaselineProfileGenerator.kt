@@ -57,7 +57,7 @@ class BaselineProfileGenerator {
         }
 
     private companion object {
-        const val DEVELOPMENT_PACKAGE = "de.circle_dev.flux_news.native.dev.benchmark"
+        const val DEVELOPMENT_PACKAGE = "de.circle_dev.flux_news.native.dev"
         const val BENCHMARK_ACTIVITY =
             "de.circledev.fluxnews.nativeapp.BenchmarkTimelineActivity"
         const val TIMELINE_DESCRIPTION = "Benchmark article timeline"
