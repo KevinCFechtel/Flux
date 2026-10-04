@@ -2294,6 +2294,14 @@ impl From<domain::WidgetArticle> for WidgetArticle {
         }
     }
 }
+impl From<domain::WidgetArticlePage> for WidgetArticlePage {
+    fn from(value: domain::WidgetArticlePage) -> Self {
+        Self {
+            articles: value.articles.into_iter().map(Into::into).collect(),
+            next_cursor: value.next_cursor.map(Into::into),
+        }
+    }
+}
 impl From<domain::WidgetCounts> for WidgetCounts {
     fn from(value: domain::WidgetCounts) -> Self {
         Self {
