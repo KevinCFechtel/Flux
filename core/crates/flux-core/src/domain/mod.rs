@@ -747,6 +747,15 @@ impl FeedPreferences {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FeedPreferencesPatch {
+    pub system_notifications_enabled: Option<bool>,
+    pub detail_rendering: Option<DetailRenderingMode>,
+    pub truncate_detail: Option<bool>,
+    pub open_in_miniflux: Option<bool>,
+    pub auto_download_audio: Option<bool>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LegacyFeedOpenInMinifluxImportOutcome {
     Imported,
