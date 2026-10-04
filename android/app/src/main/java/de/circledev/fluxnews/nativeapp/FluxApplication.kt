@@ -28,6 +28,13 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
     internal val systemNotifications: AndroidSystemNotificationManager by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidSystemNotificationManager(applicationContext, coreRuntime)
     }
+    internal val widgetProjection: AndroidWidgetProjectionCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidWidgetProjectionCoordinator(
+            coreRuntime = coreRuntime,
+            store = AndroidWidgetProjectionStore(storagePaths.widget),
+            scope = applicationScope,
+        )
+    }
     internal val postSyncEffects: AndroidPostSyncEffects by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidPostSyncEffects(
             activeSessionGeneration = coreRuntime::activeSessionGeneration,
