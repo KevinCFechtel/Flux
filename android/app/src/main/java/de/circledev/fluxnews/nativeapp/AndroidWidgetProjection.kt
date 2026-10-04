@@ -118,11 +118,16 @@ internal class AndroidWidgetProjectionStore(
         generations.mkdirs()
         val generationId = UUID.randomUUID().toString()
         val directory = File(generations, generationId).apply { mkdirs() }
-        val databaseFile = File(directory, DATABASE_NAME)
-        writeDatabase(databaseFile, data, articles)
-        writeIcons(File(directory, "icons"), icons)
-        writePointer(generationId)
-        prune(generationId)
+        try {
+            val databaseFile = File(directory, DATABASE_NAME)
+            writeDatabase(databaseFile, data, articles)
+            writeIcons(File(directory, "icons"), icons)
+            writePointer(generationId)
+            prune(generationId)
+        } catch (error: Exception) {
+            directory.deleteRecursively()
+            throw error
+        }
     }
 
     fun currentDirectory(): File? {
