@@ -3568,6 +3568,37 @@ impl Store {
         Self::query_articles_locked(&connection, query)
     }
 
+    pub fn article_summary(&self, article_id: i64) -> Result<Option<ArticleSummary>, CoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| CoreError::internal("database lock poisoned"))?;
+        connection
+            .query_row(
+                "SELECT a.id,a.feed_id,f.category_id,f.title,a.title,a.url,a.comments_url,a.published_at,a.is_read,a.is_starred,a.reading_time_minutes,a.preview,a.image_url FROM articles a JOIN feeds f ON f.id=a.feed_id WHERE a.id=?1",
+                [article_id],
+                |r| {
+                    Ok(ArticleSummary {
+                        id: r.get(0)?,
+                        feed_id: r.get(1)?,
+                        category_id: r.get(2)?,
+                        feed_title: r.get(3)?,
+                        title: r.get(4)?,
+                        url: r.get(5)?,
+                        comments_url: r.get(6)?,
+                        published_at: r.get(7)?,
+                        is_read: r.get(8)?,
+                        is_starred: r.get(9)?,
+                        reading_time_minutes: r.get::<_, u32>(10)?,
+                        preview: r.get(11)?,
+                        image_url: r.get(12)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(sql_error)
+    }
+
     pub fn article_page(
         &self,
         query: &ArticleQuery,
