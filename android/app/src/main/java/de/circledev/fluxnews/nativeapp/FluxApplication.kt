@@ -38,7 +38,7 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
     internal val postSyncEffects: AndroidPostSyncEffects by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidPostSyncEffects(
             activeSessionGeneration = coreRuntime::activeSessionGeneration,
-            effects = listOf(systemNotifications),
+            effects = listOf(systemNotifications, widgetProjection),
         )
     }
     val syncCoordinator: AndroidSyncCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
