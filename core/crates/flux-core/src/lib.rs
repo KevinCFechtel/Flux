@@ -560,6 +560,9 @@ impl FluxCore {
     pub fn query_articles(&self, query: ArticleQuery) -> Result<Vec<ArticleSummary>, CoreError> {
         self.store.query_articles(&query)
     }
+    pub fn article_summary(&self, article_id: i64) -> Result<Option<ArticleSummary>, CoreError> {
+        self.store.article_summary(article_id)
+    }
     pub fn article_page(
         &self,
         query: ArticleQuery,
