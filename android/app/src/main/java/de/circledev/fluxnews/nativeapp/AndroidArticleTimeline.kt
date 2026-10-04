@@ -43,6 +43,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
@@ -720,23 +721,12 @@ internal class AndroidArticleTimelineStore private constructor(
                 removeWhenRead &&
                 selection.readFilter == AndroidArticleReadFilter.Unread
             ) {
-                mutableState.update { state ->
-                    if (
-                        state.queryGeneration == generation &&
-                        state.selection == selection &&
-                        state.sessionGeneration == sessionGeneration
-                    ) {
-                        val filtered = state.articles.filterNot { it.id == articleId }
-                        rebuildArticleIndex(filtered)
-                        rowPresentationById.remove(articleId)
-                        state.copy(
-                            articles = filtered,
-                            audioArticleIds = state.audioArticleIds - articleId,
-                        )
-                    } else {
-                        state
-                    }
-                }
+                removeArticleFromVisibleState(
+                    articleId = articleId,
+                    selection = selection,
+                    generation = generation,
+                    sessionGeneration = sessionGeneration,
+                )
             }
             refreshSelectionTotal(selection, generation, sessionGeneration)
             if (previous && !read) {
@@ -811,23 +801,12 @@ internal class AndroidArticleTimelineStore private constructor(
 
         if (result.isSuccess) {
             if (!starred && selection.scope == AndroidNewsScope.Starred) {
-                mutableState.update { state ->
-                    if (
-                        state.queryGeneration == generation &&
-                        state.selection == selection &&
-                        state.sessionGeneration == sessionGeneration
-                    ) {
-                        val filtered = state.articles.filterNot { it.id == articleId }
-                        rebuildArticleIndex(filtered)
-                        rowPresentationById.remove(articleId)
-                        state.copy(
-                            articles = filtered,
-                            audioArticleIds = state.audioArticleIds - articleId,
-                        )
-                    } else {
-                        state
-                    }
-                }
+                removeArticleFromVisibleState(
+                    articleId = articleId,
+                    selection = selection,
+                    generation = generation,
+                    sessionGeneration = sessionGeneration,
+                )
             }
             if (selection.scope == AndroidNewsScope.Starred) {
                 refreshSelectionTotal(selection, generation, sessionGeneration)
@@ -1190,16 +1169,12 @@ internal class AndroidArticleTimelineStore private constructor(
                 current.articles[currentIndex].id == articleId
             ) {
                 if (selection.readFilter == AndroidArticleReadFilter.Unread && read && !retainScrolloverRow) {
-                    mutableState.update { state ->
-                        if (state.selection != selection || state.sessionGeneration != current.sessionGeneration) return@update state
-                        val filtered = state.articles.filterNot { it.id == articleId }
-                        rebuildArticleIndex(filtered)
-                        rowPresentationById.remove(articleId)
-                        state.copy(
-                            articles = filtered,
-                            audioArticleIds = state.audioArticleIds - articleId,
-                        )
-                    }
+                    removeArticleFromVisibleState(
+                        articleId = articleId,
+                        selection = selection,
+                        generation = current.queryGeneration,
+                        sessionGeneration = current.sessionGeneration,
+                    )
                 } else {
                     setRowRead(articleId, read)
                 }
@@ -1432,16 +1407,12 @@ internal class AndroidArticleTimelineStore private constructor(
                 current.articles[currentIndex].id == articleId
             ) {
                 if (starredScope && !starred) {
-                    mutableState.update { state ->
-                        if (state.selection != selection || state.sessionGeneration != current.sessionGeneration) return@update state
-                        val filtered = state.articles.filterNot { it.id == articleId }
-                        rebuildArticleIndex(filtered)
-                        rowPresentationById.remove(articleId)
-                        state.copy(
-                            articles = filtered,
-                            audioArticleIds = state.audioArticleIds - articleId,
-                        )
-                    }
+                    removeArticleFromVisibleState(
+                        articleId = articleId,
+                        selection = selection,
+                        generation = current.queryGeneration,
+                        sessionGeneration = current.sessionGeneration,
+                    )
                 } else {
                     setRowStarred(articleId, starred)
                 }
@@ -1609,25 +1580,49 @@ internal class AndroidArticleTimelineStore private constructor(
         val appendedAudioArticleIds = loadAudioArticleIds(appended.map { it.id })
 
         if (!owns(generation, selection, currentSessionGeneration)) return
-        mutableState.update { state ->
-            if (state.queryGeneration != generation || state.selection != selection) return@update state
-
-            val currentAppend = appended.filter { !articleIndexById.containsKey(it.id) }
-            val madeProgress = currentAppend.isNotEmpty()
-            val nextCursor = page.nextCursor.takeIf { madeProgress && it != cursor }
-
-            currentAppend.forEachIndexed { offset, article ->
-                articleIndexById[article.id] = state.articles.size + offset
-            }
-            reconcileRowPresentations(currentAppend, replace = false)
-            state.copy(
-                articles = state.articles + currentAppend,
-                audioArticleIds = state.audioArticleIds + appendedAudioArticleIds,
-                nextCursor = nextCursor,
-                loadingNextPage = false,
-                errorMessage = null,
-            )
+        val appendBase = mutableState.value
+        if (appendBase.queryGeneration != generation || appendBase.selection != selection) return
+        val currentAppend = appended.filter { article ->
+            appendBase.articles.none { it.id == article.id }
         }
+        val madeProgress = currentAppend.isNotEmpty()
+        val nextCursor = page.nextCursor.takeIf { madeProgress && it != cursor }
+        val updatedArticles = appendBase.articles + currentAppend
+        mutableState.value = appendBase.copy(
+            articles = updatedArticles,
+            audioArticleIds = appendBase.audioArticleIds + appendedAudioArticleIds,
+            nextCursor = nextCursor,
+            loadingNextPage = false,
+            errorMessage = null,
+        )
+        rebuildArticleIndex(updatedArticles)
+        reconcileRowPresentations(currentAppend, replace = false)
+    }
+
+    private fun removeArticleFromVisibleState(
+        articleId: Long,
+        selection: AndroidArticleTimelineSelection,
+        generation: Long,
+        sessionGeneration: Long?,
+    ): Boolean {
+        val state = mutableState.value
+        if (
+            state.queryGeneration != generation ||
+            state.selection != selection ||
+            state.sessionGeneration != sessionGeneration
+        ) {
+            return false
+        }
+        val filtered = state.articles.filterNot { it.id == articleId }
+        if (filtered.size == state.articles.size) return false
+
+        mutableState.value = state.copy(
+            articles = filtered,
+            audioArticleIds = state.audioArticleIds - articleId,
+        )
+        rebuildArticleIndex(filtered)
+        rowPresentationById.remove(articleId)
+        return true
     }
 
     private fun rebuildArticleIndex(articles: List<ArticleSummary>) {
@@ -1739,9 +1734,14 @@ internal fun AndroidArticleTimeline(
 ) {
     val state by store.contentState.collectAsState()
     val undoState by store.undoState.collectAsState()
-    val articlePreferences by LocalAndroidArticlePreferences.current.state.collectAsState(
-        initial = AndroidArticlePreferenceState(),
-    )
+    val preferencesFlow = LocalAndroidArticlePreferences.current.state
+    val articlePreferences by produceState<AndroidArticlePreferenceState?>(
+        initialValue = null,
+        key1 = preferencesFlow,
+    ) {
+        preferencesFlow.collect { value = it }
+    }
+    val loadedArticlePreferences = articlePreferences ?: return
     val errorMessage = state.errorMessage
     val pendingNewDataForCurrentScope = store.hasPendingNewDataForScope(
         scope = selection.scope,
@@ -1754,10 +1754,10 @@ internal fun AndroidArticleTimeline(
     val context = LocalContext.current
     val view = LocalView.current
     val publicationReferenceMillis = remember(state.queryGeneration) { System.currentTimeMillis() }
-    val articleIds = remember(state.queryGeneration, state.articles.size) {
+    val articleIds = remember(state.articles) {
         state.articles.map { it.id }
     }
-    val articleFeedIds = remember(state.queryGeneration, state.articles.size) {
+    val articleFeedIds = remember(state.articles) {
         state.articles.map { it.feedId }.distinct()
     }
     val feedIconVariant = if (isSystemInDarkTheme()) {
@@ -1776,7 +1776,7 @@ internal fun AndroidArticleTimeline(
                 store.requestSetRead(
                     articleId = article.id,
                     read = !article.isRead,
-                    removeWhenRead = articlePreferences.removeArticlesWhenRead,
+                    removeWhenRead = loadedArticlePreferences.removeArticlesWhenRead,
                 )
             }
             AndroidArticleSwipeAction.StarUnstar -> {
@@ -1786,7 +1786,7 @@ internal fun AndroidArticleTimeline(
                 store.requestSetRead(
                     articleId = article.id,
                     read = true,
-                    removeWhenRead = articlePreferences.removeArticlesWhenRead,
+                    removeWhenRead = loadedArticlePreferences.removeArticlesWhenRead,
                     providesFeedback = false,
                 )
                 if (!AndroidArticlePlatformActions.openUrl(context, article.url)) {
@@ -1797,7 +1797,7 @@ internal fun AndroidArticleTimeline(
                 store.requestSetRead(
                     articleId = article.id,
                     read = true,
-                    removeWhenRead = articlePreferences.removeArticlesWhenRead,
+                    removeWhenRead = loadedArticlePreferences.removeArticlesWhenRead,
                     providesFeedback = false,
                 )
                 actionScope.launch {
@@ -1838,7 +1838,7 @@ internal fun AndroidArticleTimeline(
                 store.requestSetRead(
                     articleId = article.id,
                     read = true,
-                    removeWhenRead = articlePreferences.removeArticlesWhenRead,
+                    removeWhenRead = loadedArticlePreferences.removeArticlesWhenRead,
                     providesFeedback = false,
                 )
                 onOpenReader(article)
@@ -1919,10 +1919,10 @@ internal fun AndroidArticleTimeline(
     LaunchedEffect(
         listState,
         scrolloverTracker,
-        articlePreferences.markReadOnScrollover,
+        loadedArticlePreferences.markReadOnScrollover,
         state.queryGeneration,
     ) {
-        if (!articlePreferences.markReadOnScrollover) {
+        if (!loadedArticlePreferences.markReadOnScrollover) {
             scrolloverTracker.synchronizeIdlePosition(listState.firstVisibleItemIndex)
             return@LaunchedEffect
         }
@@ -2023,7 +2023,7 @@ internal fun AndroidArticleTimeline(
                     key = { article -> article.id },
                     contentType = { article ->
                         AndroidArticleRowPolicy.layoutVariant(
-                            mode = articlePreferences.presentationMode,
+                            mode = loadedArticlePreferences.presentationMode,
                             imageUrl = article.imageUrl,
                             availableWidthDp = availableWidthDp,
                         )
@@ -2044,7 +2044,7 @@ internal fun AndroidArticleTimeline(
                     AndroidArticleSwipeContainer(
                         article = presentedArticle,
                         hasAudio = hasAudio,
-                        configuration = articlePreferences.swipeConfiguration,
+                        configuration = loadedArticlePreferences.swipeConfiguration,
                         rowWidth = maxWidth,
                         onOpen = { onOpenArticle(presentedArticle) },
                         onSwipeAction = { action -> performSwipeAction(presentedArticle, action) },
