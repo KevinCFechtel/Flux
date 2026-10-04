@@ -64,6 +64,10 @@ android {
             kotlin.directories.add("../Build/Products/Bindings/release/kotlin")
             jniLibs.directories.add("../Build/Products/release")
         }
+        getByName("benchmark").apply {
+            kotlin.directories.add("../Build/Products/Bindings/release/kotlin")
+            jniLibs.directories.add("../Build/Products/release")
+        }
         getByName("migrationProbe").apply {
             java.directories.add("src/migrationProbe/java")
             kotlin.directories.add("../Build/Products/Bindings/debug/kotlin")
@@ -86,6 +90,8 @@ fun registerUniffiPreparation(variantName: String, mode: String): TaskProvider<E
 fun wireUniffiPreparation(variantName: String, preparation: TaskProvider<Exec>) { val capitalized = variantName.replaceFirstChar { it.uppercase() }; tasks.matching { it.name == "compile${capitalized}Kotlin" || it.name == "merge${capitalized}JniLibFolders" || it.name == "merge${capitalized}NativeLibs" }.configureEach { dependsOn(preparation) } }
 wireUniffiPreparation("developmentDebug", registerUniffiPreparation("developmentDebug", "debug"))
 wireUniffiPreparation("developmentRelease", registerUniffiPreparation("developmentRelease", "release"))
+wireUniffiPreparation("developmentBenchmark", registerUniffiPreparation("developmentBenchmark", "release"))
+wireUniffiPreparation("productionBenchmark", registerUniffiPreparation("productionBenchmark", "release"))
 wireUniffiPreparation("productionMigrationProbe", registerUniffiPreparation("productionMigrationProbe", "debug"))
 
 val migrationSigningProperties = Properties().apply { val file = rootProject.file("migration-signing.properties"); if (file.exists()) file.inputStream().use(::load) }
