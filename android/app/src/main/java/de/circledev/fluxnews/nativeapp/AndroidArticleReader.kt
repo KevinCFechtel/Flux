@@ -272,8 +272,8 @@ internal fun AndroidArticleReaderOverlay(
             }
                 .semantics { paneTitle = "Article reader" },
             shape = RoundedCornerShape(28.dp),
-            tonalElevation = 8.dp,
-            shadowElevation = 12.dp,
+            tonalElevation = if (compactPortrait) 0.dp else 8.dp,
+            shadowElevation = if (compactPortrait) 0.dp else 12.dp,
         ) {
             Column(Modifier.fillMaxSize()) {
                 ReaderHeader(
