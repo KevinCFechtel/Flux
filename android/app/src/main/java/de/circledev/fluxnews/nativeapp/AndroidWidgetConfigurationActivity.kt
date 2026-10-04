@@ -87,8 +87,25 @@ private fun AndroidWidgetConfigurationScreen(
     catalog: AndroidWidgetCatalog,
     onSave: (AndroidWidgetConfiguration) -> Unit,
 ) {
-    var scopeType by remember { mutableStateOf(initial.scopeType) }
-    var scopeId by remember { mutableStateOf(initial.scopeId) }
+    val normalizedInitialScopeId = when (initial.scopeType) {
+        AndroidWidgetScopeType.Category ->
+            initial.scopeId?.takeIf { id -> catalog.categories.any { it.id == id } }
+                ?: catalog.categories.firstOrNull()?.id
+        AndroidWidgetScopeType.Feed ->
+            initial.scopeId?.takeIf { id -> catalog.feeds.any { it.id == id } }
+                ?: catalog.feeds.firstOrNull()?.id
+        else -> null
+    }
+    var scopeType by remember {
+        mutableStateOf(
+            when (initial.scopeType) {
+                AndroidWidgetScopeType.Category -> if (catalog.categories.isEmpty()) AndroidWidgetScopeType.All else initial.scopeType
+                AndroidWidgetScopeType.Feed -> if (catalog.feeds.isEmpty()) AndroidWidgetScopeType.All else initial.scopeType
+                else -> initial.scopeType
+            },
+        )
+    }
+    var scopeId by remember { mutableStateOf(normalizedInitialScopeId) }
     var readFilter by remember { mutableStateOf(initial.readFilter) }
     var sortOrder by remember { mutableStateOf(initial.sortOrder) }
 
