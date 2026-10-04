@@ -23,7 +23,6 @@ class BaselineProfileGenerator {
         pressHome()
         startActivityAndWait()
 
-        val device = InstrumentationRegistry.getInstrumentation().uiAutomation
         // startActivityAndWait() is the deterministic baseline gate. The timeline path is
         // opportunistic: a developer can generate a richer profile on a device whose
         // development app already has an account, without checking credentials into the repo.
