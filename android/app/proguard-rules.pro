@@ -6,3 +6,15 @@
 -keepclasseswithmembernames, includedescriptorclasses class de.circledev.fluxnews.nativeapp.AndroidPlatformTrust {
     native <methods>;
 }
+
+
+# UniFFI uses JNA for the generated Kotlin/Rust FFI boundary. JNA resolves native symbols and
+# callback types reflectively, so release minification must preserve its runtime-facing types.
+# These rules follow JNA's Android/ProGuard guidance and keep generated Library/Callback
+# implementations from having their native method names rewritten.
+-dontwarn java.awt.**
+-keep class com.sun.jna.** { *; }
+-keep class * extends com.sun.jna.** { *; }
+-keep class * implements com.sun.jna.Library { *; }
+-keep class * implements com.sun.jna.Callback { *; }
+-keepclassmembers class * extends com.sun.jna.** { public *; }
