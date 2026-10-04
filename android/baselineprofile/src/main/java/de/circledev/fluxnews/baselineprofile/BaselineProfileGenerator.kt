@@ -30,7 +30,7 @@ class BaselineProfileGenerator {
         includeInStartupProfile = false,
     ) {
         pressHome()
-        startActivityAndWait(benchmarkTimelineIntent())
+        startActivityAndWait(timelineFixtureIntent())
 
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         device.waitForIdle()
@@ -46,16 +46,17 @@ class BaselineProfileGenerator {
         }
     }
 
-    private fun benchmarkTimelineIntent(): Intent =
+    private fun timelineFixtureIntent(): Intent =
         Intent(Intent.ACTION_MAIN).apply {
-            component = ComponentName(DEVELOPMENT_PACKAGE, BENCHMARK_ACTIVITY)
+            component = ComponentName(DEVELOPMENT_PACKAGE, MAIN_ACTIVITY)
+            putExtra(TIMELINE_EXTRA, true)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         }
 
     private companion object {
         const val DEVELOPMENT_PACKAGE = "de.circle_dev.flux_news.native.dev"
-        const val BENCHMARK_ACTIVITY =
-            "de.circledev.fluxnews.nativeapp.BenchmarkTimelineActivity"
+        const val MAIN_ACTIVITY = "de.circledev.fluxnews.nativeapp.MainActivity"
+        const val TIMELINE_EXTRA = "flux.baselineProfile.timeline"
         const val TIMELINE_SCROLLS = 5
         const val SWIPE_STEPS = 24
     }
