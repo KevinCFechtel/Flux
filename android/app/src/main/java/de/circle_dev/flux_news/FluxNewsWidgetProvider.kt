@@ -195,11 +195,13 @@ private class FluxNewsWidgetFactory(
     private val widgetId: Int,
 ) : RemoteViewsService.RemoteViewsFactory {
     private var rows: de.circledev.fluxnews.nativeapp.AndroidWidgetRows? = null
+    private val iconCache = mutableMapOf<Long, android.graphics.Bitmap?>()
 
     override fun onCreate() = Unit
 
     override fun onDataSetChanged() {
         rows?.close()
+        iconCache.clear()
         val configuration = AndroidWidgetConfigurationStore(context).read(widgetId)
         rows = AndroidWidgetProjectionReader(AndroidStoragePaths.create(context).widget).openRows(configuration)
     }
@@ -207,6 +209,7 @@ private class FluxNewsWidgetFactory(
     override fun onDestroy() {
         rows?.close()
         rows = null
+        iconCache.clear()
     }
 
     override fun getCount(): Int = rows?.count ?: 0
@@ -232,7 +235,11 @@ private class FluxNewsWidgetFactory(
     private fun bindIcon(views: RemoteViews, feedId: Long, feedTitle: String) {
         val nightMode = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
         val dark = nightMode == Configuration.UI_MODE_NIGHT_YES
-        val icon = rows?.iconFile(feedId, dark)?.takeIf(File::isFile)?.let { BitmapFactory.decodeFile(it.absolutePath) }
+        val icon = iconCache.getOrPut(feedId) {
+            rows?.iconFile(feedId, dark)?.takeIf(File::isFile)?.let {
+                BitmapFactory.decodeFile(it.absolutePath)
+            }
+        }
         if (icon != null) {
             views.setViewVisibility(R.id.widget_row_icon, View.VISIBLE)
             views.setViewVisibility(R.id.widget_row_initial, View.GONE)
