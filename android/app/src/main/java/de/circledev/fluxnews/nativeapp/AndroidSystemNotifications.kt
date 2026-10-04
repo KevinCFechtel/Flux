@@ -19,7 +19,6 @@ import java.util.Date
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import uniffi.flux_uniffi.FeedSystemNotificationSetting
 import uniffi.flux_uniffi.SyncCompleted
 import uniffi.flux_uniffi.SystemNotificationCandidate
 
@@ -81,9 +80,6 @@ internal class AndroidSystemNotificationManager(
             putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-
-    suspend fun feedSettings(): Result<List<FeedSystemNotificationSetting>> =
-        runCatching { coreRuntime.local { core -> core.feedSystemNotificationSettings() } }
 
     suspend fun setFeedEnabled(feedId: Long, enabled: Boolean): Result<Unit> = runCatching {
         if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasRuntimePermission()) {
