@@ -7,11 +7,13 @@ import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import uniffi.flux_uniffi.FeedIconVariant
 import uniffi.flux_uniffi.SyncCompleted
 import uniffi.flux_uniffi.WidgetArticle
@@ -53,10 +55,10 @@ internal class AndroidWidgetProjectionCoordinator(
         refreshNow(sessionGeneration)
     }
 
-    suspend fun refreshNow(sessionGeneration: Long) {
-        if (coreRuntime.activeSessionGeneration() != sessionGeneration) return
+    suspend fun refreshNow(sessionGeneration: Long) = withContext(Dispatchers.IO) {
+        if (coreRuntime.activeSessionGeneration() != sessionGeneration) return@withContext
         writeMutex.withLock {
-            if (coreRuntime.activeSessionGeneration() != sessionGeneration) return
+            if (coreRuntime.activeSessionGeneration() != sessionGeneration) return@withLock
 
             val widgetData = coreRuntime.localForGeneration(sessionGeneration) { it.widgetData() }
             val articles = ArrayList<WidgetArticle>()
@@ -69,7 +71,7 @@ internal class AndroidWidgetProjectionCoordinator(
                 cursor = page.nextCursor
             } while (cursor != null && coreRuntime.activeSessionGeneration() == sessionGeneration)
 
-            if (coreRuntime.activeSessionGeneration() != sessionGeneration) return
+            if (coreRuntime.activeSessionGeneration() != sessionGeneration) return@withLock
             val icons = buildMap {
                 for (feed in widgetData.feeds) {
                     for (variant in listOf(FeedIconVariant.NORMAL, FeedIconVariant.DARK)) {
@@ -82,7 +84,7 @@ internal class AndroidWidgetProjectionCoordinator(
                     }
                 }
             }
-            if (coreRuntime.activeSessionGeneration() != sessionGeneration) return
+            if (coreRuntime.activeSessionGeneration() != sessionGeneration) return@withLock
             store.replace(widgetData, articles, icons)
         }
     }
@@ -183,10 +185,10 @@ internal class AndroidWidgetProjectionStore(
                 insertCount(db, "bookmarks", 0L, data.counts.bookmarksUnread, data.counts.bookmarks)
                 val feedUnread = data.counts.feedUnread.associate { it.id to it.count }
                 val feedAll = data.counts.feedAll.associate { it.id to it.count }
-                data.feeds.forEach { insertCount(db, "feed", it.id, feedUnread[it.id] ?: 0u, feedAll[it.id] ?: 0u) }
+                data.feeds.forEach { insertCount(db, "feed", it.id, feedUnread[it.id] ?: 0uL, feedAll[it.id] ?: 0u) }
                 val categoryUnread = data.counts.categoryUnread.associate { it.id to it.count }
                 val categoryAll = data.counts.categoryAll.associate { it.id to it.count }
-                data.categories.forEach { insertCount(db, "category", it.id, categoryUnread[it.id] ?: 0u, categoryAll[it.id] ?: 0u) }
+                data.categories.forEach { insertCount(db, "category", it.id, categoryUnread[it.id] ?: 0uL, categoryAll[it.id] ?: 0u) }
 
                 db.setTransactionSuccessful()
             } finally {
