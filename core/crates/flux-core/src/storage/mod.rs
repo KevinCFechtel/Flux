@@ -10,7 +10,7 @@ use crate::domain::{
     Article, ArticleAudioActionProjection, ArticlePage, ArticleQuery, ArticleScope, ArticleSort,
     ArticleSummary, Category, ContinueListeningItem, CoreError, CoreSettings, DeliveryMode,
     DetailRenderingMode, DiscoveryMode, DownloadFailureKind, DownloadNetworkPolicy, DownloadOrigin,
-    DownloadRetention, DownloadState, DownloadedMediaSummary, Enclosure, Feed, FeedPreferences,
+    DownloadRetention, DownloadState, DownloadedMediaSummary, Enclosure, Feed, FeedPreferences, FeedPreferencesPatch,
     FeedSystemNotificationSetting, LegacyDownloadImportOutcome,
     LegacyFeedOpenInMinifluxImportOutcome, LegacyPlaybackImport, LegacyPlaybackImportResult,
     ListeningListEnclosure, ListeningListFeed, ListeningListItem, ListeningListSort,
