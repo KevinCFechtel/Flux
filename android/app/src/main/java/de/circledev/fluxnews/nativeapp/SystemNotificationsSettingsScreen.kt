@@ -80,7 +80,10 @@ internal fun SystemNotificationsSettingsScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        if (!manager.notificationsEnabledBySystem() && manager.hasRuntimePermission()) {
+        if (
+            !manager.notificationsEnabledBySystem() &&
+            (manager.hasRuntimePermission() || message != null)
+        ) {
             Text(
                 "Android notification settings currently block FluxNews notifications.",
                 color = MaterialTheme.colorScheme.error,
