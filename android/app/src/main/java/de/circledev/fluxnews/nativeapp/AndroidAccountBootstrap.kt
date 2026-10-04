@@ -29,6 +29,7 @@ class AndroidAccountBootstrap private constructor(
         preferenceStore: AndroidPreferenceStore,
         coreRuntime: AndroidCoreRuntime,
         storagePaths: AndroidStoragePaths,
+        onWidgetStateCleared: () -> Unit = {},
     ) : this(
         credentialReader = credentialStore::read,
         credentialWriter = credentialStore::write,
@@ -58,7 +59,10 @@ class AndroidAccountBootstrap private constructor(
             preferenceStore.remove(SERVER_INFO_BASE)
             preferenceStore.remove(SERVER_INFO_VERSION)
         },
-        widgetStateClearer = { AndroidWidgetProjectionStore(storagePaths.widget).clear() },
+        widgetStateClearer = {
+            AndroidWidgetProjectionStore(storagePaths.widget).clear()
+            onWidgetStateCleared()
+        },
         storagePaths = storagePaths,
     )
 
