@@ -52,7 +52,14 @@ internal class AndroidWidgetProjectionCoordinator(
     }
 
     override suspend fun apply(sessionGeneration: Long, metadata: SyncCompleted) {
-        if (!metadata.dataChanged && !metadata.navigationChanged && store.hasCurrentProjection()) return
+        if (!metadata.dataChanged && !metadata.navigationChanged && store.hasCurrentProjection()) {
+            val lastSuccessfulSyncAt = coreRuntime.localForGeneration(sessionGeneration) {
+                it.lastSuccessfulSyncAt()
+            }
+            store.writeLastSuccessfulSyncAt(lastSuccessfulSyncAt)
+            onProjectionChanged()
+            return
+        }
         refreshNow(sessionGeneration)
     }
 
@@ -87,6 +94,7 @@ internal class AndroidWidgetProjectionCoordinator(
             }
             if (coreRuntime.activeSessionGeneration() != sessionGeneration) return@withLock
             store.replace(widgetData, articles, icons)
+            store.writeLastSuccessfulSyncAt(widgetData.lastSuccessfulSyncAt)
             onProjectionChanged()
         }
     }
@@ -111,6 +119,7 @@ internal class AndroidWidgetProjectionStore(
 ) {
     private val generations = File(root, "projection-v1")
     private val pointer = AtomicFile(File(root, "projection-v1.current"))
+    private val lastSuccessfulSync = AtomicFile(File(root, "last-successful-sync-v1"))
 
     fun hasCurrentProjection(): Boolean = currentDirectory()?.let { File(it, DATABASE_NAME).isFile } == true
 
@@ -135,6 +144,28 @@ internal class AndroidWidgetProjectionStore(
         }
     }
 
+    fun writeLastSuccessfulSyncAt(value: String?) {
+        root.mkdirs()
+        if (value.isNullOrBlank()) {
+            runCatching { lastSuccessfulSync.delete() }
+            return
+        }
+        val stream = lastSuccessfulSync.startWrite()
+        try {
+            stream.write(value.toByteArray(StandardCharsets.UTF_8))
+            lastSuccessfulSync.finishWrite(stream)
+        } catch (error: Exception) {
+            lastSuccessfulSync.failWrite(stream)
+            throw error
+        }
+    }
+
+    fun lastSuccessfulSyncAt(): String? {
+        val file = lastSuccessfulSync.baseFile
+        if (!file.isFile) return null
+        return runCatching { file.readText().trim().takeIf(String::isNotBlank) }.getOrNull()
+    }
+
     fun currentDirectory(): File? {
         val pointerFile = pointer.baseFile
         if (!pointerFile.isFile) return null
@@ -145,6 +176,7 @@ internal class AndroidWidgetProjectionStore(
 
     fun clear() {
         runCatching { pointer.delete() }
+        runCatching { lastSuccessfulSync.delete() }
         generations.deleteRecursively()
     }
 
