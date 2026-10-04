@@ -1,5 +1,7 @@
 package de.circledev.fluxnews.baselineprofile
 
+import android.content.ComponentName
+import android.content.Intent
 import androidx.benchmark.macro.junit4.BaselineProfileRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -22,7 +24,7 @@ class BaselineProfileGenerator {
         includeInStartupProfile = true,
     ) {
         pressHome()
-        startActivityAndWait()
+        startActivityAndWait(benchmarkTimelineIntent())
     }
 
     @Test
@@ -31,30 +33,36 @@ class BaselineProfileGenerator {
         includeInStartupProfile = false,
     ) {
         pressHome()
-        startActivityAndWait()
+        startActivityAndWait(benchmarkTimelineIntent())
 
-        // A configured account is intentionally not synthesized here. On a clean benchmark app
-        // this contributes only the launch path; after the side-by-side benchmark app is configured
-        // locally, the same generator records the real Timeline without storing credentials in git.
         val uiDevice = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
-        val timeline = uiDevice.wait(
-            Until.findObject(By.desc(TIMELINE_DESCRIPTION)),
-            TIMELINE_WAIT_MILLIS,
-        )
-        if (timeline != null) {
-            timeline.setGestureMargin(TIMELINE_GESTURE_MARGIN_PX)
-            repeat(TIMELINE_SCROLLS) {
-                timeline.fling(Direction.DOWN)
-                uiDevice.waitForIdle()
-            }
+        val timeline = requireNotNull(
+            uiDevice.wait(
+                Until.findObject(By.desc(TIMELINE_DESCRIPTION)),
+                TIMELINE_WAIT_MILLIS,
+            ),
+        ) { "Benchmark Timeline did not become visible." }
+
+        timeline.setGestureMargin(TIMELINE_GESTURE_MARGIN_PX)
+        repeat(TIMELINE_SCROLLS) {
+            timeline.fling(Direction.DOWN)
+            uiDevice.waitForIdle()
         }
     }
 
+    private fun benchmarkTimelineIntent(): Intent =
+        Intent(Intent.ACTION_MAIN).apply {
+            component = ComponentName(DEVELOPMENT_PACKAGE, BENCHMARK_ACTIVITY)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        }
+
     private companion object {
         const val DEVELOPMENT_PACKAGE = "de.circle_dev.flux_news.native.dev.benchmark"
-        const val TIMELINE_DESCRIPTION = "Article timeline"
-        const val TIMELINE_WAIT_MILLIS = 2_000L
-        const val TIMELINE_SCROLLS = 4
+        const val BENCHMARK_ACTIVITY =
+            "de.circledev.fluxnews.nativeapp.BenchmarkTimelineActivity"
+        const val TIMELINE_DESCRIPTION = "Benchmark article timeline"
+        const val TIMELINE_WAIT_MILLIS = 5_000L
+        const val TIMELINE_SCROLLS = 5
         const val TIMELINE_GESTURE_MARGIN_PX = 48
     }
 }
