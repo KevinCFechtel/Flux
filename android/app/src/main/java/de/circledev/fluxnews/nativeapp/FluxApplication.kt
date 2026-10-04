@@ -33,6 +33,7 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
             coreRuntime = coreRuntime,
             store = AndroidWidgetProjectionStore(storagePaths.widget),
             scope = applicationScope,
+            onProjectionChanged = { AndroidWidgetUpdates.refreshAll(applicationContext) },
         )
     }
     internal val widgetRouting: AndroidWidgetRouting by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
