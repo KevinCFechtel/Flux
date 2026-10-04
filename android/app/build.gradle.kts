@@ -38,6 +38,7 @@ android {
         create("benchmark") {
             initWith(getByName("release"))
             signingConfig = signingConfigs.getByName("debug")
+            applicationIdSuffix = ".benchmark"
             matchingFallbacks += listOf("release")
             isDebuggable = false
         }
