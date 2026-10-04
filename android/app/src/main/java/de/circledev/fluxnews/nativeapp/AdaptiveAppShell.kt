@@ -145,6 +145,9 @@ internal fun AdaptiveAppShell(
     val sessionGeneration by coreRuntime.sessionGeneration.collectAsState()
     val pendingNotificationFeedId by systemNotifications.pendingFeedRoute.collectAsState()
     val pendingWidgetArticleId by widgetRouting.pendingArticleId.collectAsState()
+    var pendingWidgetArticle by remember(sessionGeneration) {
+        mutableStateOf<uniffi.flux_uniffi.ArticleSummary?>(null)
+    }
     val retainedTimelineSelection = timelineStore.retainedSelectionForSession(sessionGeneration)
     var timelineSelection by remember(timelineStore, sessionGeneration) {
         mutableStateOf(
@@ -236,6 +239,19 @@ internal fun AdaptiveAppShell(
         systemNotifications.consumeFeedRoute(feedId)
     }
 
+    LaunchedEffect(pendingWidgetArticleId, sessionGeneration) {
+        val articleId = pendingWidgetArticleId ?: return@LaunchedEffect
+        val generation = sessionGeneration ?: return@LaunchedEffect
+        val article = runCatching {
+            coreRuntime.localForGeneration(generation) { core -> core.articleSummary(articleId) }
+        }.getOrNull()
+        widgetRouting.consumeArticle(articleId)
+        if (article != null) {
+            pendingWidgetArticle = article
+            navController.popBackStack(ShellRoute.Timeline, inclusive = false)
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = ShellRoute.Timeline,
@@ -257,6 +273,10 @@ internal fun AdaptiveAppShell(
                 articleOpenResolver = articleOpenResolver,
                 sessionGeneration = sessionGeneration,
                 navController = navController,
+                pendingWidgetArticle = pendingWidgetArticle,
+                onWidgetArticleConsumed = { articleId ->
+                    if (pendingWidgetArticle?.id == articleId) pendingWidgetArticle = null
+                },
                 onSelectionChanged = { timelineSelection = it },
             )
         }
@@ -330,6 +350,8 @@ private fun TimelineDestination(
     articleOpenResolver: AndroidArticleOpenResolver,
     sessionGeneration: Long?,
     navController: NavHostController,
+    pendingWidgetArticle: uniffi.flux_uniffi.ArticleSummary?,
+    onWidgetArticleConsumed: (Long) -> Unit,
     onSelectionChanged: (AndroidArticleTimelineSelection) -> Unit,
 ) {
     val scope = selection.scope
@@ -374,6 +396,8 @@ private fun TimelineDestination(
                     articleOpenResolver = articleOpenResolver,
                     navigationPreferences = preferences,
                     sessionGeneration = sessionGeneration,
+                    pendingWidgetArticle = pendingWidgetArticle,
+                    onWidgetArticleConsumed = onWidgetArticleConsumed,
                     persistentNavigation = true,
                     collapsedPersistentNavigation = false,
                     scopeTitleLeading = false,
@@ -440,6 +464,8 @@ private fun TimelineDestination(
                     articleOpenResolver = articleOpenResolver,
                     navigationPreferences = preferences,
                     sessionGeneration = sessionGeneration,
+                    pendingWidgetArticle = pendingWidgetArticle,
+                    onWidgetArticleConsumed = onWidgetArticleConsumed,
                     persistentNavigation = false,
                     collapsedPersistentNavigation = collapsedPersistentNavigation,
                     scopeTitleLeading = collapsedPersistentNavigation || compactLandscape,
@@ -466,6 +492,8 @@ private fun NewsRootContent(
     articleOpenResolver: AndroidArticleOpenResolver,
     navigationPreferences: AndroidNavigationPreferenceState,
     sessionGeneration: Long?,
+    pendingWidgetArticle: uniffi.flux_uniffi.ArticleSummary?,
+    onWidgetArticleConsumed: (Long) -> Unit,
     persistentNavigation: Boolean,
     collapsedPersistentNavigation: Boolean,
     scopeTitleLeading: Boolean,
@@ -549,19 +577,10 @@ private fun NewsRootContent(
         }
     }
 
-    LaunchedEffect(pendingWidgetArticleId, sessionGeneration) {
-        val articleId = pendingWidgetArticleId ?: return@LaunchedEffect
-        val generation = sessionGeneration ?: return@LaunchedEffect
-        val article = runCatching {
-            coreRuntime.localForGeneration(generation) { core -> core.articleSummary(articleId) }
-        }.getOrNull()
-        widgetRouting.consumeArticle(articleId)
-        if (article != null) {
-            navController.popBackStack(ShellRoute.Timeline, inclusive = false)
-            openArticle(article)
-        } else {
-            shellSnackbar.showSnackbar("The article is no longer available.")
-        }
+    LaunchedEffect(pendingWidgetArticle?.id) {
+        val article = pendingWidgetArticle ?: return@LaunchedEffect
+        onWidgetArticleConsumed(article.id)
+        openArticle(article)
     }
 
     LaunchedEffect(syncState) {
