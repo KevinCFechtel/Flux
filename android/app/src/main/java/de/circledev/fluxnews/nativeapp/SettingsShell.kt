@@ -82,12 +82,22 @@ internal fun SettingsShell(
                 Row(contentModifier) {
                     SettingsList(selected, { selected = it }, Modifier.width(340.dp).fillMaxHeight())
                     HorizontalDivider(Modifier.width(1.dp).fillMaxHeight())
-                    SettingsDetail(selected ?: SettingsDestination.Account, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, configurationBackup, diagnostics, onAccountChanged, Modifier.fillMaxSize())
+                    AndroidCenteredContent(
+                        maxWidth = AndroidSettingsDetailMaxWidth,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    ) { detailModifier ->
+                        SettingsDetail(selected ?: SettingsDestination.Account, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, configurationBackup, diagnostics, onAccountChanged, detailModifier)
+                    }
                 }
             } else if (selected == null) {
                 SettingsList(null, { selected = it }, contentModifier)
             } else {
-                SettingsDetail(selected!!, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, configurationBackup, diagnostics, onAccountChanged, contentModifier)
+                AndroidCenteredContent(
+                    maxWidth = AndroidSettingsDetailMaxWidth,
+                    modifier = contentModifier,
+                ) { detailModifier ->
+                    SettingsDetail(selected!!, bootstrap, navigationPreferences, navigationPreferenceState, navigationCategories, navigationFeeds, articlePreferences, articleState, actionBarPreferences, actionBarState, coreArticleSettings, mediaSettings, downloadedData, backgroundSync, configurationBackup, diagnostics, onAccountChanged, detailModifier)
+                }
             }
         }
     }

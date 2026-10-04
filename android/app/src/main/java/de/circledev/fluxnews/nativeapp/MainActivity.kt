@@ -30,14 +30,32 @@ import androidx.compose.ui.unit.dp
 import uniffi.flux_uniffi.SyncReason
 
 class MainActivity : ComponentActivity() {
+    private companion object {
+        const val BASELINE_PROFILE_TIMELINE_EXTRA = "flux.baselineProfile.timeline"
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (
+            BuildConfig.BUILD_TYPE == "nonMinifiedRelease" &&
+            intent?.getBooleanExtra(BASELINE_PROFILE_TIMELINE_EXTRA, false) == true
+        ) {
+            setContent {
+                FluxNewsTheme {
+                    BaselineProfileTimelineFixture()
+                }
+            }
+            return
+        }
+
         val application = application as FluxApplication
         val bootstrap = application.accountBootstrap
         val coreRuntime = application.coreRuntime
         val syncCoordinator = application.syncCoordinator
         val timelineStore = application.timelineStore
+        val searchStore = application.searchStore
+        val readerStore = application.readerStore
+        val articleOpenResolver = application.articleOpenResolver
         val navigationPreferences = application.navigationPreferences
         val articlePreferences = application.articlePreferences
         val actionBarPreferences = application.actionBarPreferences
@@ -57,7 +75,17 @@ class MainActivity : ComponentActivity() {
                     LocalAndroidBackgroundSync provides backgroundSync,
                     LocalAndroidConfigurationBackup provides configurationBackup,
                 ) {
-                    FluxNewsApp(bootstrap, coreRuntime, syncCoordinator, timelineStore, navigationPreferences, backgroundSync)
+                    FluxNewsApp(
+                        bootstrap,
+                        coreRuntime,
+                        syncCoordinator,
+                        timelineStore,
+                        searchStore,
+                        readerStore,
+                        articleOpenResolver,
+                        navigationPreferences,
+                        backgroundSync,
+                    )
                 }
             }
         }
@@ -65,7 +93,17 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun FluxNewsApp(bootstrap: AndroidAccountBootstrap, coreRuntime: AndroidCoreRuntime, syncCoordinator: AndroidSyncCoordinator, timelineStore: AndroidArticleTimelineStore, navigationPreferences: AndroidNavigationPreferences, backgroundSync: AndroidBackgroundSync) {
+private fun FluxNewsApp(
+    bootstrap: AndroidAccountBootstrap,
+    coreRuntime: AndroidCoreRuntime,
+    syncCoordinator: AndroidSyncCoordinator,
+    timelineStore: AndroidArticleTimelineStore,
+    searchStore: AndroidSearchStore,
+    readerStore: AndroidReaderStore,
+    articleOpenResolver: AndroidArticleOpenResolver,
+    navigationPreferences: AndroidNavigationPreferences,
+    backgroundSync: AndroidBackgroundSync,
+) {
     var bootstrapState by remember { mutableStateOf(bootstrap.state) }; var retryGeneration by remember { mutableStateOf(0) }; var showingRestore by remember { mutableStateOf(false) }
     LaunchedEffect(bootstrap, retryGeneration) { bootstrapState = bootstrap.restoreStoredAccount() }
     val readyState = bootstrapState as? AndroidAccountBootstrap.State.Ready
@@ -98,10 +136,24 @@ private fun FluxNewsApp(bootstrap: AndroidAccountBootstrap, coreRuntime: Android
                 }
             }
             is AndroidAccountBootstrap.State.RecoverableError -> RecoverableStartup(state.message, bootstrap, { bootstrapState = AndroidAccountBootstrap.State.Starting; retryGeneration += 1 }, ::acceptActivatedAccount)
-            is AndroidAccountBootstrap.State.Ready -> AdaptiveAppShell(bootstrap, coreRuntime, timelineStore, navigationPreferences, state, { changedState ->
-                bootstrapState = changedState
-                if (changedState is AndroidAccountBootstrap.State.Ready) syncCoordinator.requestSync(SyncReason.APP_START)
-            }, Modifier.fillMaxSize())
+            is AndroidAccountBootstrap.State.Ready -> AdaptiveAppShell(
+                bootstrap = bootstrap,
+                coreRuntime = coreRuntime,
+                syncCoordinator = syncCoordinator,
+                timelineStore = timelineStore,
+                searchStore = searchStore,
+                readerStore = readerStore,
+                articleOpenResolver = articleOpenResolver,
+                navigationPreferences = navigationPreferences,
+                state = state,
+                onAccountChanged = { changedState ->
+                    bootstrapState = changedState
+                    if (changedState is AndroidAccountBootstrap.State.Ready) {
+                        syncCoordinator.requestSync(SyncReason.APP_START)
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
@@ -120,7 +172,13 @@ private fun StandaloneStartupSurface(
             )
         },
     ) { padding ->
-        content(Modifier.fillMaxSize().padding(padding))
+        AndroidCenteredContent(
+            maxWidth = AndroidFormContentMaxWidth,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            content = content,
+        )
     }
 }
 

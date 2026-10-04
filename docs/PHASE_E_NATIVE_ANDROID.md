@@ -1,6 +1,6 @@
 # Phase E — Native Android
 
-> **Status: PHASE E1, E2 AND E3 COMPLETE — E4 NEXT / PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
+> **Status: PHASE E1, E2 AND E3 COMPLETE — E4 IMPLEMENTATION COMPLETE / CI + REAL-DEVICE ACCEPTANCE IN PROGRESS / PHYSICAL PRODUCTION-UPGRADE ACCEPTANCE DEFERRED TO E9**
 >
 > Repository-first audit baseline: main at 558d883cc88a966e3e6abc8e39adffdbb18cd1eb (28 September 2026).
 >
@@ -454,7 +454,7 @@ Required scope:
 - Open Source/About/version/legal;
 - Support Diagnostics shell where settings dependencies are needed.
 
-Use Material/Android conventions. Do not imitate the iOS split-view or navigation capsule.
+Use Material/Android conventions. The accepted Article List chrome intentionally shares Flux's capsule concept with iOS while remaining a native Compose/Material implementation. Compact phone portrait keeps the scope capsule at the top and the action capsule floating above the bottom system inset; compact landscape moves the action capsule to the top-right. Wide tablet/foldable windows use persistent 320 dp navigation with the duplicate scope capsule hidden and up to five direct actions at the top-right. That persistent navigation can be collapsed without leaving the wide layout; the collapsed state restores an interactive scope capsule at the top-leading position, keeps actions at the top-right, and opens the navigation transiently so it can be expanded again.
 
 Config Backup remains platform-specific. Android uses BackupPlatform.Android and an Android platform-settings payload. A backup is not promised to be portable to or from iOS unless a future explicit cross-platform backup contract is created.
 
@@ -570,7 +570,7 @@ Phase E2 — Adaptive App Shell, Account and Settings Foundation — is complete
 
 The completed E2 scope includes:
 
-- adaptive native Android app shell and navigation
+- adaptive native Android app shell and navigation, including compact transient navigation, persistent wide navigation, and a collapsible wide-navigation state
 - account bootstrap and account management
 - custom headers and account/server handling
 - navigation preferences
@@ -658,8 +658,9 @@ Implemented on 2 October 2026:
 
 - Android Core events are tagged with the owning Core-session generation before entering the app event stream;
 - stale events from retired account/Core sessions are ignored by the Timeline;
-- visible read/unread and star/unstar changes patch the loaded ArticleSummary rows directly instead of rebuilding the whole Timeline;
-- filter exits remove affected loaded rows without a full page reload;
+- structural Timeline data (ordered ArticleSummary rows, IDs and paging) is separated from per-row presentation state (isRead, isStarred, revision);
+- status-only read/unread and star/unstar changes update only the affected row presentation state and keep the structural articles snapshot/list instance stable;
+- filter exits still remove affected loaded rows structurally without a full page reload;
 - filter re-entry for an article that is not currently loaded triggers a bounded first-page snapshot refresh because no complete ArticleSummary exists locally for that unseen article;
 - filtered selection totals are refreshed through Core count queries so non-loaded status changes cannot leave the title count stale;
 - sync-complete events with changed article data replace the bounded Timeline snapshot;
@@ -678,16 +679,17 @@ Status: **COMPLETE**
 
 Implemented on 2 October 2026:
 
-- Compose-native Scrollover detection based on LazyList geometry and user drag interaction state;
-- programmatic scrolling, layout changes and structural snapshot resets do not qualify articles;
-- reverse movement never emits Scrollover candidates;
-- fast forward scrolling may emit multiple candidates only when those rows were previously genuinely visible/qualified;
+- Compose-native Scrollover detection uses only LazyList scroll progress plus the first-visible item index; no per-frame row geometry or visibility qualification is required;
+- each scroll interaction records the first-visible index at interaction start and the highest first-visible index reached before the list becomes idle;
+- reverse movement never erases forward progress; candidates are emitted once, at interaction end, for the stable Article IDs in [startIndex, highestReachedIndex);
+- known programmatic scrolls explicitly suppress Scrollover tracking and synchronize the idle baseline afterwards;
 - Scrollover read mutations use the existing Core bulk read API and are bound to the active Core-session generation;
-- optimistic read presentation is kept non-structural during active Scrollover so rows are not removed mid-scroll from the unread Timeline;
-- failed Core writes roll back the optimistic read state and re-arm the affected IDs;
-- Scrollover count handling avoids redundant Core count reloads for each emitted read event;
+- optimistic read presentation remains non-structural: only the affected per-ID presentation state changes, while the ordered structural Timeline snapshot remains untouched;
+- pending Scrollover mutations remain process-scoped and generation-bound so Activity recreation cannot lose accepted work;
+- failed Core writes roll back only the affected presentation state and re-arm the affected IDs;
+- the Timeline count is updated once at interaction completion instead of once per crossed article, avoiding global scroll-adjacent recomposition pulses;
 - navigation refreshes are conflated across Core-event bursts to avoid per-event scroll-adjacent reload work;
-- focused JVM tests cover geometry, programmatic-scroll exclusion, direction reversal, layout/snapshot rebasing, session ownership, bulk mutation behavior and rollback.
+- focused JVM tests cover first-item handling, forward/backward movement, highest-index accumulation, programmatic-scroll exclusion, append-only paging, snapshot replacement, bulk mutation behavior and rollback.
 
 E3-E physical-device acceptance subsequently found and closed the remaining Scrollover presentation-feedback gap without changing the E3-D architecture:
 
@@ -726,7 +728,8 @@ Acceptance corrections implemented during E3-E include:
 - decorative feed icons avoid duplicate TalkBack speech and unread state carries explicit accessibility semantics;
 - native read/star/Scrollover feedback uses system haptics rather than direct vibration control;
 - Scrollover Undo is generation-safe and uses the shared Core bulk mutation path;
-- Timeline composition work was reduced by hoisting row-width decisions, adding lazy-list content types, batching feed-icon loading and avoiding unnecessary Scrollover sampling.
+- Timeline composition work was reduced by hoisting row-width decisions, adding lazy-list content types, batching feed-icon loading, removing per-row BoxWithConstraints, avoiding Timeline-wide recomposition on scroll start, and separating volatile row presentation from the structural list snapshot;
+- read/unread presentation is geometry-stable like iOS: the headline keeps one fixed font weight, feed/publication/preview/accessory state changes are colour/opacity-only, and star/unread use permanently reserved slots so marking a row read cannot change its measured height or text wrapping.
 
 The deferred physical UniFFI runtime/production-upgrade proof remains a later release/runtime acceptance responsibility and is not represented here as completed. E9 remains the authoritative final Flutter-to-native production-upgrade gate.
 
@@ -743,7 +746,8 @@ Use:
 - one native image pipeline/cache;
 - no synchronous Core/network/image decode on the main thread;
 - batched article-level media projection where already provided by Core;
-- status-only presentation updates without reconstructing unrelated row content when practical.
+- status-only presentation updates must not replace the structural Timeline snapshot; each loaded Article ID owns an independently observable row-presentation state so unrelated visible rows are not invalidated;
+- read/unread visual treatment must be geometry-stable: do not change title font weight, slot allocation, line limits or any other measurement-affecting property as a consequence of read state.
 
 Do not introduce RecyclerView as a precautionary workaround.
 
@@ -759,21 +763,120 @@ Preserve shared semantic ordering and the date/reading-time/accessory contracts 
 
 ### Scrollover
 
-Implement the shared Scrollover behavioral contract using Android/Compose list geometry and interaction state. Do not port the UIKit tracker line-for-line.
+Implement the shared Scrollover behavioral contract with Android/Compose-native scroll state. Do not port the UIKit geometry tracker line-for-line: Android intentionally commits one ID batch when scrolling becomes idle, using the interaction start index and highest reached first-visible index.
 
-Programmatic movement, layout changes, snapshot resets and unseen skipped rows must not manufacture read candidates.
+Known programmatic movement must be explicitly suppressed. Snapshot replacement clears in-flight Scrollover progress; append-only paging preserves it.
 
 ### Performance acceptance
 
 Performance is measured on physical Android devices, with the first meaningful real-device product pass occurring in E3 once the shell, account flow and Timeline make the native app realistically testable. The API-29 runtime floor remains covered by the E1-B emulator smoke; E3 physical-device performance acceptance uses representative supported hardware and a contemporary device where available. Test with realistic large article sets and real article images.
 
-The physical Timeline acceptance pass is complete. The deferred standalone UniFFI runtime/production-upgrade proof remains tracked separately for the later final Android runtime/release acceptance rather than blocking the accepted Article Timeline.
+Performance acceptance must use a release-equivalent build. The Google Play internal-test artifact is `developmentRelease`; it shares the same `release` build type, R8 optimization, resource shrinking, Rust release build and Baseline Profile input as `productionRelease`. Debug builds remain diagnostic/development tools and are not authoritative evidence for product performance.
 
-Use Android tracing/benchmark tools to identify actual bottlenecks if future reproducible performance regressions appear. Only replace or specialize the renderer when measured evidence shows the default Compose path cannot meet the product requirement.
+The app owns a Baseline Profile producer module. Baseline Profile generation uses a deterministic fixture Timeline routed through MainActivity only when the plugin-generated `nonMinifiedRelease` build type is running and a private profile-capture Intent extra is present. Normal Debug, `developmentRelease` and `productionRelease` launches cannot activate that path; optimized Release builds can remove the unreachable branch. The fixture uses deterministic ArticleSummary values and an existing local app image resource, so Timeline profiling is reproducible without Miniflux credentials, network access or mutable user data while exercising the productive Timeline row, swipe-container, image, metadata and publication presentation code. Generate/update the profile on one connected API-33+ device with `bash android/Build/generate-baseline-profile.sh`, then commit the generated `app/src/main/generated/baselineProfiles` output before using the next Play internal-test build for performance acceptance.
+
+The physical Timeline acceptance pass completed before this release-performance pipeline was finalized. It remains valid as a functional/device acceptance result, but future claims about marginal jank or renderer-level performance must be reconfirmed on the optimized Play `developmentRelease` path before introducing new renderer/cache/recomposition complexity.
+
+Use Android Macrobenchmark/JankStats/tracing to identify actual bottlenecks if reproducible performance regressions remain after R8 and the committed Baseline Profile are active. Only replace or specialize the renderer when measured release-build evidence shows the default Compose path cannot meet the product requirement.
 
 E3 is accepted after normal reading-speed scrolling, fast scrolling, image loading, mutations and Scrollover were verified without systematic jank on physical hardware.
 
 ## 15. E4 — Actions, Search, Sync and Mutations
+
+### E4-A — Semantic Article List actions and transient list controls
+
+Status: **COMPLETE**
+
+Implemented on 3 October 2026:
+
+- the app shell now owns the complete transient `AndroidArticleTimelineSelection` instead of reconstructing default Unread/Oldest values from the selected scope;
+- scope changes preserve the current transient All/Unread and sort choices while remaining non-persistent presentation state;
+- All/Unread and Oldest/Newest controls are exposed through native Material 3 menu presentation and continue to use the existing E3 semantic-reset path, including return to the natural list start;
+- Activity/configuration recreation retains the complete selection only when the retained Timeline belongs to the active Core-session generation;
+- a pure `AndroidArticleListActionPolicy` resolves persisted semantic action priorities into direct and overflow actions without storing Compose control identities;
+- contextual availability follows the shared mobile contract: Mark All as Read is unavailable for Starred, and Mark All as Read & Next exists only for Category/Feed when a next sibling is available;
+- unavailable actions are filtered only at presentation-resolution time and never rewrite the persisted semantic configuration;
+- focused JVM tests cover transient selection transitions, action availability, direct-slot priority, overflow completeness and contextual filtering;
+- the E3 Timeline store, renderer, paging architecture and Core/UniFFI surface remain unchanged.
+
+### E4-B — Productive article actions, mutations and swipe interaction
+
+Status: **COMPLETE**
+
+Implemented on 3 October 2026:
+
+- configured leading/trailing semantic swipe actions are now resolved per article and rendered by a Compose-native horizontal gesture adapter;
+- partial swipe only reveals actions, tapping a revealed action executes it, and a full swipe executes only the configured outer/full slot;
+- a missing contextual outer action is omitted without promoting the configured inner action to Full Swipe, and reversing an already-open swipe must return to neutral before the opposite side can open;
+- long-press article actions plus a TalkBack custom action expose Read/Unread, Star/Unstar, Original, Miniflux, Comments, Copy Link, Share and third-party Save when applicable;
+- media swipe semantics remain persisted but are contextually omitted until E6 provides the native media runtime;
+- explicit Read/Unread and Star/Unstar use optimistic row state, generation-bound Core writes, serialized mutation delivery, per-article stale-completion tokens and rollback on failure;
+- successful explicit Read respects the existing Remove Articles When Read preference, while successful unstar removes a row only from the Starred scope;
+- explicit Original open marks the article read without stacking read haptic feedback; Comments does not mark the article read;
+- Original, Comments, Share and clipboard handling use Android platform APIs, while Miniflux URL resolution and third-party Save remain Core-backed;
+- a generation-bound remote execution helper prevents a retired account session from servicing third-party Save work;
+- focused JVM tests cover swipe-slot preservation, contextual action availability, URL validation, optimistic mutation/rollback, successful structural removal and retired-session completion suppression;
+- no Core/UniFFI API or E3 paging/renderer ownership change was required.
+
+The normal article-row Open action remains intentionally deferred until E4-D, because the existing Reader preference must not be temporarily bypassed by forcing every row tap to the original URL. E4-D adds Reader and then activates normal row Open with the complete routing contract.
+
+### E4-C — Manual Sync, pull-to-refresh and scope-wide read workflows
+
+Status: **COMPLETE**
+
+Implemented on 3 October 2026:
+
+- the fixed Article List Sync control now drives the existing process-scoped `AndroidSyncCoordinator` with `SyncReason.MANUAL`; Compose does not own a second Sync state machine;
+- a running Manual Sync exposes cooperative Cancel through the existing Core `SyncCancellation` handle, while startup-owned Sync runs are not user-cancellable through the Manual Sync control;
+- the Timeline uses Material 3 `PullToRefreshBox` and routes pull-to-refresh through that same Manual Sync path; an existing foreground Sync suppresses duplicate refresh requests;
+- Sync failure keeps the local Timeline visible and surfaces the coordinator's sanitized recoverable message; cancellation is treated as a normal terminal outcome rather than a network failure;
+- the persisted semantic Article List configuration is now productive in the Android top bar: fixed Sync, configured direct slots and the always-reachable More overflow share the E4-A availability policy;
+- Filter/Sort, Search, Listening List and Settings actions route through their existing native destinations/presentation paths, while Mark All actions use an explicit destructive confirmation;
+- Mark All as Read queries the Core for the exact unread IDs in the current All/Category/Feed scope using `Unread + StarredFilter.All + NewestFirst + limit=0`, then passes exactly those IDs to `setReadStateBulk`;
+- Mark All as Read & Next computes its target from the current visible navigation order before mutation, performs no wrap-around, and navigates only after the bulk mutation succeeds;
+- visible-feed order respects Hide Empty navigation semantics, including category grouping and orphan-feed placement; Category & Next likewise skips categories hidden by the current visible navigation projection;
+- successful plain Mark All reloads the current Timeline at its natural start; Mark All & Next avoids reloading the old scope and lets the successful scope transition perform the next Timeline reset; both emit one confirmation while per-article Core events are suppressed from producing an N-event haptic/reload burst;
+- stale selection/session completions cannot trigger a bulk write, a Timeline replacement or an `& Next` navigation;
+- focused JVM tests cover Manual-only cancellation, next-scope ordering/no-wrap behavior, the exact Mark-All query, exact bulk IDs, failure behavior and stale-selection suppression;
+- no Core/UniFFI API change was required.
+
+### E4-D — Reader overlay, normal article routing and remote Search
+
+Status: **IMPLEMENTATION COMPLETE — CI and real-device acceptance pending**
+
+Implemented on 3 October 2026:
+
+- Reader is temporary presentation rather than a Navigation Compose destination: the active Timeline or Search surface remains mounted underneath and retains its list state;
+- compact portrait uses a near-full-height closable Reader surface over the list, while wider/landscape/tablet layouts use a centered floating panel; Android Back, the close control and the outside scrim dismiss only Reader;
+- Reader content is loaded from the semantic Core `ReaderDocument`, including headings, paragraphs, inline emphasis/code/links, images, lists, quotes, code blocks, rules, external content and the simplified/truncated notice;
+- Reader requests are process/session-generation bound; switching article, dismissing Reader or replacing the account invalidates stale completions;
+- normal Timeline row taps are now productive and always mark the article read before routing;
+- the existing global Open Article preference selects Reader versus web opening, and web opening additionally honors the feed-specific `openInMiniflux` preference; explicit Original, explicit Reader and explicit Miniflux remain independent actions;
+- Android web routing first attempts a non-browser App Link/deep-link handler; when no dedicated app can handle the URL, Flux keeps the user in the app flow with an AndroidX Custom Tab instead of handing the URL straight to the external default browser; Android 10 uses handler-set comparison for the same compatibility behavior;
+- Search remains a real secondary Navigation Compose destination, so Back returns to the preserved News Timeline rather than treating Search as a Reader-style overlay;
+- Search uses Core/Miniflux `searchArticles` with its own 50-item offset pagination, request-generation stale suppression and result de-duplication; it does not create a local FTS/index;
+- Search reuses the normal Android article row renderer, swipe configuration, context actions, feed icons and available audio projection;
+- Article publication rows mirror the accepted iOS temporal semantics: relative publication time carries a small history/clock icon, optional Miniflux reading time is an inline Material Article icon plus duration after the centered dot, and audio articles substitute the reading-time document icon with headphones;
+- Search chrome uses a single stable Material text-field surface with an integrated leading Search action, in-field progress/clear affordance, IME Search handling and focused tonal treatment; initial/no-result states use a centered icon, headline and supporting text rather than a bare sentence;
+- Search loading feedback is intentionally singular: the in-field progress indicator is the only initial-search spinner; the result area does not render a second centered progress indicator;
+- Search Read/Unread and Star/Unstar use the Core search mutation APIs with optimistic presentation and rollback on failure;
+- opening a Search result follows the same normal Reader/original/Miniflux routing policy; Search Reader uses `readerDocumentForSearch` and closes back to the current Search result list;
+- Comments still do not mark read, while Original, Reader and Miniflux article-opening actions do;
+- Search/Reader state is app-process scoped but invalidated on Core-session replacement, so Activity recreation does not manufacture a second domain owner or stale account presentation;
+- no Core/UniFFI API change was required.
+- Article List chrome uses a shared Material capsule treatment: compact portrait keeps the action capsule floating above the bottom system inset, compact landscape moves it to the top-right, persistent tablet navigation hides duplicate scope chrome and keeps up to five direct actions at the top-right, and a collapsed persistent-navigation state restores the interactive scope capsule at top-leading while retaining top-right actions;
+- only compact portrait reserves Timeline and Snackbar clearance for the floating bottom action capsule; persistent and collapsed-persistent tablet states do not reserve bottom-action space;
+- swipe presentation keeps the E4-B 0-2-action/full-swipe contract but follows Material dismissal visuals with a continuous tonal reveal, circular icon targets, an action-colored armed full-swipe state and one selection haptic when crossing the threshold.
+- a successful explicit Read → Unread transition re-arms that Article ID in the Scrollover tracker; failed unread writes do not re-arm, and external Core unread events also re-arm the article.
+- the article long-press menu uses Material leading icons and visual grouping for state, opening and share/save actions instead of an undifferentiated text-only list.
+- full-swipe dispatch uses the latest recomposed action callback so repeating Read/Unread or Star/Unstar full swipes toggles against the current article state instead of a stale pre-mutation snapshot;
+- Starred is an all-read-state scope: Core queries force `ReadFilter.ALL` and read-filter controls are omitted while Starred is active, while the user's underlying All/Unread selection is preserved for returning to normal scopes.
+- swipe visuals use flat Material action zones rather than circular/capsule targets: partial reveal keeps up to two full-height tonal zones with bare icons, while the configured outer action expands into the continuous background for full swipe and becomes the sole visible action after the threshold;
+- swipe backgrounds use the final measured Article Row height so tonal action surfaces span the complete item and icons remain vertically centered; action zones are 80 dp with 28 dp icons (30 dp while full-swipe armed), and Article Rows do not insert separator dividers.
+- the floating Article List action capsule keeps the same semantic controls but uses tighter chrome and smaller visual icons; active Sync is represented by a thin progress ring around the current Sync/Cancel glyph instead of replacing the button with a standalone spinner.
+- Sync idle presentation uses a single clockwise Material refresh glyph; while any foreground Sync is active the title-capsule count slot shows `Syncing…`, and a successful Manual Sync temporarily replaces the Sync glyph with a checkmark for 1.5 seconds. Cancelled, failed and startup Sync runs do not show the success check.
+
+With E4-D implemented, the E4 feature surface is implementation-complete. Acceptance remains subject to the Android CI gate and a focused physical-device pass for Reader overlay geometry, Back behavior, Search pagination and article-open routing.
 
 E4 completes interactive Newsreader behavior:
 

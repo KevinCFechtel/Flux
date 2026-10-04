@@ -1,5 +1,6 @@
 package de.circledev.fluxnews.nativeapp
 
+import android.content.res.Configuration
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
@@ -27,11 +28,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -44,11 +51,15 @@ import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.PermanentDrawerSheet
 import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
@@ -56,11 +67,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
@@ -72,10 +85,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.CoreEvent
 import uniffi.flux_uniffi.NavigationCountMode
 import uniffi.flux_uniffi.NavigationProjection
+import uniffi.flux_uniffi.SyncReason
 
 private object ShellRoute {
     const val Timeline = "timeline"
@@ -84,10 +99,26 @@ private object ShellRoute {
     const val Settings = "settings"
 }
 
+private const val ANDROID_ACTION_CAPSULE_MAX_FONT_SCALE = 1.35f
+
+internal fun androidActionCapsuleScale(fontScale: Float): Float =
+    fontScale.coerceIn(1f, ANDROID_ACTION_CAPSULE_MAX_FONT_SCALE)
+
 private data class NewsNavigationModel(
     val projection: NavigationProjection? = null,
     val error: String? = null,
 )
+
+internal object AndroidSyncPresentationPolicy {
+    fun successVisible(
+        state: AndroidSyncCoordinator.State,
+        dismissedGeneration: Long?,
+    ): Boolean {
+        val succeeded = state as? AndroidSyncCoordinator.State.Succeeded ?: return false
+        return succeeded.reason == SyncReason.MANUAL &&
+            succeeded.generation != dismissedGeneration
+    }
+}
 
 /**
  * The timeline is the app root. Scope selection stays inside its transient/permanent news drawer;
@@ -97,7 +128,11 @@ private data class NewsNavigationModel(
 internal fun AdaptiveAppShell(
     bootstrap: AndroidAccountBootstrap,
     coreRuntime: AndroidCoreRuntime,
+    syncCoordinator: AndroidSyncCoordinator,
     timelineStore: AndroidArticleTimelineStore,
+    searchStore: AndroidSearchStore,
+    readerStore: AndroidReaderStore,
+    articleOpenResolver: AndroidArticleOpenResolver,
     navigationPreferences: AndroidNavigationPreferences,
     state: AndroidAccountBootstrap.State.Ready,
     onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
@@ -106,8 +141,10 @@ internal fun AdaptiveAppShell(
     val navController = rememberNavController()
     val sessionGeneration by coreRuntime.sessionGeneration.collectAsState()
     val retainedTimelineSelection = timelineStore.retainedSelectionForSession(sessionGeneration)
-    var selectedScope by remember(timelineStore, sessionGeneration) {
-        mutableStateOf(retainedTimelineSelection?.scope ?: AndroidNewsScope.All)
+    var timelineSelection by remember(timelineStore, sessionGeneration) {
+        mutableStateOf(
+            retainedTimelineSelection ?: AndroidArticleTimelineSelection(scope = AndroidNewsScope.All),
+        )
     }
     var navigation by remember { mutableStateOf(NewsNavigationModel()) }
     var preferenceState by remember { mutableStateOf<AndroidNavigationPreferenceState?>(null) }
@@ -115,6 +152,11 @@ internal fun AdaptiveAppShell(
         mutableStateOf(retainedTimelineSelection != null)
     }
     val navigationRefreshes = remember { Channel<Unit>(capacity = Channel.CONFLATED) }
+
+    LaunchedEffect(sessionGeneration) {
+        searchStore.activateSession(sessionGeneration)
+        readerStore.activateSession(sessionGeneration)
+    }
 
     suspend fun reloadNavigation() {
         navigation = try {
@@ -148,14 +190,16 @@ internal fun AdaptiveAppShell(
             val preferences = preferenceState
             val projection = navigation.projection
             if (preferences != null && projection != null) {
-                selectedScope = AndroidNavigationPolicy.resolveStartupScope(
-                    preferences = preferences,
-                    categories = projection.catalog.categories.map {
-                        AndroidNavigationCategoryRef(it.id, it.title)
-                    },
-                    feeds = projection.catalog.feeds.map {
-                        AndroidNavigationFeedRef(it.id, it.categoryId, it.title)
-                    },
+                timelineSelection = timelineSelection.selectingScope(
+                    AndroidNavigationPolicy.resolveStartupScope(
+                        preferences = preferences,
+                        categories = projection.catalog.categories.map {
+                            AndroidNavigationCategoryRef(it.id, it.title)
+                        },
+                        feeds = projection.catalog.feeds.map {
+                            AndroidNavigationFeedRef(it.id, it.categoryId, it.title)
+                        },
+                    ),
                 )
                 startupScopeApplied = true
             }
@@ -181,20 +225,25 @@ internal fun AdaptiveAppShell(
     ) {
         composable(ShellRoute.Timeline) {
             TimelineDestination(
-                scope = selectedScope,
+                selection = timelineSelection,
                 navigation = navigation,
                 preferences = currentPreferences,
                 state = state,
                 timelineStore = timelineStore,
+                syncCoordinator = syncCoordinator,
+                readerStore = readerStore,
+                articleOpenResolver = articleOpenResolver,
                 sessionGeneration = sessionGeneration,
                 navController = navController,
-                onScopeSelected = { selectedScope = it },
+                onSelectionChanged = { timelineSelection = it },
             )
         }
         composable(ShellRoute.Search) {
-            SecondaryDestination(
-                title = "Search",
-                message = "Native article search is connected to this destination in E4.",
+            AndroidSearchDestination(
+                store = searchStore,
+                readerStore = readerStore,
+                openResolver = articleOpenResolver,
+                sessionGeneration = sessionGeneration,
                 onBack = navController::popBackStack,
             )
         }
@@ -242,18 +291,25 @@ private fun backExitTransition(): ExitTransition =
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TimelineDestination(
-    scope: AndroidNewsScope,
+    selection: AndroidArticleTimelineSelection,
     navigation: NewsNavigationModel,
     preferences: AndroidNavigationPreferenceState,
     state: AndroidAccountBootstrap.State.Ready,
     timelineStore: AndroidArticleTimelineStore,
+    syncCoordinator: AndroidSyncCoordinator,
+    readerStore: AndroidReaderStore,
+    articleOpenResolver: AndroidArticleOpenResolver,
     sessionGeneration: Long?,
     navController: NavHostController,
-    onScopeSelected: (AndroidNewsScope) -> Unit,
+    onSelectionChanged: (AndroidArticleTimelineSelection) -> Unit,
 ) {
+    val scope = selection.scope
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
-        val persistentNewsNavigation = maxWidth >= 600.dp && maxHeight >= 600.dp
-        val compactLandscape = !persistentNewsNavigation && maxWidth > maxHeight
+        val supportsPersistentNavigation = maxWidth >= 600.dp && maxHeight >= 600.dp
+        var persistentNavigationCollapsed by rememberSaveable { mutableStateOf(false) }
+        val persistentNewsNavigation = supportsPersistentNavigation && !persistentNavigationCollapsed
+        val collapsedPersistentNavigation = supportsPersistentNavigation && persistentNavigationCollapsed
+        val compactLandscape = !supportsPersistentNavigation && maxWidth > maxHeight
 
         if (persistentNewsNavigation) {
             PermanentNavigationDrawer(
@@ -268,23 +324,35 @@ private fun TimelineDestination(
                             preferences = preferences,
                             timelineStore = timelineStore,
                             selectedScope = scope,
-                            onScopeSelected = onScopeSelected,
+                            onScopeSelected = { onSelectionChanged(selection.selectingScope(it)) },
                             onSearch = { navController.navigate(ShellRoute.Search) },
                             onListeningList = { navController.navigate(ShellRoute.ListeningList) },
                             onSettings = { navController.navigate(ShellRoute.Settings) },
+                            navigationToggleIcon = R.drawable.ic_arrow_back,
+                            navigationToggleDescription = "Collapse navigation",
+                            onNavigationToggle = { persistentNavigationCollapsed = true },
                         )
                     }
                 },
             ) {
                 NewsRootContent(
-                    scope = scope,
+                    selection = selection,
                     navigation = navigation,
                     state = state,
                     timelineStore = timelineStore,
+                    syncCoordinator = syncCoordinator,
+                    readerStore = readerStore,
+                    articleOpenResolver = articleOpenResolver,
+                    navigationPreferences = preferences,
                     sessionGeneration = sessionGeneration,
                     persistentNavigation = true,
+                    collapsedPersistentNavigation = false,
                     scopeTitleLeading = false,
                     onOpenNavigation = {},
+                    onSearch = { navController.navigate(ShellRoute.Search) },
+                    onListeningList = { navController.navigate(ShellRoute.ListeningList) },
+                    onSettings = { navController.navigate(ShellRoute.Settings) },
+                    onSelectionChanged = onSelectionChanged,
                 )
             }
         } else {
@@ -311,25 +379,46 @@ private fun TimelineDestination(
                             timelineStore = timelineStore,
                             selectedScope = scope,
                             onScopeSelected = {
-                                onScopeSelected(it)
+                                onSelectionChanged(selection.selectingScope(it))
                                 coroutineScope.launch { drawerState.close() }
                             },
                             onSearch = { navigateAfterDrawerCloses(ShellRoute.Search) },
                             onListeningList = { navigateAfterDrawerCloses(ShellRoute.ListeningList) },
                             onSettings = { navigateAfterDrawerCloses(ShellRoute.Settings) },
+                            navigationToggleIcon = if (collapsedPersistentNavigation) R.drawable.ic_chevron_right else null,
+                            navigationToggleDescription = if (collapsedPersistentNavigation) "Expand navigation" else null,
+                            onNavigationToggle = if (collapsedPersistentNavigation) {
+                                {
+                                    coroutineScope.launch {
+                                        drawerState.close()
+                                        persistentNavigationCollapsed = false
+                                    }
+                                }
+                            } else {
+                                null
+                            },
                         )
                     }
                 },
             ) {
                 NewsRootContent(
-                    scope = scope,
+                    selection = selection,
                     navigation = navigation,
                     state = state,
                     timelineStore = timelineStore,
+                    syncCoordinator = syncCoordinator,
+                    readerStore = readerStore,
+                    articleOpenResolver = articleOpenResolver,
+                    navigationPreferences = preferences,
                     sessionGeneration = sessionGeneration,
                     persistentNavigation = false,
-                    scopeTitleLeading = compactLandscape,
+                    collapsedPersistentNavigation = collapsedPersistentNavigation,
+                    scopeTitleLeading = collapsedPersistentNavigation || compactLandscape,
                     onOpenNavigation = { coroutineScope.launch { drawerState.open() } },
+                    onSearch = { navController.navigate(ShellRoute.Search) },
+                    onListeningList = { navController.navigate(ShellRoute.ListeningList) },
+                    onSettings = { navController.navigate(ShellRoute.Settings) },
+                    onSelectionChanged = onSelectionChanged,
                 )
             }
         }
@@ -339,22 +428,153 @@ private fun TimelineDestination(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NewsRootContent(
-    scope: AndroidNewsScope,
+    selection: AndroidArticleTimelineSelection,
     navigation: NewsNavigationModel,
     state: AndroidAccountBootstrap.State.Ready,
     timelineStore: AndroidArticleTimelineStore,
+    syncCoordinator: AndroidSyncCoordinator,
+    readerStore: AndroidReaderStore,
+    articleOpenResolver: AndroidArticleOpenResolver,
+    navigationPreferences: AndroidNavigationPreferenceState,
     sessionGeneration: Long?,
     persistentNavigation: Boolean,
+    collapsedPersistentNavigation: Boolean,
     scopeTitleLeading: Boolean,
     onOpenNavigation: () -> Unit,
+    onSearch: () -> Unit,
+    onListeningList: () -> Unit,
+    onSettings: () -> Unit,
+    onSelectionChanged: (AndroidArticleTimelineSelection) -> Unit,
 ) {
+    val scope = selection.scope
     val timelineState by timelineStore.state.collectAsState()
+    val syncState by syncCoordinator.state.collectAsState()
     val articlePreferences by LocalAndroidArticlePreferences.current.state.collectAsState(
         initial = AndroidArticlePreferenceState(),
     )
+    val actionBarState by LocalAndroidActionBarPreferences.current.state.collectAsState(
+        initial = AndroidActionBarPreferenceState(),
+    )
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val timelineCount = timelineState.total.takeIf { timelineState.selection?.scope == scope }
+    val projection = navigation.projection
+    val categoryRefs = projection?.catalog?.categories?.map {
+        AndroidNavigationCategoryRef(it.id, it.title)
+    }.orEmpty()
+    val feedRefs = projection?.catalog?.feeds?.map {
+        AndroidNavigationFeedRef(it.id, it.categoryId, it.title)
+    }.orEmpty()
+    val feedCounts = projection?.feedCounts?.associate { it.id to it.count }.orEmpty()
+    val nextScope = AndroidNavigationPolicy.nextScope(
+        after = scope,
+        hidingEmpty = navigationPreferences.hideEmptyNavigationEntries,
+        categories = categoryRefs,
+        feeds = feedRefs,
+        counts = feedCounts,
+    )
+    val resolvedActions = AndroidArticleListActionPolicy.resolvedActions(
+        configuredActions = actionBarState.actions,
+        directCapacity = if (persistentNavigation) 5 else 3,
+        scope = scope,
+        hasNextScope = nextScope != null,
+    )
+    val syncInProgress = syncState is AndroidSyncCoordinator.State.Syncing
+    val manualSyncInProgress =
+        (syncState as? AndroidSyncCoordinator.State.Syncing)?.reason == SyncReason.MANUAL
+    var dismissedSyncSuccessGeneration by remember { mutableStateOf<Long?>(null) }
+    val syncSuccessVisible = AndroidSyncPresentationPolicy.successVisible(
+        state = syncState,
+        dismissedGeneration = dismissedSyncSuccessGeneration,
+    )
+    val actionScope = rememberCoroutineScope()
+    val shellSnackbar = remember { SnackbarHostState() }
+    var markReadRequest by remember { mutableStateOf<AndroidPendingMarkRead?>(null) }
+    var markReadRunning by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    fun openReader(article: uniffi.flux_uniffi.ArticleSummary) {
+        readerStore.open(article, AndroidReaderSource.Timeline)
+    }
+
+    fun openArticle(article: uniffi.flux_uniffi.ArticleSummary) {
+        timelineStore.requestSetRead(
+            articleId = article.id,
+            read = true,
+            removeWhenRead = articlePreferences.removeArticlesWhenRead,
+            providesFeedback = false,
+        )
+        if (articlePreferences.openArticle == AndroidArticleOpenPreference.Reader) {
+            openReader(article)
+            return
+        }
+        actionScope.launch {
+            when (val destination = articleOpenResolver.resolve(article, articlePreferences.openArticle)) {
+                AndroidNormalOpenDestination.Reader -> openReader(article)
+                is AndroidNormalOpenDestination.Web -> {
+                    if (!AndroidArticlePlatformActions.openUrl(context, destination.url)) {
+                        shellSnackbar.showSnackbar("The article does not have a valid web URL.")
+                    }
+                }
+                null -> shellSnackbar.showSnackbar("The article could not be opened.")
+            }
+        }
+    }
+
+    LaunchedEffect(syncState) {
+        val succeeded = syncState as? AndroidSyncCoordinator.State.Succeeded
+        if (succeeded?.reason == SyncReason.MANUAL) {
+            delay(1_500)
+            dismissedSyncSuccessGeneration = succeeded.generation
+        }
+    }
+
+    LaunchedEffect(syncState, shellSnackbar) {
+        val failed = syncState as? AndroidSyncCoordinator.State.Failed
+        if (failed?.reason == SyncReason.MANUAL) {
+            shellSnackbar.showSnackbar(failed.message)
+        }
+    }
+
+    fun executeArticleListAction(action: AndroidActionBarAction) {
+        when (action) {
+            AndroidActionBarAction.Search -> onSearch()
+            AndroidActionBarAction.ListeningList -> onListeningList()
+            AndroidActionBarAction.Settings -> onSettings()
+            AndroidActionBarAction.MarkAllRead -> {
+                if (!markReadRunning) {
+                    markReadRequest = AndroidPendingMarkRead(
+                        workflow = AndroidMarkReadWorkflow.Read,
+                        nextScope = null,
+                    )
+                }
+            }
+            AndroidActionBarAction.MarkAllReadAndNext -> {
+                if (!markReadRunning && nextScope != null) {
+                    markReadRequest = AndroidPendingMarkRead(
+                        workflow = AndroidMarkReadWorkflow.ReadAndNext,
+                        nextScope = nextScope,
+                    )
+                }
+            }
+            AndroidActionBarAction.FilterAndSort,
+            AndroidActionBarAction.ToggleReadFilter,
+            AndroidActionBarAction.ToggleSortOrder,
+            -> Unit
+        }
+    }
 
     val layoutDirection = LocalLayoutDirection.current
+    val density = LocalDensity.current
+    val actionCapsuleScale = androidActionCapsuleScale(density.fontScale)
+    val navigationBarHeight = with(density) {
+        WindowInsets.navigationBars.getBottom(this).toDp()
+    }
+    val bottomActionsVisible = !isLandscape && !persistentNavigation && !collapsedPersistentNavigation
+    val bottomActionClearance = if (bottomActionsVisible) {
+        navigationBarHeight + 32.dp + (44.dp * actionCapsuleScale)
+    } else {
+        0.dp
+    }
     val appBarColors = TopAppBarDefaults.topAppBarColors(
         containerColor = Color.Transparent,
         scrolledContainerColor = Color.Transparent,
@@ -362,58 +582,464 @@ private fun NewsRootContent(
     Box(Modifier.fillMaxSize()) {
         Scaffold(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            snackbarHost = {
+                SnackbarHost(
+                    hostState = shellSnackbar,
+                    modifier = Modifier.padding(bottom = bottomActionClearance),
+                )
+            },
             topBar = {
                 Box(Modifier.fillMaxWidth()) {
                     FloatingChromeTopGradient(
                         modifier = Modifier.align(Alignment.TopCenter),
                     )
-                    if (scopeTitleLeading) {
+                    if (persistentNavigation) {
                         TopAppBar(
-                    title = {
-                        ScopeNavigationCapsule(
-                            scope = scope,
-                            showArticleCount = articlePreferences.showArticleCount,
-                            timelineCount = timelineCount,
-                            readFilter = timelineState.selection?.readFilter,
-                            opensNavigation = !persistentNavigation,
-                            onOpenNavigation = onOpenNavigation,
+                            title = {},
+                            actions = {
+                                AndroidArticleActionCapsule(
+                                    selection = selection,
+                                    resolvedActions = resolvedActions,
+                                    syncState = syncState,
+                                    syncSuccessVisible = syncSuccessVisible,
+                                    actionsEnabled = !markReadRunning,
+                                    scale = actionCapsuleScale,
+                                    onRequestManualSync = {
+                                        syncCoordinator.requestSync(SyncReason.MANUAL)
+                                    },
+                                    onCancelManualSync = syncCoordinator::cancelManualSync,
+                                    onSelectionChanged = onSelectionChanged,
+                                    onAction = ::executeArticleListAction,
+                                    modifier = Modifier.padding(end = 8.dp),
+                                )
+                            },
+                            colors = appBarColors,
                         )
-                    },
-                    colors = appBarColors,
-                )
-            } else {
-                CenterAlignedTopAppBar(
-                    title = {
-                        ScopeNavigationCapsule(
-                            scope = scope,
-                            showArticleCount = articlePreferences.showArticleCount,
-                            timelineCount = timelineCount,
-                            readFilter = timelineState.selection?.readFilter,
-                            opensNavigation = !persistentNavigation,
-                            onOpenNavigation = onOpenNavigation,
+                    } else if (scopeTitleLeading) {
+                        TopAppBar(
+                            title = {
+                                ScopeNavigationCapsule(
+                                    scope = scope,
+                                    showArticleCount = articlePreferences.showArticleCount,
+                                    timelineCount = timelineCount,
+                                    readFilter = timelineState.selection?.readFilter,
+                                    syncing = syncInProgress,
+                                    opensNavigation = !persistentNavigation,
+                                    onOpenNavigation = onOpenNavigation,
+                                )
+                            },
+                            actions = {
+                                if (isLandscape || collapsedPersistentNavigation) {
+                                    AndroidArticleActionCapsule(
+                                        selection = selection,
+                                        resolvedActions = resolvedActions,
+                                        syncState = syncState,
+                                        syncSuccessVisible = syncSuccessVisible,
+                                        actionsEnabled = !markReadRunning,
+                                        scale = actionCapsuleScale,
+                                        onRequestManualSync = {
+                                            syncCoordinator.requestSync(SyncReason.MANUAL)
+                                        },
+                                        onCancelManualSync = syncCoordinator::cancelManualSync,
+                                        onSelectionChanged = onSelectionChanged,
+                                        onAction = ::executeArticleListAction,
+                                        modifier = Modifier.padding(end = 8.dp),
+                                    )
+                                }
+                            },
+                            colors = appBarColors,
                         )
-                    },
-                        colors = appBarColors,
-                    )
+                    } else {
+                        CenterAlignedTopAppBar(
+                            title = {
+                                ScopeNavigationCapsule(
+                                    scope = scope,
+                                    showArticleCount = articlePreferences.showArticleCount,
+                                    timelineCount = timelineCount,
+                                    readFilter = timelineState.selection?.readFilter,
+                                    syncing = syncInProgress,
+                                    opensNavigation = !persistentNavigation,
+                                    onOpenNavigation = onOpenNavigation,
+                                )
+                            },
+                            actions = {
+                                if (isLandscape) {
+                                    AndroidArticleActionCapsule(
+                                        selection = selection,
+                                        resolvedActions = resolvedActions,
+                                        syncState = syncState,
+                                        syncSuccessVisible = syncSuccessVisible,
+                                        actionsEnabled = !markReadRunning,
+                                        scale = actionCapsuleScale,
+                                        onRequestManualSync = {
+                                            syncCoordinator.requestSync(SyncReason.MANUAL)
+                                        },
+                                        onCancelManualSync = syncCoordinator::cancelManualSync,
+                                        onSelectionChanged = onSelectionChanged,
+                                        onAction = ::executeArticleListAction,
+                                        modifier = Modifier.padding(end = 8.dp),
+                                    )
+                                }
+                            },
+                            colors = appBarColors,
+                        )
+                    }
                 }
+            },
+        ) { padding ->
+            PullToRefreshBox(
+                isRefreshing = manualSyncInProgress,
+                onRefresh = {
+                    if (!syncInProgress && !markReadRunning) {
+                        syncCoordinator.requestSync(SyncReason.MANUAL)
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(
+                        start = padding.calculateStartPadding(layoutDirection),
+                        end = padding.calculateEndPadding(layoutDirection),
+                    ),
+            ) {
+                AndroidArticleTimeline(
+                    store = timelineStore,
+                    selection = selection,
+                    sessionGeneration = sessionGeneration,
+                    accountKey = state.serverUrl,
+                    onOpenArticle = ::openArticle,
+                    onOpenReader = ::openReader,
+                    categoryFeedIds = when (val selectedScope = scope) {
+                        is AndroidNewsScope.Category -> feedRefs
+                            .asSequence()
+                            .filter { it.categoryId == selectedScope.id }
+                            .mapTo(mutableSetOf()) { it.id }
+                        else -> emptySet()
+                    },
+                    topContentPadding = padding.calculateTopPadding(),
+                    bottomOverlayPadding = bottomActionClearance,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
-        },
-    ) { padding ->
-        AndroidArticleTimeline(
-            store = timelineStore,
-            selection = AndroidArticleTimelineSelection(scope = scope),
-            sessionGeneration = sessionGeneration,
-            accountKey = state.serverUrl,
-            topContentPadding = padding.calculateTopPadding(),
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(
-                    start = padding.calculateStartPadding(layoutDirection),
-                    end = padding.calculateEndPadding(layoutDirection),
-                ),
+        }
+
+        if (bottomActionsVisible) {
+            AndroidArticleActionCapsule(
+                selection = selection,
+                resolvedActions = resolvedActions,
+                syncState = syncState,
+                syncSuccessVisible = syncSuccessVisible,
+                actionsEnabled = !markReadRunning,
+                scale = actionCapsuleScale,
+                onRequestManualSync = {
+                    syncCoordinator.requestSync(SyncReason.MANUAL)
+                },
+                onCancelManualSync = syncCoordinator::cancelManualSync,
+                onSelectionChanged = onSelectionChanged,
+                onAction = ::executeArticleListAction,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(bottom = 12.dp),
+            )
+        }
+
+        AndroidArticleReaderOverlay(
+            store = readerStore,
+            source = AndroidReaderSource.Timeline,
+            onOpenOriginal = { article ->
+                if (!AndroidArticlePlatformActions.openUrl(context, article.url)) {
+                    actionScope.launch {
+                        shellSnackbar.showSnackbar("The article does not have a valid web URL.")
+                    }
+                }
+            },
         )
     }
+
+    markReadRequest?.let { request ->
+        val title = when (request.workflow) {
+            AndroidMarkReadWorkflow.Read -> "Mark All as Read"
+            AndroidMarkReadWorkflow.ReadAndNext -> "Mark All as Read and Continue"
+        }
+        AlertDialog(
+            onDismissRequest = { if (!markReadRunning) markReadRequest = null },
+            title = { Text(title) },
+            text = { Text("Marks all unread articles in this scope as read.") },
+            confirmButton = {
+                TextButton(
+                    enabled = !markReadRunning,
+                    onClick = {
+                        markReadRequest = null
+                        markReadRunning = true
+                        actionScope.launch {
+                            val succeeded = timelineStore.markCurrentScopeAsRead(
+                                reloadCurrentScope = request.workflow == AndroidMarkReadWorkflow.Read,
+                            )
+                            if (
+                                succeeded &&
+                                request.workflow == AndroidMarkReadWorkflow.ReadAndNext &&
+                                request.nextScope != null
+                            ) {
+                                onSelectionChanged(selection.selectingScope(request.nextScope))
+                            }
+                            markReadRunning = false
+                        }
+                    },
+                ) {
+                    Text(title, color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !markReadRunning,
+                    onClick = { markReadRequest = null },
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
+}
+
+private enum class AndroidMarkReadWorkflow {
+    Read,
+    ReadAndNext,
+}
+
+private data class AndroidPendingMarkRead(
+    val workflow: AndroidMarkReadWorkflow,
+    val nextScope: AndroidNewsScope?,
+)
+
+@Composable
+private fun AndroidArticleActionCapsule(
+    selection: AndroidArticleTimelineSelection,
+    resolvedActions: AndroidArticleListResolvedActions,
+    syncState: AndroidSyncCoordinator.State,
+    syncSuccessVisible: Boolean,
+    actionsEnabled: Boolean,
+    scale: Float,
+    onRequestManualSync: () -> Boolean,
+    onCancelManualSync: () -> Boolean,
+    onSelectionChanged: (AndroidArticleTimelineSelection) -> Unit,
+    onAction: (AndroidActionBarAction) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var overflowExpanded by remember { mutableStateOf(false) }
+    var filterExpanded by remember { mutableStateOf(false) }
+    val syncing = syncState is AndroidSyncCoordinator.State.Syncing
+    val manualSyncing =
+        (syncState as? AndroidSyncCoordinator.State.Syncing)?.reason == SyncReason.MANUAL
+    val darkMode = isSystemInDarkTheme()
+    val buttonSize = 44.dp * scale
+    val iconSize = 20.dp * scale
+    val progressSize = 30.dp * scale
+    val progressIconSize = 15.dp * scale
+    val progressStrokeWidth = 1.5.dp * scale
+
+    fun perform(action: AndroidActionBarAction) {
+        when (action) {
+            AndroidActionBarAction.FilterAndSort -> filterExpanded = true
+            AndroidActionBarAction.ToggleReadFilter -> onSelectionChanged(selection.togglingReadFilter())
+            AndroidActionBarAction.ToggleSortOrder -> onSelectionChanged(selection.togglingSortOrder())
+            else -> onAction(action)
+        }
+    }
+
+    Box(modifier) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.background.copy(alpha = if (darkMode) 0.70f else 0.85f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            tonalElevation = 0.dp,
+            shadowElevation = if (darkMode) 0.5.dp else 0.dp,
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(
+                    enabled = actionsEnabled && (!syncing || manualSyncing),
+                    onClick = {
+                        if (manualSyncing) onCancelManualSync() else onRequestManualSync()
+                    },
+                    modifier = Modifier.size(buttonSize),
+                ) {
+                    if (syncSuccessVisible) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_check),
+                            contentDescription = "Sync complete",
+                            modifier = Modifier.size(iconSize),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    } else if (syncing) {
+                        Box(
+                            modifier = Modifier.size(progressSize),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.fillMaxSize(),
+                                strokeWidth = progressStrokeWidth,
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                            )
+                            Icon(
+                                painter = painterResource(
+                                    if (manualSyncing) R.drawable.ic_close else R.drawable.ic_sync,
+                                ),
+                                contentDescription = if (manualSyncing) "Cancel sync" else "Syncing",
+                                modifier = Modifier.size(progressIconSize),
+                            )
+                        }
+                    } else {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_sync),
+                            contentDescription = "Sync",
+                            modifier = Modifier.size(iconSize),
+                        )
+                    }
+                }
+
+                resolvedActions.direct.forEach { action ->
+                    IconButton(
+                        enabled = actionsEnabled,
+                        onClick = { perform(action) },
+                        modifier = Modifier.size(buttonSize),
+                    ) {
+                        Icon(
+                            painter = painterResource(articleListActionIcon(action, selection)),
+                            contentDescription = articleListActionContentDescription(action, selection),
+                            modifier = Modifier.size(iconSize),
+                        )
+                    }
+                }
+
+                Box {
+                    IconButton(
+                        enabled = actionsEnabled,
+                        onClick = { overflowExpanded = true },
+                        modifier = Modifier.size(buttonSize),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_more),
+                            contentDescription = "More",
+                            modifier = Modifier.size(iconSize),
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = overflowExpanded,
+                        onDismissRequest = { overflowExpanded = false },
+                    ) {
+                        if (resolvedActions.overflow.isEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("No additional actions") },
+                                enabled = false,
+                                onClick = {},
+                            )
+                        } else {
+                            resolvedActions.overflow.forEach { action ->
+                                DropdownMenuItem(
+                                    leadingIcon = {
+                                        Icon(
+                                            painter = painterResource(articleListActionIcon(action, selection)),
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    text = { Text(articleListActionMenuLabel(action, selection)) },
+                                    onClick = {
+                                        overflowExpanded = false
+                                        perform(action)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        DropdownMenu(
+            expanded = filterExpanded,
+            onDismissRequest = { filterExpanded = false },
+        ) {
+            if (selection.scope != AndroidNewsScope.Starred) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            if (selection.readFilter == AndroidArticleReadFilter.Unread) {
+                                "Show all articles"
+                            } else {
+                                "Show unread only"
+                            },
+                        )
+                    },
+                    onClick = {
+                        filterExpanded = false
+                        onSelectionChanged(selection.togglingReadFilter())
+                    },
+                )
+            }
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        when (selection.sort) {
+                            AndroidArticleSortOrder.OldestFirst -> "Newest first"
+                            AndroidArticleSortOrder.NewestFirst -> "Oldest first"
+                        },
+                    )
+                },
+                onClick = {
+                    filterExpanded = false
+                    onSelectionChanged(selection.togglingSortOrder())
+                },
+            )
+        }
+    }
+}
+
+private fun articleListActionIcon(
+    action: AndroidActionBarAction,
+    selection: AndroidArticleTimelineSelection,
+): Int = when (action) {
+    AndroidActionBarAction.FilterAndSort -> R.drawable.ic_filter
+    AndroidActionBarAction.ToggleReadFilter ->
+        if (selection.readFilter == AndroidArticleReadFilter.Unread) R.drawable.ic_news else R.drawable.ic_mark_unread
+    AndroidActionBarAction.ToggleSortOrder -> R.drawable.ic_sort
+    AndroidActionBarAction.Search -> R.drawable.ic_search
+    AndroidActionBarAction.MarkAllRead -> R.drawable.ic_mark_read
+    AndroidActionBarAction.MarkAllReadAndNext -> R.drawable.ic_mark_read_next
+    AndroidActionBarAction.ListeningList -> R.drawable.ic_headphones
+    AndroidActionBarAction.Settings -> R.drawable.ic_settings
+}
+
+private fun articleListActionContentDescription(
+    action: AndroidActionBarAction,
+    selection: AndroidArticleTimelineSelection,
+): String = when (action) {
+    AndroidActionBarAction.ToggleReadFilter ->
+        if (selection.readFilter == AndroidArticleReadFilter.Unread) "Show all articles" else "Show unread only"
+    AndroidActionBarAction.ToggleSortOrder ->
+        if (selection.sort == AndroidArticleSortOrder.OldestFirst) "Newest first" else "Oldest first"
+    else -> action.displayName
+}
+
+private fun articleListActionMenuLabel(
+    action: AndroidActionBarAction,
+    selection: AndroidArticleTimelineSelection,
+): String = when (action) {
+    AndroidActionBarAction.ToggleReadFilter ->
+        if (selection.readFilter == AndroidArticleReadFilter.Unread) {
+            "Show All Articles"
+        } else {
+            "Show Unread Only"
+        }
+    AndroidActionBarAction.ToggleSortOrder ->
+        if (selection.sort == AndroidArticleSortOrder.OldestFirst) {
+            "Newest First"
+        } else {
+            "Oldest First"
+        }
+    else -> action.displayName
 }
 
 @Composable
@@ -470,6 +1096,9 @@ private fun NewsNavigationContent(
     onSearch: () -> Unit,
     onListeningList: () -> Unit,
     onSettings: () -> Unit,
+    navigationToggleIcon: Int? = null,
+    navigationToggleDescription: String? = null,
+    onNavigationToggle: (() -> Unit)? = null,
 ) {
     val projection = navigation.projection
     val timelineState by timelineStore.state.collectAsState()
@@ -518,7 +1147,9 @@ private fun NewsNavigationContent(
         modifier = Modifier.fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -530,9 +1161,18 @@ private fun NewsNavigationContent(
             )
             Text(
                 "FluxNews",
+                modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
             )
+            if (navigationToggleIcon != null && onNavigationToggle != null) {
+                IconButton(onClick = onNavigationToggle) {
+                    Icon(
+                        painter = painterResource(navigationToggleIcon),
+                        contentDescription = navigationToggleDescription ?: "Toggle navigation",
+                    )
+                }
+            }
         }
         Text(
             "News",
@@ -774,6 +1414,7 @@ private fun ScopeNavigationCapsule(
     showArticleCount: Boolean,
     timelineCount: ULong?,
     readFilter: AndroidArticleReadFilter?,
+    syncing: Boolean,
     opensNavigation: Boolean,
     onOpenNavigation: () -> Unit,
 ) {
@@ -808,9 +1449,13 @@ private fun ScopeNavigationCapsule(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                if (showArticleCount && timelineCount != null) {
+                if (showArticleCount && (syncing || timelineCount != null)) {
                     Text(
-                        scopeCountLabel(scope, readFilter, timelineCount),
+                        if (syncing) {
+                            "Syncing…"
+                        } else {
+                            scopeCountLabel(scope, readFilter, requireNotNull(timelineCount))
+                        },
                         maxLines = 1,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
