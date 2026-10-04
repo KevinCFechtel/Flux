@@ -2667,11 +2667,12 @@ impl Store {
         feed_id: i64,
         enabled: bool,
     ) -> Result<(), CoreError> {
-        let connection = self
+        let mut connection = self
             .connection
             .lock()
             .map_err(|_| CoreError::internal("database lock poisoned"))?;
-        if connection
+        let tx = connection.transaction().map_err(sql_error)?;
+        if tx
             .query_row("SELECT 1 FROM feeds WHERE id=?1", [feed_id], |_| Ok(()))
             .optional()
             .map_err(sql_error)?
@@ -2679,8 +2680,25 @@ impl Store {
         {
             return Err(CoreError::data(format!("feed {feed_id} does not exist")));
         }
-        connection.execute("INSERT INTO feed_preferences(feed_id,system_notifications_enabled) VALUES(?1,?2) ON CONFLICT(feed_id) DO UPDATE SET system_notifications_enabled=excluded.system_notifications_enabled", params![feed_id, enabled]).map_err(sql_error)?;
-        Ok(())
+        tx.execute(
+            "INSERT INTO feed_preferences(feed_id,system_notifications_enabled) VALUES(?1,?2) ON CONFLICT(feed_id) DO UPDATE SET system_notifications_enabled=excluded.system_notifications_enabled",
+            params![feed_id, enabled],
+        )
+        .map_err(sql_error)?;
+
+        // Toggling notification delivery establishes a new delivery baseline.
+        // Never release articles that were queued before the user's current choice.
+        tx.execute(
+            "DELETE FROM pending_system_notifications WHERE article_id IN (SELECT id FROM articles WHERE feed_id=?1)",
+            [feed_id],
+        )
+        .map_err(sql_error)?;
+        tx.execute(
+            "DELETE FROM system_notification_candidates WHERE feed_id=?1",
+            [feed_id],
+        )
+        .map_err(sql_error)?;
+        tx.commit().map_err(sql_error)
     }
 
     pub fn feed_preferences(&self, feed_id: i64) -> Result<FeedPreferences, CoreError> {
@@ -2830,7 +2848,16 @@ impl Store {
         let tx = connection.transaction().map_err(sql_error)?;
         for article_ids in new_article_ids_by_feed.values() {
             for article_id in article_ids {
-                tx.execute("INSERT INTO pending_system_notifications(article_id) SELECT ?1 WHERE EXISTS(SELECT 1 FROM articles WHERE id=?1) ON CONFLICT(article_id) DO NOTHING", [article_id]).map_err(sql_error)?;
+                tx.execute(
+                    "INSERT INTO pending_system_notifications(article_id)
+                     SELECT a.id
+                     FROM articles a
+                     JOIN feed_preferences p ON p.feed_id=a.feed_id
+                     WHERE a.id=?1 AND p.system_notifications_enabled=1
+                     ON CONFLICT(article_id) DO NOTHING",
+                    [article_id],
+                )
+                .map_err(sql_error)?;
             }
         }
         let feeds = {
@@ -4051,6 +4078,13 @@ fn migrate(connection: &mut Connection) -> Result<(), CoreError> {
         // v19 stored these values but had no provenance. A saved historical
         // value, including false, is conservatively native-owned.
         tx.execute_batch("INSERT INTO core_settings(key,value) SELECT 'background_sync_enabled_explicit','1' WHERE EXISTS(SELECT 1 FROM core_settings WHERE key='background_sync_enabled') ON CONFLICT(key) DO UPDATE SET value='1'; INSERT INTO core_settings(key,value) SELECT 'auto_download_listening_list_explicit','1' WHERE EXISTS(SELECT 1 FROM core_settings WHERE key='auto_download_listening_list') ON CONFLICT(key) DO UPDATE SET value='1'; PRAGMA user_version=20;").map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+    }
+    if current < 21 {
+        let tx = connection.transaction().map_err(sql_error)?;
+        // Older notification code queued new articles even while a feed was disabled.
+        // Drop that ambiguous backlog once so enabling notifications starts from "now".
+        tx.execute_batch("DELETE FROM notification_candidate_articles; DELETE FROM system_notification_candidates; DELETE FROM pending_system_notifications; PRAGMA user_version=21;").map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
     }
     Ok(())
@@ -5311,7 +5345,7 @@ mod tests {
         let connection = store.connection.lock().unwrap();
         let row: (i64, String, Option<String>, String, bool, bool, i64, i64) = connection.query_row("SELECT content_processing_version,preview,image_url,raw_html_content,is_read,is_starred,feed_id,(SELECT COUNT(*) FROM pending_mutations) FROM articles WHERE id=3", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?))).unwrap();
         drop(connection);
-        assert_eq!(store.schema_version().unwrap(), 20);
+        assert_eq!(store.schema_version().unwrap(), 21);
         assert_eq!(row.0, crate::article::PROCESSING_VERSION);
         assert_eq!(row.1, "Hello world");
         assert_eq!(row.2.as_deref(), Some("https://example.test/cover.jpg"));
@@ -5335,7 +5369,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 20);
+        assert_eq!(store.schema_version().unwrap(), 21);
         assert_eq!(
             store.feed_preferences(2).unwrap(),
             FeedPreferences {
@@ -5354,6 +5388,74 @@ mod tests {
         assert_eq!(
             store.core_settings().unwrap().detail_character_limit,
             10_000
+        );
+    }
+
+    #[test]
+    fn system_notifications_only_queue_articles_after_feed_enablement() {
+        let temp = TempDir::new().unwrap();
+        let (data, cache, media) = roots(&temp);
+        let store = Store::open(&data, &cache, &media).unwrap();
+        let categories = [Category { id: 1, title: "Category".into() }];
+        let feeds = [Feed { id: 2, category_id: 1, title: "Feed".into() }];
+        let article = |id| Article {
+            id,
+            feed_id: 2,
+            title: format!("Article {id}"),
+            url: format!("https://example.test/{id}"),
+            comments_url: String::new(),
+            published_at: format!("2026-01-0{id}T00:00:00Z"),
+            is_read: false,
+            is_starred: false,
+            raw_html_content: String::new(),
+            reading_time_minutes: 0,
+            preview: String::new(),
+            image_url: None,
+        };
+
+        let before_enable = store
+            .reconcile(&categories, &feeds, &[article(1)])
+            .unwrap();
+        assert!(store
+            .prepare_system_notification_candidates(&before_enable.new_article_ids_by_feed)
+            .unwrap()
+            .is_empty());
+
+        store
+            .set_feed_system_notifications_enabled(2, true)
+            .unwrap();
+
+        // Replaying pre-enable IDs must not create a notification backlog.
+        assert!(store
+            .prepare_system_notification_candidates(&before_enable.new_article_ids_by_feed)
+            .unwrap()
+            .is_empty());
+
+        let after_enable = store
+            .reconcile(&categories, &feeds, &[article(1), article(2)])
+            .unwrap();
+        let candidates = store
+            .prepare_system_notification_candidates(&after_enable.new_article_ids_by_feed)
+            .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].feed_id, 2);
+        assert_eq!(candidates[0].new_count, 1);
+
+        store
+            .set_feed_system_notifications_enabled(2, false)
+            .unwrap();
+        let connection = store.connection.lock().unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM pending_system_notifications", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM system_notification_candidates", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
         );
     }
 
@@ -5490,7 +5592,7 @@ mod tests {
         drop(store);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 20);
+        assert_eq!(store.schema_version().unwrap(), 21);
         assert_eq!(
             store.import_legacy_feed_open_in_miniflux(2).unwrap(),
             LegacyFeedOpenInMinifluxImportOutcome::AlreadyPresent
@@ -5523,7 +5625,7 @@ mod tests {
             drop(store);
 
             let store = Store::open(&data, &cache, &media).unwrap();
-            assert_eq!(store.schema_version().unwrap(), 20);
+            assert_eq!(store.schema_version().unwrap(), 21);
             {
                 let connection = store.connection.lock().unwrap();
                 for key in [
@@ -5562,7 +5664,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 20);
+        assert_eq!(store.schema_version().unwrap(), 21);
         {
             let connection = store.connection.lock().unwrap();
             for key in [
@@ -5666,7 +5768,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 20);
+        assert_eq!(store.schema_version().unwrap(), 21);
         assert_eq!(
             store.feed_preferences(123).unwrap(),
             FeedPreferences {
@@ -5717,7 +5819,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 20);
+        assert_eq!(store.schema_version().unwrap(), 21);
         let connection = store.connection.lock().unwrap();
         assert_eq!(
             connection
@@ -5985,7 +6087,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 20);
+        assert_eq!(store.schema_version().unwrap(), 21);
         assert!(!store.enclosure(10).unwrap().unwrap().remote_present);
         assert_eq!(
             store
@@ -6026,7 +6128,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 20);
+        assert_eq!(store.schema_version().unwrap(), 21);
         // existing B1/B2/B3 data survives
         assert!(store.saved_media(10).unwrap().is_some());
         assert_eq!(store.playback_state(10).unwrap().unwrap().position_ms, 5000);
@@ -6065,7 +6167,7 @@ mod tests {
         drop(connection);
 
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 20);
+        assert_eq!(store.schema_version().unwrap(), 21);
         // Existing valid v13 rows survive intact.
         let requested = store.media_download(10).unwrap().unwrap();
         assert_eq!(requested.state, DownloadState::Requested);
@@ -6324,7 +6426,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (data, cache, media) = roots(&temp);
         let store = Store::open(&data, &cache, &media).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 20);
+        assert_eq!(store.schema_version().unwrap(), 21);
         let connection = store.connection.lock().unwrap();
         let foreign_key_count: i64 = connection
             .query_row(
