@@ -1,5 +1,6 @@
 package de.circledev.fluxnews.nativeapp
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -30,6 +31,12 @@ import androidx.compose.ui.unit.dp
 import uniffi.flux_uniffi.SyncReason
 
 class MainActivity : ComponentActivity() {
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        (application as FluxApplication).systemNotifications.routeIntent(intent)
+    }
+
     private companion object {
         const val BASELINE_PROFILE_TIMELINE_EXTRA = "flux.baselineProfile.timeline"
     }
@@ -57,6 +64,7 @@ class MainActivity : ComponentActivity() {
         }
 
         val application = application as FluxApplication
+        application.systemNotifications.routeIntent(intent)
         val bootstrap = application.accountBootstrap
         val coreRuntime = application.coreRuntime
         val syncCoordinator = application.syncCoordinator
@@ -74,6 +82,7 @@ class MainActivity : ComponentActivity() {
                 val mediaSettings = remember(coreRuntime) { AndroidMediaSettings(coreRuntime) }
                 val downloadedData = remember(coreRuntime) { AndroidDownloadedData(coreRuntime) }
                 val backgroundSync = application.backgroundSync
+                val systemNotifications = application.systemNotifications
                 CompositionLocalProvider(
                     LocalAndroidArticlePreferences provides articlePreferences,
                     LocalAndroidActionBarPreferences provides actionBarPreferences,
@@ -81,6 +90,7 @@ class MainActivity : ComponentActivity() {
                     LocalAndroidMediaSettings provides mediaSettings,
                     LocalAndroidDownloadedData provides downloadedData,
                     LocalAndroidBackgroundSync provides backgroundSync,
+                    LocalAndroidSystemNotifications provides systemNotifications,
                     LocalAndroidConfigurationBackup provides configurationBackup,
                 ) {
                     FluxNewsApp(
@@ -93,6 +103,7 @@ class MainActivity : ComponentActivity() {
                         articleOpenResolver,
                         navigationPreferences,
                         backgroundSync,
+                        systemNotifications,
                     )
                 }
             }
@@ -111,6 +122,7 @@ private fun FluxNewsApp(
     articleOpenResolver: AndroidArticleOpenResolver,
     navigationPreferences: AndroidNavigationPreferences,
     backgroundSync: AndroidBackgroundSync,
+    systemNotifications: AndroidSystemNotificationManager,
 ) {
     var bootstrapState by remember { mutableStateOf(bootstrap.state) }; var retryGeneration by remember { mutableStateOf(0) }; var showingRestore by remember { mutableStateOf(false) }
     LaunchedEffect(bootstrap, retryGeneration) { bootstrapState = bootstrap.restoreStoredAccount() }
@@ -153,6 +165,7 @@ private fun FluxNewsApp(
                 readerStore = readerStore,
                 articleOpenResolver = articleOpenResolver,
                 navigationPreferences = navigationPreferences,
+                systemNotifications = systemNotifications,
                 state = state,
                 onAccountChanged = { changedState ->
                     bootstrapState = changedState
