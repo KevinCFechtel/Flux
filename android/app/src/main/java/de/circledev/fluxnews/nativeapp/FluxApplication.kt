@@ -35,6 +35,9 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
             scope = applicationScope,
         )
     }
+    internal val widgetRouting: AndroidWidgetRouting by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        AndroidWidgetRouting()
+    }
     internal val postSyncEffects: AndroidPostSyncEffects by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidPostSyncEffects(
             activeSessionGeneration = coreRuntime::activeSessionGeneration,
