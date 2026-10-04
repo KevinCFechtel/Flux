@@ -132,6 +132,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("io.coil-kt.coil3:coil-compose:3.6.3")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
+    implementation("com.squareup.okhttp3:okhttp:5.1.0")
     implementation("com.google.android.material:material:1.14.0")
     implementation("net.java.dev.jna:jna:5.19.1@aar")
     implementation("rustls:rustls-platform-verifier:${rootProject.extra["rustlsPlatformVerifierVersion"]}@aar")
