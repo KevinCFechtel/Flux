@@ -38,6 +38,7 @@
             android:layout_height="wrap_content"
             android:text="0"
             android:textAppearance="@android:style/TextAppearance.Material.Widget.TextView"
+            android:textColor="@color/flux_widget_text_primary"
             android:textStyle="bold" />
 
         <TextView
@@ -78,5 +79,6 @@
         android:gravity="center"
         android:text="@string/widget_no_articles"
         android:textAppearance="@android:style/TextAppearance.Material.Widget.TextView"
+        android:textColor="@color/flux_widget_text_secondary"
         android:visibility="gone" />
 </LinearLayout>
