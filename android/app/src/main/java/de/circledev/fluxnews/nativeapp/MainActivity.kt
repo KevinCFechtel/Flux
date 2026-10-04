@@ -76,6 +76,7 @@ class MainActivity : ComponentActivity() {
         val articlePreferences = application.articlePreferences
         val actionBarPreferences = application.actionBarPreferences
         val configurationBackup = application.configurationBackup
+        val widgetProjection = application.widgetProjection
         setContent {
             FluxNewsTheme {
                 val coreArticleSettings = remember(coreRuntime) { AndroidCoreArticleSettings(coreRuntime) }
@@ -104,6 +105,7 @@ class MainActivity : ComponentActivity() {
                         navigationPreferences,
                         backgroundSync,
                         systemNotifications,
+                        widgetProjection,
                     )
                 }
             }
@@ -123,6 +125,7 @@ private fun FluxNewsApp(
     navigationPreferences: AndroidNavigationPreferences,
     backgroundSync: AndroidBackgroundSync,
     systemNotifications: AndroidSystemNotificationManager,
+    widgetProjection: AndroidWidgetProjectionCoordinator,
 ) {
     var bootstrapState by remember { mutableStateOf(bootstrap.state) }; var retryGeneration by remember { mutableStateOf(0) }; var showingRestore by remember { mutableStateOf(false) }
     LaunchedEffect(bootstrap, retryGeneration) { bootstrapState = bootstrap.restoreStoredAccount() }
@@ -166,6 +169,7 @@ private fun FluxNewsApp(
                 articleOpenResolver = articleOpenResolver,
                 navigationPreferences = navigationPreferences,
                 systemNotifications = systemNotifications,
+                widgetProjection = widgetProjection,
                 state = state,
                 onAccountChanged = { changedState ->
                     bootstrapState = changedState
