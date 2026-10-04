@@ -66,8 +66,10 @@ class FluxNewsWidgetProvider : AppWidgetProvider() {
                 RemoteViews(
                     mapOf(
                         SizeF(110f, 40f) to compactViews(context, configuration, header),
-                        SizeF(220f, 100f) to compactViews(context, configuration, header),
-                        SizeF(250f, 180f) to listViews(context, appWidgetId, configuration, header),
+                        SizeF(180f, 40f) to compactViews(context, configuration, header),
+                        SizeF(320f, 40f) to compactViews(context, configuration, header),
+                        SizeF(110f, 110f) to compactViews(context, configuration, header),
+                        SizeF(250f, 110f) to listViews(context, appWidgetId, configuration, header),
                     ),
                 )
             } else {
@@ -151,7 +153,12 @@ class FluxNewsWidgetProvider : AppWidgetProvider() {
             val options = optionsOverride ?: manager.getAppWidgetOptions(appWidgetId)
             val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)
             val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0)
-            return if (width >= 220 && height >= 150) WidgetLayout.List else WidgetLayout.Compact
+            val shortRow = height in 1 until 150
+            return when {
+                shortRow -> WidgetLayout.Compact
+                width in 1 until 220 -> WidgetLayout.Compact
+                else -> WidgetLayout.List
+            }
         }
 
         private fun openAppIntent(context: Context): PendingIntent =
