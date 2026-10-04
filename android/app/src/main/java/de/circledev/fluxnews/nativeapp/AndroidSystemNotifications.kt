@@ -1,6 +1,7 @@
 package de.circledev.fluxnews.nativeapp
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -110,6 +111,7 @@ internal class AndroidSystemNotificationManager(
         delivery.deliver(sessionGeneration, metadata.systemNotificationCandidates)
     }
 
+    @SuppressLint("MissingPermission")
     private fun postCandidate(candidate: SystemNotificationCandidate): Boolean {
         configure()
         if (!notificationsEnabledBySystem()) return false
