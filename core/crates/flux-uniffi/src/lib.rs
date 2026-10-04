@@ -382,6 +382,14 @@ pub struct FeedPreferences {
     pub auto_download_audio: bool,
 }
 #[derive(uniffi::Record)]
+pub struct FeedPreferencesPatch {
+    pub system_notifications_enabled: Option<bool>,
+    pub detail_rendering: Option<DetailRenderingMode>,
+    pub truncate_detail: Option<bool>,
+    pub open_in_miniflux: Option<bool>,
+    pub auto_download_audio: Option<bool>,
+}
+#[derive(uniffi::Record)]
 pub struct SystemNotificationCandidate {
     pub candidate_id: i64,
     pub feed_id: i64,
@@ -1455,6 +1463,21 @@ impl Flux {
             .map(Into::into)
             .map_err(map_error)
     }
+    pub fn feed_preferences_bulk(&self, feed_ids: Vec<i64>) -> Result<Vec<FeedPreferences>, FluxError> {
+        self.core
+            .feed_preferences_bulk(&feed_ids)
+            .map(|values| values.into_iter().map(Into::into).collect())
+            .map_err(map_error)
+    }
+    pub fn patch_feed_preferences_bulk(
+        &self,
+        feed_ids: Vec<i64>,
+        patch: FeedPreferencesPatch,
+    ) -> Result<(), FluxError> {
+        self.core
+            .patch_feed_preferences_bulk(&feed_ids, patch.into())
+            .map_err(map_error)
+    }
     pub fn set_feed_detail_rendering(
         &self,
         feed_id: i64,
@@ -1768,6 +1791,17 @@ impl From<FeedPreferences> for domain::FeedPreferences {
             feed_id: value.feed_id,
             system_notifications_enabled: value.system_notifications_enabled,
             detail_rendering: value.detail_rendering.into(),
+            truncate_detail: value.truncate_detail,
+            open_in_miniflux: value.open_in_miniflux,
+            auto_download_audio: value.auto_download_audio,
+        }
+    }
+}
+impl From<FeedPreferencesPatch> for domain::FeedPreferencesPatch {
+    fn from(value: FeedPreferencesPatch) -> Self {
+        Self {
+            system_notifications_enabled: value.system_notifications_enabled,
+            detail_rendering: value.detail_rendering.map(Into::into),
             truncate_detail: value.truncate_detail,
             open_in_miniflux: value.open_in_miniflux,
             auto_download_audio: value.auto_download_audio,
