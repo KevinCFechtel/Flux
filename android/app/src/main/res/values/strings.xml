@@ -3,4 +3,11 @@
     <string name="native_android">Native Android</string>
     <string name="phase_e1a">Phase E1-A</string>
     <string name="application_id">Application ID: %1$s</string>
+    <string name="system_notification_channel_name">New articles</string>
+    <string name="system_notification_channel_description">Notifications for new articles from enabled feeds</string>
+    <string name="system_notification_body">%1$s · %2$s</string>
+    <plurals name="system_notification_new_articles">
+        <item quantity="one">%d new article</item>
+        <item quantity="other">%d new articles</item>
+    </plurals>
 </resources>
