@@ -13,6 +13,7 @@ import uniffi.flux_uniffi.SyncCompleted
 internal class AndroidPostSyncEffects(
     private val activeSessionGeneration: () -> Long?,
     private val effects: List<AndroidPostSyncEffect> = emptyList(),
+    private val onEffectError: (AndroidPostSyncEffect, Throwable) -> Unit = { _, _ -> },
 ) {
     private val mutex = Mutex()
 
@@ -24,7 +25,13 @@ internal class AndroidPostSyncEffects(
 
             for (effect in effects) {
                 if (activeSessionGeneration() != sessionGeneration) return
-                runCatching { effect.apply(sessionGeneration, metadata) }
+                try {
+                    effect.apply(sessionGeneration, metadata)
+                } catch (error: kotlinx.coroutines.CancellationException) {
+                    throw error
+                } catch (error: Throwable) {
+                    onEffectError(effect, error)
+                }
             }
         }
     }
