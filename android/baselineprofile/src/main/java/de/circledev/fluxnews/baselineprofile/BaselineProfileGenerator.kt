@@ -5,6 +5,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.Direction
+import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import org.junit.Rule
 import org.junit.Test
@@ -16,26 +17,33 @@ class BaselineProfileGenerator {
     val baselineProfileRule = BaselineProfileRule()
 
     @Test
-    fun startupAndTimelineScroll() = baselineProfileRule.collect(
+    fun startup() = baselineProfileRule.collect(
         packageName = DEVELOPMENT_PACKAGE,
         includeInStartupProfile = true,
     ) {
         pressHome()
         startActivityAndWait()
+    }
 
-        // startActivityAndWait() is the deterministic baseline gate. The timeline path is
-        // opportunistic: a developer can generate a richer profile on a device whose
-        // development app already has an account, without checking credentials into the repo.
-        val uiDevice = androidx.test.uiautomator.UiDevice.getInstance(
-            InstrumentationRegistry.getInstrumentation(),
-        )
+    @Test
+    fun timelineScroll() = baselineProfileRule.collect(
+        packageName = DEVELOPMENT_PACKAGE,
+        includeInStartupProfile = false,
+    ) {
+        pressHome()
+        startActivityAndWait()
+
+        // A configured account is intentionally not synthesized here. On a clean benchmark app
+        // this contributes only the launch path; after the side-by-side benchmark app is configured
+        // locally, the same generator records the real Timeline without storing credentials in git.
+        val uiDevice = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         val timeline = uiDevice.wait(
             Until.findObject(By.desc(TIMELINE_DESCRIPTION)),
             TIMELINE_WAIT_MILLIS,
         )
         if (timeline != null) {
+            timeline.setGestureMargin(TIMELINE_GESTURE_MARGIN_PX)
             repeat(TIMELINE_SCROLLS) {
-                timeline.setGestureMargin(TIMELINE_GESTURE_MARGIN_PX)
                 timeline.fling(Direction.DOWN)
                 uiDevice.waitForIdle()
             }
