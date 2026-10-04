@@ -33,18 +33,21 @@ class MainActivity : ComponentActivity() {
     private companion object {
         const val BASELINE_PROFILE_TIMELINE_EXTRA = "flux.baselineProfile.timeline"
     }
+    private fun isBaselineProfileTimelineLaunch(): Boolean =
+        BuildConfig.BUILD_TYPE == "nonMinifiedRelease" &&
+            intent?.getBooleanExtra(BASELINE_PROFILE_TIMELINE_EXTRA, false) == true
+
     override fun onResume() {
         super.onResume()
-        (application as FluxApplication).backgroundSync.requestResumeIfNeeded()
+        if (!isBaselineProfileTimelineLaunch()) {
+            (application as FluxApplication).backgroundSync.requestResumeIfNeeded()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        if (
-            BuildConfig.BUILD_TYPE == "nonMinifiedRelease" &&
-            intent?.getBooleanExtra(BASELINE_PROFILE_TIMELINE_EXTRA, false) == true
-        ) {
+        if (isBaselineProfileTimelineLaunch()) {
             setContent {
                 FluxNewsTheme {
                     BaselineProfileTimelineFixture()
