@@ -135,6 +135,7 @@ internal fun AdaptiveAppShell(
     articleOpenResolver: AndroidArticleOpenResolver,
     navigationPreferences: AndroidNavigationPreferences,
     systemNotifications: AndroidSystemNotificationManager,
+    widgetProjection: AndroidWidgetProjectionCoordinator,
     state: AndroidAccountBootstrap.State.Ready,
     onAccountChanged: (AndroidAccountBootstrap.State) -> Unit,
     modifier: Modifier = Modifier,
@@ -158,6 +159,7 @@ internal fun AdaptiveAppShell(
     LaunchedEffect(sessionGeneration) {
         searchStore.activateSession(sessionGeneration)
         readerStore.activateSession(sessionGeneration)
+        sessionGeneration?.let { widgetProjection.ensureAvailable(it) }
     }
 
     suspend fun reloadNavigation() {
@@ -175,6 +177,9 @@ internal fun AdaptiveAppShell(
             timelineStore.handleCoreEvent(runtimeEvent)
             if (runtimeEvent.event.requiresNavigationRefresh()) {
                 navigationRefreshes.trySend(Unit)
+            }
+            if (runtimeEvent.event.requiresWidgetProjectionRefresh()) {
+                widgetProjection.requestRefresh(runtimeEvent.generation)
             }
         }
     }
@@ -281,6 +286,13 @@ internal fun AdaptiveAppShell(
             )
         }
     }
+}
+
+private fun CoreEvent.requiresWidgetProjectionRefresh(): Boolean = when (this) {
+    is CoreEvent.ArticleReadStateChanged,
+    is CoreEvent.ArticleStarredStateChanged,
+    -> true
+    else -> false
 }
 
 private fun CoreEvent.requiresNavigationRefresh(): Boolean = when (this) {
