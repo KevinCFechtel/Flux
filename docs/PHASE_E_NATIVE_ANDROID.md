@@ -981,6 +981,17 @@ Article taps route into the normal app article-open path. Widgets do not own a s
 
 The legacy manual widget Sync button is intentionally retired in the native Android widget. Widget data refresh follows the normal app/background sync and local-mutation projection refresh paths; the widget must not expose a parallel Core sync path.
 
+Current native implementation direction for E5-C/E5-D:
+
+- Android persists a credential-free SQLite projection in `flux-native/widget` and publishes complete retained timelines into it using paged Core reads rather than a fixed article limit.
+- Projection generations are atomically switched so a launcher never reads a partially written database; feed icons are stored once per feed/variant instead of once per article.
+- Local read/star mutations refresh the projection through the existing single Core event consumer, avoiding a second competing Core event collector.
+- The production provider identity remains `de.circle_dev.flux_news.FluxNewsWidgetProvider`.
+- The large widget uses `RemoteViewsService`/`RemoteViewsFactory` collection semantics; compact sizes show scope/count/last-sync status.
+- Each widget ID stores its own scope/read-filter/sort configuration.
+- Article taps carry only the article ID into the app; the app resolves the current local Core article and uses the normal article-open flow.
+- Initial styling deliberately uses native/system background and widget-radius behavior. Flutter-specific translucent backgrounds, bespoke colors and fixed corner radii are not part of the initial native contract and should be evaluated only after physical-device acceptance.
+
 ### Existing production widget component
 
 The Flutter production app already has FluxNewsWidgetProvider and installed widget instances may survive an application update only if their Android component/configuration path remains valid.
