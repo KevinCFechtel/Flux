@@ -35,7 +35,7 @@ import kotlinx.coroutines.launch
 import uniffi.flux_uniffi.DetailRenderingMode
 import uniffi.flux_uniffi.FeedPreferences
 
-@androidx.compose.material3.ExperimentalMaterial3Api
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 internal fun AndroidFeedSettingsDestination(
     feedId: Long,
