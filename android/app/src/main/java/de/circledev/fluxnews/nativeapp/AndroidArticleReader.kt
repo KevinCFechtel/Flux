@@ -2,6 +2,7 @@ package de.circledev.fluxnews.nativeapp
 
 import android.text.format.DateFormat
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
@@ -37,9 +38,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,6 +68,7 @@ import java.util.Date
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -235,7 +241,27 @@ internal fun AndroidArticleReaderOverlay(
     val article = state.article ?: return
     if (state.source != source) return
 
-    BackHandler { store.dismiss() }
+    var readerVisible by remember(article.id, source) { mutableStateOf(false) }
+    val dismissScope = rememberCoroutineScope()
+
+    LaunchedEffect(article.id, source) {
+        readerVisible = true
+    }
+
+    fun dismissReader() {
+        if (!readerVisible) return
+        readerVisible = false
+        val closingArticleId = article.id
+        dismissScope.launch {
+            delay(AndroidMotion.ReaderDurationMillis.toLong())
+            val current = store.state.value
+            if (current.article?.id == closingArticleId && current.source == source) {
+                store.dismiss()
+            }
+        }
+    }
+
+    BackHandler(enabled = readerVisible) { dismissReader() }
 
     BoxWithConstraints(
         modifier = Modifier
@@ -249,78 +275,95 @@ internal fun AndroidArticleReaderOverlay(
         } else {
             MaterialTheme.colorScheme.surface
         }
-        val interactionSource = remember { MutableInteractionSource() }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.38f))
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = null,
-                    onClick = store::dismiss,
-                ),
-        )
 
-        Surface(
-            modifier = if (compactPortrait) {
-                Modifier
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .align(Alignment.BottomCenter)
-                    .padding(horizontal = 6.dp, vertical = 6.dp)
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.94f)
-            } else {
-                Modifier
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .align(Alignment.Center)
-                    .padding(24.dp)
-                    .fillMaxWidth(0.76f)
-                    .fillMaxHeight(0.88f)
-                    .widthIn(max = 860.dp)
-            }
-                .semantics { paneTitle = "Article reader" },
-            shape = RoundedCornerShape(28.dp),
-            color = readerContainerColor,
-            tonalElevation = if (compactPortrait) 0.dp else 8.dp,
-            shadowElevation = if (compactPortrait) 0.dp else 12.dp,
+        AnimatedVisibility(
+            visible = readerVisible,
+            enter = AndroidMotion.readerScrimEnter(),
+            exit = AndroidMotion.readerScrimExit(),
+            modifier = Modifier.fillMaxSize(),
         ) {
-            Column(Modifier.fillMaxSize()) {
-                ReaderHeader(
-                    article = article,
-                    onClose = store::dismiss,
-                    onOpenOriginal = { onOpenOriginal(article) },
-                )
-                HorizontalDivider()
-                when {
-                    state.loading -> {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator()
-                        }
+            val interactionSource = remember { MutableInteractionSource() }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.38f))
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = ::dismissReader,
+                    ),
+            )
+        }
+
+        AnimatedVisibility(
+            visible = readerVisible,
+            enter = AndroidMotion.readerSurfaceEnter(compactPortrait),
+            exit = AndroidMotion.readerSurfaceExit(compactPortrait),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                Surface(
+                    modifier = if (compactPortrait) {
+                        Modifier
+                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                            .align(Alignment.BottomCenter)
+                            .padding(horizontal = 6.dp, vertical = 6.dp)
+                            .fillMaxWidth()
+                            .fillMaxHeight(0.94f)
+                    } else {
+                        Modifier
+                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                            .align(Alignment.Center)
+                            .padding(24.dp)
+                            .fillMaxWidth(0.76f)
+                            .fillMaxHeight(0.88f)
+                            .widthIn(max = 860.dp)
                     }
-                    state.errorMessage != null -> {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                        ) {
-                            Text(
-                                state.errorMessage ?: "Article content could not be loaded.",
-                                style = MaterialTheme.typography.bodyLarge,
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            Button(onClick = { onOpenOriginal(article) }) {
-                                Text("Open original")
+                        .semantics { paneTitle = "Article reader" },
+                    shape = RoundedCornerShape(28.dp),
+                    color = readerContainerColor,
+                    tonalElevation = if (compactPortrait) 0.dp else 8.dp,
+                    shadowElevation = if (compactPortrait) 0.dp else 12.dp,
+                ) {
+                    Column(Modifier.fillMaxSize()) {
+                        ReaderHeader(
+                            article = article,
+                            onClose = ::dismissReader,
+                            onOpenOriginal = { onOpenOriginal(article) },
+                        )
+                        HorizontalDivider()
+                        when {
+                            state.loading -> {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator()
+                                }
+                            }
+                            state.errorMessage != null -> {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                ) {
+                                    Text(
+                                        state.errorMessage ?: "Article content could not be loaded.",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                    )
+                                    Spacer(Modifier.height(12.dp))
+                                    Button(onClick = { onOpenOriginal(article) }) {
+                                        Text("Open original")
+                                    }
+                                }
+                            }
+                            state.document != null -> {
+                                AndroidReaderDocumentContent(
+                                    document = state.document!!,
+                                    onOpenOriginal = { onOpenOriginal(article) },
+                                    modifier = Modifier.fillMaxSize(),
+                                )
                             }
                         }
-                    }
-                    state.document != null -> {
-                        AndroidReaderDocumentContent(
-                            document = state.document!!,
-                            onOpenOriginal = { onOpenOriginal(article) },
-                            modifier = Modifier.fillMaxSize(),
-                        )
                     }
                 }
             }
