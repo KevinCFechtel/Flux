@@ -33,7 +33,7 @@ use domain::{
     CreateFeedRequest, CreateFeedResult, DeliveryDisposition, DeliveryMode, DetailRenderingMode,
     DiscoverSubscriptionsRequest, DiscoveredSubscription, DownloadFailureKind,
     DownloadNetworkPolicy, DownloadOrigin, DownloadRetention, DownloadState,
-    DownloadedMediaSummary, Enclosure, FeedIcon, FeedIconVariant, FeedPreferences,
+    DownloadedMediaSummary, Enclosure, FeedIcon, FeedIconVariant, FeedPreferences, FeedPreferencesPatch,
     FeedSystemNotificationSetting, LegacyDownloadImportOutcome,
     LegacyFeedOpenInMinifluxImportOutcome, LegacyPlaybackImport, LegacyPlaybackImportResult,
     ListeningListFeed, ListeningListItem, ListeningListSort, MediaChapter, MediaDownload,
@@ -1074,6 +1074,16 @@ impl FluxCore {
     }
     pub fn feed_preferences(&self, feed_id: i64) -> Result<FeedPreferences, CoreError> {
         self.store.feed_preferences(feed_id)
+    }
+    pub fn feed_preferences_bulk(&self, feed_ids: &[i64]) -> Result<Vec<FeedPreferences>, CoreError> {
+        self.store.feed_preferences_bulk(feed_ids)
+    }
+    pub fn patch_feed_preferences_bulk(
+        &self,
+        feed_ids: &[i64],
+        patch: FeedPreferencesPatch,
+    ) -> Result<(), CoreError> {
+        self.store.patch_feed_preferences_bulk(feed_ids, patch)
     }
     pub fn set_feed_detail_rendering(
         &self,
