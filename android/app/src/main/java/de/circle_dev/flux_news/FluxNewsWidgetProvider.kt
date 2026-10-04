@@ -26,10 +26,13 @@ import de.circledev.fluxnews.nativeapp.AndroidWidgetReadFilter
 import de.circledev.fluxnews.nativeapp.MainActivity
 import de.circledev.fluxnews.nativeapp.R
 import java.io.File
+import java.text.DateFormat
 import java.time.Instant
-import java.time.ZoneId
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
+import java.util.Date
+import java.util.Locale
 
 /**
  * Kept under the production Flutter component name so placed widgets have the
@@ -151,13 +154,28 @@ class FluxNewsWidgetProvider : AppWidgetProvider() {
         }
 
         private fun formatSync(context: Context, raw: String): String {
-            val formatted = runCatching {
-                DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT)
-                    .withZone(ZoneId.systemDefault())
-                    .format(Instant.parse(raw))
-            }.getOrDefault(raw)
+            val instant = parseCoreUtcTimestamp(raw)
+            val formatted = instant?.let {
+                DateFormat.getDateTimeInstance(
+                    DateFormat.SHORT,
+                    DateFormat.SHORT,
+                    Locale.getDefault(),
+                ).apply {
+                    timeZone = java.util.TimeZone.getDefault()
+                }.format(Date.from(it))
+            } ?: raw
             return context.getString(R.string.widget_last_sync, formatted)
         }
+
+        private fun parseCoreUtcTimestamp(raw: String): Instant? =
+            runCatching { Instant.parse(raw) }.getOrNull()
+                ?: runCatching {
+                    LocalDateTime.parse(raw, CORE_SQLITE_TIMESTAMP)
+                        .toInstant(ZoneOffset.UTC)
+                }.getOrNull()
+
+        private val CORE_SQLITE_TIMESTAMP: DateTimeFormatter =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.ROOT)
 
         private fun layoutFor(
             manager: AppWidgetManager,
