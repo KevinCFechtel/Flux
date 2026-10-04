@@ -303,6 +303,11 @@ pub struct WidgetArticle {
     pub is_starred: bool,
 }
 #[derive(uniffi::Record)]
+pub struct WidgetArticlePage {
+    pub articles: Vec<WidgetArticle>,
+    pub next_cursor: Option<ArticleCursor>,
+}
+#[derive(uniffi::Record)]
 pub struct WidgetCounts {
     pub all_unread: u64,
     pub all_articles: u64,
@@ -1502,6 +1507,16 @@ impl Flux {
     }
     pub fn widget_data(&self) -> Result<WidgetData, FluxError> {
         self.core.widget_data().map(Into::into).map_err(map_error)
+    }
+    pub fn widget_articles_page(
+        &self,
+        limit: u32,
+        cursor: Option<ArticleCursor>,
+    ) -> Result<WidgetArticlePage, FluxError> {
+        self.core
+            .widget_articles_page(limit, cursor.map(Into::into))
+            .map(Into::into)
+            .map_err(map_error)
     }
     pub fn runtime_health(&self) -> Result<RuntimeHealthStatus, FluxError> {
         self.core
