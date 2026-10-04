@@ -216,13 +216,16 @@ internal fun AdaptiveAppShell(
         AndroidNavigationFeedRef(it.id, it.categoryId, it.title)
     }.orEmpty()
 
-    LaunchedEffect(pendingNotificationFeedId, feeds, sessionGeneration) {
+    LaunchedEffect(pendingNotificationFeedId, navigation.projection, feeds, sessionGeneration) {
         val feedId = pendingNotificationFeedId ?: return@LaunchedEffect
-        val feed = feeds.firstOrNull { it.id == feedId } ?: return@LaunchedEffect
-        timelineSelection = timelineSelection.selectingScope(
-            AndroidNewsScope.Feed(feed.id, feed.categoryId, feed.title),
-        )
-        navController.popBackStack(ShellRoute.Timeline, inclusive = false)
+        if (navigation.projection == null) return@LaunchedEffect
+        val feed = feeds.firstOrNull { it.id == feedId }
+        if (feed != null) {
+            timelineSelection = timelineSelection.selectingScope(
+                AndroidNewsScope.Feed(feed.id, feed.categoryId, feed.title),
+            )
+            navController.popBackStack(ShellRoute.Timeline, inclusive = false)
+        }
         systemNotifications.consumeFeedRoute(feedId)
     }
 
