@@ -1125,6 +1125,43 @@ impl FluxCore {
         self.store.widget_data()
     }
 
+    /// Pages the complete compact widget article projection without changing the
+    /// intentionally bounded WidgetData contract used by WidgetKit snapshots.
+    pub fn widget_articles_page(
+        &self,
+        limit: u32,
+        cursor: Option<domain::ArticleCursor>,
+    ) -> Result<domain::WidgetArticlePage, CoreError> {
+        let page = self.store.article_page(
+            &ArticleQuery {
+                scope: domain::ArticleScope::All,
+                read_filter: domain::ReadFilter::All,
+                starred_filter: domain::StarredFilter::All,
+                sort: domain::ArticleSort::NewestFirst,
+                limit,
+                cursor,
+            },
+            false,
+        )?;
+        Ok(domain::WidgetArticlePage {
+            articles: page
+                .articles
+                .into_iter()
+                .map(|article| domain::WidgetArticle {
+                    id: article.id,
+                    feed_id: article.feed_id,
+                    category_id: article.category_id,
+                    feed_title: article.feed_title,
+                    title: article.title,
+                    published_at: article.published_at,
+                    is_read: article.is_read,
+                    is_starred: article.is_starred,
+                })
+                .collect(),
+            next_cursor: page.next_cursor,
+        })
+    }
+
     pub fn database_path(&self) -> PathBuf {
         self.store.database_path()
     }
