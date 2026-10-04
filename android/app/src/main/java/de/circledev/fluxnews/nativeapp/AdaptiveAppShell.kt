@@ -10,6 +10,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
@@ -75,6 +76,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -1432,6 +1435,7 @@ private fun CategoryNavigationRow(
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun FeedNavigationRow(
     feedId: Long,
@@ -1449,37 +1453,54 @@ private fun FeedNavigationRow(
     } else {
         MaterialTheme.colorScheme.background
     }
+    val haptics = LocalHapticFeedback.current
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Surface(
         color = selectedContainer,
         shape = MaterialTheme.shapes.extraLarge,
         modifier = Modifier.fillMaxWidth().padding(start = 32.dp, top = 2.dp, bottom = 2.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick)
-                .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            FeedIcon(
-                feedId = feedId,
-                title = title,
-                pngData = iconPng,
-                variant = iconVariant,
-                onRequest = onRequestFeedIcon,
-            )
-            Text(
-                title,
-                modifier = Modifier.weight(1f).padding(start = 12.dp),
-                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            )
-            CountText(count)
-            IconButton(onClick = onSettings) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_settings),
-                    contentDescription = "Feed Settings",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        Box {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(
+                        onClick = onClick,
+                        onLongClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            menuExpanded = true
+                        },
+                    )
+                    .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FeedIcon(
+                    feedId = feedId,
+                    title = title,
+                    pngData = iconPng,
+                    variant = iconVariant,
+                    onRequest = onRequestFeedIcon,
+                )
+                Text(
+                    title,
+                    modifier = Modifier.weight(1f).padding(start = 12.dp),
+                    fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                )
+                CountText(count)
+            }
+
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { menuExpanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Feed Settings") },
+                    onClick = {
+                        menuExpanded = false
+                        onSettings()
+                    },
                 )
             }
         }
