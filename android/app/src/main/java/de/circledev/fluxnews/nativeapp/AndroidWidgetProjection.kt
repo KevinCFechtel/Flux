@@ -29,6 +29,7 @@ internal class AndroidWidgetProjectionCoordinator(
     private val coreRuntime: AndroidCoreRuntime,
     private val store: AndroidWidgetProjectionStore,
     scope: CoroutineScope,
+    private val onProjectionChanged: () -> Unit = {},
 ) : AndroidPostSyncEffect {
     private val writeMutex = Mutex()
     private val refreshRequests = Channel<Long>(Channel.CONFLATED)
@@ -86,10 +87,14 @@ internal class AndroidWidgetProjectionCoordinator(
             }
             if (coreRuntime.activeSessionGeneration() != sessionGeneration) return@withLock
             store.replace(widgetData, articles, icons)
+            onProjectionChanged()
         }
     }
 
-    fun clear() = store.clear()
+    fun clear() {
+        store.clear()
+        onProjectionChanged()
+    }
 
     private companion object {
         const val PAGE_SIZE = 500u
@@ -190,10 +195,10 @@ internal class AndroidWidgetProjectionStore(
                 insertCount(db, "bookmarks", 0L, data.counts.bookmarksUnread, data.counts.bookmarks)
                 val feedUnread = data.counts.feedUnread.associate { it.id to it.count }
                 val feedAll = data.counts.feedAll.associate { it.id to it.count }
-                data.feeds.forEach { insertCount(db, "feed", it.id, feedUnread[it.id] ?: 0uL, feedAll[it.id] ?: 0u) }
+                data.feeds.forEach { insertCount(db, "feed", it.id, feedUnread[it.id] ?: 0uL, feedAll[it.id] ?: 0uL) }
                 val categoryUnread = data.counts.categoryUnread.associate { it.id to it.count }
                 val categoryAll = data.counts.categoryAll.associate { it.id to it.count }
-                data.categories.forEach { insertCount(db, "category", it.id, categoryUnread[it.id] ?: 0uL, categoryAll[it.id] ?: 0u) }
+                data.categories.forEach { insertCount(db, "category", it.id, categoryUnread[it.id] ?: 0uL, categoryAll[it.id] ?: 0uL) }
 
                 db.setTransactionSuccessful()
             } finally {
