@@ -2053,7 +2053,7 @@ internal fun AndroidArticleTimeline(
                         AndroidArticleTimelineRow(
                             article = presentedArticle,
                             hasAudio = hasAudio,
-                            preferences = articlePreferences,
+                            preferences = loadedArticlePreferences,
                             publicationReferenceMillis = publicationReferenceMillis,
                             feedIconPng = state.feedIconPngByFeedId[article.feedId],
                             feedIconVariant = feedIconVariant,
