@@ -636,6 +636,7 @@ private fun NewsRootContent(
                                         syncState = syncState,
                                         syncSuccessVisible = syncSuccessVisible,
                                         actionsEnabled = !markReadRunning,
+                                        scale = actionCapsuleScale,
                                         onRequestManualSync = {
                                             syncCoordinator.requestSync(SyncReason.MANUAL)
                                         },
@@ -669,6 +670,7 @@ private fun NewsRootContent(
                                         syncState = syncState,
                                         syncSuccessVisible = syncSuccessVisible,
                                         actionsEnabled = !markReadRunning,
+                                        scale = actionCapsuleScale,
                                         onRequestManualSync = {
                                             syncCoordinator.requestSync(SyncReason.MANUAL)
                                         },
