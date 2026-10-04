@@ -11,8 +11,8 @@
 
     <ImageView
         android:id="@+id/widget_row_icon"
-        android:layout_width="28dp"
-        android:layout_height="28dp"
+        android:layout_width="22dp"
+        android:layout_height="22dp"
         android:layout_marginEnd="10dp"
         android:contentDescription="@null"
         android:scaleType="fitCenter"
@@ -20,8 +20,8 @@
 
     <TextView
         android:id="@+id/widget_row_initial"
-        android:layout_width="28dp"
-        android:layout_height="28dp"
+        android:layout_width="22dp"
+        android:layout_height="22dp"
         android:layout_marginEnd="10dp"
         android:background="@drawable/flux_widget_feed_icon_fallback"
         android:gravity="center"
