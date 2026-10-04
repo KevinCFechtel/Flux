@@ -61,8 +61,8 @@ internal fun SystemNotificationsSettingsScreen(
         } else {
             scope.launch {
                 manager.setFeedEnabled(feedId, true)
+                    .onSuccess { refreshGeneration += 1 }
                     .onFailure { message = "This feed could not be enabled for System Notifications." }
-                refreshGeneration += 1
             }
         }
     }
@@ -122,10 +122,10 @@ internal fun SystemNotificationsSettingsScreen(
                     } else {
                         scope.launch {
                             manager.setFeedEnabled(setting.feedId, enabled)
+                                .onSuccess { refreshGeneration += 1 }
                                 .onFailure {
                                     message = "System Notification setting could not be saved."
                                 }
-                            refreshGeneration += 1
                         }
                     }
                 }
