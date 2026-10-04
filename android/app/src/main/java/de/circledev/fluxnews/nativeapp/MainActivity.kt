@@ -33,6 +33,11 @@ class MainActivity : ComponentActivity() {
     private companion object {
         const val BASELINE_PROFILE_TIMELINE_EXTRA = "flux.baselineProfile.timeline"
     }
+    override fun onResume() {
+        super.onResume()
+        (application as FluxApplication).backgroundSync.requestResumeIfNeeded()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
