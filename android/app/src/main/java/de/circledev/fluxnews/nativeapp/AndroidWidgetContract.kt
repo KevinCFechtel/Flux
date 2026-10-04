@@ -122,14 +122,14 @@ internal class AndroidWidgetProjectionReader(private val root: File) {
             "SELECT $countColumn FROM counts WHERE scope_type=? AND scope_id=?",
             arrayOf(scopeType, scopeId.toString()),
         ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else 0L }
-        val lastSync = rawQuery(
+        val projectedLastSync = rawQuery(
             "SELECT value FROM metadata WHERE key='last_successful_sync_at'",
             null,
         ).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0).takeIf(String::isNotBlank) else null }
         AndroidWidgetHeader(
             title = scopeTitle(configuration),
             count = count,
-            lastSuccessfulSyncAt = lastSync,
+            lastSuccessfulSyncAt = store.lastSuccessfulSyncAt() ?: projectedLastSync,
         )
     }
 
