@@ -23,7 +23,9 @@
         android:layout_width="28dp"
         android:layout_height="28dp"
         android:layout_marginEnd="10dp"
+        android:background="@drawable/flux_widget_feed_icon_fallback"
         android:gravity="center"
+        android:textColor="@color/flux_widget_icon_fallback_text"
         android:textStyle="bold" />
 
     <LinearLayout
@@ -39,6 +41,7 @@
             android:ellipsize="end"
             android:maxLines="2"
             android:textAppearance="@android:style/TextAppearance.Material.Widget.TextView"
+            android:textColor="@color/flux_widget_text_primary"
             android:textStyle="bold" />
 
         <TextView
@@ -47,6 +50,7 @@
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textAppearance="@android:style/TextAppearance.Material.Widget.TextView" />
+            android:textAppearance="@android:style/TextAppearance.Material.Widget.TextView"
+            android:textColor="@color/flux_widget_text_secondary" />
     </LinearLayout>
 </LinearLayout>
