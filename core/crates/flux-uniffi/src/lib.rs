@@ -1005,6 +1005,12 @@ impl Flux {
             .map(|rows| rows.into_iter().map(Into::into).collect())
             .map_err(map_error)
     }
+    pub fn article_summary(&self, article_id: i64) -> Result<Option<ArticleSummary>, FluxError> {
+        self.core
+            .article_summary(article_id)
+            .map(|article| article.map(Into::into))
+            .map_err(map_error)
+    }
     pub fn article_page(
         &self,
         query: ArticleQuery,
