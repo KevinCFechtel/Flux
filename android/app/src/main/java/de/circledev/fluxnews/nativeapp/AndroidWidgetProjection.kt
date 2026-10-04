@@ -76,7 +76,7 @@ internal class AndroidWidgetProjectionCoordinator(
                 for (feed in widgetData.feeds) {
                     for (variant in listOf(FeedIconVariant.NORMAL, FeedIconVariant.DARK)) {
                         val icon = runCatching {
-                            coreRuntime.localForGeneration(sessionGeneration) {
+                            coreRuntime.remoteForGeneration(sessionGeneration) {
                                 it.feedIcon(feed.id, variant)
                             }
                         }.getOrNull()
