@@ -1,7 +1,5 @@
 package de.circledev.fluxnews.baselineprofile
 
-import android.content.ComponentName
-import android.content.Intent
 import androidx.benchmark.macro.junit4.BaselineProfileRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -24,7 +22,7 @@ class BaselineProfileGenerator {
         includeInStartupProfile = true,
     ) {
         pressHome()
-        startActivityAndWait(benchmarkTimelineIntent())
+        startActivityAndWait()
     }
 
     @Test
@@ -33,7 +31,7 @@ class BaselineProfileGenerator {
         includeInStartupProfile = false,
     ) {
         pressHome()
-        startActivityAndWait(benchmarkTimelineIntent())
+        startActivityAndWait()
 
         val uiDevice = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         val timeline = requireNotNull(
@@ -50,16 +48,8 @@ class BaselineProfileGenerator {
         }
     }
 
-    private fun benchmarkTimelineIntent(): Intent =
-        Intent(Intent.ACTION_MAIN).apply {
-            component = ComponentName(DEVELOPMENT_PACKAGE, BENCHMARK_ACTIVITY)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        }
-
     private companion object {
         const val DEVELOPMENT_PACKAGE = "de.circle_dev.flux_news.native.dev"
-        const val BENCHMARK_ACTIVITY =
-            "de.circledev.fluxnews.nativeapp.BenchmarkTimelineActivity"
         const val TIMELINE_DESCRIPTION = "Benchmark article timeline"
         const val TIMELINE_WAIT_MILLIS = 5_000L
         const val TIMELINE_SCROLLS = 5
