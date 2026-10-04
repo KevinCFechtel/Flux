@@ -137,7 +137,7 @@ internal class AndroidWidgetProjectionReader(private val root: File) {
         val directory = store.currentDirectory() ?: return null
         val databaseFile = File(directory, DATABASE_NAME)
         if (!databaseFile.isFile) return null
-        val db = SQLiteDatabase.openDatabase(databaseFile, null, SQLiteDatabase.OPEN_READONLY)
+        val db = SQLiteDatabase.openDatabase(databaseFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
         return try {
             val clauses = mutableListOf<String>()
             val args = mutableListOf<String>()
@@ -197,7 +197,7 @@ internal class AndroidWidgetProjectionReader(private val root: File) {
         val directory = store.currentDirectory() ?: return null
         val file = File(directory, DATABASE_NAME)
         if (!file.isFile) return null
-        return SQLiteDatabase.openDatabase(file, null, SQLiteDatabase.OPEN_READONLY).use(block)
+        return SQLiteDatabase.openDatabase(file.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use(block)
     }
 
     private companion object {
