@@ -3,6 +3,7 @@ package de.circledev.fluxnews.nativeapp
 import android.text.format.DateFormat
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -239,10 +240,15 @@ internal fun AndroidArticleReaderOverlay(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .zIndex(50f)
-            .windowInsetsPadding(WindowInsets.safeDrawing),
+            .zIndex(50f),
     ) {
         val compactPortrait = maxWidth < 600.dp && maxHeight >= maxWidth
+        val darkMode = isSystemInDarkTheme()
+        val readerContainerColor = if (darkMode) {
+            MaterialTheme.colorScheme.surfaceContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        }
         val interactionSource = remember { MutableInteractionSource() }
         Box(
             modifier = Modifier
@@ -258,12 +264,14 @@ internal fun AndroidArticleReaderOverlay(
         Surface(
             modifier = if (compactPortrait) {
                 Modifier
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
                     .align(Alignment.BottomCenter)
                     .padding(horizontal = 6.dp, vertical = 6.dp)
                     .fillMaxWidth()
                     .fillMaxHeight(0.94f)
             } else {
                 Modifier
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
                     .align(Alignment.Center)
                     .padding(24.dp)
                     .fillMaxWidth(0.76f)
@@ -272,6 +280,7 @@ internal fun AndroidArticleReaderOverlay(
             }
                 .semantics { paneTitle = "Article reader" },
             shape = RoundedCornerShape(28.dp),
+            color = readerContainerColor,
             tonalElevation = if (compactPortrait) 0.dp else 8.dp,
             shadowElevation = if (compactPortrait) 0.dp else 12.dp,
         ) {
