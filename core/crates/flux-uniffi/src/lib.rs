@@ -1514,7 +1514,13 @@ impl Flux {
         cursor: Option<ArticleCursor>,
     ) -> Result<WidgetArticlePage, FluxError> {
         self.core
-            .widget_articles_page(limit, cursor.map(Into::into))
+            .widget_articles_page(
+                limit,
+                cursor.map(|value| domain::ArticleCursor {
+                    published_at: value.published_at,
+                    article_id: value.article_id,
+                }),
+            )
             .map(Into::into)
             .map_err(map_error)
     }
@@ -2298,7 +2304,10 @@ impl From<domain::WidgetArticlePage> for WidgetArticlePage {
     fn from(value: domain::WidgetArticlePage) -> Self {
         Self {
             articles: value.articles.into_iter().map(Into::into).collect(),
-            next_cursor: value.next_cursor.map(Into::into),
+            next_cursor: value.next_cursor.map(|cursor| ArticleCursor {
+                published_at: cursor.published_at,
+                article_id: cursor.article_id,
+            }),
         }
     }
 }
