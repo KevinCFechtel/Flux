@@ -43,6 +43,13 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
         AndroidPostSyncEffects(
             activeSessionGeneration = coreRuntime::activeSessionGeneration,
             effects = listOf(systemNotifications, widgetProjection),
+            onEffectError = { effect, error ->
+                diagnostics.record(
+                    AndroidAppLogLevel.Error,
+                    "post-sync",
+                    "${effect.javaClass.simpleName} failed: ${error.javaClass.simpleName}: ${error.message.orEmpty()}",
+                )
+            },
         )
     }
     val syncCoordinator: AndroidSyncCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
