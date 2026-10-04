@@ -63,3 +63,6 @@ android/**/*.aab
 !android/Build/*.sh
 android/Build/Products/
 android/Build/reports/
+
+# Local SourceKit-LSP / xcode-build-server configuration
+buildServer.json
