@@ -99,6 +99,11 @@ private object ShellRoute {
     const val Settings = "settings"
 }
 
+private const val ANDROID_ACTION_CAPSULE_MAX_FONT_SCALE = 1.35f
+
+internal fun androidActionCapsuleScale(fontScale: Float): Float =
+    fontScale.coerceIn(1f, ANDROID_ACTION_CAPSULE_MAX_FONT_SCALE)
+
 private data class NewsNavigationModel(
     val projection: NavigationProjection? = null,
     val error: String? = null,
@@ -560,11 +565,16 @@ private fun NewsRootContent(
 
     val layoutDirection = LocalLayoutDirection.current
     val density = LocalDensity.current
+    val actionCapsuleScale = androidActionCapsuleScale(density.fontScale)
     val navigationBarHeight = with(density) {
         WindowInsets.navigationBars.getBottom(this).toDp()
     }
     val bottomActionsVisible = !isLandscape && !persistentNavigation && !collapsedPersistentNavigation
-    val bottomActionClearance = if (bottomActionsVisible) navigationBarHeight + 76.dp else 0.dp
+    val bottomActionClearance = if (bottomActionsVisible) {
+        navigationBarHeight + 32.dp + (44.dp * actionCapsuleScale)
+    } else {
+        0.dp
+    }
     val appBarColors = TopAppBarDefaults.topAppBarColors(
         containerColor = Color.Transparent,
         scrolledContainerColor = Color.Transparent,
@@ -593,6 +603,7 @@ private fun NewsRootContent(
                                     syncState = syncState,
                                     syncSuccessVisible = syncSuccessVisible,
                                     actionsEnabled = !markReadRunning,
+                                    scale = actionCapsuleScale,
                                     onRequestManualSync = {
                                         syncCoordinator.requestSync(SyncReason.MANUAL)
                                     },
@@ -716,6 +727,7 @@ private fun NewsRootContent(
                 syncState = syncState,
                 syncSuccessVisible = syncSuccessVisible,
                 actionsEnabled = !markReadRunning,
+                scale = actionCapsuleScale,
                 onRequestManualSync = {
                     syncCoordinator.requestSync(SyncReason.MANUAL)
                 },
@@ -804,6 +816,7 @@ private fun AndroidArticleActionCapsule(
     syncState: AndroidSyncCoordinator.State,
     syncSuccessVisible: Boolean,
     actionsEnabled: Boolean,
+    scale: Float,
     onRequestManualSync: () -> Boolean,
     onCancelManualSync: () -> Boolean,
     onSelectionChanged: (AndroidArticleTimelineSelection) -> Unit,
@@ -816,6 +829,11 @@ private fun AndroidArticleActionCapsule(
     val manualSyncing =
         (syncState as? AndroidSyncCoordinator.State.Syncing)?.reason == SyncReason.MANUAL
     val darkMode = isSystemInDarkTheme()
+    val buttonSize = 44.dp * scale
+    val iconSize = 20.dp * scale
+    val progressSize = 30.dp * scale
+    val progressIconSize = 15.dp * scale
+    val progressStrokeWidth = 1.5.dp * scale
 
     fun perform(action: AndroidActionBarAction) {
         when (action) {
@@ -843,23 +861,23 @@ private fun AndroidArticleActionCapsule(
                     onClick = {
                         if (manualSyncing) onCancelManualSync() else onRequestManualSync()
                     },
-                    modifier = Modifier.size(44.dp),
+                    modifier = Modifier.size(buttonSize),
                 ) {
                     if (syncSuccessVisible) {
                         Icon(
                             painter = painterResource(R.drawable.ic_check),
                             contentDescription = "Sync complete",
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(iconSize),
                             tint = MaterialTheme.colorScheme.primary,
                         )
                     } else if (syncing) {
                         Box(
-                            modifier = Modifier.size(30.dp),
+                            modifier = Modifier.size(progressSize),
                             contentAlignment = Alignment.Center,
                         ) {
                             CircularProgressIndicator(
                                 modifier = Modifier.fillMaxSize(),
-                                strokeWidth = 1.5.dp,
+                                strokeWidth = progressStrokeWidth,
                                 color = MaterialTheme.colorScheme.primary,
                                 trackColor = MaterialTheme.colorScheme.surfaceVariant,
                             )
@@ -868,14 +886,14 @@ private fun AndroidArticleActionCapsule(
                                     if (manualSyncing) R.drawable.ic_close else R.drawable.ic_sync,
                                 ),
                                 contentDescription = if (manualSyncing) "Cancel sync" else "Syncing",
-                                modifier = Modifier.size(15.dp),
+                                modifier = Modifier.size(progressIconSize),
                             )
                         }
                     } else {
                         Icon(
                             painter = painterResource(R.drawable.ic_sync),
                             contentDescription = "Sync",
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(iconSize),
                         )
                     }
                 }
@@ -884,12 +902,12 @@ private fun AndroidArticleActionCapsule(
                     IconButton(
                         enabled = actionsEnabled,
                         onClick = { perform(action) },
-                        modifier = Modifier.size(44.dp),
+                        modifier = Modifier.size(buttonSize),
                     ) {
                         Icon(
                             painter = painterResource(articleListActionIcon(action, selection)),
                             contentDescription = articleListActionContentDescription(action, selection),
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(iconSize),
                         )
                     }
                 }
@@ -898,12 +916,12 @@ private fun AndroidArticleActionCapsule(
                     IconButton(
                         enabled = actionsEnabled,
                         onClick = { overflowExpanded = true },
-                        modifier = Modifier.size(44.dp),
+                        modifier = Modifier.size(buttonSize),
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_more),
                             contentDescription = "More",
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(iconSize),
                         )
                     }
                     DropdownMenu(
