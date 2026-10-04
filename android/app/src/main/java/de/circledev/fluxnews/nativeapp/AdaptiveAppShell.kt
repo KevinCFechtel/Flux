@@ -164,7 +164,9 @@ internal fun AdaptiveAppShell(
     LaunchedEffect(sessionGeneration) {
         searchStore.activateSession(sessionGeneration)
         readerStore.activateSession(sessionGeneration)
-        sessionGeneration?.let { widgetProjection.ensureAvailable(it) }
+        sessionGeneration?.let { generation ->
+            runCatching { widgetProjection.ensureAvailable(generation) }
+        }
     }
 
     suspend fun reloadNavigation() {
