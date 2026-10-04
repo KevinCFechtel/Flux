@@ -682,6 +682,12 @@ pub struct WidgetArticle {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WidgetArticlePage {
+    pub articles: Vec<WidgetArticle>,
+    pub next_cursor: Option<ArticleCursor>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WidgetCounts {
     pub all_unread: u64,
     pub all_articles: u64,
