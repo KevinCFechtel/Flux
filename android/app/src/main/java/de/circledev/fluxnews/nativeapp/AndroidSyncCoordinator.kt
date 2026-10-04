@@ -54,6 +54,7 @@ class AndroidSyncCoordinator private constructor(
         cancellationFactory: () -> AndroidSyncCancellationHandle,
         sessionGeneration: () -> Long? = { 1L },
         syncRunner: suspend (SyncReason, AndroidSyncCancellationHandle) -> Unit,
+        syncMetadata: SyncCompleted? = null,
         postSync: suspend (Long, SyncCompleted) -> Unit = { _, _ -> },
         @Suppress("UNUSED_PARAMETER") testOnly: Unit,
     ) : this(
@@ -62,7 +63,7 @@ class AndroidSyncCoordinator private constructor(
         sessionGeneration = sessionGeneration,
         syncRunner = { _, reason, cancellation ->
             syncRunner(reason, cancellation)
-            AndroidSyncExecutionResult.Completed()
+            AndroidSyncExecutionResult.Completed(syncMetadata)
         },
         postSync = postSync,
     )
