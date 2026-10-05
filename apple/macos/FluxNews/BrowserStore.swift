@@ -726,7 +726,11 @@ final class BrowserStore: ObservableObject {
             systemNotificationSettingsError = NativeErrorPresentation.message(for: error)
         }
     }
-    func setSystemNotificationsEnabled(feedID: Int64, enabled: Bool) {
+    func setSystemNotificationsEnabled(
+        feedID: Int64,
+        enabled: Bool,
+        completion: ((Result<Void, Error>) -> Void)? = nil
+    ) {
         guard let core, !updatingSystemNotificationFeedIDs.contains(feedID) else { return }
         updatingSystemNotificationFeedIDs.insert(feedID)
         systemNotificationSettingsError = nil
@@ -740,12 +744,14 @@ final class BrowserStore: ObservableObject {
                     guard let store = store.value else { return }
                     store.updatingSystemNotificationFeedIDs.remove(feedID)
                     store.systemNotificationSettings = settings
+                    completion?(.success(()))
                 }
             } catch {
                 await MainActor.run {
                     guard let store = store.value else { return }
                     store.updatingSystemNotificationFeedIDs.remove(feedID)
                     store.systemNotificationSettingsError = NativeErrorPresentation.message(for: error)
+                    completion?(.failure(error))
                 }
             }
         }
@@ -1370,13 +1376,6 @@ final class BrowserStore: ObservableObject {
     func feedTitle(feedID: Int64) -> String { catalog.feeds.first(where: { $0.id == feedID })?.title ?? "" }
     func setFeedDetailRendering(feedID: Int64, mode: DetailRenderingMode) throws { try core?.setFeedDetailRendering(feedId: feedID, mode: mode) }
     func setFeedTruncateDetail(feedID: Int64, enabled: Bool) throws { try core?.setFeedTruncateDetail(feedId: feedID, enabled: enabled) }
-    func setFeedSystemNotificationsEnabled(feedID: Int64, enabled: Bool) throws {
-        guard let core else { throw NSError(domain: "FluxNews", code: 1) }
-        if enabled {
-            throw NSError(domain: "FluxNews", code: 2, userInfo: [NSLocalizedDescriptionKey: "Use the asynchronous notification authorization path."])
-        }
-        try core.setFeedSystemNotificationsEnabled(feedId: feedID, enabled: false)
-    }
     func setFeedOpenInMiniflux(feedID: Int64, enabled: Bool) throws { try core?.setFeedOpenInMiniflux(feedId: feedID, enabled: enabled) }
     func setFeedAutoDownloadAudio(feedID: Int64, enabled: Bool) throws { try core?.setFeedAutoDownloadAudio(feedId: feedID, enabled: enabled) }
     func share(_ article: ArticleSummary) { guard let url = URL(string: article.url) else { return }; DispatchQueue.main.async { [weak self] in guard let self, let view = NSApplication.shared.keyWindow?.contentView else { return }; let picker = NSSharingServicePicker(items: [article.title, url]); self.sharingPicker = picker; let point = view.convert(view.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil); picker.show(relativeTo: NSRect(origin: point, size: NSSize(width: 1, height: 1)), of: view, preferredEdge: .minY) } }
