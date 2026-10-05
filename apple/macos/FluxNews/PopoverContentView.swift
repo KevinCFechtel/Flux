@@ -1970,7 +1970,7 @@ private struct AccountSettingsView: View {
                     }
                 }
 
-                if index < customHeaders.indices.last {
+                if index < customHeaders.count - 1 {
                     Divider()
                 }
             }
