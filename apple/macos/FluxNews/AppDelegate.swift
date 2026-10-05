@@ -91,9 +91,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
         popover.behavior = .transient; popover.animates = true; popover.delegate = self; popover.contentSize = size(sidebarVisible: false); popover.contentViewController = host()
         AppRouter.shared.configure(open: { [weak self] route in self?.store.route(to: route); self?.show() }, refresh: { [weak self] in self?.show(); self?.store.sync(reason: .manual) }, widgetAction: { [weak self] action in self?.store.handleWidgetAction(action); self?.show() })
+        readerWindow.onVisibilityChanged = { [weak self] visible in
+            guard let self else { return }
+            self.popover.behavior = visible ? .applicationDefined : .transient
+        }
         store.onOpenDetail = { [weak self] article, togglesPreview in
             guard let self else { return }
-            self.readerWindow.show(article: article, togglesPreview: togglesPreview, preferredScreen: self.detailScreen())
+            // Keep the timeline interactive while the coupled Reader takes focus.
+            // The Reader reuses its existing panel and only replaces its article.
+            self.popover.behavior = .applicationDefined
+            self.readerWindow.show(
+                article: article,
+                togglesPreview: togglesPreview,
+                preferredScreen: self.detailScreen()
+            )
         }
         store.onInvalidateContent = { [weak self] in self?.readerWindow.hide() }
         catalogObservation = store.$catalog.dropFirst().removeDuplicates().sink { [weak self] catalog in
