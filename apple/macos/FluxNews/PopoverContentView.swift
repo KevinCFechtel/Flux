@@ -1444,24 +1444,49 @@ struct SettingsView: View {
     @State private var launchAtLogin = false
     @State private var globalShortcut = GlobalShortcutChoice.optionCommandF
     @State private var section: SettingsSection = .account
+    @State private var settingsSidebarVisible = true
     @State private var backupFlow: BackupPasswordFlow?
     @State private var settingsWindow: NSWindow?
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("FluxNews Settings")
-                .font(.title2.bold())
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
-            Divider()
-            NavigationSplitView {
-                SettingsSidebar(selection: $section)
-            } detail: {
-                settingsPage
-                    .padding(20)
+            HStack(spacing: 12) {
+                Text("FluxNews Settings")
+                    .font(.title2.bold())
+
+                Button {
+                    settingsSidebarVisible.toggle()
+                } label: {
+                    Image(systemName: "sidebar.left")
+                }
+                .buttonStyle(.borderless)
+                .help(settingsSidebarVisible ? "Hide navigation" : "Show navigation")
+                .accessibilityLabel(settingsSidebarVisible ? "Hide navigation" : "Show navigation")
+
+                Spacer()
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+
             Divider()
+
+            HStack(spacing: 0) {
+                if settingsSidebarVisible {
+                    SettingsSidebar(selection: $section)
+                        .frame(width: 170)
+                        .overlay(alignment: .trailing) { Divider() }
+                }
+
+                ScrollView {
+                    settingsPage
+                        .padding(20)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+            Divider()
+
             HStack {
                 Spacer()
                 Button { settingsWindow?.performClose(nil) } label: {
@@ -1477,7 +1502,7 @@ struct SettingsView: View {
             }
                 .padding(16)
         }
-        .frame(width: 900, height: 500)
+        .frame(minWidth: 640, minHeight: 420)
         .overlay(alignment: .bottom) {
             if let confirmation = store.actionConfirmation {
                 Text(confirmation)
@@ -1775,7 +1800,6 @@ private struct SettingsSidebar: View {
             }
         }
         .listStyle(.sidebar)
-        .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 190)
     }
 }
 
