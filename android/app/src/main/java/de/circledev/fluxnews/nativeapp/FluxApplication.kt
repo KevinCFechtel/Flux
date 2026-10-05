@@ -29,13 +29,14 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
     internal val diagnostics: AndroidAppDiagnostics by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidAppDiagnostics(applicationContext, storagePaths, preferenceStore) }
     val coreRuntime: AndroidCoreRuntime by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidCoreRuntime(AndroidCoreDiagnosticListener(diagnostics)) }
     internal val systemNotifications: AndroidSystemNotificationManager by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        AndroidSystemNotificationManager(applicationContext, coreRuntime)
+        AndroidSystemNotificationManager(applicationContext, coreRuntime, diagnostics)
     }
     internal val widgetProjection: AndroidWidgetProjectionCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         AndroidWidgetProjectionCoordinator(
             coreRuntime = coreRuntime,
             store = AndroidWidgetProjectionStore(storagePaths.widget),
             scope = applicationScope,
+            diagnostics = diagnostics,
             onProjectionChanged = { AndroidWidgetUpdates.refreshAll(applicationContext) },
         )
     }
@@ -63,7 +64,7 @@ class FluxApplication : Application(), SingletonImageLoader.Factory {
     internal val readerStore: AndroidReaderStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidReaderStore(coreRuntime) }
     internal val articleOpenResolver: AndroidArticleOpenResolver by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidArticleOpenResolver(coreRuntime) }
     internal val backgroundSync: AndroidBackgroundSync by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        AndroidBackgroundSync(applicationContext, coreRuntime, accountBootstrap, postSyncEffects)
+        AndroidBackgroundSync(applicationContext, coreRuntime, accountBootstrap, postSyncEffects, diagnostics)
     }
     val credentialStore: AndroidCredentialStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidCredentialStore(applicationContext) }
     internal val navigationPreferences: AndroidNavigationPreferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { AndroidNavigationPreferences(preferenceStore) }
