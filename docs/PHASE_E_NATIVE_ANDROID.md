@@ -920,6 +920,13 @@ Contextually invalid actions are omitted rather than represented as durable disa
 
 ## 16. E5 — Background Sync, System Notifications and Widgets
 
+Status: **COMPLETE — implementation baseline accepted; follow-up defects handled as normal bug fixes**
+
+E5 is accepted as complete for Phase-E sequencing. The native Android implementation now includes WorkManager background synchronization, Core-owned Resume freshness fallback, per-feed System Notifications with post-handoff acknowledgement, credential-free native widget projection/configuration, article routing from widgets, and persistent support diagnostics for background-sync / notification / widget handoff analysis.
+
+This closure is an implementation milestone, not a claim that no real-device defects remain. Findings discovered after this point are handled as ordinary bug fixes and do not reopen E5 unless they expose a concrete architecture or product-contract contradiction. The current merge handoff intentionally allows follow-up repair of the latest Android CI regression introduced by the final diagnostics pass.
+
+
 ### Background Sync
 
 Use WorkManager or the current platform-supported equivalent for deferrable periodic synchronization.
