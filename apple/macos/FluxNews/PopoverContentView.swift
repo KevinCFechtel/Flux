@@ -69,10 +69,19 @@ struct PopoverContentView: View {
         }
         .frame(width: PopoverLayout.width(mode: store.articlePresentationMode, sidebarVisible: sidebarVisible))
         .frame(maxHeight: .infinity)
-        .sheet(isPresented: $store.settingsVisible) { SettingsView(store: store) }
         .sheet(item: $store.feedSettingsTarget) { target in FeedSettingsView(store: store, target: target) }
         .sheet(isPresented: $store.addFeedVisible) { AddFeedView(store: store) }
         .sheet(isPresented: $store.addCategoryVisible) { AddCategoryView(store: store) }
+        .onAppear {
+            if store.settingsVisible {
+                MacOSSettingsWindowPresentation.open(store: store)
+            }
+        }
+        .onChange(of: store.settingsVisible) { _, visible in
+            if visible {
+                MacOSSettingsWindowPresentation.open(store: store)
+            }
+        }
     }
 }
 
@@ -210,7 +219,7 @@ private struct ArticlePane: View {
             setNewestFirst: store.setNewestFirst,
             setListeningListSort: store.setListeningListSort,
             setListeningListFeed: store.setListeningListFeed,
-            showSettings: { store.settingsVisible = true },
+            showSettings: { MacOSSettingsWindowPresentation.open(store: store) },
             quit: { NSApplication.shared.terminate(nil) }
         )
     }
@@ -1435,7 +1444,20 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     }
 }
 
-private struct SettingsView: View {
+enum MacOSSettingsWindowPresentation {
+    static func open(store: BrowserStore) {
+        store.settingsVisible = false
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        NSApplication.shared.sendAction(
+            Selector(("showSettingsWindow:")),
+            to: nil,
+            from: nil
+        )
+    }
+}
+
+struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: BrowserStore
     @State private var server = ""
     @State private var key = ""
@@ -1465,7 +1487,7 @@ private struct SettingsView: View {
             Divider()
             HStack {
                 Spacer()
-                Button { store.settingsVisible = false } label: {
+                Button { dismiss() } label: {
                     if section == .account { Text("Cancel") } else { Text("Done") }
                 }
                 if section == .account {
