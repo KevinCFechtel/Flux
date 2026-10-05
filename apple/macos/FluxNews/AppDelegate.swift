@@ -150,7 +150,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         AppRouter.shared.open(route)
         return true
     }
-    private func host() -> NSHostingController<PopoverContentView> { NSHostingController(rootView: PopoverContentView(store: store, playbackState: playbackPresentationState, playbackCoordinator: playbackCoordinator, transferState: transferPresentationState, layoutChanged: { [weak self] visible in self?.resize(sidebarVisible: visible) }, dismiss: { [weak self] in self?.dismiss() })) }
+    private func host() -> NSHostingController<PopoverContentView> {
+        NSHostingController(
+            rootView: PopoverContentView(
+                store: store,
+                playbackState: playbackPresentationState,
+                playbackCoordinator: playbackCoordinator,
+                transferState: transferPresentationState,
+                layoutChanged: { [weak self] visible in
+                    self?.resize(sidebarVisible: visible)
+                },
+                showSettings: { [weak self] in
+                    self?.showSettingsWindow()
+                },
+                dismiss: { [weak self] in
+                    self?.dismiss()
+                }
+            )
+        )
+    }
     private func show() {
         NSApplication.shared.activate(ignoringOtherApps: true)
         freezeStatusItemLength()
