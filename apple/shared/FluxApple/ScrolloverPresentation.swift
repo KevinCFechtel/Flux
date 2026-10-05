@@ -21,7 +21,6 @@ struct ScrolloverExposureTracker {
         emittedIDs = emittedIDs.intersection(unread)
         for (id, frame) in frames where unread.contains(id) {
             var exposure = exposures[id] ?? Exposure(processedFrame: frame, currentFrame: frame)
-            exposure.wasVisible = exposure.wasVisible || frame.intersects(CGRect(x: -.greatestFiniteMagnitude, y: 0, width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude))
             exposure.processedFrame = frame
             exposure.currentFrame = frame
             exposures[id] = exposure
