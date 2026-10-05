@@ -139,3 +139,52 @@ enum ArticlePresentationLayout {
     static func internalUnreadIndicatorOpacity(isRead: Bool) -> CGFloat { isRead ? 0 : 1 }
 }
 enum ArticlePreviewLines: Int, CaseIterable { case compact = 2, standard = 3, extended = 5 }
+
+
+enum ArticleTemporalPresentation {
+    static func absolutePublishedDate(_ publishedAt: String) -> String {
+        guard let date = ISO8601DateFormatter().date(from: publishedAt) else { return publishedAt }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    static func relativePublishedAge(_ publishedAt: String, relativeTo referenceDate: Date) -> String {
+        guard let date = ISO8601DateFormatter().date(from: publishedAt) else { return publishedAt }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        formatter.dateTimeStyle = .numeric
+        return spacingLocalizedNumberUnits(
+            formatter.localizedString(for: date, relativeTo: referenceDate)
+        )
+    }
+
+    static func publicationValue(_ publishedAt: String, showRelative: Bool, relativeTo referenceDate: Date) -> String {
+        showRelative
+            ? relativePublishedAge(publishedAt, relativeTo: referenceDate)
+            : absolutePublishedDate(publishedAt)
+    }
+
+    static func readingTime(_ minutes: UInt32) -> String? {
+        guard minutes > 0 else { return nil }
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.minute]
+        formatter.unitsStyle = .abbreviated
+        formatter.zeroFormattingBehavior = .dropAll
+        return formatter.string(from: TimeInterval(minutes) * 60)
+            .map(spacingLocalizedNumberUnits)
+    }
+
+    static func spacingLocalizedNumberUnits(_ value: String) -> String {
+        var result = ""
+        result.reserveCapacity(value.count + 1)
+        var previous: Character?
+
+        for character in value {
+            if let previous, previous.isNumber, character.isLetter {
+                result.append(" ")
+            }
+            result.append(character)
+            previous = character
+        }
+        return result
+    }
+}
