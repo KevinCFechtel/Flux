@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var frozenStatusItemLength: CGFloat?
     private var statusItemLengthWasFixed = false
     private var countObservation: AnyCancellable?
+    private var settingsObservation: AnyCancellable?
     private var catalogObservation: AnyCancellable?
     private var shortcutObservation: AnyCancellable?
     private let spotlightIndexer = SpotlightIndexer()
@@ -23,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private lazy var shortcutRegistrar = GlobalShortcutRegistrar { [weak self] in self?.show() }
     private var sidebarVisible = false
     private var fallbackPanel: NSPanel?
+    private var settingsWindowController: NSWindowController?
     private lazy var readerWindow = ReaderWindowController(store: store)
 
     func applicationDidResignActive(_ notification: Notification) {
@@ -80,6 +82,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         countObservation = store.$unreadTotal.combineLatest(store.$hasPendingNewData).sink { [weak self] unreadTotal, hasPendingNewData in
             self?.updateStatusItem(unreadTotal: unreadTotal, hasPendingNewData: hasPendingNewData)
         }
+        settingsObservation = store.$settingsVisible.removeDuplicates().sink { [weak self] visible in
+            guard let self else { return }
+            if visible {
+                self.showSettingsWindow()
+            } else if self.settingsWindowController?.window?.isVisible == true {
+                self.settingsWindowController?.close()
+            }
+        }
         popover.behavior = .transient; popover.animates = true; popover.delegate = self; popover.contentSize = size(sidebarVisible: false); popover.contentViewController = host()
         AppRouter.shared.configure(open: { [weak self] route in self?.store.route(to: route); self?.show() }, refresh: { [weak self] in self?.show(); self?.store.sync(reason: .manual) }, widgetAction: { [weak self] action in self?.store.handleWidgetAction(action); self?.show() })
         store.onOpenDetail = { [weak self] article, togglesPreview in
@@ -119,10 +129,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         store.syncIfStale()
     }
     func windowWillClose(_ notification: Notification) {
-        guard notification.object as? NSPanel === fallbackPanel else { return }
-        store.popoverVisible = false
-        releaseStatusItemLength()
-        store.syncIfStale()
+        if notification.object as? NSPanel === fallbackPanel {
+            store.popoverVisible = false
+            releaseStatusItemLength()
+            store.syncIfStale()
+            return
+        }
+
+        if notification.object as? NSWindow === settingsWindowController?.window {
+            settingsWindowController = nil
+            if store.settingsVisible {
+                store.settingsVisible = false
+            }
+        }
     }
     func application(_ application: NSApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([NSUserActivityRestoring]) -> Void) -> Bool {
         guard userActivity.activityType == CSSearchableItemActionType,
@@ -154,6 +173,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         panel.center()
         panel.makeKeyAndOrderFront(nil)
     }
+    private func showSettingsWindow() {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+
+        if let window = settingsWindowController?.window {
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let visibleFrame = NSScreen.main?.visibleFrame
+        let width = min(900, max(640, (visibleFrame?.width ?? 980) - 80))
+        let height = min(500, max(420, (visibleFrame?.height ?? 580) - 80))
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: NSSize(width: width, height: height)),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "FluxNews Settings"
+        window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: min(640, width), height: min(420, height))
+        window.delegate = self
+        window.contentViewController = NSHostingController(rootView: SettingsView(store: store))
+        window.center()
+
+        let controller = NSWindowController(window: window)
+        settingsWindowController = controller
+        controller.showWindow(nil)
+        window.makeKeyAndOrderFront(nil)
+    }
+
     private func makeFallback() -> NSPanel { let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size(sidebarVisible: sidebarVisible)), styleMask: [.titled, .closable, .utilityWindow], backing: .buffered, defer: false); panel.title = "FluxNews"; panel.isFloatingPanel = true; panel.level = .floating; panel.collectionBehavior = [.moveToActiveSpace, .transient]; panel.isReleasedWhenClosed = false; panel.delegate = self; panel.contentViewController = host(); return panel }
     private func resize(sidebarVisible: Bool) { self.sidebarVisible = sidebarVisible; let newSize = size(sidebarVisible: sidebarVisible); guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { popover.contentSize = newSize; fallbackPanel?.setContentSize(newSize); return }; if popover.isShown { NSAnimationContext.runAnimationGroup { $0.duration = PopoverLayout.animation; $0.allowsImplicitAnimation = true; popover.contentSize = newSize } } else { fallbackPanel?.setContentSize(newSize) } }
     private func updateStatusItem(unreadTotal: UInt64, hasPendingNewData: Bool) {
