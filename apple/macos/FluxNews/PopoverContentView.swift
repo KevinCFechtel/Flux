@@ -1861,8 +1861,10 @@ private struct SettingsSidebar: View {
                     Label(section.title, systemImage: section.systemImage)
                         .foregroundStyle(section == selection ? .white : .primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .contentShape(Rectangle())
                 .listRowBackground(section == selection ? Color.accentColor : .clear)
             }
         }
