@@ -8,9 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     let store = BrowserStore()
     private let popover = NSPopover()
     private var statusItem: NSStatusItem!
-    private var statusItemLengthFrozen = false
-    private var frozenStatusItemLength: CGFloat?
-    private var statusItemLengthWasFixed = false
+    private var statusItemWidthLocked = false
     private var countObservation: AnyCancellable?
     private var settingsObservation: AnyCancellable?
     private var catalogObservation: AnyCancellable?
@@ -68,12 +66,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             self.show()
             self.store.selectNotificationFeed(feedID)
         }
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: 28)
         if let button = statusItem.button {
             button.image = Bundle.main.url(forResource: "FluxNewsTemplate", withExtension: "svg").flatMap(NSImage.init(contentsOf:))
             button.image?.size = NSSize(width: 18, height: 18)
             button.image?.isTemplate = true
             button.imagePosition = .imageLeading
+            button.alignment = .left
             button.toolTip = "FluxNews"
             button.setAccessibilityLabel("FluxNews")
             button.target = self
@@ -119,19 +118,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
     @objc private func togglePopover() { if popover.isShown || fallbackPanel?.isVisible == true { dismiss() } else { show() } }
     func popoverWillShow(_ notification: Notification) {
-        freezeStatusItemLength()
+        lockStatusItemWidth()
         store.popoverVisible = true
         popover.contentSize = size(sidebarVisible: sidebarVisible)
     }
     func popoverDidClose(_ notification: Notification) {
         store.popoverVisible = false
-        releaseStatusItemLength()
+        unlockStatusItemWidth()
         store.syncIfStale()
     }
     func windowWillClose(_ notification: Notification) {
         if notification.object as? NSPanel === fallbackPanel {
             store.popoverVisible = false
-            releaseStatusItemLength()
+            unlockStatusItemWidth()
             store.syncIfStale()
             return
         }
@@ -171,7 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
     private func show() {
         NSApplication.shared.activate(ignoringOtherApps: true)
-        freezeStatusItemLength()
+        lockStatusItemWidth()
         if let button = usableButton() {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
@@ -183,7 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private func usableButton() -> NSStatusBarButton? { guard let button = statusItem.button, let window = button.window, let screen = window.screen else { return nil }; return screen.frame.intersects(window.convertToScreen(button.convert(button.bounds, to: nil))) ? button : nil }
     private func dismiss() { if popover.isShown { popover.performClose(nil) }; fallbackPanel?.close() }
     private func showFallback() {
-        freezeStatusItemLength()
+        lockStatusItemWidth()
         let panel = fallbackPanel ?? makeFallback()
         fallbackPanel = panel
         panel.setContentSize(size(sidebarVisible: sidebarVisible))
@@ -225,46 +224,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private func resize(sidebarVisible: Bool) { self.sidebarVisible = sidebarVisible; let newSize = size(sidebarVisible: sidebarVisible); guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { popover.contentSize = newSize; fallbackPanel?.setContentSize(newSize); return }; if popover.isShown { NSAnimationContext.runAnimationGroup { $0.duration = PopoverLayout.animation; $0.allowsImplicitAnimation = true; popover.contentSize = newSize } } else { fallbackPanel?.setContentSize(newSize) } }
     private func updateStatusItem(unreadTotal: UInt64, hasPendingNewData: Bool) {
         guard let button = statusItem.button else { return }
-        let title = StatusItemPresentation.title(
+        button.title = StatusItemPresentation.title(
             unreadTotal: unreadTotal,
             hasPendingNewData: hasPendingNewData
         )
-
-        // Opening the popover must not change the NSStatusItem geometry. Only
-        // convert the variable-length item to the captured fixed width when its
-        // visible title actually changes while the popover is open.
-        if statusItemLengthFrozen,
-           title != button.title,
-           !statusItemLengthWasFixed,
-           let frozenStatusItemLength,
-           frozenStatusItemLength > 0 {
-            statusItem.length = frozenStatusItemLength
-            statusItemLengthWasFixed = true
-        }
-
-        button.title = title
         button.setAccessibilityValue(
             StatusItemPresentation.accessibilityValue(
                 unreadTotal: unreadTotal,
                 hasPendingNewData: hasPendingNewData
             )
         )
+
+        if !statusItemWidthLocked {
+            applyStatusItemWidth()
+        }
     }
 
-    private func freezeStatusItemLength() {
-        guard !statusItemLengthFrozen else { return }
-        statusItemLengthFrozen = true
-        frozenStatusItemLength = statusItem.button?.bounds.width
-        statusItemLengthWasFixed = false
+    private func applyStatusItemWidth() {
+        guard let button = statusItem.button else { return }
+        let width = max(28, ceil(button.intrinsicContentSize.width + 4))
+        if abs(statusItem.length - width) > 0.5 {
+            statusItem.length = width
+        }
     }
 
-    private func releaseStatusItemLength() {
-        statusItemLengthFrozen = false
-        frozenStatusItemLength = nil
+    private func lockStatusItemWidth() {
+        statusItemWidthLocked = true
+    }
 
-        guard statusItemLengthWasFixed else { return }
-        statusItemLengthWasFixed = false
-        statusItem.length = NSStatusItem.variableLength
+    private func unlockStatusItemWidth() {
+        statusItemWidthLocked = false
+        applyStatusItemWidth()
     }
 
     private func size(sidebarVisible: Bool) -> NSSize {
