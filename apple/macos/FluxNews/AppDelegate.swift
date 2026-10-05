@@ -5,7 +5,7 @@ import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
-    private let store = BrowserStore()
+    let store = BrowserStore()
     private let popover = NSPopover()
     private var statusItem: NSStatusItem!
     private var statusItemLengthFrozen = false
