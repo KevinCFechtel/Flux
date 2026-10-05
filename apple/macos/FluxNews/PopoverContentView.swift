@@ -1009,19 +1009,6 @@ private struct ArticleItem: View {
             metadata
 
             HStack(alignment: .top, spacing: 12) {
-                if hasAvailableThumbnail {
-                    Button { onSelect(); store.open(article) } label: {
-                        ThumbnailSlot(
-                            article: article,
-                            store: store,
-                            width: 112,
-                            height: 84,
-                            cornerRadius: 9
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-
                 Button { onSelect(); store.open(article) } label: {
                     VStack(alignment: .leading, spacing: 5) {
                         headline(lineLimit: 3)
@@ -1035,6 +1022,19 @@ private struct ArticleItem: View {
                 quickActions
                     .opacity(hovered ? 1 : 0)
                     .allowsHitTesting(hovered)
+
+                if hasAvailableThumbnail {
+                    Button { onSelect(); store.open(article) } label: {
+                        ThumbnailSlot(
+                            article: article,
+                            store: store,
+                            width: 112,
+                            height: 84,
+                            cornerRadius: 9
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
             }
 
             if !article.preview.isEmpty {
