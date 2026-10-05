@@ -775,7 +775,431 @@ final class BrowserStore: ObservableObject {
             }
         }
     }
-
+    func selectNotificationFeed(_ feedID: Int64) {
+        startupRouteState.markExplicitRoute()
+        select(.feed(feedID))
+    }
+    private func updateCoreSettings(_ update: @escaping (Flux) throws -> Void, afterSuccess: @escaping () -> Void = {}) {
+        guard let core else { return }
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result {
+                try update(core)
+                return try core.coreSettings()
+            }
+            await MainActor.run {
+                switch result {
+                case let .success(settings):
+                    store.value?.coreSettings = settings
+                    afterSuccess()
+                case let .failure(error): store.value?.errorMessage = NativeErrorPresentation.message(for: error)
+                }
+            }
+        }
+    }
+    func handle(event: CoreEvent) {
+        switch event {
+        case .articleReadStateChanged, .articleStarredStateChanged:
+            refreshWidgetSnapshot()
+            return
+        case let .syncDidComplete(metadata):
+            refreshWidgetSnapshot()
+            handleSyncCompleted(metadata)
+        default:
+            return
+        }
+    }
+    private func handleSyncCompleted(_ metadata: SyncCompleted) {
+        isLoading = false
+        refreshListeningListIfVisible()
+        reloadLiveUnreadTotal()
+        if metadata.reason == .background || metadata.reason == .periodic {
+            pendingNewData.accumulate(metadata.newArticlesByFeed.map { (feedID: $0.feedId, count: $0.count) })
+            publishPendingNewData()
+        }
+        if metadata.navigationChanged { reloadNavigationAndCounts() }
+        else if metadata.reason == .manual { reloadCounts() }
+        else if metadata.dataChanged { reloadCounts() }
+        if metadata.reason == .periodic { NativeLog.sync.notice("periodic sync completed") }
+        let action: SnapshotRefreshPolicy.Action = if metadata.reason == .background || metadata.reason == .periodic {
+            metadata.dataChanged ? .signalNewData : .preserve
+        } else {
+            SnapshotRefreshPolicy.action(manual: metadata.reason == .manual, dataChanged: metadata.dataChanged, hasMeaningfullyInteracted: hasMeaningfullyInteracted)
+        }
+        switch action {
+        case .replace:
+            reloadVisibleArticles(resetPosition: true, acknowledgingPendingNewData: metadata.reason == .manual)
+        case .signalNewData:
+            newDataAvailable = true
+        case .preserve:
+            break
+        }
+    }
+    private func reloadLiveUnreadTotal() {
+        guard let core else { return }
+        do {
+            unreadTotal = try core.countArticles(query: ArticleQuery(scope: .all, readFilter: .unread, starredFilter: .all, sort: .newestFirst, limit: 0, cursor: nil))
+        } catch {
+            NativeLog.sync.error("live unread count refresh failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+    private func acknowledgePendingNewDataForCurrentScope() {
+        switch scope {
+        case .all:
+            pendingNewData.adoptAll()
+        case let .category(categoryID):
+            pendingNewData.adoptFeeds(in: Set(catalog.feeds.filter { $0.categoryId == categoryID }.map(\.id)))
+        case let .feed(feedID):
+            pendingNewData.adoptFeed(feedID)
+        case .starred, .search, .listeningList:
+            return
+        }
+        publishPendingNewData()
+    }
+    private func publishPendingNewData() {
+        pendingNewByFeed = pendingNewData.byFeed
+        hasPendingNewData = pendingNewData.hasPending
+    }
+    func setRead(_ article: ArticleSummary, _ read: Bool) {
+        guard let core else { return }
+        if scope == .search {
+            let store = WeakBrowserStore(self)
+            Task.detached {
+                let result = Result { try core.searchSetReadState(articleId: article.id, read: read) }
+                await MainActor.run {
+                    switch result {
+                    case let .success(disposition):
+                        store.value?.updateVisibleRead([article.id], read: read)
+                        if case .localFirst = disposition { store.value?.reloadCounts() }
+                    case let .failure(error): store.value?.errorMessage = NativeErrorPresentation.message(for: error)
+                    }
+                }
+            }
+            return
+        }
+        do { _ = try core.setReadState(articleId: article.id, read: read); updateVisibleRead([article.id], read: read); reloadSelectionTotal(); reloadCounts() } catch { errorMessage = NativeErrorPresentation.message(for: error) }
+    }
+    func setStarred(_ article: ArticleSummary, _ starred: Bool, completion: ((Bool) -> Void)? = nil) {
+        guard let core else { completion?(false); return }
+        if scope == .search {
+            let store = WeakBrowserStore(self)
+            Task.detached {
+                let result = Result { try core.searchSetStarredState(articleId: article.id, starred: starred) }
+                await MainActor.run {
+                    switch result {
+                    case let .success(disposition):
+                        store.value?.updateVisible([article.id]) { $0.isStarred = starred }
+                        if case .localFirst = disposition { store.value?.reloadCounts() }
+                        completion?(true)
+                    case let .failure(error): store.value?.errorMessage = NativeErrorPresentation.message(for: error); completion?(false)
+                    }
+                }
+            }
+            return
+        }
+        do { _ = try core.setStarredState(articleId: article.id, starred: starred); updateVisible([article.id]) { $0.isStarred = starred }; reloadSelectionTotal(); reloadCounts(); completion?(true) } catch { errorMessage = NativeErrorPresentation.message(for: error); completion?(false) }
+    }
+    func loadReaderDocument(_ article: ArticleSummary, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
+        loadReaderDocument(articleID: article.id, forSearch: ReaderDocumentSource.forScope(scope) == .search, completion: completion)
+    }
+    func loadReaderDocument(articleID: Int64, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
+        loadReaderDocument(articleID: articleID, forSearch: false, completion: completion)
+    }
+    private func loadReaderDocument(articleID: Int64, forSearch: Bool, completion: @escaping (Result<ReaderDocument, Error>) -> Void) {
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            return
+        }
+        readerDocumentRequest &+= 1
+        let request = readerDocumentRequest
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result {
+                if forSearch {
+                    return try core.readerDocumentForSearch(articleId: articleID)
+                }
+                return try core.readerDocument(articleId: articleID)
+            }
+            await MainActor.run {
+                guard let store = store.value, store.readerDocumentRequest == request else { return }
+                completion(result)
+            }
+        }
+    }
+    func loadArticleAudioActions(for articleID: Int64) {
+        loadArticleAudioActions(for: [articleID], selectedArticleID: articleID)
+    }
+    func loadArticleAudioActions(for articleIDs: [Int64], selectedArticleID: Int64? = nil) {
+        articleAudioRequestGeneration &+= 1
+        let generation = articleAudioRequestGeneration
+        articleAudioActionState = nil
+        guard let core else { return }
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result {
+                try core.articleAudioActionStates(articleIds: articleIDs).reduce(into: [Int64: ArticleAudioActionState]()) { result, state in
+                    result[state.articleId] = ArticleAudioActionState(articleID: state.articleId, enclosures: ArticleAudioActions.audioEnclosures(state.enclosures), isInListeningList: state.isInListeningList, downloads: Dictionary(uniqueKeysWithValues: state.downloads.map { ($0.enclosureId, $0) }))
+                }
+            }
+            await MainActor.run {
+                guard let store = store.value, store.articleAudioRequestGeneration == generation else { return }
+                switch result {
+                case let .success(states):
+                    store.articleAudioActionStates.merge(states) { _, new in new }
+                    if let selectedArticleID { store.articleAudioActionState = states[selectedArticleID] }
+                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
+                }
+            }
+        }
+    }
+    func refreshArticleAudioActions() {
+        guard let articleID = articleAudioActionState?.articleID else { return }
+        loadArticleAudioActions(for: articleID)
+    }
+    func selectArticleAudioActions(for articleID: Int64?) {
+        articleAudioActionState = articleID.flatMap { articleAudioActionStates[$0] }
+    }
+    func addToListeningList(articleID: Int64) {
+        guard let core else { return }
+        let generation = articleAudioRequestGeneration
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result { try core.addToListeningList(articleId: articleID) }
+            await MainActor.run {
+                guard let store = store.value else { return }
+                switch result {
+                case .success:
+                    store.showActionConfirmation(String(localized: "Added to Listening List"))
+                    store.onMediaTransferRequested?()
+                    store.refreshListeningListIfVisible()
+                    guard store.articleAudioRequestGeneration == generation else { return }
+                    store.loadArticleAudioActions(for: articleID)
+                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
+                }
+            }
+        }
+    }
+    func requestManualDownload(articleID: Int64, enclosureID: Int64) {
+        guard let core else { return }
+        let refreshArticleActions = articleAudioActionState?.articleID == articleID
+        let generation = articleAudioRequestGeneration
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result { try core.requestDownload(enclosureId: enclosureID, origin: .manual) }
+            await MainActor.run {
+                guard let store = store.value else { return }
+                switch result {
+                case .success:
+                    store.showActionConfirmation(String(localized: "Download requested"))
+                    store.onMediaTransferRequested?()
+                    store.refreshListeningListIfVisible()
+                    if refreshArticleActions, store.articleAudioRequestGeneration == generation {
+                        store.loadArticleAudioActions(for: articleID)
+                    }
+                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
+                }
+            }
+        }
+    }
+    func removeFromListeningList(articleID: Int64) {
+        guard let core else { return }
+        let refreshArticleActions = articleAudioActionState?.articleID == articleID
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result { try core.removeFromListeningList(articleId: articleID) }
+            await MainActor.run {
+                guard let store = store.value else { return }
+                switch result {
+                case .success:
+                    store.showActionConfirmation(String(localized: "Removed from Listening List"))
+                    store.onMediaTransferRequested?()
+                    store.refreshListeningListIfVisible()
+                    if refreshArticleActions { store.refreshArticleAudioActions() }
+                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
+                }
+            }
+        }
+    }
+    func deleteDownload(articleID: Int64, enclosureID: Int64) {
+        guard let core else { return }
+        let refreshArticleActions = articleAudioActionState?.articleID == articleID
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result { try core.requestDownloadDeletion(enclosureId: enclosureID) }
+            await MainActor.run {
+                guard let store = store.value else { return }
+                switch result {
+                case .success:
+                    store.showActionConfirmation(String(localized: "Download deletion requested"))
+                    store.onMediaTransferRequested?()
+                    store.refreshListeningListIfVisible()
+                    if refreshArticleActions { store.refreshArticleAudioActions() }
+                case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
+                }
+            }
+        }
+    }
+    func saveToService(_ article: ArticleSummary) {
+        guard let core else { return }
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            do {
+                let result = try core.saveToService(articleId: article.id)
+                await MainActor.run {
+                    switch result {
+                    case .saved:
+                        store.value?.showActionConfirmation(String(localized: "Saved to third-party service"))
+                    case .noIntegrationConfigured:
+                        store.value?.showActionConfirmation(String(localized: "No third-party integration is configured in Miniflux"))
+                    }
+                }
+            } catch {
+                await MainActor.run { store.value?.errorMessage = NativeErrorPresentation.message(for: error) }
+            }
+        }
+    }
+    func discoverSubscriptions(_ request: DiscoverSubscriptionsRequest, completion: @escaping (Result<[DiscoveredSubscription], Error>) -> Void) {
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            return
+        }
+        Task.detached {
+            let result = Result { try core.discoverSubscriptions(request: request) }
+            await MainActor.run { completion(result) }
+        }
+    }
+    func createFeed(_ request: CreateFeedRequest, completion: @escaping (Result<CreateFeedResult, Error>) -> Void) {
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            return
+        }
+        Task.detached {
+            let result = Result { try core.createFeed(request: request) }
+            await MainActor.run { completion(result) }
+        }
+    }
+    func createCategory(_ title: String, completion: @escaping (Result<CreateCategoryResult, Error>) -> Void) {
+        guard let core else {
+            completion(.failure(NSError(domain: "FluxNews", code: 1, userInfo: [NSLocalizedDescriptionKey: "Flux is not configured"])))
+            return
+        }
+        Task.detached {
+            let result = Result { try core.createCategory(title: title) }
+            await MainActor.run { completion(result) }
+        }
+    }
+    func beginScrolloverUndoBatch() {
+        scrolloverUndoBatch.beginScroll()
+        scrolloverRemovedArticles = [:]
+        scrolloverOriginalOrder = Dictionary(uniqueKeysWithValues: articles.enumerated().map { ($0.element.id, $0.offset) })
+    }
+    func finishScrolloverUndoBatch() {
+        guard scrolloverCountsPending else { return }
+        scrolloverCountsPending = false
+        reloadScrolloverCounts()
+    }
+    func flushScrollover(_ ids: [Int64]) {
+        guard let core, !ids.isEmpty else { return }
+        let started = ContinuousClock.now
+        do {
+            _ = try core.setReadStateBulk(articleIds: ids, read: true)
+            let elapsed = started.duration(to: .now)
+            if elapsed >= .milliseconds(8) {
+                let components = elapsed.components
+                let milliseconds = components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000
+                NativeLog.scrollover.debug("scrollover mutation elapsed_ms=\(milliseconds, privacy: .public) ids=\(ids.count, privacy: .public)")
+            }
+            lastScrolloverBatch = scrolloverUndoBatch.append(ids)
+            updateVisibleRead(ids, read: true, retainingForScrolloverUndo: true)
+            scrolloverCountsPending = true
+            showScrolloverUndo()
+        } catch { errorMessage = NativeErrorPresentation.message(for: error) }
+    }
+    func undoScrollover() { guard let core, !lastScrolloverBatch.isEmpty else { return }; do { _ = try core.setReadStateBulk(articleIds: lastScrolloverBatch, read: false); updateVisibleRead(lastScrolloverBatch, read: false); restoreScrolloverRemovedArticles(); scrolloverUndoBatch.clear(); lastScrolloverBatch = []; scrolloverUndoVisible = false; undoExpiry?.cancel(); reloadSelectionTotal(); reloadCounts() } catch { errorMessage = NativeErrorPresentation.message(for: error) } }
+    func setScrolloverEnabled(_ enabled: Bool) { markReadOnScrolloverEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.markReadOnScrollover") }
+    func setStartupScope(_ preference: StartupScopePreference) {
+        startupScope = preference
+        if preference == .category, startupCategoryID == nil { startupCategoryID = catalog.categories.first?.id }
+        if preference == .feed, startupFeedID == nil { startupFeedID = catalog.feeds.first?.id }
+        UserDefaults.standard.set(preference.rawValue, forKey: "FluxNews.startupScope")
+        persistStartupTargets()
+    }
+    func setStartupCategoryID(_ id: Int64?) { startupCategoryID = id; persistStartupTargets() }
+    func setStartupFeedID(_ id: Int64?) { startupFeedID = id; persistStartupTargets() }
+    func setHideEmptyNavigationEntries(_ enabled: Bool) { hideEmptyNavigationEntries = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.hideEmptyNavigationEntries") }
+    func setRemoveArticlesWhenMarkedRead(_ enabled: Bool) { removeArticlesWhenMarkedRead = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.removeArticlesWhenMarkedRead") }
+    func setSyncOnStartEnabled(_ enabled: Bool) { syncOnStartEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.syncOnStart") }
+    func setArticlePreviewLines(_ lines: ArticlePreviewLines) { articlePreviewLines = lines; UserDefaults.standard.set(lines.rawValue, forKey: "FluxNews.articlePreviewLines") }
+    func setShowArticleCount(_ enabled: Bool) { showArticleCount = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.showArticleCount") }
+    func setShowRelativePublicationTime(_ enabled: Bool) { showRelativePublicationTime = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.showRelativePublicationTime") }
+    func setClickOnNews(_ preference: ClickOnNews) { clickOnNews = preference; UserDefaults.standard.set(preference.rawValue, forKey: "FluxNews.clickOnNews") }
+    func setGlobalShortcut(_ shortcut: GlobalShortcutChoice) { guard shortcut != globalShortcut else { return }; globalShortcut = shortcut; shortcut.store() }
+    func exportConfigurationBackup(password: String) throws -> Data {
+        guard let core else { throw ConfigurationBackupPresentationError.noConfiguredAccount }
+        guard let credentials = try CredentialStore.load() else { throw ConfigurationBackupPresentationError.noConfiguredAccount }
+        let snapshot = try core.configurationSnapshot()
+        let payload = try JSONEncoder().encode(nativeBackupSettings(customHeaders: credentials.resolvedCustomHeaders))
+        let input = ConfigBackupInput(
+            platform: .macos,
+            account: BackupAccount(installationBase: snapshot.installationBase, apiKey: credentials.apiKey),
+            coreSettings: snapshot.coreSettings,
+            feedPreferences: snapshot.feedPreferences,
+            platformSettings: PlatformSettingsPayload(schemaVersion: MacOSBackupSettingsV1.version, dataJson: String(decoding: payload, as: UTF8.self))
+        )
+        return Data(try exportConfigBackup(input: input, password: password))
+    }
+    func importConfigurationBackup(bytes: Data, password: String) async throws -> BackupImportOutcome {
+        let restored = try await Task.detached(priority: .userInitiated) {
+            try parseConfigBackup(bytes: bytes, password: password, expectedPlatform: .macos)
+        }.value
+        guard restored.platformSettings.schemaVersion == MacOSBackupSettingsV1.version else {
+            throw ConfigurationBackupPresentationError.unsupportedPlatformSettings
+        }
+        let native = try JSONDecoder().decode(MacOSBackupSettingsV1.self, from: Data(restored.platformSettings.dataJson.utf8))
+        guard native.version == MacOSBackupSettingsV1.version else {
+            throw ConfigurationBackupPresentationError.unsupportedPlatformSettings
+        }
+        guard let core else { throw ConfigurationBackupPresentationError.noConfiguredAccount }
+        let previousSnapshot = try core.configurationSnapshot()
+        let previousCredentials = try CredentialStore.load()
+        let previousNative = nativeBackupSettings(customHeaders: previousCredentials?.resolvedCustomHeaders ?? [])
+        do {
+            invalidateWidgetSnapshot()
+            try core.replaceConfiguration(installationBase: restored.account.installationBase, coreSettings: restored.coreSettings, feedPreferences: restored.feedPreferences)
+            let customHeaders = native.customHeaders ?? []
+            try CredentialStore.save(MinifluxCredentials(server: restored.account.installationBase, apiKey: restored.account.apiKey, customHeaders: customHeaders))
+            guard configure(server: restored.account.installationBase, apiKey: restored.account.apiKey, customHeaders: customHeaders, refreshVersion: false, startSync: false) else {
+                throw ConfigurationBackupPresentationError.coreInitialization
+            }
+            try applyNativeBackupSettings(native)
+        } catch {
+            try? core.replaceConfiguration(installationBase: previousSnapshot.installationBase, coreSettings: previousSnapshot.coreSettings, feedPreferences: previousSnapshot.feedPreferences)
+            try? restoreCredentials(previousCredentials)
+            _ = configure(server: previousSnapshot.installationBase, apiKey: previousCredentials?.apiKey ?? "", customHeaders: previousCredentials?.resolvedCustomHeaders ?? [], refreshVersion: false, startSync: false)
+            try? applyNativeBackupSettings(previousNative)
+            throw error
+        }
+        invalidateLocalPresentation()
+        return await syncAfterImport()
+    }
+    func rebuildLocalState() {
+        guard let core, !isLoading else { return }
+        invalidateWidgetSnapshot()
+        isLoading = true
+        let store = WeakBrowserStore(self)
+        Task.detached {
+            let result = Result { try core.rebuildLocalState() }
+            await MainActor.run {
+                guard let store = store.value else { return }
+                store.invalidateLocalPresentation()
+                store.isLoading = false
+                switch result {
+                case .success: store.showActionConfirmation(String(localized: "Local state rebuilt"))
+                case .failure: store.errorMessage = String(localized: "Local state was cleared, but synchronization could not be completed.")
+                }
+            }
+        }
+    }
     func resetFluxNews() {
         guard let core else { return }
         do {
