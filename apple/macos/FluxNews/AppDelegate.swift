@@ -200,7 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
 
         let visibleFrame = NSScreen.main?.visibleFrame
-        let width = min(900, max(640, (visibleFrame?.width ?? 980) - 80))
+        let width = min(1_100, max(760, (visibleFrame?.width ?? 1_180) - 80))
         let height = min(500, max(420, (visibleFrame?.height ?? 580) - 80))
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: NSSize(width: width, height: height)),
@@ -210,7 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         )
         window.title = "FluxNews Settings"
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: min(640, width), height: min(420, height))
+        window.minSize = NSSize(width: min(760, width), height: min(420, height))
         window.delegate = self
         window.contentViewController = NSHostingController(rootView: SettingsView(store: store))
         window.center()
