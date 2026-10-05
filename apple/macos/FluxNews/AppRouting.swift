@@ -153,7 +153,7 @@ final class SpotlightIndexer {
                     self.finishUpdate()
                     return
                 }
-                self.index.indexSearchableItems(items) { error in
+                self.index.indexSearchableItems(items) { [weak self] error in
                     DispatchQueue.main.async { [weak self] in
                         guard let self else { return }
                         if let error {
