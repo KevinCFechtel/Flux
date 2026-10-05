@@ -42,9 +42,8 @@ final class BrowserPresentationTests: XCTestCase {
 
     func testArticlePresentationModesUseVisualAsDefaultAndCanonicalValues() {
         XCTAssertEqual(ArticlePresentationMode.allCases, [.visual, .visualCompact, .compact])
-        // macOS has no side-title layout, so it renders `visualCompact` as the
-        // visual presentation — but it must still accept the value, which syncs
-        // from iOS through the core settings.
+        // macOS now renders `visualCompact` as its own side-thumbnail layout,
+        // while retaining the same persisted canonical value as the other clients.
         XCTAssertEqual(ArticlePresentationMode(rawValue: "visualCompact"), .visualCompact)
         XCTAssertTrue(ArticlePresentationMode.visualCompact.showsArticleImage)
         XCTAssertEqual(ArticlePresentationMode(rawValue: "visual"), .visual)
@@ -75,10 +74,36 @@ final class BrowserPresentationTests: XCTestCase {
         XCTAssertEqual(PopoverLayout.width(mode: .visual, sidebarVisible: false), 390)
         XCTAssertEqual(PopoverLayout.width(mode: .visual, sidebarVisible: true), 630)
 
+        XCTAssertEqual(PopoverLayout.contentWidth(for: .visualCompact), 390)
+        XCTAssertEqual(PopoverLayout.height(for: .visualCompact), 760)
+        XCTAssertEqual(PopoverLayout.width(mode: .visualCompact, sidebarVisible: true), 630)
+
         XCTAssertEqual(PopoverLayout.contentWidth(for: .compact), 500)
         XCTAssertEqual(PopoverLayout.height(for: .compact), 520)
         XCTAssertEqual(PopoverLayout.width(mode: .compact, sidebarVisible: false), 500)
         XCTAssertEqual(PopoverLayout.width(mode: .compact, sidebarVisible: true), 740)
+    }
+
+    func testSharedArticleTemporalPresentationFormatsReadingTimeAndPublication() {
+        XCTAssertNil(ArticleTemporalPresentation.readingTime(0))
+        XCTAssertNotNil(ArticleTemporalPresentation.readingTime(4))
+
+        let published = "2026-01-01T12:00:00Z"
+        let reference = Date(timeIntervalSince1970: 1_767_268_800)
+        XCTAssertFalse(
+            ArticleTemporalPresentation.publicationValue(
+                published,
+                showRelative: false,
+                relativeTo: reference
+            ).isEmpty
+        )
+        XCTAssertFalse(
+            ArticleTemporalPresentation.publicationValue(
+                published,
+                showRelative: true,
+                relativeTo: reference
+            ).isEmpty
+        )
     }
 
     func testMediaTransferReconciliationUsesExistingWakeupCallback() {

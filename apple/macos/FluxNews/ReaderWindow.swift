@@ -14,6 +14,7 @@ final class ReaderWindowController: NSObject, ObservableObject {
     private var requests = ReaderRequestState()
     private var sharingPicker: NSSharingServicePicker?
     private var articlesObservation: AnyCancellable?
+    var onVisibilityChanged: ((Bool) -> Void)?
 
     init(store: BrowserStore) {
         self.store = store
@@ -40,6 +41,7 @@ final class ReaderWindowController: NSObject, ObservableObject {
         isLoading = true
         NSApplication.shared.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
+        onVisibilityChanged?(true)
         store?.setRead(article, true)
         store?.loadReaderDocument(article) { [weak self] result in
             guard let self, self.requests.isCurrent(requestID) else { return }
@@ -112,7 +114,9 @@ final class ReaderWindowController: NSObject, ObservableObject {
     }
 
     func hide() {
+        guard panel?.isVisible == true else { return }
         panel?.orderOut(nil)
+        onVisibilityChanged?(false)
     }
 
     private func starImage(starred: Bool) -> NSImage? {
@@ -247,6 +251,7 @@ extension ReaderWindowController: NSToolbarDelegate {
 extension ReaderWindowController: NSWindowDelegate {
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.orderOut(nil)
+        onVisibilityChanged?(false)
         return false
     }
 

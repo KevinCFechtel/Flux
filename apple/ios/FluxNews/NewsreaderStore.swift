@@ -395,42 +395,18 @@ struct ArticleRowArticle: Equatable, Sendable {
 
 enum IOSArticleTemporalPresentation {
     static func relativePublishedAge(_ publishedAt: String, relativeTo referenceDate: Date) -> String {
-        guard let date = ISO8601DateFormatter().date(from: publishedAt) else { return publishedAt }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        formatter.dateTimeStyle = .numeric
-        return spacingLocalizedNumberUnits(
-            formatter.localizedString(for: date, relativeTo: referenceDate)
+        ArticleTemporalPresentation.relativePublishedAge(
+            publishedAt,
+            relativeTo: referenceDate
         )
     }
 
     static func readingTime(_ minutes: UInt32) -> String? {
-        guard minutes > 0 else { return nil }
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.minute]
-        formatter.unitsStyle = .abbreviated
-        formatter.zeroFormattingBehavior = .dropAll
-        return formatter.string(from: TimeInterval(minutes) * 60)
-            .map(spacingLocalizedNumberUnits)
+        ArticleTemporalPresentation.readingTime(minutes)
     }
 
-    /// Some formatter/locale combinations return compact forms such as `4Min.`
-    /// or `3Std.`. Preserve the formatter's localized wording and any existing
-    /// whitespace (including non-breaking variants), but guarantee separation
-    /// when a localized unit starts immediately after a number.
     static func spacingLocalizedNumberUnits(_ value: String) -> String {
-        var result = ""
-        result.reserveCapacity(value.count + 1)
-        var previous: Character?
-
-        for character in value {
-            if let previous, previous.isNumber, character.isLetter {
-                result.append(" ")
-            }
-            result.append(character)
-            previous = character
-        }
-        return result
+        ArticleTemporalPresentation.spacingLocalizedNumberUnits(value)
     }
 }
 

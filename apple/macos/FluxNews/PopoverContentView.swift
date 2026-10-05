@@ -40,6 +40,7 @@ struct PopoverContentView: View {
     let playbackCoordinator: MediaPlaybackCoordinator?
     let transferState: MediaTransferPresentationState
     let layoutChanged: (Bool) -> Void
+    let showSettings: () -> Void
     let dismiss: () -> Void
     @State private var sidebarVisible = false
     @State private var showingPlayer = false
@@ -63,13 +64,13 @@ struct PopoverContentView: View {
                 sidebarVisible: $sidebarVisible,
                 showingPlayer: $showingPlayer,
                 layoutChanged: layoutChanged,
+                showSettings: showSettings,
                 dismiss: dismiss
             )
             .frame(width: PopoverLayout.contentWidth(for: store.articlePresentationMode))
         }
         .frame(width: PopoverLayout.width(mode: store.articlePresentationMode, sidebarVisible: sidebarVisible))
         .frame(maxHeight: .infinity)
-        .sheet(isPresented: $store.settingsVisible) { SettingsView(store: store) }
         .sheet(item: $store.feedSettingsTarget) { target in FeedSettingsView(store: store, target: target) }
         .sheet(isPresented: $store.addFeedVisible) { AddFeedView(store: store) }
         .sheet(isPresented: $store.addCategoryVisible) { AddCategoryView(store: store) }
@@ -85,10 +86,10 @@ private struct ArticlePane: View {
     @Binding var sidebarVisible: Bool
     @Binding var showingPlayer: Bool
     let layoutChanged: (Bool) -> Void
+    let showSettings: () -> Void
     let dismiss: () -> Void
-    @State private var tracker = ScrolloverExposureTracker()
-    @State private var frames: [Int64: CGRect] = [:]
-    @State private var viewport = CGRect.zero
+    @State private var visibleArticleIDs = Set<Int64>()
+    @State private var scrollDirection: CGFloat = 0
     @State private var trackerRevision: UInt64
     @State private var selectedID: Int64?
     @State private var hoveredID: Int64?
@@ -98,7 +99,7 @@ private struct ArticlePane: View {
     @State private var pendingAudioReplacement: Enclosure?
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
-    init(store: BrowserStore, playbackState: MediaPlaybackPresentationState, playbackCoordinator: MediaPlaybackCoordinator?, transferState: MediaTransferPresentationState, sidebarVisible: Binding<Bool>, showingPlayer: Binding<Bool>, layoutChanged: @escaping (Bool) -> Void, dismiss: @escaping () -> Void) {
+    init(store: BrowserStore, playbackState: MediaPlaybackPresentationState, playbackCoordinator: MediaPlaybackCoordinator?, transferState: MediaTransferPresentationState, sidebarVisible: Binding<Bool>, showingPlayer: Binding<Bool>, layoutChanged: @escaping (Bool) -> Void, showSettings: @escaping () -> Void, dismiss: @escaping () -> Void) {
         self.store = store
         self.playbackState = playbackState
         self.playbackCoordinator = playbackCoordinator
@@ -106,6 +107,7 @@ private struct ArticlePane: View {
         _sidebarVisible = sidebarVisible
         _showingPlayer = showingPlayer
         self.layoutChanged = layoutChanged
+        self.showSettings = showSettings
         self.dismiss = dismiss
         _trackerRevision = State(initialValue: store.listPresentationRevision)
     }
@@ -145,7 +147,8 @@ private struct ArticlePane: View {
             }
         }
         .onChange(of: store.listPresentationRevision) { _, revision in
-            tracker.reset()
+            visibleArticleIDs.removeAll()
+            scrollDirection = 0
             trackerRevision = revision
             selectedID = nil
             suppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
@@ -155,11 +158,13 @@ private struct ArticlePane: View {
         .onChange(of: selectedID) { _, articleID in
             store.selectArticleAudioActions(for: articleID)
         }
-        .onChange(of: store.popoverVisible) { _, _ in tracker.reset() }
+        .onChange(of: store.popoverVisible) { _, _ in
+            visibleArticleIDs.removeAll()
+            scrollDirection = 0
+        }
         .onChange(of: store.articles.map(\.id)) { _, ids in
             if let selectedID, !ids.contains(selectedID) { self.selectedID = nil }
         }
-        .onReceive(timer) { _ in observe() }
         .alert("Replace Playing Audio?", isPresented: Binding(get: { pendingAudioReplacement != nil }, set: { if !$0 { pendingAudioReplacement = nil } })) {
             Button("Cancel", role: .cancel) { pendingAudioReplacement = nil }
             Button("Replace", role: .destructive) {
@@ -177,7 +182,11 @@ private struct ArticlePane: View {
                 .help(sidebarToggleLabel)
                 .accessibilityLabel(sidebarToggleLabel)
             Text(title).font(.headline).lineLimit(1)
-            Text("\(store.selectionTotal)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            if store.showArticleCount {
+                Text("\(store.selectionTotal)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
             Button { store.sync() } label: {
                 if store.isLoading { ProgressView().controlSize(.small).frame(width: 16, height: 16) }
@@ -206,7 +215,7 @@ private struct ArticlePane: View {
             setNewestFirst: store.setNewestFirst,
             setListeningListSort: store.setListeningListSort,
             setListeningListFeed: store.setListeningListFeed,
-            showSettings: { store.settingsVisible = true },
+            showSettings: showSettings,
             quit: { NSApplication.shared.terminate(nil) }
         )
     }
@@ -236,7 +245,7 @@ private struct ArticlePane: View {
             GeometryReader { geometry in
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: store.articlePresentationMode == .visual ? 4 : 0) {
+                        LazyVStack(spacing: store.articlePresentationMode == .compact ? 0 : 4) {
                             ForEach(store.articles, id: \.id) { article in
                                  ArticleItem(article: article, mode: store.articlePresentationMode, selected: selectedID == article.id, audioState: store.articleAudioActionStates[article.id], transferState: transferState, store: store, onSelect: { selectedID = article.id }, onPlayAudio: playAudio, onDownloadAudio: { enclosure in store.requestManualDownload(articleID: article.id, enclosureID: enclosure.id) }, onDeleteDownload: { enclosure in store.deleteDownload(articleID: article.id, enclosureID: enclosure.id) }, onAddToListeningList: { store.addToListeningList(articleID: article.id) }, onHoverChanged: { hovering in
                                     if hovering { hoveredID = article.id }
@@ -253,10 +262,15 @@ private struct ArticlePane: View {
                                 }
                             }
                         }
+                        .scrollTargetLayout()
                     }
                     .scrollPosition($scrollPosition)
-                    .coordinateSpace(name: ArticleScrollSpace.name)
-                    .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in scrollChanged(new - old) }
+                    .onScrollTargetVisibilityChange(idType: Int64.self) { ids in
+                        visibleArticlesChanged(Set(ids))
+                    }
+                    .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { old, new in
+                        scrollChanged(new - old)
+                    }
                     .onScrollPhaseChange { previous, phase in
                         if !isUserScrollPhase(previous), isUserScrollPhase(phase) {
                             store.beginScrolloverUndoBatch()
@@ -265,22 +279,20 @@ private struct ArticlePane: View {
                             store.finishScrolloverUndoBatch()
                         }
                         scrollPhase = phase
-                        if !userScrolling { tracker.rebase(frames: frames, unread: unreadIDs) }
+                        if !userScrolling { scrollDirection = 0 }
                     }
                     .onChange(of: store.snapshotResetRevision) { _, revision in
                         NativeLog.snapshot.debug("snapshot reset requested revision=\(revision, privacy: .public)")
-                        tracker.reset()
+                        visibleArticleIDs.removeAll()
+                        scrollDirection = 0
                         suppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
                         scrollPosition.scrollTo(edge: .top)
                         NativeLog.snapshot.debug("snapshot reset completed revision=\(revision, privacy: .public)")
                     }
                     .background { KeyboardCommandObserver { command in handle(command, proxy: proxy) } }
-                    .onAppear { viewport = CGRect(origin: .zero, size: geometry.size); observe() }
-                    .onChange(of: geometry.size) { _, size in viewport = CGRect(origin: .zero, size: size); tracker.reset() }
-                    .onPreferenceChange(ArticleFrameKey.self) { newFrames in
-                        frames = newFrames
-                        if !userScrolling { tracker.rebase(frames: newFrames, unread: unreadIDs) }
-                        observe()
+                    .onChange(of: geometry.size) { _, _ in
+                        visibleArticleIDs.removeAll()
+                        scrollDirection = 0
                     }
                 }
             }
@@ -318,17 +330,42 @@ private struct ArticlePane: View {
         else { withAnimation(.easeInOut(duration: PopoverLayout.animation)) { sidebarVisible.toggle() } }
         layoutChanged(sidebarVisible)
     }
-    private func observe() {
-        guard !store.isSearchActive, store.popoverVisible, store.markReadOnScrolloverEnabled, ProcessInfo.processInfo.systemUptime >= suppressUntil, !viewport.isEmpty else { return }
-        tracker.observe(frames: frames, viewport: viewport, unread: unreadIDs, now: Date.timeIntervalSinceReferenceDate)
-    }
     private func scrollChanged(_ delta: CGFloat) {
-        guard userScrolling else { tracker.rebase(frames: frames, unread: unreadIDs); observe(); return }
+        guard userScrolling else {
+            scrollDirection = 0
+            return
+        }
         store.noteMeaningfulInteraction()
-        guard !store.isSearchActive, store.markReadOnScrolloverEnabled, ProcessInfo.processInfo.systemUptime >= suppressUntil, trackerRevision == store.listPresentationRevision else { return }
-        let ids = tracker.process(frames: frames, viewport: viewport, unread: unreadIDs, now: Date.timeIntervalSinceReferenceDate, offsetDelta: delta, userInitiated: true)
+        scrollDirection = delta
+    }
+
+    private func visibleArticlesChanged(_ newVisibleIDs: Set<Int64>) {
+        defer { visibleArticleIDs = newVisibleIDs }
+
+        guard userScrolling,
+              scrollDirection > 0,
+              !store.isSearchActive,
+              store.popoverVisible,
+              store.markReadOnScrolloverEnabled,
+              ProcessInfo.processInfo.systemUptime >= suppressUntil,
+              trackerRevision == store.listPresentationRevision,
+              !visibleArticleIDs.isEmpty,
+              !newVisibleIDs.isEmpty else { return }
+
+        let order = Dictionary(uniqueKeysWithValues: store.articles.enumerated().map { ($0.element.id, $0.offset) })
+        guard let firstVisibleIndex = newVisibleIDs.compactMap({ order[$0] }).min() else { return }
+
+        let ids = visibleArticleIDs
+            .subtracting(newVisibleIDs)
+            .filter { id in
+                guard unreadIDs.contains(id), let index = order[id] else { return false }
+                return index < firstVisibleIndex
+            }
+            .sorted { (order[$0] ?? .max) < (order[$1] ?? .max) }
+
         if !ids.isEmpty { store.flushScrollover(ids) }
     }
+
     private func handle(_ command: ArticleKeyboardCommand, proxy: ScrollViewProxy) {
         switch command {
         case .moveUp: move(-1, proxy)
@@ -373,7 +410,8 @@ private struct ArticlePane: View {
         let index = min(max(0, (current ?? (delta < 0 ? store.articles.count : -1)) + delta), store.articles.count - 1)
         selectedID = store.articles[index].id
         suppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
-        tracker.reset()
+        visibleArticleIDs.removeAll()
+        scrollDirection = 0
         proxy.scrollTo(store.articles[index].id, anchor: .center)
     }
 }
@@ -873,13 +911,6 @@ private struct MoreMenu: View {
 }
 
 private struct ArticleItem: View {
-    private static let isoFormatter = ISO8601DateFormatter()
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter
-    }()
-
     let article: ArticleSummary
     let mode: ArticlePresentationMode
     let selected: Bool
@@ -893,125 +924,367 @@ private struct ArticleItem: View {
     let onAddToListeningList: () -> Void
     let onHoverChanged: (Bool) -> Void
     @State private var hovered = false
+    @State private var temporalReferenceDate = Date()
 
-    var body: some View { mode == .compact ? AnyView(compact) : AnyView(visual) }
+    @ViewBuilder
+    var body: some View {
+        switch mode {
+        case .visual:
+            visual
+        case .visualCompact:
+            visualCompact
+        case .compact:
+            compact
+        }
+    }
+
     private var visual: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if mode.showsArticleImage, article.imageUrl != nil, !store.unavailableArticleThumbnails.contains(store.articleThumbnailKey(article)) {
+            if hasAvailableThumbnail {
                 Button { onSelect(); store.open(article) } label: {
-                    ThumbnailSlot(article: article, store: store, width: PopoverLayout.visualWidth - 24, height: 206, cornerRadius: 10)
+                    ThumbnailSlot(
+                        article: article,
+                        store: store,
+                        width: PopoverLayout.visualWidth - 24,
+                        height: 206,
+                        cornerRadius: 10
+                    )
                 }
                 .buttonStyle(.plain)
             }
-            HStack(alignment: .top, spacing: 10) {
-                Button { onSelect(); store.open(article) } label: {
-                    textComposition.contentShape(Rectangle())
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 10) {
+                    Button { onSelect(); store.open(article) } label: {
+                        semanticTextComposition
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    quickActions
+                        .opacity(hovered ? 1 : 0)
+                        .allowsHitTesting(hovered)
                 }
-                .buttonStyle(.plain)
-                quickActions.opacity(hovered ? 1 : 0).allowsHitTesting(hovered)
+                audioActions
             }
             .padding(12)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(interactionBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .padding(.horizontal, 12).padding(.vertical, 6)
-        .contentShape(Rectangle())
-        .onHover { hovering in hovered = hovering; onHoverChanged(hovering) }.contextMenu { actionMenu }
+        .articleInteractionStyle(
+            selected: selected,
+            hovered: hovered,
+            onHoverChanged: updateHover,
+            menu: { actionMenu }
+        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .onDisappear { store.retryUnavailableArticleThumbnail(article) }
     }
-    private var compact: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Button { onSelect(); store.open(article) } label: {
-                HStack(alignment: .top, spacing: 10) {
-                    FeedIconSlot(feedID: article.feedId, store: store)
-                    compactTextComposition
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            quickActions.opacity(hovered ? 1 : 0).allowsHitTesting(hovered)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12).padding(.vertical, 7)
-        .contentShape(Rectangle()).background(interactionBackground)
-        .onHover { hovering in hovered = hovering; onHoverChanged(hovering) }.contextMenu { actionMenu }
-    }
-    private var textComposition: some View {
-        VStack(alignment: .leading, spacing: 5) {
+
+    private var visualCompact: some View {
+        VStack(alignment: .leading, spacing: 8) {
             metadata
-            Text(ListeningListPresentation.textOrFallback(article.title, fallback: String(localized: "Untitled News"))).font(.system(size: 14, weight: article.isRead ? .regular : .semibold))
-                .foregroundStyle(article.isRead ? .secondary : .primary).lineLimit(3).multilineTextAlignment(.leading)
-            if !article.preview.isEmpty { Text(article.preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(store.articlePreviewLines.rawValue).multilineTextAlignment(.leading) }
-            if ArticleAudioActions.shouldRender(audioState, transferStateAvailable: transferState != nil), let audioState, let transferState { AudioActionsView(state: audioState, transferState: transferState, onPlay: onPlayAudio, onDownload: onDownloadAudio, onDelete: onDeleteDownload, onAdd: onAddToListeningList) }
+
+            HStack(alignment: .top, spacing: 12) {
+                Button { onSelect(); store.open(article) } label: {
+                    VStack(alignment: .leading, spacing: 5) {
+                        headline(lineLimit: 3)
+                        publicationRow
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if hasAvailableThumbnail {
+                    Button { onSelect(); store.open(article) } label: {
+                        ThumbnailSlot(
+                            article: article,
+                            store: store,
+                            width: 112,
+                            height: 84,
+                            cornerRadius: 9
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack(alignment: .top, spacing: 10) {
+                if !article.preview.isEmpty {
+                    Text(article.preview)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(store.articlePreviewLines.rawValue)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Spacer(minLength: 0)
+                }
+
+                quickActions
+                    .opacity(hovered ? 1 : 0)
+                    .allowsHitTesting(hovered)
+            }
+
+            audioActions
+        }
+        .padding(12)
+        .articleInteractionStyle(
+            selected: selected,
+            hovered: hovered,
+            onHoverChanged: updateHover,
+            menu: { actionMenu }
+        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .onDisappear { store.retryUnavailableArticleThumbnail(article) }
+    }
+
+    private var compact: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .top, spacing: 10) {
+                Button { onSelect(); store.open(article) } label: {
+                    semanticTextComposition
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                quickActions
+                    .opacity(hovered ? 1 : 0)
+                    .allowsHitTesting(hovered)
+            }
+            audioActions
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .contentShape(Rectangle())
+        .background(interactionBackground)
+        .onHover(perform: updateHover)
+        .contextMenu { actionMenu }
+    }
+
+    private var semanticTextComposition: some View {
+        VStack(alignment: .leading, spacing: mode == .compact ? 3 : 5) {
+            metadata
+            headline(lineLimit: mode == .compact ? 2 : 3)
+            publicationRow
+            if !article.preview.isEmpty {
+                Text(article.preview)
+                    .font(mode == .compact ? .caption : .subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(store.articlePreviewLines.rawValue)
+                    .multilineTextAlignment(.leading)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
-    private var compactTextComposition: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(ListeningListPresentation.textOrFallback(article.title, fallback: String(localized: "Untitled News"))).font(.system(size: 14, weight: article.isRead ? .regular : .semibold))
-                .foregroundStyle(article.isRead ? .secondary : .primary).lineLimit(2).multilineTextAlignment(.leading)
-            compactMetadata
-            if !article.preview.isEmpty { Text(article.preview).font(.caption).foregroundStyle(.secondary).lineLimit(store.articlePreviewLines.rawValue).multilineTextAlignment(.leading) }
-            if ArticleAudioActions.shouldRender(audioState, transferStateAvailable: transferState != nil), let audioState, let transferState { AudioActionsView(state: audioState, transferState: transferState, onPlay: onPlayAudio, onDownload: onDownloadAudio, onDelete: onDeleteDownload, onAdd: onAddToListeningList) }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+
+    private func headline(lineLimit: Int) -> some View {
+        Text(
+            ListeningListPresentation.textOrFallback(
+                article.title,
+                fallback: String(localized: "Untitled News")
+            )
+        )
+        .font(.system(size: 14, weight: article.isRead ? .regular : .semibold))
+        .foregroundStyle(article.isRead ? .secondary : .primary)
+        .lineLimit(lineLimit)
+        .multilineTextAlignment(.leading)
     }
+
     private var metadata: some View {
-        HStack(spacing: 5) {
-            FeedIconSlot(feedID: article.feedId, store: store)
-            Text(article.feedTitle).lineLimit(1)
-            Text("·")
-            Text(relativeDate)
-            if !article.commentsUrl.isEmpty { Image(systemName: "bubble.left") }
-            if article.isStarred { Image(systemName: "star.fill").foregroundStyle(.yellow).accessibilityLabel("Unstar") }
+        HStack(spacing: 6) {
+            FeedIconSlot(feedID: article.feedId, store: store, size: 22)
+            Text(article.feedTitle)
+                .lineLimit(1)
+                .foregroundStyle(article.isRead ? .tertiary : .secondary)
+
+            Spacer(minLength: 4)
+
+            if hasAudio {
+                Image(systemName: "headphones")
+                    .accessibilityLabel("Audio available")
+            }
+            if !article.commentsUrl.isEmpty {
+                Image(systemName: "bubble.left")
+                    .accessibilityLabel("Comments available")
+            }
+            if article.isStarred {
+                Image(systemName: "star.fill")
+                    .foregroundStyle(.yellow)
+                    .accessibilityLabel("Starred")
+            }
+            if !article.isRead {
+                Circle()
+                    .frame(width: 6, height: 6)
+                    .accessibilityLabel("Unread")
+            }
         }
-        .font(.caption).foregroundStyle(article.isRead ? .tertiary : .secondary)
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
-    private var compactMetadata: some View {
-        HStack(spacing: 5) {
-            Text(article.feedTitle).lineLimit(1)
-            Text("·")
-            Text(relativeDate)
-            if !article.commentsUrl.isEmpty { Image(systemName: "bubble.left") }
-            if article.isStarred { Image(systemName: "star.fill").foregroundStyle(.yellow).accessibilityLabel("Unstar") }
+
+    private var publicationRow: some View {
+        HStack(spacing: 4) {
+            if store.showRelativePublicationTime {
+                Image(systemName: "clock.arrow.circlepath")
+                    .accessibilityHidden(true)
+            }
+
+            Text(publicationValue)
+
+            if let readingTime {
+                Text("·")
+                Image(systemName: hasAudio ? "headphones" : "doc.text")
+                    .accessibilityHidden(true)
+                Text(readingTime)
+            }
         }
-        .font(.caption).foregroundStyle(article.isRead ? .tertiary : .secondary)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
     }
+
+    @ViewBuilder
+    private var audioActions: some View {
+        if ArticleAudioActions.shouldRender(audioState, transferStateAvailable: transferState != nil),
+           let audioState,
+           let transferState {
+            AudioActionsView(
+                state: audioState,
+                transferState: transferState,
+                onPlay: onPlayAudio,
+                onDownload: onDownloadAudio,
+                onDelete: onDeleteDownload,
+                onAdd: onAddToListeningList
+            )
+        }
+    }
+
     private var quickActions: some View {
         VStack(spacing: 8) {
             if !store.isSearchActive {
-                iconButton(article.isRead ? "circle.fill" : "checkmark.circle", label: readActionLabel) { store.setRead(article, !article.isRead) }
+                iconButton(
+                    article.isRead ? "circle.fill" : "checkmark.circle",
+                    label: readActionLabel
+                ) {
+                    store.setRead(article, !article.isRead)
+                }
             }
-            iconButton(article.isStarred ? "star.fill" : "star", label: starActionLabel) { store.setStarred(article, !article.isStarred) }
-            Menu { actionMenu } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 22).help("More").accessibilityLabel("More")
+            iconButton(
+                article.isStarred ? "star.fill" : "star",
+                label: starActionLabel
+            ) {
+                store.setStarred(article, !article.isStarred)
+            }
+            Menu { actionMenu } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 22)
+            .help("More")
+            .accessibilityLabel("More")
         }
     }
-    private var interactionBackground: Color { selected ? Color.accentColor.opacity(0.16) : hovered ? Color.primary.opacity(0.055) : .clear }
-    @ViewBuilder private var actionMenu: some View {
+
+    private var interactionBackground: Color {
+        selected
+            ? Color.accentColor.opacity(0.16)
+            : hovered ? Color.primary.opacity(0.055) : .clear
+    }
+
+    @ViewBuilder
+    private var actionMenu: some View {
         Button { store.open(article) } label: { Label("Open", systemImage: "safari") }
         Button { store.openDetail(article) } label: { Label("Open Detail View", systemImage: "doc.text") }
-        Button { store.setStarred(article, !article.isStarred) } label: { Label(starActionLabel, systemImage: article.isStarred ? "star.slash" : "star") }
+        Button { store.setStarred(article, !article.isStarred) } label: {
+            Label(starActionLabel, systemImage: article.isStarred ? "star.slash" : "star")
+        }
         if !store.isSearchActive {
-            Button { store.setRead(article, !article.isRead) } label: { Label(readActionLabel, systemImage: article.isRead ? "circle.fill" : "checkmark.circle") }
-            Button { store.saveToService(article) } label: { Label("Save to Third-Party Service", systemImage: "tray.and.arrow.down") }
+            Button { store.setRead(article, !article.isRead) } label: {
+                Label(readActionLabel, systemImage: article.isRead ? "circle.fill" : "checkmark.circle")
+            }
+            Button { store.saveToService(article) } label: {
+                Label("Save to Third-Party Service", systemImage: "tray.and.arrow.down")
+            }
             Divider()
             Button { store.copyLink(article) } label: { Label("Copy Link", systemImage: "doc.on.doc") }
             Button { store.share(article) } label: { Label("Share...", systemImage: "square.and.arrow.up") }
             Button { store.openOriginal(article) } label: { Label("Open Original", systemImage: "safari") }
             Button { store.openInMiniflux(article) } label: { Label("Open in Miniflux", systemImage: "arrow.up.forward.app") }
             Button { store.select(.feed(article.feedId)) } label: { Label("Show Feed", systemImage: "line.3.horizontal.decrease.circle") }
-            if !article.commentsUrl.isEmpty { Button { store.openComments(article) } label: { Label("Open Comments", systemImage: "bubble.left") } }
+            if !article.commentsUrl.isEmpty {
+                Button { store.openComments(article) } label: { Label("Open Comments", systemImage: "bubble.left") }
+            }
         }
     }
-    private func iconButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: icon) }.buttonStyle(.borderless).help(label).accessibilityLabel(label)
+
+    private func iconButton(
+        _ icon: String,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) { Image(systemName: icon) }
+            .buttonStyle(.borderless)
+            .help(label)
+            .accessibilityLabel(label)
     }
-    private var readActionLabel: String { article.isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read") }
-    private var starActionLabel: String { article.isStarred ? String(localized: "Unstar") : String(localized: "Star") }
-    private var relativeDate: String {
-        guard let date = Self.isoFormatter.date(from: article.publishedAt) else { return "" }
-        return Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
+
+    private func updateHover(_ hovering: Bool) {
+        hovered = hovering
+        onHoverChanged(hovering)
+    }
+
+    private var hasAvailableThumbnail: Bool {
+        mode.showsArticleImage
+            && article.imageUrl != nil
+            && !store.unavailableArticleThumbnails.contains(store.articleThumbnailKey(article))
+    }
+
+    private var hasAudio: Bool {
+        !(audioState?.enclosures.isEmpty ?? true)
+    }
+
+    private var publicationValue: String {
+        ArticleTemporalPresentation.publicationValue(
+            article.publishedAt,
+            showRelative: store.showRelativePublicationTime,
+            relativeTo: temporalReferenceDate
+        )
+    }
+
+    private var readingTime: String? {
+        ArticleTemporalPresentation.readingTime(article.readingTimeMinutes)
+    }
+
+    private var readActionLabel: String {
+        article.isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read")
+    }
+
+    private var starActionLabel: String {
+        article.isStarred ? String(localized: "Unstar") : String(localized: "Star")
+    }
+}
+
+private extension View {
+    func articleInteractionStyle<MenuContent: View>(
+        selected: Bool,
+        hovered: Bool,
+        onHoverChanged: @escaping (Bool) -> Void,
+        @ViewBuilder menu: () -> MenuContent
+    ) -> some View {
+        self
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                selected
+                    ? Color.accentColor.opacity(0.16)
+                    : hovered ? Color.primary.opacity(0.055) : .clear
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .contentShape(Rectangle())
+            .onHover(perform: onHoverChanged)
+            .contextMenu { menu() }
     }
 }
 
@@ -1125,52 +1398,98 @@ private struct ThumbnailSlot: View {
 
 struct FeedIconSlot: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
     let feedID: Int64
     @ObservedObject var store: BrowserStore
+    var size: CGFloat = 16
+
     var body: some View {
         let dark = colorScheme == .dark
         let key = "\(feedID)-\(dark ? "dark" : "normal")"
+
         Group {
-            if let data = store.feedIcons[key], let image = NSImage(data: data) {
-                Image(nsImage: image).resizable().interpolation(.high).scaledToFit()
+            if let image = store.feedIcons[key] {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
             } else {
-                Image(systemName: "dot.radiowaves.left.and.right").foregroundStyle(.secondary)
+                ZStack {
+                    Circle()
+                        .fill(Color.accentColor)
+                    Text(fallbackLetter)
+                        .font(.system(size: max(8, size * 0.52), weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                }
             }
         }
-        .frame(width: 16, height: 16)
+        .frame(width: size, height: size)
+        .clipShape(Circle())
         .accessibilityLabel("Feed icon")
-        .onAppear { store.requestFeedIcon(feedID, darkAppearance: dark) }
-        .onChange(of: colorScheme) { _, appearance in
-            store.requestFeedIcon(feedID, darkAppearance: appearance == .dark)
+        .onAppear {
+            store.requestFeedIcon(
+                feedID,
+                darkAppearance: dark,
+                displayScale: displayScale
+            )
         }
+        .onChange(of: colorScheme) { _, appearance in
+            store.requestFeedIcon(
+                feedID,
+                darkAppearance: appearance == .dark,
+                displayScale: displayScale
+            )
+        }
+    }
+
+    private var fallbackLetter: String {
+        let title = store.feedTitle(feedID: feedID)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.first.map { String($0).uppercased() } ?? "•"
     }
 }
 
 private enum SettingsSection: String, CaseIterable, Identifiable {
     case account
-    case syncStorage
+    case articles
+    case navigation
     case media
-    case reading
+    case backgroundSync
     case systemNotifications
     case general
-    case data
+    case configurationBackup
 
     var id: Self { self }
 
     var title: LocalizedStringResource {
         switch self {
         case .account: "Account"
-        case .syncStorage: "Sync & Storage"
-        case .media: "Media / Listening List"
-        case .reading: "Reading"
+        case .articles: "Articles"
+        case .navigation: "Navigation"
+        case .media: "Media"
+        case .backgroundSync: "Background Sync"
         case .systemNotifications: "System Notifications"
         case .general: "General"
-        case .data: "Data & Backup"
+        case .configurationBackup: "Configuration Backup"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .account: "person.crop.circle"
+        case .articles: "doc.text"
+        case .navigation: "sidebar.leading"
+        case .media: "headphones"
+        case .backgroundSync: "arrow.triangle.2.circlepath"
+        case .systemNotifications: "bell"
+        case .general: "gearshape"
+        case .configurationBackup: "externaldrive.badge.timemachine"
         }
     }
 }
 
-private struct SettingsView: View {
+struct SettingsView: View {
     @ObservedObject var store: BrowserStore
     @State private var server = ""
     @State private var key = ""
@@ -1180,27 +1499,52 @@ private struct SettingsView: View {
     @State private var launchAtLogin = false
     @State private var globalShortcut = GlobalShortcutChoice.optionCommandF
     @State private var section: SettingsSection = .account
+    @State private var settingsSidebarVisible = true
     @State private var backupFlow: BackupPasswordFlow?
     @State private var settingsWindow: NSWindow?
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("FluxNews Settings")
-                .font(.title2.bold())
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
-            Divider()
-            NavigationSplitView {
-                SettingsSidebar(selection: $section)
-            } detail: {
-                settingsPage
-                    .padding(20)
+            HStack(spacing: 12) {
+                Text("FluxNews Settings")
+                    .font(.title2.bold())
+
+                Button {
+                    settingsSidebarVisible.toggle()
+                } label: {
+                    Image(systemName: "sidebar.left")
+                }
+                .buttonStyle(.borderless)
+                .help(settingsSidebarVisible ? "Hide navigation" : "Show navigation")
+                .accessibilityLabel(settingsSidebarVisible ? "Hide navigation" : "Show navigation")
+
+                Spacer()
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+
             Divider()
+
+            HStack(spacing: 0) {
+                if settingsSidebarVisible {
+                    SettingsSidebar(selection: $section)
+                        .frame(width: 170)
+                        .overlay(alignment: .trailing) { Divider() }
+                }
+
+                ScrollView {
+                    settingsPage
+                        .padding(20)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+            Divider()
+
             HStack {
                 Spacer()
-                Button { store.settingsVisible = false } label: {
+                Button { settingsWindow?.performClose(nil) } label: {
                     if section == .account { Text("Cancel") } else { Text("Done") }
                 }
                 if section == .account {
@@ -1213,7 +1557,7 @@ private struct SettingsView: View {
             }
                 .padding(16)
         }
-        .frame(width: 900, height: 500)
+        .frame(minWidth: 640, minHeight: 420)
         .overlay(alignment: .bottom) {
             if let confirmation = store.actionConfirmation {
                 Text(confirmation)
@@ -1264,17 +1608,29 @@ private struct SettingsView: View {
         switch section {
         case .account:
             AccountSettingsView(server: $server, key: $key, customHeaders: $customHeaders, configuredServer: store.configuredServer, version: store.minifluxVersion, validationError: store.accountValidationError)
-        case .syncStorage:
-            SyncStorageSettingsView(store: store, syncOnStart: $syncOnStart, retention: retention, deliveryMode: deliveryMode, backgroundSyncEnabled: backgroundSyncEnabled)
+        case .articles:
+            MacOSArticlesSettingsView(
+                store: store,
+                scrollover: $scrollover,
+                retention: retention,
+                deliveryMode: deliveryMode,
+                detailCharacterLimit: detailCharacterLimit
+            )
+        case .navigation:
+            MacOSNavigationSettingsView(store: store)
         case .media:
             MediaSettingsView(store: store, autoDownloadListeningList: autoDownloadListeningList, deleteAfterPlayback: deleteAfterPlayback, removeCompletedListeningList: removeCompletedListeningList)
-        case .reading:
-            ReadingSettingsView(store: store, scrollover: $scrollover, detailCharacterLimit: detailCharacterLimit)
+        case .backgroundSync:
+            MacOSBackgroundSyncSettingsView(
+                store: store,
+                syncOnStart: $syncOnStart,
+                backgroundSyncEnabled: backgroundSyncEnabled
+            )
         case .systemNotifications:
             SystemNotificationsSettingsView(store: store)
         case .general:
             GeneralSettingsView(launchAtLogin: $launchAtLogin, globalShortcut: $globalShortcut, registrationError: store.globalShortcutRegistrationError)
-        case .data:
+        case .configurationBackup:
             DataBackupSettingsView(store: store, export: chooseExportDestination, importBackup: chooseImportSource, filePanelsAvailable: settingsWindow != nil)
         }
     }
@@ -1452,7 +1808,7 @@ private struct DataBackupSettingsView: View {
         VStack(alignment: .leading, spacing: 20) {
             GroupBox("Configuration Backup") {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Export or import your account, FluxNews settings, Feed Settings, and macOS preferences. Backups are password encrypted.")
+                    Text("Export or import your account, FluxNews settings, Feed Settings, and macOS preferences. Configuration backups are password encrypted.")
                         .foregroundStyle(.secondary)
                     HStack {
                         Button("Export Configuration Backup...") { export() }
@@ -1502,16 +1858,17 @@ private struct SettingsSidebar: View {
         List {
             ForEach(SettingsSection.allCases) { section in
                 Button { selection = section } label: {
-                    Text(section.title)
+                    Label(section.title, systemImage: section.systemImage)
                         .foregroundStyle(section == selection ? .white : .primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .contentShape(Rectangle())
                 .listRowBackground(section == selection ? Color.accentColor : .clear)
             }
         }
         .listStyle(.sidebar)
-        .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 190)
     }
 }
 
@@ -1576,47 +1933,53 @@ private struct AccountSettingsView: View {
     }
 
     private var customHeadersEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text("Header Name")
-                    .frame(minWidth: 240, idealWidth: 260, maxWidth: 300, alignment: .leading)
-                Text("Value")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Color.clear.frame(width: 24)
-                Text("Remove")
-                    .hidden()
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(customHeaders.indices, id: \.self) { index in
-                HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Header Name")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Remove", role: .destructive) {
+                            revealedHeaderIDs.remove(customHeaders[index].id)
+                            customHeaders.remove(at: index)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+
                     TextField("", text: $customHeaders[index].name)
                         .textFieldStyle(.roundedBorder)
                         .multilineTextAlignment(.leading)
-                        .frame(minWidth: 240, idealWidth: 260, maxWidth: 300)
-                    headerValueField(at: index)
-                        .frame(minWidth: 300, maxWidth: .infinity)
-                        .layoutPriority(1)
-                    Button {
-                        toggleHeaderValueVisibility(for: customHeaders[index].id)
-                    } label: {
-                        Image(systemName: revealedHeaderIDs.contains(customHeaders[index].id) ? "eye.slash" : "eye")
+
+                    Text("Value")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 8) {
+                        headerValueField(at: index)
+                            .frame(maxWidth: .infinity)
+
+                        Button {
+                            toggleHeaderValueVisibility(for: customHeaders[index].id)
+                        } label: {
+                            Image(systemName: revealedHeaderIDs.contains(customHeaders[index].id) ? "eye.slash" : "eye")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(revealedHeaderIDs.contains(customHeaders[index].id) ? String(localized: "Hide header value") : String(localized: "Show header value"))
+                        .accessibilityLabel(revealedHeaderIDs.contains(customHeaders[index].id) ? String(localized: "Hide header value") : String(localized: "Show header value"))
+                        .frame(width: 24)
                     }
-                    .buttonStyle(.borderless)
-                    .help(revealedHeaderIDs.contains(customHeaders[index].id) ? String(localized: "Hide header value") : String(localized: "Show header value"))
-                    .accessibilityLabel(revealedHeaderIDs.contains(customHeaders[index].id) ? String(localized: "Hide header value") : String(localized: "Show header value"))
-                    .frame(width: 24)
-                    Button("Remove", role: .destructive) {
-                        revealedHeaderIDs.remove(customHeaders[index].id)
-                        customHeaders.remove(at: index)
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
+                }
+
+                if index < customHeaders.count - 1 {
+                    Divider()
                 }
             }
 
-            Button("Add Header") { customHeaders.append(CustomHTTPHeader()) }
+            Button { customHeaders.append(CustomHTTPHeader()) } label: {
+                Label("Add Header", systemImage: "plus")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1643,86 +2006,148 @@ private struct AccountSettingsView: View {
     }
 }
 
-private struct SyncStorageSettingsView: View {
+private struct MacOSArticlesSettingsView: View {
     @ObservedObject var store: BrowserStore
-    @Binding var syncOnStart: Bool
+    @Binding var scrollover: Bool
     let retention: Binding<ReadArticleRetention>
     let deliveryMode: Binding<DeliveryMode>
-    let backgroundSyncEnabled: Binding<Bool>
+    let detailCharacterLimit: Binding<UInt32>
 
     var body: some View {
         Form {
-            Toggle("Background Sync", isOn: backgroundSyncEnabled)
+            Picker("Open article", selection: Binding(get: { store.clickOnNews }, set: store.setClickOnNews)) {
+                Text("Original link").tag(ClickOnNews.openLink)
+                Text("Reader").tag(ClickOnNews.openDetailView)
+            }
+            Picker("Presentation", selection: Binding(get: { store.articlePresentationMode }, set: store.setArticlePresentationMode)) {
+                ForEach(ArticlePresentationMode.allCases, id: \.self) { mode in
+                    Text(LocalizedStringKey(mode.displayNameKey)).tag(mode)
+                }
+            }
+            Picker("Preview lines", selection: Binding(get: { store.articlePreviewLines }, set: store.setArticlePreviewLines)) {
+                Text("2 lines").tag(ArticlePreviewLines.compact)
+                Text("3 lines").tag(ArticlePreviewLines.standard)
+                Text("5 lines").tag(ArticlePreviewLines.extended)
+            }
+            Toggle("Show article count", isOn: Binding(get: { store.showArticleCount }, set: store.setShowArticleCount))
+            Toggle("Show relative publication time", isOn: Binding(get: { store.showRelativePublicationTime }, set: store.setShowRelativePublicationTime))
+            Toggle("Remove articles when read", isOn: Binding(get: { store.removeArticlesWhenMarkedRead }, set: store.setRemoveArticlesWhenMarkedRead))
+            Toggle(
+                "Mark read on scrollover",
+                isOn: Binding(
+                    get: { store.markReadOnScrolloverEnabled },
+                    set: { enabled in
+                        scrollover = enabled
+                        store.setScrolloverEnabled(enabled)
+                    }
+                )
+            )
+
+            Section {
+                Picker("Keep read articles", selection: retention) {
+                    Text("30 days").tag(ReadArticleRetention.days30)
+                    Text("60 days").tag(ReadArticleRetention.days60)
+                    Text("90 days").tag(ReadArticleRetention.days90)
+                    Text("180 days").tag(ReadArticleRetention.days180)
+                    Text("365 days").tag(ReadArticleRetention.days365)
+                }
+                Picker("Reader detail limit", selection: detailCharacterLimit) {
+                    Text("5,000 characters").tag(UInt32(5_000))
+                    Text("10,000 characters").tag(UInt32(10_000))
+                    Text("20,000 characters").tag(UInt32(20_000))
+                }
+            } header: {
+                Text("Storage & Reader")
+            } footer: {
+                Text("Read article retention controls how long synchronized read items remain in local history. The Reader detail limit controls how much article text the Core keeps when a feed uses truncated Reader content.")
+            }
+            .disabled(store.coreSettings == nil)
+
+            Section {
+                Picker(
+                    "Sync article changes",
+                    selection: deliveryMode
+                ) {
+                    Text("Deferred").tag(DeliveryMode.deferred)
+                    Text("Immediately").tag(DeliveryMode.live)
+                }
                 .disabled(store.coreSettings == nil)
-            Toggle("Sync on Start", isOn: $syncOnStart)
-            Picker("Mutation Delivery", selection: deliveryMode) {
-                Text("Deferred").tag(DeliveryMode.deferred)
-                Text("Live").tag(DeliveryMode.live)
+            } footer: {
+                Text("Immediate delivery saves read/unread and star changes locally first and then sends them to Miniflux. Failed delivery remains pending for a later retry.")
             }
-            .disabled(store.coreSettings == nil)
-            Picker("Retention", selection: retention) {
-                Text("30 days").tag(ReadArticleRetention.days30)
-                Text("60 days").tag(ReadArticleRetention.days60)
-                Text("90 days").tag(ReadArticleRetention.days90)
-                Text("180 days").tag(ReadArticleRetention.days180)
-                Text("365 days").tag(ReadArticleRetention.days365)
-            }
-            .disabled(store.coreSettings == nil)
         }
         .formStyle(.grouped)
     }
 }
 
-private struct ReadingSettingsView: View {
+private struct MacOSNavigationSettingsView: View {
     @ObservedObject var store: BrowserStore
-    @Binding var scrollover: Bool
-    let detailCharacterLimit: Binding<UInt32>
 
     var body: some View {
         Form {
-            Picker("Startup Scope", selection: Binding(get: { store.startupScope }, set: { store.setStartupScope($0) })) {
+            Toggle(
+                "Hide empty feeds",
+                isOn: Binding(
+                    get: { store.hideEmptyNavigationEntries },
+                    set: store.setHideEmptyNavigationEntries
+                )
+            )
+            Picker(
+                "Startup scope",
+                selection: Binding(get: { store.startupScope }, set: store.setStartupScope)
+            ) {
                 Text("All News").tag(StartupScopePreference.allNews)
                 Text("Starred").tag(StartupScopePreference.starred)
                 Text("Category").tag(StartupScopePreference.category)
                 Text("Feed").tag(StartupScopePreference.feed)
             }
             if store.startupScope == .category {
-                Picker("Startup Category", selection: Binding(get: { store.startupCategoryID }, set: { store.setStartupCategoryID($0) })) {
-                    ForEach(store.catalog.categories, id: \.id) { category in Text(category.title).tag(Optional(category.id)) }
+                Picker(
+                    "Startup category",
+                    selection: Binding(
+                        get: { store.startupCategoryID },
+                        set: store.setStartupCategoryID
+                    )
+                ) {
+                    ForEach(store.catalog.categories, id: \.id) { category in
+                        Text(category.title).tag(Optional(category.id))
+                    }
                 }
                 .disabled(store.catalog.categories.isEmpty)
             }
             if store.startupScope == .feed {
-                Picker("Startup Feed", selection: Binding(get: { store.startupFeedID }, set: { store.setStartupFeedID($0) })) {
-                    ForEach(store.catalog.feeds, id: \.id) { feed in Text(feed.title).tag(Optional(feed.id)) }
+                Picker(
+                    "Startup feed",
+                    selection: Binding(
+                        get: { store.startupFeedID },
+                        set: store.setStartupFeedID
+                    )
+                ) {
+                    ForEach(store.catalog.feeds, id: \.id) { feed in
+                        Text(feed.title).tag(Optional(feed.id))
+                    }
                 }
                 .disabled(store.catalog.feeds.isEmpty)
             }
-            Picker("Article Presentation", selection: Binding(get: { store.articlePresentationMode }, set: { store.setArticlePresentationMode($0) })) {
-                Text("Visual").tag(ArticlePresentationMode.visual)
-                Text("Compact").tag(ArticlePresentationMode.compact)
+        }
+        .formStyle(.grouped)
+    }
+}
+
+private struct MacOSBackgroundSyncSettingsView: View {
+    @ObservedObject var store: BrowserStore
+    @Binding var syncOnStart: Bool
+    let backgroundSyncEnabled: Binding<Bool>
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Background Sync", isOn: backgroundSyncEnabled)
+                    .disabled(store.coreSettings == nil)
+                Toggle("Sync on Start", isOn: $syncOnStart)
+            } footer: {
+                Text("When enabled, FluxNews may refresh news in the background and when you return to the app. Manual Sync remains available at all times.")
             }
-            Text(store.articlePresentationMode == .compact ? "Text-focused presentation with higher information density." : "Image-forward article presentation.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Picker("Preview Lines", selection: Binding(get: { store.articlePreviewLines }, set: { store.setArticlePreviewLines($0) })) {
-                Text("2 lines").tag(ArticlePreviewLines.compact)
-                Text("3 lines").tag(ArticlePreviewLines.standard)
-                Text("5 lines").tag(ArticlePreviewLines.extended)
-            }
-            Picker("Click on News", selection: Binding(get: { store.clickOnNews }, set: { store.setClickOnNews($0) })) {
-                Text("Open Link").tag(ClickOnNews.openLink)
-                Text("Open Detail View").tag(ClickOnNews.openDetailView)
-            }
-            Picker("Reader Detail Limit", selection: detailCharacterLimit) {
-                Text("5,000 characters").tag(UInt32(5_000))
-                Text("10,000 characters").tag(UInt32(10_000))
-                Text("20,000 characters").tag(UInt32(20_000))
-            }
-            .disabled(store.coreSettings == nil)
-            Toggle("Mark articles as read when scrolling past", isOn: $scrollover)
-            Toggle("Remove article from list when marked read", isOn: Binding(get: { store.removeArticlesWhenMarkedRead }, set: { store.setRemoveArticlesWhenMarkedRead($0) }))
-            Toggle("Hide Empty Feeds / Categories", isOn: Binding(get: { store.hideEmptyNavigationEntries }, set: { store.setHideEmptyNavigationEntries($0) }))
         }
         .formStyle(.grouped)
     }
@@ -1736,13 +2161,13 @@ private struct MediaSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Media / Listening List") {
-                Toggle("Automatically download items added to Listening List", isOn: autoDownloadListeningList)
+            Section("Listening List") {
+                Toggle("Automatically download Listening List audio", isOn: autoDownloadListeningList)
                 Text("Downloads audio automatically when an item is added to Listening List.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Toggle("Delete download after playback", isOn: deleteAfterPlayback)
+                Toggle("Delete download after playback completes", isOn: deleteAfterPlayback)
                 Text("Removes the local download after playback is completed. The item remains in Listening List.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1764,6 +2189,7 @@ private struct FeedSettingsView: View {
     let target: FeedSettingsTarget
     @State private var preferences: FeedPreferences?
     @State private var error: String?
+    @State private var isSaving = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -1776,9 +2202,17 @@ private struct FeedSettingsView: View {
                         Text("Text Only").tag(DetailRenderingMode.textOnly)
                     }
                      Toggle("Truncate Detail", isOn: Binding(get: { preferences.truncateDetail }, set: updateTruncateDetail))
+                     Toggle(
+                        "System Notifications",
+                        isOn: Binding(
+                            get: { preferences.systemNotificationsEnabled },
+                            set: updateSystemNotifications
+                        )
+                     )
                      Toggle("Open in Miniflux", isOn: Binding(get: { preferences.openInMiniflux }, set: updateOpenInMiniflux))
                      Toggle("Automatically download audio from this feed", isOn: Binding(get: { preferences.autoDownloadAudio }, set: updateAutoDownloadAudio))
                  }
+                .disabled(isSaving)
                 .formStyle(.grouped)
             } else {
                 ProgressView()
@@ -1807,6 +2241,24 @@ private struct FeedSettingsView: View {
         do { try store.setFeedTruncateDetail(feedID: target.id, enabled: enabled); preferences = try store.feedPreferences(feedID: target.id) }
         catch { self.error = NativeErrorPresentation.message(for: error) }
     }
+    private func updateSystemNotifications(_ enabled: Bool) {
+        guard store.catalog.feeds.contains(where: { $0.id == target.id }) else {
+            dismiss()
+            return
+        }
+        isSaving = true
+        error = nil
+        store.setSystemNotificationsEnabled(feedID: target.id, enabled: enabled) { result in
+            isSaving = false
+            switch result {
+            case .success:
+                load()
+            case let .failure(error):
+                self.error = NativeErrorPresentation.message(for: error)
+            }
+        }
+    }
+
     private func updateOpenInMiniflux(_ enabled: Bool) {
         guard store.catalog.feeds.contains(where: { $0.id == target.id }) else { dismiss(); return }
         do { try store.setFeedOpenInMiniflux(feedID: target.id, enabled: enabled); preferences = try store.feedPreferences(feedID: target.id) }
@@ -1859,7 +2311,7 @@ private struct GeneralSettingsView: View {
     var body: some View {
         Form {
             Toggle("Launch automatically at login", isOn: $launchAtLogin)
-            Picker("Global Shortcut", selection: $globalShortcut) {
+            Picker("Global shortcut", selection: $globalShortcut) {
                 ForEach(GlobalShortcutChoice.allCases, id: \.self) { Text($0.title).tag($0) }
             }
             if let registrationError {
