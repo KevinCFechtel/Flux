@@ -132,6 +132,8 @@ private struct MacOSBackupSettingsV1: Codable {
     let syncOnStart: Bool
     let articlePresentationMode: String
     let previewLines: Int
+    let showArticleCount: Bool?
+    let showRelativePublicationTime: Bool?
     let clickOnNews: String
     let globalShortcut: String
     let launchAtLogin: Bool
@@ -168,7 +170,7 @@ final class BrowserStore: ObservableObject {
     @Published var selectionTotal: UInt64 = 0
     @Published var categorySidebarCounts: [Int64: UInt64] = [:]
     @Published var feedSidebarCounts: [Int64: UInt64] = [:]
-    @Published private(set) var feedIcons: [String: Data] = [:]
+    @Published private(set) var feedIcons: [String: NSImage] = [:]
     @Published private(set) var articleThumbnails: [String: NSImage] = [:]
     @Published private(set) var unavailableArticleThumbnails = Set<String>()
     @Published var isLoading = false
@@ -201,6 +203,8 @@ final class BrowserStore: ObservableObject {
     @Published private(set) var syncOnStartEnabled: Bool
     @Published var articlePresentationMode: ArticlePresentationMode
     @Published var articlePreviewLines: ArticlePreviewLines
+    @Published var showArticleCount: Bool
+    @Published var showRelativePublicationTime: Bool
     @Published var clickOnNews: ClickOnNews
     @Published var globalShortcut: GlobalShortcutChoice
     @Published var globalShortcutRegistrationError: String?
@@ -254,6 +258,8 @@ final class BrowserStore: ObservableObject {
         syncOnStartEnabled = UserDefaults.standard.object(forKey: "FluxNews.syncOnStart") as? Bool ?? true
         articlePresentationMode = UserDefaults.standard.string(forKey: "FluxNews.articlePresentationMode").flatMap(ArticlePresentationMode.init(rawValue:)) ?? .visual
         articlePreviewLines = ArticlePreviewLines(rawValue: UserDefaults.standard.integer(forKey: "FluxNews.articlePreviewLines")) ?? .standard
+        showArticleCount = UserDefaults.standard.object(forKey: "FluxNews.showArticleCount") as? Bool ?? true
+        showRelativePublicationTime = UserDefaults.standard.object(forKey: "FluxNews.showRelativePublicationTime") as? Bool ?? false
         clickOnNews = UserDefaults.standard.string(forKey: "FluxNews.clickOnNews").flatMap(ClickOnNews.init(rawValue:)) ?? .openLink
         globalShortcut = GlobalShortcutChoice.stored()
     }
@@ -447,7 +453,7 @@ final class BrowserStore: ObservableObject {
         }
     }
     func reloadNavigationAndCounts() { reloadNavigation(); reloadCounts() }
-    func requestFeedIcon(_ feedID: Int64, darkAppearance: Bool) {
+    func requestFeedIcon(_ feedID: Int64, darkAppearance: Bool, displayScale: CGFloat = 2) {
         let key = "\(feedID)-\(darkAppearance ? "dark" : "normal")"
         guard feedIconRequests.begin(key, cached: feedIcons[key] != nil), let core else { return }
         let store = WeakBrowserStore(self)
@@ -455,16 +461,21 @@ final class BrowserStore: ObservableObject {
             do {
                 let variant: FeedIconVariant = darkAppearance ? .dark : .normal
                 let icon = try core.feedIcon(feedId: feedID, variant: variant)
+                let prepared = icon.flatMap {
+                    MacOSFeedIconImagePreparation.prepare(
+                        data: Data($0.pngData),
+                        displayScale: displayScale
+                    )
+                }
                 await MainActor.run {
                     guard let store = store.value else { return }
-                    if let icon {
-                        store.feedIcons[key] = Data(icon.pngData)
-                        store.feedIconRequests.complete(key)
+                    if let prepared {
+                        store.feedIcons[key] = prepared
                         NativeLog.feedIcon.debug("feed icon available feed_id=\(feedID, privacy: .public) variant=\(darkAppearance ? "dark" : "normal", privacy: .public)")
                     } else {
-                        store.feedIconRequests.complete(key)
                         NativeLog.feedIcon.debug("feed icon unavailable feed_id=\(feedID, privacy: .public) variant=\(darkAppearance ? "dark" : "normal", privacy: .public)")
                     }
+                    store.feedIconRequests.complete(key)
                 }
             } catch {
                 await MainActor.run {
@@ -606,8 +617,10 @@ final class BrowserStore: ObservableObject {
                 switch result {
                 case let .success(page):
                     let existing = Set(store.articles.map(\.id))
-                    store.articles.append(contentsOf: page.articles.filter { !existing.contains($0.id) })
+                    let appended = page.articles.filter { !existing.contains($0.id) }
+                    store.articles.append(contentsOf: appended)
                     store.searchTotal = page.total
+                    store.loadArticleAudioActions(for: appended.map(\.id))
                 case let .failure(error): store.errorMessage = NativeErrorPresentation.message(for: error)
                 }
             }
@@ -1092,6 +1105,8 @@ final class BrowserStore: ObservableObject {
     func setRemoveArticlesWhenMarkedRead(_ enabled: Bool) { removeArticlesWhenMarkedRead = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.removeArticlesWhenMarkedRead") }
     func setSyncOnStartEnabled(_ enabled: Bool) { syncOnStartEnabled = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.syncOnStart") }
     func setArticlePreviewLines(_ lines: ArticlePreviewLines) { articlePreviewLines = lines; UserDefaults.standard.set(lines.rawValue, forKey: "FluxNews.articlePreviewLines") }
+    func setShowArticleCount(_ enabled: Bool) { showArticleCount = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.showArticleCount") }
+    func setShowRelativePublicationTime(_ enabled: Bool) { showRelativePublicationTime = enabled; UserDefaults.standard.set(enabled, forKey: "FluxNews.showRelativePublicationTime") }
     func setClickOnNews(_ preference: ClickOnNews) { clickOnNews = preference; UserDefaults.standard.set(preference.rawValue, forKey: "FluxNews.clickOnNews") }
     func setGlobalShortcut(_ shortcut: GlobalShortcutChoice) { guard shortcut != globalShortcut else { return }; globalShortcut = shortcut; shortcut.store() }
     func exportConfigurationBackup(password: String) throws -> Data {
@@ -1253,6 +1268,8 @@ final class BrowserStore: ObservableObject {
             syncOnStart: syncOnStartEnabled,
             articlePresentationMode: articlePresentationMode.rawValue,
             previewLines: articlePreviewLines.rawValue,
+            showArticleCount: showArticleCount,
+            showRelativePublicationTime: showRelativePublicationTime,
             clickOnNews: clickOnNews.rawValue,
             globalShortcut: globalShortcut.rawValue,
             launchAtLogin: CredentialStore.launchAtLoginEnabled,
@@ -1270,6 +1287,8 @@ final class BrowserStore: ObservableObject {
         setSyncOnStartEnabled(settings.syncOnStart)
         setArticlePresentationMode(ArticlePresentationMode(rawValue: settings.articlePresentationMode) ?? .visual)
         setArticlePreviewLines(ArticlePreviewLines(rawValue: settings.previewLines) ?? .standard)
+        setShowArticleCount(settings.showArticleCount ?? true)
+        setShowRelativePublicationTime(settings.showRelativePublicationTime ?? false)
         setClickOnNews(ClickOnNews(rawValue: settings.clickOnNews) ?? .openLink)
         setGlobalShortcut(GlobalShortcutChoice(rawValue: settings.globalShortcut) ?? .optionCommandF)
         setStartupScope(StartupScopePreference(rawValue: settings.startupScope ?? "") ?? .allNews)
@@ -1284,6 +1303,8 @@ final class BrowserStore: ObservableObject {
         setSyncOnStartEnabled(true)
         setArticlePresentationMode(.visual)
         setArticlePreviewLines(.standard)
+        setShowArticleCount(true)
+        setShowRelativePublicationTime(false)
         setClickOnNews(.openLink)
         setGlobalShortcut(.optionCommandF)
         setStartupScope(.allNews)
@@ -1346,8 +1367,16 @@ final class BrowserStore: ObservableObject {
     }
     func copyLink(_ article: ArticleSummary) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(article.url, forType: .string) }
     func feedPreferences(feedID: Int64) throws -> FeedPreferences { guard let core else { throw NSError(domain: "FluxNews", code: 1) }; return try core.feedPreferences(feedId: feedID) }
+    func feedTitle(feedID: Int64) -> String { catalog.feeds.first(where: { $0.id == feedID })?.title ?? "" }
     func setFeedDetailRendering(feedID: Int64, mode: DetailRenderingMode) throws { try core?.setFeedDetailRendering(feedId: feedID, mode: mode) }
     func setFeedTruncateDetail(feedID: Int64, enabled: Bool) throws { try core?.setFeedTruncateDetail(feedId: feedID, enabled: enabled) }
+    func setFeedSystemNotificationsEnabled(feedID: Int64, enabled: Bool) throws {
+        guard let core else { throw NSError(domain: "FluxNews", code: 1) }
+        if enabled {
+            throw NSError(domain: "FluxNews", code: 2, userInfo: [NSLocalizedDescriptionKey: "Use the asynchronous notification authorization path."])
+        }
+        try core.setFeedSystemNotificationsEnabled(feedId: feedID, enabled: false)
+    }
     func setFeedOpenInMiniflux(feedID: Int64, enabled: Bool) throws { try core?.setFeedOpenInMiniflux(feedId: feedID, enabled: enabled) }
     func setFeedAutoDownloadAudio(feedID: Int64, enabled: Bool) throws { try core?.setFeedAutoDownloadAudio(feedId: feedID, enabled: enabled) }
     func share(_ article: ArticleSummary) { guard let url = URL(string: article.url) else { return }; DispatchQueue.main.async { [weak self] in guard let self, let view = NSApplication.shared.keyWindow?.contentView else { return }; let picker = NSSharingServicePicker(items: [article.title, url]); self.sharingPicker = picker; let point = view.convert(view.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil); picker.show(relativeTo: NSRect(origin: point, size: NSSize(width: 1, height: 1)), of: view, preferredEdge: .minY) } }
