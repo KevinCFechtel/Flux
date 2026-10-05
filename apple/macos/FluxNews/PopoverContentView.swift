@@ -873,13 +873,6 @@ private struct MoreMenu: View {
 }
 
 private struct ArticleItem: View {
-    private static let isoFormatter = ISO8601DateFormatter()
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter
-    }()
-
     let article: ArticleSummary
     let mode: ArticlePresentationMode
     let selected: Bool
@@ -893,125 +886,362 @@ private struct ArticleItem: View {
     let onAddToListeningList: () -> Void
     let onHoverChanged: (Bool) -> Void
     @State private var hovered = false
+    @State private var temporalReferenceDate = Date()
 
-    var body: some View { mode == .compact ? AnyView(compact) : AnyView(visual) }
+    @ViewBuilder
+    var body: some View {
+        switch mode {
+        case .visual:
+            visual
+        case .visualCompact:
+            visualCompact
+        case .compact:
+            compact
+        }
+    }
+
     private var visual: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if mode.showsArticleImage, article.imageUrl != nil, !store.unavailableArticleThumbnails.contains(store.articleThumbnailKey(article)) {
+            if hasAvailableThumbnail {
                 Button { onSelect(); store.open(article) } label: {
-                    ThumbnailSlot(article: article, store: store, width: PopoverLayout.visualWidth - 24, height: 206, cornerRadius: 10)
+                    ThumbnailSlot(
+                        article: article,
+                        store: store,
+                        width: PopoverLayout.visualWidth - 24,
+                        height: 206,
+                        cornerRadius: 10
+                    )
                 }
                 .buttonStyle(.plain)
             }
-            HStack(alignment: .top, spacing: 10) {
-                Button { onSelect(); store.open(article) } label: {
-                    textComposition.contentShape(Rectangle())
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 10) {
+                    Button { onSelect(); store.open(article) } label: {
+                        semanticTextComposition
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    quickActions
+                        .opacity(hovered ? 1 : 0)
+                        .allowsHitTesting(hovered)
                 }
-                .buttonStyle(.plain)
-                quickActions.opacity(hovered ? 1 : 0).allowsHitTesting(hovered)
+                audioActions
             }
             .padding(12)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(interactionBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .padding(.horizontal, 12).padding(.vertical, 6)
-        .contentShape(Rectangle())
-        .onHover { hovering in hovered = hovering; onHoverChanged(hovering) }.contextMenu { actionMenu }
+        .articleInteractionStyle(
+            selected: selected,
+            hovered: hovered,
+            onHoverChanged: updateHover,
+            menu: actionMenu
+        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .onDisappear { store.retryUnavailableArticleThumbnail(article) }
     }
-    private var compact: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Button { onSelect(); store.open(article) } label: {
-                HStack(alignment: .top, spacing: 10) {
-                    FeedIconSlot(feedID: article.feedId, store: store)
-                    compactTextComposition
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            quickActions.opacity(hovered ? 1 : 0).allowsHitTesting(hovered)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12).padding(.vertical, 7)
-        .contentShape(Rectangle()).background(interactionBackground)
-        .onHover { hovering in hovered = hovering; onHoverChanged(hovering) }.contextMenu { actionMenu }
-    }
-    private var textComposition: some View {
-        VStack(alignment: .leading, spacing: 5) {
+
+    private var visualCompact: some View {
+        VStack(alignment: .leading, spacing: 8) {
             metadata
-            Text(ListeningListPresentation.textOrFallback(article.title, fallback: String(localized: "Untitled News"))).font(.system(size: 14, weight: article.isRead ? .regular : .semibold))
-                .foregroundStyle(article.isRead ? .secondary : .primary).lineLimit(3).multilineTextAlignment(.leading)
-            if !article.preview.isEmpty { Text(article.preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(store.articlePreviewLines.rawValue).multilineTextAlignment(.leading) }
-            if ArticleAudioActions.shouldRender(audioState, transferStateAvailable: transferState != nil), let audioState, let transferState { AudioActionsView(state: audioState, transferState: transferState, onPlay: onPlayAudio, onDownload: onDownloadAudio, onDelete: onDeleteDownload, onAdd: onAddToListeningList) }
+
+            HStack(alignment: .top, spacing: 12) {
+                if hasAvailableThumbnail {
+                    Button { onSelect(); store.open(article) } label: {
+                        ThumbnailSlot(
+                            article: article,
+                            store: store,
+                            width: 112,
+                            height: 84,
+                            cornerRadius: 9
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button { onSelect(); store.open(article) } label: {
+                    VStack(alignment: .leading, spacing: 5) {
+                        headline(lineLimit: 3)
+                        publicationRow
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                quickActions
+                    .opacity(hovered ? 1 : 0)
+                    .allowsHitTesting(hovered)
+            }
+
+            if !article.preview.isEmpty {
+                Text(article.preview)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(store.articlePreviewLines.rawValue)
+                    .multilineTextAlignment(.leading)
+            }
+
+            audioActions
+        }
+        .padding(12)
+        .articleInteractionStyle(
+            selected: selected,
+            hovered: hovered,
+            onHoverChanged: updateHover,
+            menu: actionMenu
+        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .onDisappear { store.retryUnavailableArticleThumbnail(article) }
+    }
+
+    private var compact: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .top, spacing: 10) {
+                Button { onSelect(); store.open(article) } label: {
+                    semanticTextComposition
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                quickActions
+                    .opacity(hovered ? 1 : 0)
+                    .allowsHitTesting(hovered)
+            }
+            audioActions
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .contentShape(Rectangle())
+        .background(interactionBackground)
+        .onHover(perform: updateHover)
+        .contextMenu { actionMenu }
+    }
+
+    private var semanticTextComposition: some View {
+        VStack(alignment: .leading, spacing: mode == .compact ? 3 : 5) {
+            metadata
+            headline(lineLimit: mode == .compact ? 2 : 3)
+            publicationRow
+            if !article.preview.isEmpty {
+                Text(article.preview)
+                    .font(mode == .compact ? .caption : .subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(store.articlePreviewLines.rawValue)
+                    .multilineTextAlignment(.leading)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
-    private var compactTextComposition: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(ListeningListPresentation.textOrFallback(article.title, fallback: String(localized: "Untitled News"))).font(.system(size: 14, weight: article.isRead ? .regular : .semibold))
-                .foregroundStyle(article.isRead ? .secondary : .primary).lineLimit(2).multilineTextAlignment(.leading)
-            compactMetadata
-            if !article.preview.isEmpty { Text(article.preview).font(.caption).foregroundStyle(.secondary).lineLimit(store.articlePreviewLines.rawValue).multilineTextAlignment(.leading) }
-            if ArticleAudioActions.shouldRender(audioState, transferStateAvailable: transferState != nil), let audioState, let transferState { AudioActionsView(state: audioState, transferState: transferState, onPlay: onPlayAudio, onDownload: onDownloadAudio, onDelete: onDeleteDownload, onAdd: onAddToListeningList) }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+
+    private func headline(lineLimit: Int) -> some View {
+        Text(
+            ListeningListPresentation.textOrFallback(
+                article.title,
+                fallback: String(localized: "Untitled News")
+            )
+        )
+        .font(.system(size: 14, weight: article.isRead ? .regular : .semibold))
+        .foregroundStyle(article.isRead ? .secondary : .primary)
+        .lineLimit(lineLimit)
+        .multilineTextAlignment(.leading)
     }
+
     private var metadata: some View {
-        HStack(spacing: 5) {
-            FeedIconSlot(feedID: article.feedId, store: store)
-            Text(article.feedTitle).lineLimit(1)
-            Text("·")
-            Text(relativeDate)
-            if !article.commentsUrl.isEmpty { Image(systemName: "bubble.left") }
-            if article.isStarred { Image(systemName: "star.fill").foregroundStyle(.yellow).accessibilityLabel("Unstar") }
+        HStack(spacing: 6) {
+            FeedIconSlot(feedID: article.feedId, store: store, size: 22)
+            Text(article.feedTitle)
+                .lineLimit(1)
+                .foregroundStyle(article.isRead ? .tertiary : .secondary)
+
+            Spacer(minLength: 4)
+
+            if hasAudio {
+                Image(systemName: "headphones")
+                    .accessibilityLabel("Audio available")
+            }
+            if !article.commentsUrl.isEmpty {
+                Image(systemName: "bubble.left")
+                    .accessibilityLabel("Comments available")
+            }
+            if article.isStarred {
+                Image(systemName: "star.fill")
+                    .foregroundStyle(.yellow)
+                    .accessibilityLabel("Starred")
+            }
+            if !article.isRead {
+                Circle()
+                    .frame(width: 6, height: 6)
+                    .accessibilityLabel("Unread")
+            }
         }
-        .font(.caption).foregroundStyle(article.isRead ? .tertiary : .secondary)
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
-    private var compactMetadata: some View {
-        HStack(spacing: 5) {
-            Text(article.feedTitle).lineLimit(1)
-            Text("·")
-            Text(relativeDate)
-            if !article.commentsUrl.isEmpty { Image(systemName: "bubble.left") }
-            if article.isStarred { Image(systemName: "star.fill").foregroundStyle(.yellow).accessibilityLabel("Unstar") }
+
+    private var publicationRow: some View {
+        HStack(spacing: 4) {
+            if store.showRelativePublicationTime {
+                Image(systemName: "clock.arrow.circlepath")
+                    .accessibilityHidden(true)
+            }
+
+            Text(publicationValue)
+
+            if let readingTime {
+                Text("·")
+                Image(systemName: hasAudio ? "headphones" : "doc.text")
+                    .accessibilityHidden(true)
+                Text(readingTime)
+            }
         }
-        .font(.caption).foregroundStyle(article.isRead ? .tertiary : .secondary)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
     }
+
+    @ViewBuilder
+    private var audioActions: some View {
+        if ArticleAudioActions.shouldRender(audioState, transferStateAvailable: transferState != nil),
+           let audioState,
+           let transferState {
+            AudioActionsView(
+                state: audioState,
+                transferState: transferState,
+                onPlay: onPlayAudio,
+                onDownload: onDownloadAudio,
+                onDelete: onDeleteDownload,
+                onAdd: onAddToListeningList
+            )
+        }
+    }
+
     private var quickActions: some View {
         VStack(spacing: 8) {
             if !store.isSearchActive {
-                iconButton(article.isRead ? "circle.fill" : "checkmark.circle", label: readActionLabel) { store.setRead(article, !article.isRead) }
+                iconButton(
+                    article.isRead ? "circle.fill" : "checkmark.circle",
+                    label: readActionLabel
+                ) {
+                    store.setRead(article, !article.isRead)
+                }
             }
-            iconButton(article.isStarred ? "star.fill" : "star", label: starActionLabel) { store.setStarred(article, !article.isStarred) }
-            Menu { actionMenu } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 22).help("More").accessibilityLabel("More")
+            iconButton(
+                article.isStarred ? "star.fill" : "star",
+                label: starActionLabel
+            ) {
+                store.setStarred(article, !article.isStarred)
+            }
+            Menu { actionMenu } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 22)
+            .help("More")
+            .accessibilityLabel("More")
         }
     }
-    private var interactionBackground: Color { selected ? Color.accentColor.opacity(0.16) : hovered ? Color.primary.opacity(0.055) : .clear }
-    @ViewBuilder private var actionMenu: some View {
+
+    private var interactionBackground: Color {
+        selected
+            ? Color.accentColor.opacity(0.16)
+            : hovered ? Color.primary.opacity(0.055) : .clear
+    }
+
+    @ViewBuilder
+    private var actionMenu: some View {
         Button { store.open(article) } label: { Label("Open", systemImage: "safari") }
         Button { store.openDetail(article) } label: { Label("Open Detail View", systemImage: "doc.text") }
-        Button { store.setStarred(article, !article.isStarred) } label: { Label(starActionLabel, systemImage: article.isStarred ? "star.slash" : "star") }
+        Button { store.setStarred(article, !article.isStarred) } label: {
+            Label(starActionLabel, systemImage: article.isStarred ? "star.slash" : "star")
+        }
         if !store.isSearchActive {
-            Button { store.setRead(article, !article.isRead) } label: { Label(readActionLabel, systemImage: article.isRead ? "circle.fill" : "checkmark.circle") }
-            Button { store.saveToService(article) } label: { Label("Save to Third-Party Service", systemImage: "tray.and.arrow.down") }
+            Button { store.setRead(article, !article.isRead) } label: {
+                Label(readActionLabel, systemImage: article.isRead ? "circle.fill" : "checkmark.circle")
+            }
+            Button { store.saveToService(article) } label: {
+                Label("Save to Third-Party Service", systemImage: "tray.and.arrow.down")
+            }
             Divider()
             Button { store.copyLink(article) } label: { Label("Copy Link", systemImage: "doc.on.doc") }
             Button { store.share(article) } label: { Label("Share...", systemImage: "square.and.arrow.up") }
             Button { store.openOriginal(article) } label: { Label("Open Original", systemImage: "safari") }
             Button { store.openInMiniflux(article) } label: { Label("Open in Miniflux", systemImage: "arrow.up.forward.app") }
             Button { store.select(.feed(article.feedId)) } label: { Label("Show Feed", systemImage: "line.3.horizontal.decrease.circle") }
-            if !article.commentsUrl.isEmpty { Button { store.openComments(article) } label: { Label("Open Comments", systemImage: "bubble.left") } }
+            if !article.commentsUrl.isEmpty {
+                Button { store.openComments(article) } label: { Label("Open Comments", systemImage: "bubble.left") }
+            }
         }
     }
-    private func iconButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: icon) }.buttonStyle(.borderless).help(label).accessibilityLabel(label)
+
+    private func iconButton(
+        _ icon: String,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) { Image(systemName: icon) }
+            .buttonStyle(.borderless)
+            .help(label)
+            .accessibilityLabel(label)
     }
-    private var readActionLabel: String { article.isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read") }
-    private var starActionLabel: String { article.isStarred ? String(localized: "Unstar") : String(localized: "Star") }
-    private var relativeDate: String {
-        guard let date = Self.isoFormatter.date(from: article.publishedAt) else { return "" }
-        return Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
+
+    private func updateHover(_ hovering: Bool) {
+        hovered = hovering
+        onHoverChanged(hovering)
+    }
+
+    private var hasAvailableThumbnail: Bool {
+        mode.showsArticleImage
+            && article.imageUrl != nil
+            && !store.unavailableArticleThumbnails.contains(store.articleThumbnailKey(article))
+    }
+
+    private var hasAudio: Bool {
+        !(audioState?.enclosures.isEmpty ?? true)
+    }
+
+    private var publicationValue: String {
+        ArticleTemporalPresentation.publicationValue(
+            article.publishedAt,
+            showRelative: store.showRelativePublicationTime,
+            relativeTo: temporalReferenceDate
+        )
+    }
+
+    private var readingTime: String? {
+        ArticleTemporalPresentation.readingTime(article.readingTimeMinutes)
+    }
+
+    private var readActionLabel: String {
+        article.isRead ? String(localized: "Mark as Unread") : String(localized: "Mark as Read")
+    }
+
+    private var starActionLabel: String {
+        article.isStarred ? String(localized: "Unstar") : String(localized: "Star")
+    }
+}
+
+private extension View {
+    func articleInteractionStyle<MenuContent: View>(
+        selected: Bool,
+        hovered: Bool,
+        onHoverChanged: @escaping (Bool) -> Void,
+        @ViewBuilder menu: () -> MenuContent
+    ) -> some View {
+        self
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                selected
+                    ? Color.accentColor.opacity(0.16)
+                    : hovered ? Color.primary.opacity(0.055) : .clear
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .contentShape(Rectangle())
+            .onHover(perform: onHoverChanged)
+            .contextMenu(menuItems: menu)
     }
 }
 
