@@ -1444,6 +1444,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     }
 }
 
+@MainActor
 enum MacOSSettingsWindowPresentation {
     static func open(store: BrowserStore) {
         store.settingsVisible = false
