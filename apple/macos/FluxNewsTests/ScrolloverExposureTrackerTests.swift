@@ -9,20 +9,25 @@ final class ScrolloverExposureTrackerTests: XCTestCase {
         [1: CGRect(x: 0, y: y, width: 100, height: 100)]
     }
 
-    func testFirstQualifiedItemIsProcessedWhenItCrossesViewport() {
+    func testVisibleItemIsProcessedWhenItCrossesViewport() {
         var tracker = ScrolloverExposureTracker()
         tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 0)
-        tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 0.7)
 
-        XCTAssertEqual(tracker.process(frames: frame(-100), viewport: viewport, unread: unread, now: 0.8, offsetDelta: 50, userInitiated: true), [1])
+        XCTAssertEqual(tracker.process(frames: frame(-100), viewport: viewport, unread: unread, now: 0.01, offsetDelta: 50, userInitiated: true), [1])
     }
 
-    func testBriefExposureIsNotProcessed() {
+    func testBriefExposureStillProcessesAfterTopCrossing() {
         var tracker = ScrolloverExposureTracker()
-        tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 0)
-        tracker.observe(frames: frame(0), viewport: viewport, unread: unread, now: 0.69)
+        tracker.observe(frames: frame(90), viewport: viewport, unread: unread, now: 0)
 
-        XCTAssertEqual(tracker.process(frames: frame(-100), viewport: viewport, unread: unread, now: 0.7, offsetDelta: 50, userInitiated: true), [])
+        XCTAssertEqual(tracker.process(frames: frame(-100), viewport: viewport, unread: unread, now: 0.01, offsetDelta: 50, userInitiated: true), [1])
+    }
+
+    func testNeverVisibleItemIsNotProcessed() {
+        var tracker = ScrolloverExposureTracker()
+        tracker.observe(frames: frame(120), viewport: viewport, unread: unread, now: 0)
+
+        XCTAssertEqual(tracker.process(frames: frame(-100), viewport: viewport, unread: unread, now: 0.01, offsetDelta: 50, userInitiated: true), [])
     }
 
     func testProgrammaticScrollDoesNotProcessButLargeForwardGeometryDoes() {
