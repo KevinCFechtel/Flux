@@ -12,10 +12,14 @@ struct FeedIconRequestState { private var inFlight = Set<String>(); mutating fun
 struct ArticleThumbnailRequestState { private var inFlight = Set<String>(); mutating func begin(_ key: String, cached: Bool) -> Bool { !cached && inFlight.insert(key).inserted }; mutating func complete(_ key: String) { inFlight.remove(key) }; func isInFlight(_ key: String) -> Bool { inFlight.contains(key) } }
 
 
+struct MacOSPreparedFeedIcon: @unchecked Sendable {
+    let image: CGImage
+}
+
 enum MacOSFeedIconImagePreparation {
     static let displaySidePoints: CGFloat = 22
 
-    static func prepare(data: Data, displayScale: CGFloat) -> NSImage? {
+    static func prepare(data: Data, displayScale: CGFloat) -> MacOSPreparedFeedIcon? {
         let scale = max(displayScale, 1)
         let pixelSide = max(1, Int((displaySidePoints * scale).rounded(.up)))
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
@@ -64,9 +68,6 @@ enum MacOSFeedIconImagePreparation {
             )
         )
         guard let displayReady = context.makeImage() else { return nil }
-        return NSImage(
-            cgImage: displayReady,
-            size: NSSize(width: displaySidePoints, height: displaySidePoints)
-        )
+        return MacOSPreparedFeedIcon(image: displayReady)
     }
 }
