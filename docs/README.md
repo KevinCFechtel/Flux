@@ -17,7 +17,7 @@ This directory is intentionally small.
 - **Phase B — Shared Podcast / Media Core:** complete and architecture-frozen.
 - **Phase C — Native macOS Audio Experience:** complete and architecture-frozen. `PHASE_C_NATIVE_MACOS_AUDIO.md` remains the implemented Phase-C contract even if historical wording inside that document still describes it as planned.
 - **Phase D — Native iOS/iPadOS:** feature implementation complete. D7 is architecture-frozen; D8 is deferred and not required for replacement; D9 implementation is complete/test-gated. The final canonical acceptance gate and detailed physical Flutter-to-native production-upgrade test remain pending. `PHASE_D_NATIVE_IOS_IPADOS.md` remains authoritative.
-- **Phase E — Native Android:** authoritative contract defined; implementation has not started. E1 — Android Foundation & Production Migration Spike is next. `PHASE_E_NATIVE_ANDROID.md` is the Phase-E implementation/sequencing authority.
+- **Phase E — Native Android:** E1 through E5 are implemented; E5 — Background Sync, System Notifications and Widgets is accepted as complete for sequencing purposes. Remaining E5 findings are normal bug-fix follow-up unless they expose an architecture/product-contract contradiction. E6 — Native Media, Listening List and Background Transfers is next. `PHASE_E_NATIVE_ANDROID.md` is the Phase-E implementation/sequencing authority.
 
 The remaining Phase-D physical production-upgrade acceptance does not block Phase-E foundation work.
 
