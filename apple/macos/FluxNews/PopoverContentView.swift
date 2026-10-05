@@ -40,6 +40,7 @@ struct PopoverContentView: View {
     let playbackCoordinator: MediaPlaybackCoordinator?
     let transferState: MediaTransferPresentationState
     let layoutChanged: (Bool) -> Void
+    let showSettings: () -> Void
     let dismiss: () -> Void
     @State private var sidebarVisible = false
     @State private var showingPlayer = false
@@ -63,6 +64,7 @@ struct PopoverContentView: View {
                 sidebarVisible: $sidebarVisible,
                 showingPlayer: $showingPlayer,
                 layoutChanged: layoutChanged,
+                showSettings: showSettings,
                 dismiss: dismiss
             )
             .frame(width: PopoverLayout.contentWidth(for: store.articlePresentationMode))
@@ -84,6 +86,7 @@ private struct ArticlePane: View {
     @Binding var sidebarVisible: Bool
     @Binding var showingPlayer: Bool
     let layoutChanged: (Bool) -> Void
+    let showSettings: () -> Void
     let dismiss: () -> Void
     @State private var tracker = ScrolloverExposureTracker()
     @State private var frames: [Int64: CGRect] = [:]
@@ -97,7 +100,7 @@ private struct ArticlePane: View {
     @State private var pendingAudioReplacement: Enclosure?
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
-    init(store: BrowserStore, playbackState: MediaPlaybackPresentationState, playbackCoordinator: MediaPlaybackCoordinator?, transferState: MediaTransferPresentationState, sidebarVisible: Binding<Bool>, showingPlayer: Binding<Bool>, layoutChanged: @escaping (Bool) -> Void, dismiss: @escaping () -> Void) {
+    init(store: BrowserStore, playbackState: MediaPlaybackPresentationState, playbackCoordinator: MediaPlaybackCoordinator?, transferState: MediaTransferPresentationState, sidebarVisible: Binding<Bool>, showingPlayer: Binding<Bool>, layoutChanged: @escaping (Bool) -> Void, showSettings: @escaping () -> Void, dismiss: @escaping () -> Void) {
         self.store = store
         self.playbackState = playbackState
         self.playbackCoordinator = playbackCoordinator
@@ -105,6 +108,7 @@ private struct ArticlePane: View {
         _sidebarVisible = sidebarVisible
         _showingPlayer = showingPlayer
         self.layoutChanged = layoutChanged
+        self.showSettings = showSettings
         self.dismiss = dismiss
         _trackerRevision = State(initialValue: store.listPresentationRevision)
     }
@@ -209,7 +213,7 @@ private struct ArticlePane: View {
             setNewestFirst: store.setNewestFirst,
             setListeningListSort: store.setListeningListSort,
             setListeningListFeed: store.setListeningListFeed,
-            showSettings: { store.settingsVisible = true },
+            showSettings: showSettings,
             quit: { NSApplication.shared.terminate(nil) }
         )
     }
