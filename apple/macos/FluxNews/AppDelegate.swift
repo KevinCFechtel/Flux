@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private let popover = NSPopover()
     private var statusItem: NSStatusItem!
     private var statusItemLengthFrozen = false
+    private var frozenStatusItemLength: CGFloat?
+    private var statusItemLengthWasFixed = false
     private var countObservation: AnyCancellable?
     private var catalogObservation: AnyCancellable?
     private var shortcutObservation: AnyCancellable?
@@ -156,10 +158,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private func resize(sidebarVisible: Bool) { self.sidebarVisible = sidebarVisible; let newSize = size(sidebarVisible: sidebarVisible); guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { popover.contentSize = newSize; fallbackPanel?.setContentSize(newSize); return }; if popover.isShown { NSAnimationContext.runAnimationGroup { $0.duration = PopoverLayout.animation; $0.allowsImplicitAnimation = true; popover.contentSize = newSize } } else { fallbackPanel?.setContentSize(newSize) } }
     private func updateStatusItem(unreadTotal: UInt64, hasPendingNewData: Bool) {
         guard let button = statusItem.button else { return }
-        button.title = StatusItemPresentation.title(
+        let title = StatusItemPresentation.title(
             unreadTotal: unreadTotal,
             hasPendingNewData: hasPendingNewData
         )
+
+        // Opening the popover must not change the NSStatusItem geometry. Only
+        // convert the variable-length item to the captured fixed width when its
+        // visible title actually changes while the popover is open.
+        if statusItemLengthFrozen,
+           title != button.title,
+           !statusItemLengthWasFixed,
+           let frozenStatusItemLength,
+           frozenStatusItemLength > 0 {
+            statusItem.length = frozenStatusItemLength
+            statusItemLengthWasFixed = true
+        }
+
+        button.title = title
         button.setAccessibilityValue(
             StatusItemPresentation.accessibilityValue(
                 unreadTotal: unreadTotal,
@@ -169,13 +185,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     private func freezeStatusItemLength() {
-        guard !statusItemLengthFrozen, let button = statusItem.button else { return }
+        guard !statusItemLengthFrozen else { return }
         statusItemLengthFrozen = true
-        statusItem.length = max(button.bounds.width, button.fittingSize.width)
+        frozenStatusItemLength = statusItem.button?.bounds.width
+        statusItemLengthWasFixed = false
     }
 
     private func releaseStatusItemLength() {
         statusItemLengthFrozen = false
+        frozenStatusItemLength = nil
+
+        guard statusItemLengthWasFixed else { return }
+        statusItemLengthWasFixed = false
         statusItem.length = NSStatusItem.variableLength
     }
 
