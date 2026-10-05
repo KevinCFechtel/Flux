@@ -29,6 +29,7 @@ internal val LocalAndroidSystemNotifications = staticCompositionLocalOf<AndroidS
 internal class AndroidSystemNotificationManager(
     private val context: Context,
     private val coreRuntime: AndroidCoreRuntime,
+    private val diagnostics: AndroidAppDiagnostics,
 ) : AndroidPostSyncEffect {
     private val notificationManager = NotificationManagerCompat.from(context)
     private val platformNotificationManager = context.getSystemService(NotificationManager::class.java)
@@ -37,11 +38,24 @@ internal class AndroidSystemNotificationManager(
         activeSessionGeneration = coreRuntime::activeSessionGeneration,
         handoff = ::postCandidate,
         acknowledge = { generation, candidateId ->
-            runCatching {
+            val result = runCatching {
                 coreRuntime.localForGeneration(generation) { core ->
                     core.acknowledgeSystemNotification(candidateId)
                 }
-            }.isSuccess
+            }
+            if (result.isSuccess) {
+                diagnostics.record(AndroidAppLogLevel.Info, "notification", "candidate acknowledged id=" + candidateId)
+            } else {
+                val error = result.exceptionOrNull()
+                diagnostics.record(
+                    AndroidAppLogLevel.Error,
+                    "notification",
+                    "candidate acknowledge failed id=" + candidateId +
+                        " type=" + error?.javaClass?.simpleName.orEmpty() +
+                        " message=" + error?.message.orEmpty(),
+                )
+            }
+            result.isSuccess
         },
     )
 
@@ -103,6 +117,14 @@ internal class AndroidSystemNotificationManager(
     }
 
     override suspend fun apply(sessionGeneration: Long, metadata: SyncCompleted) {
+        diagnostics.record(
+            AndroidAppLogLevel.Info,
+            "notification",
+            "post-sync pass reason=" + metadata.reason +
+                " new=" + metadata.newArticles +
+                " feed_counts=" + metadata.newArticlesByFeed.joinToString(prefix = "[", postfix = "]") { it.feedId.toString() + ":" + it.count } +
+                " candidates=" + metadata.systemNotificationCandidates.joinToString(prefix = "[", postfix = "]") { it.candidateId.toString() + ":" + it.feedId + ":" + it.newCount },
+        )
         if (metadata.systemNotificationCandidates.isEmpty()) return
         delivery.deliver(sessionGeneration, metadata.systemNotificationCandidates)
     }
@@ -110,7 +132,33 @@ internal class AndroidSystemNotificationManager(
     @SuppressLint("MissingPermission")
     private fun postCandidate(candidate: SystemNotificationCandidate): Boolean {
         configure()
-        if (!notificationsEnabledBySystem()) return false
+        if (!hasRuntimePermission()) {
+            diagnostics.record(
+                AndroidAppLogLevel.Warning,
+                "notification",
+                "candidate blocked id=" + candidate.candidateId + " feed=" + candidate.feedId + " reason=runtime_permission",
+            )
+            return false
+        }
+        if (!notificationManager.areNotificationsEnabled()) {
+            diagnostics.record(
+                AndroidAppLogLevel.Warning,
+                "notification",
+                "candidate blocked id=" + candidate.candidateId + " feed=" + candidate.feedId + " reason=app_notifications_disabled",
+            )
+            return false
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = platformNotificationManager.getNotificationChannel(CHANNEL_ID)
+            if (channel?.importance == NotificationManager.IMPORTANCE_NONE) {
+                diagnostics.record(
+                    AndroidAppLogLevel.Warning,
+                    "notification",
+                    "candidate blocked id=" + candidate.candidateId + " feed=" + candidate.feedId + " reason=channel_disabled",
+                )
+                return false
+            }
+        }
 
         val count = candidate.newCount.coerceAtMost(Int.MAX_VALUE.toUInt()).toInt()
         val countText = context.resources.getQuantityString(
@@ -140,9 +188,29 @@ internal class AndroidSystemNotificationManager(
             .setAutoCancel(true)
             .build()
 
-        return runCatching {
-            notificationManager.notify(candidate.candidateId.hashCode(), notification)
-        }.isSuccess
+        val notificationId = candidate.candidateId.hashCode()
+        return try {
+            notificationManager.notify(notificationId, notification)
+            diagnostics.record(
+                AndroidAppLogLevel.Info,
+                "notification",
+                "candidate posted id=" + candidate.candidateId +
+                    " notification_id=" + notificationId +
+                    " feed=" + candidate.feedId +
+                    " count=" + candidate.newCount,
+            )
+            true
+        } catch (error: Exception) {
+            diagnostics.record(
+                AndroidAppLogLevel.Error,
+                "notification",
+                "candidate post failed id=" + candidate.candidateId +
+                    " feed=" + candidate.feedId +
+                    " type=" + error.javaClass.simpleName +
+                    " message=" + error.message.orEmpty(),
+            )
+            false
+        }
     }
 
     private companion object {
