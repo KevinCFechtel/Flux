@@ -72,16 +72,6 @@ struct PopoverContentView: View {
         .sheet(item: $store.feedSettingsTarget) { target in FeedSettingsView(store: store, target: target) }
         .sheet(isPresented: $store.addFeedVisible) { AddFeedView(store: store) }
         .sheet(isPresented: $store.addCategoryVisible) { AddCategoryView(store: store) }
-        .onAppear {
-            if store.settingsVisible {
-                MacOSSettingsWindowPresentation.open(store: store)
-            }
-        }
-        .onChange(of: store.settingsVisible) { _, visible in
-            if visible {
-                MacOSSettingsWindowPresentation.open(store: store)
-            }
-        }
     }
 }
 
@@ -219,7 +209,7 @@ private struct ArticlePane: View {
             setNewestFirst: store.setNewestFirst,
             setListeningListSort: store.setListeningListSort,
             setListeningListFeed: store.setListeningListFeed,
-            showSettings: { MacOSSettingsWindowPresentation.open(store: store) },
+            showSettings: { store.settingsVisible = true },
             quit: { NSApplication.shared.terminate(nil) }
         )
     }
@@ -1441,19 +1431,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .general: "General"
         case .data: "Data & Backup"
         }
-    }
-}
-
-@MainActor
-enum MacOSSettingsWindowPresentation {
-    static func open(store: BrowserStore) {
-        store.settingsVisible = false
-        NSApplication.shared.activate(ignoringOtherApps: true)
-        NSApplication.shared.sendAction(
-            Selector(("showSettingsWindow:")),
-            to: nil,
-            from: nil
-        )
     }
 }
 
